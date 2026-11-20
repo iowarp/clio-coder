@@ -4,6 +4,31 @@
 [mgr]
 show_hidden = true
 
+# Yazi's stdout is the pane's event stream, and a blocking opener inherits it.
+# These replace the preset openers that block, with the same commands writing
+# to the terminal, so an editor or a viewer never lands in the stream.
+[opener]
+edit = [
+	{ run = "exec >/dev/tty; ${EDITOR:-vi} %s", desc = "$EDITOR", for = "unix", block = true },
+	{ run = "code %s", desc = "code", for = "windows", orphan = true },
+	{ run = "code -w %s >CON", desc = "code (block)", for = "windows", block = true },
+]
+play = [
+	{ run = "xdg-open %s1", desc = "Play", for = "linux", orphan = true },
+	{ run = "open %s", desc = "Play", for = "macos" },
+	{ run = 'start "" %s1', desc = "Play", for = "windows", orphan = true },
+	{ run = "termux-open %s1", desc = "Play", for = "android" },
+	{ run = "exec >/dev/tty; mediainfo %s1; echo 'Press enter to exit'; read _", block = true, desc = "Show media info", for = "unix" },
+	{ run = "mediainfo %s1 >CON & pause >CON", block = true, desc = "Show media info", for = "windows" },
+]
+reveal = [
+	{ run = "xdg-open %d1", desc = "Reveal", for = "linux" },
+	{ run = "open -R %s1", desc = "Reveal", for = "macos" },
+	{ run = "explorer /select,%s1", desc = "Reveal", for = "windows", orphan = true },
+	{ run = "termux-open %d1", desc = "Reveal", for = "android" },
+	{ run = "exec >/dev/tty; clear; exiftool %s1; echo 'Press enter to exit'; read _", desc = "Show EXIF", for = "unix", block = true },
+]
+
 [[plugin.prepend_fetchers]]
 id = "git"
 group = "git"

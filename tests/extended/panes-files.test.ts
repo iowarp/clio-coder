@@ -22,6 +22,8 @@ import {
 } from "../../src/domains/mux/operations.js";
 import type { MuxPaneRecord } from "../../src/domains/mux/types.js";
 import { renderPosixShellShim } from "../../src/domains/mux/workspace/platform-posix.js";
+import { createYaziEventStream } from "../../src/domains/mux/yazi/event-stream.js";
+import { renderYaziKeymap } from "../../src/domains/mux/yazi/profile.js";
 import {
 	createYaziSession,
 	sweepStaleTransportFiles,
@@ -582,6 +584,50 @@ describe("contracts/files pane session transport", () => {
 			strictEqual(existsSync(stream), false);
 		} finally {
 			rmSync(cacheDir, { recursive: true, force: true });
+		}
+	});
+
+	it("binds Enter to enter a directory or send the selection as Ctrl+Y does, never Yazi's open", () => {
+		const doc = parseTomlDocument(renderYaziKeymap("/opt/Jo's yazi/ya", "linux")) as {
+			mgr: { prepend_keymap: { on: string; run: string }[] };
+		};
+		const run = (on: string): string => doc.mgr.prepend_keymap.find((chord) => chord.on === on)?.run ?? "";
+		const enter = run("<Enter>");
+		ok(enter.startsWith("plugin clio-enter -- '") && enter.endsWith("'"), enter);
+		const pick = enter.slice("plugin clio-enter -- '".length, -1).replaceAll(`'\\''`, "'");
+		strictEqual(`shell -- ${pick}`, run("<C-y>"));
+	});
+
+	it("reads only event lines from the stream, past screen output a child process wrote there", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-files-stream-"));
+		try {
+			const path = join(dir, "s.stream");
+			writeFileSync(
+				path,
+				[
+					'cd,1,1,{"tab":1,"url":"/w"}',
+					"\u001b[?1049h\u001b[22;0;0t\u001b[H\u001b[2J",
+					'" Netrw Directory Listing, sorted by name, then size, then time\r',
+					"Vim: Warning: Output is not to a terminal",
+					'clio-coder-pick,1,1,["tok","/w/a.txt"]',
+					"",
+				].join("\n"),
+			);
+			const events: string[] = [];
+			const stream = createYaziEventStream({
+				path,
+				autoStart: false,
+				isAlive: () => true,
+				onEvent: (event) =>
+					events.push(event.kind === "cd" ? `cd ${event.cwd}` : `${event.kind} ${event.values.join(" ")}`),
+			});
+			await stream.poll();
+			deepStrictEqual(events, ["cd /w", "clio-coder-pick tok /w/a.txt"]);
+			strictEqual(stream.stats().malformedLines, 0);
+			strictEqual(stream.stats().stopReason, null);
+			stream.stop();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });
