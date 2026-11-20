@@ -9,7 +9,15 @@ import {
 	revokeProjectSurfaceTrust,
 } from "../core/workspace-trust.js";
 import { forgetApprovedFlowPolicy } from "../domains/safety/flow-policy-snapshot.js";
-import { printError } from "./shared.js";
+import { parseCommandFlags } from "./kit/flags.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import type { ErrorSlug } from "./kit/slugs.js";
+
+const TRUST_PATH = ["config", "trust"] as const;
+
+function fail(slug: ErrorSlug, message: string, json: boolean): void {
+	writeCliFailure({ path: TRUST_PATH, slug, message, json });
+}
 
 const SURFACES: ReadonlyArray<ProjectTrustSurface> = [
 	"safety",
@@ -47,23 +55,37 @@ function packageLines(surface: ProjectTrustSurface, packages: ReadonlyArray<Proj
 	return `Project ${surface} to approve. Approval covers every package listed, the disabled ones included:\n${lines.join("\n")}\n`;
 }
 
-/** Review is read-only. Approval names the digest the operator reviewed, so edits cannot borrow stale consent. */
+/**
+ * Review is read-only. Approval names the digest the operator reviewed, so edits cannot borrow stale consent.
+ * The surface and its one flag may come in either order (I-12).
+ */
 export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process.cwd()): number {
-	const surface = args[0] as ProjectTrustSurface | undefined;
-	if (surface === undefined || !SURFACES.includes(surface)) {
-		printError(
-			"usage: clio-coder config trust safety|hooks|settings|extensions|plugins|handbook [--json | --hash SHA256 | --revoke]",
-		);
+	const parsed = parseCommandFlags(args, {
+		json: { kind: "boolean" },
+		revoke: { kind: "boolean" },
+		hash: { kind: "value" },
+	});
+	const jsonAsked = args.includes("--json");
+	if (!parsed.ok) {
+		fail(parsed.slug, parsed.message, jsonAsked);
 		return 2;
 	}
-	const rest = args.slice(1);
-	const preview = rest.length === 0 || (rest.length === 1 && rest[0] === "--json");
-	const revoke = rest.length === 1 && rest[0] === "--revoke";
-	const approve = rest.length === 2 && rest[0] === "--hash" && /^[a-f0-9]{64}$/.test(rest[1] ?? "");
-	if (!preview && !revoke && !approve) {
-		printError("trust expects --json, --revoke, or --hash followed by the full reviewed SHA-256 digest");
+	const surface = parsed.positional[0] as ProjectTrustSurface | undefined;
+	if (surface === undefined || !SURFACES.includes(surface) || parsed.positional.length > 1) {
+		fail("usage", `expects one surface: ${SURFACES.join("|")}`, jsonAsked);
 		return 2;
 	}
+	const { json = false, revoke = false, hash } = parsed.flags;
+	if ([json, revoke, hash !== undefined].filter(Boolean).length > 1) {
+		fail("flag_conflict", "--json, --revoke and --hash are exclusive", jsonAsked);
+		return 2;
+	}
+	if (hash !== undefined && !/^[a-f0-9]{64}$/.test(hash)) {
+		fail("usage", "--hash expects the full reviewed SHA-256 digest", false);
+		return 2;
+	}
+	const approve = hash !== undefined;
+	const preview = !approve && !revoke;
 	try {
 		if (revoke) {
 			revokeProjectSurfaceTrust(cwd, surface);
@@ -79,7 +101,6 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 		const snapshot = captureProjectSurface(cwd, surface);
 		if (preview) {
 			const packages = projectPackageEntries(snapshot);
-			const json = rest[0] === "--json";
 			// JSON escapes terminal control sequences in repository-controlled text.
 			if (json || packages === null)
 				process.stdout.write(`${JSON.stringify(packages === null ? snapshot : { ...snapshot, packages }, null, 2)}\n`);
@@ -96,11 +117,11 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 			return 0;
 		}
 		if (snapshot.contentHash === null || !snapshot.files.some((file) => file.text !== null)) {
-			printError(`no readable project ${surface} files to approve`);
+			fail("not_found", `no readable project ${surface} files to approve`, false);
 			return 1;
 		}
-		if (snapshot.contentHash !== rest[1]) {
-			printError(`project ${surface} changed since review; inspect it again before approving`);
+		if (snapshot.contentHash !== hash) {
+			fail("io", `project ${surface} changed since review; inspect it again before approving`, false);
 			return 1;
 		}
 		if (surface === "extensions" || surface === "plugins") recordProjectPackageTrust(snapshot);
@@ -110,7 +131,7 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 		);
 		return 0;
 	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
+		fail("io", error instanceof Error ? error.message : String(error), json);
 		return 1;
 	}
 }
