@@ -1,9 +1,9 @@
 /**
- * PLAN+EDIT: one headless main-agent run of this same build in the iteration's worktree, through `run --json
- * --json-events terminal`. Clio's own agent both plans and edits. The run inherits the operator's environment so its
+ * PLAN+EDIT: one headless main-agent run of this same build in the iteration's worktree, through `run --output-format
+ * stream-json` (schema v2). Clio's own agent both plans and edits. The run inherits the operator's environment so its
  * targets and credentials resolve as an interactive run's would; it runs at the campaign's autonomy (`default`, or
  * contained `yolo` with the operator's autonomous caps) with dispatch off, and the campaign's remaining wall time and
- * spend are passed down as `--timeout` and `--max-cost-usd`. A yolo run's audit comes back on `turn_end.autonomy`.
+ * spend are passed down as `--timeout` and `--max-cost-usd`. A yolo run's audit comes back on the `autonomy` frame.
  */
 import { spawn } from "node:child_process";
 import { withContainedYoloPin } from "../safety/autonomy.js";
@@ -44,9 +44,8 @@ export type AgentRunner = (request: AgentRunRequest) => Promise<AgentRunResult>;
 export function agentRunArgv(request: Omit<AgentRunRequest, "signal">): string[] {
 	return [
 		"run",
-		"--json",
-		"--json-events",
-		"terminal",
+		"--output-format",
+		"stream-json",
 		"--cwd",
 		request.worktree,
 		"--no-delegate",
@@ -60,7 +59,11 @@ export function agentRunArgv(request: Omit<AgentRunRequest, "signal">): string[]
 	];
 }
 
-/** Fold the frames of a `run --json --json-events terminal` stream into the run's result. */
+/**
+ * Fold the frames of a `run --output-format stream-json` stream into the run's result. The v2 `run_end` envelope
+ * carries the session, outcome, answer and failure; spend is the sum of the stream's `agent_end` usage, as the
+ * campaign has always counted it, and a yolo run's audit is its `autonomy` frame.
+ */
 export function parseAgentRunFrames(stdout: string, exitCode: number | null, stderr: string): AgentRunResult {
 	let sessionId: string | null = null;
 	let outcome: string | null = null;
@@ -81,12 +84,16 @@ export function parseAgentRunFrames(stdout: string, exitCode: number | null, std
 			const usage = frame.usage as { cost?: unknown } | undefined;
 			costs.push(usage?.cost);
 		}
-		if (frame.type === "turn_end" && typeof frame.exitCode === "number") {
-			if (typeof frame.text === "string") text = frame.text;
-			if (typeof frame.error === "string") error = frame.error;
+		if (frame.type === "autonomy") autonomy = readAutonomyAudit(frame) ?? autonomy;
+		if (frame.type === "run_end" && frame.schemaVersion === 2) {
+			if (typeof frame.sessionId === "string") sessionId = frame.sessionId;
+			const result: Record<string, unknown> = isRecord(frame.result) ? frame.result : {};
+			if (typeof result.text === "string") text = result.text;
+			const cause: Record<string, unknown> =
+				Array.isArray(frame.causes) && isRecord(frame.causes[0]) ? frame.causes[0] : {};
+			if (typeof cause.message === "string") error = cause.message;
 			if (typeof frame.outcome === "string")
 				outcome = typeof frame.outcomeDetail === "string" ? `${frame.outcome}:${frame.outcomeDetail}` : frame.outcome;
-			autonomy = readAutonomyAudit(frame.autonomy) ?? autonomy;
 		}
 	}
 	const stderrTail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 400);
@@ -105,7 +112,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The parts of a `run --json` autonomy audit a campaign keeps; anything malformed reads as absent. */
+/** The parts of a run's autonomy audit a campaign keeps; anything malformed reads as absent. */
 function readAutonomyAudit(value: unknown): ResearchAgentAutonomy | undefined {
 	if (!isRecord(value)) return undefined;
 	if (value.confinement !== "contained" && value.confinement !== "unconfined") return undefined;

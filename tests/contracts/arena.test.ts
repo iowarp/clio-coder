@@ -428,6 +428,7 @@ if (args[0] === "verifiers") {
   process.exit(declared ? 0 : 1);
 }
 const cwd = args[args.indexOf("--cwd") + 1];
+if (args[args.indexOf("--output-format") + 1] !== "stream-json" || args.includes("--json-events")) { process.stderr.write("want --output-format stream-json\\n"); process.exit(2); }
 const model = args[args.indexOf("--model") + 1];
 const end = args.indexOf("--");
 const prompt = end === -1 ? null : args.slice(end + 1).join(" ");
@@ -442,6 +443,7 @@ out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
 out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) + " in " + cwd }] } });
 if (args[args.indexOf("--autonomy") + 1] === "yolo") out({ type: "autonomy", confinement: process.env.CLIO_CODER_YOLO_CONFINEMENT === "contained" ? "contained" : "unconfined", caps: {}, usage: { toolCalls: 1, activeMs: 1, tokens: 1 }, halted: model === "m2" ? { kind: "toolCalls", detail: "600 calls" } : null, openDecisions: [{ seq: 1, tool: "bash", command: "push-from-" + model, kind: "ask" }], openDecisionsOmitted: 2 });
+out({ type: "run_end", schemaVersion: 2, mode: "main", sessionId: "fake-" + model, exitCode: 0, outcome: "succeeded", causes: [], result: { text: "envelope text", artifacts: [] } });
 if (model === "slow") setTimeout(() => {}, 60_000);
 if (model === "breaker") setTimeout(() => unlinkSync(process.env.ARENA_BREAK), 800);
 `;

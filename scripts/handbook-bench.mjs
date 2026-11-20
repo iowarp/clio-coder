@@ -411,6 +411,16 @@ function tokenTotals(frame) {
 	return (frame.usage?.input?.measured ?? 0) + (frame.usage?.output?.measured ?? 0);
 }
 
+/**
+ * The tool calls a main run made, counted as the harness counts them: one per settled call, a call the output limit
+ * cut off is none, and a gateway chain counts as its settled steps (each names the chain in `parentToolCallId`).
+ */
+export function mainToolCalls(frames) {
+	const settled = frames.filter((frame) => frame.type === "tool_execution_end" && frame.notRun === undefined);
+	const chains = new Set(settled.map((frame) => frame.parentToolCallId).filter((id) => typeof id === "string"));
+	return settled.filter((frame) => frame.parentToolCallId !== undefined || !chains.has(frame.toolCallId)).length;
+}
+
 function runOne({ arm, task, round, options, scratch }) {
 	const dir = join(scratch, `${arm.name}-${task.id}-${round}`);
 	git(["clone", "--quiet", "--no-local", root, dir]);
@@ -444,8 +454,9 @@ function runOne({ arm, task, round, options, scratch }) {
 	const argv = [
 		options.clio,
 		"run",
-		// `run --agent` accepts only --json; its stream is worker events ending in a `result` frame.
-		...(options.tier === "worker" ? ["--json"] : ["--json-events", "terminal"]),
+		// Schema v2 for both tiers; a `run --agent` stream is the worker's events, its receipt in `dispatch.runs[0]`.
+		"--output-format",
+		"stream-json",
 		"--cwd",
 		dir,
 		"--timeout",
@@ -475,13 +486,13 @@ function runOne({ arm, task, round, options, scratch }) {
 			}
 		})
 		.filter((frame) => frame !== null);
-	const end = frames.findLast((frame) => frame.type === "turn_end") ?? {};
-	const workerResult = frames.findLast((frame) => frame.type === "result")?.result;
-	const answer = options.tier === "worker" ? String(workerResult?.output?.text ?? "") : String(end.text ?? "");
+	const end = frames.findLast((frame) => frame.type === "run_end" && frame.schemaVersion === 2) ?? {};
+	const answer =
+		options.tier === "worker" ? String(end.dispatch?.runs?.[0]?.output?.text ?? "") : String(end.result?.text ?? "");
 	const toolCalls =
 		options.tier === "worker"
 			? frames.filter((frame) => frame.type === "tool_execution_start").length
-			: frames.reduce((sum, frame) => sum + (frame.observed?.toolCalls ?? 0), 0);
+			: mainToolCalls(frames);
 	// A run can leave its clone unreadable to git; that run scores on what can be listed instead of ending the batch.
 	const listErrors = [];
 	const list = (args) => {
