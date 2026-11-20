@@ -165,6 +165,8 @@ interface WorkerSpecFields {
 	sampling?: "deterministic";
 	/** Epoch ms when the worker stops exploring and takes its terminal round. */
 	synthesisAt?: number;
+	/** Which of its head's cache lanes this run takes, so no two live workers share one provider session id (FL-17). */
+	cacheLane?: number;
 	/**
 	 * Terminal contract from the admitted agent recipe. The worker validates its
 	 * own final result against it and spends bounded repair rounds, so the
@@ -1119,6 +1121,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	// A misspelled sampling policy must not silently restore the server defaults that varied handbooks.
 	readOptionalEnum(spec, "sampling", "WorkerSpec", ["deterministic"] as const);
 	readOptionalNumber(spec, "synthesisAt", "WorkerSpec");
+	if (spec.cacheLane !== undefined && (!Number.isSafeInteger(spec.cacheLane) || (spec.cacheLane as number) < 0))
+		throw new Error("WorkerSpec.cacheLane must be a non-negative integer");
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.responseSchema !== undefined) {

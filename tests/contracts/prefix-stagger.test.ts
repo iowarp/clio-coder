@@ -5,6 +5,7 @@ import { publishAgentLedgerEntry } from "../../src/domains/dispatch/agent-ledger
 import { appendAgentLedgerEntry, openAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { DispatchPrefixGroup } from "../../src/domains/dispatch/contract.js";
 import {
+	claimCacheLane,
 	claimSharedPrefix,
 	PREFIX_HOLD_CAP_MS,
 	startAfterPrefixHold,
@@ -101,6 +102,26 @@ test("abort during the hold ends the follower cleanly without starting its worke
 	groups.get("shared")?.release();
 	await new Promise((resolve) => setImmediate(resolve));
 	strictEqual(starts.join(","), "lead");
+});
+
+test("each live worker of a head takes its own cache lane and a finished one frees it (FL-17)", () => {
+	// Workers started one after another all take lane 0, which is what lets each read the head the last one wrote.
+	for (let run = 0; run < 3; run += 1) {
+		const claim = claimCacheLane("head");
+		strictEqual(claim.lane, 0);
+		claim.release();
+	}
+	const live = [claimCacheLane("head"), claimCacheLane("head"), claimCacheLane("head")];
+	deepStrictEqual(
+		live.map((claim) => claim.lane),
+		[0, 1, 2],
+	);
+	strictEqual(claimCacheLane("other head").lane, 0);
+	// The lowest freed lane is taken first, and a second release never frees the worker that took it.
+	live[1]?.release();
+	strictEqual(claimCacheLane("head").lane, 1);
+	live[1]?.release();
+	strictEqual(claimCacheLane("head").lane, 3);
 });
 
 test("the hold's cap timer keeps the process alive until the group releases", () => {
