@@ -227,11 +227,16 @@ it("CLI tasks hand retains JSON state and emits the explicit headless pickup tur
 		strictEqual(missing.code, 1);
 		match(missing.stderr, /not found/);
 		strictEqual(missing.stderr.includes("Before working"), false);
+		const addedJson = await runCli(["tasks", "add", "--json", "json task"], options);
+		strictEqual(addedJson.code, 0, addedJson.stderr);
+		const addedDoc = JSON.parse(addedJson.stdout) as { version: number; task: { title: string } };
+		strictEqual(addedDoc.version, 1);
+		strictEqual(addedDoc.task.title, "json task");
 		for (const [args, refusal] of [
-			[["tasks", "list", "--x"], /^error: unknown flag: --x\nUsage:\n/u],
-			[["tasks", "add", "--x", "title"], /^error: unknown flag: --x\nUsage:\n/u],
-			[["tasks", "add"], /^error: tasks add requires the task text\nUsage:\n/u],
-			[["tasks", "hand"], /^error: tasks hand requires a task id \(uN\)\nUsage:\n/u],
+			[["tasks", "list", "--x"], /^clio-coder tasks list: unknown flag: --x\nsee: clio-coder tasks list --help\n$/u],
+			[["tasks", "add", "--x", "title"], /^clio-coder tasks add: unknown flag: --x\nsee: /u],
+			[["tasks", "add"], /^clio-coder tasks add: tasks add requires the task text\nsee: /u],
+			[["tasks", "hand"], /^clio-coder tasks hand: tasks hand requires a task id \(uN\)\nsee: /u],
 		] as const) {
 			const usage = await runCli([...args], options);
 			strictEqual(usage.code, 2, usage.stderr);
