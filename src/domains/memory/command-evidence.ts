@@ -145,6 +145,17 @@ export function commandChain(command: string): CommandChain | null {
 	return segments.length === 0 ? null : { segments, cwd };
 }
 
+/** Whether a lone invocation's program, under any `command` or `builtin` prefix, is a word that refuses a chain. */
+function shellControlInvocation(argv: readonly string[]): boolean {
+	let index = 0;
+	while (argv[index] === "command" || argv[index] === "builtin") {
+		index += 1;
+		while (argv[index]?.startsWith("-") === true) index += 1;
+	}
+	const program = argv[index] ?? "";
+	return program.startsWith("!") || CHAIN_BREAKING_WORDS.has(program);
+}
+
 /** One segment's evidence identity: what ran, as the shell split it, and the key that vouches for it. */
 export interface CommandSegment {
 	readonly assignments: readonly string[];
@@ -175,9 +186,10 @@ export function commandSegments(command: string, workspaceRoot?: string, cwd?: s
 	if (!atWorkspaceRoot(workspaceRoot, cwd)) return [];
 	const chain = commandChain(command);
 	if (chain === null) {
-		// One simple invocation is its own receipt even under a word that refuses a chain (`command node x.mjs`).
+		// One simple invocation is its own receipt even under a word that refuses a chain (`command node x.mjs`), but
+		// never one that negates, re-parses, replaces or changes the shell's state: `! a` exits 0 when `a` fails.
 		const simple = simpleInvocation(command);
-		if (simple === null) return [];
+		if (simple === null || shellControlInvocation(simple.argv)) return [];
 		const argv = identityArgv(simple.argv);
 		const text = withoutHarmlessRedirection(command);
 		return [{ assignments: simple.assignments, argv, text, key: segmentKey(simple.assignments, argv) }];
