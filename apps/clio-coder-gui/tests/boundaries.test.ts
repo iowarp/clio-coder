@@ -23,6 +23,7 @@ const httpModules = new Map([
 	["src/engine/acp/types.ts", new Set(["*"])],
 	["src/core/xdg.ts", new Set(["clioStateDir", "clioDataDir", "clioConfigDir", "resolveClioDirs"])],
 	["src/core/package-root.ts", new Set(["resolvePackageRoot"])],
+	["src/core/path-containment.ts", new Set(["relativePathEscapes"])],
 	["src/core/context-operation.ts", new Set(["ACP_CONTEXT_STATUS_METHOD"])],
 	["src/core/process-identity.ts", new Set(["processAlive", "processBirthToken"])],
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
