@@ -2,21 +2,33 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
+import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
-import { memoryGateTerms } from "./relevance.js";
+import {
+	type CommandSegment,
+	commandSegment,
+	commandSegments,
+	receiptVouches,
+	successfulShellReceipt,
+} from "./command-evidence.js";
+import { lessonCommands, lessonSubject, repositoryRelativePath } from "./lesson-evidence.js";
 import { loadMemoryRecordsSync } from "./store.js";
 import type { MemoryRecord } from "./types.js";
 
 /**
  * Recall versus use. A memory record the host carried into a turn (the
  * `# Memory` selection, a lesson reminder, a `memory_recall` hit) counts as
- * recalled; it counts as used when the turn's own output acts on it: the model
- * cites its id, repeats a literal it names (a path, a command, a backticked
- * span), or carries most of its distinctive terms that the operator's request
- * did not already supply. Records recalled `MEMORY_DEMOTE_AFTER_UNUSED` turns
- * running without use are demoted: the relevance gate then asks more of them.
- * Nothing is deleted or unapproved; one use clears the demotion.
+ * recalled. It counts as used on a typed fact only: the turn cites its id, or
+ * a shell call whose evidence identity is the lesson's recommended command
+ * succeeded in the turn. Words the turn shares with the lesson are not use;
+ * on generic coding vocabulary that rule marked one stale lesson used 202
+ * times in 318 recalls (XR-26). Reading or changing a file the lesson names is
+ * `exposed`: recorded, and neither use nor a verdict. A lesson that recommends
+ * no command cannot be scored for use, so an uncited recall of one leaves its
+ * unused run unchanged. Records recalled `MEMORY_DEMOTE_AFTER_UNUSED` scored
+ * turns running without use are demoted: the relevance gate then asks more of
+ * them. Nothing is deleted or unapproved; one use clears the demotion.
  */
 
 export const MEMORY_DEMOTE_AFTER_UNUSED = 5;
@@ -32,6 +44,8 @@ export interface RecallUseEntry {
 	consecutiveUnused: number;
 	lastRecalledAt: string;
 	lastUsedAt?: string;
+	/** Recalled turns that read or changed a file the record names without using it. */
+	exposed?: number;
 }
 
 export interface RecallUseLedger {
@@ -39,63 +53,70 @@ export interface RecallUseLedger {
 	records: Record<string, RecallUseEntry>;
 }
 
-export type MemoryUseSignal = "cited" | "literal" | "terms";
+/** `unscored`: the record recommends no command and was not cited, so the turn says nothing about its use. */
+export type MemoryUseSignal = "cited" | "command" | "exposed" | "unscored";
+
+/** What one turn did, in typed facts. */
+export interface TurnUseEvidence {
+	/** The turn's final text and tool arguments; searched for a cited record id and nothing else. */
+	readonly text: string;
+	/** Evidence identities of the shell segments that succeeded in the turn. */
+	readonly segments: ReadonlyArray<CommandSegment>;
+	/** Repository-relative paths the turn read or changed. */
+	readonly touched: ReadonlySet<string>;
+}
 
 function recallUseLedgerPath(stateDir: string): string {
 	return join(stateDir, "memory", "recall-use-v1.json");
 }
 
-/** A path, a flag-bearing command or a backticked span the lesson names, at least 6 characters. */
-function lessonLiterals(lesson: string): string[] {
-	const ticked = [...lesson.matchAll(/`([^`\n]{6,200})`/gu)].map((match) => match[1] ?? "");
-	const tokens = (lesson.match(/[\p{L}\p{N}_@~./:=-]{6,}/gu) ?? [])
-		.map((token) => token.replace(/[.:]+$/u, ""))
-		.filter((token) => /[/=]|\.[a-z]{1,5}$|^--[a-z]/iu.test(token));
-	return [...new Set([...ticked, ...tokens].map((value) => value.trim()).filter((value) => value.length >= 6))];
-}
-
 /**
- * Whether a turn's output acted on one record. `task` is the operator's text
- * for the turn: terms it already holds prove nothing, since the model echoes
- * its request whether or not a lesson helped.
+ * Whether a turn used one record. Use is a cited id, or a succeeded segment that vouches for one of the lesson's
+ * recommended commands by evidence identity; a `printf` of that command, a piped run or a run from another
+ * checkout has a different identity or none. Reading or changing a file the lesson names is `exposed`. Null means
+ * recalled and unused.
  */
 export function detectMemoryUse(
-	record: Pick<MemoryRecord, "id" | "lesson" | "appliesWhen">,
-	evidence: string,
-	task = "",
+	record: Pick<MemoryRecord, "id" | "lesson" | "evidenceRefs">,
+	evidence: TurnUseEvidence,
+	root?: string,
 ): MemoryUseSignal | null {
-	if (evidence.length === 0) return null;
-	if (evidence.includes(record.id)) return "cited";
-	const lowered = evidence.toLowerCase();
-	const request = task.toLowerCase();
-	const literals = lessonLiterals(record.lesson)
-		.map((literal) => literal.toLowerCase())
-		.filter((literal) => !request.includes(literal));
-	if (literals.some((literal) => lowered.includes(literal))) return "literal";
-	const asked = memoryGateTerms(task);
-	const own = [...memoryGateTerms([record.lesson, ...record.appliesWhen].join("\n"))].filter((term) => !asked.has(term));
-	if (own.length < 2) return null;
-	const said = memoryGateTerms(evidence);
-	const carried = own.filter((term) => said.has(term)).length;
-	return carried >= Math.min(5, Math.max(2, Math.ceil(own.length * 0.4))) ? "terms" : null;
+	if (evidence.text.includes(record.id)) return "cited";
+	const claims = lessonCommands(record.lesson, record.evidenceRefs, root).recommended.flatMap(
+		(command) => commandSegment(command, root) ?? [],
+	);
+	if (claims.some((claim) => evidence.segments.some((segment) => receiptVouches(claim, segment)))) return "command";
+	if (lessonSubject(record.lesson).paths.some((path) => evidence.touched.has(path))) return "exposed";
+	return claims.length === 0 ? "unscored" : null;
+}
+
+/** One turn: every recalled id, those used, those exposed, and those the turn could not score. */
+export interface RecallUseTurn {
+	recalled: ReadonlyArray<string>;
+	used: ReadonlyArray<string>;
+	exposed?: ReadonlyArray<string>;
+	unscored?: ReadonlyArray<string>;
+	at: string;
 }
 
 /** Folds one turn into the ledger; returns a new ledger and leaves the input untouched. */
-export function foldRecallUse(
-	ledger: RecallUseLedger,
-	turn: { recalled: ReadonlyArray<string>; used: ReadonlyArray<string>; at: string },
-): RecallUseLedger {
+export function foldRecallUse(ledger: RecallUseLedger, turn: RecallUseTurn): RecallUseLedger {
 	const records: Record<string, RecallUseEntry> = { ...ledger.records };
 	const used = new Set(turn.used);
+	const exposed = new Set(turn.exposed ?? []);
+	const unscored = new Set(turn.unscored ?? []);
 	for (const id of new Set(turn.recalled)) {
 		const prior = records[id];
 		const hit = used.has(id);
+		const seen = (prior?.exposed ?? 0) + (!hit && exposed.has(id) ? 1 : 0);
+		const unused = prior?.consecutiveUnused ?? 0;
 		records[id] = {
 			recalled: (prior?.recalled ?? 0) + 1,
 			used: (prior?.used ?? 0) + (hit ? 1 : 0),
-			consecutiveUnused: hit ? 0 : (prior?.consecutiveUnused ?? 0) + 1,
+			consecutiveUnused: hit ? 0 : unscored.has(id) ? unused : unused + 1,
 			lastRecalledAt: turn.at,
 			...(hit ? { lastUsedAt: turn.at } : prior?.lastUsedAt !== undefined ? { lastUsedAt: prior.lastUsedAt } : {}),
+			...(seen > 0 ? { exposed: seen } : {}),
 		};
 	}
 	const ids = Object.keys(records);
@@ -126,7 +147,8 @@ function isEntry(value: unknown): value is RecallUseEntry {
 		Number.isInteger(entry.used) &&
 		Number.isInteger(entry.consecutiveUnused) &&
 		typeof entry.lastRecalledAt === "string" &&
-		(entry.lastUsedAt === undefined || typeof entry.lastUsedAt === "string")
+		(entry.lastUsedAt === undefined || typeof entry.lastUsedAt === "string") &&
+		(entry.exposed === undefined || Number.isInteger(entry.exposed))
 	);
 }
 
@@ -147,10 +169,7 @@ export function readRecallUseLedger(stateDir: string): RecallUseLedger {
 	}
 }
 
-async function recordRecallUse(
-	stateDir: string,
-	turn: { recalled: ReadonlyArray<string>; used: ReadonlyArray<string>; at: string },
-): Promise<void> {
+async function recordRecallUse(stateDir: string, turn: RecallUseTurn): Promise<void> {
 	if (turn.recalled.length === 0) return;
 	const path = recallUseLedgerPath(stateDir);
 	await withStateFileLock(
@@ -171,62 +190,110 @@ export interface MemoryRecallUseDeps {
 	enabled(): boolean;
 	/** The record ids carried into the turn now ending; the call clears them. */
 	takeRecalled(): ReadonlyArray<string>;
+	/** The checkout commands and paths are judged against; the process directory when absent. */
+	workspaceRoot?(): string;
 	/** Each turn's verdict, for tracing and tests. */
-	onTurn?(turn: { recalled: ReadonlyArray<string>; used: ReadonlyArray<string> }): void;
+	onTurn?(turn: { recalled: ReadonlyArray<string>; used: ReadonlyArray<string>; exposed: ReadonlyArray<string> }): void;
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
+/** Segments and paths kept per turn; a turn past these says no more about use than its first ones. */
+const TURN_FACTS_MAX = 256;
+const PATH_TOOLS: ReadonlySet<string> = new Set([ToolNames.Read, ToolNames.Write, ToolNames.Edit]);
+
 /**
- * Observes a turn (its request, the arguments of every tool it called and its
- * final text) and records recall versus use at `turn_end`, in the awaited
- * phase so the write is never detached. It never emits an effect.
+ * Observes a turn (the arguments of every tool it called, the shell tool's own
+ * success receipts, the files it read or changed, and its final text) and
+ * records recall versus use at `turn_end`, in the awaited phase so the write is
+ * never detached. It never emits an effect. Recalled ids carry no position in
+ * the turn, so a command that succeeded earlier in the turn than a mid-turn
+ * reminder counts as after it.
  */
 export function createMemoryRecallUseRegistration(deps: MemoryRecallUseDeps): MiddlewareHookRegistration {
-	let task = "";
-	let evidence: string[] = [];
-	let evidenceChars = 0;
-	const note = (text: string): void => {
-		if (evidenceChars >= EVIDENCE_MAX_CHARS || text.length === 0) return;
-		const kept = text.slice(0, EVIDENCE_MAX_CHARS - evidenceChars);
-		evidence.push(kept);
-		evidenceChars += kept.length;
+	let text: string[] = [];
+	let textChars = 0;
+	let segments: CommandSegment[] = [];
+	let touched = new Set<string>();
+	const root = (): string => {
+		try {
+			return deps.workspaceRoot?.() ?? process.cwd();
+		} catch {
+			return process.cwd();
+		}
+	};
+	const note = (value: string): void => {
+		if (textChars >= EVIDENCE_MAX_CHARS || value.length === 0) return;
+		const kept = value.slice(0, EVIDENCE_MAX_CHARS - textChars);
+		text.push(kept);
+		textChars += kept.length;
+	};
+	const reset = (): void => {
+		text = [];
+		textChars = 0;
+		segments = [];
+		touched = new Set();
+	};
+	const observeTool = (input: MiddlewareHookInput): void => {
+		const args = input.toolArgs;
+		if (args === undefined) return;
+		try {
+			note(JSON.stringify(args));
+		} catch {
+			// An argument that cannot be serialized says nothing about memory.
+		}
+		const ok = input.metadata?.resultKind === "ok";
+		if (
+			input.toolName === ToolNames.Bash &&
+			typeof args.command === "string" &&
+			successfulShellReceipt(ok, input.toolResultDetails) &&
+			segments.length < TURN_FACTS_MAX
+		)
+			segments.push(...commandSegments(args.command, root(), typeof args.cwd === "string" ? args.cwd : undefined));
+		const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
+		if (ok && path !== null && PATH_TOOLS.has(input.toolName ?? "") && touched.size < TURN_FACTS_MAX) {
+			const relative = repositoryRelativePath(path, [root()]);
+			if (relative !== null) touched.add(relative);
+		}
 	};
 	return {
 		id: MEMORY_RECALL_USE_REGISTRATION_ID,
 		description: "record which carried memory records a turn actually used",
 		hooks: ["turn_start", "after_tool", "turn_end"],
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
-			if (input.hook === "turn_start" && input.metadata?.requestContinuation !== true) {
-				task = input.text ?? "";
-				evidence = [];
-				evidenceChars = 0;
-			} else if (input.hook === "after_tool" && input.toolArgs !== undefined) {
-				try {
-					note(JSON.stringify(input.toolArgs));
-				} catch {
-					// An argument that cannot be serialized says nothing about memory.
-				}
-			}
+			if (input.hook === "turn_start" && input.metadata?.requestContinuation !== true) reset();
+			else if (input.hook === "after_tool") observeTool(input);
 			return NO_EFFECTS;
 		},
 		async evaluateAsync(input: MiddlewareHookInput): Promise<ReadonlyArray<MiddlewareEffect>> {
 			if (input.hook !== "turn_end") return NO_EFFECTS;
 			const recalled = [...new Set(deps.takeRecalled())];
 			note(input.text ?? "");
-			const said = evidence.join("\n");
-			evidence = [];
-			evidenceChars = 0;
+			const evidence: TurnUseEvidence = { text: text.join("\n"), segments, touched };
+			reset();
 			const stop = input.metadata?.stopReason;
 			if (recalled.length === 0 || !deps.enabled() || stop === "aborted" || stop === "error") return NO_EFFECTS;
 			try {
 				const records = new Map(loadMemoryRecordsSync(deps.dataDir()).map((record) => [record.id, record]));
-				const used = recalled.filter((id) => {
-					const record = records.get(id);
-					return record !== undefined && detectMemoryUse(record, said, task) !== null;
+				const checkout = root();
+				const signals = new Map(
+					recalled.map((id) => {
+						const record = records.get(id);
+						return [id, record === undefined ? null : detectMemoryUse(record, evidence, checkout)] as const;
+					}),
+				);
+				const having = (...kinds: MemoryUseSignal[]) =>
+					recalled.filter((id) => kinds.includes(signals.get(id) as MemoryUseSignal));
+				const used = having("cited", "command");
+				const exposed = having("exposed");
+				deps.onTurn?.({ recalled, used, exposed });
+				await recordRecallUse(deps.stateDir(), {
+					recalled,
+					used,
+					exposed,
+					unscored: having("unscored"),
+					at: new Date().toISOString(),
 				});
-				deps.onTurn?.({ recalled, used });
-				await recordRecallUse(deps.stateDir(), { recalled, used, at: new Date().toISOString() });
 			} catch {
 				// The counts are advisory; a turn never fails on them.
 			}

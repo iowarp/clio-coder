@@ -25,7 +25,7 @@ import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js"
 import type { SessionEntry } from "../session/index.js";
 import type { SessionLedgerStat } from "../session/related-ledgers.js";
 import { sessionLedgersForRoots } from "../session/related-ledgers.js";
-import { succeededCommandForms, successfulShellReceipt } from "./command-evidence.js";
+import { atWorkspaceRoot, commandSegments, successfulShellReceipt } from "./command-evidence.js";
 import { recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
 import { observationDigest } from "./observations.js";
 import { relatedRepositoryRoots } from "./operations.js";
@@ -799,9 +799,15 @@ function renderOutcome(
 	const succeeded = successfulShellReceipt(!failed, details);
 	const worthReview = TRIVIAL_COMMAND.test(command.trim()) ? null : "command";
 	if (succeeded) {
-		// The exact command and, for a pure `&&` chain run from the root, each
-		// of its segments: exit 0 proves every one of them finished with exit 0.
-		const forms = exact ? succeededCommandForms(command, root, typeof args.cwd === "string" ? args.cwd : undefined) : [];
+		// The exact command and each segment it vouches for, as the shell ran
+		// them: exit 0 from a pure `&&` chain run from the root proves every
+		// segment finished with exit 0. A call whose own cwd is not the root
+		// proves no form; evidence identity is read from these texts again.
+		const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
+		const forms =
+			exact && atWorkspaceRoot(root, cwd)
+				? [...new Set([command, ...commandSegments(command, root, cwd).map((segment) => segment.text)])]
+				: [];
 		return {
 			line: `ok: ${shown}`,
 			counted: true,

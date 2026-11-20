@@ -7,19 +7,35 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runMemoryCommand } from "../../src/cli/memory.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
+import {
+	commandEvidenceRef,
+	commandSegment,
+	commandSegments,
+	legacyCommandHash,
+	receiptVouches,
+	sourceEvidenceRef,
+} from "../../src/domains/memory/command-evidence.js";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
+import { evaluateMemoryGate } from "../../src/domains/memory/guardian-gate.js";
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
-import { lessonEvidence, readInsideRoot, repositoryRelativePath } from "../../src/domains/memory/lesson-evidence.js";
+import {
+	lessonCommands,
+	lessonEvidence,
+	readInsideRoot,
+	repositoryRelativePath,
+} from "../../src/domains/memory/lesson-evidence.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
+import { detectMemoryUse } from "../../src/domains/memory/recall-use.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { proposeInjectedTaskMemory } from "../../src/domains/memory/task-bank-promotion.js";
 import { renderTaskMemoryHandoffSource } from "../../src/domains/memory/task-memory-handoff.js";
 import { runTaskMemoryPolicy, TaskMemoryEndpointPreemptedError } from "../../src/domains/memory/task-memory-policy.js";
+import type { MemoryRecord } from "../../src/domains/memory/types.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { cwdHash } from "../../src/engine/session.js";
 import { closedSessionLessonSource } from "../../src/entry/flow-ledger.js";
@@ -793,3 +809,107 @@ test("a child named ..x is inside the repository, and a sibling of the root is n
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("evidence identity grounds and counts use only for the command that ran, segment by segment", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "memory-identity-")));
+	const other = realpathSync(mkdtempSync(join(tmpdir(), "memory-identity-other-")));
+	try {
+		const grounds = (lessonCommand: string, receipt: string) =>
+			lessonEvidence(
+				new TaskMemoryBank().saveKnowledge(`Validate with \`${lessonCommand}\`.`, {
+					durable: true,
+					evidenceCommand: lessonCommand,
+				}),
+				{ succeededCommands: new Set([receipt]), observedReads: new Map(), workspaceRoot: root },
+			);
+		const lesson = (command: string): Pick<MemoryRecord, "id" | "lesson" | "evidenceRefs"> => ({
+			id: "mem-00000000000000d1",
+			lesson: `Validate scripts/check.mjs with \`${command}\`.`,
+			evidenceRefs: [commandEvidenceRef(command)],
+		});
+		const used = (command: string, receipt: string, touched: string[] = []) =>
+			detectMemoryUse(
+				lesson(command),
+				{ text: "", segments: commandSegments(receipt, root), touched: new Set(touched) },
+				root,
+			);
+		const PNPM = "pnpm run check";
+		const positives: Array<[string, string]> = [
+			[COMMAND, COMMAND],
+			[COMMAND, `node scripts/build.mjs && ${COMMAND}`],
+			[PNPM, `cd ${root} && corepack pnpm -s run check`],
+		];
+		for (const [claimed, receipt] of positives) {
+			strictEqual(grounds(claimed, receipt), "command", receipt);
+			strictEqual(used(claimed, receipt), "command", receipt);
+		}
+		const BOUNDED = 'node scripts/check.mjs --name "fast mode"';
+		const negatives: Array<[string, string]> = [
+			[COMMAND, "node scripts/check.mjs --mode"],
+			[BOUNDED, "node scripts/check.mjs --name fast mode"],
+			[COMMAND, `${COMMAND} | cat`],
+			[COMMAND, `printf '%s\\n' '${COMMAND}'`],
+			[COMMAND, `cd ${other} && ${COMMAND}`],
+			[PNPM, "pnpm run check --fix"],
+		];
+		for (const [claimed, receipt] of negatives) {
+			strictEqual(grounds(claimed, receipt), null, receipt);
+			notStrictEqual(used(claimed, receipt), "command", receipt);
+		}
+		deepStrictEqual(commandSegments(COMMAND, root, other), [], "a call whose cwd is another checkout vouches nothing");
+		strictEqual(used(COMMAND, "git status", ["scripts/check.mjs"]), "exposed", "touching a named file is not use");
+		deepStrictEqual(
+			lessonCommands("Set `const mode = 'native'` before running `node scripts/check.mjs`.", [], root).recommended,
+			["node scripts/check.mjs"],
+			"a backticked JavaScript span is not a command",
+		);
+		notStrictEqual(
+			sourceEvidenceRef("scripts/check.mjs", "process.exit(2);"),
+			sourceEvidenceRef("scripts/check.mjs", "process.exit(0);"),
+			"two quotes in one file are two sources",
+		);
+		const scratch = join(root, "scratch");
+		const claim = commandSegment(`pnpm install --store-dir ${scratch}/a/store`, root);
+		ok(claim);
+		const parametric = { ...claim, scratchParameter: 3 };
+		const receipt = (path: string) => commandSegment(`pnpm install --store-dir ${path}`, root) ?? assertSegment();
+		ok(receiptVouches(parametric, receipt(`${scratch}/b/store`), [scratch]), "a declared scratch parameter matches");
+		ok(!receiptVouches(parametric, receipt(`${other}/store`), [scratch]), "a path outside the scratch root does not");
+		ok(!receiptVouches(claim, receipt(`${scratch}/b/store`), [scratch]), "an undeclared claim never generalizes");
+		const record = (id: string, text: string, refs: string[], patch: Partial<MemoryRecord> = {}): MemoryRecord => ({
+			id,
+			scope: "repo",
+			key: id,
+			lesson: text,
+			evidenceRefs: refs,
+			appliesWhen: [],
+			avoidWhen: [],
+			confidence: 1,
+			createdAt: "2026-11-01T00:00:00.000Z",
+			approved: false,
+			repository: { kind: "canonical-path", key: root },
+			provenance: { sourceKind: "task-bank-entry", sourceEntryKind: "knowledge" },
+			...patch,
+		});
+		// A rejection recorded before evidence identity carries the old text hash of `pnpm run check`.
+		const rejected = record("mem-00000000000000d2", `Run \`${PNPM}\` before a release.`, [
+			`command:${legacyCommandHash(PNPM)}`,
+		]);
+		rejected.rejectedAt = "2026-11-02T00:00:00.000Z";
+		const reworded = record(
+			"mem-00000000000000d3",
+			"Always run `corepack pnpm -s run check` before releasing.",
+			[commandEvidenceRef("corepack pnpm -s run check")],
+			{ observations: [{ at: "2026-11-03T00:00:00.000Z", sessionId: "s2", kind: "held" }] },
+		);
+		strictEqual(evaluateMemoryGate(reworded, []), "approve");
+		strictEqual(evaluateMemoryGate(reworded, [rejected]), "hold", "a pre-slice rejection holds a rewording");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(other, { recursive: true, force: true });
+	}
+});
+
+function assertSegment(): never {
+	throw new Error("expected one command segment");
+}

@@ -17,7 +17,8 @@
  * an operator rejection or approval is a decision the guardian never revisits.
  */
 
-import { COMMAND_CLAIM_REF_PREFIX, COMMAND_EVIDENCE_REF_PREFIX } from "./command-evidence.js";
+import { COMMAND_EVIDENCE_REF_PREFIX, parseSourceEvidenceRef } from "./command-evidence.js";
+import { commandRefKeys } from "./lesson-evidence.js";
 import { cloneMemoryRecord } from "./operations.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { mutateMemoryRecords } from "./store.js";
@@ -87,8 +88,8 @@ export function evaluateMemoryGate(record: MemoryRecord, store: ReadonlyArray<Me
 /** Backed by a `source:` quote and by no `command:` the host saw succeed. */
 function sourceOnlyEvidence(record: Pick<MemoryRecord, "evidenceRefs">): boolean {
 	return (
-		record.evidenceRefs.some((ref) => ref.startsWith("source:")) &&
-		!record.evidenceRefs.some((ref) => ref.startsWith("command:"))
+		record.evidenceRefs.some((ref) => parseSourceEvidenceRef(ref) !== null) &&
+		!record.evidenceRefs.some((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX))
 	);
 }
 
@@ -107,11 +108,17 @@ function sourceOnlyEvidence(record: Pick<MemoryRecord, "evidenceRefs">): boolean
  * the declined lesson citing the same command would be approved on one
  * session's word and delivered as though the operator had never ruled. A
  * stored record's unverified `command-claimed:` ref counts as its claim here.
+ * Both sides compare evidence identities (`commandRefKeys`), so a ref written
+ * before identity existed, and a spelling such as `corepack pnpm -s test`
+ * against `pnpm test`, meet as one command.
  */
 function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<MemoryRecord>): boolean {
-	const commands = record.evidenceRefs.filter((ref) => ref.startsWith("command:"));
+	const commands = commandRefKeys(
+		record.lesson,
+		record.evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)),
+	);
 	const repository = record.repository;
-	if (commands.length === 0 || repository === undefined) return false;
+	if (commands.size === 0 || repository === undefined) return false;
 	return store.some(
 		(other) =>
 			other.id !== record.id &&
@@ -119,13 +126,7 @@ function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<Memory
 			other.scope === "repo" &&
 			other.repository?.kind === repository.kind &&
 			other.repository.key === repository.key &&
-			other.evidenceRefs.some((ref) =>
-				commands.includes(
-					ref.startsWith(COMMAND_CLAIM_REF_PREFIX)
-						? `${COMMAND_EVIDENCE_REF_PREFIX}${ref.slice(COMMAND_CLAIM_REF_PREFIX.length)}`
-						: ref,
-				),
-			),
+			[...commandRefKeys(other.lesson, other.evidenceRefs)].some((key) => commands.has(key)),
 	);
 }
 

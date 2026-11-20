@@ -7,7 +7,6 @@ import { createMemoryPromptReader, type MemoryPromptRequest } from "../../src/do
 import {
 	createMemoryRecallUseRegistration,
 	demotedMemoryIds,
-	detectMemoryUse,
 	foldRecallUse,
 	MEMORY_DEMOTE_AFTER_UNUSED,
 	type RecallUseLedger,
@@ -131,26 +130,6 @@ test("the gated reader carries only what the turn concerns, while the legacy rea
 	);
 });
 
-test("use is the turn acting on a record: its id, a literal it names, or its terms beyond the request", () => {
-	strictEqual(detectMemoryUse(PNPM, "Per [mem-00000000000000a1] I ran the install."), "cited");
-	strictEqual(detectMemoryUse(PNPM, '{"command":"pnpm install --frozen-lockfile"}', "set up the repo"), "literal");
-	strictEqual(
-		detectMemoryUse(PNPM, "pnpm install --frozen-lockfile", "run pnpm install --frozen-lockfile"),
-		null,
-		"a literal the operator typed is an echo",
-	);
-	strictEqual(
-		detectMemoryUse(HDF5, "I sized the chunk cache to the dataset chunk shape first.", "speed up parallel reads"),
-		"terms",
-	);
-	strictEqual(
-		detectMemoryUse(HDF5, "Done: parallel reads of the HDF5 file are faster now.", "speed up HDF5 parallel reads"),
-		null,
-		"repeating the request is not using the lesson",
-	);
-	strictEqual(detectMemoryUse(FORMAT, ""), null);
-});
-
 test("records left unused turn after turn are demoted, and one use restores them", () => {
 	let ledger: RecallUseLedger = { version: 1, records: {} };
 	for (let turn = 0; turn < MEMORY_DEMOTE_AFTER_UNUSED - 1; turn++)
@@ -187,13 +166,19 @@ test("the registration records recall against use at turn end and skips aborted 
 	});
 	const turn = async (task: string, toolArgs: Record<string, unknown>, text: string, stopReason = "stop") => {
 		hook.evaluate({ hook: "turn_start", text: task });
-		hook.evaluate({ hook: "after_tool", toolName: "bash", toolArgs });
+		hook.evaluate({
+			hook: "after_tool",
+			toolName: "bash",
+			toolArgs,
+			metadata: { resultKind: "ok" },
+			toolResultDetails: { outcome: "success", exitCode: 0 },
+		});
 		recalled = ["mem-00000000000000a1", "mem-00000000000000a2"];
 		await hook.evaluateAsync?.({ hook: "turn_end", text, metadata: { stopReason } });
 	};
 	await turn("set up the repo", { command: "pnpm install --frozen-lockfile" }, "Dependencies installed.");
 	deepStrictEqual(turns, [
-		{ recalled: ["mem-00000000000000a1", "mem-00000000000000a2"], used: ["mem-00000000000000a1"] },
+		{ recalled: ["mem-00000000000000a1", "mem-00000000000000a2"], used: ["mem-00000000000000a1"], exposed: [] },
 	]);
 	await turn("set up the repo", { command: "ls" }, "Stopped.", "aborted");
 	strictEqual(turns.length, 1);

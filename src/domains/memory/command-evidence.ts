@@ -9,14 +9,18 @@
  * substitution or background launch), and a lesson's command is satisfied
  * only by a receipt for that same complete command.
  *
- * A record that carries a `command:` evidence ref names its recommended
- * command by this module's identity; `lessonCommands` in lesson-evidence reads
- * it back and falls back to conservative wording rules for older records.
+ * Evidence identity (`commandSegments`) is what vouches: one identity per
+ * segment of a permitted command, keyed on its argv as an array. Only three
+ * rewrites reach it, each leaving what ran unchanged, and no path is ever
+ * replaced. A record that carries a `command:` evidence ref names its
+ * recommended command by that key; `lessonCommands` in lesson-evidence reads
+ * it back, resolving a ref written before the key existed through the same
+ * function, and falls back to conservative wording rules for older records.
  */
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { commandName, wrappedCommand } from "../../core/command-words.js";
 import { shellLikeChain, shellLikeInvocation } from "../../core/shell-argv.js";
 
@@ -141,23 +145,158 @@ export function commandChain(command: string): CommandChain | null {
 	return segments.length === 0 ? null : { segments, cwd };
 }
 
+/** One segment's evidence identity: what ran, as the shell split it, and the key that vouches for it. */
+export interface CommandSegment {
+	readonly assignments: readonly string[];
+	/** The argv after the identity rewrites; nothing else is changed. */
+	readonly argv: readonly string[];
+	/** The exact text the shell ran for this segment, before any rewrite. */
+	readonly text: string;
+	/** SHA-256 over the assignments and argv as arrays, so argument boundaries are part of the identity. */
+	readonly key: string;
+}
+
 /**
- * Every command one successful shell receipt vouches for: the command itself,
- * and each segment of a pure `&&` chain. A chain that first changed directory
- * counts only when that directory is the workspace root itself, because a
- * lesson's command is written relative to the root and `cd sub && node x.mjs`
- * runs a different `x.mjs`. The same holds for a call given its own `cwd`:
- * one that is not the root vouches for nothing, not even its exact text.
+ * Evidence identity: every segment one command vouches for, or none.
+ *
+ * A permitted command is one simple invocation or a pure `&&` chain run from
+ * the workspace root; exit 0 proves each segment ran and exited 0, so each is
+ * an identity of its own. Everything else yields nothing: pipes, `;`, `||`,
+ * `&`, substitution, a `cd` other than one leading `cd` to the root, and a
+ * `cwd` that is not the root, because `cd sub && node x.mjs` runs a different
+ * `x.mjs` than the one a lesson written at the root names. Without a root
+ * neither a leading `cd` nor a `cwd` can be judged, so both refuse.
+ *
+ * Exactly three rewrites reach the key, each leaving what ran unchanged: the
+ * leading `cd <root> &&` is dropped, `corepack <manager>` is unwrapped, and a
+ * package manager's output-only flags are dropped. A path is never replaced.
  */
-export function succeededCommandForms(command: string, root: string, cwd?: string): string[] {
-	if (cwd !== undefined && cwd.length > 0 && !sameDirectory(resolve(root, cwd), root)) return [];
-	const forms = new Set<string>([command]);
+export function commandSegments(command: string, workspaceRoot?: string, cwd?: string): CommandSegment[] {
+	if (!atWorkspaceRoot(workspaceRoot, cwd)) return [];
 	const chain = commandChain(command);
-	if (chain === null) return [...forms];
-	if (chain.segments.length === 1 && chain.cwd === null) return [...forms];
-	if (chain.cwd !== null && !sameDirectory(resolve(root, chain.cwd), root)) return [...forms];
-	for (const segment of chain.segments) forms.add(segment.text);
-	return [...forms];
+	if (chain === null) {
+		// One simple invocation is its own receipt even under a word that refuses a chain (`command node x.mjs`).
+		const simple = simpleInvocation(command);
+		if (simple === null) return [];
+		const argv = identityArgv(simple.argv);
+		const text = withoutHarmlessRedirection(command);
+		return [{ assignments: simple.assignments, argv, text, key: segmentKey(simple.assignments, argv) }];
+	}
+	if (chain.cwd !== null) {
+		if (workspaceRoot === undefined || !sameDirectory(resolve(workspaceRoot, chain.cwd), workspaceRoot)) return [];
+	}
+	return chain.segments.map((segment) => {
+		const argv = identityArgv(segment.argv);
+		return { assignments: segment.assignments, argv, text: segment.text, key: segmentKey(segment.assignments, argv) };
+	});
+}
+
+/** A call's own `cwd` leaves it at the workspace root: absent, empty, or the root itself. */
+export function atWorkspaceRoot(workspaceRoot: string | undefined, cwd: string | undefined): boolean {
+	if (cwd === undefined || cwd.length === 0) return true;
+	return workspaceRoot !== undefined && sameDirectory(resolve(workspaceRoot, cwd), workspaceRoot);
+}
+
+/** The identity of a command that must be exactly one segment, as a lesson's recommended command is. */
+export function commandSegment(command: string, workspaceRoot?: string, cwd?: string): CommandSegment | null {
+	const segments = commandSegments(command, workspaceRoot, cwd);
+	return segments.length === 1 ? (segments[0] ?? null) : null;
+}
+
+/** Two commands are the same command when each is one segment with the same key. */
+export function sameCommandIdentity(left: string, right: string, workspaceRoot?: string): boolean {
+	const a = commandSegment(left, workspaceRoot);
+	const b = commandSegment(right, workspaceRoot);
+	return a !== null && b !== null && a.key === b.key;
+}
+
+function segmentKey(assignments: readonly string[], argv: readonly string[]): string {
+	return createHash("sha256")
+		.update(JSON.stringify([assignments, argv]))
+		.digest("hex");
+}
+
+/** Package managers `corepack <manager>` runs with the rest of the words unchanged (the finish gate's set, CLI-P24). */
+const COREPACK_MANAGERS: ReadonlySet<string> = new Set(["npm", "npx", "pnpm", "yarn"]);
+/** Package managers whose output-only flags are dropped from an identity. */
+const OUTPUT_FLAG_MANAGERS: ReadonlySet<string> = new Set(["npm", "pnpm", "yarn", "bun"]);
+/**
+ * Flags that only change what a package manager prints, and those of them that take a value. The same fixed table
+ * the finish gate credits check spellings with (`PACKAGE_OUTPUT_FLAGS` in safety/protected-artifacts.ts, 3774e5e13);
+ * a change to one is a change to both.
+ */
+const PACKAGE_OUTPUT_FLAGS: ReadonlySet<string> = new Set(["-s", "--silent", "-q", "--quiet", "--color", "--no-color"]);
+const PACKAGE_OUTPUT_VALUE_FLAGS: ReadonlySet<string> = new Set(["--loglevel", "--reporter"]);
+
+function outputFlagWidth(args: readonly string[], index: number): number {
+	const arg = args[index];
+	if (arg === undefined) return 0;
+	if (PACKAGE_OUTPUT_FLAGS.has(arg)) return 1;
+	const equals = arg.indexOf("=");
+	if (equals > 0) return PACKAGE_OUTPUT_VALUE_FLAGS.has(arg.slice(0, equals)) ? 1 : 0;
+	return PACKAGE_OUTPUT_VALUE_FLAGS.has(arg) && args[index + 1] !== undefined ? 2 : 0;
+}
+
+/**
+ * The two argv rewrites: `corepack <manager>` runs that manager on the same words, and a package manager's
+ * output-only flags, where they stand before its command or between `run` and the script, change only what it
+ * prints. A flag after the script belongs to the script and is kept.
+ */
+export function identityArgv(argv: readonly string[]): readonly string[] {
+	let words = [...argv];
+	if (commandName(words[0] ?? "") === "corepack" && COREPACK_MANAGERS.has(words[1] ?? "")) words = words.slice(1);
+	if (!OUTPUT_FLAG_MANAGERS.has(commandName(words[0] ?? ""))) return words;
+	const kept = [words[0] ?? ""];
+	let index = 1;
+	for (let width = outputFlagWidth(words, index); width > 0; width = outputFlagWidth(words, index)) index += width;
+	if (words[index] === "run") {
+		kept.push("run");
+		index += 1;
+		for (let width = outputFlagWidth(words, index); width > 0; width = outputFlagWidth(words, index)) index += width;
+	}
+	return [...kept, ...words.slice(index)];
+}
+
+/**
+ * A claim on one command. Its key vouches by equality; a claim may instead declare one argument a scratch-path
+ * parameter, and then a receipt that holds a path under a scratch root at that position, and is equal everywhere
+ * else, matches it. The claim is parametric by its own declaration; the receipt is never rewritten.
+ */
+export interface CommandClaim {
+	readonly assignments: readonly string[];
+	readonly argv: readonly string[];
+	readonly key: string;
+	/** Index into `argv` of the declared scratch-path parameter. */
+	readonly scratchParameter?: number;
+}
+
+/** Whether one receipt segment vouches for a claim: an equal key, or a match on the claim's declared parameter. */
+export function receiptVouches(
+	claim: CommandClaim,
+	receipt: CommandSegment,
+	scratchRoots: readonly string[] = [],
+): boolean {
+	if (claim.key === receipt.key) return true;
+	const at = claim.scratchParameter;
+	if (at === undefined || at <= 0 || at >= claim.argv.length) return false;
+	if (receipt.argv.length !== claim.argv.length || receipt.assignments.length !== claim.assignments.length) return false;
+	if (claim.assignments.some((assignment, index) => receipt.assignments[index] !== assignment)) return false;
+	for (let index = 0; index < claim.argv.length; index++) {
+		if (index === at) continue;
+		if (receipt.argv[index] !== claim.argv[index]) return false;
+	}
+	// `--dir=<path>` declares the value after its own unchanged prefix.
+	const declared = claim.argv[at] ?? "";
+	const held = receipt.argv[at] ?? "";
+	const equals = declared.startsWith("-") ? declared.indexOf("=") + 1 : 0;
+	if (held.slice(0, equals) !== declared.slice(0, equals)) return false;
+	return scratchRoots.some((root) => strictlyInside(held.slice(equals), root));
+}
+
+function strictlyInside(path: string, root: string): boolean {
+	if (!isAbsolute(path) || !isAbsolute(root)) return false;
+	const inside = relative(resolve(root), resolve(path));
+	return inside.length > 0 && inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
 }
 
 function sameDirectory(left: string, right: string): boolean {
@@ -222,21 +361,30 @@ export function trivialInvocation(invocation: SimpleInvocation): boolean {
 	return false;
 }
 
-/** Whitespace-collapsed identity; lessons store commands with collapsed whitespace. */
-function commandIdentity(command: string): string {
-	return command.replace(/\s+/gu, " ").trim();
-}
-
-export function sameCommand(left: string, right: string): boolean {
-	return commandIdentity(left) === commandIdentity(right);
+/** Whitespace-collapsed text: what refs hashed before evidence identity, and what a quoted span is hashed over. */
+function collapsedText(text: string): string {
+	return text.replace(/\s+/gu, " ").trim();
 }
 
 export const COMMAND_EVIDENCE_REF_PREFIX = "command:";
 export const COMMAND_CLAIM_REF_PREFIX = "command-claimed:";
 
-/** Durable evidence identity for one exact command, kept apart from the claim's wording. */
+/** The hash a ref carried before evidence identity: 16 hex characters of the whitespace-collapsed text. */
+export function legacyCommandHash(command: string): string {
+	return createHash("sha256").update(collapsedText(command)).digest("hex").slice(0, 16);
+}
+
+/** Whether a ref's hash is a segment key, as opposed to a legacy text hash. */
+export function segmentKeyRef(hash: string): boolean {
+	return /^[0-9a-f]{64}$/u.test(hash);
+}
+
+/**
+ * Durable evidence identity for one command, kept apart from the claim's wording: the key of its one segment. A
+ * command that is not one segment has no evidence identity and keeps its text hash, which vouches for nothing.
+ */
 export function commandEvidenceRef(command: string): string {
-	return `${COMMAND_EVIDENCE_REF_PREFIX}${createHash("sha256").update(commandIdentity(command)).digest("hex").slice(0, 16)}`;
+	return `${COMMAND_EVIDENCE_REF_PREFIX}${commandSegment(command)?.key ?? legacyCommandHash(command)}`;
 }
 
 /**
@@ -247,9 +395,32 @@ export function commandClaimRef(command: string): string {
 	return `${COMMAND_CLAIM_REF_PREFIX}${commandEvidenceRef(command).slice(COMMAND_EVIDENCE_REF_PREFIX.length)}`;
 }
 
+/**
+ * A source is a path and the SHA-256 of one quoted span in it, so two quotes in one file are two sources. The span
+ * is hashed with its whitespace collapsed, as quotes are compared.
+ */
+export interface SourceEvidence {
+	readonly path: string;
+	readonly spanHash: string;
+}
+
+function sourceEvidence(path: string, quote: string): SourceEvidence {
+	return { path, spanHash: createHash("sha256").update(collapsedText(quote)).digest("hex") };
+}
+
 /** Durable evidence identity for one quoted source span. */
 export function sourceEvidenceRef(path: string, quote: string): string {
-	return `source:${path}#${createHash("sha256").update(commandIdentity(quote)).digest("hex").slice(0, 16)}`;
+	const source = sourceEvidence(path, quote);
+	return `source:${source.path}#${source.spanHash}`;
+}
+
+/**
+ * A `source:` ref read back, or null. A ref written before the full hash carries the first 16 hex characters of the
+ * same digest, so a legacy hash is a prefix of the full one.
+ */
+export function parseSourceEvidenceRef(ref: string): SourceEvidence | null {
+	const match = /^source:(.+)#([0-9a-f]{16}|[0-9a-f]{64})$/u.exec(ref);
+	return match === null ? null : { path: match[1] ?? "", spanHash: match[2] ?? "" };
 }
 
 /**
