@@ -100,6 +100,7 @@ import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from
 const PERMISSION_REQUIRED_EXIT_CODE = 3;
 
 import {
+	noteDispatchRunsV2,
 	noteDispatchSupersededV2,
 	noteMainRunV2,
 	noteRunCompletion,
@@ -1605,7 +1606,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown(), {
 				supersede: runResultV2Active(),
 			})
-		: { live: [], undelivered: [], canceled: [], superseded: [] };
+		: { runs: [], live: [], undelivered: [], canceled: [], superseded: [] };
+	noteDispatchRunsV2(settlement.runs.map(projectDispatchedRunOutcome));
 	if (settlement.superseded.length > 0) noteDispatchSupersededV2(settlement.superseded.map(projectDispatchedRunOutcome));
 	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
 		writeJsonHeader(true);

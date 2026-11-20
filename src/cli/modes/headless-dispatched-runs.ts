@@ -16,6 +16,11 @@ const UNDELIVERED_OUTCOMES: ReadonlySet<RunOutcome> = new Set([
 ]);
 
 export interface DispatchedRunsSettlement {
+	/**
+	 * Every run the headless turn dispatched, retried attempts included, oldest first: v2's `run_end.dispatch.runs`.
+	 * A steer-canceled run reads as it does in `canceled`.
+	 */
+	runs: ReadonlyArray<RunEnvelope>;
 	/** Runs still in flight when waiting stopped; shutdown drain cancels them. */
 	live: ReadonlyArray<RunEnvelope>;
 	/** Final attempts that ended without delivering (a retried attempt is not final). */
@@ -101,10 +106,14 @@ export async function settleDispatchedRuns(
 	const steerCanceled = failed.filter((run) => dispatch.canceledBySteer?.(run.id) === true);
 	const undeliveredCandidates = failed.filter((run) => !steerCanceled.includes(run));
 	const superseded = options.supersede === true ? undeliveredCandidates.filter((run) => supersededBy(run, runs)) : [];
+	const canceled = steerCanceled.map(asSteerCanceled);
+	// Oldest first; the sort is stable, so runs that started together keep the ledger's order.
+	const ordered = [...runs].sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
 	return {
+		runs: ordered.map((run) => canceled.find((entry) => entry.id === run.id) ?? run),
 		live: runs.filter((run) => !isTerminalRunEnvelope(run)),
 		undelivered: undeliveredCandidates.filter((run) => !superseded.includes(run)),
-		canceled: steerCanceled.map(asSteerCanceled),
+		canceled,
 		superseded,
 	};
 }
