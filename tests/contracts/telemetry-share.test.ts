@@ -28,6 +28,7 @@ import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains
 import {
 	freshShareSource,
 	importShareArchive,
+	packShare,
 	planShare,
 	resolveShareScopes,
 	SHARE_PROFILE_NAMES,
@@ -676,6 +677,39 @@ test("a report share anonymizes ids and the record context, and clears the birth
 			strictEqual((linked.record.data as EventPayload<"run.linked">).runId, run.id);
 			strictEqual(linked.record.ctx.sessionId, sessionId);
 			strictEqual(linked.record.ctx.agent.id, sessionId);
+		});
+		await t.test("a 0.8.4 archive keeping raw run ids verifies; the same records from this version are refused", () => {
+			const run = plan.scopes.find((scope) => scope.kind === "run");
+			ok(run);
+			const runRows = scanTelemetrySegment(run.journal).rows;
+			const closing = runRows.at(-2);
+			const seal = runRows.at(-1);
+			ok(closing?.kind === "header" && seal?.kind === "record");
+			// The context 0.8.4 wrote: the run id and the worker agent it names left readable.
+			const raw = (ctx: TelemetryContext): TelemetryContext =>
+				ctx.runId === undefined ? ctx : { ...ctx, runId, agent: { role: "worker", id: runId } };
+			const lines = runRows.slice(0, -2).map((row) => {
+				ok(row.kind === "header" || row.kind === "record");
+				return row.kind === "header" ? row.header : { ...row.record, ctx: raw(row.record.ctx) };
+			});
+			const resealed = sealSharedScope({
+				scope: { kind: "run", id: runId },
+				lines: lines as Parameters<typeof sealSharedScope>[0]["lines"],
+				objects: run.objects,
+				profile: "report",
+				installId: plan.installId,
+				writer,
+				header: closing.header,
+				ctx: raw(seal.record.ctx),
+				now: new Date(),
+			});
+			const scopes = plan.scopes.map((scope) => (scope === run ? { ...scope, ...resealed, id: runId } : scope));
+			const written = (clioCoderVersion: string) => verifyShareArchive(packShare({ ...plan, clioCoderVersion, scopes }));
+			strictEqual(written("0.8.4").failure, null);
+			match(
+				written("0.8.5").failure ?? "",
+				new RegExp(`^run ${runId}: holds \\S+ with a context beyond the report projection$`, "u"),
+			);
 		});
 		const decided = rows.find((row) => row.kind === "record" && row.record.k === "system_one.decided");
 		ok(decided?.kind === "record");

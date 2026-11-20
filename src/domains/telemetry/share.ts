@@ -57,6 +57,7 @@ import type { AnonKind, ProjectionTally, ReadableKind, ShareProjection } from ".
 import {
 	conformingAnonymous,
 	createProjectionTally,
+	legacyReportProjection,
 	projectionFor,
 	projectSharedContext,
 	projectSharedObject,
@@ -920,15 +921,32 @@ const MEMBER = /^(sessions|runs|process)\/([^/]+)\/(.+)$/u;
 const MEMBER_KIND: Readonly<Record<string, ShareScopeKind>> = { sessions: "session", runs: "run", process: "process" };
 
 /**
+ * Whether a share archive's writer predates report shares hashing run ids (0.8.5): such an archive is held to the
+ * report projection it was written under. The version comes from the manifest; one that does not parse is current.
+ */
+function keepsRunIds(clioCoderVersion: string): boolean {
+	const match = /^(\d+)\.(\d+)\.(\d+)(?![.\d])/u.exec(clioCoderVersion);
+	if (!match) return false;
+	const [major, minor, patch] = match.slice(1).map(Number) as [number, number, number];
+	return major === 0 && (minor < 8 || (minor === 8 && patch < 5));
+}
+
+/**
  * The profile a shared scope's records and objects must stay within, checked line by line (#434). Every header and
  * record names the source by its install id. Below research, every record and object must be a fixed point of its
  * projection: a field the table drops, prose it withholds or an identity it anonymizes that is still present fails.
+ * A `report` scope from a writer that kept run ids ({@link keepsRunIds}) is held to that writer's projection.
  */
-function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, installId: string): string | null {
+function profileViolation(
+	files: TelemetryScopeFiles,
+	profile: ShareProfile,
+	installId: string,
+	legacyRunIds = false,
+): string | null {
 	const definition = SHARE_PROFILES[profile];
 	const projected = profile !== "research";
 	// The verifier cannot know whether model ids were anonymized; an anonymous id is a fixed point of `model-id` too.
-	const projection = projectionFor(profile);
+	const projection = legacyRunIds && profile === "report" ? legacyReportProjection() : projectionFor(profile);
 	const refs = new Map<string, string>();
 	for (const segment of files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
@@ -1070,8 +1088,10 @@ export function verifyShareArchive(archive: Buffer): ShareArchiveCheck {
 		else if (bundle.host !== manifest.installId) check.failure = `${label}: sealed by another source`;
 		else if (verdict.seal.head !== scope.head) check.failure = `${label}: its head differs from the manifest`;
 		else {
-			const violation = profileViolation(files, scope.profile, manifest.installId);
-			if (violation !== null) check.failure = `${label}: ${violation}`;
+			const legacy = keepsRunIds(manifest.clioCoderVersion);
+			const violation = profileViolation(files, scope.profile, manifest.installId, legacy);
+			if (violation !== null)
+				check.failure = `${label}: ${violation}${legacy ? ` (written by Clio ${manifest.clioCoderVersion})` : ""}`;
 		}
 		if (check.failure !== null) return check;
 	}

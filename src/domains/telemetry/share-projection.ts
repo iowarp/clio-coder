@@ -1116,6 +1116,17 @@ export function projectionFor(profile: string, models: "keep" | "anonymize" = "k
 	return projection;
 }
 
+let legacyReport: ShareProjection | undefined;
+
+/**
+ * The `report` projection 0.8.4 and earlier wrote: run ids and the agents a run names stayed readable. Verification
+ * holds an archive those versions produced to it, so their report shares still verify and import.
+ */
+export function legacyReportProjection(): ShareProjection {
+	legacyReport ??= { ...projectionFor("report"), context: { ...REPORT_CONTEXT, runId: "keep" } };
+	return legacyReport;
+}
+
 /** A shareable record's payload as a share below research carries it; null for an event the table does not admit. */
 export function projectSharedPayload(
 	kind: string,
@@ -1150,11 +1161,13 @@ export function projectSharedContext<C>(
 	if (projection.context === undefined) return ctx;
 	const context = ctx as { runId?: string; agent?: { role?: string; id?: string } } | null;
 	const role = context?.agent?.role;
+	// A projection that keeps run ids keeps the agents a run names too.
+	const hashesRuns = projection.context.runId !== "keep";
 	// Workers can also be the actor on another scope's approval record, with a different or absent ctx.runId.
 	const agentKind =
 		role === "system-one"
 			? "name"
-			: role === "worker" || (context?.runId !== undefined && context.agent?.id === context.runId)
+			: hashesRuns && (role === "worker" || (context?.runId !== undefined && context.agent?.id === context.runId))
 				? "id"
 				: null;
 	const table =
