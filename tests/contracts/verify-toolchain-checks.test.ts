@@ -44,11 +44,17 @@ function admission(root: string, args: Record<string, unknown>, level: "yolo" | 
 const PYPROJECT = '[project]\nname = "demo"\nversion = "0.1.0"\ndependencies = ["pydantic>=2"]\n';
 
 describe("verify in repositories without package.json", () => {
-	it("derives a uv-launched unittest check from pyproject.toml, uv.lock and a tests directory", () => {
-		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": "" });
+	it("derives a uv-launched unittest check from pyproject.toml, uv.lock, .venv and a tests directory", () => {
+		const root = workspace({
+			"pyproject.toml": PYPROJECT,
+			"uv.lock": "version = 1\n",
+			".venv/pyvenv.cfg": "",
+			"tests/test_a.py": "",
+		});
 		deepStrictEqual(commandOf(root, "python-unittest"), [
 			"uv",
 			"run",
+			"--no-sync",
 			"python",
 			"-m",
 			"unittest",
@@ -68,14 +74,19 @@ describe("verify in repositories without package.json", () => {
 		const root = workspace({
 			"pyproject.toml": `${PYPROJECT}\n[dependency-groups]\ndev = ["pytest>=8"]\n`,
 			"uv.lock": "version = 1\n",
+			".venv/pyvenv.cfg": "",
 			"tests/test_a.py": "",
 		});
-		deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "python", "-m", "pytest"]);
+		deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "--no-sync", "python", "-m", "pytest"]);
 		strictEqual(commandOf(root, "python-unittest"), undefined);
 	});
 
-	it("resolves python3 once on the worker PATH and refuses provisioning before execution", async () => {
-		const root = workspace({ "pyproject.toml": "[tool.pytest.ini_options]\n", "bin/python3": "#!/bin/sh\necho ran\n" });
+	it("resolves python3 once on the worker PATH, runs an unsynced uv project on it and refuses provisioning", async () => {
+		const root = workspace({
+			"pyproject.toml": "[tool.pytest.ini_options]\n[tool.tox]\n",
+			"bin/python3": "#!/bin/sh\necho ran\n",
+			"empty/.keep": "",
+		});
 		chmodSync(join(root, "bin/python3"), 0o755);
 		const previousPath = process.env.PATH;
 		const previousVenv = process.env.VIRTUAL_ENV;
@@ -88,7 +99,16 @@ describe("verify in repositories without package.json", () => {
 			strictEqual(entry?.provenance.interpreter, "python3");
 			deepStrictEqual(discoverToolchainChecks(root)[0], entry);
 			strictEqual((await verifyTool.run({ check: "python-pytest" })).kind, "ok");
+			// FL-2: the family word picks the direct runner over tox instead of refusing as ambiguous.
+			const family = await verifyTool.run({ check: "test" });
+			strictEqual(family.details?.check, "python-pytest", textOf(family));
 			writeFileSync(join(root, "uv.lock"), "version = 1\n");
+			// FL-2: without .venv the suite runs on python3 from PATH, provisioning nothing, and says so.
+			match(textOf(await verifyTool.run({})), /python3 -m pytest .*uv\.lock has no \.venv: runs on python3/u);
+			const fallback = await verifyTool.run({ check: "test" });
+			strictEqual(fallback.kind, "ok", textOf(fallback));
+			match(textOf(fallback), /ran/u);
+			process.env.PATH = join(root, "empty");
 			const listed = await verifyTool.run({});
 			match(textOf(listed), /needs-provisioning.*uv sync/u);
 			const refused = await verifyTool.run({ check: "python-pytest", args: ["-q"] });
@@ -100,6 +120,7 @@ describe("verify in repositories without package.json", () => {
 			});
 			match(textOf(refused), /other arguments or cwd cannot help/u);
 			strictEqual(refused.details?.exitCode, undefined, "uv was never spawned");
+			strictEqual(refused.details?.unresolved, true, "an unavailable runner ran nothing, so no receipt seals it failed");
 			mkdirSync(join(root, ".venv"));
 			deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "--no-sync", "python", "-m", "pytest"]);
 		} finally {

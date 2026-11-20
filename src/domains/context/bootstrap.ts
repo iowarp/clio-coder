@@ -659,7 +659,11 @@ function pythonVerificationLines(cwd: string, tomlFiles: TomlFileReader): string
 		return [`Run \`${launcher}pytest\`.`];
 	}
 	const derived = pythonProposals(cwd, []).find((proposal) => proposal.tags.includes("test"));
-	return derived ? [`Run the Python tests with \`${derived.command.join(" ")}\`.`] : [];
+	if (!derived) return [];
+	// The handbook outlives this checkout's missing .venv, so it names the locked command, not verify's fallback.
+	const command =
+		derived.provenance.environment !== undefined ? ["uv", "run", "python", ...derived.command.slice(1)] : derived.command;
+	return [`Run the Python tests with \`${command.join(" ")}\`.`];
 }
 
 /** CI steps that prepare the machine rather than judge the change. */

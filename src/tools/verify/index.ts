@@ -58,10 +58,12 @@ export const verifyTool: ToolSpec = {
 				snapshotError = error instanceof Error ? error.message : String(error);
 			}
 		}
-		const result = await runResolvedVerify(args, {
-			...(options?.signal !== undefined ? { signal: options.signal } : {}),
-			...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
-		});
+		const result = notRunWhenUnavailable(
+			await runResolvedVerify(args, {
+				...(options?.signal !== undefined ? { signal: options.signal } : {}),
+				...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+			}),
+		);
 		if (!applies || !policy) return result;
 		let stable = false;
 		if (before) {
@@ -84,6 +86,18 @@ export const verifyTool: ToolSpec = {
 		};
 	},
 };
+
+/**
+ * A check whose runner was unavailable judged nothing, so it carries the same not-run marker as a name that resolved
+ * to no check; receipts otherwise sealed it as a failed check and said "validation failed" for a suite that passes
+ * once its runner exists (FL-2).
+ */
+function notRunWhenUnavailable(result: ToolResult): ToolResult {
+	if (result.kind !== "error" || result.details?.unresolved === true) return result;
+	const judged = result.details?.judgement as { execution?: unknown } | undefined;
+	if (judged?.execution !== "unavailable") return result;
+	return { ...result, details: { ...result.details, unresolved: true } };
+}
 
 async function runResolvedVerify(args: Record<string, unknown>, options: VerifyRunOptions): Promise<ToolResult> {
 	const resolution = resolveVerifyCall(process.cwd(), args);
