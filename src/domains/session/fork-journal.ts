@@ -1,4 +1,5 @@
 import { assertSafeId } from "../../core/safe-id.js";
+import { readSessionMeta } from "../../engine/session.js";
 import type { CallJournalRead } from "../telemetry/call-journal.js";
 import { readCallJournalSync } from "../telemetry/call-journal.js";
 import { telemetryRunDirectory, telemetrySessionDirectory } from "../telemetry/index.js";
@@ -7,6 +8,24 @@ import { journalOwnsSideUsage } from "./journal-usage.js";
 
 export interface SessionCallJournalRead extends CallJournalRead {
 	runs: Map<string, CallJournalRead & { throughMs: number }>;
+}
+
+/**
+ * The session a session was forked from, or null for a root. Read from its meta.json, and once that session was
+ * deleted, from the one session.forked record its telemetry journal keeps, so a fork's ancestor chain still reaches
+ * past a deleted middle session (FL-14). Throws when neither source can say.
+ */
+export function forkParentSessionId(stateDir: string, sessionId: string): string | null {
+	try {
+		return (readSessionMeta(sessionId) as { parentSessionId?: string | null }).parentSessionId ?? null;
+	} catch (metaError) {
+		assertSafeId(sessionId, "session");
+		const forked = readCallJournalSync(telemetrySessionDirectory(stateDir, sessionId)).records.flatMap(({ record }) =>
+			record.k === "session.forked" ? [record.data.parentSessionId] : [],
+		);
+		if (forked.length !== 1 || forked[0] === undefined) throw metaError;
+		return forked[0];
+	}
 }
 
 /** Resolve immutable ancestor facts; a copied ledger never owns a second copy of its calls (#434). */

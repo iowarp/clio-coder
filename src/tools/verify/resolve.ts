@@ -64,7 +64,14 @@ function extraArgs(args: Record<string, unknown>): string[] {
 	return Array.isArray(args.args) ? args.args.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
-export type RunnableCheckDiscoveryResult = { ok: true; checks: DeclaredCheck[] } | { ok: false; reason: string };
+export type RunnableCheckDiscoveryResult =
+	| {
+			ok: true;
+			checks: DeclaredCheck[];
+			/** Family words (`test`, `lint`, ...) no id takes that verify maps to one derived owner (FL-12). */
+			familyAliases?: ReadonlyMap<string, DeclaredCheck>;
+	  }
+	| { ok: false; reason: string };
 
 /**
  * Every check `verify(check=<id>)` runs by exact id: package scripts and
@@ -83,7 +90,14 @@ export function runnableChecksAtRoot(workspaceRoot: string, cwdArg: string | und
 	} catch {
 		// Derived checks are a convenience; a discovery fault leaves the declared ones.
 	}
-	return { ok: true, checks: [...declared, ...derived] };
+	const checks = [...declared, ...derived];
+	const taken = new Set(checks.map((check) => check.id));
+	const familyAliases = new Map<string, DeclaredCheck>();
+	for (const word of FAMILY_WORDS) {
+		const owners = taken.has(word) ? [] : familyOwners(derived, word);
+		if (owners.length === 1 && owners[0] !== undefined) familyAliases.set(word, owners[0]);
+	}
+	return { ok: true, checks, ...(familyAliases.size > 0 ? { familyAliases } : {}) };
 }
 
 /**

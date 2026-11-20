@@ -666,6 +666,125 @@ test("a first splice with no usage anchor is fitted at the transport's own count
 	}
 });
 
+test("a worker stopped by its own lost stdout lane names cause=internal, not parent_cancel (FL-9)", {
+	timeout: 20_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-internal-stop-");
+	let requested!: () => void;
+	const request = new Promise<void>((resolve) => {
+		requested = resolve;
+	});
+	// The provider holds the request open, so only the abort ends the call.
+	const server = createServer((_req, _res) => requested());
+	let worker: WorkerRunHandle | undefined;
+	try {
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const events: unknown[] = [];
+		worker = startWorkerRun(
+			{
+				agentId: "internal-stop-fixture",
+				systemPrompt: "Reply Complete.",
+				task: "Reply Complete.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "[redacted:assignment]",
+				modelCapabilities: { contextWindow: 32_768, maxTokens: 4096, tools: true },
+				allowedTools: [],
+				budget: { mode: "advisory", toolCalls: 4, readReserve: 0, synthesis: true, hardCap: 8 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+			},
+			(event) => void events.push(event),
+		);
+		await request;
+		worker.abort("internal");
+		const outcome = await worker.promise;
+		notEqual(outcome.exitCode, 0);
+		const text = JSON.stringify(events);
+		match(text, /cause=internal/u);
+		ok(!text.includes("parent_cancel"), "the worker's own failure is not its parent's cancel");
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		server.closeAllConnections();
+		await closeServer(server);
+		env.restore();
+	}
+});
+
+test("a worker citation grounds on a line its own bash grep -n printed (FL-12)", { timeout: 20_000 }, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-bash-grep-");
+	writeFileSync(join(env.dir, "notes.txt"), "intro\nalpha marker\noutro\n");
+	const findings = (line: number) => ({
+		findings: [{ claim: "The marker is on this line.", path: "notes.txt", line }],
+		needsSplit: false,
+		proposedSubtasks: [],
+	});
+	const call = (name: string, args: unknown) => ({ name, arguments: JSON.stringify(args) });
+	const rounds = [
+		[call("bash", { command: "grep -n alpha notes.txt" })],
+		[call("clio_submit_result", findings(2))],
+		[call("clio_submit_result", { ...findings(2), findings: [{ claim: "No grounded evidence." }] })],
+	];
+	let requests = 0;
+	const server = createServer(async (req, res) => {
+		await readRequestBody(req);
+		const round = rounds[Math.min(requests, rounds.length - 1)] ?? [];
+		requests += 1;
+		const tool_calls = round.map((entry, index) => ({
+			index,
+			id: `call_${requests}_${index}`,
+			type: "function",
+			function: entry,
+		}));
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			`data: ${JSON.stringify({ model: "fixture", choices: [{ index: 0, delta: { role: "assistant", tool_calls }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
+		);
+	});
+	let worker: WorkerRunHandle | undefined;
+	const events: unknown[] = [];
+	const previousCwd = process.cwd();
+	process.chdir(env.dir);
+	try {
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		worker = startWorkerRun(
+			{
+				agentId: "scout",
+				systemPrompt: "Inspect and return a Scout report.",
+				task: "Find the marker.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "fixture",
+				thinkingLevel: "off",
+				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
+				allowedTools: ["bash"],
+				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+				helperResult: true,
+				resultContract: { kind: "scout-report" },
+			},
+			(event) => void events.push(event),
+		);
+		const outcome = await worker.promise;
+		equal(outcome.exitCode, 0, JSON.stringify(outcome).slice(0, 2000));
+		// The cited line was printed by the worker's own shell search, so no citation repair round follows.
+		equal(requests, 2, JSON.stringify(events).slice(-3000));
+	} finally {
+		process.chdir(previousCwd);
+		worker?.abort();
+		await worker?.promise;
+		server.closeAllConnections();
+		await closeServer(server);
+		env.restore();
+	}
+});
+
 test("drv-cf3a D-B: a result-contract repair round stays anchored on the provider's last count", () => {
 	const guard = createWorkerContextGuard(refuseArchive);
 	const input = { systemPrompt: "worker", tools: [], contextWindow: 32_768, outputReserve: () => 4096 };

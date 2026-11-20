@@ -5,7 +5,8 @@ import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { clearAbandonedStateLock, stateLockIsAbandoned, tryWithStateFileLockSync } from "../../core/state-file-lock.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { pruneWorkerObservations } from "../context/worker/observation-retention.js";
-import { readRunEnds } from "../dispatch/state.js";
+import { pruneWorkerContextSeeds } from "../context/worker/store.js";
+import { readContextSeedEnds, readRunEnds } from "../dispatch/state.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
 import {
@@ -585,8 +586,9 @@ export async function sweepTelemetryDaily(
 }
 
 /**
- * Evicted worker observations age out with the run journals, keyed on the run that wrote them (D1-5). A ledger that
- * cannot be read says nothing about which runs are still live, so nothing is removed that day.
+ * Evicted worker observations age out with the run journals, keyed on the run that wrote them (D1-5), and worker
+ * context seeds with them, keyed on the runs that used them (FL-8). A ledger that cannot be read says nothing about
+ * which runs are still live, so nothing is removed that day.
  */
 async function pruneWorkerObservationsWithRuns(
 	stateDir: string,
@@ -595,18 +597,18 @@ async function pruneWorkerObservationsWithRuns(
 	hostStopped: () => boolean,
 ): Promise<void> {
 	let runEnds: ReadonlyMap<string, number | null>;
+	let seedEnds: ReadonlyMap<string, number | null>;
 	try {
 		runEnds = readRunEnds(stateDir);
+		seedEnds = readContextSeedEnds(stateDir);
 	} catch {
 		return;
 	}
 	const deadline = performance.now() + budgetMs;
-	await pruneWorkerObservations(stateDir, {
-		nowMs,
-		retentionMs: DEFAULT_PRUNE_POLICY.days * DAY_MS,
-		runEnds,
-		stopped: () => performance.now() > deadline || hostStopped(),
-	}).catch(() => {
+	const stopped = () => performance.now() > deadline || hostStopped();
+	const retentionMs = DEFAULT_PRUNE_POLICY.days * DAY_MS;
+	await pruneWorkerObservations(stateDir, { nowMs, retentionMs, runEnds, stopped }).catch(() => {
 		// A failed pass removes nothing it could not prove safe; the next day tries again.
 	});
+	await pruneWorkerContextSeeds(stateDir, { nowMs, retentionMs, seedEnds, stopped }).catch(() => {});
 }

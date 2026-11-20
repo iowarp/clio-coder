@@ -1039,9 +1039,19 @@ test("the daily sweep ages out worker observation archives on the run journals' 
 	};
 	try {
 		await mkdir(join(stateDir, "telemetry"), { recursive: true });
-		const ended = fixtureEnvelope("run-ended");
-		const live = { ...fixtureEnvelope("run-live"), status: "running" as const, endedAt: null };
-		const recent = { ...fixtureEnvelope("run-recent"), endedAt: new Date(nowMs - day).toISOString() };
+		const seedHash = (digit: string) => digit.repeat(64);
+		const ended = { ...fixtureEnvelope("run-ended"), workerContext: { contentHash: seedHash("1") } };
+		const live = {
+			...fixtureEnvelope("run-live"),
+			status: "running" as const,
+			endedAt: null,
+			workerContext: { contentHash: seedHash("2") },
+		};
+		const recent = {
+			...fixtureEnvelope("run-recent"),
+			endedAt: new Date(nowMs - day).toISOString(),
+			workerContext: { contentHash: seedHash("3") },
+		};
 		await writeFile(join(stateDir, "runs.json"), JSON.stringify([ended, live, recent]));
 		const endedFresh = await archive(join(root, "run-ended"), "a", false);
 		const liveOld = await archive(join(root, "run-live"), "b", true);
@@ -1050,9 +1060,18 @@ test("the daily sweep ages out worker observation archives on the run journals' 
 		const unknownFresh = await archive(join(root, "run-gone"), "e", false);
 		const legacyOld = await archive(root, "f", true);
 		const legacyFresh = await archive(root, "0", false);
+		// Worker context seeds follow the same rule, keyed on the runs that used them (FL-8).
+		const seeds = join(stateDir, "context-seeds");
+		const seedEndedOld = await archive(seeds, "1", true);
+		const seedLiveOld = await archive(seeds, "2", true);
+		const seedRecentOld = await archive(seeds, "3", true);
+		const seedUnknownOld = await archive(seeds, "4", true);
+		const seedUnknownFresh = await archive(seeds, "5", false);
 		ok(await sweepTelemetryDaily(stateDir, { nowMs }));
-		for (const kept of [liveOld, recentOld, unknownFresh, legacyFresh]) ok(existsSync(kept), `${kept} kept`);
-		for (const gone of [endedFresh, unknownOld, legacyOld]) ok(!existsSync(gone), `${gone} removed`);
+		for (const kept of [liveOld, recentOld, unknownFresh, legacyFresh, seedLiveOld, seedRecentOld, seedUnknownFresh])
+			ok(existsSync(kept), `${kept} kept`);
+		for (const gone of [endedFresh, unknownOld, legacyOld, seedEndedOld, seedUnknownOld])
+			ok(!existsSync(gone), `${gone} removed`);
 		ok(!existsSync(join(root, "run-ended")));
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });

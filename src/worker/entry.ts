@@ -374,11 +374,11 @@ async function main(): Promise<number> {
 	let abortStarted = false;
 	let runSettled = false;
 	let forceExit: ReturnType<typeof setTimeout> | null = null;
-	const abortOnce = (): void => {
+	const abortOnce = (cause?: "internal"): void => {
 		if (abortStarted || runSettled) return;
 		abortStarted = true;
 		emitControlFrame({ kind: "cancel_ack", at: Date.now() });
-		handle.abort();
+		handle.abort(cause);
 	};
 	demux.onChannelClose(() => {
 		for (const pending of pendingHooks.values()) pending.reject(new Error("the control channel closed"));
@@ -393,7 +393,8 @@ async function main(): Promise<number> {
 	// A gap in the bulk trail cannot seal as a complete run, so the run stops
 	// through the same owner as a cancel and exitAfterDrain refuses a clean code.
 	// The failure surfaces inside an event sink; abort after it unwinds.
-	onStdoutFailure(() => queueMicrotask(abortOnce));
+	// The worker's own lane failed, not its parent: the stop is internal, never parent_cancel (FL-9).
+	onStdoutFailure(() => queueMicrotask(() => abortOnce("internal")));
 	const onSignal = (signal: NodeJS.Signals): void => {
 		// #425: a signal abort must leave its route in the worker's own diagnostics.
 		process.stderr.write(`[worker] ${signal} received; aborting run\n`);

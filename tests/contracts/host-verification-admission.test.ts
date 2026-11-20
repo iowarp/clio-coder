@@ -318,6 +318,21 @@ it("admits a toolchain check verify lists in a Python project and seals the argv
 		deepStrictEqual(requests[0]?.resolvedVerification, [
 			{ check: "python-unittest", argv: resolution.argv, cwd: root, timeoutMs: resolution.check.timeoutMs },
 		]);
+		// A family word verify maps to one derived owner is admitted too, sealing that owner's argv (FL-12).
+		const family = resolveVerifyCall(root, { check: "test" });
+		ok(family.kind === "toolchain" && family.check.id === "python-unittest", JSON.stringify(family));
+		const aliased = await registry.invoke({
+			tool: "dispatch",
+			args: {
+				agent: "coder",
+				task: "Edit greet.py.",
+				intent: { version: 2, write_roots: ["greet.py"], verification: [{ check: "test" }] },
+			},
+		});
+		strictEqual(aliased.kind, "ok", JSON.stringify(aliased));
+		deepStrictEqual(requests[1]?.resolvedVerification, [
+			{ check: "test", argv: family.argv, cwd: root, timeoutMs: family.check.timeoutMs },
+		]);
 	} finally {
 		process.chdir(previousCwd);
 	}
