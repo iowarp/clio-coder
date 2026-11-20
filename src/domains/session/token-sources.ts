@@ -527,9 +527,18 @@ function tokenSourcesReport(
 		calls: 1,
 	});
 	// A checkpoint's calls are charged to the turn whose prompt it ran ahead of, or to the open turn when it ran inside
-	// one; the next ledger message says which.
+	// one; the next ledger message says which. A call journaled with the turn it served goes there instead, which is how a
+	// /compact between turns lands on the turn before it and a discarded compaction on its own turn rather than by time.
 	let pending: SideCharge[] = [];
 	const charged = new Set<TelemetryRecord<"call.settled">>();
+	const userTurnIds = new Set(
+		path.flatMap((entry) => (entry.kind === "message" && entry.role === "user" ? [entry.turnId] : [])),
+	);
+	const servedTurn = (record: TelemetryRecord<"call.settled">): string | undefined => {
+		const turnId = record.ctx.turnId;
+		return turnId !== undefined && userTurnIds.has(turnId) ? turnId : undefined;
+	};
+	const stamped: TelemetryRecord<"call.settled">[] = [];
 	const flushPending = (turn: TurnAccumulator | undefined): void => {
 		if (turn !== undefined) for (const charge of pending) chargeSide(turn, charge);
 		pending = [];
@@ -541,7 +550,8 @@ function tokenSourcesReport(
 				(record) => record.ctx.agent.role === "compaction" && entry.callIds?.includes(record.data.callId) === true,
 			);
 			for (const record of linked) charged.add(record);
-			pending.push(...linked.map(sideCharge));
+			stamped.push(...linked.filter((record) => servedTurn(record) !== undefined));
+			pending.push(...linked.filter((record) => servedTurn(record) === undefined).map(sideCharge));
 			if (linked.length === 0 && entry.usage !== undefined)
 				pending.push({
 					role: "compaction",
@@ -626,11 +636,17 @@ function tokenSourcesReport(
 	}
 
 	flushPending(turns.at(-1));
-	// Any other side call is charged to the turn that was open when it started.
+	const turnById = (turnId: string | undefined) =>
+		turnId === undefined ? undefined : turns.find((turn) => turn.turnId === turnId);
+	for (const record of stamped) {
+		const turn = turnById(servedTurn(record)) ?? turns.at(-1);
+		if (turn !== undefined) chargeSide(turn, sideCharge(record));
+	}
+	// Any other side call is charged to the turn it served, or else to the turn that was open when it started.
 	for (const record of sideCalls) {
 		if (charged.has(record)) continue;
 		const at = startedAt.get(record.data.attemptId) ?? record.t;
-		const turn = [...turns].reverse().find((candidate) => candidate.at <= at) ?? turns[0];
+		const turn = turnById(servedTurn(record)) ?? [...turns].reverse().find((candidate) => candidate.at <= at) ?? turns[0];
 		if (turn !== undefined) chargeSide(turn, sideCharge(record));
 	}
 	for (const record of workerCalls) {

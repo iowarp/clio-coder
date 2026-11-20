@@ -264,6 +264,7 @@ type StageFacts = {
 	waitedOn?: "budget" | "capacity" | "steering";
 	inputTokens?: number;
 	anchored?: boolean;
+	outputReserveTokens?: number;
 	refreshed?: boolean;
 	reused?: boolean;
 };
@@ -409,6 +410,7 @@ export function beginCall(
 							...(facts.waitedOn ? { waitedOn: facts.waitedOn } : {}),
 							...(facts.inputTokens !== undefined ? { inputTokens: facts.inputTokens } : {}),
 							...(facts.anchored !== undefined ? { anchored: facts.anchored } : {}),
+							...(facts.outputReserveTokens !== undefined ? { outputReserveTokens: facts.outputReserveTokens } : {}),
 						};
 					else if (name === "auth")
 						stages.auth = { ...span, ...(facts.refreshed === undefined ? {} : { refreshed: facts.refreshed }) };

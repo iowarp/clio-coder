@@ -520,9 +520,10 @@ export const CallRowSchema = Type.Object(
 				verdict: CallSettledSchema.properties.cache.properties.verdict,
 				expectedColdReasons: CallSettledSchema.properties.cache.properties.expectedColdReasons,
 				firstDivergentSection: FactTextSchema,
+				/** An upper bound on the previous prompt this call prefilled again (`cache.rePrefilledTokens`). */
 				rePrefilled: QuantitySchema,
 				uncachedPrefill: QuantitySchema,
-				/** rePrefilled × (input rate − cache-read rate), once a call records it (#434 §12). */
+				/** rePrefilled × (input rate − cache-read rate), once a call records it, so an upper bound too (#434 §12). */
 				breakUsd: QuantitySchema,
 			},
 			closed,
@@ -609,8 +610,10 @@ const cacheBreak = Type.Object(
 		verdict: CallSettledSchema.properties.cache.properties.verdict,
 		expectedColdReasons: CallSettledSchema.properties.cache.properties.expectedColdReasons,
 		firstDivergentSection: FactTextSchema,
+		/** An upper bound on the previous prompt this call prefilled again. */
 		rePrefilled: QuantitySchema,
 		uncachedPrefill: QuantitySchema,
+		/** rePrefilled priced as a cache break; an upper bound like it. */
 		breakUsd: QuantitySchema,
 		share: Type.Optional(QuantitySchema),
 	},

@@ -73,6 +73,7 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	turn_timeout: "it ran past the worker response limit",
 	output_cap: "it used up the worker output limit",
 	loop_guard: "the worker loop guard ended the run",
+	oversized_tool_result: "one tool result alone did not fit the model's context",
 	shutdown: "Clio Coder shut down",
 	internal: "Clio failed internally",
 };

@@ -342,19 +342,44 @@ it("charges compaction and memory calls to the turn they ran in, by role, inside
 		const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
 		const memory = telemetryCall(sessionId, { role: "memory", at: at(3), usage: { input: 900, output: 50 } });
 		// The checkpoint's calls run before the prompt they make room for is written, so by time alone they would land
-		// in turn 1; the ledger's call ids put them in turn 2.
+		// in turn 1; the turn they were journaled under, the prompt's reserved id, puts them in turn 2.
 		const compaction = [
-			telemetryCall(sessionId, { role: "compaction", at: at(4), usage: { input: 3, cacheWrite: 13874, output: 1351 } }),
-			telemetryCall(sessionId, { role: "compaction", at: at(5), usage: { input: 3, cacheWrite: 1201, output: 424 } }),
+			telemetryCall(sessionId, {
+				role: "compaction",
+				at: at(4),
+				turnId: "u2",
+				usage: { input: 3, cacheWrite: 13874, output: 1351 },
+			}),
+			telemetryCall(sessionId, {
+				role: "compaction",
+				at: at(5),
+				turnId: "u2",
+				usage: { input: 3, cacheWrite: 1201, output: 424 },
+			}),
 		];
 		const callIds = compaction.map((records) => (records[0]?.k === "call.started" ? records[0].data.callId : ""));
+		// CTX-15: a /compact between turns is journaled under the turn before it, and a discarded compaction ahead of a prompt
+		// under that prompt's turn; ledger order would charge the first to turn 3 and time the second to turn 2.
+		const manual = telemetryCall(sessionId, {
+			role: "compaction",
+			at: at(10),
+			turnId: "u2",
+			usage: { input: 5, output: 100 },
+		});
+		const discarded = telemetryCall(sessionId, {
+			role: "compaction",
+			at: at(12),
+			turnId: "u3",
+			usage: { input: 7, output: 200 },
+		});
+		const manualId = manual[0]?.k === "call.started" ? manual[0].data.callId : "";
 		const header = scanTelemetrySegment(goldenSessionJournal(sessionId)).rows.find((row) => row.kind === "header");
 		ok(header?.kind === "header");
 		const journalDirectory = telemetrySessionDirectory(clioStateDir(), sessionId);
 		mkdirSync(journalDirectory, { recursive: true });
 		writeFileSync(
 			join(journalDirectory, "journal.jsonl"),
-			Buffer.concat([header.header, ...memory, ...compaction.flat()].map(encodeTelemetryLine)),
+			Buffer.concat([header.header, ...memory, ...compaction.flat(), ...manual, ...discarded].map(encodeTelemetryLine)),
 		);
 		const assistant = (turnId: string, second: number) => ({
 			kind: "message",
@@ -388,6 +413,19 @@ it("charges compaction and memory calls to the turn they ran in, by role, inside
 			},
 			user("u2", 7),
 			assistant("a2", 8),
+			{
+				kind: "compactionSummary",
+				callIds: [manualId],
+				trigger: "force",
+				turnId: "c2",
+				parentTurnId: "a2",
+				timestamp: at(11),
+				summary: "more work",
+				tokensBefore: 30000,
+				firstKeptTurnId: "a2",
+			},
+			user("u3", 13),
+			assistant("a3", 14),
 		];
 		const directory = join(clioStateDir(), "sessions", "token-sources-repo", sessionId);
 		mkdirSync(directory, { recursive: true });
@@ -395,19 +433,21 @@ it("charges compaction and memory calls to the turn they ran in, by role, inside
 
 		const report = loadTokenSourcesReport(clioStateDir(), sessionId);
 		ok(report, "the session ledger loads");
-		const [first, second] = report.turns;
+		const [first, second, third] = report.turns;
 		const roles = (turn: typeof first) => turn?.roles.map((role) => `${role.role}:${role.calls}:${role.output}`);
 		strictEqual(roles(first)?.join(","), "main:1:20,memory:1:50", JSON.stringify(first));
-		strictEqual(roles(second)?.join(","), "main:1:20,compaction:2:1775", JSON.stringify(second));
-		strictEqual(second?.input.total, 400 + 3 + 13874 + 3 + 1201);
+		strictEqual(roles(second)?.join(","), "main:1:20,compaction:3:1875", JSON.stringify(second));
+		strictEqual(roles(third)?.join(","), "main:1:20,compaction:1:200", JSON.stringify(third));
+		strictEqual(second?.input.total, 400 + 3 + 13874 + 3 + 1201 + 5);
+		strictEqual(third?.input.total, 400 + 7);
 		strictEqual(second?.rows.find((row) => row.source === "role:compaction")?.label, "compaction calls");
-		strictEqual(report.totals.calls, 5);
-		strictEqual(report.totals.output, 20 + 50 + 20 + 1775);
+		strictEqual(report.totals.calls, 8);
+		strictEqual(report.totals.output, 20 + 50 + 20 + 1775 + 100 + 20 + 200);
 		ok(
-			renderTokenSources(report, false).includes("3 (1 without split, compaction 2)"),
+			renderTokenSources(report, false).includes("4 (1 without split, compaction 3)"),
 			renderTokenSources(report, false),
 		);
-		ok(renderTokenSources(report, true).includes("output 1795 (compaction 1775)"), renderTokenSources(report, true));
+		ok(renderTokenSources(report, true).includes("output 1895 (compaction 1875)"), renderTokenSources(report, true));
 	} finally {
 		env.restore();
 	}

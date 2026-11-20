@@ -3666,6 +3666,7 @@ const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
 	"turn_timeout",
 	"output_cap",
 	"loop_guard",
+	"oversized_tool_result",
 	"shutdown",
 ]);
 

@@ -772,17 +772,23 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
 	try {
 		await live.loop.submit("Read notes/station-1.md, then bignotes/manual.md in full, then say done.");
 		await live.loop.whenSettled();
-		const stops = live.events.flatMap((event) =>
+		const stopped = live.events.flatMap((event) =>
 			event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "error"
-				? [event.message.errorMessage ?? ""]
+				? [event.message as { errorMessage?: string; failure?: Record<string, unknown>; failureRoute?: unknown }]
 				: [],
 		);
+		const stops = stopped.map((message) => message.errorMessage ?? "");
 		strictEqual(stops.length, 1, "one stop, no retry");
 		ok(
 			/^\[CLIO Coder\] This turn stopped: .*The read bignotes\/manual\.md result alone is 140000 characters/.test(
 				stops[0] ?? "",
 			),
 			stops[0],
+		);
+		// CLI-3: Clio's guard stopped it, so it carries the harness's own cause and names no route.
+		deepStrictEqual(
+			[stopped[0]?.failure?.stage, stopped[0]?.failure?.errorClass, stopped[0]?.failureRoute],
+			["harness", "oversized_tool_result", undefined],
 		);
 		strictEqual(wire.requests.length, 2, "the oversized request never reaches the provider, and nothing retries it");
 		deepStrictEqual(refusals(live.notices()), []);

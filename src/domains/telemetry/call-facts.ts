@@ -108,6 +108,7 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 		case "shutdown":
 		case "parent_cancel":
 		case "loop_guard":
+		case "oversized_tool_result":
 			return failure.stage === "harness" ? failure.errorClass : undefined;
 	}
 	const status = amount(failure.httpStatus);

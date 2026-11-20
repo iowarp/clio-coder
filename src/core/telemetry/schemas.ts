@@ -226,6 +226,8 @@ export const CallSettledSchema = Type.Object(
 							/** The input count a main turn's window fit was decided on, and whether the route's provider-measured anchor priced it. */
 							inputTokens: Type.Optional(count),
 							anchored: Type.Optional(Type.Boolean()),
+							/** The output reserve that fit was decided with, as resolved for that input on the route (CTX-2). */
+							outputReserveTokens: Type.Optional(count),
 						},
 						closed,
 					),
@@ -294,9 +296,14 @@ export const CallSettledSchema = Type.Object(
 				),
 				/** Superseded tool-result bytes a v6 observation-aging batch took out of this request; no longer written (CF-5). */
 				observationAgingBytes: Type.Optional(count),
+				/**
+				 * An upper bound on the previous request's prompt this one prefilled again: the lesser of this request's
+				 * uncached input plus cache writes and the previous prompt less this cache read. Both terms also count tokens
+				 * this request added, so the true re-prefill is at most this figure, never more.
+				 */
 				rePrefilledTokens: factSchema(count),
 				uncachedPrefillTokens: factSchema(count),
-				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle (#434). */
+				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle, so also an upper bound (#434). */
 				bill: Type.Optional(PricingSchema),
 				verdict: vocabulary(["hot", "partial", "cold", "small", "unknown"]),
 				/**
@@ -775,8 +782,16 @@ export const CompactionSettledSchema = Type.Object(
 		callIds: Type.Array(CallIdSchema, { minItems: 1, uniqueItems: true }),
 		outcome: vocabulary(["committed", "discarded", "failed", "unresolved"]),
 		checkpointTurnId: Type.Union([ExistingId, Type.Null()]),
-		/** Tokens the committed context sits below the automatic trigger; negative when the cut stayed above it. */
+		/** Tokens the committed context sits below the automatic trigger; 0 when the cut stayed at or above it. Older journals may hold a negative figure. */
 		headroomTokens: Type.Optional(Type.Integer()),
+		/** Tokens a committed cut still sits above the automatic trigger; absent when it landed below. */
+		overTriggerTokens: Type.Optional(count),
+		/** The output reserve a request at the committed size is fitted with, resolved on the chat route. */
+		fitReserveTokens: Type.Optional(count),
+		/** The output cap the summary request was sent with, when Clio bounded it. */
+		summaryOutputCap: Type.Optional(count),
+		/** The checkpoint room the summary request stated, when it stated one. */
+		summaryRoomTokens: Type.Optional(count),
 	},
 	closed,
 );
