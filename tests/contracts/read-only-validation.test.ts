@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, notStrictEqual, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1360,6 +1360,15 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		"yarn --cwd=web test",
 		"cargo build",
 		"php artisan test",
+		// SF-2: stdbuf, ionice, nohup and valued sudo options are read past; make -C and pnpm or yarn selectors before a bin.
+		"stdbuf -oL npm test",
+		"ionice -c 3 -n 7 npm test",
+		"nohup npm test",
+		"sudo -u ci npm test",
+		"env -u CI npm test",
+		"make -C sub test",
+		"pnpm --filter web vitest run",
+		"yarn workspace web jest",
 	]) {
 		const call = read(command);
 		deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
@@ -1370,6 +1379,13 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 	strictEqual(read("timeout 300 npm test").check, "npm test");
 	strictEqual(read("npm --prefix web test").check, "npm --prefix web test");
 	strictEqual(settleCheckCall(read("timeout 300 npm test"), true, "error", true).settled, true);
+	// Transparent wrappers key with the check they run, so respellings settle each other; sudo and env keep their own.
+	for (const command of ["stdbuf -oL npm test", "nohup npm run test", "timeout 300 npm run test"])
+		strictEqual(read(command).identity, read("npm test").identity, command);
+	notStrictEqual(read("sudo -u ci npm test").identity, read("npm test").identity);
+	// A wrapper or directory that moves the check out of the workspace leaves it outside.
+	for (const command of ["env -C /elsewhere npm test", "sudo -D /elsewhere npm test", "make -C ../other test"])
+		strictEqual(read(command).shell?.outsideCwd, true, command);
 	// Writers stay writers through a wrapper or an exec, and a wrapped delete names its target.
 	for (const command of [
 		"timeout 60 npx eslint --fix .",
@@ -1379,6 +1395,8 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		"python -m ruff format .",
 		"python -m black src",
 		"timeout 5 rm -rf build",
+		"nohup rm -rf build",
+		"stdbuf -oL make lint:fix",
 	]) {
 		strictEqual(read(command).verdict, "mutation", command);
 		strictEqual(gate(command), "engage/unvalidated_mutation", command);

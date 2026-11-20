@@ -2064,6 +2064,13 @@ function makeCheckMatch(args: ReadonlyArray<string>): boolean {
 			if (/^\d+$/u.test(args[index + 1] ?? "")) index += 1;
 			continue;
 		}
+		// `make -C dir test` runs dir's target; checkReachesOutside holds dir to the workspace (SF-2).
+		if (arg === "-C" || arg === "--directory") {
+			if (args[index + 1] === undefined) return false;
+			index += 1;
+			continue;
+		}
+		if (/^-C./u.test(arg) || arg.startsWith("--directory=")) continue;
 		if (/^(?:-s|--silent|--quiet|-k|--keep-going|-j\d+|--jobs=\d+)$/u.test(arg)) continue;
 		if (arg.startsWith("-")) return false;
 		if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(arg)) continue;
@@ -2560,7 +2567,8 @@ function someCheckStep(
 		const executable = step.index === null ? "" : basenameToken(step.argv[step.index]);
 		const target = cdTarget(step.argv);
 		if (isCheckStep(step)) {
-			if (test(step.argv.slice(step.index ?? 0), directory)) return true;
+			const prefix = step.argv.slice(0, step.index ?? 0);
+			if (test(step.argv.slice(step.index ?? 0), wrapperMovesDirectory(prefix) ? null : directory)) return true;
 		} else if (executable === "popd")
 			directory = step.argv.length > (step.index ?? 0) + 1 ? null : (pushed.pop() ?? null);
 		else if (target !== null) {
@@ -2572,6 +2580,21 @@ function someCheckStep(
 			directory = outer?.directory ?? null;
 			pushed = outer?.pushed ?? [];
 		}
+	}
+	return false;
+}
+
+/**
+ * Whether the wrappers before a command run it in another directory or from a re-split string (`env -C dir`,
+ * `env -S '...'`, `sudo -D dir`), so where the check ran is unknown (SF-2).
+ */
+function wrapperMovesDirectory(prefix: ReadonlyArray<string>): boolean {
+	let wrapper = "";
+	for (const word of prefix) {
+		if (word === "env" || word === "sudo" || word === "doas") wrapper = word;
+		else if (/^--(?:chdir|split-string)(?:=|$)/u.test(word)) return true;
+		else if (wrapper === "env" && /^-[a-zA-Z]*[CS]/u.test(word)) return true;
+		else if (wrapper === "sudo" && /^-[a-zA-Z]*D/u.test(word)) return true;
 	}
 	return false;
 }
@@ -3364,6 +3387,26 @@ function packageScriptRun(
 	args: ReadonlyArray<string>,
 ): { manager: PackageManager; selectors: string[]; script: string; forwarded: ReadonlyArray<string> } | null {
 	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
+	const selected = packageSelectors(executable, args);
+	if (selected === null) return null;
+	const { selectors, index } = selected;
+	const first = args[index];
+	if (first === undefined) return null;
+	if (first === "test") return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
+	if (first === "run") {
+		const script = args[index + 1];
+		return script === undefined ? null : { manager: executable, selectors, script, forwarded: args.slice(index + 2) };
+	}
+	if (executable !== "pnpm" && executable !== "yarn") return null;
+	if (first.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(first) === true) return null;
+	return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
+}
+
+/** The workspace selectors and project directory before a package manager's command, and the index past them. */
+function packageSelectors(
+	executable: PackageManager,
+	args: ReadonlyArray<string>,
+): { selectors: string[]; index: number } | null {
 	const selectors: string[] = [];
 	const valued = PACKAGE_VALUE_SELECTORS[executable];
 	let index = 0;
@@ -3383,16 +3426,7 @@ function packageScriptRun(
 		selectors.push("workspace", args[index + 1] as string);
 		index += 2;
 	}
-	const first = args[index];
-	if (first === undefined) return null;
-	if (first === "test") return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
-	if (first === "run") {
-		const script = args[index + 1];
-		return script === undefined ? null : { manager: executable, selectors, script, forwarded: args.slice(index + 2) };
-	}
-	if (executable !== "pnpm" && executable !== "yarn") return null;
-	if (first.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(first) === true) return null;
-	return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
+	return { selectors, index };
 }
 
 /**
@@ -3515,13 +3549,15 @@ const SCRIPT_RUNNING_COMMANDS: ReadonlySet<string> = new Set(["run", "test", "st
 
 /**
  * The binary `pnpm <bin>` or `yarn <bin>` runs when the first word is no builtin of theirs (`pnpm vitest run`) and
- * none of the commands that run a package script (`run`, `test`, `start`).
+ * none of the commands that run a package script (`run`, `test`, `start`), past workspace selectors and the project
+ * directory (`pnpm --filter web vitest run`, SF-2), which {@link checkReachesOutside} still holds to the workspace.
  */
 function packageBinInvocation(
 	executable: string,
 	args: ReadonlyArray<string>,
 ): { executable: string; args: ReadonlyArray<string> } | null {
-	const bin = args[0];
+	const at = executable === "pnpm" || executable === "yarn" ? packageSelectors(executable, args)?.index : 0;
+	const bin = at === undefined ? undefined : args[at];
 	if (
 		bin === undefined ||
 		bin.startsWith("-") ||
@@ -3529,7 +3565,7 @@ function packageBinInvocation(
 		PACKAGE_MANAGER_BUILTINS.get(executable)?.has(bin) !== false
 	)
 		return null;
-	return { executable: basenameToken(bin), args: args.slice(1) };
+	return { executable: basenameToken(bin), args: args.slice((at ?? 0) + 1) };
 }
 
 function isPythonExecutable(executable: string): boolean {
@@ -4125,17 +4161,20 @@ function commandTokenIndex(segment: ReadonlyArray<string>): number | null {
 		}
 		if (token === "env") {
 			index += 1;
-			while (
-				index < segment.length &&
-				(segment[index]?.startsWith("-") === true || isEnvAssignment(segment[index] ?? ""))
-			) {
-				index += 1;
+			for (let option = segment[index]; option !== undefined; option = segment[index]) {
+				if (option.startsWith("-")) index += ENV_VALUE_OPTIONS.has(option) ? 2 : 1;
+				else if (isEnvAssignment(option)) index += 1;
+				else break;
 			}
 			continue;
 		}
 		if (SHELL_WRAPPERS.has(token)) {
 			index += 1;
-			while (index < segment.length && segment[index]?.startsWith("-") === true) index += 1;
+			const valued = token === "sudo" || token === "doas" ? PRIVILEGE_VALUE_OPTIONS : undefined;
+			for (let option = segment[index]; option?.startsWith("-") === true; option = segment[index]) {
+				index += valued?.has(option) === true ? 2 : 1;
+				if (option === "--") break;
+			}
 			continue;
 		}
 		const past = pastTransparentWrapper(segment, index);
@@ -4163,13 +4202,46 @@ function pastTransparentWrapper(segment: ReadonlyArray<string>, index: number): 
 }
 
 /**
+ * `env` options that take the next word as their value. `-C`/`--chdir` move the command elsewhere and `-S` re-splits a
+ * string, which {@link wrapperMovesDirectory} holds against a check.
+ */
+const ENV_VALUE_OPTIONS: ReadonlySet<string> = new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]);
+/** `sudo` and `doas` options that take the next word as their value (`sudo -u bob npm test` runs npm). */
+const PRIVILEGE_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+	"-u",
+	"--user",
+	"-g",
+	"--group",
+	"-C",
+	"--close-from",
+	"-D",
+	"--chdir",
+	"-h",
+	"--host",
+	"-p",
+	"--prompt",
+	"-r",
+	"--role",
+	"-t",
+	"--type",
+	"-T",
+	"--command-timeout",
+	"-U",
+	"--other-user",
+]);
+
+/**
  * Commands that run the rest of their segment unchanged, each with its options that take the next word as a value:
- * `timeout [opts] DURATION`, `nice [-n N | -N]` and `xvfb-run [opts]`. The command after them is the one every
- * reader judges, so `timeout 300 npm test` runs a check and `timeout 5 rm -rf x` deletes.
+ * `timeout [opts] DURATION`, `nice [-n N | -N]`, `xvfb-run [opts]`, `stdbuf [-i|-o|-e MODE]`, `ionice [-c C] [-n N]`
+ * and `nohup` (SF-2). The command after them is the one every reader judges, so `timeout 300 npm test` runs a check
+ * and `timeout 5 rm -rf x` deletes.
  */
 const TRANSPARENT_WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 	["timeout", new Set(["-s", "--signal", "-k", "--kill-after"])],
 	["nice", new Set(["-n", "--adjustment"])],
+	["stdbuf", new Set(["-i", "-o", "-e"])],
+	["ionice", new Set(["-c", "--class", "-n", "--classdata"])],
+	["nohup", new Set<string>()],
 	[
 		"xvfb-run",
 		new Set([
