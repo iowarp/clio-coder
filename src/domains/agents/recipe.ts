@@ -1,4 +1,5 @@
 import path from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import type { WorkerPermissionDeclaration } from "../safety/worker-permit.js";
 import type { ResultContract } from "./result-contract.js";
 import type {
@@ -159,7 +160,7 @@ export function recipeIdFromPath(absPath: string, rootDir: string): string {
 	const resolvedPath = path.resolve(absPath);
 	const relPath = path.relative(resolvedRoot, resolvedPath);
 
-	if (relPath === "" || relPath.startsWith("..") || path.isAbsolute(relPath)) {
+	if (relPath === "" || relativePathEscapes(relPath)) {
 		throw new Error(`recipe: path must live under rootDir (${resolvedPath} not under ${resolvedRoot})`);
 	}
 	if (path.dirname(relPath) !== ".") {
