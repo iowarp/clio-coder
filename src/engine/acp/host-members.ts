@@ -28,7 +28,7 @@ import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
 import { formatDecisionCorrectionTurn } from "../../session-control/decision-correction.js";
-import { councilShortfall, voteTally } from "../../session-control/poll.js";
+import { councilShortfall, councilSkippedSeats, voteTally } from "../../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../../session-control/slash-commands.js";
 import {
 	type AskUserHandler,
@@ -76,6 +76,14 @@ function partialOf(details: Readonly<Record<string, unknown>> | undefined): {
 	return partial !== undefined ? { partial } : {};
 }
 
+/** Seats skipped because their target was down, named as the TUI names them rather than counted as failures. */
+function skippedOf(details: Readonly<Record<string, unknown>> | undefined): {
+	skipped?: { answered: number; ran: number; labels: string[] };
+} {
+	const skipped = councilSkippedSeats(details);
+	return skipped !== undefined ? { skipped } : {};
+}
+
 /** One dispatch the operator asked for by command, announced, admitted and settled as a model's call is. */
 export async function runHostDispatch(
 	registry: Pick<ToolRegistry, "invoke">,
@@ -101,8 +109,9 @@ export async function runHostDispatch(
 							message: verdict.result.message,
 							...tallyOf(verdict.result.details),
 							...partialOf(verdict.result.details),
+							...skippedOf(verdict.result.details),
 						}
-					: { status: "ok", ...tallyOf(verdict.result.details) };
+					: { status: "ok", ...tallyOf(verdict.result.details), ...skippedOf(verdict.result.details) };
 	const text =
 		verdict.kind === "ok" && verdict.result.kind === "ok"
 			? verdict.result.output

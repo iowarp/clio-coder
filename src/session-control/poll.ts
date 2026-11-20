@@ -10,7 +10,12 @@
  * Pure: no I/O, no dispatch. The caller owns the run.
  */
 
-import { COUNCIL_BALLOT_VERDICT_MAX_BYTES, isCouncilBallotOption } from "../domains/agents/index.js";
+import {
+	COUNCIL_BALLOT_VERDICT_MAX_BYTES,
+	COUNCIL_SEAT_NOT_RUN_WORDS,
+	isCouncilBallotOption,
+	isCouncilSeatNotRun,
+} from "../domains/agents/index.js";
 
 /** Council member bounds the dispatch tool admits; a poll seats the same. */
 export const POLL_MIN_PARTICIPANTS = 2;
@@ -143,29 +148,58 @@ export function formatPollTally(tally: Readonly<Record<string, number>>, partici
 	return [`poll: ${voted} of ${participants} voted; ${headline}`, ...lines].join("\n");
 }
 
-/**
- * The final-round members that failed while at least one other answered, from a council result's `details.council`.
- * Undefined when every member answered or none did: only the mixed case is a partial council.
- */
-export function councilShortfall(
+/** A council result's final-round seats from `details.council`, in roster order; undefined when it carries none. */
+function councilFinalSeats(
 	details: Readonly<Record<string, unknown>> | undefined,
-): { answered: number; total: number; failed: string[] } | undefined {
+): Array<{ label?: unknown; round?: unknown; runId?: unknown; failed?: unknown }> | undefined {
 	const council = details?.council;
 	if (council === null || typeof council !== "object") return undefined;
 	const raw = (council as { members?: unknown }).members;
 	if (!Array.isArray(raw)) return undefined;
 	const members = raw.filter(
-		(member): member is { label?: unknown; round?: unknown; failed?: unknown } =>
+		(member): member is { label?: unknown; round?: unknown; runId?: unknown; failed?: unknown } =>
 			member !== null && typeof member === "object",
 	);
 	const finalRound = Math.max(...members.map((member) => (typeof member.round === "number" ? member.round : 1)));
-	const finals = members.filter((member) => (typeof member.round === "number" ? member.round : 1) === finalRound);
+	return members.filter((member) => (typeof member.round === "number" ? member.round : 1) === finalRound);
+}
+
+/**
+ * The final-round members that failed while at least one other answered, from a council result's `details.council`.
+ * Undefined when every member answered or none did: only the mixed case is a partial council. A seat whose target was
+ * down never ran, so it is neither an answer nor a failure here and the counts are of the seats that ran (FX-20).
+ */
+export function councilShortfall(
+	details: Readonly<Record<string, unknown>> | undefined,
+): { answered: number; total: number; failed: string[] } | undefined {
+	const finals = councilFinalSeats(details)?.filter((member) => !isCouncilSeatNotRun(member));
+	if (finals === undefined) return undefined;
 	const failed = finals
 		.filter((member) => member.failed !== undefined)
 		.map((member) => String(member.label ?? "member"));
 	const answered = finals.length - failed.length;
 	if (answered === 0 || failed.length === 0) return undefined;
 	return { answered, total: finals.length, failed };
+}
+
+/**
+ * The final-round seats admission skipped because their target was down, with how many of the seats that ran
+ * answered, so `/council` names a skipped seat without calling the council partial. Undefined when none was skipped.
+ */
+export function councilSkippedSeats(
+	details: Readonly<Record<string, unknown>> | undefined,
+): { answered: number; ran: number; labels: string[] } | undefined {
+	const finals = councilFinalSeats(details);
+	if (finals === undefined) return undefined;
+	const labels = finals.filter(isCouncilSeatNotRun).map((member) => String(member.label ?? "member"));
+	if (labels.length === 0) return undefined;
+	const ran = finals.filter((member) => !isCouncilSeatNotRun(member));
+	return { answered: ran.filter((member) => member.failed === undefined).length, ran: ran.length, labels };
+}
+
+/** The words `/council` adds for skipped seats, in the copy every council surface uses. */
+export function councilSkippedWords(labels: ReadonlyArray<string>): string {
+	return labels.map((label) => `${label}: ${COUNCIL_SEAT_NOT_RUN_WORDS}`).join("; ");
 }
 
 /** The vote tally a council result carries in `details.council.synthesis`, when it ran a vote. */

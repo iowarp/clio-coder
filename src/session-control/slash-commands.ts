@@ -99,7 +99,7 @@ import type { OperatorMemoryCommands } from "./operator-memory.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import type { PollCommandOptions } from "./poll.js";
-import { buildPollDispatchArgs, formatPollTally, pollChoiceProblem } from "./poll.js";
+import { buildPollDispatchArgs, councilSkippedWords, formatPollTally, pollChoiceProblem } from "./poll.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
 import type { ReloadTarget } from "./reload-report.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
@@ -350,18 +350,27 @@ export type SetThinkingLevelResult =
 /**
  * What one admitted dispatch-tool call reports back to `/council`. The council
  * itself is watched on the board and in the transcript, so success is silent;
- * only a refusal or a failure is worth a notice.
+ * only a refusal, a failure or a seat skipped because its target was down is worth a notice.
  */
 export type CouncilDispatchOutcome =
-	| { status: "ok"; tally?: Record<string, number> }
+	| { status: "ok"; tally?: Record<string, number>; skipped?: CouncilSkippedSeats }
 	| { status: "blocked"; reason: string }
 	| {
 			status: "error";
 			message: string;
 			tally?: Record<string, number>;
-			/** Set when some final-round members answered and others failed. */
+			/** Set when some final-round members that ran answered and others failed. */
 			partial?: { answered: number; total: number; failed: string[] };
+			/** Set when admission skipped a seat whose target was down; it is not counted in `partial`. */
+			skipped?: CouncilSkippedSeats;
 	  };
+
+/** Seats a council skipped because their target was down, and how many of the seats that ran answered. */
+export interface CouncilSkippedSeats {
+	answered: number;
+	ran: number;
+	labels: string[];
+}
 
 export type TaskMemorySeedCommandResult =
 	| { status: "seeded"; seeded: number; skipped: number; source: string; flowRuleIds?: ReadonlyArray<string> }
@@ -954,10 +963,20 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 		if (outcome.status === "blocked") ctx.notice("warn", councilRefusalWords(outcome.reason));
 		else if (outcome.status === "error" && outcome.partial !== undefined) {
 			// The card already reads partial; one answer stands, so this is not a failed council.
+			// Counts are of the seats that ran; a seat whose target was down is named, not counted (FX-20).
 			const { answered, total, failed } = outcome.partial;
-			ctx.notice("warn", `/council partial: ${answered} of ${total} members answered; ${failed.join(", ")} failed`);
+			const skipped = outcome.skipped !== undefined ? `; ${councilSkippedWords(outcome.skipped.labels)}` : "";
+			ctx.notice(
+				"warn",
+				`/council partial: ${answered} of ${total} members answered; ${failed.join(", ")} failed${skipped}`,
+			);
 		} else if (outcome.status === "error")
 			ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
+		else if (outcome.status === "ok" && outcome.skipped !== undefined) {
+			// Every seat that ran answered, so the council is whole as admitted; the skipped seat is still named.
+			const { answered, ran, labels } = outcome.skipped;
+			ctx.notice("info", `/council: ${answered} of ${ran} members answered; ${councilSkippedWords(labels)}`);
+		}
 	} catch (err) {
 		ctx.notice("error", `/council failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);
 	}

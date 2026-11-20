@@ -11,7 +11,11 @@
  * Pure: no I/O, no bus, no session.
  */
 
-import type { CouncilReport } from "../domains/agents/result-contract.js";
+import {
+	COUNCIL_SEAT_NOT_RUN_WORDS,
+	type CouncilReport,
+	isCouncilSeatNotRun,
+} from "../domains/agents/result-contract.js";
 import { WORKER_OUTPUT_MAX_BYTES } from "../domains/dispatch/event-pump.js";
 import { truncateUtf8 } from "../tools/truncate-utf8.js";
 import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
@@ -78,6 +82,7 @@ function shareNote(facts: WorkerShareFacts, body: string): string | null {
 
 /** One member's answer under its roster label, or its failure when it produced none. */
 function councilMemberLine(member: CouncilReport["members"][number]): string {
+	if (isCouncilSeatNotRun(member)) return `[${member.label}] ${COUNCIL_SEAT_NOT_RUN_WORDS}`;
 	if (member.failed !== undefined) return `[${member.label}] failed: ${member.failed.reason}`;
 	const verdict = member.verdict === undefined ? "" : ` (verdict ${member.verdict})`;
 	return `[${member.label}]${verdict} ${member.answer.trim()}`;
