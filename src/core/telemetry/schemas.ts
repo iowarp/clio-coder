@@ -894,7 +894,7 @@ export const TurnSettledSchema = Type.Object(
 );
 /**
  * How a step template's pipeline ended (`StepPipelineEnd`, bt-15): `done` when its step tool reported `pipelineDone`,
- * otherwise `stoppedBy` names the continuation cap, the end of a turn nothing continued, or a last turn that made no
+ * otherwise `stoppedBy` names the continuation cap, a cancel, a terminal failure, the end of a turn nothing continued, or a last turn that made no
  * step call (`unreported`). Journaled after the fact so a reader need not have watched the `run --json` stream (bt-20).
  */
 export const StepPipelineSettledSchema = Type.Object(
@@ -902,7 +902,7 @@ export const StepPipelineSettledSchema = Type.Object(
 		stepTool: ExistingId,
 		template: Type.Optional(ExistingId),
 		done: Type.Boolean(),
-		stoppedBy: Type.Optional(vocabulary(["cap", "turn", "unreported"])),
+		stoppedBy: Type.Optional(vocabulary(["cap", "turn", "cancel", "failure", "unreported"])),
 	},
 	closed,
 );

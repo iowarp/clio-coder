@@ -1125,8 +1125,9 @@ function reloadProtectedArtifactsForSession(
 /**
  * How the last step pipeline ended, for a headless caller: `done` when its step
  * tool said `pipelineDone`; otherwise `stoppedBy` says whether the yolo
- * continuation cap (`cap`) or the end of a turn nothing continued (`turn`:
- * autonomy below yolo, a cancel, a failure) stopped it (bt-15). `unreported`
+ * continuation cap (`cap`), a cancel (`cancel`), a terminal failure
+ * (`failure`) or the end of a turn nothing continued (`turn`, such as
+ * autonomy below yolo) stopped it (bt-15, SC-3). `unreported`
  * is a pipeline whose last turn, at the cap, made no step call and ended on
  * its own summary: no step was cut off, but the step tool never said
  * `pipelineDone`, so whether every step ran is unknown (N1).
@@ -1135,20 +1136,25 @@ export interface StepPipelineEnd {
 	stepTool: string;
 	template?: string;
 	done: boolean;
-	stoppedBy?: "cap" | "turn" | "unreported";
+	stoppedBy?: "cap" | "turn" | "cancel" | "failure" | "unreported";
 }
 
-function stepPipelineEnd(
+export function stepPipelineEnd(
 	policy: { stepTool: string; template?: string },
 	run: StepRun,
 	capSpent: boolean,
 	settledCleanly: boolean,
+	ended: "cancel" | "failure" | null,
 ): StepPipelineEnd {
-	const stoppedBy = !capSpent
-		? ("turn" as const)
-		: run.carried === true && settledCleanly
-			? ("unreported" as const)
-			: ("cap" as const);
+	// A cancel or a failure is what ended the pipeline, at the cap or below it.
+	const stoppedBy =
+		ended !== null
+			? ended
+			: !capSpent
+				? ("turn" as const)
+				: run.carried === true && settledCleanly
+					? ("unreported" as const)
+					: ("cap" as const);
 	return {
 		stepTool: policy.stepTool,
 		...(policy.template === undefined ? {} : { template: policy.template }),
@@ -4286,7 +4292,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							!state.synthesisToolLock &&
 							!state.toolBudgetLock;
 						lastStepPipeline =
-							stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent, settledCleanly) : null;
+							stepPolicy && stepRun !== null
+								? stepPipelineEnd(
+										stepPolicy,
+										stepRun,
+										capSpent,
+										settledCleanly,
+										canceled ? "cancel" : detectTerminalFailureFromState(agentRuntime.agent) !== null ? "failure" : null,
+									)
+								: null;
 						const named = lastStepPipeline?.template ? `prompt template ${lastStepPipeline.template}` : "this template";
 						if (lastStepPipeline?.stoppedBy === "cap")
 							emitNotice(
