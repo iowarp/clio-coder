@@ -313,13 +313,22 @@ export function presentSettledWorkerAnswer(
 }
 
 /**
+ * A Markdown code-fence line (three or more backticks or tildes, any info string): it says how an answer is formatted,
+ * not what it says, so a one-line preview skips it. The same test as the council grid's compact row (FX-19).
+ */
+function isCodeFenceLine(line: string): boolean {
+	return /^(?:`{3,}|~{3,})/u.test(line.trim());
+}
+
+/**
  * One member's answer as a line a person reads: a typed report's first claim or fact, else its first line of prose.
  * A council collects typed reports, so its raw text is JSON the operator was never meant to read.
  */
 export function councilAnswerGist(answer: string): string {
 	const typed = councilMemberAnswerLines(answer);
 	const first = typed?.find((line) => line.trim().length > 0 && !line.startsWith("  "));
-	const line = (first ?? answer.split("\n").find((row) => row.trim().length > 0) ?? "").replace(/^-\s*/u, "").trim();
+	const prose = answer.split("\n").find((row) => row.trim().length > 0 && !isCodeFenceLine(row));
+	const line = (first ?? prose ?? "").replace(/^-\s*/u, "").trim();
 	return safeWorkerAnswerText(line);
 }
 

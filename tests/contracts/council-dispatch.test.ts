@@ -13,7 +13,7 @@ import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { dispatchCouncilThroughRegistry } from "../../src/interactive/council-dispatch.js";
-import { presentCouncilReport } from "../../src/interactive/renderers/worker-answer.js";
+import { councilAnswerGist, presentCouncilReport } from "../../src/interactive/renderers/worker-answer.js";
 import { parseCouncilDeadline } from "../../src/session-control/council.js";
 import { councilShortfall } from "../../src/session-control/poll.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -368,6 +368,12 @@ test("a seat whose target is down sits as a failed seat while the live seats del
 	const refused = await tool.run({ mode: "council", members: members(["a", "dead"]), task: "t" }, {} as never);
 	deepStrictEqual(seated, []);
 	match(refused.kind === "error" ? refused.message : "", /council_too_few_live_seats: 1 of 2 .*health down/u);
+});
+
+test("a council member's one-line preview skips a code-fence line (FX-19.3)", () => {
+	strictEqual(councilAnswerGist('```json\n{"answer":"tabs win"}\n```'), '{"answer":"tabs win"}');
+	strictEqual(councilAnswerGist("~~~\nplain body\n~~~"), "plain body");
+	strictEqual(councilAnswerGist("tabs win\n```json\n{}\n```"), "tabs win");
 });
 
 test("a judge council admits round 2 and the judge when host text names an endpoint or a result object (bt-47 CF-a, CF-b)", async () => {
