@@ -315,7 +315,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		settleTriage(owner, verdicts, applied) {
 			if (hub === null || owner === undefined || verdicts.length === 0) return;
 			const firing: OpenFiring = {
-				firingId: nextFiringId(owner),
+				firingId: nextFiringId(),
 				surface: "triage",
 				kind: "nudge",
 				inRun: false,

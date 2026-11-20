@@ -11,9 +11,8 @@ import {
 const SEVERITY_ORDER: ReadonlyArray<MiddlewareReminderSeverity> = ["info", "advisory", "warn", "hard-block"];
 /** The evidence class shape middleware.fired admits; a class built from an operator's id that misses it is dropped. */
 const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$/;
-/** Owners whose firing sequence is kept; the oldest is forgotten past this, as a process outlives many sessions. */
-const FIRING_OWNER_LIMIT = 256;
-const firingSequences = new Map<string, number>();
+/** The process's one firing sequence: every owner draws from it, so no owner is ever forgotten and handed an id again. */
+let firingSequence = 0;
 /**
  * This process's token in every id it draws. A resumed session runs in a new process whose sequence starts again at 1,
  * so the token keeps its ids apart from the ones its journal already holds.
@@ -21,29 +20,23 @@ const firingSequences = new Map<string, number>();
 const PROCESS_TOKEN = randomUUID().slice(0, 8);
 
 /**
- * The next firing id of a session (or of a run, in a worker): `fir_<process token>_<sequence>`, monotonic per owner
- * for the life of the process and unique across the processes one owner's journal spans, so two firings never share
- * one (memory design 4.1). A host surface that fires outside middleware, such as steering triage, draws from the same
- * sequence.
+ * The next firing id: `fir_<process token>_<sequence>`. One sequence serves every session (and every run, in a
+ * worker) of the process, so ids are monotonic per owner for the life of the process, never reused within it however
+ * many owners it serves, and unique across the processes one owner's journal spans (memory design 4.1). A host
+ * surface that fires outside middleware, such as steering triage, draws from the same sequence.
  */
-export function nextFiringId(owner: string): string {
-	const next = (firingSequences.get(owner) ?? 0) + 1;
-	firingSequences.delete(owner);
-	firingSequences.set(owner, next);
-	if (firingSequences.size > FIRING_OWNER_LIMIT) {
-		const oldest = firingSequences.keys().next().value;
-		if (oldest !== undefined) firingSequences.delete(oldest);
-	}
-	return `fir_${PROCESS_TOKEN}_${next}`;
+export function nextFiringId(): string {
+	firingSequence += 1;
+	return `fir_${PROCESS_TOKEN}_${firingSequence}`;
 }
 
-/** The result with a firing id on every rule whose effects settle; ids need an owner to be monotonic within. */
+/** The result with a firing id on every rule whose effects settle; a hook with no session or run has no ledger. */
 function withFiringIds(result: MiddlewareHookResult): MiddlewareHookResult {
 	const owner = result.input.sessionId ?? result.input.runId;
 	if (owner === undefined || !result.fired?.some((rule) => rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind))))
 		return result;
 	const fired: MiddlewareFiredRule[] = result.fired.map((rule) =>
-		rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind)) ? { ...rule, firingId: nextFiringId(owner) } : rule,
+		rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind)) ? { ...rule, firingId: nextFiringId() } : rule,
 	);
 	return { ...result, fired };
 }
