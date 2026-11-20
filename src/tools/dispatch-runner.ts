@@ -52,9 +52,12 @@ import {
 } from "../domains/dispatch/gate-decisions.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
+	COUNCIL_MIN_MEMBERS,
 	competePresentationOrder,
 	competeStanceFor,
 	councilBallotContract,
+	councilSeatDownReason,
+	councilTooFewLiveSeats,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
@@ -2411,6 +2414,9 @@ function boundedCouncilBriefing(parts: ReadonlyArray<BriefingPart>): BuiltBriefi
 const COUNCIL_MEMBER_FRAMING =
 	"[council] You are advising a council read-only: read and search the code, then answer the question. Do not edit files, run builds or commit; no write tool is available in this seat.";
 
+/** The run id a council report gives a seat that never ran because its target was down; no run carries it. */
+const COUNCIL_SEAT_NOT_RUN = "not-run";
+
 async function runCouncil(
 	deps: RegisteredDispatchToolDeps,
 	base: DispatchRequest,
@@ -2421,6 +2427,9 @@ async function runCouncil(
 ): Promise<{ report: CouncilReport; runs: CompletedRun[]; group: string }> {
 	const group = newGateGroupId("council");
 	const runs: CompletedRun[] = [];
+	// Every seat of every round in roster order; a seat whose target is down has no run (FL-4).
+	const seats: Array<{ label: string; round: number; run: CompletedRun | null }> = [];
+	const down = new Map<string, string>((council.downSeats ?? []).map((seat) => [seat.label, seat.reason]));
 	let prior = new Map<string, CompletedRun>();
 	const timedOut = new Set<string>();
 	let scopeIntent: DispatchIntent | undefined;
@@ -2481,6 +2490,7 @@ async function runCouncil(
 	for (let round = 1; round <= council.rounds; round += 1) {
 		const settled = await Promise.all(
 			council.members.map(async (member, index) => {
+				if (down.has(member.label)) return [member.label, null] as const;
 				// A seated coder or architect argues from its perspective; it must not try to edit and fail.
 				// The original briefing counts against the seat's cap; each peer keeps its label or failure status.
 				const peerParts: BriefingPart[] = [{ kind: "framing", lead: COUNCIL_MEMBER_FRAMING }];
@@ -2491,7 +2501,14 @@ async function runCouncil(
 					for (const peer of council.members) {
 						if (peer.label === member.label) continue;
 						const previous = prior.get(peer.label);
-						if (previous === undefined) {
+						const downReason = down.get(peer.label);
+						if (previous === undefined && downReason !== undefined) {
+							peerParts.push({
+								kind: "evidence",
+								lead: `[${peer.label}] failed in prior round; no answer contributed. Reason: `,
+								body: downReason,
+							});
+						} else if (previous === undefined) {
 							peerParts.push({ kind: "evidence", lead: `[${peer.label}] failed in prior round; no answer contributed.` });
 						} else if (isPipelineStepFailure(previous.receipt)) {
 							peerParts.push({
@@ -2567,17 +2584,43 @@ async function runCouncil(
 					council: { group, label: member.label, ...(member.color ? { color: member.color } : {}), round },
 					briefing: peerBriefing.text,
 				};
-				return [
-					member.label,
-					await runMember(withResolvedPlanTaskPin(request, pinned, { pinTask: false, pinBriefing: false }), peerBriefing),
-				] as const;
+				try {
+					return [
+						member.label,
+						await runMember(withResolvedPlanTaskPin(request, pinned, { pinTask: false, pinBriefing: false }), peerBriefing),
+					] as const;
+				} catch (error) {
+					// Admission refused this seat's target as down: it sits as a failed seat, not a refused council.
+					const reason = councilSeatDownReason(error);
+					if (reason === null) throw error;
+					down.set(member.label, reason);
+					return [member.label, null] as const;
+				}
 			}),
 		);
-		prior = new Map(settled);
-		runs.push(...settled.map(([, run]) => run));
+		if (round === 1 && council.members.length - down.size < COUNCIL_MIN_MEMBERS) {
+			throw new Error(
+				councilTooFewLiveSeats(
+					council.members.length,
+					[...down].map(([label, reason]) => ({ label, reason })),
+				),
+			);
+		}
+		const live = settled.flatMap(([label, run]) => (run === null ? [] : [[label, run] as const]));
+		seats.push(...settled.map(([label, run]) => ({ label, round, run })));
+		prior = new Map(live);
+		runs.push(...live.map(([, run]) => run));
 	}
 
-	const members: CouncilReportMember[] = runs.map((run) => {
+	const members: CouncilReportMember[] = seats.map(({ label, round, run }) => {
+		if (run === null)
+			return {
+				label,
+				runId: COUNCIL_SEAT_NOT_RUN,
+				round,
+				answer: "",
+				failed: { reason: down.get(label) ?? "seat not run" },
+			};
 		const text = normalizedAssistantText(run.summary);
 		const failed = isPipelineStepFailure(run.receipt);
 		const verdict = councilVerdict(text);
@@ -2709,6 +2752,7 @@ function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeo
 		.filter((member) => member.round === Math.max(...outcome.report.members.map((entry) => entry.round)))
 		.map((member) => {
 			const run = outcome.runs.find((entry) => entry.receipt.runId === member.runId);
+			if (run === undefined && member.failed !== undefined) return `[${member.label}] ${member.failed.reason}`;
 			return `[${member.label}] ${run?.receipt.targetId ?? "unknown"}/${run?.receipt.wireModelId ?? "unknown"}\n${member.answer}`;
 		});
 	sections.push(

@@ -14,6 +14,8 @@ import {
 	COUNCIL_MAX_MEMBERS,
 	COUNCIL_MIN_MEMBERS,
 	councilBallotContract,
+	councilSeatDownReason,
+	councilTooFewLiveSeats,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
@@ -943,8 +945,11 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				if (council === undefined || base === undefined)
 					throw new Error("dispatch: council admission settings are unavailable");
 				const subjects: Array<{ runId: string; digest: null }> = [];
+				// A seat whose target is down in round 1 sits out every round as a failed seat (FL-4).
+				const downSeats: Array<{ label: string; reason: string }> = [];
 				for (let round = 1; round <= council.rounds; round += 1) {
 					for (const [index, member] of council.members.entries()) {
+						if (downSeats.some((seat) => seat.label === member.label)) continue;
 						const memberRequest: DispatchRequest = {
 							...base,
 							...(member.agent !== undefined ? { agentId: member.agent } : {}),
@@ -970,7 +975,15 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							...(member.thinking ? { thinkingLevel: member.thinking as NonNullable<DispatchRequest["thinkingLevel"]> } : {}),
 							gate: { role: "member", group: "plan-preview", cycle: round },
 						};
-						const task = resolveTask(memberRequest, "member", (round - 1) * council.members.length + index + 1);
+						let task: ResolvedPlanTask;
+						try {
+							task = resolveTask(memberRequest, "member", (round - 1) * council.members.length + index + 1);
+						} catch (error) {
+							const reason = round === 1 ? councilSeatDownReason(error) : null;
+							if (reason === null) throw error;
+							downSeats.push({ label: member.label, reason });
+							continue;
+						}
 						if (task.node !== "local" || task.nodeKind !== "local") {
 							return shapeRejection(args, `council_member_remote_node: ${member.label}`);
 						}
@@ -984,7 +997,11 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						if (round === council.rounds) subjects.push({ runId: `plan-member-${member.label}`, digest: null });
 						tasks.push(task);
 					}
+					if (round === 1 && council.members.length - downSeats.length < COUNCIL_MIN_MEMBERS) {
+						return shapeRejection(args, councilTooFewLiveSeats(council.members.length, downSeats));
+					}
 				}
+				if (downSeats.length > 0) snapshotFields.council = { ...council, downSeats };
 				if (council.synthesis === "judge") {
 					const judgeRequest: DispatchRequest = {
 						agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
