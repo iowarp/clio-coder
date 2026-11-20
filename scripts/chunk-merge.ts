@@ -91,6 +91,9 @@ const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray
  * although `headless` covers it, because
  * tests/contracts/instant-shell-import-graph.test.ts budgets the owner's
  * static closure and pins `run --help` to load nothing of the run command.
+ * `help` keeps `help --json` to the kit and the command specs: without it the
+ * kit shared a file with the import() namespace stub of
+ * src/domains/prompts/preload.ts, whose imports load the session stage.
  */
 const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<string>]> = [
 	// The workspace launcher: the launch stage plus what starts the pane host and the session inside it.
@@ -123,6 +126,7 @@ const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<st
 	],
 	["worker", ["src/worker/entry.ts"]],
 	["runHelp", ["src/cli/index.ts", "src/cli/run-help.ts"]],
+	["help", ["src/cli/index.ts", "src/cli/help-command.ts"]],
 ];
 
 /**
