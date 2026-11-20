@@ -2908,6 +2908,27 @@ export function applySettingsDelta(saved: unknown, before: unknown, after: unkno
 	return out;
 }
 
+/**
+ * Write one dotted leaf of `settings` onto a raw saved document even when the
+ * delta skipped it because it equals the inherited value, so an explicit
+ * `config set` pins the value in its own scope. An absent leaf pins nothing.
+ */
+export function pinSettingsLeaf(saved: unknown, settings: unknown, path: string): unknown {
+	const keys = path.split(".");
+	let value: unknown = settings;
+	for (const key of keys) value = isPlainObject(value) ? value[key] : undefined;
+	if (value === undefined) return saved;
+	const out: Record<string, unknown> = isPlainObject(saved) ? saved : {};
+	let cursor = out;
+	for (const key of keys.slice(0, -1)) {
+		const next = cursor[key];
+		if (!isPlainObject(next)) cursor[key] = {};
+		cursor = cursor[key] as Record<string, unknown>;
+	}
+	cursor[keys.at(-1) as string] = cloneValue(value);
+	return out;
+}
+
 function deepEquals(a: unknown, b: unknown): boolean {
 	if (a === b) return true;
 	if (Array.isArray(a) || Array.isArray(b)) {
@@ -2930,6 +2951,8 @@ export type SettingsMutator = (settings: ClioSettings) => ClioSettings | undefin
 export interface SettingsUpdateOptions {
 	/** Total time to wait for the lock before giving up. Default 10s. */
 	timeoutMs?: number;
+	/** Dotted leaf written even when it equals the inherited value (`config set`). */
+	pin?: string;
 }
 
 /**
@@ -3016,7 +3039,8 @@ export function updateSettings(mutate: SettingsMutator, options: SettingsUpdateO
 		const next = mutate(current) ?? current;
 		const revalidated = validateSettings(JSON.parse(JSON.stringify(next)));
 		if (revalidated.issues.length > 0) throw new SettingsValidationError(revalidated.issues);
-		persistSettings(applySettingsDelta(saved, before, revalidated.settings));
+		const delta = applySettingsDelta(saved, before, revalidated.settings);
+		persistSettings(options.pin !== undefined ? pinSettingsLeaf(delta, revalidated.settings, options.pin) : delta);
 		return revalidated.settings;
 	}, options);
 }

@@ -478,6 +478,10 @@ test("config get, set and unset save one setting per scope, refuse bad input unw
 		strictEqual(config("unset", "interface.exitSummary").status, 0);
 		const fallback = JSON.parse(config("get", "interface.exitSummary", "--json").stdout) as Record<string, unknown>;
 		strictEqual(fallback.source, "default");
+		// A value equal to the inherited one is still pinned in the scope it was set in.
+		strictEqual(config("set", "interface.exitSummary", "auto").status, 0);
+		const pinned = JSON.parse(config("get", "interface.exitSummary", "--scope", "user", "--json").stdout);
+		deepStrictEqual([pinned.value, pinned.source], ["auto", "user"]);
 
 		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "interface:\n  demo: true\n");
 		const untrusted = config("set", "interface.exitSummary", "brief", "--scope", "project");
@@ -491,6 +495,12 @@ test("config get, set and unset save one setting per scope, refuse bad input unw
 		strictEqual(config("unset", "interface.exitSummary", "--scope", "project").status, 0);
 		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
 		strictEqual(config("get", "interface.exitSummary", "--scope", "project").status, 1);
+		strictEqual(config("set", "interface.exitSummary", "standard").status, 0);
+		strictEqual(config("set", "interface.exitSummary", "standard", "--scope", "project").status, 0);
+		const local = JSON.parse(config("get", "interface.exitSummary", "--scope", "project", "--json").stdout);
+		deepStrictEqual([local.value, local.source], ["standard", "project.local"]);
+		strictEqual(config("set", "interface.exitSummary", "off").status, 0);
+		strictEqual(readLayeredSettings(workspace).settings.interface.exitSummary, "standard");
 	} finally {
 		home.restore();
 	}
