@@ -42,6 +42,25 @@ const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlyArray<string>>> = {
 	],
 	doas: ["-u", "-C"],
 	timeout: ["-s", "--signal", "-k", "--kill-after"],
+	stdbuf: ["-i", "--input", "-o", "--output", "-e", "--error"],
+	ionice: ["-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"],
+	taskset: [],
+	chrt: ["-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"],
+	xargs: [
+		"-a",
+		"--arg-file",
+		"-d",
+		"--delimiter",
+		"-E",
+		"-I",
+		"-L",
+		"-n",
+		"--max-args",
+		"-P",
+		"--max-procs",
+		"-s",
+		"--max-chars",
+	],
 };
 
 /** Git named bare, by path, or as the Windows executable. */
@@ -80,8 +99,8 @@ function commandWordIndex(words: ReadonlyArray<string>): number {
 			if (!option.startsWith("-")) break;
 			index += valueOptions.includes(option) ? 2 : 1;
 		}
-		// timeout names its duration before the command it runs.
-		if (wrapper === "timeout") index++;
+		// timeout names its duration, taskset its CPU mask and chrt its priority before the command.
+		if (wrapper === "timeout" || wrapper === "taskset" || wrapper === "chrt") index++;
 	}
 	return index;
 }

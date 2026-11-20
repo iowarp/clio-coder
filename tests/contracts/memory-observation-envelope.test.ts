@@ -147,4 +147,44 @@ test("only an operator message grounds a constraint or decision; tool output sta
 		prepared([older], true).map(([category]) => category),
 		["constraint", "constraint", "decision"],
 	);
+	// MEM-2: a reflection cannot promote context to a constraint; a note keeping an input constraint keeps it.
+	const input = prepareObservation({
+		response,
+		source: { ...source, units: [mixed] },
+		units: [mixed],
+		authority: { generation: 1, commitEpoch: 1 },
+		revision: "0123456789abcdef",
+		route: null,
+		usage: null,
+	});
+	const [legacy, api] = input.notes;
+	const reflection = prepareObservation({
+		response: JSON.stringify({
+			notes: [
+				{ id: api?.id, category: "constraint", status: "assertion", text: "Keep the API.", refs: ["t1"] },
+				{
+					id: "r1",
+					category: "constraint",
+					status: "assertion",
+					text: "Use legacy.",
+					refs: ["t1"],
+					supersedes: [legacy?.id],
+				},
+			],
+		}),
+		source: { ...source, units: [mixed] },
+		units: [mixed],
+		authority: { generation: 1, commitEpoch: 1 },
+		revision: "fedcba9876543210",
+		route: null,
+		usage: null,
+		inputs: [input],
+	});
+	deepStrictEqual(
+		reflection.notes.map((note) => [note.category, note.text]),
+		[
+			["constraint", "Keep the API."],
+			["context", "Use legacy."],
+		],
+	);
 });

@@ -16,7 +16,8 @@
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
+import { commandName, wrappedCommand } from "../../core/command-words.js";
 import { shellLikeChain, shellLikeInvocation } from "../../core/shell-argv.js";
 
 export interface SimpleInvocation {
@@ -199,96 +200,26 @@ const TEST_FILE_OPERATORS: ReadonlySet<string> = new Set(["-e", "-f", "-d", "-r"
  * evidence. A wrapper that exits with the status of the command it runs
  * (`env FOO=1 true`, `timeout 5 true`) is judged by that command, help and
  * version requests included; a wrapper form the host cannot read with
- * certainty names no program, so it is no evidence either.
+ * certainty names no program, so it is no evidence either. xargs is never
+ * evidence: whether it runs its command at all depends on its input.
  */
 export function trivialInvocation(invocation: SimpleInvocation): boolean {
 	let argv = invocation.argv;
 	for (let depth = 0; ; depth++) {
 		const inner = wrappedCommand(argv);
 		if (inner === undefined) break;
-		if (inner === null || inner.length === 0 || depth >= 8) return true;
+		// xargs runs its command once, or not at all, depending on its input.
+		if (inner === null || inner.length === 0 || depth >= 8 || commandName(argv[0] ?? "") === "xargs") return true;
 		argv = inner;
 		if (diagnosticInvocation({ assignments: [], argv })) return true;
 	}
-	const program = basename(argv[0] ?? "");
+	const program = commandName(argv[0] ?? "");
 	const args = argv.slice(1);
 	if (TRIVIAL_PROGRAMS.has(program)) return true;
 	if (program === "test" || program === "[") {
 		return !args.some((arg, index) => TEST_FILE_OPERATORS.has(arg) && (args[index + 1] ?? "]") !== "]");
 	}
 	return false;
-}
-
-const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
-const TIMEOUT_DURATION = /^\d+(?:\.\d+)?[smhd]?$/u;
-
-/**
- * The command a wrapper runs and whose exit status it returns: `[]` when it
- * runs none, null when its options cannot be read with certainty (`env -S`,
- * `env -C`, `command -v`, any flag not listed here), undefined when the
- * program is not such a wrapper.
- */
-function wrappedCommand(argv: readonly string[]): readonly string[] | null | undefined {
-	const wrapper = basename(argv[0] ?? "");
-	let at = 1;
-	const optionsEnd = (): boolean => {
-		if (argv[at] !== "--") return false;
-		at++;
-		return true;
-	};
-	switch (wrapper) {
-		case "env":
-			for (; at < argv.length; ) {
-				const arg = argv[at] ?? "";
-				if (optionsEnd()) break;
-				if (arg === "-i" || arg === "--ignore-environment" || arg === "-") at++;
-				else if (arg === "-u" || arg === "--unset") at += 2;
-				else if (/^-u./u.test(arg) || arg.startsWith("--unset=")) at++;
-				else if (arg.startsWith("-")) return null;
-				else break;
-			}
-			if (at > argv.length) return null;
-			while (ENV_ASSIGNMENT.test(argv[at] ?? "")) at++;
-			break;
-		case "nice": {
-			const arg = argv[1] ?? "";
-			if (arg === "-n" || arg === "--adjustment") at = /^-?\d+$/u.test(argv[2] ?? "") ? 3 : -1;
-			else if (/^(?:-n-?|--adjustment=-?|-)\d+$/u.test(arg)) at = 2;
-			else if (arg.startsWith("-") && arg !== "--") return null;
-			if (at < 0) return null;
-			optionsEnd();
-			break;
-		}
-		case "time":
-			if (argv[1] === "-p") at = 2;
-			if (!optionsEnd() && (argv[at] ?? "").startsWith("-")) return null;
-			break;
-		case "timeout":
-			for (; at < argv.length; ) {
-				const arg = argv[at] ?? "";
-				if (optionsEnd()) break;
-				if (["--preserve-status", "--foreground", "-v", "--verbose"].includes(arg)) at++;
-				else if (["-k", "-s", "--kill-after", "--signal"].includes(arg)) at += 2;
-				else if (/^(?:-[ks].|--kill-after=|--signal=)/u.test(arg)) at++;
-				else if (arg.startsWith("-")) return null;
-				else break;
-			}
-			if (!TIMEOUT_DURATION.test(argv[at] ?? "")) return null;
-			at++;
-			break;
-		case "command":
-			if (argv[1] === "-p") at = 2;
-			if (!optionsEnd() && (argv[at] ?? "").startsWith("-")) return null;
-			break;
-		case "nohup":
-		case "exec":
-		case "builtin":
-			if (!optionsEnd() && (argv[at] ?? "").startsWith("-")) return null;
-			break;
-		default:
-			return undefined;
-	}
-	return argv.slice(at);
 }
 
 /** Whitespace-collapsed identity; lessons store commands with collapsed whitespace. */

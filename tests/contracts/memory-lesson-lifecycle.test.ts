@@ -722,9 +722,25 @@ test("a wrapper's success is judged by the command it runs, and an unreadable wr
 		"command -v node",
 		"exec true",
 		"builtin echo ok",
+		// MEM-2: these wrappers are judged by what they run, and xargs never vouches.
+		"sudo -u nobody true",
+		"stdbuf -oL true",
+		"ionice -c3 true",
+		"taskset -c 1 true",
+		"chrt -f 10 true",
+		"env -iu HOME true",
+		`xargs ${COMMAND}`,
+		`ionice -p 1 ${COMMAND}`,
 	])
 		strictEqual(evidence(command), null, command);
-	for (const command of [COMMAND, `env -i FOO=1 ${COMMAND}`, `timeout 30 nice ${COMMAND}`, `command ${COMMAND}`])
+	for (const command of [
+		COMMAND,
+		`env -i FOO=1 ${COMMAND}`,
+		`timeout 30 nice ${COMMAND}`,
+		`command ${COMMAND}`,
+		`env -iu HOME ${COMMAND}`,
+		`stdbuf -oL taskset -c 1 ${COMMAND}`,
+	])
 		strictEqual(evidence(command), "command", command);
 });
 
