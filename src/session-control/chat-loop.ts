@@ -4547,6 +4547,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} finally {
 				// Settlements land before the lease release flushes, and possibly seals, the session's journal.
 				middleware.releaseTurnHolds(turnHolds);
+				// A turn that ended without its turn_end hook (a throw or an abort before any reply) still ended here.
+				if (promptStarted && generation === submitGeneration && submitOwner === owner) outcomeCollector.endTurn();
 				await turnLease?.release();
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
@@ -4873,6 +4875,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queues.reset({ keepOperator: sessionId !== null && sessionId === queueSessionId });
 			queueSessionId = sessionId;
 			middleware.clearPendingReminders();
+			// The turn the reset cut off never reaches its turn_end hook: what its requests carried settles with it now.
+			outcomeCollector.closeSession();
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			state.lastRunSnapshot = null;

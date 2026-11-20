@@ -456,7 +456,8 @@ describe("middleware hook boundary", () => {
 			)) as typeof import("../../src/domains/middleware/fired-record.js");
 			const resumed = other.nextFiringId();
 			ok(!ids().includes(resumed), `a resumed process reuses ${resumed}`);
-			// The chat loop settles what a submit held before its turn lease flushes the journal.
+			// The chat loop settles what a submit held before its turn lease flushes the journal, and what a turn's requests
+			// carried when the turn ends without its turn_end hook (a throw before any reply) or the conversation resets mid-turn.
 			const loopSession = "md12-chat-loop";
 			const scratchEnv = await isolateClioEnv("clio-coder-md12-loop-");
 			const loopCollector = createTurnOutcomeCollector();
@@ -465,6 +466,9 @@ describe("middleware hook boundary", () => {
 				registrations: [
 					loopCollector,
 					registration("gate.lock", () => (lockAtStart ? [{ kind: "lock_tools" }] : []), { hooks: ["turn_start"] }),
+					registration("guard.fixture", (input) =>
+						input.toolCallId === "t-loop-chat" ? [{ kind: "block_tool", reason: "repeat", severity: "hard-block" }] : [],
+					),
 				],
 			}).contract;
 			const order: string[] = [];
@@ -493,6 +497,9 @@ describe("middleware hook boundary", () => {
 			const journals = createSessionJournals(clioStateDir(), () => {
 				throw new Error("fixture journal unavailable");
 			});
+			/** What the faux model does: reply, or fire and carry a block, then throw or reset the conversation. */
+			let mode: "reply" | "throw" | "reset" = "reply";
+			let settledAtReset: string[] = [];
 			const loop: ReturnType<typeof createChatLoop> = createChatLoop({
 				getSettings: () => settings,
 				providers: stubContext.getContract("providers") as ProvidersContract,
@@ -551,6 +558,21 @@ describe("middleware hook boundary", () => {
 							async prompt() {
 								await listener({ type: "agent_start" });
 								await listener({ type: "turn_start" });
+								if (mode !== "reply") {
+									// A tool hook's block fires and the request after it goes out: any send admits an in-run firing.
+									loopMiddleware.runHook({
+										sessionId: loopSession,
+										hook: "before_tool",
+										toolName: "bash",
+										toolCallId: "t-loop-chat",
+										toolArgs: {},
+									});
+									loopCollector.requestSent(null, []);
+									if (mode === "throw") throw new Error("fixture prompt failed");
+									loop.resetForSession(null);
+									settledAtReset = [...loopSettled.keys()];
+									return;
+								}
 								const message = {
 									role: "assistant",
 									content: [{ type: "text", text: "done" }],
@@ -574,6 +596,18 @@ describe("middleware hook boundary", () => {
 				ok(l1 !== undefined);
 				deepStrictEqual(loopSettled.get(l1), { outcome: "suppressed", admittedIn: null });
 				ok(order.indexOf(`settled ${l1}`) < order.lastIndexOf("release"), order.join(", "));
+				// The model throws before any reply, so no turn_end hook runs: the carried block still settles with the submit.
+				mode = "throw";
+				await loop.submit("throw before replying");
+				const [, g5] = loopFired;
+				ok(g5 !== undefined);
+				deepStrictEqual(loopSettled.get(g5), { outcome: "ignored", admittedIn: null });
+				// The conversation resets mid-turn: the turn's carried block settles with the reset, not at a later session.
+				mode = "reset";
+				await loop.submit("reset mid-turn");
+				const [, , g6] = loopFired;
+				ok(g6 !== undefined && settledAtReset.includes(g6), `open after the reset: ${g6}`);
+				deepStrictEqual(loopSettled.get(g6), { outcome: "ignored", admittedIn: null });
 			} finally {
 				loop.dispose();
 				await loop.whenSettled();
