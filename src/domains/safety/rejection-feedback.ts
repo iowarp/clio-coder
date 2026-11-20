@@ -72,8 +72,8 @@ export function formatRejection(ctx: RejectionContext): RejectionMessage {
  * the standing pivot instruction, which always closes the message. Output is
  * enforced-bounded: lines cap at 300 characters and the message at 16 lines,
  * because reason strings interpolate caller data (paths, commands) verbatim.
- * An overlong line breaks at sentence ends and then gives up quoted text, so
- * the remedy clause after a long command survives (`boundLine`).
+ * An overlong line breaks at sentence ends, gives up quoted text and then wraps
+ * at word breaks, so the remedy clause after a long command survives (`boundLine`).
  */
 const MODEL_REJECTION_PIVOT =
 	"Do not retry this action through another tool or a respelled command (other flags, quoting, or a wrapper) unless a hint above names one; pivot or report the blocker.";
@@ -125,19 +125,42 @@ function shortenQuoted(text: string): string {
 }
 
 /**
+ * Wrap a sentence still over the cap at word breaks, so its closing clause survives (FL-10). Only a run with no break
+ * longer than the cap, such as a hostile path, is cut, and the text after it carries on.
+ */
+function wrapSentence(text: string): string[] {
+	const max = MODEL_REJECTION_MAX_LINE_CHARS;
+	const parts: string[] = [];
+	let rest = text;
+	while (rest.length > max) {
+		const cut = rest.lastIndexOf(" ", max);
+		if (cut > 0) {
+			parts.push(rest.slice(0, cut));
+			rest = rest.slice(cut + 1);
+			continue;
+		}
+		parts.push(`${rest.slice(0, max)}…`);
+		const next = rest.indexOf(" ", max);
+		rest = next < 0 ? "" : rest.slice(next + 1);
+	}
+	if (rest.length > 0) parts.push(rest);
+	return parts;
+}
+
+/**
  * Bound one line: pack whole sentences into lines under the cap, shorten quoted text in a sentence still over it,
- * and cut only what quoting cannot explain.
+ * and wrap what quoting cannot explain.
  */
 function boundLine(line: string): string[] {
 	const max = MODEL_REJECTION_MAX_LINE_CHARS;
 	if (line.length <= max) return [line];
 	const lines: string[] = [];
 	for (const sentence of sentences(line)) {
-		const fitted = shortenQuoted(sentence);
-		const bounded = fitted.length > max ? `${fitted.slice(0, max)}…` : fitted;
-		const last = lines.length - 1;
-		if (last >= 0 && (lines[last]?.length ?? 0) + 1 + bounded.length <= max) lines[last] = `${lines[last]} ${bounded}`;
-		else lines.push(bounded);
+		for (const bounded of wrapSentence(shortenQuoted(sentence))) {
+			const last = lines.length - 1;
+			if (last >= 0 && (lines[last]?.length ?? 0) + 1 + bounded.length <= max) lines[last] = `${lines[last]} ${bounded}`;
+			else lines.push(bounded);
+		}
 	}
 	return lines;
 }

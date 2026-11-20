@@ -1256,7 +1256,7 @@ report:
   offers: ask
 
 # Main-agent system prompt text: v1 (current) or v2 (the D-02 rewrite, under
-# evaluation). Applies to the next session.
+# evaluation). Applies from the next turn.
 prompts:
   profile: v1
 

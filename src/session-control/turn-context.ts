@@ -1549,8 +1549,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * floor over the measured prefix nor the caller's `floor` applies; without
 	 * one it is max(floor, A4).
 	 */
-	const overflowFitTokens = (agentRuntime: AgentRuntime, pendingUserText?: string, floor = 0): number => {
-		const observed = observeHistory(agentRuntime);
+	const overflowFitTokens = (
+		agentRuntime: AgentRuntime,
+		pendingUserText?: string,
+		floor = 0,
+		history?: MessageListDigests,
+	): number => {
+		const observed = history ?? observeHistory(agentRuntime);
 		const live = liveContextEstimate(agentRuntime, pendingUserText, undefined, observed);
 		const pending: AgentMessage[] = [];
 		if (pendingUserText !== undefined) {
@@ -1568,11 +1573,23 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return Math.max(floor, live.tokens, pi);
 	};
 
-	/** The anchored count of the next request with nothing pending, or null when this route has no measured anchor. */
-	const anchoredInputTokens = (agentRuntime: AgentRuntime): number | null => {
-		const observed = observeHistory(agentRuntime);
+	/**
+	 * The anchored count of the next request with nothing pending, or null when this route has no measured anchor.
+	 * `history`, when given, is an observation of the same runtime nothing has changed since.
+	 */
+	const anchoredInputTokens = (agentRuntime: AgentRuntime, history?: MessageListDigests): number | null => {
+		const observed = history ?? observeHistory(agentRuntime);
 		const live = liveContextEstimate(agentRuntime, undefined, undefined, observed);
 		return anchoredFitCount(agentRuntime, observed, live, []);
+	};
+
+	/** After an overflow fold or the requireFit summary: a request that fits on the A4 count pins it for the next main request. */
+	const pinOverflowFit = (agentRuntime: AgentRuntime, pendingUserText?: string): boolean => {
+		const fitAfter = overflowFitTokens(agentRuntime, pendingUserText);
+		const window = liveContextEstimate(agentRuntime, pendingUserText).contextWindow;
+		if (!requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), window)) return false;
+		overflowInputPin = { sessionId: deps.session?.current()?.id };
+		return true;
 	};
 
 	/**
@@ -2109,9 +2126,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
 		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
 		overflowFitTokens: (runtime, pendingUserText) => overflowFitTokens(runtime, pendingUserText),
-		armOverflowInputPin: () => {
-			overflowInputPin = { sessionId: deps.session?.current()?.id };
-		},
+		pinOverflowFit: (runtime, pendingUserText) => pinOverflowFit(runtime, pendingUserText),
 		reconciledHistoryTokens: (runtime, commit) => reconciledHistoryTokens(runtime, undefined, commit),
 		evictionAnchor: (runtime, historyTokens, tokensRemoved) => evictionAnchor(runtime, historyTokens, tokensRemoved),
 		carryReconciledAnchorThroughProjection: (runtime, historyTokens, tokensRemoved) =>
@@ -2119,10 +2134,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		dropReconciledAnchor: () => {
 			reconciledAnchor = null;
 		},
-		captureRuntimeContextSnapshot: (runtime, turnId, threshold, extra) =>
-			captureRuntimeContextSnapshot(runtime, turnId, threshold, extra),
-		setCurrentSnapshot: (snapshot) => {
+		publishSnapshot: (runtime, threshold, metadata) => {
+			const snapshot = captureRuntimeContextSnapshot(runtime, state.activeUserTurnId || "compaction", threshold, metadata);
 			currentContextSnapshot = snapshot;
+			persistContextSnapshot(snapshot);
+			return snapshot;
 		},
 		persistContextSnapshot: (snapshot) => persistContextSnapshot(snapshot),
 		noteCompactionEvent: (event) => {
@@ -2136,15 +2152,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 		emitCompactionActivity: (status, message) => emitCompactionActivity(status, message),
 		compactionFailureMessage,
-		recordCompactionFact: (fact) => {
-			compactionFacts.push(fact);
+		noteStructuralEviction: (planned) => {
+			const count = planned.items.length;
+			compactionFacts.push({ kind: "omitted", unit: "observations", count });
+			emitCompactionActivity("completed", `${count} working-set ${count === 1 ? "item" : "items"} evicted`);
+			compactionTokens = { before: planned.tokensBefore, after: planned.tokensAfter, basis: "runtime-estimate" };
 		},
-		recordCompactionTokens: (tokens) => {
-			compactionTokens = tokens;
+		recompilePosturePrompt: async (runtime) => {
+			if (!postureGeneration) return;
+			await controller.ensureSessionPrompt(runtime);
+			controller.logPromptCompileIfPending();
 		},
-		hasPostureGeneration: () => Boolean(postureGeneration),
-		ensureSessionPrompt: (runtime) => controller.ensureSessionPrompt(runtime),
-		logPromptCompileIfPending: () => controller.logPromptCompileIfPending(),
 	});
 	const refreshAgentMessagesFromSession = contextFold.refreshAgentMessagesFromSession;
 
@@ -2838,12 +2856,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			CONTEXT_STATUS_NOTICE_KEY,
 		);
 		// The requireFit summary cleared what the fold could not: the next main request pins the same A4 count.
-		if (requiredFit) {
-			const fitAfter = overflowFitTokens(agentRuntime, pendingUserText);
-			const window = liveContextEstimate(agentRuntime, pendingUserText).contextWindow;
-			if (requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), window))
-				overflowInputPin = { sessionId: deps.session?.current()?.id };
-		}
+		if (requiredFit) pinOverflowFit(agentRuntime, pendingUserText);
 		refreshLiveBudget(pendingUserText);
 		return true;
 	};
@@ -3992,15 +4005,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
 			const messagesBefore = agentRuntime.agent.state.messages;
+			// Until a compaction attempt yields, nothing touches the messages, so the checks read `history` instead of
+			// walking every message again; a check after an attempt starts observes afresh (SC-6).
+			let attemptStarted = false;
+			const settled = (): MessageListDigests | undefined => (attemptStarted ? undefined : history);
 			// The A4 count (overflowFitTokens) decides whether the request fits; the fit line's reserve is A5's, read at that count.
 			const a4Fits = (view: LiveBudgetView): boolean => {
-				const input = overflowFitTokens(agentRuntime, undefined, view.inputTokens ?? 0);
+				const input = overflowFitTokens(agentRuntime, undefined, view.inputTokens ?? 0, settled());
 				const reserve = view.outputReserveTokens === null ? null : resolveFitOutputReserve(agentRuntime, input);
 				return requestFits(input, reserve, view.effectiveWindow);
 			};
 			// The view's figures, or with a measured anchor the anchored count admission sends on (bt3 drv-rv5).
 			const fitFigures = (view: LiveBudgetView): { input: number | null; reserve: number | null } => {
-				const anchored = anchoredInputTokens(agentRuntime);
+				const anchored = anchoredInputTokens(agentRuntime, settled());
 				if (anchored === null) return { input: view.inputTokens, reserve: view.outputReserveTokens };
 				const reserve = view.outputReserveTokens === null ? null : resolveFitOutputReserve(agentRuntime, anchored);
 				return { input: anchored, reserve };
@@ -4014,6 +4031,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// S0 commits under the trigger on an uncached route, so the guard asks there too (SPEC §3.4).
 			const attempted = mustFit || verdict.shouldCompact || supersededStageApplies(agentRuntime.runtimeResolution);
 			const compact = async (requireFit: boolean): Promise<void> => {
+				attemptStarted = true;
 				try {
 					const done = await runAutoCompact(
 						agentRuntime,

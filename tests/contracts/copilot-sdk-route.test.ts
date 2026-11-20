@@ -99,6 +99,9 @@ class FakeSession {
 				await new Promise((resolve) => setTimeout(resolve, delay));
 			}
 			return { ...snapshot, totalUserRequests: 0, totalApiDurationMs: 0, sessionStartTime: "", lastCallInputTokens: 0, lastCallOutputTokens: 0, modelMetrics: {}, codeChanges: {} };
+		} }, history: { cancelBackgroundCompaction: async () => {
+			this.compactionsCancelled = (this.compactionsCancelled ?? 0) + 1;
+			return { cancelled: true };
 		} } };
 	}
 	usage(data) {
@@ -1267,6 +1270,34 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	const seed = fake().sessions.at(-1)?.prompts[0] ?? "";
 	ok(seed.includes(`<tool_result id="call_1" name="read">\n${stub}\n</tool_result>`), seed);
 	ok(!/<tool_result[^>]*>\nfile body/.test(seed), "the evicted body is absent from the provider's input");
+	disposeCopilotConversations(key);
+});
+
+test("a reseed past a call a Copilot run still waits on closes that run instead of leaving it parked (CTX-4)", async () => {
+	const key = "stale-tools-session";
+	disposeCopilotConversations(key);
+	const ask = user("please use tool");
+	const first = await step({ tools: [readTool], messages: [ask] }, key);
+	strictEqual(first.stopReason, "toolUse");
+	const parked = fake().sessions.at(-1) as FakeSession & { aborted?: boolean };
+	// History before the call was rewritten, so the waiting run can never take this result.
+	const moved = [user("summary of the earlier work"), ask, first, toolResult("call_1", "file body")];
+	const reseeded = await step({ tools: [readTool], messages: moved }, key);
+	strictEqual((reseeded as { copilotContinuation?: string }).copilotContinuation, "full");
+	ok(await eventually(() => parked.aborted === true, 5_000), "the run parked on call_1 is closed");
+	disposeCopilotConversations(key);
+});
+
+test("the runtime's own background compaction is cancelled so the live session keeps Clio's transcript (FX-5)", async () => {
+	const key = "compaction-session";
+	disposeCopilotConversations(key);
+	await step({ messages: [user("hello")] }, key);
+	const live = fake().sessions.at(-1) as FakeSession & {
+		compactionsCancelled?: number;
+		emit(type: string, data: unknown): void;
+	};
+	live.emit("session.compaction_start", { conversationTokens: 160_000 });
+	ok(await eventually(() => live.compactionsCancelled === 1), "the background compaction is cancelled");
 	disposeCopilotConversations(key);
 });
 

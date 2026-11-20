@@ -29,6 +29,7 @@ import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../.
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
+import { middlewareHookFailedSessionNotice } from "../../src/interactive/bus-notices.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -821,6 +822,16 @@ describe("user hook applicability", () => {
 			diagnostics.map((diagnostic) => [diagnostic.kind, diagnostic.registrationId]),
 			[["budget_exceeded", "cold"]],
 		);
+		// A lone stall is no steady-state slowness, but the operator still hears of it, once (EX-2).
+		const stall = { kind: "budget_exceeded", registrationId: "cold", hook: "turn_start", elapsedMs: 5000, budgetMs: 50 };
+		const seen = new Set<string>();
+		ok(
+			middlewareHookFailedSessionNotice({ ...stall, steadyStateWarn: false }, seen)?.text.includes(
+				"stalled on turn_start",
+			),
+		);
+		strictEqual(middlewareHookFailedSessionNotice({ ...stall, steadyStateWarn: false }, seen), null);
+		strictEqual(middlewareHookFailedSessionNotice({ ...stall, elapsedMs: 60, steadyStateWarn: false }, new Set()), null);
 		run = () => {
 			throw new Error("spawn exploded");
 		};

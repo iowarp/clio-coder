@@ -24,6 +24,24 @@ import { resolveContinuityProjection } from "../domains/session/continuity/proje
 import type { SessionEntry } from "../domains/session/entries.js";
 import { effectiveToolCall } from "../tools/surface.js";
 
+/**
+ * self_compact writes its note before the results of the calls beside it arrive, so it runs alone. Its siblings are
+ * not held back for it: only the self_compact call is refused, and the model calls it again by itself once it has
+ * used their results. A whole-batch refusal cost the siblings a round (bt-47 drv-f1).
+ */
+export function selfCompactSiblingRefusal(
+	toolCall: { name: string; arguments: unknown },
+	assistantMessage: { content: ReadonlyArray<{ type: string }> },
+): { block: true; reason: string } | undefined {
+	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== "self_compact") return undefined;
+	if (assistantMessage.content.filter((block) => block.type === "toolCall").length === 1) return undefined;
+	return {
+		block: true,
+		reason:
+			"self_compact must be called alone: it did not run, and the other calls in this batch did. Call self_compact by itself once you have used their results.",
+	};
+}
+
 export interface ContinuityReductionHooks {
 	beforeSummaryCall(): void;
 	/** Called before the summary append; the resulting carry reserves the exact commit. */

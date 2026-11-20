@@ -397,4 +397,10 @@ test("one approved hook covers one reloaded hook, and the narrowest cover is tak
 	deepStrictEqual(envelopeGrowth(approved, hooks(narrow, narrow, narrow)), [
 		"hook before_tool on gate (250 ms; can refuse the call)",
 	]);
+	// The first claimant's narrowest cover is the only one the second fits, so it moves to the broad one.
+	const blockingAbc = { on: "before_tool", tools: ["a", "b", "c"], onError: "block", timeoutMs: 100 };
+	const everyTool = { on: "before_tool", timeoutMs: 100 };
+	const ab = { on: "before_tool", tools: ["a", "b"], timeoutMs: 100 };
+	const blockingC = { on: "before_tool", tools: ["c"], onError: "block", timeoutMs: 100 };
+	deepStrictEqual(envelopeGrowth(hooks(blockingAbc, everyTool), hooks(ab, blockingC)), []);
 });

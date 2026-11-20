@@ -16,6 +16,7 @@ import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import type { RunAssessmentContext } from "../evidence/assessment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 import { runContextProvenance } from "../evidence/trust-status.js";
+import { runtimeResolutionWarnings } from "../providers/runtime-resolution.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { telemetryObjectRef } from "../telemetry/objects.js";
 import { runSettledDigest } from "../telemetry/run-digest.js";
@@ -40,6 +41,7 @@ import type {
 	RunResult,
 	RunResultDraft,
 	SafetyBlockedAttempt,
+	ToolActivitySummary,
 } from "./types.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
@@ -116,6 +118,22 @@ function routeOf(
 		runtimeId: run.runtimeId,
 		runtimeKind: run.runtimeKind,
 	};
+}
+
+/** The finalizer's tool activity and the calls it saw start and never finish, which the producer alone observed (FL-6). */
+function toolActivityOf(
+	activity: ToolActivitySummary,
+	telemetry: { unfinished: ReadonlyArray<{ count: number }> } | undefined,
+): NonNullable<RunSettled["toolActivity"]> {
+	const unfinished = telemetry?.unfinished.reduce((sum, entry) => sum + entry.count, 0) ?? 0;
+	return { ...activity, ...(unfinished > 0 ? { unfinished } : {}) };
+}
+
+function routeWarningsOf(run: Pick<RunResultDraft, "runtimeResolution">): Pick<RunSettled, "routeWarnings"> {
+	const warnings = runtimeResolutionWarnings(run.runtimeResolution?.diagnostics ?? [])
+		.slice(0, 16)
+		.flatMap((message) => diagnostic(message) ?? []);
+	return warnings.length > 0 ? { routeWarnings: warnings } : {};
 }
 
 function nodeOf(run: Pick<RunEnvelope, "node">): RunSettled["node"] {
@@ -292,7 +310,7 @@ export function settleFinishedRun(
 	const usage = input.usage ?? unobservedRunUsageFacts();
 	const host = receipt.hostVerification;
 	// An ask refused without an answer, as a --timeout abort denies one, is a permission request the way `decisions`
-	// counts it, not a blocked call. The tools row has no field for it, so it stays in `calls` only (bt-15 c14a).
+	// counts it, not a blocked call (bt-15 c14a). The tools row counts it as `asked`, so the row still sums (FX-3).
 	const asked = new Map<string, number>(input.askedByTool ?? []);
 	if (input.askedByTool === undefined)
 		for (const attempt of receipt.safety?.permissionRequestedAttempts ?? [])
@@ -326,17 +344,21 @@ export function settleFinishedRun(
 			frameType: input.frameType,
 			...usage,
 			toolCalls: receipt.toolCalls,
-			tools: receipt.toolStats.slice(0, 256).map((stat) => ({
-				tool: stat.tool,
-				calls: stat.count,
-				ok: stat.ok,
-				errors: stat.errors,
-				blocked: Math.max(0, stat.blocked - (asked.get(stat.tool) ?? 0)),
-			})),
+			tools: receipt.toolStats.slice(0, 256).map((stat) => {
+				const refusedAsks = Math.min(stat.blocked, asked.get(stat.tool) ?? 0);
+				return {
+					tool: stat.tool,
+					calls: stat.count,
+					ok: stat.ok,
+					errors: stat.errors,
+					blocked: stat.blocked - refusedAsks,
+					...(refusedAsks > 0 ? { asked: refusedAsks } : {}),
+				};
+			}),
 			skills: (receipt.skillActivations ?? [])
 				.slice(0, 256)
 				.map((skill) => ({ name: skill.name, requestSource: skill.requestSource ?? null })),
-			toolActivity: receipt.toolActivity ? { ...receipt.toolActivity } : null,
+			toolActivity: receipt.toolActivity ? toolActivityOf(receipt.toolActivity, receipt.safety?.toolTelemetry) : null,
 			capabilityMismatch: receipt.capabilityMismatch
 				? {
 						agentId: receipt.capabilityMismatch.agentId,
@@ -400,6 +422,7 @@ export function settleFinishedRun(
 						},
 					}
 				: {}),
+			...routeWarningsOf(receipt),
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,

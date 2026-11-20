@@ -29,6 +29,7 @@ import {
 	createSearchDiagnostics,
 	finishSearch,
 	newSearchCompleteness,
+	rejectionSuffix,
 	type SearchCompleteness,
 	searchNotice,
 	skipSearchPath,
@@ -100,7 +101,7 @@ async function fdFind(
 	) {
 		return {
 			ok: false,
-			message: `find: fd rejected the search or failed (exit code ${result.exitCode}). Check the glob and search path.`,
+			message: `find: fd rejected the search or failed (exit code ${result.exitCode}). Check the glob and search path.${rejectionSuffix(diagnostics.rejectionDetail)}`,
 		};
 	}
 	const paths = lines

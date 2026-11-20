@@ -343,4 +343,8 @@ test("typed read and grep refuse Clio's settings and MCP files while they hold a
 	writeFileSync(backup, "targets: []\n");
 	writeFileSync(mcp, "version: 1\nservers:\n  - id: gh\n    command: gh-mcp\n");
 	deepStrictEqual(verdicts(), ["allow", "allow", "allow", "allow", "allow", "allow"]);
+	// A backup kept from when settings held a header target, and a token passed in a server's args, stay refused.
+	writeFileSync(backup, secretSettings);
+	writeFileSync(mcp, 'version: 1\nservers:\n  - id: gh\n    command: gh-mcp\n    args: ["--token", "MCP_ARG_MARKER"]\n');
+	deepStrictEqual(verdicts(), ["allow", "allow", "block", "block", "block", "block"]);
 });

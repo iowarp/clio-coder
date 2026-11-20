@@ -91,6 +91,10 @@ export interface ArcadeSession {
 	/** Route one key to the game; the host calls this ahead of its own key handling. */
 	handleInput(data: string): void;
 	isOpen(): boolean;
+	/** Put away by a wait on the operator with the board kept; `resume` brings it back. */
+	isPaused(): boolean;
+	/** Show a paused game again where it stopped; false while Clio still waits on the operator. */
+	resume(): boolean;
 }
 
 type ArcadeTui = Pick<TUI, "showOverlay" | "requestRender"> & { terminal: Pick<TUI["terminal"], "columns" | "rows"> };
@@ -100,6 +104,12 @@ export function openArcadeOverlay(
 	tui: ArcadeTui,
 	options: {
 		onClose?: () => void;
+		/**
+		 * Whether Clio waits on the operator (an approval, an ask_user card). The game draws over the whole TUI and takes
+		 * every key, so while this holds it steps aside: the card stays reachable and the board is kept for later.
+		 */
+		needsOperator?: () => boolean;
+		onPause?: () => void;
 		setInterval?: typeof setInterval;
 		clearInterval?: typeof clearInterval;
 	} = {},
@@ -109,15 +119,26 @@ export function openArcadeOverlay(
 	let state = createArcadeState();
 	let handle: OverlayHandle | null = null;
 	let timer: ReturnType<typeof setInterval> | null = null;
-	const close = () => {
+	let paused = false;
+	const putAway = (): boolean => {
 		if (timer !== null) stop(timer);
 		timer = null;
 		const open = handle;
 		handle = null;
-		if (!open) return;
+		if (!open) return false;
 		open.hide();
 		tui.requestRender(true);
-		options.onClose?.();
+		return true;
+	};
+	const close = () => {
+		const wasPaused = paused;
+		paused = false;
+		if (putAway() || wasPaused) options.onClose?.();
+	};
+	const pause = () => {
+		if (!putAway()) return;
+		paused = true;
+		options.onPause?.();
 	};
 	const handleInput = (data: string): void => {
 		if (data === "q" || data === "Q" || matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
@@ -138,16 +159,34 @@ export function openArcadeOverlay(
 		invalidate: () => {},
 		handleInput,
 	};
-	handle = tui.showOverlay(component, { anchor: "top-left", width: "100%", maxHeight: "100%", margin: 0 });
-	timer = every(() => {
-		if (state.status !== "playing") return;
-		const size = arcadeSize();
-		// A shrunken terminal pauses the game behind its notice.
-		if (tui.terminal.columns < size.columns || tui.terminal.rows < size.rows) return;
-		tickArcade(state);
-		tui.requestRender();
-	}, TICK_MS);
-	timer.unref?.();
-	tui.requestRender(true);
-	return { close, handleInput, isOpen: () => handle !== null };
+	const show = () => {
+		handle = tui.showOverlay(component, { anchor: "top-left", width: "100%", maxHeight: "100%", margin: 0 });
+		timer = every(() => {
+			// Checked ahead of everything else: a finished game or a shrunken terminal still steps aside for the operator.
+			if (options.needsOperator?.() === true) {
+				pause();
+				return;
+			}
+			if (state.status !== "playing") return;
+			const size = arcadeSize();
+			// A shrunken terminal pauses the game behind its notice.
+			if (tui.terminal.columns < size.columns || tui.terminal.rows < size.rows) return;
+			tickArcade(state);
+			tui.requestRender();
+		}, TICK_MS);
+		timer.unref?.();
+		tui.requestRender(true);
+	};
+	const resume = (): boolean => {
+		if (!paused) return handle !== null;
+		if (options.needsOperator?.() === true) return false;
+		paused = false;
+		show();
+		return true;
+	};
+	if (options.needsOperator?.() === true) {
+		paused = true;
+		options.onPause?.();
+	} else show();
+	return { close, handleInput, isOpen: () => handle !== null, isPaused: () => paused, resume };
 }

@@ -302,6 +302,17 @@ it("routes press/repeat/release before viewport and keeps literal paste inert", 
 	f.terminal.input("\r");
 	assert.equal(f.counts.submit, 1);
 });
+it("Ctrl+X clears the whole draft in one press and undo brings it back (TUI-5)", () => {
+	const f = fixture();
+	f.terminal.input("first line");
+	f.terminal.input("\x1b[200~pasted\nsecond\x1b[201~");
+	const draft = f.editor.getText();
+	f.terminal.input("\x18");
+	assert.equal(f.editor.getText(), "");
+	assert.equal(f.counts.cancel, 0, "clearing the draft leaves the run alone");
+	f.terminal.input("\x1f");
+	assert.equal(f.editor.getText(), draft);
+});
 it("keeps search focused ahead of globals and Ctrl+C leaves the active run alive", () => {
 	const f = fixture();
 	f.editor.setText("draft");

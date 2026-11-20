@@ -71,6 +71,48 @@ test("a settled tool call records tool.settled under its session, turn and tool 
 	}
 });
 
+test("a before_tool hook's time is recorded as hookMs and kept out of the tool's durationMs (EX-2)", async () => {
+	const sink = capture("producer-hook-time");
+	try {
+		const holdMs = 20;
+		const middleware = createMiddlewareBundle({
+			registrations: [
+				{
+					id: "slow-hook",
+					description: "blocks like a command hook",
+					hooks: ["before_tool"],
+					evaluate: () => {
+						const until = performance.now() + holdMs;
+						while (performance.now() < until) {}
+						return [];
+					},
+				},
+			],
+		}).contract;
+		const registry = createRegistry({ safety: createWorkerSafety(), middleware });
+		registry.register({
+			name: ToolNames.Read,
+			description: "Read fixture",
+			parameters: Type.Object({ path: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "fixture" }),
+		});
+		const [tool] = resolveAgentTools({
+			registry,
+			allowedTools: [ToolNames.Read],
+			invokeOptions: () => ({ sessionId: "producer-hook-time", turnId: "turn-1" }),
+		});
+		ok(tool);
+		await tool.execute("tool-call-1", { path: "README.md" });
+		const [settled] = sink.of("tool.settled");
+		ok(settled && validPayload("tool.settled", settled.data), JSON.stringify(settled?.data));
+		const data = settled.data as { durationMs: number; hookMs?: number };
+		ok((data.hookMs ?? 0) >= holdMs, JSON.stringify(data));
+	} finally {
+		sink.release();
+	}
+});
+
 test("middleware.fired names each emitting rule, its own effects and the evidence it reports (#431)", () => {
 	const sink = capture("producer-middleware");
 	try {

@@ -33,7 +33,12 @@ import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker
 import { bindExternalUsage } from "../external-call-telemetry.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
-import type { WorkerRefusal } from "../worker-refusals.js";
+import {
+	WORKER_REFUSAL_REPORT_BLOCK,
+	WORKER_REFUSAL_REPORT_DIRECTIVE,
+	type WorkerRefusal,
+	workerRefusalLimitReason,
+} from "../worker-refusals.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
 import { claudeSdkBridgedTools, createClioToolBridge } from "./clio-tool-bridge.js";
@@ -407,6 +412,10 @@ interface PermissionGateInput {
 	mainGrantsUnavailable?: boolean;
 	emit: WorkerEventEmit;
 	onPermissionFailure(): void;
+	/** The refusal limit was reached: the run will exit permission_required after the model's report reply (FL-10). */
+	onRefusalLimit(): void;
+	/** Set once the limit is reached; a later tool use ends the run instead of reaching the permission gate. */
+	refusalReport: { active: boolean };
 	handledToolDecisions: Map<string, ClaudeToolPermissionDecision>;
 	/** Execute refusals so far in this run; the shared decision appends to it once per tool use. */
 	executeRefusals: WorkerRefusal[];
@@ -511,16 +520,34 @@ export function createClaudeWorkerBudgetGate(
 
 /**
  * CLB-5: an ask with no responder ends the run under `fail`. Under `deny` an
- * execute refusal returns to the model, which may take another route, and only
- * the WORKER_REFUSAL_LIMIT-th ends the run. The native worker gets one more
- * reply there, with tools refused, to write its report; this one does not.
+ * execute refusal returns to the model, which may take another route, and the
+ * WORKER_REFUSAL_LIMIT-th leaves it one more reply, with tools refused, to write
+ * its report, as the native worker does (FL-10).
  */
 function endsPermissionRun(decision: ClaudeToolPermissionDecision, input: PermissionGateInput): boolean {
+	return decision.kind === "deny" && decision.permissionRequired && input.onPermission === "fail";
+}
+
+/** The refusal that reached the limit: the model reads the full list and the report directive, and the run goes on. */
+function reachesRefusalLimit(decision: ClaudeToolPermissionDecision, input: PermissionGateInput): boolean {
 	return (
 		decision.kind === "deny" &&
 		decision.permissionRequired &&
-		(input.onPermission === "fail" || decision.refusalLimitReached === true)
+		decision.refusalLimitReached === true &&
+		!endsPermissionRun(decision, input)
 	);
+}
+
+function refusalLimitMessage(input: PermissionGateInput): string {
+	return `${workerRefusalLimitReason(input.executeRefusals)}\n${WORKER_REFUSAL_REPORT_DIRECTIVE}`;
+}
+
+/** A tool use in the report reply ends the run; the hook/callback pair of the capped use itself still resolves. */
+function blockedByRefusalReport(input: PermissionGateInput, toolUseID: string | undefined): boolean {
+	if (!input.refusalReport.active) return false;
+	if (toolUseID !== undefined && input.handledToolDecisions.has(toolUseID)) return false;
+	input.onPermissionFailure();
+	return true;
 }
 
 function permissionResultForDecision(
@@ -539,9 +566,11 @@ function permissionResultForDecision(
 	if (endsPermissionRun(decision, input)) {
 		input.onPermissionFailure();
 	}
+	const limit = reachesRefusalLimit(decision, input);
+	if (limit) input.onRefusalLimit();
 	const result: PermissionResult = {
 		behavior: "deny",
-		message: decision.reason,
+		message: limit ? refusalLimitMessage(input) : decision.reason,
 		interrupt: endsPermissionRun(decision, input),
 		decisionClassification: "user_reject",
 	};
@@ -642,6 +671,16 @@ function decideToolUseOnce(
 
 function buildCanUseTool(input: PermissionGateInput): CanUseTool {
 	return async (toolName, toolInput, options): Promise<PermissionResult> => {
+		if (blockedByRefusalReport(input, options.toolUseID)) {
+			const blocked: PermissionResult = {
+				behavior: "deny",
+				message: WORKER_REFUSAL_REPORT_BLOCK,
+				interrupt: true,
+				decisionClassification: "user_reject",
+			};
+			if (options.toolUseID !== undefined) blocked.toolUseID = options.toolUseID;
+			return blocked;
+		}
 		const decision = decideToolUseOnce(input, options.toolUseID, toolName, toolInput);
 		return permissionResultForDecision(decision, options.toolUseID, input);
 	};
@@ -651,6 +690,17 @@ function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
 	return async (hookInput, toolUseID) => {
 		if (hookInput.hook_event_name !== "PreToolUse") return { continue: true };
 		const id = hookInput.tool_use_id || toolUseID;
+		if (blockedByRefusalReport(input, id)) {
+			return {
+				continue: false,
+				stopReason: WORKER_REFUSAL_REPORT_BLOCK,
+				hookSpecificOutput: {
+					hookEventName: "PreToolUse",
+					permissionDecision: "deny",
+					permissionDecisionReason: WORKER_REFUSAL_REPORT_BLOCK,
+				},
+			};
+		}
 		const decision = decideToolUseOnce(input, id, hookInput.tool_name, hookInput.tool_input);
 		if (decision.kind === "allow") {
 			return {
@@ -663,12 +713,14 @@ function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
 			};
 		}
 		if (endsPermissionRun(decision, input)) input.onPermissionFailure();
+		const limit = reachesRefusalLimit(decision, input);
+		if (limit) input.onRefusalLimit();
 		return {
 			continue: true,
 			hookSpecificOutput: {
 				hookEventName: "PreToolUse",
 				permissionDecision: "deny",
-				permissionDecisionReason: decision.reason,
+				permissionDecisionReason: limit ? refusalLimitMessage(input) : decision.reason,
 			},
 		};
 	};
@@ -775,6 +827,13 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			permissionFailure = true;
 			abort();
 		},
+		onRefusalLimit() {
+			// The run still exits permission_required; the model's next reply is its report.
+			permissionFailure = true;
+			permissionGate.refusalReport.active = true;
+			process.stderr.write(`[worker:claude-sdk] ${workerRefusalLimitReason(permissionGate.executeRefusals)}\n`);
+		},
+		refusalReport: { active: false },
 		allowedTools: allowedToolSet,
 		...(budgetGate ? { budgetGate } : {}),
 		...(skillPolicy !== undefined ? { pendingSkillPolicy: skillPolicy } : {}),

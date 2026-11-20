@@ -267,6 +267,11 @@ export interface ExecuteFleetRunInput {
 	settings?: Readonly<Pick<ClioSettings, "safety" | "targets">>;
 	/** Cancel the fleet, including queued and running proposals. */
 	signal?: AbortSignal;
+	/**
+	 * Called synchronously before each step starts. It may abort `signal` (a durable root cancel request), and a step
+	 * whose start finds `signal` aborted is refused before it is announced or launched.
+	 */
+	beforeStepAdmission?: () => void;
 	/** Variables rendered into the playbook body and sealed into the run record. */
 	vars?: Readonly<Record<string, string>>;
 	/** A validated prior run and the successful prefix retained from it. */
@@ -488,6 +493,12 @@ async function runFleetHoldingWorkspace(
 	rootTelemetry: FleetRootTelemetry,
 ): Promise<FleetRunOutcome> {
 	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
+	/** A start the admission check canceled throws the abort reason, so the plan stops the way a signal stops it. */
+	const refuseCanceledAdmission = (): void => {
+		if (input.beforeStepAdmission === undefined) return;
+		input.beforeStepAdmission();
+		if (input.signal?.aborted === true) throw input.signal.reason;
+	};
 	const decisionRefs = activeDecisionRefs(input.getDecisionBoard?.() ?? []);
 	let livePlan = input.plan;
 	const replayed = input.resume?.replayed ?? new Map<string, ExecutionStepResult>();
@@ -871,6 +882,7 @@ async function runFleetHoldingWorkspace(
 				return { ownerId: reservation.ownerId };
 			},
 			async run(step, handoffs, reservation, ledger, signal) {
+				refuseCanceledAdmission();
 				// A loop repair is attempt n of the same logical work, so it enters
 				// the run ledger as one: recovery evidence, not a fresh observation.
 				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
@@ -1117,6 +1129,7 @@ async function runFleetHoldingWorkspace(
 				};
 			},
 			async runCode(step, _handoffs, signal, priorResults) {
+				refuseCanceledAdmission();
 				const command = input.commands?.commands.get(step.commandId);
 				if (command === undefined) throw new Error(`fleet code step '${step.id}' has no registered command`);
 				const isCommit = step.commitFrom !== undefined;

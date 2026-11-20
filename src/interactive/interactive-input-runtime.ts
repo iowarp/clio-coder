@@ -55,6 +55,7 @@ export interface InteractiveInputKeyActionDeps {
 	toggleAutonomy?: () => void;
 	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
+	clearDraft?: () => boolean;
 	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 	openQueueNavigator: () => void;
@@ -71,6 +72,8 @@ export interface InteractiveInputRuntimeDeps {
 	hasActiveEditorBash?: () => boolean;
 	explainSearchUnavailable?: () => void;
 	explainThinkingUnavailable?: () => void;
+	/** The clear-draft key emptied the composer; `undoKey` is the key that brings the draft back. */
+	noteDraftCleared?: (undoKey: string) => void;
 	keybindings: {
 		matches(data: string, id: Keybinding): boolean;
 		leaderTargets(): ReadonlyArray<LeaderTarget>;
@@ -241,6 +244,15 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		...(deps.actions.toggleAutonomy ? { toggleAutonomy: deps.actions.toggleAutonomy } : {}),
 		...(deps.actions.recordFeature ? { recordFeature: deps.actions.recordFeature } : {}),
 		openExternalEditor: deps.editorSubmit.openExternalEditorForInput,
+		clearDraft: () => {
+			if (deps.editor.getText().length === 0) return false;
+			// The editor's setText keeps an undo snapshot, pasted blocks included, so undo restores the draft whole.
+			deps.editor.setText("");
+			deps.noteDraftCleared?.(deps.keybindings.actionLabel?.("tui.editor.undo") ?? "Ctrl+_");
+			deps.refreshFooter();
+			deps.requestRender();
+			return true;
+		},
 		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
 		openQueueNavigator: deps.actions.openQueueNavigator,

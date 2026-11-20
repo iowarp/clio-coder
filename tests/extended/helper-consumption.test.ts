@@ -46,6 +46,19 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 	match(lines.join("\n"), /No validation receipt/);
 	match(lines.join("\n"), /factual accuracy is not measured/);
 	strictEqual(lines.length, 4);
+	// FX-4: a helper result still carries the run's work counters, so an edit task that changed nothing reads so.
+	const counted = compactHelperResultLines(
+		finishedRun({
+			...receipt,
+			toolActivity: { calls: 2, succeeded: 1, failed: 0, blocked: 1, mutatingSucceeded: false },
+		}),
+		PRODUCER_INTEGRITY,
+		1024,
+	);
+	match(
+		counted?.join("\n") ?? "",
+		/\n {2}work=calls:2 ok:1 failed:0 blocked:1 mutations:no\n {2}mutation_effect=none\n/u,
+	);
 	strictEqual(runHelperResult(finishedRun(receipt), { state: "failed", reason: "run seal failed" }), null);
 	for (const patch of [
 		{ exitCode: 1 },

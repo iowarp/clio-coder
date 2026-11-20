@@ -1,8 +1,9 @@
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
+import { redactSecretString } from "./redaction.js";
 
 /**
  * Absolute path of Clio's provider secret store, when resolvable. The policy
@@ -65,7 +66,11 @@ function nonEmptyMap(value: unknown): boolean {
  * Whether a config file holds a secret by the rule given, read from disk. A file YAML cannot parse counts when its
  * text names the field, so a broken file is not readable just for being broken.
  */
-function configFileHoldsSecret(file: string, field: RegExp, holds: (document: unknown) => boolean): boolean {
+function configFileHoldsSecret(
+	file: string,
+	field: (text: string) => boolean,
+	holds: (document: unknown) => boolean,
+): boolean {
 	let text: string;
 	try {
 		text = readFileSync(file, "utf8");
@@ -75,16 +80,38 @@ function configFileHoldsSecret(file: string, field: RegExp, holds: (document: un
 	try {
 		return holds(parseYaml(text));
 	} catch {
-		return field.test(text);
+		return field(text);
 	}
+}
+
+/** The copies Clio leaves beside settings.yaml (`.bak`, `.v1.bak`, an interrupted write), the names `settingsFileMasks()` covers. */
+function settingsCopies(config: string): string[] {
+	try {
+		return readdirSync(config)
+			.filter(
+				(name) => (name.startsWith("settings.yaml") && name !== "settings.yaml") || name.startsWith(".settings.yaml.tmp-"),
+			)
+			.sort()
+			.map((name) => path.join(config, name));
+	} catch {
+		return [];
+	}
+}
+
+/** Whether an MCP server's launch arguments carry a credential (`--token X`, `--api-key=X`, URL userinfo). */
+function argsHoldSecret(args: unknown): boolean {
+	if (!Array.isArray(args)) return false;
+	const line = args.filter((arg): arg is string => typeof arg === "string").join(" ");
+	return redactSecretString(line) !== line;
 }
 
 /**
  * The files that hold a secret now, as zero-access path entries, by the rules the sandbox masks them on: Clio's
- * settings.yaml and the copies beside it (`settingsFileMasks()`) when a target authenticates with `auth.headers`,
- * mcp.yaml when a server declares an `env` map, the one place a user-scope server's token goes, and the build-tool
- * settings `buildToolSecretPaths()` names. Otherwise all stay readable. A stat call per file and use; the files are
- * read again only when one changes.
+ * settings.yaml and the copies beside it (`settingsFileMasks()`) when a target authenticates with `auth.headers`, and
+ * any one of those copies that still holds such a target after the live file stopped (a `.bak` the configure editor
+ * kept); mcp.yaml when a server declares an `env` map or passes a credential in its `args`; and the build-tool
+ * settings `buildToolSecretPaths()` names. Otherwise all stay readable. A listing of the config directory and a stat
+ * call per file and use; the files are read again only when one changes.
  */
 export function conditionalSecretPaths(): string[] {
 	let config: string | null;
@@ -96,8 +123,14 @@ export function conditionalSecretPaths(): string[] {
 	const home = homedir();
 	const settings = config === null ? null : path.join(config, "settings.yaml");
 	const mcp = config === null ? null : path.join(config, "mcp.yaml");
-	const watched = [settings, mcp, ...BUILD_TOOL_CREDENTIAL_FILES.map(({ relative }) => path.join(home, relative))];
-	const signature = `${config}|${home}|${watched.map((file) => (file === null ? "-" : fileSignature(file))).join("|")}`;
+	const copies = config === null ? [] : settingsCopies(config);
+	const watched = [
+		settings,
+		mcp,
+		...copies,
+		...BUILD_TOOL_CREDENTIAL_FILES.map(({ relative }) => path.join(home, relative)),
+	];
+	const signature = `${config}|${home}|${copies.join("|")}|${watched.map((file) => (file === null ? "-" : fileSignature(file))).join("|")}`;
 	if (configSecretCache?.signature === signature) return configSecretCache.paths;
 	const paths: string[] = [];
 	if (settings !== null && mcp !== null) {
@@ -105,12 +138,19 @@ export function conditionalSecretPaths(): string[] {
 			yamlEntries(document, "targets").some((target) =>
 				nonEmptyMap((target as { auth?: { headers?: unknown } } | null)?.auth?.headers),
 			);
-		if (configFileHoldsSecret(settings, /\bheaders\s*:/u, headers)) {
+		const namesHeaders = (text: string) => /\bheaders\s*:/u.test(text);
+		if (configFileHoldsSecret(settings, namesHeaders, headers)) {
 			paths.push(path.join(config as string, "settings.yaml*"), path.join(config as string, ".settings.yaml.tmp-*"));
+		} else {
+			paths.push(...copies.filter((copy) => configFileHoldsSecret(copy, namesHeaders, headers)));
 		}
-		const env = (document: unknown) =>
-			yamlEntries(document, "servers").some((server) => nonEmptyMap((server as { env?: unknown } | null)?.env));
-		if (configFileHoldsSecret(mcp, /\benv\s*:/u, env)) paths.push(mcp);
+		const serverSecret = (document: unknown) =>
+			yamlEntries(document, "servers").some((server) => {
+				const entry = server as { env?: unknown; args?: unknown } | null;
+				return nonEmptyMap(entry?.env) || argsHoldSecret(entry?.args);
+			});
+		const namesServerSecret = (text: string) => /\benv\s*:/u.test(text) || redactSecretString(text) !== text;
+		if (configFileHoldsSecret(mcp, namesServerSecret, serverSecret)) paths.push(mcp);
 	}
 	paths.push(...buildToolSecretPaths(home));
 	configSecretCache = { signature, paths };

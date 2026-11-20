@@ -209,7 +209,7 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 			"clio-coder.editor.external": "Alt+G",
 		})[action] ?? null;
 	for (const width of [160, 200, 240]) {
-		const lines = buildWelcomeDashboardLines(stats, "0.5.7", width, "launchpad", 0, keyLabel).map(stripTerminalSequences);
+		const lines = buildWelcomeDashboardLines(stats, "0.5.7", width, "launchpad", keyLabel).map(stripTerminalSequences);
 		ok(lines.every((line) => visibleWidth(line) <= width));
 		const column = (text: string) => {
 			const row = lines.find((line) => line.includes(text));

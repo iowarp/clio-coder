@@ -501,3 +501,54 @@ function deleteHit(target: string, reason: string): YoloFloorHit {
 		reason: `matched ${id}: deletes or overwrites ${reason} (${target}); yolo never deletes the filesystem root, the home directory or an ancestor of it, or a system tree`,
 	};
 }
+
+/** One `CLIO_CODER_X=/literal/path` word: single-quoted, double-quoted or bare, with no expansion and no space. */
+const PINNED_ASSIGNMENT =
+	/^(CLIO_CODER_[A-Z0-9_]+)=(?:'(\/[^'\s]*)'|"(\/[^"$`\\!\s]*)"|(\/[\w./@%+,:=-]*))(?=[ \t;&\n]|$)/u;
+
+/** Shell words that can set a variable without naming it in the text, so a pin cannot be trusted past them. */
+const DYNAMIC_ASSIGNERS =
+	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
+
+/**
+ * The command with each `$CLIO_CODER_X` and `${CLIO_CODER_X}` replaced by the literal absolute path its leading
+ * statements pin it to (`export CLIO_CODER_HOME=/scratch/h; echo x > $CLIO_CODER_HOME/state/f`), so a write into a
+ * scratch Clio home is judged by the path it lands on rather than by the variable's name (CLI-H4). A pin counts only
+ * from statements at the very start that do nothing but assign literal paths, each name once, when the rest names
+ * that variable only to expand it and runs nothing that could set a variable without naming it (`eval`, `source`,
+ * `read`, `declare`, `export`, ...). Anything else returns the command unchanged, and the variable's name keeps
+ * reading as Clio's own tree. The substituted path then meets the same judgment as a literal one, so a pin to the
+ * operator's real Clio home is still a floor hit.
+ */
+export function pinnedClioCommand(command: string): string {
+	const pins = new Map<string, string>();
+	let rest = command;
+	for (;;) {
+		const statement = /^[ \t\n]*(?:export[ \t]+)?/u.exec(rest)?.[0] ?? "";
+		let cursor = rest.slice(statement.length);
+		const assigned: Array<[string, string]> = [];
+		for (;;) {
+			const match = PINNED_ASSIGNMENT.exec(cursor);
+			if (match === null) break;
+			const [word, name, single, double, bare] = match;
+			assigned.push([name as string, (single ?? double ?? bare) as string]);
+			cursor = cursor.slice(word.length).replace(/^[ \t]+/u, "");
+		}
+		const separator = /^(?:;|&&|\n)/u.exec(cursor)?.[0];
+		if (assigned.length === 0 || separator === undefined) break;
+		for (const [name, value] of assigned) {
+			if (pins.has(name)) return command;
+			pins.set(name, value);
+		}
+		rest = cursor.slice(separator.length);
+	}
+	if (pins.size === 0 || DYNAMIC_ASSIGNERS.test(rest)) return command;
+	let substituted = rest;
+	for (const [name, value] of pins) {
+		const named = rest.match(new RegExp(String.raw`\b${name}\b`, "gu"))?.length ?? 0;
+		const expanded = new RegExp(String.raw`\$\{${name}\}|\$${name}\b`, "gu");
+		if ((rest.match(expanded)?.length ?? 0) !== named) return command;
+		substituted = substituted.replace(expanded, value);
+	}
+	return `${command.slice(0, command.length - rest.length)}${substituted}`;
+}

@@ -50,7 +50,7 @@ import type { EditorChrome } from "./clio-editor.js";
 import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
-import { admissionHint } from "./context-operation-view.js";
+import { admissionHint, CONTEXT_KIND_TITLES } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
 import {
 	createDispatchBoardStore,
@@ -98,6 +98,7 @@ import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import { actionKeyLabel, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
 import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { QuotaProviders } from "./quota-view.js";
+import { railsFolded } from "./rails-budget.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSilenceTranscriptRow } from "./silence-row.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
@@ -860,6 +861,16 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			? { phase: activity.phase, startedAtMs: activity.startedAtMs }
 			: null;
 	};
+	/**
+	 * On a folded terminal the context rail gives up its rows, so the composer rail names the operation in its place.
+	 * Compaction already has the rail's own phase; the others would otherwise go unsaid.
+	 */
+	const foldedContextWords = (): string | null => {
+		if (!railsFolded(deps.terminal.rows ?? process.stdout.rows ?? 40)) return null;
+		const activity = contextActivityStore.current();
+		if (!activity || activity.completedAtMs !== null || activity.kind === "compaction") return null;
+		return `${CONTEXT_KIND_TITLES[activity.kind].toLowerCase()} running`;
+	};
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getTaskRail: (room) => {
@@ -879,7 +890,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
-			const detail = railDetail(currentLiveWork(), width);
+			const detail = [railDetail(currentLiveWork(), width), foldedContextWords()].filter(Boolean).join(" · ") || null;
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
 				const name = phaseModelName(status);
@@ -1320,6 +1331,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		{
 			mode: settings.interface?.mode ?? "regular",
 			fullscreenScrollbar: settings.interface?.fullscreenScrollbar ?? "auto",
+			getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
 			onTranscript: (view) => {
 				transcriptView = view;
 			},

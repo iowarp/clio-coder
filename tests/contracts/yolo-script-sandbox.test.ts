@@ -371,3 +371,31 @@ test("under bwrap a contained command reads no Kerberos ticket cache in a shared
 	const output = await runPlan(`${reads.join("; ")}; true`);
 	assert.doesNotMatch(output, /read:/u, output);
 });
+
+test("under bwrap a contained command writes a private tsx, jiti or Node compile cache, never the host's in a shared temp root", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-modcache-")));
+	t.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const workspace = join(scratch, "workspace");
+	const shared = join(scratch, "tmp");
+	for (const dir of [workspace, shared]) mkdirSync(dir);
+	const tsx = join(shared, `tsx-${process.geteuid?.() ?? ""}`);
+	mkdirSync(tsx);
+	writeFileSync(join(tsx, "entry"), '{"code":"console.log(1)"}');
+	const policy = resolveMainSandboxPolicy({ workspace, scratchRoots: [shared], clioDirs: [] });
+	const script = [tsx, join(shared, "jiti"), join(shared, "node-compile-cache")]
+		.map((dir) => `mkdir -p ${dir} && echo forged > ${dir}/entry && echo wrote:${dir}`)
+		.join("; ");
+	const plan = planMainSandboxSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
+	assert.equal(plan.kind, "sandboxed");
+	if (plan.kind !== "sandboxed") return;
+	const result = await run(plan.file, plan.args);
+	plan.afterExit();
+	assert.equal((result.output.match(/wrote:/gu) ?? []).length, 3, result.output);
+	assert.equal(readFileSync(join(tsx, "entry"), "utf8"), '{"code":"console.log(1)"}');
+	for (const dir of ["jiti", "node-compile-cache"]) assert.equal(existsSync(join(shared, dir, "entry")), false, dir);
+});

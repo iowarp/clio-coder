@@ -36,6 +36,7 @@ export interface ClioAppKeybindings {
 	"clio-coder.model.cycleForward": true;
 	"clio-coder.model.cycleBackward": true;
 	"clio-coder.editor.external": true;
+	"clio-coder.editor.clear": true;
 	"clio-coder.message.interrupt": true;
 	"clio-coder.message.dequeue": true;
 	"clio-coder.queue.open": true;
@@ -181,6 +182,15 @@ export const CLIO_APP_KEYBINDINGS = {
 		kind: "edit",
 		repeat: false,
 		leader: "g",
+	},
+	"clio-coder.editor.clear": {
+		// Ctrl+X: no pi editor action, no tty control character, and no default in tmux, screen, zellij or Herdr.
+		defaultKeys: "ctrl+x",
+		label: "Clear draft",
+		description: "Clear the whole draft; undo (Ctrl+_) brings it back",
+		scope: "composer",
+		kind: "edit",
+		repeat: false,
 	},
 	"clio-coder.dispatch.background": {
 		defaultKeys: [],

@@ -103,4 +103,53 @@ describe("arcade egg", () => {
 		session.close();
 		assert.equal(closed, 1);
 	});
+
+	it("steps aside while Clio waits on the operator and resumes where it stopped (TUI-17)", () => {
+		const shown: { hidden: boolean }[] = [];
+		const clock: { tick?: () => void } = {};
+		const running = new Set<number>();
+		let nextId = 0;
+		let waiting = false;
+		let pauses = 0;
+		const tui = {
+			terminal: { columns: 80, rows: 30 },
+			requestRender: () => {},
+			showOverlay: () => {
+				const entry = { hidden: false };
+				shown.push(entry);
+				return {
+					hide: () => {
+						entry.hidden = true;
+					},
+				};
+			},
+		};
+		const session = openArcadeOverlay(tui as never, {
+			needsOperator: () => waiting,
+			onPause: () => pauses++,
+			setInterval: ((fn: () => void) => {
+				clock.tick = fn;
+				running.add(++nextId);
+				return nextId;
+			}) as never,
+			clearInterval: ((id: number) => running.delete(id)) as never,
+		});
+		waiting = true;
+		assert.equal(session.resume(), true, "an open game has nothing to resume");
+		clock.tick?.();
+		assert.equal(session.isOpen(), false, "the approval or ask_user card gets the screen and the keys");
+		assert.equal(session.isPaused(), true);
+		assert.equal(shown[0]?.hidden, true);
+		assert.equal(running.size, 0, "the game clock stops while paused");
+		assert.equal(pauses, 1);
+		assert.equal(session.resume(), false, "it stays put while the operator is still needed");
+		waiting = false;
+		assert.equal(session.resume(), true);
+		assert.equal(session.isOpen(), true);
+		assert.equal(session.isPaused(), false);
+		assert.equal(shown.length, 2);
+		assert.equal(running.size, 1);
+		session.close();
+		assert.equal(running.size, 0);
+	});
 });

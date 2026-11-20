@@ -16,6 +16,7 @@ import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
 	appendClaims,
 	bindHostVerificationHypotheses,
+	CLAIMS_LOG_MAX_CLAIMS,
 	type ClaimRecord,
 	claimCheckLabel,
 	claimFromVerifyResult,
@@ -23,6 +24,7 @@ import {
 	claimSealReader,
 	claimStatuses,
 	claimsDeliveryMessage,
+	claimsEvicted,
 	claimsLogPath,
 	claimsProjectRoot,
 	contradictionConditions,
@@ -34,6 +36,7 @@ import {
 	overturnedAgreements,
 	readClaims,
 	recordAcceptedWorkerSlates,
+	recordClaims,
 	recordHostVerificationClaims,
 	snapshotAcceptedWorkerSlates,
 } from "../../src/domains/claims/index.js";
@@ -43,6 +46,7 @@ import {
 	approveMemoryRecord,
 	loadMemoryRecords,
 	type MemoryRecord,
+	proposeMemoryFromClaim,
 	readClearedMemoryRegressions,
 } from "../../src/domains/memory/index.js";
 import { memoryRecordEligible } from "../../src/domains/memory/operations.js";
@@ -351,6 +355,69 @@ describe("claims ledger (#406)", () => {
 				[claim.id],
 			);
 			assert.equal(read.unreadable, 1);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("evicts the oldest superseded claims nothing names or memory cites once recording crosses the count cap (MEM-3)", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const claimAt = (index: number, passed: boolean, commit: number) => {
+				const built = claimFromVerifyResult({
+					details: {
+						...numericDetails(passed, passed ? "passed" : "failed"),
+						checkout: { commit: commit.toString(16).padStart(40, "0"), trackedTreeClean: true },
+					},
+					project,
+					at: new Date(Date.UTC(2026, 10, 1) + index * 1000).toISOString(),
+					source,
+				});
+				assert.ok(built);
+				return built;
+			};
+			// The first two disagree at one commit, so a contradiction names both; each later commit supersedes the last.
+			const history = [claimAt(0, true, 0), claimAt(1, false, 0)];
+			for (let index = 2; index < CLAIMS_LOG_MAX_CLAIMS; index++) history.push(claimAt(index, true, index));
+			const edges = deriveClaimEdges({ claims: [], edges: [] }, history);
+			mkdirSync(join(clioStateDir(), "claims"), { recursive: true });
+			writeFileSync(
+				claimsLogPath(project),
+				`${[...history, ...edges].map((record) => JSON.stringify(record)).join("\n")}\n`,
+			);
+			const newest = claimAt(CLAIMS_LOG_MAX_CLAIMS, true, CLAIMS_LOG_MAX_CLAIMS);
+			// A memory record cites the oldest superseded claim, so it stays as the manual prune keeps it.
+			const citedClaim = history[2];
+			assert.ok(citedClaim);
+			await proposeMemoryFromClaim(clioDataDir(), {
+				claimId: citedClaim.id,
+				text: citedClaim.text,
+				check: "stats",
+				project,
+				at: citedClaim.at,
+			});
+			await recordClaims([newest], new Date("2026-11-19T00:00:00.000Z"));
+			const read = readClaims(project);
+			const ids = new Set(read.records.map((record) => record.id));
+			assert.equal(read.records.length, 3072);
+			assert.ok(ids.has(newest.id) && ids.has(history[0]?.id ?? "") && ids.has(history[1]?.id ?? ""));
+			assert.ok(ids.has(citedClaim.id), "a superseded claim a memory record cites is never evicted");
+			assert.equal(ids.has(history[3]?.id ?? ""), false, "the oldest superseded claim nothing names is evicted");
+			assert.ok(
+				read.edges.every((edge) => ids.has(edge.to)),
+				"an edge leaves with the claim it points at",
+			);
+			const statuses = claimStatuses(read.records, read.edges);
+			assert.equal(statuses.get(citedClaim.id), "superseded", "a kept claim stays superseded after its superseder goes");
+			assert.equal(statuses.get(history[1]?.id ?? ""), "superseded");
+			const evicted = claimsEvicted(project);
+			assert.equal(evicted?.claims, CLAIMS_LOG_MAX_CLAIMS + 1 - 3072);
+			const evictedText = readFileSync(evicted?.path ?? "", "utf8");
+			match(evictedText, new RegExp(history[3]?.id ?? "missing"));
+			assert.equal(evictedText.includes(citedClaim.id), false);
 		} finally {
 			env.restore();
 		}
