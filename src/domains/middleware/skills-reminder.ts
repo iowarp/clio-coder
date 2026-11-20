@@ -1,4 +1,4 @@
-import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
+import { SKILL_SUGGESTION_ANCHOR, skillActivationFromToolDetails } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import { workspaceStoreTags } from "../store/index.js";
@@ -94,11 +94,11 @@ function rankedSkillsReminder(
 		matches.length === 0
 			? []
 			: [
-					"[Skills] Likely workflows for this task. Choose only one that helps the current step; skip all if none fits. Respect tool and task restrictions.",
+					"[Skills] Likely workflows for this task; skip all if none fits. Respect tool and task restrictions.",
 					...lines,
 					modelActivation
-						? `Load the chosen name with ${load} and continue the task.`
-						: `Suggest \`${SKILL_SUGGESTION_ANCHOR}\` with the chosen name, then continue without waiting; only the operator loads a skill.`,
+						? `Load the one for the current step with ${load}; another may follow. Continue the task.`
+						: `Suggest \`${SKILL_SUGGESTION_ANCHOR}\` with the one for the current step; another may follow. Continue without waiting; only the operator loads a skill.`,
 				];
 	const names = capabilities.slice(0, 3).map((match) => match.id);
 	const store = !storeSignalled(capabilities)
@@ -204,6 +204,21 @@ export function isSubstantiveUserTurn(text: string | undefined): boolean {
 	return tokens.some((token) => !GREETING_WORDS.has(token));
 }
 
+/** How many distinct recent tool names join the stored task in the skills query (MD13). */
+const RECENT_TOOLS = 5;
+
+/**
+ * A turn whose text the operator wrote. A yolo continuation, a job's machine
+ * turn, a peer's message and a request continuation carry host or agent text,
+ * so the ranking keeps the operator's last task instead (MD13). A host that
+ * stamps no origin is read as the operator, as before origins existed.
+ */
+function operatorAuthoredTurn(input: { metadata?: Readonly<Record<string, unknown>> }): boolean {
+	if (input.metadata?.requestContinuation === true) return false;
+	const origin = input.metadata?.turnOrigin;
+	return origin === undefined || origin === "operator";
+}
+
 export function createSkillsReminderRegistration(deps: SkillsReminderDeps): MiddlewareHookRegistration {
 	// The first turn_start of a fresh session fires before the session is
 	// created, so sessionId can be null there; the spent flag tracks the
@@ -218,17 +233,51 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 	// mid-session": this flag carries that knowledge across the greeting turns.
 	let observedFreshStart = false;
 	let observedAnyTurn = false;
+	// Ranked hosts, per session: the operator's last substantive task, the last
+	// list delivered, the skills a tool result showed loaded, and recent tools.
 	let task = "";
-	let rankedIds = "";
-	let refinements = 0;
+	let deliveredIds = "";
+	const loadedSkills = new Set<string>();
+	let recentTools: string[] = [];
+
+	/** True when turn_start reports a different session than the one being tracked. */
+	const sessionChanged = (sessionId: string | null): boolean => {
+		// A fresh session's opening turn fires before the session is created
+		// (null id); the session is created during that turn, so the next turn
+		// carries the concrete id. That is the SAME session gaining an id, not a
+		// new one, so adopt the id without resetting; otherwise a greeting-first
+		// session would look brand new on its second turn.
+		if (lastSeenSessionId === undefined || (lastSeenSessionId === null && sessionId !== null)) {
+			lastSeenSessionId = sessionId;
+			return false;
+		}
+		if (sessionId === lastSeenSessionId) return false;
+		lastSeenSessionId = sessionId;
+		return true;
+	};
 
 	return {
 		id: SKILLS_REMINDER_REGISTRATION_ID,
 		description:
 			"suggests task-relevant workflows within the skill activation policy; continues a turn that stopped on a suggestion",
-		hooks: ["turn_start", "before_tool", "turn_end"],
+		hooks: ["turn_start", "after_tool", "turn_end"],
 		evidence: "rank:skills@task",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+			const ranked = deps.rankSkills !== undefined || deps.rankCapabilities !== undefined;
+			// Observation only: the tools the session just used and the skills a
+			// successful context load returned. Nothing is emitted at a tool boundary.
+			if (input.hook === "after_tool") {
+				const tool = input.toolName ?? "";
+				if (!ranked || tool.length === 0) return NO_EFFECTS;
+				// A gateway call is seen again under the capability it ran (nested), which names the step.
+				if (tool !== ToolNames.Gateway)
+					recentTools = [tool, ...recentTools.filter((name) => name !== tool)].slice(0, RECENT_TOOLS);
+				if (tool === ToolNames.Context && input.metadata?.resultKind === "ok") {
+					const activation = skillActivationFromToolDetails(input.toolResultDetails);
+					if (activation !== null) loadedSkills.add(activation.name);
+				}
+				return NO_EFFECTS;
+			}
 			const constraints = deps.getTurnConstraints?.();
 			const suppressed =
 				constraints?.mode === "answer" ||
@@ -255,21 +304,25 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 					return NO_EFFECTS;
 				}
 			}
-			if (deps.rankSkills || deps.rankCapabilities) {
-				if (input.hook === "turn_start") {
-					task = input.text ?? "";
-					rankedIds = "";
-					refinements = 0;
-					if ((metadataNumber(input, "pendingSkillRequests") ?? 0) > 0) task = "";
+			if (ranked) {
+				if (input.hook !== "turn_start") return NO_EFFECTS;
+				if (sessionChanged(input.sessionId ?? null)) {
+					task = "";
+					deliveredIds = "";
+					loadedSkills.clear();
+					recentTools = [];
 				}
-				if (
-					constraints?.mode === "answer" ||
-					constraints?.mode === "proposal" ||
-					!isSubstantiveUserTurn(task) ||
-					refinements >= 2
-				)
+				if (operatorAuthoredTurn(input)) {
+					// A greeting or acknowledgement keeps the task it follows and ranks nothing.
+					if (!isSubstantiveUserTurn(input.text)) return NO_EFFECTS;
+					task = input.text ?? "";
+					// The operator already chose a skill for this turn.
+					if ((metadataNumber(input, "pendingSkillRequests") ?? 0) > 0) return NO_EFFECTS;
+				}
+				if (constraints?.mode === "answer" || constraints?.mode === "proposal" || !isSubstantiveUserTurn(task))
 					return NO_EFFECTS;
-				const matches = suppressed ? [] : (deps.rankSkills?.(task) ?? []);
+				const query = recentTools.length > 0 ? `${task}\n${recentTools.join(" ")}` : task;
+				const matches = suppressed ? [] : (deps.rankSkills?.(query) ?? []).filter((match) => !loadedSkills.has(match.id));
 				const capabilities = turnAllowsTool(constraints, "gateway")
 					? (deps.rankCapabilities?.(task) ?? [])
 							.filter((match) => turnAllowsTool(constraints, match.id) && capabilityWorthNaming(match, task))
@@ -282,11 +335,11 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 					storeTags.slice(0, STORE_TAGS_NAMED),
 					storeTags.length,
 				]);
-				if ((matches.length === 0 && capabilities.length === 0) || ids === rankedIds) return NO_EFFECTS;
-				rankedIds = ids;
+				// The last delivered list is still in the conversation; an equal ranking adds nothing.
+				if ((matches.length === 0 && capabilities.length === 0) || ids === deliveredIds) return NO_EFFECTS;
 				const shown = deps.verifyRankedSkills?.(matches) ?? matches;
 				if (shown.length === 0 && capabilities.length === 0) return NO_EFFECTS;
-				refinements++;
+				deliveredIds = ids;
 				return [
 					{
 						kind: "inject_reminder",
@@ -303,20 +356,9 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 				];
 			}
 			if (input.hook !== "turn_start") return NO_EFFECTS;
-			const sessionId = input.sessionId ?? null;
-			if (lastSeenSessionId === undefined) {
-				lastSeenSessionId = sessionId;
-			} else if (lastSeenSessionId === null && sessionId !== null) {
-				// A fresh session's opening turn fires before the session is created
-				// (null id); the session is created during that turn, so the next
-				// turn carries the concrete id. That is the SAME session gaining an
-				// id, not a new one, so adopt the id without resetting — otherwise a
-				// greeting-first session would look brand new on its second turn.
-				lastSeenSessionId = sessionId;
-			} else if (sessionId !== lastSeenSessionId) {
+			if (sessionChanged(input.sessionId ?? null)) {
 				// A genuinely different session (new/resume/fork all route through a
 				// concrete id change): reset the per-session state.
-				lastSeenSessionId = sessionId;
 				spentForActiveSession = false;
 				observedFreshStart = false;
 				observedAnyTurn = false;
