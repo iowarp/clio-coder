@@ -2724,18 +2724,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						checkpointTokenFigures: (entry) => {
 							// The figures are taken just before the append, so the last entry asked about is the one written.
 							summaryRecordId = entry.turnId;
+							const stream = deps.readSessionEntries?.() ?? [];
+							const replayOptions = {
+								...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+								continuity: continuityContextFromSession(deps.session),
+							};
 							const messages = buildModelReplayAgentMessagesFromTurns(
-								[...(deps.readSessionEntries?.() ?? []), { ...entry, timestamp: new Date().toISOString() }],
-								{
-									...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-									continuity: continuityContextFromSession(deps.session),
-								},
+								[...stream, { ...entry, timestamp: new Date().toISOString() }],
+								replayOptions,
 							);
 							const tokensAfter = liveContextEstimate(agentRuntime, pendingUserText, messages).tokens;
+							// Both sides on one estimate (CLI-P4): the live figure, or the replaced replay at the route's ratio when the
+							// runtime does not hold that history (a reset), whichever is larger.
+							const replayBefore = liveContextEstimate(
+								agentRuntime,
+								pendingUserText,
+								buildModelReplayAgentMessagesFromTurns(stream, replayOptions),
+							).tokens;
 							const triggerTokens = route.triggerTokens(tokensAfter);
 							// A cut that still sits above the trigger states by how much, never as negative headroom (CTX-2).
 							return {
-								tokensBefore: footerTokensBefore,
+								tokensBefore: Math.max(footerTokensBefore, replayBefore),
 								tokensAfter,
 								headroomTokens: Math.max(0, triggerTokens - tokensAfter),
 								...(tokensAfter > triggerTokens ? { overTriggerTokens: tokensAfter - triggerTokens } : {}),

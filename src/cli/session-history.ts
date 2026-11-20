@@ -20,7 +20,8 @@
  *
  * compact (SPEC L3c) boots a headless session on `<s>` that sends no turn and runs the `/context compact` summarizer
  * once (`runHeadlessCompaction`). `before` and `after` count the entries the next resumed request replays; an exit 0
- * with `compacted: false` means the summarizer found nothing to cut, and its notice says why.
+ * with `compacted: false` means the summarizer found nothing to cut or a cut that would not have been smaller (the
+ * ledger is left as it was), and `reason` says why.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -443,6 +444,9 @@ function compactReport(
 	const compacted = after.checkpointTurnId !== null && after.checkpointTurnId !== before.checkpointTurnId;
 	// A notice explains an empty cut; beside a real one it is only boot chatter (an unknown window, a route note).
 	const notice = compacted ? "" : outcome.notices.join("\n");
+	// Why nothing was cut, such as a summary that would not have been smaller than the history it replaces (CLI-P4):
+	// the compaction's own notice, which comes after any boot chatter.
+	const reason = compacted ? "" : (outcome.notices.at(-1) ?? "nothing to compact");
 	return out(
 		{
 			sessionId,
@@ -450,6 +454,7 @@ function compactReport(
 			before: { entries: before.entries, tokens: compacted ? after.tokensBefore : null },
 			after: { entries: after.entries, tokens: compacted ? after.tokensAfter : null },
 			...(notice !== "" ? { notice } : {}),
+			...(reason !== "" ? { reason } : {}),
 		},
 		compacted
 			? `compacted ${sessionId}: ${before.entries} -> ${after.entries} replayed entries`

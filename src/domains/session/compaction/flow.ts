@@ -463,6 +463,13 @@ export async function runCompactionFlow(
 		let figures: ReturnType<NonNullable<CompactionFlowBudget["checkpointTokenFigures"]>> | undefined;
 		if (budget?.checkpointTokenFigures) {
 			figures = budget.checkpointTokenFigures(entry);
+			// The replay comparison above prices both sides at chars/4. The figures price them on the live estimate
+			// (anchored before, calibrated after), and a checkpoint that is not smaller there costs more than the history
+			// it replaces, so the original ledger stays (CLI-P4).
+			if (figures.tokensAfter >= figures.tokensBefore) {
+				closure.outcome = "discarded";
+				return { ...result, noGain: true };
+			}
 			entry.tokensBefore = figures.tokensBefore;
 			entry.tokensAfter = figures.tokensAfter;
 		}
