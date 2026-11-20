@@ -205,6 +205,16 @@ describe("contracts/DOG-001 doctor credential reads", () => {
 		strictEqual(finding.level, "warn");
 		strictEqual(finding.name, "credentials");
 		match(finding.detail, /ACL also grants BUILTIN\\Users \(run `clio-coder doctor --fix`/);
+		// FX-29: an explicit grant (no (I)) is named the same way, and a fix that removed it says so.
+		match(
+			windowsCredentialsFinding(file, { output: listing([...owned, "BUILTIN\\Users:(R)"]) }, account).detail,
+			/ACL also grants BUILTIN\\Users \(run/,
+		);
+		deepStrictEqual(windowsCredentialsFinding(file, { output: listing(owned) }, account, ["BUILTIN\\Users"]), {
+			ok: true,
+			name: "credentials",
+			detail: `${file}; removed BUILTIN\\Users from its ACL`,
+		});
 	});
 
 	it("reads the committed snapshot while a writer holds the lock without disturbing the writer", async () => {

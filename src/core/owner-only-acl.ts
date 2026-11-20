@@ -4,7 +4,8 @@
  * On win32 chmod(0o600) only clears the read-only attribute: the file keeps the
  * ACL it inherited from its directory, and outside the user profile that grants
  * BUILTIN\Users read and Authenticated Users modify. `applyOwnerOnlyAcl` breaks
- * inheritance and grants only the current account and SYSTEM; `readWindowsAcl`
+ * inheritance, grants only the current account and SYSTEM, removes any explicit
+ * grant another tool or a restore left behind, and checks the result; `readWindowsAcl`
  * and `extraAclPrincipals` let doctor say who else holds an ACE. Both system
  * tools run by absolute path without a shell, so a PATH entry or a file in the
  * working directory cannot stand in for them. Off win32 nothing runs.
@@ -68,10 +69,18 @@ export function currentWindowsAccount(exec: AclExec = runSystemTool): WindowsAcc
 	}
 }
 
+/** icacls takes a bare SID only with a `*` prefix; a name it resolves as listed. */
+function icaclsPrincipal(principal: string): string {
+	return /^S-1-[\d-]+$/iu.test(principal) ? `*${principal}` : principal;
+}
+
 /**
  * Replace the ACL of `path` with full control for the current account and
- * SYSTEM only, dropping every inherited ACE. Returns null when that worked or
- * the platform is not win32, otherwise why it failed; it never throws.
+ * SYSTEM only. `/inheritance:r` drops inherited ACEs and `/grant:r` replaces
+ * only the grants it names, so an explicit grant to anyone else survives both
+ * and is removed one principal at a time; the listing is then read back.
+ * Returns null when the file is owner-only or the platform is not win32,
+ * otherwise why it is not; it never throws.
  */
 export function applyOwnerOnlyAcl(path: string, host: AclHost = {}): string | null {
 	if ((host.platform ?? process.platform) !== "win32") return null;
@@ -80,8 +89,13 @@ export function applyOwnerOnlyAcl(path: string, host: AclHost = {}): string | nu
 		const account = currentWindowsAccount(exec);
 		const owner = account.sid !== null ? `*${account.sid}` : account.name;
 		if (owner === null) return "could not resolve the current Windows account";
-		exec(systemTool("icacls.exe"), [path, "/inheritance:r", "/grant:r", `${owner}:F`, `*${SYSTEM_SID}:F`]);
-		return null;
+		const icacls = systemTool("icacls.exe");
+		exec(icacls, [path, "/inheritance:r", "/grant:r", `${owner}:F`, `*${SYSTEM_SID}:F`]);
+		const extras = extraAclPrincipals(exec(icacls, [path]), path, account);
+		if (extras.length === 0) return null;
+		for (const principal of extras) exec(icacls, [path, "/remove:g", icaclsPrincipal(principal)]);
+		const left = extraAclPrincipals(exec(icacls, [path]), path, account);
+		return left.length === 0 ? null : `its ACL still grants ${left.join(", ")}`;
 	} catch (error) {
 		return oneLine(error);
 	}

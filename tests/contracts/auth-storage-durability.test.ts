@@ -13,6 +13,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { applyOwnerOnlyAcl } from "../../src/core/owner-only-acl.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { InMemoryAuthStorageBackend } from "../../src/domains/providers/auth/backend-memory.js";
 import {
@@ -213,6 +214,7 @@ describe("contracts/auth storage durability", () => {
 		deepStrictEqual(calls, [
 			["whoami.exe", ["/user", "/fo", "csv", "/nh"]],
 			["icacls.exe", [path, "/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:F", "*S-1-5-18:F"]],
+			["icacls.exe", [path]],
 		]);
 
 		calls.length = 0;
@@ -222,6 +224,58 @@ describe("contracts/auth storage durability", () => {
 		);
 		deepStrictEqual(calls, [], "POSIX keeps the chmod alone");
 		strictEqual(statSync(path).mode & 0o777, 0o600);
+	});
+
+	it("removes the explicit grants /grant:r leaves and fails when one survives (FX-29)", () => {
+		const file = "C:\\clio-acl\\config\\credentials.yaml";
+		const names: Record<string, string> = {
+			"*S-1-5-21-1-2-3-1001": "ZBOOK\\akougk",
+			"*S-1-5-18": "NT AUTHORITY\\SYSTEM",
+		};
+		// icacls as Windows applies it: /grant:r replaces only the grants it names.
+		const fakeIcacls = (removeWorks: boolean) => {
+			let aces = [
+				["BUILTIN\\Users", "(I)(RX)"],
+				["ZBOOK\\akougk", "(I)(F)"],
+				["BUILTIN\\Users", "(R)"],
+				["S-1-5-21-9-9-9-1234", "(M)"],
+				["Everyone", "(DENY)(W)"],
+			];
+			const calls: string[][] = [];
+			const exec = (program: string, args: readonly string[]): string => {
+				if (program.endsWith("whoami.exe")) return '"ZBOOK\\akougk","S-1-5-21-1-2-3-1001"\r\n';
+				calls.push(args.slice(1));
+				const [, op, ...rest] = args;
+				if (op === undefined)
+					return `${file} ${aces.map(([who, rights]) => `${who}:${rights}`).join(`\r\n${" ".repeat(file.length + 1)}`)}\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`;
+				if (op === "/inheritance:r") {
+					const granted = rest.slice(1).map((grant) => names[grant.slice(0, grant.lastIndexOf(":"))] ?? grant);
+					aces = aces.filter(([who, rights]) => !rights?.includes("(I)") && !granted.includes(who ?? ""));
+					aces.push(...granted.map((who) => [who, "(F)"]));
+				} else if (op === "/remove:g" && removeWorks) {
+					const gone = rest[0]?.replace(/^\*/u, "");
+					aces = aces.filter(([who, rights]) => who !== gone || rights?.includes("(DENY)"));
+				}
+				return "processed file\r\n";
+			};
+			return { exec, calls };
+		};
+
+		const icacls = fakeIcacls(true);
+		strictEqual(applyOwnerOnlyAcl(file, { platform: "win32", exec: icacls.exec }), null);
+		deepStrictEqual(icacls.calls, [
+			["/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:F", "*S-1-5-18:F"],
+			[],
+			["/remove:g", "BUILTIN\\Users"],
+			["/remove:g", "*S-1-5-21-9-9-9-1234"],
+			[],
+		]);
+
+		const stuck = fakeIcacls(false);
+		strictEqual(
+			applyOwnerOnlyAcl(file, { platform: "win32", exec: stuck.exec }),
+			"its ACL still grants BUILTIN\\Users, S-1-5-21-9-9-9-1234",
+		);
 	});
 
 	/**
