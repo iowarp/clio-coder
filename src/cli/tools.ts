@@ -14,6 +14,8 @@ import {
 	toolStatus,
 	toolStatuses,
 } from "../domains/toolchain/index.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder tools <command>
@@ -25,7 +27,10 @@ PATH wins over CLIO Coder's own as long as it clears the pinned minimum.
 
 Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
-  clio-coder tools status <id> [--json] [--reset-profile]  one tool in detail
+  clio-coder tools status <id> [--json]    one tool in detail
+  clio-coder tools reset-profile <id> [--json]  regenerate a tool's CLIO Coder profile on next
+                                           open (yazi); status --reset-profile is the
+                                           deprecated spelling
   clio-coder tools install claude-sdk      provision the separate Claude SDK component
   clio-coder tools install copilot-sdk     provision the separate GitHub Copilot SDK component
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
@@ -50,16 +55,27 @@ interface Parsed {
 	help: boolean;
 }
 
+/**
+ * A usage error: the C3 diagnostic on stderr and, under `--json`, the C6
+ * failure document on stdout. Every caller returns exit 2, as before.
+ */
+function usageFailure(command: string | undefined, slug: ErrorSlug, message: string, json: boolean): number {
+	writeCliFailure({ path: command === undefined ? ["tools"] : ["tools", command], slug, message, json });
+	return 2;
+}
+
 export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise<number> {
 	let parsed: Parsed;
 	try {
 		parsed = parse(argv);
 	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
-		process.stderr.write(HELP);
-		return 2;
+		const message = error instanceof Error ? error.message : String(error);
+		const command = argv.find((arg) => !arg.startsWith("-"));
+		return usageFailure(command, "unknown_flag", message, argv.includes("--json"));
 	}
 	if (parsed.help || parsed.command === undefined) {
+		// Bare `tools` keeps its v1 form, help on stdout and exit 2; C2's stderr
+		// placement would change stdout.
 		process.stdout.write(HELP);
 		return parsed.help ? 0 : 2;
 	}
@@ -67,8 +83,7 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 	// `--all` belongs to `remove` alone. Silently ignoring it elsewhere would let
 	// `tools install --all` read as a request that was honored.
 	if (parsed.all && parsed.command !== "remove") {
-		printError("--all is only valid with `tools remove`");
-		return 2;
+		return usageFailure(parsed.command, "flag_conflict", "--all is only valid with `tools remove`", parsed.json);
 	}
 
 	switch (parsed.command) {
@@ -76,7 +91,14 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			if (parsed.resetProfile) return invalidResetProfile();
 			return listTools(parsed.json);
 		case "status":
+			if (parsed.resetProfile)
+				process.stderr.write("clio-coder: deprecated: tools status --reset-profile; use tools reset-profile <id>\n");
 			return statusTool(parsed.positional[0], parsed.json, parsed.resetProfile);
+		case "reset-profile":
+			if (parsed.resetProfile || parsed.force) {
+				return usageFailure("reset-profile", "unknown_flag", "reset-profile takes only <id> and --json", parsed.json);
+			}
+			return resetProfile(parsed.positional, parsed.json);
 		case "install":
 			if (parsed.resetProfile) return invalidResetProfile();
 			if (parsed.positional[0] === "claude-sdk") {
@@ -118,10 +140,39 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			if (parsed.resetProfile) return invalidResetProfile();
 			return parsed.all ? removeAll(parsed.positional[0], parsed.json) : removeOne(parsed.positional[0], parsed.json);
 		default:
-			printError(`unknown tools command: ${parsed.command}`);
-			process.stderr.write(HELP);
-			return 2;
+			return usageFailure(undefined, "unknown_command", `unknown command: ${parsed.command}`, parsed.json);
 	}
+}
+
+/**
+ * `tools reset-profile <id>`: the state change `tools status --reset-profile`
+ * used to make from a read verb (A-06). A new leaf, so it follows C7 from the
+ * start: an id the registry does not know is `not_found`, exit 1.
+ */
+function resetProfile(positional: ReadonlyArray<string>, json: boolean): number {
+	const [id, extra] = positional;
+	if (id === undefined) return usageFailure("reset-profile", "usage", "name a tool: tools reset-profile <id>", json);
+	if (extra !== undefined) return usageFailure("reset-profile", "usage", `unexpected argument: ${extra}`, json);
+	if (findPinnedTool(id) === null) {
+		writeCliFailure({
+			path: ["tools", "reset-profile"],
+			slug: "not_found",
+			message: `unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`,
+			json,
+		});
+		return 1;
+	}
+	if (id !== "yazi")
+		return usageFailure("reset-profile", "usage", `${id} has no CLIO Coder profile; only yazi does`, json);
+	resetYaziProfile();
+	const profile = inspectCurrentYaziProfile();
+	if (json) {
+		process.stdout.write(`${JSON.stringify({ version: 1, id, profileReset: true, profile })}\n`);
+		return 0;
+	}
+	printOk("yazi profile reset; next open regenerates it");
+	process.stdout.write(`  profile     ${describeYaziProfile(profile)}\n`);
+	return 0;
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
@@ -175,7 +226,7 @@ function listTools(json: boolean): number {
 }
 
 function invalidResetProfile(): number {
-	printError("--reset-profile is only valid with `tools status yazi`");
+	printError("--reset-profile is only valid with `tools status yazi`; use `tools reset-profile yazi`");
 	return 2;
 }
 
