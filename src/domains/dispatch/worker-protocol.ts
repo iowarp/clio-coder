@@ -196,6 +196,7 @@ function workerSpecDigestOf(spec: unknown): string {
 export type WorkerChannelOperation =
 	| "steer"
 	| "permission_decision"
+	| "permission_hold"
 	| "spec"
 	| "ledger_delta"
 	| "admit"

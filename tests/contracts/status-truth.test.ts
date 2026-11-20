@@ -108,6 +108,13 @@ import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 import { createWorkerStream } from "../../src/session-control/worker-stream.js";
+import {
+	permissionHoldBackstopAt,
+	WORKER_APPROVAL_BACKSTOP_MARGIN_MS,
+	WORKER_PERMISSION_HOLD_LIMIT_MS,
+	WORKER_PERMISSION_HOLD_VERSION,
+	type WorkerPermissionHoldFrame,
+} from "../../src/worker/protocol.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 
 const STUCK_AFTER_MS = 180_000;
@@ -1111,7 +1118,7 @@ function manualWindows(denyResult = true) {
 	return {
 		windows,
 		denials,
-		open(requestId: string, windowMs = 120_000): void {
+		open(requestId: string, windowMs = 120_000, extend?: (holdMs: number) => boolean): void {
 			windows.open({
 				runId: "run",
 				agentId: "coder",
@@ -1122,6 +1129,7 @@ function manualWindows(denyResult = true) {
 					denials.push(requestId);
 					return denyResult;
 				},
+				...(extend !== undefined ? { extend } : {}),
 			});
 		},
 		advance(ms: number): void {
@@ -1165,6 +1173,40 @@ test("a key holds a worker window until its ceiling, not forever, and the worker
 	ok(workerApprovalBackstopMs(3_600_000) > 3_600_000, "a window past the ceiling still ends before the backstop");
 });
 
+test("a person still at a held worker card renews it only through a worker that moves its backstop, never past the limit", () => {
+	const rig = manualWindows();
+	const sent: number[] = [];
+	let honors = false;
+	rig.open("ask", 120_000, (holdMs) => {
+		if (honors) sent.push(holdMs);
+		return honors;
+	});
+	ok(rig.windows.hold("ask"));
+	rig.advance(5 * 60_000);
+	strictEqual(rig.windows.hold("ask"), false, "a worker that cannot extend keeps the first ceiling");
+	honors = true;
+	ok(rig.windows.hold("ask"), "a key renews the hold a ceiling away from now");
+	deepStrictEqual(sent, [WORKER_APPROVAL_HOLD_CEILING_MS], "the worker hears the new deadline before the window moves");
+	strictEqual(rig.windows.read("ask")?.remainingMs, WORKER_APPROVAL_HOLD_CEILING_MS);
+	strictEqual(rig.windows.read("ask")?.ceilingMs, 5 * 60_000 + WORKER_APPROVAL_HOLD_CEILING_MS);
+	rig.advance(30_000);
+	strictEqual(rig.windows.hold("ask"), false, "a renewal gaining under a minute sends nothing");
+	strictEqual(sent.length, 1);
+	let elapsed = 5 * 60_000 + 30_000;
+	while (rig.denials.length === 0 && elapsed < 2 * WORKER_PERMISSION_HOLD_LIMIT_MS) {
+		rig.advance(15_000);
+		elapsed += 15_000;
+		rig.windows.hold("ask");
+	}
+	deepStrictEqual(rig.denials, ["ask"], "however often renewed, the ask ends");
+	strictEqual(elapsed, WORKER_PERMISSION_HOLD_LIMIT_MS, "at the hold limit counted from the ask opening");
+	ok(
+		sent.every((ms) => ms <= WORKER_APPROVAL_HOLD_CEILING_MS),
+		"no renewal promises more than a ceiling from now",
+	);
+	ok(sent.length <= 60, `at most one hold frame a minute, sent ${sent.length}`);
+});
+
 test("an answered worker ask cannot be denied by its window afterwards", () => {
 	const rig = manualWindows();
 	rig.open("ask");
@@ -1201,6 +1243,44 @@ test("only a denial on the permission_decision line can carry the timeout cause"
 		{ requestId: "b", decision: "approve" },
 		{ requestId: "c", decision: "deny" },
 	]);
+});
+
+test("a permission_hold frame round-trips at its version and a worker's backstop for it stays bounded", () => {
+	const demux = createWorkerStdinDemux();
+	const holds: unknown[] = [];
+	demux.feed(`${JSON.stringify({ not: "a spec" })}\n`);
+	demux.readSpec().catch(() => {});
+	const frame: WorkerPermissionHoldFrame = {
+		type: "permission_hold",
+		version: WORKER_PERMISSION_HOLD_VERSION,
+		requestId: "ask",
+		holdMs: 900_000,
+	};
+	demux.feed(`${JSON.stringify(frame)}\n`);
+	strictEqual(demux.droppedLineCount(), 1, "a hold before its handler is dropped, not buffered");
+	demux.onPermissionHold((hold) => holds.push(hold));
+	demux.feed(`${JSON.stringify(frame)}\n`);
+	demux.feed(`${JSON.stringify({ ...frame, version: 2 })}\n`);
+	demux.feed(`${JSON.stringify({ ...frame, holdMs: WORKER_PERMISSION_HOLD_LIMIT_MS + 1 })}\n`);
+	demux.feed(`${JSON.stringify({ ...frame, holdMs: 0 })}\n`);
+	demux.feed(`${JSON.stringify({ ...frame, requestId: "" })}\n`);
+	deepStrictEqual(holds, [{ requestId: "ask", holdMs: 900_000 }]);
+	strictEqual(demux.droppedLineCount(), 5);
+	const margin = WORKER_APPROVAL_BACKSTOP_MARGIN_MS;
+	strictEqual(
+		permissionHoldBackstopAt({ openedAt: 0, now: 600_000, holdMs: 900_000, currentAt: 0 }),
+		1_500_000 + margin,
+	);
+	strictEqual(
+		permissionHoldBackstopAt({ openedAt: 0, now: 3_500_000, holdMs: 900_000, currentAt: 0 }),
+		WORKER_PERMISSION_HOLD_LIMIT_MS + margin,
+		"never past the limit counted from the ask opening",
+	);
+	strictEqual(
+		permissionHoldBackstopAt({ openedAt: 0, now: 0, holdMs: 1_000, currentAt: 2_000_000 }),
+		2_000_000,
+		"a hold never brings the backstop forward",
+	);
 });
 
 test("a worker's wait states when it ends, what happens then, and that it is held", () => {

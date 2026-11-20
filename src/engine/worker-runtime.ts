@@ -147,6 +147,7 @@ import { clearTaskGates, configureTaskGates, isTaskGateCall } from "../tools/ver
 import {
 	type AgentLedgerPort,
 	canonicalJson,
+	permissionHoldBackstopAt,
 	type WorkerExtensionHook,
 	type WorkerGrantRequestFrame,
 } from "../worker/protocol.js";
@@ -380,6 +381,13 @@ export interface WorkerRunHandle {
 		binding?: WorkerDecisionBinding,
 		cause?: "timeout",
 	): boolean;
+	/**
+	 * The parent that owns this ask's window answers within `holdMs`: move the
+	 * backstop to just past that, within the hold limit. Present on the same
+	 * runtimes as resolvePermission. Returns false when the ask is not the parked
+	 * one or the parent does not own its window.
+	 */
+	holdPermission?(requestId: string, holdMs: number): boolean;
 }
 
 export type WorkerEventEmit = (event: AgentEvent | ClioWorkerEvent) => void;
@@ -2399,6 +2407,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		 */
 		refusal?: WorkerRefusal;
 		timer: ReturnType<typeof setTimeout>;
+		/** Monotonic time the ask was opened, which bounds every hold. */
+		openedAt: number;
+		/** Monotonic time the timer fires. */
+		timerAt: number;
 	}
 	let activeEscalation: ActiveEscalation | null = null;
 	// Denied escalations, keyed by the exact call and permission conditions. A
@@ -2706,10 +2718,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// escalation the orchestrator never resolves. clearActiveEscalation
 			// clears it on every resolution path. A parent that owns the window
 			// answers first, so under one this is only the backstop.
-			const timer = setTimeout(
-				() => resolveEscalation(requestId, "deny", "timeout"),
-				escalationConfig.backstopMs ?? escalationConfig.timeoutMs,
-			);
+			const openedAt = performance.now();
+			const timerMs = escalationConfig.backstopMs ?? escalationConfig.timeoutMs;
+			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), timerMs);
 			activeEscalation = {
 				requestId,
 				tool: call.tool,
@@ -2721,6 +2732,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					? { refusal: describeWorkerRefusal(call, decision) }
 					: {}),
 				timer,
+				openedAt,
+				timerAt: openedAt + timerMs,
 			};
 			// The decider sees this exact call through a sanitized allowlisted
 			// preview of its object. Unlisted fields cross only as type-and-size
@@ -2978,5 +2991,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			binding?: WorkerDecisionBinding,
 			cause?: "timeout",
 		) => resolveDecision(requestId, decision, binding, cause),
+		holdPermission: (requestId: string, holdMs: number) => {
+			const active = activeEscalation;
+			// Without a backstop the worker's own timer is the window, and no parent may stretch it.
+			if (active === null || active.requestId !== requestId || escalationConfig?.backstopMs === undefined) return false;
+			const at = performance.now();
+			const timerAt = permissionHoldBackstopAt({ openedAt: active.openedAt, now: at, holdMs, currentAt: active.timerAt });
+			if (timerAt === active.timerAt) return true;
+			clearTimeout(active.timer);
+			active.timerAt = timerAt;
+			active.timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), timerAt - at);
+			return true;
+		},
 	};
 }

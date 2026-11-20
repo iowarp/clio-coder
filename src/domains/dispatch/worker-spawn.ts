@@ -1071,13 +1071,15 @@ function attachWorkerChannel(
 		const operation =
 			frameType === "permission_decision"
 				? "permission_decision"
-				: frameType === "ledger_delta"
-					? "ledger_delta"
-					: frameType === "admit"
-						? "admit"
-						: frameType === "hook_result"
-							? "hook_result"
-							: "steer";
+				: frameType === "permission_hold"
+					? "permission_hold"
+					: frameType === "ledger_delta"
+						? "ledger_delta"
+						: frameType === "admit"
+							? "admit"
+							: frameType === "hook_result"
+								? "hook_result"
+								: "steer";
 		// #425: receipt finalization can outlive process exit; late board updates are harmless no-ops.
 		if (!isAlive() || settled || abortStarted || leaderExit !== null) return false;
 		const stdin = child.stdin;

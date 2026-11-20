@@ -57,6 +57,7 @@ import {
 	toolSignatureOf,
 	WORKER_ADMISSION_WAIT_MS,
 	WORKER_HOOK_REQUEST_EVENT,
+	WORKER_PERMISSION_HOLD_VERSION,
 	WORKER_PROTOCOL_VERSION,
 	type WorkerHookEffect,
 	workerSpecDigest,
@@ -129,6 +130,7 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
 			wireModelId: spec.wireModelId,
 			toolSignature: toolSignatureOf(toolNames),
 			toolSchemaSignature: attestedToolSchemaSignature(toolNames),
+			permissionHold: WORKER_PERMISSION_HOLD_VERSION,
 			resources: observeWorkerResourceFacts(configuredNodeLabels()),
 		},
 	});
@@ -367,6 +369,12 @@ async function main(): Promise<number> {
 		const resolved = handle.resolvePermission?.(requestId, decision, binding, cause) ?? false;
 		if (!resolved) {
 			process.stderr.write(`[worker] dropped permission_decision for unknown request '${requestId}'\n`);
+		}
+	});
+	// A hold renewal moves the parked ask's backstop; one for an ask already answered changes nothing.
+	demux.onPermissionHold(({ requestId, holdMs }) => {
+		if (!(handle.holdPermission?.(requestId, holdMs) ?? false)) {
+			process.stderr.write(`[worker] dropped permission_hold for request '${requestId}'\n`);
 		}
 	});
 	// Parent monitor: the control channel closing after the spec means the

@@ -113,6 +113,47 @@ export interface WorkerAdmitFrame {
 }
 
 /**
+ * Version of the `permission_hold` stdin frame this build honors. A worker
+ * announces it in its attestation; a parent sends the frame only to a worker
+ * that announced this version, because an older one drops the line and its
+ * backstop would deny a hold the parent believed it extended.
+ */
+export const WORKER_PERMISSION_HOLD_VERSION = 1;
+
+/** The longest a held worker ask can wait, counted from when it was opened, however often the person renews the hold. */
+export const WORKER_PERMISSION_HOLD_LIMIT_MS = 60 * 60_000;
+
+/** How far a worker's backstop sits past the parent's latest possible answer, which also covers a backed-up event lane. */
+export const WORKER_APPROVAL_BACKSTOP_MARGIN_MS = 60_000;
+
+/**
+ * Stdin frame a parent that owns an ask's window writes when the person
+ * renews a hold past the worker's current backstop: the parent answers within
+ * `holdMs` from now, so the worker moves its backstop to just past that.
+ */
+export interface WorkerPermissionHoldFrame {
+	type: "permission_hold";
+	version: typeof WORKER_PERMISSION_HOLD_VERSION;
+	requestId: string;
+	holdMs: number;
+}
+
+/**
+ * Where a worker's backstop for a held ask moves to: just past the parent's
+ * promised answer, never past the hold limit counted from when the worker
+ * opened the ask, and never earlier than where it already stands.
+ */
+export function permissionHoldBackstopAt(input: {
+	openedAt: number;
+	now: number;
+	holdMs: number;
+	currentAt: number;
+}): number {
+	const promised = Math.min(input.now + input.holdMs, input.openedAt + WORKER_PERMISSION_HOLD_LIMIT_MS);
+	return Math.max(input.currentAt, promised + WORKER_APPROVAL_BACKSTOP_MARGIN_MS);
+}
+
+/**
  * One observable resource value. Unknown is a distinct state, never a zero or
  * an optimistic guess, so an active hard requirement can refuse it.
  */
@@ -167,6 +208,8 @@ export interface WorkerAttestation {
 	 * before it announces names only and is admitted on the name check alone.
 	 */
 	toolSchemaSignature?: string;
+	/** The `permission_hold` frame version this worker honors. Absent on a peer from before it, which is never sent one. */
+	permissionHold?: typeof WORKER_PERMISSION_HOLD_VERSION;
 	resources: WorkerResourceFacts;
 }
 
@@ -802,6 +845,8 @@ function parseAttestation(value: unknown): FrameParseResult<WorkerAttestation> {
 	if (schemaSignature !== undefined && (typeof schemaSignature !== "string" || !HEX_64.test(schemaSignature))) {
 		return { ok: false, reason: "announce toolSchemaSignature must be a sha256 hex digest" };
 	}
+	// Another version reads as none: this parent then never sends the worker a hold it may not honor.
+	const permissionHold = record.permissionHold === WORKER_PERMISSION_HOLD_VERSION;
 	return {
 		ok: true,
 		value: {
@@ -818,6 +863,7 @@ function parseAttestation(value: unknown): FrameParseResult<WorkerAttestation> {
 			wireModelId: record.wireModelId as string,
 			toolSignature: record.toolSignature as string,
 			...(schemaSignature !== undefined ? { toolSchemaSignature: schemaSignature } : {}),
+			...(permissionHold ? { permissionHold: WORKER_PERMISSION_HOLD_VERSION } : {}),
 			resources,
 		},
 	};
