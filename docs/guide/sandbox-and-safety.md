@@ -232,7 +232,7 @@ Native workers you dispatch run their commands in their own sandbox when the
 host has a backend. Without one, `auto` runs them unsandboxed and `required`
 refuses them. Subprocess and SDK runtimes, and workers on a `fleet.nodes`
 node, are not sandboxed by CLIO Coder. A sandboxed worker has no network
-unless `safety.sandboxNetwork` is on or it holds `web_fetch`; an MCP server it
+unless `safety.sandboxNetwork` is on or it holds `web_fetch` or `web_read`; an MCP server it
 starts reaches the network only with its own grant
 (`clio-coder mcp trust <id> --network`). Ordinary asks go to the same safety
 judge by default, and a worker cannot raise its own level.

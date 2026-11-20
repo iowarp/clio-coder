@@ -3148,6 +3148,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const telemetryShown = (state: WorkerEntryState, view: TelemetryView | null): string =>
 		`${state.runId}\0${workerTelemetryDisplay(view?.run(state.runId) ?? null)}`;
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
+	/**
+	 * The cards that render as one group: one dispatch call's, or for the operator's `/council`, whose dispatch has no
+	 * tool call id, one council's. Without it those members rendered as lone cards and no member's change reached the
+	 * row its round's header is cached on.
+	 */
+	const workerGroupKey = (state: WorkerEntryState): string | undefined =>
+		state.parentToolCallId ?? (state.council === undefined ? undefined : `council\u0000${state.council.group}`);
 	/** A dispatch call whose every card settled cancelled reads as stopped on its own row too. */
 	const markCancelledDispatch = (toolCallId: string | undefined): void => {
 		if (toolCallId === undefined) return;
@@ -3165,8 +3172,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (entry.role !== "worker") return {};
 		const view = options.getTelemetry?.() ?? null;
 		const telemetry = view?.run(entry.state.runId) ?? null;
-		const siblings =
-			entry.state.parentToolCallId === undefined ? undefined : dispatchGroups.get(entry.state.parentToolCallId);
+		const key = workerGroupKey(entry.state);
+		const siblings = key === undefined ? undefined : dispatchGroups.get(key);
 		const route = entry.state.runtime;
 		return {
 			telemetry,
@@ -4336,8 +4343,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// The reducer mutated the same state object this entry already holds,
 				// so nothing is re-linked; only the cached render is now stale.
 				invalidateEntryCache(existing);
-				const lead = state.parentToolCallId === undefined ? undefined : dispatchGroups.get(state.parentToolCallId)?.[0];
+				const key = workerGroupKey(state);
+				const group = key === undefined ? [] : (dispatchGroups.get(key) ?? []);
+				const lead = group[0];
 				if (lead !== undefined && lead !== existing) invalidateEntryCache(lead);
+				// A council round's header reads every member of the round, whichever card it sits on.
+				const council = state.council;
+				if (council !== undefined)
+					for (const member of group)
+						if (member !== existing && member.state.council?.round === council.round) invalidateEntryCache(member);
 				markCancelledDispatch(state.parentToolCallId);
 				markDirty();
 				return;
@@ -4349,11 +4363,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				telemetryShown: telemetryShown(state, options.getTelemetry?.() ?? null),
 			};
 			workerEntries.set(state.assignmentId, entry);
-			if (state.parentToolCallId !== undefined) {
-				const siblings = dispatchGroups.get(state.parentToolCallId) ?? [];
+			const groupKey = workerGroupKey(state);
+			if (groupKey !== undefined) {
+				const siblings = dispatchGroups.get(groupKey) ?? [];
 				for (const sibling of siblings) invalidateEntryCache(sibling);
 				siblings.push(entry);
-				dispatchGroups.set(state.parentToolCallId, siblings);
+				dispatchGroups.set(groupKey, siblings);
 			}
 			// The card is the run's row from here on: the call that spawned it drops
 			// the task and outcome it would otherwise state. A helper's `↳` row is

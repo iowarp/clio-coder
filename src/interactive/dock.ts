@@ -140,18 +140,21 @@ export const DOCK_COMPACT_ROWS = 6;
 /**
  * The most rows an adaptive surface may take: half the terminal when that is
  * more than the shared budget, never more than the terminal can hold, and never
- * less than what every other menu already gets.
+ * less than what every other menu already gets. A decision the operator has to
+ * read before answering (`fill`, the interview) takes every row the rails, the
+ * footer and a sliver of transcript leave, so its question is not read three
+ * lines at a time in a quarter-screen pane under an auto-pick timer.
  */
-export function dockGrowthRows(tui: object): number {
+export function dockGrowthRows(tui: object, fill = false): number {
 	const rows = terminalRows(tui);
 	const shared = dockBodyRows(tui);
 	const available = Math.max(DOCK_BODY_ROWS_MIN, rows - DOCK_RESERVED_ROWS - (footerHeights.get(tui) ?? 2));
-	return Math.max(shared, Math.min(Math.floor(rows / 2), available));
+	return Math.max(shared, fill ? available : Math.min(Math.floor(rows / 2), available));
 }
 
 /** An adaptive body's height for `wanted` content rows. */
-export function dockAdaptiveRows(tui: object, wanted: number): number {
-	const ceiling = dockGrowthRows(tui);
+export function dockAdaptiveRows(tui: object, wanted: number, fill = false): number {
+	const ceiling = dockGrowthRows(tui, fill);
 	return Math.max(Math.min(DOCK_COMPACT_ROWS, ceiling), Math.min(ceiling, Math.floor(wanted)));
 }
 

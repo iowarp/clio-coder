@@ -22,7 +22,11 @@ import {
 } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
+import { sideQuestionUsage } from "../../src/session-control/side-question.js";
 
 const context = { sessionId: "existing-session-id", agent: { role: "main" as const, id: "existing-session-id" } };
 const header: SegmentHeader = {
@@ -345,6 +349,96 @@ test("a settled breakdown keeps its measured zeros beside a larger total; only a
 	);
 	strictEqual(totalOnly.usage?.input.kind, "unknown");
 	deepStrictEqual(totalOnly.usage?.total, { kind: "measured", value: 500, source: "provider" });
+});
+
+test("declared target rates price the counts of a runtime that computed no cost, and unknown stays unknown (#434)", async () => {
+	// copilot-sdk marks its seeded zero total uncomputed and lists the counts it measured; rates are per million.
+	const cost = { total: 0, totalUncomputed: true };
+	const usage = { input: 3, output: 27, cacheRead: 9905, cacheWrite: 226, totalTokens: 10161, cost };
+	const rates = { input: 2, output: 8, cacheRead: 2, cacheWrite: 0 };
+	const copilot = (reportedFields: string[]) =>
+		callSettlementFromMessage(
+			{ stopReason: "stop", usage: { ...usage, reportedFields } },
+			{ pricedBy: "target-rates", rates },
+		).pricing;
+	deepStrictEqual(copilot(["input", "output", "cacheRead", "cacheWrite"]), {
+		usd: { kind: "measured", value: (3 * 2 + 27 * 8 + 9905 * 2) / 1_000_000, source: "local-count" },
+		pricedBy: "target-rates",
+	});
+	// A rated count the provider never reported cannot be priced; a zero-rated one does not matter.
+	strictEqual(copilot(["input", "output", "cacheWrite"]).usd.kind, "unknown");
+	strictEqual(copilot(["input", "output", "cacheRead"]).usd.kind, "measured");
+	// Handed no rates, an uncomputed total is never taken as the amount.
+	strictEqual(
+		callSettlementFromMessage(
+			{ stopReason: "stop", usage: { ...usage, reportedFields: ["input", "output"] } },
+			"target-rates",
+		).pricing.usd.kind,
+		"unknown",
+	);
+	// A Pi runtime computed its total from the declared rates, so it keeps that total, cache-read field omitted or not.
+	const pi = (extra: Record<string, unknown>, priced = { input: 2, output: 8, cacheRead: 0.2, cacheWrite: 0 }) =>
+		callSettlementFromMessage(
+			{ stopReason: "stop", usage: { input: 1000, output: 50, cacheRead: 0, cacheWrite: 0, ...extra } },
+			{ pricedBy: "target-rates", rates: priced },
+		).pricing;
+	deepStrictEqual(pi({ cacheReadField: "omitted", cost: { total: 0.0024 } }), {
+		usd: { kind: "measured", value: 0.0024, source: "local-count" },
+		pricedBy: "target-rates",
+	});
+	// With no total at all, an undeclared cacheWrite rate is the documented $0 for 1h writes; a declared one bills 2x input.
+	const longWrites = { cacheWrite: 100, cacheWrite1h: 100 };
+	const undeclared = pi(longWrites).usd;
+	strictEqual(undeclared.kind === "measured" && undeclared.value, (1000 * 2 + 50 * 8) / 1_000_000);
+	const declared = pi(longWrites, { input: 2, output: 8, cacheRead: 2, cacheWrite: 3 }).usd;
+	strictEqual(declared.kind === "measured" && declared.value, (1000 * 2 + 50 * 8 + 100 * 4) / 1_000_000);
+	// A provider's own cost outranks declared rates.
+	deepStrictEqual(pi({ cost: { total: 0.5, totalFromProvider: true } }), {
+		usd: { kind: "measured", value: 0.5, source: "provider" },
+		pricedBy: "provider",
+	});
+	// A side request (System One one-shot, safety judge) carries the same marks through sideQuestionUsage.
+	const settled: CallSettled[] = [];
+	const unsubscribe = telemetryHub().subscribe("call.settled", (payload) => {
+		settled.push(payload);
+	});
+	try {
+		const admit = createSideRequestAdmission({
+			providers: {
+				getTarget: () => ({ id: "side", runtime: "copilot-sdk", pricing: { input: 2, output: 8, cacheWrite: 3 } }) as never,
+			},
+			scheduling: { admitPaidRequest: async () => {} } as unknown as SchedulingContract,
+			getCeilingUsd: () => 0,
+			currentSession: () => "side-session",
+			repoIdentity: () => "side-repo",
+			telemetry: {
+				acquireTelemetrySession: async () => ({
+					journaled: true,
+					context: { sessionId: "side-session", agent: { role: "system-one", id: "side-session" } },
+					release: async () => {},
+				}),
+			} as unknown as TelemetryContract,
+		});
+		const side = async (raw: Record<string, unknown>) => {
+			(await admit({ targetId: "side", model: "m", signal: new AbortController().signal }))(sideQuestionUsage(raw), {
+				callOutcome: "success",
+			});
+			return settled.at(-1)?.pricing;
+		};
+		// copilot-sdk's placeholder cacheWrite is not promoted to measured, and its rate is declared: unknown.
+		const placeholder = { ...usage, cacheWrite: 0, reportedFields: ["input", "output", "cacheRead"] };
+		strictEqual((await side(placeholder))?.usd.kind, "unknown");
+		ok(
+			(await side({ ...placeholder, reportedFields: ["input", "output", "cacheRead", "cacheWrite"] }))?.usd.kind ===
+				"measured",
+		);
+		deepStrictEqual(await side({ input: 1000, output: 50, cost: { total: 0.5, totalFromProvider: true } }), {
+			usd: { kind: "measured", value: 0.5, source: "provider" },
+			pricedBy: "provider",
+		});
+	} finally {
+		unsubscribe();
+	}
 });
 
 test("message facts preserve unknown placeholders, explicit zero, terminal errors and unsent calls", () => {

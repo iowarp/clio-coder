@@ -14,6 +14,9 @@
  * retried here; the next cadence tick decides again.
  */
 
+import type { MemorySurfaceId } from "../../core/side-surfaces.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import type { EffectivePricing } from "../providers/catalog.js";
 import { calculatePricingCostUsd } from "../providers/catalog.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
@@ -38,7 +41,9 @@ export type BackgroundSkipReason =
 	| "quota_window"
 	| "quota_retry"
 	| "endpoint_busy"
-	| "time_budget";
+	| "time_budget"
+	/** The session's automatic memory spend is over `context.memory.sideShare` of its main spend. */
+	| "side_share";
 
 export const BACKGROUND_SKIP_REASONS: ReadonlySet<BackgroundSkipReason> = new Set([
 	"cost_ceiling",
@@ -47,6 +52,7 @@ export const BACKGROUND_SKIP_REASONS: ReadonlySet<BackgroundSkipReason> = new Se
 	"quota_retry",
 	"endpoint_busy",
 	"time_budget",
+	"side_share",
 ]);
 
 export interface BackgroundRouteFacts {
@@ -84,6 +90,8 @@ export interface BackgroundStepFacts {
 	session: { spendUsd: number; ceilingUsd: number };
 	/** The newest reading the quota domain holds for the route's account, or null when it holds none. */
 	quota: { snapshot: UsageSnapshot | null; stale: boolean; retryUntil: string | null } | null;
+	/** The side-share governor's facts for this call; absent where no session journal is read, which admits. */
+	sideShare?: SideShareFacts;
 	endpoint: {
 		/** Requests holding the endpoint now: foreground streams, worker leases and held reservations. */
 		occupied: number;
@@ -100,6 +108,9 @@ export type BackgroundStepDecision =
 
 export function decideBackgroundStep(facts: BackgroundStepFacts): BackgroundStepDecision {
 	const kind = backgroundRouteKind(facts.route);
+	// The governor refuses before any route check; it is decided here when the caller folded its facts.
+	if (facts.sideShare !== undefined && sideShareRefuses(facts.sideShare))
+		return { admit: false, kind, reason: "side_share" };
 	const admit = (timeoutMs: number): BackgroundStepDecision => ({ admit: true, kind, timeoutMs });
 	const skip = (reason: BackgroundSkipReason, resumeAt?: string | null): BackgroundStepDecision => {
 		// Providers write reset instants in their own ISO dialects; the ledger keeps one.
@@ -156,4 +167,118 @@ export function decideBackgroundStep(facts: BackgroundStepFacts): BackgroundStep
 			return neededMs > facts.timeoutCapMs ? skip("time_budget") : admit(Math.max(1, neededMs));
 		}
 	}
+}
+
+/**
+ * The side-share governor's view of one session (memory design 4.1). It is a governor, not a spend ceiling: the first
+ * {@link SIDE_SHARE_FREE_CALLS} automatic memory calls run, and later ones are refused while the session's memory output
+ * is over `share` of its main output. 15% is a design assumption, not a measured optimum.
+ */
+export interface SideShareFacts {
+	/** `context.memory.sideShare`; 0 turns the governor off. */
+	share: number;
+	/** False for a call the operator asked for (`SIDE_SHARE_EXEMPT`), which the governor never refuses. */
+	automatic: boolean;
+	/** Automatic memory calls this session already made, those in flight included. */
+	automaticCalls: number;
+	/** Settled memory output tokens, plus the request `maxTokens` of each call in flight or settled without usage. */
+	sideOutputTokens: number;
+	/** Settled main-role output tokens. */
+	mainOutputTokens: number;
+	/** Premium units of settled memory and main calls when the route reports them; null when none reported any. */
+	premium: { side: number; main: number } | null;
+}
+
+/** Automatic calls a session makes before the share applies. */
+export const SIDE_SHARE_FREE_CALLS = 3;
+
+/**
+ * Memory calls the operator asked for in that turn: the classifier after an explicit "remember" and the explicit
+ * consolidation pass. Everything automatic is governed, so the governor can refuse a call that would have helped.
+ */
+export const SIDE_SHARE_EXEMPT: ReadonlySet<MemorySurfaceId> = new Set(["memory.classify", "memory.consolidate"]);
+
+/**
+ * True when the governor refuses: past the free calls, and over the share on tokens or, when reported, premium units.
+ * Tokens: a zero main denominator admits only the free calls. Premium units refuse only when memory actually spent some:
+ * a 0x route reports zero units on every call, and zero memory units are never over any share.
+ */
+function sideShareRefuses(facts: SideShareFacts): boolean {
+	if (!(facts.share > 0) || !facts.automatic || facts.automaticCalls < SIDE_SHARE_FREE_CALLS) return false;
+	if (!(facts.mainOutputTokens > 0) || facts.sideOutputTokens / facts.mainOutputTokens > facts.share) return true;
+	const premium = facts.premium;
+	return premium !== null && premium.side > 0 && (!(premium.main > 0) || premium.side / premium.main > facts.share);
+}
+
+/** An admitted memory call this process holds until the journal shows it settled. */
+export interface SideShareHeld {
+	purpose: MemorySurfaceId;
+	/** The request's own output budget, charged while it is held. */
+	maxTokens: number;
+	/** The journaled call it is; null for one no journal records. */
+	callId: string | null;
+}
+
+/**
+ * Fold the governor's counters from the session's own call journal, so a resumed session continues its count, plus the
+ * calls this process holds. Only settled attempts are read from the journal, each once by attempt id: an attempt still
+ * open there is either held here, and counted once from `held`, or the call being decided, which never counts itself. A
+ * held call any of whose attempts the journal shows settled is counted from the journal and reported in `covered`. A
+ * never-sent attempt spent nothing and is not a call. A memory call is charged once: the measured output of its attempts,
+ * or, when none measured any (a 401 attempt and its retry included), its own request budget (`budgetOf`), never zero.
+ */
+export function foldSideShare(
+	records: readonly TelemetryRecord[],
+	held: readonly SideShareHeld[],
+	budgetOf: (callId: string) => number,
+): { facts: Omit<SideShareFacts, "share" | "automatic">; covered: SideShareHeld[] } {
+	const value = (fact: Fact<number> | undefined): number | null =>
+		fact !== undefined && (fact.kind === "measured" || fact.kind === "estimated") ? fact.value : null;
+	// A replayed or forked journal can repeat a settlement; the attempt id names it once.
+	const settled = new Map<string, TelemetryRecord<"call.settled">>();
+	for (const record of records) if (record.k === "call.settled") settled.set(record.data.attemptId, record);
+	const seen = new Set<string>();
+	const memoryCalls = new Map<string, { automatic: boolean; output: number | null }>();
+	let mainOutputTokens = 0;
+	const premium = { side: 0, main: 0 };
+	let premiumReported = false;
+	for (const record of settled.values()) {
+		const role = record.ctx.agent.role;
+		if (role !== "memory" && role !== "main") continue;
+		const data = record.data;
+		seen.add(data.callId);
+		if (data.disposition === "never_sent") continue;
+		const output = value(data.usage?.output);
+		const units = value(data.billing?.premiumRequests);
+		if (units !== null) premiumReported = true;
+		if (role === "main") {
+			mainOutputTokens += output ?? 0;
+			premium.main += units ?? 0;
+			continue;
+		}
+		premium.side += units ?? 0;
+		// A memory call journaled before purposes existed was automatic; only a named operator purpose is exempt.
+		const automatic = data.purpose === undefined || !SIDE_SHARE_EXEMPT.has(data.purpose as MemorySurfaceId);
+		const call = memoryCalls.get(data.callId) ?? { automatic, output: null };
+		if (output !== null) call.output = (call.output ?? 0) + output;
+		memoryCalls.set(data.callId, call);
+	}
+	let sideOutputTokens = 0;
+	let automaticCalls = 0;
+	for (const [callId, call] of memoryCalls) {
+		sideOutputTokens += call.output ?? budgetOf(callId);
+		if (call.automatic) automaticCalls += 1;
+	}
+	const covered = held.filter((call) => call.callId !== null && seen.has(call.callId));
+	const open = held.filter((call) => !covered.includes(call));
+	for (const call of open) sideOutputTokens += call.maxTokens;
+	return {
+		facts: {
+			automaticCalls: automaticCalls + open.filter((call) => !SIDE_SHARE_EXEMPT.has(call.purpose)).length,
+			sideOutputTokens,
+			mainOutputTokens,
+			premium: premiumReported ? premium : null,
+		},
+		covered,
+	};
 }

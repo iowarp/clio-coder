@@ -17,6 +17,11 @@ const FORCED: Readonly<Record<string, string>> = {
 	PYTHONUNBUFFERED: "1",
 };
 const PATH_FLAGS = new Set(["--gemini-dir", "--gemini_dir", "--app-data-dir", "--app_data_dir"]);
+const GEMINI_DIR_FLAGS = new Set(["--gemini-dir", "--gemini_dir"]);
+const APP_DATA_DIR_FLAGS = new Set(["--app-data-dir", "--app_data_dir"]);
+/** agy's defaults for a launch that names no profile flag: `~/.gemini` and `antigravity-cli` inside it. */
+const DEFAULT_GEMINI_DIR = ".gemini";
+const DEFAULT_APP_DATA_DIR = "antigravity-cli";
 
 interface OwnerMarker {
 	version: 1;
@@ -30,6 +35,8 @@ interface OwnerMarker {
 export interface AntigravityLaunch {
 	args: string[];
 	env: Record<string, string>;
+	/** agy's profile, `<gemini-dir>/<app-data-dir>` from the resolved args, which holds its `conversations/` store. */
+	profileDir: string;
 	/** Record the spawned agy pid in the owner marker, so a sweep waits for the child as well as for Clio. */
 	recordChild(pid: number | null): void;
 	/** Synchronous removal for a launch that never reached its run (transport creation threw). */
@@ -50,6 +57,19 @@ export function isAntigravityAcp(agent: DelegationAgentConfig): boolean {
 function expandHome(value: string, home: string | undefined): string {
 	if (home === undefined) return value;
 	return value === "~" ? home : value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
+}
+
+/** The last non-empty value given for one of `flags`, as `--flag value` or `--flag=value`; a consumed value is skipped. */
+function flagValue(args: ReadonlyArray<string>, flags: ReadonlySet<string>): string | undefined {
+	let value: string | undefined;
+	for (let index = 0; index < args.length; index++) {
+		const [flag, inline] = (args[index] ?? "").split(/=(.*)/su, 2);
+		if (flag === undefined || !flags.has(flag)) continue;
+		const given = inline ?? args[++index];
+		// A trailing flag or an empty value names no directory; agy's default stands.
+		if (given !== undefined && given.trim().length > 0) value = given;
+	}
+	return value;
 }
 
 /** Inode of this process's pid namespace on Linux; null where it cannot be read, which disables the sweep. */
@@ -133,6 +153,8 @@ async function sweepOrphans(root: string, namespace: string | null): Promise<voi
 export function prepareAntigravityLaunch(
 	agent: DelegationAgentConfig,
 	overlay: Record<string, string> = {},
+	/** The child's working directory, against which agy resolves a relative profile flag. */
+	cwd: string = process.cwd(),
 ): AntigravityLaunch {
 	const env: Record<string, string> = {};
 	for (const name of [...Object.keys(agent.env ?? {}), ...GENERATED_TOOL_ENV_KEYS]) {
@@ -146,6 +168,11 @@ export function prepareAntigravityLaunch(
 		if (inline !== undefined && flag !== undefined && PATH_FLAGS.has(flag)) return `${flag}=${expandHome(inline, home)}`;
 		return PATH_FLAGS.has(agent.args[index - 1] ?? "") ? expandHome(arg, home) : arg;
 	});
+	const profileDir = path.resolve(
+		cwd,
+		flagValue(args, GEMINI_DIR_FLAGS) ?? path.join(home ?? homedir(), DEFAULT_GEMINI_DIR),
+		flagValue(args, APP_DATA_DIR_FLAGS) ?? DEFAULT_APP_DATA_DIR,
+	);
 	// An entry TMPDIR relocates the Clio-owned root; the entry's directory itself is never scanned.
 	const root = ownedRoot(env.TMPDIR ? env.TMPDIR : tmpdir());
 	const namespace = pidNamespace();
@@ -175,6 +202,7 @@ export function prepareAntigravityLaunch(
 	return {
 		args,
 		env,
+		profileDir,
 		recordChild(pid) {
 			if (pid === null) return;
 			marker.childPid = pid;

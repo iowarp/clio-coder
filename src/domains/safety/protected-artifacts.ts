@@ -465,25 +465,55 @@ type ShellInvocation =
 	| { kind: "stdin" }
 	| { kind: "opaque" };
 
+/**
+ * Shells whose `-o` and `-O`, alone or anywhere in a flag cluster, take the next word as the option name. zsh reads
+ * `-opipefail` inline and takes no word for `-O`; ksh is not modelled, so a cluster naming an option there is opaque.
+ */
+const NEXT_WORD_OPTION_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "dash"]);
+
 function segmentShellInvocation(segment: ReadonlyArray<string>): ShellInvocation {
 	const commandIndex = commandTokenIndex(segment);
 	if (commandIndex === null) return { kind: "none" };
-	if (!INNER_SHELLS.has(basenameToken(segment[commandIndex]))) return { kind: "none" };
+	const shell = basenameToken(segment[commandIndex]);
+	if (!INNER_SHELLS.has(shell)) return { kind: "none" };
+	const nextWordOptions = NEXT_WORD_OPTION_SHELLS.has(shell);
 	for (let index = commandIndex + 1; index < segment.length; index += 1) {
 		const token = segment[index];
 		if (token === undefined) return { kind: "opaque" };
-		if (token === "-o" || token === "+o" || token === "-O" || token === "+O") {
+		if (token === "-o" || token === "+o" || (nextWordOptions && (token === "-O" || token === "+O"))) {
 			const option = segment[++index];
 			if (option === undefined || option.startsWith("-") || option.startsWith("+")) return { kind: "opaque" };
 			continue;
 		}
 		if (["--norc", "--noprofile", "--posix", "--login", "--restricted", "--verbose"].includes(token)) continue;
+		// `bash --version` prints and exits without running a script.
+		if (token === "--version" || token === "--help") return { kind: "none" };
 		if (token === "--rcfile" || token === "--init-file") return { kind: "opaque" };
 		if (/^[-+][a-zA-Z]+$/u.test(token)) {
-			if (!/^[-+][abCefhiklmnprstuvxBDEHILPTXc]+$/u.test(token)) return { kind: "opaque" };
-			if (token.startsWith("-") && token.slice(1).includes("c")) return { kind: "inline", script: segment[index + 1] };
+			const cluster = token.slice(1);
+			let flags = cluster;
+			let named = 0;
+			if (nextWordOptions) {
+				// bash and dash: each `o` or `O` in a cluster (`-euo pipefail`) takes the next word as its option name.
+				named = cluster.replace(/[^oO]/gu, "").length;
+			} else if (shell === "zsh") {
+				// zsh: `-o` takes the rest of its cluster as the option name (`-opipefail`), or the next word when it ends
+				// the cluster (`-eo pipefail`); `-O` is a flag (row 215).
+				const inline = cluster.indexOf("o");
+				if (inline >= 0) {
+					flags = cluster.slice(0, inline);
+					named = inline === cluster.length - 1 ? 1 : 0;
+				}
+			} else if (/[oO]/u.test(cluster)) return { kind: "opaque" };
+			if (!/^[abCefhiklmnoprstuvxBDEHILOPTXc]*$/u.test(flags)) return { kind: "opaque" };
+			if (named > 0 && flags.includes("c")) return { kind: "opaque" };
+			for (let taken = 0; taken < named; taken += 1) {
+				const option = segment[++index];
+				if (option === undefined || option.startsWith("-") || option.startsWith("+")) return { kind: "opaque" };
+			}
+			if (token.startsWith("-") && flags.includes("c")) return { kind: "inline", script: segment[index + 1] };
 			// `-s` reads the script from standard input even with operands.
-			if (token.startsWith("-") && token.slice(1).includes("s")) return { kind: "stdin" };
+			if (token.startsWith("-") && flags.includes("s")) return { kind: "stdin" };
 			continue;
 		}
 		if (token === "--")
@@ -493,15 +523,24 @@ function segmentShellInvocation(segment: ReadonlyArray<string>): ShellInvocation
 	return { kind: "stdin" };
 }
 
+/** The script files a command or line runs, and whether it also runs a script it does not name. */
+export interface ShellScriptRuns {
+	sources: ScriptSource[];
+	/** A script fed through a pipe, a here-document or here-string, `-s` or a startup option, or nested past the parse. */
+	unnamed: boolean;
+}
+
 /**
  * Script files a command runs through a shell, for the operator's yolo to scan
  * (#419): `bash x.sh`, `sh -e x.sh` and `bash < x.sh`, also inside an `sh -c`
- * script or a substitution. Null when some script cannot be named: one fed
- * through a pipe, a here-document, `-s` or a startup option keeps its ask.
+ * script or a substitution. A script it cannot name never hides one it names
+ * beside it (row 215). `home` stands in for a leading `~`, `$HOME` or
+ * `${HOME}` the shell expands, so a quoted `'$HOME/x'` stays literal.
  */
-export function shellScriptSources(command: string): ScriptSource[] | null {
+export function shellScriptSources(command: string, home?: string): ShellScriptRuns {
 	const sources: ScriptSource[] = [];
-	return collectScriptSources(command, 0, false, sources) ? sources : null;
+	const named = collectScriptSources(command, 0, false, sources, home);
+	return { sources, unnamed: !named };
 }
 
 /**
@@ -520,32 +559,48 @@ export interface ScriptSource {
 /**
  * The files one line of a scanned script runs (#419): what
  * {@link shellScriptSources} names, plus `source x`, `. x` and `exec` of a
- * shell or of a path. Null when the line runs a script it cannot name.
+ * shell or of a path, with `unnamed` set when the line also runs a script it cannot name.
  */
-export function scriptLineSources(line: string): ScriptSource[] | null {
+export function scriptLineSources(line: string): ShellScriptRuns {
 	const sources: ScriptSource[] = [];
-	return collectScriptSources(line, 0, true, sources) ? sources : null;
+	const named = collectScriptSources(line, 0, true, sources);
+	return { sources, unnamed: !named };
 }
 
 /** Options of `exec` that take the next word: `-a name`. */
 const EXEC_VALUE_OPTIONS: ReadonlySet<string> = new Set(["-a"]);
 
-function collectScriptSources(command: string, depth: number, sourced: boolean, sources: ScriptSource[]): boolean {
+/**
+ * Adds the scripts a command names to `sources`; false when it also runs one it does not name. Every segment is
+ * read either way, so `bash x.sh && cat y | bash` still names `x.sh` (row 215).
+ */
+function collectScriptSources(
+	command: string,
+	depth: number,
+	sourced: boolean,
+	sources: ScriptSource[],
+	home?: string,
+): boolean {
+	let named = true;
+	const nested = (script: string | undefined): void => {
+		if (script === undefined || depth >= INNER_SHELL_MAX_DEPTH) named = false;
+		else if (!collectScriptSources(script, depth + 1, sourced, sources, home)) named = false;
+	};
 	for (const segment of splitSegments(scanShellLike(command))) {
 		for (const token of segment) {
-			for (const substitution of token.substitutions ?? []) {
-				if (depth >= INNER_SHELL_MAX_DEPTH || !collectScriptSources(substitution, depth + 1, sourced, sources))
-					return false;
-			}
+			for (const substitution of token.substitutions ?? []) nested(substitution);
 		}
-		let argv = shellCommandArguments(segment);
+		let argv = shellCommandWords(segment).map((token) => homeExpanded(token, home));
 		if (sourced) {
 			const commandIndex = commandTokenIndex(argv);
 			const executable = commandIndex === null ? "" : basenameToken(argv[commandIndex]);
 			if (commandIndex !== null && (executable === "source" || executable === ".")) {
 				const operands = argv.slice(commandIndex + 1);
 				const target = operands[0] === "--" ? operands[1] : operands[0];
-				if (target === undefined || target.startsWith("-")) return false;
+				if (target === undefined || target.startsWith("-")) {
+					named = false;
+					continue;
+				}
 				sources.push({ path: target, program: false, sourced: true, stdin: false });
 				continue;
 			}
@@ -564,23 +619,43 @@ function collectScriptSources(command: string, depth: number, sourced: boolean, 
 		}
 		const invocation = segmentShellInvocation(argv);
 		if (invocation.kind === "none") continue;
-		if (invocation.kind === "opaque") return false;
-		if (invocation.kind === "file") sources.push({ path: invocation.path, program: false, sourced: false, stdin: false });
-		else if (invocation.kind === "inline") {
-			if (
-				invocation.script === undefined ||
-				depth >= INNER_SHELL_MAX_DEPTH ||
-				!collectScriptSources(invocation.script, depth + 1, sourced, sources)
-			)
-				return false;
-		} else {
-			const redirect = segment.findIndex((token) => token.operator && token.value === "<");
-			const target = redirect < 0 ? undefined : segment[redirect + 1];
-			if (target === undefined || target.operator) return false;
-			sources.push({ path: target.value, program: false, sourced: false, stdin: true });
+		if (invocation.kind === "opaque") named = false;
+		else if (invocation.kind === "file")
+			sources.push({ path: invocation.path, program: false, sourced: false, stdin: false });
+		else if (invocation.kind === "inline") nested(invocation.script);
+		else {
+			// A shell reading standard input runs a named script only when fd 0 last comes from `< file`; a pipe, a
+			// here-document or here-string, or a duplicated descriptor is a script the floor does not place (row 215).
+			const input = standardInputFile(segment);
+			if (input === null) named = false;
+			else sources.push({ path: homeExpanded(input, home), program: false, sourced: false, stdin: true });
 		}
 	}
-	return true;
+	return named;
+}
+
+/** The word a segment's last redirect of descriptor 0 opens when that redirect is `< file`, else null. */
+function standardInputFile(segment: ReadonlyArray<ShellToken>): ShellToken | null {
+	let input: ShellToken | null = null;
+	for (let index = 0; index < segment.length; index += 1) {
+		const operator = segment[index];
+		if (operator === undefined || !operator.operator || !SHELL_REDIRECTIONS.has(operator.value)) continue;
+		const previous = segment[index - 1];
+		const fd =
+			previous !== undefined &&
+			!previous.operator &&
+			!previous.quoted &&
+			previous.end === operator.start &&
+			/^\d+$/u.test(previous.value)
+				? previous.value
+				: operator.value.startsWith("<")
+					? "0"
+					: "1";
+		if (fd !== "0") continue;
+		const target = segment[index + 1];
+		input = operator.value === "<" && target !== undefined && !target.operator ? target : null;
+	}
+	return input;
 }
 
 /** Shell source that cannot be inspected must keep the one-shot confirmation rail. */

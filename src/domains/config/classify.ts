@@ -29,6 +29,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// The parked request re-reads the ceiling every 250 ms, and dispatch admission
 	// reads it per call, so a raise lifts a live wait (#424).
 	"safety.limits.sessionCostUsd",
+	// The main session reads it on every foreground bash call, so the next one observes a change (FX-32).
+	"safety.limits.bashIdleSeconds",
 	"chat.modelPicker",
 	// The keepalive reads it before every refresh, so a change applies to the next one (#423).
 	"chat.cacheKeepalive",
@@ -89,6 +91,10 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	// Reminders read it at each decision point; a running session's `# Memory` section stays as it was compiled, so a
 	// new session (or a resumed one recompiling its prompt) is the first to carry a changed section.
 	"context.memory.surfaces.delivery",
+	// The memory middleware and route read these at each trigger and each call; the next turn observes a change.
+	"context.memory.surfaces.correct",
+	"context.memory.surfaces.bank",
+	"context.memory.sideShare",
 	"turnControl",
 	// An engine resolves per call; the use that registers consult at startup is restart-required.
 	"systemOne",

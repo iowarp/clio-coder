@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import type { MemoryDeliveryMode } from "../../core/defaults.js";
+import type { MemoryDeliveryMode, MemorySurfaceSettings } from "../../core/defaults.js";
+import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { neutralizeFraming } from "../../core/reminder-framing.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { Fact } from "../../core/telemetry/fact.js";
@@ -188,6 +189,11 @@ export interface MemoryInterventionSettings {
 	windowSteps: number;
 	maxTokens: number;
 	timeoutMs: number;
+	/**
+	 * `context.memory.surfaces`: `model` arms the model step on its triggers; `rules` (the default) leaves that surface
+	 * to the deterministic tier. `correct` owns `tool_error_streak` and `loop_signal`, `bank` owns `interval`.
+	 */
+	surfaces?: Pick<MemorySurfaceSettings, "correct" | "bank">;
 }
 
 const CALL_DESCRIPTION_MAX_CHARS = 180;
@@ -261,6 +267,7 @@ const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
 	"quota_window",
 	"quota_retry",
 	"time_budget",
+	"side_share",
 	"client_error",
 	"information_flow_blocked",
 	"no_client",
@@ -300,6 +307,8 @@ export interface MemoryInterventionDeps {
 	maxTokens?: number;
 	timeoutMs?: number;
 	everyNTools?: number;
+	/** The model-tier switches when no live settings are read; absent fields take the shipped defaults. */
+	surfaces?: Partial<Pick<MemorySurfaceSettings, "correct" | "bank">>;
 	/** Lazily resolves the dedicated memory route or the active chat route. Null means rules-only. */
 	getModelClient?: () => TaskMemoryModelClient | null;
 	/** One alternative route after a client error; never used after timeout, cancellation or model output. */
@@ -910,7 +919,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			return launchPromptedStep(false);
 		},
 		signalLoop(): void {
-			if (!disposed && settings().enabled) pendingTriggers.add("loop_signal");
+			if (!disposed && settings().enabled && settings().surfaces.correct === "model") pendingTriggers.add("loop_signal");
 		},
 		lastDecision: () => lastDecision,
 		recentActivity: () => [...activity],
@@ -1299,7 +1308,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		}
 	}
 
-	function settings(): MemoryInterventionSettings {
+	function settings(): Required<MemoryInterventionSettings> {
 		const live = deps.getSettings?.();
 		return {
 			enabled: live?.enabled ?? deps.enabled ?? true,
@@ -1310,6 +1319,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			windowSteps: positiveInteger(live?.windowSteps ?? deps.windowSteps, MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS),
 			maxTokens: positiveInteger(live?.maxTokens ?? deps.maxTokens, MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS),
 			timeoutMs: positiveInteger(live?.timeoutMs ?? deps.timeoutMs, TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS),
+			surfaces: {
+				correct: live?.surfaces?.correct ?? deps.surfaces?.correct ?? DEFAULT_SETTINGS.context.memory.surfaces.correct,
+				bank: live?.surfaces?.bank ?? deps.surfaces?.bank ?? DEFAULT_SETTINGS.context.memory.surfaces.bank,
+			},
 		};
 	}
 
@@ -1784,13 +1797,16 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		toolsSinceLessonPass += 1;
 		if (prepared.toolName === ToolNames.Bash) shellStepsSinceLessonPass += 1;
 		const live = settings();
-		if (toolsSinceMemoryStep >= live.everyNTools) pendingTriggers.add("interval");
+		// The model tiers of bank maintenance and correction run only when their surface says `model`; the rules tier below
+		// (failure entries, repeated-failure annotation and reminder) runs either way.
+		if (live.surfaces.bank === "model" && toolsSinceMemoryStep >= live.everyNTools) pendingTriggers.add("interval");
 		if (outcome === "error") {
 			for (const watch of deliveries) {
 				if (watch.fingerprints.has(prepared.operationFingerprint)) watch.recurrences += 1;
 			}
 			consecutiveErrors += 1;
-			if (consecutiveErrors >= 2 && !operatorAskedRepeat) pendingTriggers.add("tool_error_streak");
+			if (live.surfaces.correct === "model" && consecutiveErrors >= 2 && !operatorAskedRepeat)
+				pendingTriggers.add("tool_error_streak");
 		} else {
 			consecutiveErrors = 0;
 		}

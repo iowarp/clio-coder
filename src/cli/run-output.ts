@@ -132,6 +132,25 @@ function limitationLine(item: string): string {
 	return chars.length > 400 ? `${chars.slice(0, 399).join("")}…` : plain;
 }
 
+/** The `Not verified:` block a run prints after its answer, one line per item; empty without items. */
+function notVerifiedBlock(items: ReadonlyArray<string>): string {
+	return items.length > 0 ? `\nNot verified:\n${items.map((item) => `- ${limitationLine(item)}`).join("\n")}\n` : "";
+}
+
+/**
+ * The `Not verified:` block for a main run's host-sealed completion facts: a run whose last observation calls the
+ * per-turn pool refused says so as an observation budget limit (CLI-P42). Empty when no such fact was sealed.
+ */
+export function sealedFactsNotVerified(facts: ReadonlyArray<string>): string {
+	return notVerifiedBlock(
+		facts.includes("observation_budget")
+			? [
+					"Observation budget: the per-turn observation pool refused the run's last observation calls (read, grep, find, ls, code_nav, context), so what they would have returned was not read.",
+				]
+			: [],
+	);
+}
+
 /**
  * The sealed result's own prose, for a native worker that delivered its answer
  * only through the result contract and wrote no assistant text (DF-6: a read-only
@@ -209,10 +228,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const executed = [...(verifier?.failedChecks ?? []), ...executedCodeFailures(receipt)];
 	const failedBlock =
 		executed.length > 0 ? `\nFailed checks:\n${executed.map((item) => `- ${limitationLine(item)}`).join("\n")}\n` : "";
-	const block =
-		limitations.length > 0
-			? `\nNot verified:\n${limitations.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
-			: "";
+	const block = notVerifiedBlock(limitations);
 	// The one exit for a headless answer, whichever of the streamed, last or sealed text it came from (#446).
 	// A person reading the run learns what went wrong in words before the machine line repeats the record's own detail.
 	const headline = receipt.exitCode !== 0 ? workerFailureHeadline(receipt.failureMessage) : null;

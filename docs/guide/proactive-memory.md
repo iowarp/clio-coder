@@ -471,6 +471,8 @@ Memory does not call a model after every tool. Signals accumulate and coalesce a
 a turn-end or native tool-batch boundary; at most one prompted step is started for
 that boundary, and it runs detached from it.
 
+The interval trigger runs only under `context.memory.surfaces.bank: model`, and the tool-error streak and loop signal only under `context.memory.surfaces.correct: model`; both default to `rules`, under which the repeated-failure and post-compaction rows below still run and make no model call.
+
 | Trigger | Behavior |
 | --- | --- |
 | Interval | After `context.memory.cadenceToolCalls` completed tools since the last prompted step; default 10. This is the nondeterministic, citation-gated path. |

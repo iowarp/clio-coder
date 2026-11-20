@@ -2247,6 +2247,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					const memory = context.memory;
 					issues.unknownKeys("context.memory", memory, [
 						"enabled",
+						"sideShare",
 						"observations",
 						"surfaces",
 						"target",
@@ -2260,6 +2261,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("enabled" in memory) {
 						const parsed = expectBoolean(issues, "context.memory.enabled", memory.enabled);
 						if (parsed !== undefined) settings.context.memory.enabled = parsed;
+					}
+					if ("sideShare" in memory) {
+						const parsed = expectNumber(issues, "context.memory.sideShare", memory.sideShare, { min: 0 });
+						if (parsed !== undefined) settings.context.memory.sideShare = parsed;
 					}
 					if ("observations" in memory) {
 						if (!isPlainObject(memory.observations)) issues.add("context.memory.observations", "expected a map");
@@ -2277,7 +2282,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!isPlainObject(memory.surfaces))
 							issues.add("context.memory.surfaces", `expected a map, got ${describe(memory.surfaces)}`);
 						else {
-							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe", "delivery"]);
+							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe", "delivery", "correct", "bank"]);
 							if ("observe" in memory.surfaces) {
 								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
 									"off",
@@ -2293,6 +2298,14 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 									"broadcast",
 								] as const);
 								if (parsed !== undefined) settings.context.memory.surfaces.delivery = parsed;
+							}
+							for (const key of ["correct", "bank"] as const) {
+								if (!(key in memory.surfaces)) continue;
+								const parsed = expectEnum(issues, `context.memory.surfaces.${key}`, memory.surfaces[key], [
+									"rules",
+									"model",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces[key] = parsed;
 							}
 						}
 					}
@@ -2535,6 +2548,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"autonomousToolCalls",
 						"autonomousMinutes",
 						"autonomousTokens",
+						"bashIdleSeconds",
 					]);
 					if ("sessionCostUsd" in limits) {
 						const parsed = expectNumber(issues, "safety.limits.sessionCostUsd", limits.sessionCostUsd, { min: 0 });
@@ -2550,7 +2564,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 1 });
 						if (parsed !== undefined) settings.safety.limits[key] = parsed;
 					}
-					for (const key of ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens"] as const) {
+					for (const key of ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens", "bashIdleSeconds"] as const) {
 						if (!(key in limits)) continue;
 						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 0 });
 						if (parsed !== undefined) settings.safety.limits[key] = parsed;

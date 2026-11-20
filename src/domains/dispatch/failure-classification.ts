@@ -263,7 +263,7 @@ export function classifyFailure(
 	// ACP model admission and 400/404 prompt verdicts reject the same request
 	// on every attempt. They do not indicate that the peer is unhealthy.
 	if (
-		/^acp delegation failed: acp peer (?:does not offer|offers multiple efforts for) requested model\b/.test(
+		/^acp delegation failed: acp peer (?:does not offer requested (?:model|thinking level)|offers multiple efforts for requested model)\b/.test(
 			diagnostic,
 		) ||
 		/^acp peer reported http (?:400|404):/.test(diagnostic) ||
@@ -301,7 +301,8 @@ export function classifyFailure(
 	if (httpStatus !== null && httpStatus >= 500 && httpStatus < 600) return "target-transient";
 	const message = providerMessageText(result, providerError);
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(message)) return "target-auth";
-	if (/\b429\b|rate[ -]?limit|too many requests/.test(message)) return "target-rate-limit";
+	if (/\b429\b|rate[ -]?limit|too many requests|^antigravity quota exhausted\b/m.test(message))
+		return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(message)) return "node-resource";
 	// Anthropic's overloaded_error is the provider's own load, not this node's capacity.
 	if (/overloaded_error/.test(message)) return "target-transient";

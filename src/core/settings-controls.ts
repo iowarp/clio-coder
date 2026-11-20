@@ -488,6 +488,9 @@ const MENU_ROWS = new Set([
 	"fleet.worktrees.root",
 	"context.memory.surfaces.observe",
 	"context.memory.surfaces.delivery",
+	"context.memory.surfaces.correct",
+	"context.memory.surfaces.bank",
+	"context.memory.sideShare",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -497,6 +500,7 @@ const MENU_ROWS = new Set([
 	"safety.limits.autonomousToolCalls",
 	"safety.limits.autonomousMinutes",
 	"safety.limits.autonomousTokens",
+	"safety.limits.bashIdleSeconds",
 	"safety.sandbox",
 	"safety.sandboxNetwork",
 	"safety.scratchRoots",
@@ -549,6 +553,8 @@ const CHOICES: Record<string, readonly string[]> = {
 	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"context.memory.surfaces.observe": ["off", "on"],
 	"context.memory.surfaces.delivery": ["off", "section", "decision", "broadcast"],
+	"context.memory.surfaces.correct": ["rules", "model"],
+	"context.memory.surfaces.bank": ["rules", "model"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -615,6 +621,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Yolo stretch tokens",
 		"Tokens one yolo stretch spends before it pauses for you to resume; 0 turns this cap off.",
 	],
+	"safety.limits.bashIdleSeconds": [
+		"Bash idle timeout",
+		"Seconds a foreground bash command may run with no output and no CPU use before it is stopped as idle; 0 turns this off.",
+	],
 	"context.semantic.enabled": [
 		"Semantic search",
 		"Make the optional project search index available to Clio after pinning a qualified embedding route.",
@@ -646,6 +656,18 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.surfaces.delivery": [
 		"Lesson delivery",
 		"Where kept lessons reach the model: off, the Memory section only, the section plus reminders at decision points (a failed command, a verification gap, a touched file, the turn's task), or those plus the first-change broadcast. Decision by default; memory_recall works in every mode.",
+	],
+	"context.memory.surfaces.correct": [
+		"Correction tier",
+		"Rules, the default, warns after a repeated failure with no model call. Model also asks the memory model after two tool errors in a row or a loop-guard block. Rules by default as a policy choice: the model tier was measured costing calls without producing reminders.",
+	],
+	"context.memory.surfaces.bank": [
+		"Task bank tier",
+		"Rules, the default, records failures and operator statements in the task bank with no model call. Model also asks the memory model to maintain the bank every cadence of tool calls. Rules by default as a policy choice: the model tier's product was rarely read.",
+	],
+	"context.memory.sideShare": [
+		"Memory side share",
+		"After three automatic memory calls, a session skips more while its memory output tokens (and premium units, where the route reports them) exceed this share of its main output. Calls you ask for, such as remember, are never skipped. 0 turns the governor off.",
 	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",

@@ -116,7 +116,9 @@ export function readScriptLine(reader: ScriptReader, shell: ScriptShell, line: s
 	// A loop body repeats and a function body runs at its call, so values and
 	// directories known here may not be the ones it sees; only HOME holds.
 	const deferred = context === "loop" || context === "function";
-	const vars = deferred ? new Map([["HOME", shell.vars.get("HOME") ?? homedir()]]) : shell.vars;
+	const home = shell.vars.get("HOME");
+	// A HOME the scan lost stays unknown here too, never the operator's (row 215).
+	const vars = deferred ? new Map<string, string>(home === undefined ? [] : [["HOME", home]]) : shell.vars;
 	return {
 		data: false,
 		context,

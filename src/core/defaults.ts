@@ -622,12 +622,30 @@ export interface MemorySurfaceSettings {
 	 * store, and `memory_recall` still reaches every layer.
 	 */
 	delivery: MemoryDeliveryMode;
+	/**
+	 * In-session correction after repeated failures. `rules` (the default) keeps the repeated-failure annotation and
+	 * turn-end reminder and makes no model call; `model` adds the model step on `tool_error_streak` and `loop_signal`.
+	 * Rules by default as a policy choice: 111 lane model calls produced no reminder.
+	 */
+	correct: "rules" | "model";
+	/**
+	 * Task-bank maintenance between folds. `rules` (the default) writes procedural entries from failures and knowledge
+	 * from operator statements; `model` adds the `interval` model step every `cadenceToolCalls` tools. Rules by default
+	 * as a policy choice: 818 lane model calls, a product read by restoration 11 times.
+	 */
+	bank: "rules" | "model";
 }
 
 export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
 
 export interface MemorySettings {
 	enabled: boolean;
+	/**
+	 * The side-share governor: after three automatic memory calls a session refuses more while its memory output is over
+	 * this share of its main output (and of its premium units, where the route reports them). 0 turns it off. A design
+	 * assumption, not a measured optimum.
+	 */
+	sideShare: number;
 	surfaces: MemorySurfaceSettings;
 	target: string | null;
 	model: string | null;
@@ -681,6 +699,11 @@ export interface SafetySettings {
 		autonomousMinutes: number;
 		/** Tokens one yolo stretch spends before it pauses; 0 is off. */
 		autonomousTokens: number;
+		/**
+		 * Seconds a main-session foreground bash call may go with no output and no CPU in its process tree before it
+		 * ends as an idle timeout (FX-32); 0 is off.
+		 */
+		bashIdleSeconds: number;
 	};
 	review: ReviewSettings;
 	/**
@@ -887,7 +910,8 @@ export const DEFAULT_SETTINGS = {
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
-			surfaces: { observe: "off", delivery: "decision" },
+			sideShare: 0.15,
+			surfaces: { observe: "off", delivery: "decision", correct: "rules", bank: "rules" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -925,6 +949,7 @@ export const DEFAULT_SETTINGS = {
 			autonomousToolCalls: 600,
 			autonomousMinutes: 120,
 			autonomousTokens: 5_000_000,
+			bashIdleSeconds: 0,
 		},
 		review: { enabled: false } as ReviewSettings,
 		sandbox: "auto" as SandboxMode,
@@ -1116,9 +1141,12 @@ context:
     provider: off
   memory:
     enabled: true
+    sideShare: 0.15
     surfaces:
       observe: off
       delivery: decision
+      correct: rules
+      bank: rules
     target: null
     model: null
     thinkingLevel: off
@@ -1160,6 +1188,9 @@ safety:
     autonomousToolCalls: 600
     autonomousMinutes: 120
     autonomousTokens: 5000000
+    # A foreground bash call with no output and no CPU in its processes for
+    # this many seconds ends as an idle timeout; 0 turns it off.
+    bashIdleSeconds: 0
   review:
     enabled: false
   # OS sandbox for shell commands: auto | required | off. Dispatched workers

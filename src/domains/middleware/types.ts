@@ -37,9 +37,15 @@ export type MiddlewareAnnotationSeverity = (typeof MIDDLEWARE_ANNOTATION_SEVERIT
  * A coordinator obligation still open when a turn ends (fleet design 4.3): an unvalidated mutation, a check whose last
  * outcome since the last change is red, a detached child run not yet collected, an open task-board item. A builtin
  * turn_end producer tags the reminder or continuation it already emits for one; the host lowers a declared `done` over
- * any of them to `partly_done`. Hooks files cannot declare it.
+ * any of them to `partly_done`. Hooks files cannot declare it. `observation_budget` is the host's own: a headless run
+ * whose last observation calls the pool refused, so what they would have read went unseen (CLI-P42).
  */
-export type CompletionFact = "unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task";
+export type CompletionFact =
+	| "unvalidated_mutation"
+	| "failed_check"
+	| "uncollected_run"
+	| "open_task"
+	| "observation_budget";
 
 export type MiddlewareEffect =
 	/**
@@ -225,7 +231,22 @@ export interface MiddlewareFiredRule {
 	effects: ReadonlyArray<MiddlewareEffect["kind"]>;
 	/** What the rule says triggered it, as `matcher:subject@scope`. */
 	evidence?: string;
+	/**
+	 * Set by the fired record when one of its effects settles ({@link SETTLING_EFFECT_KINDS}): the id its firing row
+	 * and its one `surface.settled` carry. Bookkeeping only; nothing reads it for a verdict (memory design 4.1).
+	 */
+	firingId?: string;
 }
+
+/**
+ * The effect kinds that cost a round or stop a call, so a firing that emits one settles with an outcome; a rule that
+ * only reminds, annotates or notifies is counted, not settled (memory design 4.6).
+ */
+export const SETTLING_EFFECT_KINDS: ReadonlySet<MiddlewareEffect["kind"]> = new Set([
+	"request_continuation",
+	"block_tool",
+	"lock_tools",
+]);
 
 export interface MiddlewareHookResult {
 	hook: MiddlewareHook;

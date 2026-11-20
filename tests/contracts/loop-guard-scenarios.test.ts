@@ -8,6 +8,7 @@ import type { ToolName } from "../../src/core/tool-names.js";
 import { type TurnConstraints, turnScopeGuidance } from "../../src/core/turn-constraints.js";
 import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import {
 	type CreateLoopGuardRegistrationOptions,
 	createLoopGuardRegistration,
@@ -414,6 +415,29 @@ test("loop guard block reasons restate a prior failure and name where the turn's
 			admitted: [true, true, true, false, false],
 			reasons: [["every", /this turn has made its 3 tool calls/u]],
 		},
+		{
+			name:
+				"two direct finish attempts called alone stay admitted past a spent budget; one beside an edit, a gateway-wrapped one or a third is refused (CLI-P43)",
+			guard: { turnToolCallBudget: () => ({ soft: 2, hard: 3 }) },
+			calls: [
+				...times(5, (index) => read(`${index}.md`)),
+				// One response: the finish would end the turn over its refused sibling.
+				{ tool: "edit", args: { path: "a.ts", edits: [] }, batch: "b1" },
+				{ tool: "finish", args: { state: "done" }, batch: "b1" },
+				{ tool: "finish", args: { state: "partly_done" } },
+				{ tool: "gateway", args: { op: "call", capability: "finish", args: { state: "done" } } },
+				{ tool: "finish", args: { state: "done", remaining: ["a"] } },
+				{ tool: "finish", args: { state: "done", remaining: ["b"] } },
+			],
+			admitted: [true, true, false, false, false, false, false, true, false, true, false],
+			reasons: [
+				[1, /passed the hard ceiling \(3\)/u],
+				[3, /passed the hard ceiling/u],
+				[4, /passed the hard ceiling/u],
+				[5, /passed the hard ceiling/u],
+				[6, /passed the hard ceiling/u],
+			],
+		},
 	];
 	for (const row of rows) check(row);
 });
@@ -622,5 +646,141 @@ test("template budget: min(template, max(operator, ceiling)) bounds the turn's c
 	} finally {
 		configureGuardrails(undefined);
 		env.restore();
+	}
+});
+
+test("loop guard read coverage: a grep between rereads keeps the count, a fold forgets what was shown (X5)", () => {
+	const read = (args: Record<string, unknown> = {}, shownCount = 40): MiddlewareHookInput => ({
+		hook: "after_tool",
+		turnId: "turn-1",
+		toolName: "read",
+		toolArgs: { path: "coverage.ts", offset: 1, limit: shownCount, ...args },
+		metadata: { resultKind: "ok", resultBytes: 1000 },
+		toolResultDetails: {
+			file: { bytes: 4000, mtimeMs: 1 },
+			observation: { tool: "read", unit: "lines", format: "text", shownCount, truncated: false },
+		},
+	});
+	const call = (toolName: string, toolArgs: Record<string, unknown>): MiddlewareHookInput => ({
+		hook: "before_tool",
+		turnId: "turn-1",
+		toolName,
+		toolArgs,
+		metadata: { callFingerprint: JSON.stringify([toolName, toolArgs]) },
+	});
+	const grep: MiddlewareHookInput = {
+		hook: "after_tool",
+		turnId: "turn-1",
+		toolName: "grep",
+		toolArgs: { pattern: "coverage" },
+		metadata: { resultKind: "ok", resultFingerprint: "coverage.ts:1" },
+	};
+	// Each keeps the file's size and mtime, so only the call itself can tell coverage it is stale.
+	const bash = (command: string): MiddlewareHookInput => ({
+		hook: "after_tool",
+		turnId: "turn-1",
+		toolName: "bash",
+		toolArgs: { command },
+		metadata: { resultKind: "ok" },
+	});
+	const fold = (stage: string): MiddlewareHookInput => ({
+		hook: "on_compaction",
+		turnId: "turn-1",
+		metadata: { stage },
+	});
+	let locks = 0;
+	// The main session's guard: block budget 3, same-call limit 2, synthesis lockout.
+	const main: Omit<CreateLoopGuardRegistrationOptions, "safety"> = {
+		readResultMaxBytes: () => 64 * 1024,
+		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
+		sameCallBlockLimit: INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
+		turnSynthesisLockout: true,
+		onSynthesisLockout: () => {
+			locks += 1;
+		},
+	};
+	const subranges = [5, 12, 30, 41, 77, 90, 120, 150].flatMap((offset) => [
+		call("read", { path: "coverage.ts", offset, limit: 10 }),
+		read({ offset }, 10),
+	]);
+	const rows: Array<{
+		name: string;
+		steps: MiddlewareHookInput[];
+		annotations: number;
+		guard?: Omit<CreateLoopGuardRegistrationOptions, "safety">;
+		also?: RegExp;
+	}> = [
+		{
+			name: "read, grep, read, grep, recall, read, grep, read of one range draws the annotation on the third reread",
+			steps: [read(), grep, read(), grep, fold("working_set_recall"), read(), grep, read()],
+			annotations: 1,
+		},
+		{
+			name: "read, working-set fold, then three rereads of the same range draw none",
+			steps: [read(), fold("working_set_evict"), read(), read(), read()],
+			annotations: 0,
+		},
+		{
+			name: "main session: one whole read then eight subranges annotates twice and never locks or blocks",
+			steps: [call("read", { path: "coverage.ts" }), read({}, 200), ...subranges, call("read", { path: "other.ts" })],
+			annotations: 2,
+			guard: main,
+		},
+		{
+			name: "four page ranges of one PDF are separate coverage",
+			steps: ["1-2", "3-4", "5-6", "7-8"].map((pages) => read({ pages })),
+			annotations: 0,
+		},
+		{
+			name: "four members of one archive are separate coverage",
+			steps: ["a.txt", "b.txt", "c.txt", "d.txt"].map((member) => read({ member })),
+			annotations: 0,
+		},
+		{
+			name: "a throwing cap getter turns coverage off and the rest of after_tool still runs",
+			steps: [call("read", { path: "coverage.ts" }), read(), read(), read(), read()],
+			annotations: 0,
+			guard: {
+				readResultMaxBytes: () => {
+					throw new Error("settings unavailable");
+				},
+				toolBudgetAdvisory: true,
+				toolCallSoftLimit: 1,
+			},
+			also: /Advisory tool estimate reached/,
+		},
+		...["sed -i 's/a/b/' coverage.ts", "cp -p backup.ts coverage.ts", "git checkout -- coverage.ts"].map((command) => ({
+			name: `${command} between rereads forgets coverage`,
+			steps: [read(), read(), bash(command), read(), read()],
+			annotations: 0,
+		})),
+	];
+	for (const row of rows) {
+		locks = 0;
+		// A getter cap, as the main session passes its live context.toolResultMaxBytes.
+		const guard = createLoopGuardRegistration({
+			safety: loopSafety(),
+			...(row.guard ?? { readResultMaxBytes: () => 64 * 1024 }),
+		});
+		const effects = row.steps.flatMap((step) => guard.evaluate(step));
+		const detail = `${row.name}: ${JSON.stringify(effects)}`;
+		const shown = effects.filter(
+			(effect) => effect.kind === "annotate_tool_result" && effect.message.includes("already shown"),
+		);
+		strictEqual(shown.length, row.annotations, detail);
+		// Advice, not a block: a model reads "loop detected" or "blocked" as a refusal (ACP-H5).
+		ok(
+			shown.every((effect) => effect.kind === "annotate_tool_result" && !/loop detected|blocked/i.test(effect.message)),
+			detail,
+		);
+		ok(!effects.some((effect) => effect.kind === "block_tool" || effect.kind === "lock_tools"), detail);
+		strictEqual(locks, 0, detail);
+		if (row.also !== undefined) {
+			const also = row.also;
+			ok(
+				effects.some((effect) => effect.kind === "annotate_tool_result" && also.test(effect.message)),
+				detail,
+			);
+		}
 	}
 });

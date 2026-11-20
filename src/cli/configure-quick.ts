@@ -23,7 +23,7 @@ import {
 	targetApiKeyRef,
 } from "./configure-target.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
-import { credentialWriteFailed } from "./shared.js";
+import { credentialFileProtection, credentialWriteFailed } from "./shared.js";
 
 interface Connection {
 	runtime: RuntimeDescriptor;
@@ -283,7 +283,7 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 				if (credentialWriteFailed(auth, "The key was not saved; connection settings were not changed."))
 					throw new Error("The key could not be saved. Check permissions on the credentials file and retry.");
 				presenter.warn(
-					"API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+					`API key stored unencrypted (${credentialFileProtection()}). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.`,
 				);
 			}
 			updateSettings(apply);

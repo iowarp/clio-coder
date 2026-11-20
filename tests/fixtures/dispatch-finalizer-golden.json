@@ -43,6 +43,7 @@
 					}
 				]
 			},
+			"answerBudgetBytes": 12000,
 			"targetId": "default",
 			"wireModelId": "gpt-4o",
 			"runtimeId": "openai",
@@ -1908,6 +1909,7 @@
 			"executionRole": "researcher",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
+			"answerBudgetBytes": 12000,
 			"targetId": "delegation:golden-peer",
 			"wireModelId": "golden-peer",
 			"runtimeId": "acp",

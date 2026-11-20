@@ -27,6 +27,7 @@ import {
 import { markHostAuthored } from "../core/message-accounting.js";
 import { EXPLORATION_TOOL_NAMES, READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
 import { systemReminderBlock, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
+import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	LoopBlockedDisposition,
@@ -129,6 +130,8 @@ export const ORCH_TURN_TOOL_CALL_HARD_MARGIN = 15;
 
 /** Bounded turn-id memory, matching the registry's dispatch-guard policy. */
 const LOOP_GUARD_TURN_LIMIT = 32;
+/** Direct `finish` attempts a turn may make past its spent tool-call budget (CLI-P43). */
+const FINISH_ATTEMPTS_PAST_BUDGET = 2;
 
 /** Bounded per-fingerprint success memory for the block-reason evidence anchor. */
 const SUCCEEDED_FINGERPRINT_LIMIT = 128;
@@ -172,6 +175,16 @@ const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
  * spellings of one inspection (an op alias, limit 20 or none) cannot dodge the
  * detector as ignored log fields once did (DF-4, DF-9).
  */
+/** The guard's events belong to the hook's own session or run, turn and tool call, whichever async context emits them. */
+function guardEventContext(input: MiddlewareHookInput) {
+	return ownerTelemetryContext({
+		sessionId: input.sessionId,
+		runId: input.runId,
+		turnId: input.turnId,
+		toolCallId: input.toolCallId,
+	});
+}
+
 function callIdentity(tool: string, args: Record<string, unknown> | undefined): string {
 	const git = tool === ToolNames.Git && args !== undefined ? gitCallIdentity(args) : null;
 	return hashToolCall(tool, git ?? args ?? {});
@@ -279,6 +292,14 @@ function gitConfigOnlyReads(words: ReadonlyArray<string>): boolean {
  * its options (Astra r2-4, SF-4).
  */
 function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
+	// `cd <one path>` reads nothing and writes nothing, so a cd-prefixed read stays a read (X1). Only the
+	// builtin counts: a bare `cd`, or one through `builtin` or `command`, with no leading assignment, since
+	// `./cd`, `env cd` or `sudo cd` runs a program, and no `$`, since an expansion such as `${X@P}` can run code.
+	const cd = input[0] === "cd" ? 1 : (input[0] === "builtin" || input[0] === "command") && input[1] === "cd" ? 2 : 0;
+	if (cd > 0) {
+		const operand = input[cd] ?? "-";
+		return input.length === cd + 1 && !operand.startsWith("-") && !operand.includes("$");
+	}
 	let words = input;
 	while (/^[A-Za-z_]\w*=/.test(words[0] ?? "")) words = words.slice(1);
 	for (let depth = 0; depth < 8; depth++) {
@@ -810,8 +831,8 @@ export function readOrchTurnToolCallBudget(): OrchTurnToolCallBudget {
 
 export interface CreateLoopGuardRegistrationOptions {
 	safety: SafetyContract;
-	/** Enables returned-read coverage only when the caller supplies its result-shaping cap. */
-	readResultMaxBytes?: number;
+	/** Enables returned-read coverage only when the caller supplies its result-shaping cap; a getter reads a live cap. */
+	readResultMaxBytes?: number | (() => number);
 	/** Orchestrator only: LoopBlocked events for the interactive layer. */
 	bus?: TelemetryHub;
 	/** Loop blocks tolerated per turn before the block reason announces a stop. */
@@ -981,6 +1002,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const identicalBlockStreakByTurn = new Map<string, { identity: string; count: number }>();
 	const unavailableChecks = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
+	/** Per turn: direct `finish` attempts admitted past a spent turn budget (CLI-P43). */
+	const finishesPastBudgetByTurn = new Map<string, number>();
 	/** Per turn: calls by effective tool (a gateway call counts as its capability), named in the budget refusal. */
 	const callsByToolByTurn = new Map<string, Map<string, number>>();
 	/**
@@ -1238,8 +1261,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// Any extension tool that did not declare itself read-only may have
 		// written, and so may any bash command that is not a plain read, and a
 		// typed git add or commit, direct or through the gateway (Astra r2-4).
-		// These re-key repeats only; the workspace epoch the registry's denial
-		// memory and read coverage key on still moves for file writes alone.
+		// These re-key repeats and forget read coverage; the workspace epoch the
+		// registry's denial memory keys on still moves for file writes alone.
 		const stateChange =
 			ok &&
 			input.toolName !== undefined &&
@@ -1268,10 +1291,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// Evicting an identity only raises its epoch, which admits more, never less.
 			bumpBoundedCounter(byIdentity, callIdentity(input.toolName, input.toolArgs), SUCCEEDED_FINGERPRINT_LIMIT);
 		}
-		if (!workspaceWrite) return false;
-		bumpBoundedCounter(mutationEpochByTurn, turnKey);
+		// Coverage keys on size and mtime, which a state change can keep
+		// (an equal-length sed -i in one mtime tick, cp -p, git checkout), and
+		// the guard cannot tell which paths a command touched, so forget it all.
 		readCoverage.clear();
 		redundantReadsByTurn.clear();
+		if (!workspaceWrite) return false;
+		bumpBoundedCounter(mutationEpochByTurn, turnKey);
 		return true;
 	};
 
@@ -1459,7 +1485,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 		};
-		options.bus?.emit("safety.loop_blocked", payload);
+		options.bus?.emit("safety.loop_blocked", payload, guardEventContext(input));
 	};
 
 	const emitBudgetEvent = (
@@ -1482,7 +1508,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			...(bound?.stepTool !== undefined ? { stepTool: bound.stepTool } : {}),
 			...(bound?.rolled === true ? { rolled: true as const } : {}),
 		};
-		options.bus?.emit("safety.tool_budget_exceeded", payload);
+		options.bus?.emit("safety.tool_budget_exceeded", payload, guardEventContext(input));
 	};
 
 	/**
@@ -1819,6 +1845,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			redundantReadsByTurn.delete(turnKey);
 			return [];
 		};
+		// Only a read that may have shown new lines ends a redundant run: a
+		// grep between two rereads of one range is still a reread (X5). A
+		// failed read showed nothing; an ok read this guard cannot measure may
+		// have shown new lines, so it resets.
+		if (input.toolName !== ToolNames.Read || input.metadata?.resultKind !== "ok") return [];
 		const details = input.toolResultDetails;
 		const file = details?.file as { bytes?: unknown; mtimeMs?: unknown } | undefined;
 		const observation = details?.observation as
@@ -1829,15 +1860,21 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const resultBytes = input.metadata?.resultBytes;
 		// after_tool precedes the registry's final shaping pass. If that pass
 		// could shorten the source, its pre-shaping line count is not evidence.
-		const deliveredCap = Math.min(options.readResultMaxBytes ?? 0, resolveGuardrail("readMaxBytes"));
+		// A getter that throws turns coverage off for this read, not the rest of after_tool.
+		let shapingCap: number | undefined;
+		try {
+			shapingCap =
+				typeof options.readResultMaxBytes === "function" ? options.readResultMaxBytes() : options.readResultMaxBytes;
+		} catch {
+			return reset();
+		}
+		const deliveredCap = Math.min(shapingCap ?? 0, resolveGuardrail("readMaxBytes"));
 		if (
 			!Number.isFinite(deliveredCap) ||
 			deliveredCap <= 0 ||
 			typeof resultBytes !== "number" ||
 			!Number.isFinite(resultBytes) ||
 			resultBytes > deliveredCap ||
-			input.toolName !== ToolNames.Read ||
-			input.metadata?.resultKind !== "ok" ||
 			typeof path !== "string" ||
 			input.toolArgs?.tail !== undefined ||
 			typeof offset !== "number" ||
@@ -1869,7 +1906,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		} catch {
 			return reset();
 		}
-		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}`;
+		// A PDF page range or an archive member renders its own numbered lines, so
+		// each is separate coverage, keyed as read normalizes them.
+		const pages = input.toolArgs?.pages;
+		const member = input.toolArgs?.member;
+		const document = JSON.stringify([
+			typeof pages === "string" && pages.trim().length > 0 ? pages : null,
+			typeof member === "string" && member.length > 0 ? member : null,
+		]);
+		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}\0${document}`;
 		let entry = readCoverage.get(key);
 		if (!entry || entry.bytes !== file.bytes || entry.mtimeMs !== file.mtimeMs) {
 			entry = { bytes: file.bytes, mtimeMs: file.mtimeMs, ranges: [] };
@@ -1897,14 +1942,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (!redundant) return reset();
 		const streak = bumpBoundedCounter(redundantReadsByTurn, turnKey);
 		if (streak < RESULT_STAGNATION_THRESHOLD || lockoutByTurn.has(turnKey)) return [];
-		const reason = `loop detected: ${streak} consecutive read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`;
-		// The read already ran and remains successful. Reuse the existing loop
-		// budget/lock transition, delivering its reason as a result annotation.
-		return blockAsLoop(input, turnKey, ToolNames.Read, streak, reason, options.now?.() ?? Date.now()).map((effect) =>
-			effect.kind === "block_tool"
-				? { kind: "annotate_tool_result" as const, message: effect.reason, severity: "warn" as const }
-				: effect,
-		);
+		// The read already ran and remains successful. The threshold is an
+		// annotation (DESIGN 3.5): it spends no loop block budget and cannot
+		// lock the turn, and the count starts over once it fires. The text is
+		// advice: wording a model can read as a block makes it report one (ACP-H5).
+		redundantReadsByTurn.delete(turnKey);
+		return [
+			{
+				kind: "annotate_tool_result",
+				message: "These lines were already shown in this turn; reuse them unless the file changed.",
+				severity: "warn",
+			},
+		];
 	};
 
 	// Read's typed EOF result proves that changing offsets cannot reveal more
@@ -1958,7 +2007,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
 			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
-		hooks: ["before_tool", "after_tool"],
+		hooks: ["before_tool", "after_tool", "on_compaction"],
 		evidence: "count:repeated-call@tool-args",
 		callCount: () => count,
 		turnMeter: (settledSinceSubmit, fallbackBudget) => {
@@ -1995,6 +2044,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			return true;
 		},
 		evaluate(hookInput): ReadonlyArray<MiddlewareEffect> {
+			if (hookInput.hook === "on_compaction") {
+				// A fold removed results whose lines coverage counts as shown, so a
+				// later reread is not redundant (X5). A recall only adds context, and
+				// a superseded result leaves the later identical call's lines in place.
+				const stage = hookInput.metadata?.stage;
+				if (stage !== "working_set_recall" && stage !== "superseded") {
+					readCoverage.clear();
+					redundantReadsByTurn.clear();
+				}
+				return [];
+			}
 			// A nested invocation (the gateway calling the capability the model
 			// asked for) is the same model call the outer gateway occurrence
 			// already counted and fingerprinted. Counting it again would spend
@@ -2158,6 +2218,24 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const chainWrapper = isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs);
 			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> => {
 				if (rejudge) return [];
+				// A run that spent its turn's calls can still declare how it ended: a direct `finish` called alone past the soft
+				// budget or the hard ceiling runs and spends nothing, at most FINISH_ATTEMPTS_PAST_BUDGET times a turn, so an
+				// invalid or varying declaration cannot spin. A gateway-wrapped finish cannot run, and a finish in a wider
+				// batch would end the turn over its refused siblings, so both count as any call does; the repeat and
+				// stagnation detectors still see every attempt (CLI-P43).
+				const batched = typeof input.metadata?.batchSize === "number" && input.metadata.batchSize > 1;
+				if (hookInput.toolName === ToolNames.Finish && !batched) {
+					const soft = resolveTurnBudget(input)?.budget.soft;
+					const spent = callsByTurn.get(turnKey) ?? 0;
+					if (
+						soft !== undefined &&
+						spent >= soft &&
+						(finishesPastBudgetByTurn.get(turnKey) ?? 0) < FINISH_ATTEMPTS_PAST_BUDGET
+					) {
+						bumpBoundedCounter(finishesPastBudgetByTurn, turnKey);
+						return [];
+					}
+				}
 				if (chainWrapper) {
 					const soft = resolveTurnBudget(input)?.budget.soft;
 					if (

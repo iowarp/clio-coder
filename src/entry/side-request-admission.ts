@@ -152,17 +152,22 @@ export function createSideRequestAdmission(deps: {
 								// key is omitted for them: a present `clioExternal` without the mark reads as unmeasured (#434).
 								...(usage.providerReported ? { clioExternal: { tokenUsage: "provider-reported" as const } } : {}),
 								...(usage.providerReported && usage.cacheRead === undefined ? { input: undefined } : {}),
-								cost: {
-									total:
-										usage.costUsd ??
-										calculatePricingCostUsd(pricing.rates, {
-											input: usage.input,
-											output: usage.output,
-											cacheRead: usage.cacheRead ?? 0,
-											cacheWrite: usage.cacheWrite ?? 0,
-											cacheWrite1h: usage.cacheWrite1h ?? 0,
-										}),
-								},
+								// A runtime that computed no cost hands its counts to the declared rates; a billed cost outranks
+								// them, and reportedFields (spread above) keeps a placeholder count unknown (#434).
+								cost: usage.costUncomputed
+									? { totalUncomputed: true }
+									: {
+											total:
+												usage.costUsd ??
+												calculatePricingCostUsd(pricing.rates, {
+													input: usage.input,
+													output: usage.output,
+													cacheRead: usage.cacheRead ?? 0,
+													cacheWrite: usage.cacheWrite ?? 0,
+													cacheWrite1h: usage.cacheWrite1h ?? 0,
+												}),
+											...(usage.costFromProvider ? { totalFromProvider: true } : {}),
+										},
 							},
 			});
 		};
