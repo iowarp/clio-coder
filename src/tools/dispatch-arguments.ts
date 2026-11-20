@@ -457,6 +457,22 @@ export function dispatchRequestsFromArgs(
 			}
 			return { ok: false, message: `dispatch: whole batch rejected; task ${index + 1}: ${parsed.message}` };
 		}
+		// An explicit batch-level write_roots: [] is a no-write ceiling, not the unbounded
+		// ceiling an omitted write_roots leaves, so a member may not declare writes under it.
+		const memberWriteRoots = [
+			...(Array.isArray(itemIntent?.write_roots) ? itemIntent.write_roots : []),
+			...(isRecord(item) && Array.isArray(item.writeRoots) ? item.writeRoots : []),
+		];
+		if (
+			Array.isArray(sharedIntent?.write_roots) &&
+			sharedIntent.write_roots.length === 0 &&
+			memberWriteRoots.length > 0
+		) {
+			return {
+				ok: false,
+				message: `dispatch: task ${index + 1}: intent_scope_widening: writeRoots entry '${String(memberWriteRoots[0])}' is outside the enclosing intent ceiling: the batch intent declares write_roots: [] (no writes). Drop the batch-level write_roots: [] or this task's write roots.`,
+			};
+		}
 		if (sharedIntent !== null && itemIntent !== null) {
 			if (options.resolveIntent === undefined) {
 				return { ok: false, message: `dispatch: task ${index + 1}: intent resolver is unavailable` };

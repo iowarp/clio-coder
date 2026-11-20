@@ -764,7 +764,22 @@ describe("dispatch admission boundary", () => {
 				deepStrictEqual(resolveDispatchPathScope(request).workingContextPaths, paths, task);
 				deepStrictEqual(resolveDispatchPathScope(request).writeBoundaries, [], task);
 			}
-			for (const task of ["read /etc/passwd now", `read ${dirname(root)}/elsewhere/a.md now`]) {
+			// A backticked or quoted token that closes right after the path is a whole token.
+			for (const [task, paths] of [
+				[`Read \`${root}/paper/method.md\` and report`, ["paper/method.md"]],
+				[`Read "${root}/paper/method.md" and report`, ["paper/method.md"]],
+			] as const) {
+				const { request, notices } = normalized(task);
+				strictEqual(notices.length, 1, task);
+				deepStrictEqual(resolveDispatchPathScope(request).workingContextPaths, paths, task);
+			}
+			// A quoted path that runs on past the workspace root names a sibling: left as written, still refused.
+			for (const task of [
+				"read /etc/passwd now",
+				`read ${dirname(root)}/elsewhere/a.md now`,
+				`Read "${root} archive/paper/method.md" now`,
+				`Read \`${root} archive/paper/method.md\` now`,
+			]) {
 				const { request, notices } = normalized(task);
 				deepStrictEqual(notices, [], task);
 				throws(() => resolveDispatchPathScope(request), /legacy_scope_path_absolute/u);
@@ -793,6 +808,7 @@ describe("dispatch admission boundary", () => {
 		const specs = [
 			{ id: "coder", capabilityClass: "workspace-edit" },
 			{ id: "debugger", capabilityClass: "verification" },
+			{ id: "scout", capabilityClass: "read-only" },
 		] as unknown as AgentSpec[];
 		const normalized = (args: Record<string, unknown>) => {
 			const parsed = dispatchRequestsFromArgs(args, { auto, resolveIntent, workspaceRoot: process.cwd() });
@@ -813,7 +829,30 @@ describe("dispatch admission boundary", () => {
 			declared.notices[0] ?? "",
 			/task 1 \(coder\) runs read-only: its intent\.write_roots: \[\] declares no writes/u,
 		);
-		// Row 146: a coder and a debugger with nothing declared would refuse the batch; both run as inspection.
+		// verification: [] asks for no checks, so it does not keep a write_roots: [] task writable.
+		const noChecks = normalized({
+			mode: "parallel",
+			tasks: [{ agent: "coder", task: "Inspect src", intent: { write_roots: [], verification: [] } }],
+		});
+		strictEqual(noChecks.requests[0]?.readOnly, true);
+		// An explicit batch-level write_roots: [] is a no-write ceiling a member may not widen.
+		const widened = dispatchRequestsFromArgs(
+			{
+				mode: "parallel",
+				intent: { write_roots: [] },
+				tasks: [{ agent: "coder", task: "Update src", intent: { write_roots: ["src/"] } }],
+			},
+			{ auto, resolveIntent, workspaceRoot: process.cwd() },
+		);
+		ok(!widened.ok);
+		match(widened.message, /task 1: intent_scope_widening: .*'src\/'.*write_roots: \[\] \(no writes\)/u);
+		const inherited = normalized({
+			mode: "parallel",
+			intent: { write_roots: [] },
+			tasks: [{ agent: "coder", task: "Update src", intent: { relevant_paths: ["src/"] } }],
+		});
+		strictEqual(inherited.requests[0]?.readOnly, true);
+		// Row 146: builders with nothing declared run as inspection (explorer role) in a parallel batch.
 		const builders = normalized({
 			mode: "parallel",
 			tasks: [
@@ -823,15 +862,41 @@ describe("dispatch admission boundary", () => {
 			],
 		});
 		deepStrictEqual(
-			builders.requests.map((request) => request.readOnly === true),
-			[true, true, false],
+			builders.requests.map((request) => [request.readOnly === true, request.executionRole]),
+			[
+				[true, "researcher"],
+				[true, "researcher"],
+				[false, "builder"],
+			],
 		);
 		strictEqual(parallelWriterConflict(builders.requests, specs), null);
 		match(
 			builders.notices.join("\n"),
-			/task 2 \(debugger\) runs read-only: a builder in a parallel batch with no intent\.write_roots/u,
+			/task 2 \(debugger\) runs read-only as an explorer: a builder in a parallel batch with no intent\.write_roots/u,
 		);
-		// A batch that admits as sent is left alone.
+		// One unscoped coder beside a scout is no writer conflict, and still runs as inspection (DESIGN 4.7).
+		const beside = normalized({
+			mode: "parallel",
+			tasks: [
+				{ agent: "coder", task: "Explain the cache" },
+				{ agent: "scout", task: "Map the tests" },
+			],
+		});
+		deepStrictEqual(
+			beside.requests.map((request) => request.readOnly === true),
+			[true, false],
+		);
+		strictEqual(beside.requests[0]?.executionRole, "researcher");
+		// A single task is not a batch, and writers: 1 asks for serialized writers: both left alone.
+		const serialized = normalized({
+			mode: "parallel",
+			writers: 1,
+			tasks: [
+				{ agent: "coder", task: "Fix a" },
+				{ agent: "coder", task: "Fix b" },
+			],
+		});
+		deepStrictEqual(serialized.notices, []);
 		const lone = normalized({ mode: "parallel", tasks: [{ agent: "coder", task: "Fix b" }] });
 		deepStrictEqual([lone.requests[0]?.readOnly, lone.notices], [undefined, []]);
 		const writers = dispatchRequestsFromArgs(

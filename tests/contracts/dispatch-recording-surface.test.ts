@@ -239,6 +239,18 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 		match(text, /approved before the batch detaches/);
 		match(text, /dispatch \(detached\) batch=/);
 		deepStrictEqual(approvals, [root, root, root]);
+		// A detach the runner cannot honour is refused before any approval is asked.
+		const timed = tool.prepareAdmissionArguments?.({
+			...scout,
+			task: "Inspect the sibling checkout.",
+			detach: true,
+			timeout_ms: 60_000,
+		});
+		ok(timed);
+		const timedOut = await tool.run(timed);
+		equal(timedOut.kind, "error");
+		match(timedOut.kind === "error" ? timedOut.message : "", /detach cannot enforce timeout_ms/);
+		deepStrictEqual(approvals, [root, root, root]);
 	} finally {
 		await bundle.extension.stop?.();
 	}

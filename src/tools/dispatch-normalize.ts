@@ -12,7 +12,7 @@
  *   leading-slash workspace path, on a request inferring its scope from prose;
  * - `intent.write_roots: []`, which declares a task that writes nothing;
  * - a builder recipe with no write roots and no expected outputs in a parallel
- *   batch that would otherwise be refused as undeclared writers (row 146);
+ *   batch of two or more tasks, which runs read-only as an explorer (row 146);
  * - an outside read root with `detach: true`, whose approval is asked before
  *   the batch detaches.
  * A dispatch called through the gateway is forwarded by the gateway itself
@@ -21,7 +21,7 @@
 
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
-import { canonicalWriteRoots, parallelWriterConflict } from "../domains/dispatch/parallel-writers.js";
+import { canonicalWriteRoots } from "../domains/dispatch/parallel-writers.js";
 import { relativizeWorkspaceAbsoluteTokens } from "../domains/dispatch/path-scope.js";
 import { dispatchTaskArgs } from "./dispatch-arguments.js";
 import type { DispatchMode } from "./dispatch-types.js";
@@ -32,11 +32,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The member named verification itself, through intent.verification or gate. */
+/**
+ * The member asked for checks itself, through a non-empty intent.verification or
+ * a gate. `verification: []` asks for none, so it does not make a member a writer.
+ */
 function declaresVerification(itemArgs: Record<string, unknown>): boolean {
-	return (
-		(isRecord(itemArgs.intent) && Object.hasOwn(itemArgs.intent, "verification")) || Object.hasOwn(itemArgs, "gate")
-	);
+	const checks = isRecord(itemArgs.intent) ? itemArgs.intent.verification : undefined;
+	const named = checks !== undefined && checks !== null && !(Array.isArray(checks) && checks.length === 0);
+	return named || (itemArgs.gate !== undefined && itemArgs.gate !== null && itemArgs.gate !== false);
 }
 
 /** intent.write_roots is an explicit empty array and no legacy writeRoots stands beside it. */
@@ -127,8 +130,9 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 		);
 	}
 
-	// Row 146: builders that declared nothing to write would refuse the whole batch as undeclared writers.
-	if (mode === "parallel" && args.writers !== 1 && parallelWriterConflict(requests, specs) !== null) {
+	// Row 146 (DESIGN 4.7): in a parallel batch a builder that declared nothing to write or produce is
+	// inspection: role explorer (`researcher` in ExecutionRole), no writes. writers: 1 asks for serialized writers.
+	if (mode === "parallel" && requests.length > 1 && args.writers !== 1) {
 		for (const [index, request] of requests.entries()) {
 			const itemArgs = memberArgs(index);
 			const capabilityClass = classes.get(request.agentId);
@@ -141,9 +145,9 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 				(request.intent?.expectedOutputs.length ?? 0) > 0
 			)
 				continue;
-			requests[index] = readOnly(request);
+			requests[index] = { ...readOnly(request), executionRole: "researcher" };
 			notices.push(
-				`${NOTICE_PREFIX} ${label(index)} runs read-only: a builder in a parallel batch with no intent.write_roots and no expected_outputs is admitted as inspection; declare disjoint write roots or use worktree: true for a task that writes.`,
+				`${NOTICE_PREFIX} ${label(index)} runs read-only as an explorer: a builder in a parallel batch with no intent.write_roots and no expected_outputs is admitted as inspection; declare disjoint write roots or use worktree: true for a task that writes.`,
 			);
 		}
 	}

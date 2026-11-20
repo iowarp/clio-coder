@@ -3061,6 +3061,25 @@ export async function runDispatchTool(
 				}
 			: {}),
 	}));
+	// Refuse a detach the runner cannot honour before any outside-root approval is asked.
+	if (snapshot.detach && resolvedPlan?.topology !== "fleet") {
+		if (mode !== "parallel") {
+			return { kind: "error", message: `dispatch: detach only supports parallel mode; got '${mode}'` };
+		}
+		if (review !== undefined) {
+			return {
+				kind: "error",
+				message: "dispatch: detach cannot combine with a review gate; run gated dispatch attached",
+			};
+		}
+		if (timeoutMs !== undefined) {
+			return {
+				kind: "error",
+				message:
+					'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
+			};
+		}
+	}
 	const background = createBackgroundSwitch();
 	const rejectedExternal: Array<{ position: number; reason: string; message: string }> = [];
 	const permitted: DispatchRequest[] = [];
@@ -3149,22 +3168,6 @@ export async function runDispatchTool(
 		}
 
 		if (snapshot.detach) {
-			if (mode !== "parallel") {
-				return { kind: "error", message: `dispatch: detach only supports parallel mode; got '${mode}'` };
-			}
-			if (review !== undefined) {
-				return {
-					kind: "error",
-					message: "dispatch: detach cannot combine with a review gate; run gated dispatch attached",
-				};
-			}
-			if (timeoutMs !== undefined) {
-				return {
-					kind: "error",
-					message:
-						'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
-				};
-			}
 			try {
 				const started = await runDetached(deps, requests, options?.sessionId ?? null);
 				if (externalFailures.length === 0 || started.kind !== "ok") return started;
