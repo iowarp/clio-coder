@@ -738,3 +738,156 @@ it("a turn after a tool call holds no request until its own goes out, so nothing
 		env.restore();
 	}
 });
+
+it("admission sizes each main request on one history walk, as one publication does (SC-6)", async () => {
+	const env = await isolateClioEnv("clio-coder-call-stages-walks-");
+	const faux = registerEngineFauxProvider({
+		api: "admission-walk-fixture",
+		models: [{ id: "chat" }],
+		tokensPerSecond: 0,
+	});
+	const usage = {
+		input: 3,
+		output: 2,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 5,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+	const base = { role: "assistant" as const, api: faux.api, provider: "fixture", model: "chat", usage };
+	faux.setResponses([
+		{
+			...base,
+			content: [{ type: "toolCall" as const, id: "t1", name: "no_such_tool", arguments: {} }],
+			stopReason: "toolUse" as const,
+			timestamp: Date.now(),
+		},
+		{ ...base, content: [{ type: "text" as const, text: "done" }], stopReason: "stop" as const, timestamp: Date.now() },
+	]);
+	const capabilities = { chat: true, tools: true, reasoning: false, contextWindow: 131072, maxTokens: 8192 };
+	const runtime = {
+		id: "fixture",
+		displayName: "Fixture",
+		kind: "http",
+		tier: "cloud",
+		apiFamily: "openai-completions",
+		auth: "api-key",
+		defaultCapabilities: capabilities,
+		synthesizeModel: (_target: unknown, id: string) => faux.getModel(id),
+	} as unknown as RuntimeDescriptor;
+	const target = { id: "chat-target", runtime: "fixture", url: "https://chat.invalid/v1", defaultModel: "chat" };
+	const providers = {
+		list: () => [
+			{ target, runtime, available: true, capabilities, discoveredModels: ["chat"], discoveredModelsSource: "probe" },
+		],
+		getTarget: () => target,
+		getRuntime: () => runtime,
+		getDetectedReasoning: () => false,
+		auth: {
+			resolveForTarget: async () => ({
+				providerId: "fixture",
+				available: true,
+				credentialType: "api-key",
+				source: "env",
+				detail: "fixture",
+				apiKey: "fixture-key",
+			}),
+		},
+	} as unknown as ProvidersContract;
+	const entries: SessionEntry[] = [];
+	const session = {
+		current: () => ({ id: "admission-walk-session", cwd: env.dir, cwdHash: "admission-walk-repo" }),
+		tree: () => ({ leafId: entries.at(-1)?.turnId ?? null }),
+		leafId: () => entries.at(-1)?.turnId ?? null,
+		append(turn: TurnInput) {
+			const id = `turn-${entries.length + 1}`;
+			entries.push({
+				kind: "message",
+				turnId: id,
+				parentTurnId: turn.parentId,
+				timestamp: new Date().toISOString(),
+				role: turn.kind,
+				payload: turn.payload,
+			} as SessionEntry);
+			return { id };
+		},
+		appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
+			const row = { ...entry, turnId: `entry-${entries.length + 1}`, timestamp: new Date().toISOString() };
+			entries.push(row as SessionEntry);
+			return row;
+		},
+	} as unknown as SessionContract;
+	const journals = createSessionJournals(clioStateDir(), () => {
+		throw new Error("fixture journal unavailable");
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = target.id;
+	settings.chat.model = "chat";
+	settings.chat.thinkingLevel = "off";
+	settings.chat.prewarm = false;
+	// The operator's message stands for the history: the fold's trace check reads it once per walk.
+	let walks = 0;
+	let counted = false;
+	const perAdmission: number[] = [];
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers,
+		session,
+		readSessionEntries: () => entries,
+		middleware: {
+			registerHook: () => {},
+			runHook: () => ({ effects: [], ruleIds: [] }),
+		} as unknown as MiddlewareContract,
+		knownTargets: () => new Set([target.id]),
+		createAgent: (options) => {
+			const admit = options?.beforeStreamRequest;
+			ok(admit, "the main runtime admits its requests");
+			const created = createEngineAgent({
+				...options,
+				beforeStreamRequest: async (request) => {
+					const first = created.agent.state.messages.find((message) => message.role === "user") as
+						| { content?: unknown }
+						| undefined;
+					if (!counted && first) {
+						counted = true;
+						const content = first.content;
+						Object.defineProperty(first, "content", {
+							enumerable: true,
+							get: () => {
+								if (new Error().stack?.includes("matchesTrace")) walks += 1;
+								return content;
+							},
+						});
+					}
+					const before = walks;
+					const admission = await admit(request);
+					perAdmission.push(walks - before);
+					return admission;
+				},
+			});
+			return created;
+		},
+		telemetry: { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract,
+		prompts: {
+			inputEpoch: () => 0,
+			compileSessionPrompt: async () => ({
+				systemPrompt: "fixture prompt",
+				systemPromptHash: "fixture",
+				tokenEstimate: 1,
+				sections: [{ id: "identity", tokenEstimate: 1, contentHash: "identity" }],
+				fragmentManifest: [],
+			}),
+		} as unknown as PromptsContract,
+	});
+	try {
+		await loop.submit("call a tool");
+		// The first admission folds the new prompt rather than walking it; base walked [1, 2] (refresh, then anchor).
+		deepStrictEqual(perAdmission, [0, 1], "each admission walks the history at most once, as one publication does");
+		strictEqual(loop.modelRequest()?.modelId, "chat", "and both requests were admitted and sent");
+	} finally {
+		loop.dispose();
+		faux.unregister();
+		await journals.flush();
+		env.restore();
+	}
+});

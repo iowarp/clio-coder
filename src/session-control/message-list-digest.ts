@@ -25,10 +25,31 @@ function elementJson(message: unknown, index: number): string {
 
 const sha256 = (json: string): string => createHash("sha256").update(json).digest("hex");
 
+// A synchronous stretch in which no message the history holds is edited in place; appends and replacements may happen.
+let settledDepth = 0;
+let settledScope = 0;
+
+/**
+ * Run `run` as one settled stretch (SC-6). Its first observation of a fold checks every message by trace as usual;
+ * a later one in the same stretch matches the prefix it checked by identity alone, since nothing in the stretch edits a
+ * message in place, so it returns what a full check would and skips the walk. `run` must not await: a stretch that
+ * yields could let other code edit a message, so the scope ends with the synchronous call.
+ */
+export function withSettledHistory<T>(run: () => T): T {
+	if (settledDepth === 0) settledScope += 1;
+	settledDepth += 1;
+	try {
+		return run();
+	} finally {
+		settledDepth -= 1;
+	}
+}
+
 /**
  * The conversation's digest and token estimates, kept across publications. Each `observe` checks every message by
- * identity and trace and serializes, hashes and estimates only the messages appended since the last one; an edit
- * re-folds from the first changed message. Hashing the list once per publication grew with the whole history.
+ * identity and trace (inside a settled stretch, by identity alone after its first observation) and serializes, hashes
+ * and estimates only the messages appended since the last one; an edit re-folds from the first changed message.
+ * Hashing the list once per publication grew with the whole history.
  */
 export function createMessageListFold(): MessageListFold {
 	let messages: AgentMessage[] = [];
@@ -37,6 +58,8 @@ export function createMessageListFold(): MessageListFold {
 	let hash: Hash = createHash("sha256").update("[");
 	// Digests of folded prefixes by length; a new map whenever the prefix changes, so older snapshots keep theirs.
 	let prefixDigests = new Map<number, string>();
+	// The settled stretch whose first observation checked every folded message by trace; 0 for none.
+	let checkedInScope = 0;
 
 	const rehash = (count: number): void => {
 		hash = createHash("sha256").update("[");
@@ -49,12 +72,14 @@ export function createMessageListFold(): MessageListFold {
 		observe(input) {
 			const snapshot = [...input];
 			const folded = Math.min(messages.length, snapshot.length);
+			const settled = settledDepth > 0 && checkedInScope === settledScope;
 			let kept = 0;
 			while (kept < folded) {
 				const trace = traces[kept];
-				if (snapshot[kept] !== messages[kept] || !trace || !matchesTrace(snapshot[kept], trace)) break;
+				if (snapshot[kept] !== messages[kept] || !trace || (!settled && !matchesTrace(snapshot[kept], trace))) break;
 				kept += 1;
 			}
+			if (settledDepth > 0) checkedInScope = settledScope;
 			if (kept < messages.length) {
 				messages = messages.slice(0, kept);
 				traces = traces.slice(0, kept);
