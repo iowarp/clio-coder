@@ -96,7 +96,8 @@ class ScriptedWizard extends TargetWizardSurface {
 		);
 		this.seen.push(heading);
 		let value: unknown;
-		if (heading.includes("Where does your model")) value = "local-server";
+		if (heading.includes("What do you have")) value = "list";
+		else if (heading.includes("Where does your model")) value = "local-server";
 		else if (heading.includes("Which provider")) value = this.runtime;
 		else if (heading.includes("Which model") || heading.includes("Choose the model")) value = this.model;
 		else if (heading.includes("Review what Clio could verify")) {
@@ -162,6 +163,9 @@ test("the dock hosts shared target add and URL/runtime/model editing through Sav
 		strictEqual(target.runtime, "wizard-one");
 		strictEqual(target.url, "http://localhost:9911");
 		strictEqual(target.defaultModel, "model-a");
+		// Add opens on the current first question, and the category list is one row of it, not the first screen (CLI-11).
+		match(add.seen[0] ?? "", /What do you have\?/u);
+		match(add.seen[1] ?? "", /Where does your model come from\?/u);
 		match(add.seen.join("\n"), /Machine observations.*usable CPUs.*available memory.*automatic local workers/u);
 		match(add.seen.join("\n"), /Connection address.*No generation request was sent/u);
 		updateSettings((settings) => {

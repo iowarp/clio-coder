@@ -182,7 +182,7 @@ interface Answers {
 
 type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model" | "imported" | "fix";
 
-type Have = "key" | "subscription" | "server" | "file";
+type Have = "key" | "subscription" | "server" | "file" | "list";
 
 /** A route `collectSetupCandidates` found, with the runtime it runs on. */
 interface OfferedRoute extends DetectedChatRoute {
@@ -190,9 +190,14 @@ interface OfferedRoute extends DetectedChatRoute {
 	owner?: string;
 }
 
-/** `configure` with no runtime on a home with no target: the flow that asks what the user has. */
-function firstRunFlow(answers: Answers): boolean {
-	return answers.mode === "first" && !answers.fixedRuntime;
+/** `configure` and Add a target with no preset runtime: both open on what the user has (first run also on what Clio found). */
+function asksWhatTheyHave(answers: Answers): boolean {
+	return answers.mode !== "edit" && !answers.fixedRuntime;
+}
+
+/** The flow that asks what the user has, unless Add a target's "Every provider and app" row left it for the category list. */
+function guidedFlow(answers: Answers): boolean {
+	return asksWhatTheyHave(answers) && answers.have !== "list";
 }
 
 interface Wizard {
@@ -352,7 +357,7 @@ function clearConnection(answers: Answers): void {
 /** Screen 1 when Clio found something: each route it found, best first, and a way out to the rest. */
 const OFFERED_STEP: Step = {
 	id: "offered",
-	applies: (answers) => firstRunFlow(answers) && answers.offered.length > 0,
+	applies: (answers) => asksWhatTheyHave(answers) && answers.offered.length > 0,
 	run: async (wizard, answers) => {
 		const chosen = answers.detectedChatRoute;
 		const previous = chosen ? answers.offered.findIndex((route) => route.target === chosen.target) : -1;
@@ -419,15 +424,23 @@ const HAVE_CHOICES: ReadonlyArray<{ value: Have; label: string; hint: string }> 
 	{ value: "file", label: "A setup file from my lab or team", hint: "a path or https address someone gave you" },
 ];
 
+/** Add a target only: the category list and every provider in it, including an installed coding agent as a worker. */
+const LIST_CHOICE: { value: Have; label: string; hint: string } = {
+	value: "list",
+	label: "Every provider and app",
+	hint: "choose by category, including an installed coding agent as a worker",
+};
+
 /** Screen 1 when Clio found nothing, or the user wants something else: what they have, in their words. */
 const HAVE_STEP: Step = {
 	id: "have",
-	applies: (answers) => firstRunFlow(answers) && answers.detectedChatRoute === undefined,
+	applies: (answers) => asksWhatTheyHave(answers) && answers.detectedChatRoute === undefined,
 	run: async (wizard, answers) => {
-		const previous = HAVE_CHOICES.findIndex((choice) => choice.value === answers.have);
+		const choices = answers.mode === "add" ? [...HAVE_CHOICES, LIST_CHOICE] : HAVE_CHOICES;
+		const previous = choices.findIndex((choice) => choice.value === answers.have);
 		const result = await wizard.select<Have>({
 			heading: ["", chalk.bold("What do you have?")],
-			choices: HAVE_CHOICES.map((choice) => ({ ...choice })),
+			choices: choices.map((choice) => ({ ...choice })),
 			initialIndex: Math.max(0, previous),
 			railPrefix: wizard.rail,
 			backLabel: answers.offered.length > 0 ? "back" : "cancel",
@@ -450,7 +463,7 @@ const HAVE_STEP: Step = {
 				answers.targetId = deriveTargetId(runtime.id, readSettings().targets);
 			}
 		}
-		wizard.answer("You have", HAVE_CHOICES.find((choice) => choice.value === result.value)?.label ?? result.value);
+		wizard.answer("You have", choices.find((choice) => choice.value === result.value)?.label ?? result.value);
 		return "next";
 	},
 };
@@ -460,7 +473,7 @@ const ENV_REFERENCE = /^\$([A-Za-z_][A-Za-z0-9_]*)$/u;
 /** The API-key path: one masked field; a known prefix names the provider, `$NAME` reads an environment variable. */
 const KEY_STEP: Step = {
 	id: "key",
-	applies: (answers) => firstRunFlow(answers) && answers.have === "key",
+	applies: (answers) => guidedFlow(answers) && answers.have === "key",
 	run: async (wizard, answers) => {
 		const result = await wizard.text({
 			heading: [
@@ -523,7 +536,7 @@ const KEY_STEP: Step = {
 /** The setup-file path: the same import as `configure --import`, shown and confirmed on the rail. */
 const FILE_STEP: Step = {
 	id: "setup-file",
-	applies: (answers) => firstRunFlow(answers) && answers.have === "file",
+	applies: (answers) => guidedFlow(answers) && answers.have === "file",
 	run: async (wizard, answers) => {
 		let problem: string | undefined;
 		for (;;) {
@@ -583,10 +596,10 @@ const FILE_STEP: Step = {
 	},
 };
 
-/** `configure --add` without a runtime: the source categories, then the providers in the one chosen. */
+/** Add a target's "Every provider and app": the source categories, then the providers in the one chosen. */
 const CATEGORY_STEP: Step = {
 	id: "category",
-	applies: (answers) => answers.mode === "add" && !answers.fixedRuntime,
+	applies: (answers) => answers.mode === "add" && !answers.fixedRuntime && answers.have === "list",
 	run: async (wizard, answers) => {
 		const available = CONFIGURE_CATEGORY_CHOICES.filter(
 			(choice) => runtimesForCategory(allEntries(), choice.category).length > 0,
@@ -605,7 +618,7 @@ const CATEGORY_STEP: Step = {
 			})),
 			initialIndex: Math.max(0, current),
 			railPrefix: wizard.rail,
-			backLabel: "cancel",
+			backLabel: "back",
 			clearOnExit: true,
 			input: wizard.input,
 			output: wizard.output,
@@ -628,7 +641,7 @@ const RUNTIME_STEP: Step = {
 	applies: (answers) =>
 		!answers.fixedRuntime &&
 		!(
-			firstRunFlow(answers) &&
+			guidedFlow(answers) &&
 			(answers.have === "server" || (answers.have === "key" && answers.keyProvider !== undefined))
 		),
 	run: async (wizard, answers) => {
@@ -639,7 +652,7 @@ const RUNTIME_STEP: Step = {
 		});
 		// A key the prefix table did not place: the providers that take one.
 		const entries =
-			firstRunFlow(answers) && answers.have === "key"
+			guidedFlow(answers) && answers.have === "key"
 				? runtimesForCategory(chatEntries, "cloud-api").filter((entry) => registry.get(entry.runtimeId)?.auth === "api-key")
 				: answers.category
 					? runtimesForCategory(chatEntries, answers.category)
@@ -765,8 +778,8 @@ const URL_STEP: Step = {
 	id: "url",
 	applies: (answers) => answers.runtime !== undefined && supportFor(answers.runtime).supportsCustomUrl,
 	run: async (wizard, answers) => {
-		const serverPath = firstRunFlow(answers) && answers.have === "server";
-		// The first-run server path asks on the generic runtime and moves to the native one the address turns out to be.
+		const serverPath = guidedFlow(answers) && answers.have === "server";
+		// The guided server path asks on the generic runtime and moves to the native one the address turns out to be.
 		if (serverPath && answers.runtime?.id !== "openai-compat") {
 			answers.runtime = getRuntimeRegistry().get("openai-compat") ?? answers.runtime;
 			answers.detected = undefined;
@@ -912,8 +925,8 @@ const DETECTED_RUNTIME_STEP: Step = {
 		if (!detected || !runtime) return "next";
 		const native = getRuntimeRegistry().get(detected.runtimeId);
 		if (!native) return "next";
-		// The first-run server path takes what the address is serving; the generic runtime stays a configure choice.
-		if (firstRunFlow(answers)) {
+		// The guided server path takes what the address is serving; the generic runtime stays a configure choice.
+		if (guidedFlow(answers)) {
 			if (wizard.goingBack) return "back";
 			answers.runtime = native;
 			answers.inventoryKey = undefined;
@@ -1022,7 +1035,7 @@ function keyWaitsForRefusal(answers: Answers, runtime: RuntimeDescriptor): boole
 	return (
 		answers.mode !== "edit" &&
 		runtime.auth === "api-key" &&
-		(LOCAL_APP_RUNTIME_IDS.has(runtime.id) || (firstRunFlow(answers) && answers.have === "server")) &&
+		(LOCAL_APP_RUNTIME_IDS.has(runtime.id) || (guidedFlow(answers) && answers.have === "server")) &&
 		answers.keyRequested !== true
 	);
 }
@@ -1312,9 +1325,9 @@ const MODEL_STEP: Step = {
 			support.defaultModel !== undefined && offered.includes(support.defaultModel) ? support.defaultModel : undefined;
 		const models =
 			recommended !== undefined ? [recommended, ...offered.filter((model) => model !== recommended)] : offered;
-		// The first run takes the recommended model, or the only one a server lists; the review offers the list.
+		// The guided flow takes the recommended model, or the only one a server lists; the review offers the list.
 		const automatic =
-			firstRunFlow(answers) && !answers.chooseModel
+			guidedFlow(answers) && !answers.chooseModel
 				? (recommended ?? (offered.length === 1 ? offered[0] : undefined))
 				: undefined;
 		if (
@@ -1518,7 +1531,7 @@ const REVIEW_STEP: Step = {
 				],
 				choices: [
 					{ value: "save", label: "Save target" },
-					...(firstRunFlow(answers) ? [{ value: "model", label: "Choose a different model" }] : []),
+					...(guidedFlow(answers) ? [{ value: "model", label: "Choose a different model" }] : []),
 					{ value: "details", label: "Connection and machine details" },
 					{ value: "back", label: "Back" },
 					{ value: "cancel", label: "Cancel setup" },
@@ -1925,7 +1938,7 @@ export async function runOnboardingWizard(
 			continue;
 		}
 		// Leaving the list "Choose a different model" opened returns to the review with the model unchanged.
-		if (outcome === "back" && step === MODEL_STEP && answers.chooseModel && firstRunFlow(answers)) {
+		if (outcome === "back" && step === MODEL_STEP && answers.chooseModel && guidedFlow(answers)) {
 			answers.chooseModel = undefined;
 			if (answers.model !== undefined) wizard.answer("Model", answers.model);
 			cursor = STEPS.indexOf(REVIEW_STEP);
