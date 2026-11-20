@@ -62,12 +62,19 @@ export async function readPipedStdin(hasPromptSource = false, explicit = false):
 	});
 }
 
+/**
+ * The first run's user message (SPEC 6.2): argv text, then `@file` blocks, then piped stdin. Stdin that follows argv
+ * text is framed as a `<stdin>` block, the shape `<file name>` attachments use, whether it came through `-` or the
+ * deprecated implicit read, so every spelling and output format assembles the same task (H23). With no argv text,
+ * stdin is the task itself and stays unframed.
+ */
 export function buildInitialMessage(input: InitialMessageInput): InitialMessageResult {
 	const parts: string[] = [];
 	const [first, ...rest] = input.messages;
 	if (first !== undefined) parts.push(first);
 	if (input.fileText) parts.push(input.fileText);
-	if (input.stdinContent !== undefined) parts.push(input.stdinContent);
+	if (input.stdinContent !== undefined)
+		parts.push(first !== undefined ? `<stdin>\n${input.stdinContent}\n</stdin>` : input.stdinContent);
 
 	const result: InitialMessageResult = { remainingMessages: rest };
 	if (parts.length > 0) result.initialMessage = parts.join("\n\n");

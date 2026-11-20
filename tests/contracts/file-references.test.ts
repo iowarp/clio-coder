@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { buildInitialMessage } from "../../src/cli/initial-message.js";
 import { expandInlineFileReferencesAsync, INLINE_TEXT_MAX_BYTES } from "../../src/core/file-references.js";
 
 /** One-member ustar archive with a valid header checksum. */
@@ -89,5 +90,14 @@ describe("contracts/file references", () => {
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
+	});
+
+	it("run frames piped stdin as a <stdin> block after argv text, and stdin alone stays the task (SPEC 6.2)", () => {
+		const fileText = '<file name="notes.md">\nN\n</file>\n';
+		strictEqual(
+			buildInitialMessage({ messages: ["A"], fileText, stdinContent: "B" }).initialMessage,
+			`A\n\n${fileText}\n\n<stdin>\nB\n</stdin>`,
+		);
+		strictEqual(buildInitialMessage({ messages: [], stdinContent: "B\n" }).initialMessage, "B\n");
 	});
 });
