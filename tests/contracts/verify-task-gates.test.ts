@@ -3,16 +3,27 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../src/core/safe-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStatePath } from "../../src/core/xdg.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
+import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { discoverDeclaredChecks } from "../../src/tools/verify/discovery.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
-import { clearTaskGates, configureTaskGates, extractTaskGates } from "../../src/tools/verify/task-gates.js";
+import {
+	clearTaskGates,
+	configureTaskGates,
+	extractTaskGates,
+	taskGateBounds,
+	taskGateCheck,
+} from "../../src/tools/verify/task-gates.js";
 
 const roots: string[] = [];
 const originalCwd = process.cwd();
@@ -79,7 +90,7 @@ describe("verifier task gates", () => {
 
 		const hung = await verify("gate-3", { timeout_ms: 300 });
 		strictEqual(judgementOf(hung), "timed-out");
-		if (hung.kind === "error") match(hung.message, /timed out after 300ms/u);
+		if (hung.kind === "error") match(hung.message, /timed out after 0\.3 s/u);
 
 		const widened = await verify("gate-1", { args: ["--extra"] });
 		strictEqual(widened.kind === "error" && widened.details?.unresolved, true);
@@ -224,5 +235,115 @@ describe("verifier task gates", () => {
 		strictEqual(verdict.kind, "blocked");
 		if (verdict.kind === "blocked") match(verdict.reason, /unverified: no OS sandbox/u);
 		deepStrictEqual(ran, []);
+	});
+
+	it("truncates passing verify output to max_output_bytes (head, marker, tail) without killing the check (XR-7)", async () => {
+		const noisyPass = 'process.stdout.write("HEAD_START\\n" + "x".repeat(4000) + "\\nTAIL_SUMMARY\\n");\n';
+		enter({
+			"noisy-pass.js": noisyPass,
+			"package.json": JSON.stringify({ name: "xr7-pass", scripts: { test: "node noisy-pass.js" } }),
+		});
+		configureTaskGates("Run `node noisy-pass.js`.", { confined: false });
+
+		const gateResult = await verify("gate-1", { max_output_bytes: 500 });
+		strictEqual(gateResult.kind, "ok");
+		strictEqual(gateResult.details?.exitCode, 0);
+		strictEqual(gateResult.details?.outputCapped, false);
+		strictEqual(judgementOf(gateResult), "succeeded");
+		if (gateResult.kind === "ok") {
+			ok(Buffer.byteLength(gateResult.output, "utf8") <= 500);
+			match(gateResult.output, /HEAD_START/u);
+			match(gateResult.output, /\[\.\.\. \d+ bytes omitted \.\.\.\]/u);
+			match(gateResult.output, /TAIL_SUMMARY/u);
+		}
+
+		clearTaskGates();
+		const scriptResult = await verify("test", { max_output_bytes: 500 });
+		strictEqual(scriptResult.kind, "ok");
+		strictEqual(scriptResult.details?.exitCode, 0);
+		strictEqual(scriptResult.details?.outputCapped, false);
+		strictEqual(judgementOf(scriptResult), "succeeded");
+		if (scriptResult.kind === "ok") {
+			ok(Buffer.byteLength(scriptResult.output, "utf8") <= 500);
+			match(scriptResult.output, /HEAD_START/u);
+			match(scriptResult.output, /\[\.\.\. \d+ bytes omitted \.\.\.\]/u);
+			match(scriptResult.output, /TAIL_SUMMARY/u);
+		}
+	});
+
+	it("keeps a failing verify check's non-zero exit code when output exceeds max_output_bytes (XR-7)", async () => {
+		enter({
+			"noisy-fail.js":
+				'process.stdout.write("HEAD_START\\n" + "y".repeat(4000) + "\\nTAIL_FAILURE\\n"); process.exit(3);\n',
+		});
+		configureTaskGates("Run `node noisy-fail.js`.", { confined: false });
+
+		const failed = await verify("gate-1", { max_output_bytes: 500 });
+		strictEqual(failed.kind, "error");
+		strictEqual(failed.details?.exitCode, 3);
+		strictEqual(failed.details?.outputCapped, false);
+		strictEqual(judgementOf(failed), "failed");
+		if (failed.kind === "error") {
+			match(failed.message, /^verify: exited with code 3:/u);
+			ok(!/output exceeded/u.test(failed.message));
+			match(failed.message, /HEAD_START/u);
+			match(failed.message, /\[\.\.\. \d+ bytes omitted \.\.\.\]/u);
+			match(failed.message, /TAIL_FAILURE/u);
+		}
+	});
+
+	it("names timed out after <N> s in result text and card head, and gives build gates a 300 s default deadline (CLI-P28)", async () => {
+		enter({
+			"hang-verbose.js": 'process.stdout.write("✓ Step 1\\n✓ Step 2\\n"); setTimeout(() => {}, 10_000);\n',
+			"package.json": JSON.stringify({ name: "cli-p28", scripts: { build: "node hang-verbose.js", test: "node -e ''" } }),
+		});
+		configureTaskGates("Run `pnpm run build` and `node hang-verbose.js`.", { confined: false });
+
+		const extracted = extractTaskGates("Run `pnpm run build` and `node hang-verbose.js`.");
+		const buildGate = extracted.gates[0];
+		const nonBuildGate = extracted.gates[1];
+		ok(buildGate !== undefined && nonBuildGate !== undefined);
+		strictEqual(taskGateCheck(buildGate).timeoutMs, 300_000);
+		strictEqual(taskGateBounds({}, taskGateCheck(buildGate).timeoutMs).timeout_ms, 300_000);
+		strictEqual(taskGateCheck(nonBuildGate).timeoutMs, SAFE_EXEC_DEFAULT_TIMEOUT_MS);
+		strictEqual(SAFE_EXEC_DEFAULT_TIMEOUT_MS, 120_000);
+
+		const discovered = discoverDeclaredChecks(undefined);
+		strictEqual(discovered.ok, true);
+		if (discovered.ok) {
+			const checks = discovered.sources.flatMap((source) => source.checks);
+			const pkgBuild = checks.find((entry) => entry.id === "build");
+			const pkgTest = checks.find((entry) => entry.id === "test");
+			strictEqual(pkgBuild?.timeoutMs, 300_000);
+			strictEqual(pkgTest?.timeoutMs, SAFE_EXEC_DEFAULT_TIMEOUT_MS);
+		}
+
+		const timedOut = await verify("gate-2", { timeout_ms: 1_000 });
+		strictEqual(timedOut.kind, "error");
+		strictEqual(judgementOf(timedOut), "timed-out");
+		strictEqual(timedOut.details?.timedOut, true);
+		strictEqual(timedOut.details?.timeoutMs, 1_000);
+		if (timedOut.kind === "error") {
+			match(timedOut.message, /^verify: timed out after 1 s\b/u);
+			// Render both with no details (main-agent thrown-error path) and with details.
+			for (const result of [
+				{ content: [{ type: "text", text: timedOut.message }] },
+				{ content: [{ type: "text", text: timedOut.message }], details: timedOut.details },
+			]) {
+				const rows = renderToolPreview(
+					{
+						toolCallId: "v-timeout",
+						toolName: "verify",
+						args: { check: "build" },
+						result,
+						isError: true,
+						durationMs: 1_000,
+					},
+					120,
+					transcriptDetail("standard"),
+				).map(stripTerminalSequences);
+				match(rows[0] ?? "", /timed out after 1 s/u);
+			}
+		}
 	});
 });

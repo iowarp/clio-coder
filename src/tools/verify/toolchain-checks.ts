@@ -2,7 +2,7 @@ import path from "node:path";
 import { readCiRunCommands } from "../../core/ci-commands.js";
 import { SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
-import type { DeclaredCheck } from "./catalog.js";
+import { type DeclaredCheck, defaultVerifyTimeoutMs } from "./catalog.js";
 import {
 	cargoProposals,
 	cmakeProposals,
@@ -59,7 +59,10 @@ function fromProposal(proposal: RawProposal, id: string, argsBase: string[] | un
 		description: proposal.description,
 		command: [...proposal.command],
 		cwd: proposal.cwd,
-		timeoutMs: proposal.timeoutMs,
+		timeoutMs:
+			proposal.timeoutMs === SAFE_EXEC_DEFAULT_TIMEOUT_MS
+				? defaultVerifyTimeoutMs(id, proposal.command)
+				: proposal.timeoutMs,
 		tags: [...proposal.tags],
 		source: { kind: "toolchain", path: proposal.provenance.path },
 		kind: "command",

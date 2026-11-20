@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import {
 	combineSafeOutput,
+	createRetainedStreamWindow,
 	resolveSafeCwd,
 	runCommandVector,
 	SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
@@ -33,6 +34,23 @@ export function timeoutArg(args: Record<string, unknown>, fallback = SAFE_EXEC_D
 
 function cwdArg(args: Record<string, unknown>): string | undefined {
 	return typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
+}
+
+export function trimOutputHeadTail(text: string, maxBytes: number): string {
+	const buf = Buffer.from(text, "utf8");
+	if (buf.byteLength <= maxBytes) return text;
+	if (maxBytes <= 0) return "";
+	const markerAllowance = Buffer.byteLength(`\n[... ${buf.byteLength} bytes omitted ...]\n`, "utf8");
+	const bodyBudget = Math.max(0, maxBytes - markerAllowance);
+	const headCap = Math.floor(bodyBudget / 3);
+	const tailCap = bodyBudget - headCap;
+	const window = createRetainedStreamWindow(headCap, tailCap);
+	window.append(buf);
+	return window.render().text;
+}
+
+function formatTimeoutSeconds(timeoutMs: number): string {
+	return `${Number((timeoutMs / 1000).toFixed(3))} s`;
 }
 
 export function maxOutputArg(args: Record<string, unknown>): number {
@@ -73,12 +91,20 @@ export async function runVectorTool(
 		shellSandbox?: MainSandboxPolicy;
 		/** The root `cwd` must stay inside; the process working directory when absent. */
 		workspaceRoot?: string;
+		/**
+		 * When true, `args.max_output_bytes` only trims the returned text
+		 * (head, dropped-byte marker, tail); the child runs under the default
+		 * safe-exec output cap so a small cap never kills the check.
+		 */
+		truncateOutputOnly?: boolean;
 	},
 ): Promise<ToolResult> {
 	const timeoutMs = timeoutArg(args);
-	const maxOutputBytes = maxOutputArg(args);
+	const requestedMaxOutputBytes = maxOutputArg(args);
+	const truncateOnly = options?.truncateOutputOnly === true;
+	const processMaxOutputBytes = truncateOnly ? SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES : requestedMaxOutputBytes;
 	try {
-		const runOptions: Parameters<typeof runCommandVector>[2] = { timeoutMs, maxOutputBytes };
+		const runOptions: Parameters<typeof runCommandVector>[2] = { timeoutMs, maxOutputBytes: processMaxOutputBytes };
 		const cwd = cwdArg(args);
 		if (cwd !== undefined) runOptions.cwd = cwd;
 		if (options?.signal !== undefined) runOptions.signal = options.signal;
@@ -87,24 +113,35 @@ export async function runVectorTool(
 		if (options?.shellSandbox !== undefined) runOptions.shellSandbox = options.shellSandbox;
 		if (options?.workspaceRoot !== undefined) runOptions.workspaceRoot = options.workspaceRoot;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
-		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
+		const combined = combineSafeOutput(result);
+		const output = truncateOnly
+			? trimOutputHeadTail(combined, requestedMaxOutputBytes)
+			: truncateUtf8(combined, requestedMaxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
 		if (result.timedOut) {
-			const status = `${action}: timed out after ${timeoutMs}ms`;
-			return { kind: "error", message: output.trim().length > 0 ? `${status}\n\n${output.trim()}` : status, details };
+			const status =
+				action === "verify"
+					? `${action}: timed out after ${formatTimeoutSeconds(timeoutMs)}`
+					: `${action}: timed out after ${timeoutMs}ms`;
+			return {
+				kind: "error",
+				message: output.trim().length > 0 ? `${status}\n\n${output.trim()}` : status,
+				details: { ...details, timeoutMs },
+			};
 		}
 		if (result.outputCapped)
 			return {
 				kind: "error",
 				message:
 					output.trim().length > 0
-						? `${action}: output exceeded ${maxOutputBytes} bytes\n\n${output.trim()}`
-						: `${action}: output exceeded ${maxOutputBytes} bytes`,
+						? `${action}: output exceeded ${processMaxOutputBytes} bytes\n\n${output.trim()}`
+						: `${action}: output exceeded ${processMaxOutputBytes} bytes`,
 				details,
 			};
 		if (result.exitCode !== 0) {
-			const sandboxHint = options?.shellSandbox === undefined ? null : mainSandboxWriteHint(output, options.shellSandbox);
+			const sandboxHint =
+				options?.shellSandbox === undefined ? null : mainSandboxWriteHint(combined, options.shellSandbox);
 			return {
 				kind: "error",
 				message: `${action}: exited with code ${result.exitCode ?? "?"}: ${output.trim()}${sandboxHint === null ? "" : `\n${sandboxHint}`}`,

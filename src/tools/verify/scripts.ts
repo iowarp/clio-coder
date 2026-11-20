@@ -16,6 +16,7 @@ import {
 	type DeclaredCheckSource,
 	type DeclaredNumericCompare,
 	type DeclaredPerfBudget,
+	defaultVerifyTimeoutMs,
 	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
 	resolveProjectVerifierExecutionCwd,
 } from "./catalog.js";
@@ -249,7 +250,7 @@ export async function runToolchainCheck(
 		file,
 		vector,
 		{ ...args, cwd, timeout_ms: typeof args.timeout_ms === "number" ? args.timeout_ms : check.timeoutMs },
-		options,
+		{ ...options, truncateOutputOnly: true },
 	);
 	return withDeclaredEvidence(result, { ...check, command: [...argv] });
 }
@@ -266,8 +267,14 @@ export async function runTaskGateCheck(
 ): Promise<ToolResult> {
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: task gate '${check.id}' has empty argv` };
-	const bounds = taskGateBounds(args);
-	const result = await runVectorTool("verify", file, vector, { cwd: process.cwd(), ...bounds }, options);
+	const bounds = taskGateBounds(args, check.timeoutMs);
+	const result = await runVectorTool(
+		"verify",
+		file,
+		vector,
+		{ cwd: process.cwd(), ...bounds },
+		{ ...options, truncateOutputOnly: true },
+	);
 	return withDeclaredEvidence(result, { ...check, timeoutMs: bounds.timeout_ms });
 }
 
@@ -632,7 +639,12 @@ async function runJudgedCheck(
 		const facts = { ...commandFacts(result), judgement: judgement(execution, "not-run") };
 		if (result.aborted) return { kind: "error", message: `verify: ${runLabel}aborted`, details: facts };
 		if (result.timedOut) {
-			return { kind: "error", message: `verify: ${runLabel}timed out after ${check.timeoutMs}ms`, details: facts };
+			const seconds = Number((check.timeoutMs / 1000).toFixed(3));
+			return {
+				kind: "error",
+				message: `verify: ${runLabel}timed out after ${seconds} s`,
+				details: { ...facts, timeoutMs: check.timeoutMs },
+			};
 		}
 		if (result.outputCapped) {
 			return {
@@ -917,11 +929,20 @@ export async function runScriptCheck(
 		: [];
 	const vector = ["run", check];
 	if (extraArgs.length > 0) vector.push("--", ...extraArgs);
+	const timeoutMs =
+		typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : defaultVerifyTimeoutMs(check);
 	return withCommandJudgement(
-		classifyUnavailable(await runVectorTool("verify", "npm", vector, { ...args, cwd }, options), check, [
-			"npm",
-			...vector,
-		]),
+		classifyUnavailable(
+			await runVectorTool(
+				"verify",
+				"npm",
+				vector,
+				{ ...args, cwd, timeout_ms: timeoutMs },
+				{ ...options, truncateOutputOnly: true },
+			),
+			check,
+			["npm", ...vector],
+		),
 	);
 }
 
