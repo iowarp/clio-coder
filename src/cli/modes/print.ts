@@ -1103,10 +1103,17 @@ function defaultShutdownHooks(): HeadlessShutdownHooks {
 /** Dispatched workers' calls, which the main run's own fold leaves out. */
 const CHILD_CALL_ROLES: CallFilter["roles"] = ["worker"];
 
-/**
- * The schema v2 envelope's usage: `main` is the fold the run ledger records; `children` and `total` are the same fold
- * over the dispatched workers' calls and over both. `children` is absent when no worker call was recorded.
- */
+/** Side agents' calls the session makes beside its turns, such as the safety judge's; the main fold leaves them out. */
+const SIDE_CALL_ROLES: CallFilter["roles"] = [
+	"memory",
+	"system-one",
+	"safety-judge",
+	"prewarm",
+	"btw",
+	"handoff",
+	"helper",
+];
+
 /** The `--output-format text` stderr line: session, outcome, requests, tokens in/out and spend. */
 function runTextSummaryLine(sessionId: string | null, outcome: RunOutcome, usage: Pick<RunCallUsage, "sums">): string {
 	const { apiCalls, usd, usage: tokens } = usage.sums;
@@ -1114,14 +1121,27 @@ function runTextSummaryLine(sessionId: string | null, outcome: RunOutcome, usage
 	return `clio-coder run: session ${sessionId ?? "none"} · ${outcome} · ${renderCompactCount(apiCalls)} requests · ${renderCompactCount(tokens.input)}/${renderCompactCount(tokens.output)} tokens · ${cost}\n`;
 }
 
+/**
+ * The schema v2 envelope's usage: `main` is the fold the run ledger records; `side` and `children` are the same fold
+ * over the side agents' and the dispatched workers' calls, each absent when none was recorded; `total` folds all three.
+ */
 async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, main: RunCallUsage): Promise<void> {
-	const children = (await options.runUsage?.(from, CHILD_CALL_ROLES).catch(() => null)) ?? null;
-	if (children === null || children.callIds.length === 0) {
+	const recorded = async (roles: CallFilter["roles"]): Promise<RunCallUsage | null> => {
+		const usage = (await options.runUsage?.(from, roles).catch(() => null)) ?? null;
+		return usage !== null && usage.callIds.length > 0 ? usage : null;
+	};
+	const side = await recorded(SIDE_CALL_ROLES);
+	const children = await recorded(CHILD_CALL_ROLES);
+	if (side === null && children === null) {
 		noteMainRunV2({ usage: { main, total: main } });
 		return;
 	}
-	const total = await options.runUsage?.(from, ["main", "compaction", ...(CHILD_CALL_ROLES ?? [])]).catch(() => null);
-	noteMainRunV2({ usage: { main, children, ...(total ? { total } : {}) } });
+	const total = await options
+		.runUsage?.(from, ["main", "compaction", ...(SIDE_CALL_ROLES ?? []), ...(CHILD_CALL_ROLES ?? [])])
+		.catch(() => null);
+	noteMainRunV2({
+		usage: { main, ...(side ? { side } : {}), ...(children ? { children } : {}), ...(total ? { total } : {}) },
+	});
 }
 
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {

@@ -226,12 +226,14 @@ export interface AgentRunSettlementV2 {
 
 /**
  * A run's spend, each part folded from the session telemetry the way the run ledger folds it: `main` is the run's own
- * turn and compaction calls, `children` the dispatched workers' calls (absent when none were recorded), `total` both.
+ * turn and compaction calls, `side` the side agents' calls such as the safety judge's, `children` the dispatched
+ * workers' calls (each absent when none were recorded), `total` all of them.
  */
 export interface RunUsageV2 {
 	main: RunCallUsage;
+	side?: RunCallUsage;
 	children?: RunCallUsage;
-	/** Absent only when a fold over both parts could not be read beside the children's own. */
+	/** Absent only when a fold over every part could not be read beside the side or children's own. */
 	total?: RunCallUsage;
 }
 
