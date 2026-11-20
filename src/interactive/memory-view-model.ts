@@ -93,7 +93,9 @@ function trackRecord(record: MemoryRecord): string[] {
 		}; contradicted after delivery in ${sessions("contradicted").size} sessions.`,
 		`Last verified ${record.lastVerifiedAt ?? "never"}; learned ${record.createdAt}.`,
 		...(record.revisions !== undefined
-			? [`Reworded ${record.revisions.length - 1} times; verdicts count per wording.`]
+			? [
+					`Reworded ${record.revisions.length - 1} time${record.revisions.length === 2 ? "" : "s"}; verdicts count per wording.`,
+				]
 			: []),
 	];
 }

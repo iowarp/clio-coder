@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
-import { canonicalProjectRoot, checkoutHead } from "../../core/project-root.js";
+import { canonicalProjectRoot, checkoutHead, repositoryRoot } from "../../core/project-root.js";
 import {
 	type MemoryMutationOptions,
 	memoryRoot,
@@ -220,16 +220,8 @@ function cloneClaim(claim: MemoryClaim): MemoryClaim {
  * no branch, an unborn branch has no head).
  */
 export function checkoutPosition(cwd: string): { branch?: string; head?: string } {
-	let root: string | null = null;
-	for (let dir = cwd; isAbsolute(dir); ) {
-		if (existsSync(join(dir, ".git"))) {
-			root = dir;
-			break;
-		}
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
+	// The enclosing checkout, as the handbook walk finds it: a home directory that is a repository owns only itself.
+	const root = repositoryRoot(resolve(cwd));
 	if (root === null) return {};
 	const head = checkoutHead(root);
 	let branch: string | undefined;

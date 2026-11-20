@@ -63,6 +63,8 @@ interface ProposedEntry {
 	 * still owed its held observation when the command later succeeds.
 	 */
 	held: boolean;
+	/** Filed when a reminder carrying it was delivered, so a later held is a prompted one. */
+	delivered: boolean;
 }
 
 const HISTORY_CANDIDATE_VERSION = 1;
@@ -116,10 +118,14 @@ export class MemoryLessonFeedback {
 			const filed = this.#proposed.get(entry.id);
 			if (filed === undefined || filed.content !== entry.content || filed.held) return [];
 			filed.held = true;
-			return [filed.record];
+			return [filed];
 		});
 		if (fresh.length > 0) this.#propose(fresh, "held", undefined, review.commandVerified);
-		if (nowHeld.length > 0) this.#observeResolved(nowHeld, "held", "held lessons not recorded");
+		// A lesson the reminder carried before it held was prompted to.
+		for (const prompted of [true, false]) {
+			const records = nowHeld.filter((filed) => filed.delivered === prompted).map((filed) => filed.record);
+			if (records.length > 0) this.#observeResolved(records, "held", "held lessons not recorded", prompted);
+		}
 		const unfounded = review.ungrounded.filter((entry) => this.#proposed.get(entry.id)?.content !== entry.content);
 		if (unfounded.length > 0) this.#propose(unfounded, null);
 		const withdrawn = review.withdrawn.flatMap((entry) => {
@@ -436,6 +442,7 @@ export class MemoryLessonFeedback {
 			this.#proposed.set(entry.id, {
 				content: entry.content,
 				held: kind === "held" && entry.durable === true,
+				delivered: kind === "delivered",
 				record: proposal.then((records) => {
 					const record = entry.durable === true ? records.get(entry.id) : undefined;
 					return record === undefined || sessionId === null ? null : { memoryId: record.id, sessionId };
@@ -448,13 +455,16 @@ export class MemoryLessonFeedback {
 		records: ReadonlyArray<Promise<{ memoryId: string; sessionId: string } | null>>,
 		kind: MemoryObservationKind,
 		failure: string,
+		prompted?: boolean,
 	): void {
 		this.#track(
 			Promise.all(records)
 				.then((resolved) =>
 					recordMemoryObservations(
 						this.#ports.dataDir(),
-						resolved.filter((item) => item !== null).map((item) => ({ ...this.#position(), ...item, kind })),
+						resolved
+							.filter((item) => item !== null)
+							.map((item) => ({ ...this.#position(), ...item, kind, ...(prompted ? { prompted } : {}) })),
 					),
 				)
 				.then((outcome) => this.#reportGate(outcome))

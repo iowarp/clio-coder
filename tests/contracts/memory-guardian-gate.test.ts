@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { BackgroundStepDecision, BackgroundStepFacts } from "../../src/domains/memory/background-budget.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
-import { commandEvidenceRef, commandSegment } from "../../src/domains/memory/command-evidence.js";
+import { commandEvidenceRef, commandSegment, legacyCommandHash } from "../../src/domains/memory/command-evidence.js";
 import {
 	type ClaimReceipt,
 	claimDemonstration,
@@ -14,8 +14,17 @@ import {
 	recordClaimSession,
 	recordMemoryObservations,
 } from "../../src/domains/memory/guardian-gate.js";
-import { approveMemoryRecord, canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/operations.js";
-import { claimCommand, claimPathRefusal, proposeMemoryPromotion } from "../../src/domains/memory/promotion.js";
+import {
+	approveMemoryRecord,
+	canonicalMemoryRepositoryIdentity,
+	rejectMemoryRecord,
+} from "../../src/domains/memory/operations.js";
+import {
+	claimCommand,
+	claimPathRefusal,
+	memoryClaimKey,
+	proposeMemoryPromotion,
+} from "../../src/domains/memory/promotion.js";
 import { selectMemoryForPrompt } from "../../src/domains/memory/prompt-section.js";
 import { insertMemoryRecordIfAbsent, loadMemoryRecords } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
@@ -327,6 +336,70 @@ describe("memory guardian gate", () => {
 		strictEqual(kept.size, 500);
 		ok(decided.every((item) => kept.has(item.id)));
 		strictEqual(kept.has(notes[0]?.id ?? ""), false, "the note with no evidence goes first");
+
+		// An operator decision is never written by an automatic path, and its command blocks every other claim on it.
+		const strictId = strictNote.record?.id ?? "";
+		await rejectMemoryRecord(dataDir, strictId);
+		const rejectedBefore = (await loadMemoryRecords(dataDir)).find((item) => item.id === strictId);
+		await session("s20", strict, [passed("strict")]);
+		await recordMemoryObservations(dataDir, [
+			{ memoryId: strictId, sessionId: "s21", kind: "delivered" },
+			{ memoryId: strictId, sessionId: "s21", kind: "held" },
+		]);
+		deepStrictEqual(
+			(await loadMemoryRecords(dataDir)).find((item) => item.id === strictId),
+			rejectedBefore,
+			"the operator's rejection is left exactly as they left it",
+		);
+		const otherFix: MemoryClaim = { kind: "fix", failed: pattern(run("old")), fixed: pattern(run("strict")) };
+		const otherPair = [failed("old"), passed("strict")];
+		for (const sessionId of ["s22", "s23"]) await session(sessionId, otherFix, otherPair);
+		strictEqual(
+			(await session("s24", otherFix, otherPair)).gate,
+			"hold",
+			"a rejected command is not promoted under another claim",
+		);
+
+		// A declared scratch parameter is one claim whatever scratch path each session used.
+		const scratchRun = (dir: string) => `node fixture.mjs --out ${join(tmpdir(), dir, "out.txt")}`;
+		const parametric = (dir: string): MemoryClaim => ({ kind: "command", command: pattern(scratchRun(dir), 3) });
+		const roots = { scratchRoots: [tmpdir()] };
+		const run1 = await session("s25", parametric("run-1"), [{ command: scratchRun("run-1"), ok: true }], roots);
+		const run2 = await session("s26", parametric("run-2"), [{ command: scratchRun("run-2"), ok: true }], roots);
+		strictEqual(run2.created, false);
+		strictEqual(run2.record?.id, run1.record?.id);
+
+		// `cd <root> && <command>` is the same claim as `<command>`, as evidence identity says.
+		const quoted = (command: string, ref: string): MemoryRecord =>
+			note(990, { lesson: `Run \`${command}\`.`, evidenceRefs: [ref], repository: { kind: "canonical-path", key: repo } });
+		const chained = `cd ${repo} && ${run("check")}`;
+		const plainKey = memoryClaimKey(quoted(run("check"), commandEvidenceRef(run("check"))));
+		ok(plainKey);
+		strictEqual(memoryClaimKey(quoted(chained, `command:${legacyCommandHash(chained)}`)), plainKey);
+
+		// Procedural entries and handoff snapshots wait for the operator however many sessions hold them.
+		const repository = canonicalMemoryRepositoryIdentity(repo);
+		if (repository === null) throw new Error("no repository identity");
+		for (const kind of ["procedural", "handoff"] as const) {
+			const { record } = await proposeMemoryPromotion(
+				dataDir,
+				{
+					kind: kind === "handoff" ? "handoff-snapshot" : "task-bank-entry",
+					sessionId: `${kind}-author`,
+					evidenceRefs: [`session:${kind}-author`, commandEvidenceRef(run(kind))],
+					entry:
+						kind === "handoff"
+							? new TaskMemoryBank().saveKnowledge(`Resume with \`${run(kind)}\`.`)
+							: new TaskMemoryBank().saveProcedural(`Retried with \`${run(kind)}\`.`),
+				},
+				{ scope: "repo", repository },
+			);
+			const outcome = await recordMemoryObservations(dataDir, [
+				{ memoryId: record.id, sessionId: `${kind}-2`, kind: "held" },
+				{ memoryId: record.id, sessionId: `${kind}-3`, kind: "held" },
+			]);
+			deepStrictEqual(outcome.approved, [], kind);
+		}
 	});
 
 	it("round-trips a parked bank with its entry ids", () => {

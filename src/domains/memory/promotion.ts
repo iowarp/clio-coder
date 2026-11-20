@@ -1,15 +1,18 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { repositoryRoot as enclosingRepository } from "../../core/project-root.js";
 import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
 import {
 	COMMAND_CLAIM_REF_PREFIX,
 	COMMAND_EVIDENCE_REF_PREFIX,
 	type CommandSegment,
 	commandSegment,
+	legacyCommandHash,
 	parseSourceEvidenceRef,
+	segmentKeyRef,
 } from "./command-evidence.js";
-import { commandRefKeys } from "./lesson-evidence.js";
 import { canonicalMemoryRepositoryIdentity, relatedRepositoryRoots } from "./operations.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
@@ -168,7 +171,11 @@ export function memoryRecordFromPromotion(
 		},
 	};
 	applyScopeIdentity(record, validatedScope);
-	const claim = claimFromEvidence(record.lesson, record.evidenceRefs);
+	const claim = claimFromEvidence(
+		record.lesson,
+		record.evidenceRefs,
+		validatedScope.scope === "repo" ? validatedScope.repository.key : undefined,
+	);
 	if (claim !== null) {
 		if (validatedScope.scope === "repo") {
 			const refusal = claimPathRefusal(claim, validatedScope.repository.key);
@@ -183,23 +190,32 @@ export function memoryRecordFromPromotion(
  * What a record's evidence refs claim, read from the refs and the lesson text alone. A verified `command:` ref is a
  * command claim on the quoted span whose evidence identity it names; without one, a single `source:` ref is a
  * source claim. A `command-claimed:` ref grants nothing and claims nothing. More than one candidate, or a command
- * whose words the store could not hold, is no claim.
+ * whose words the store could not hold, is no claim. A quoted span is read against the repository root, as
+ * evidence identity reads a receipt, so `cd <root> && pnpm test` claims `pnpm test`; a ref written before segment
+ * keys names its span by the text hash.
  *
  * New records store the claim they were built with. A record written before claim identity has none stored and is
  * read through this function on every use (`recordClaim`); its derived claim is never written back.
  */
-function claimFromEvidence(lesson: string, evidenceRefs: ReadonlyArray<string>): MemoryClaim | null {
-	const declared = commandRefKeys(
-		lesson,
-		evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)),
+function claimFromEvidence(lesson: string, evidenceRefs: ReadonlyArray<string>, root?: string): MemoryClaim | null {
+	const hashes = new Set(
+		evidenceRefs
+			.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX))
+			.map((ref) => ref.slice(COMMAND_EVIDENCE_REF_PREFIX.length)),
 	);
-	if (declared.size > 1) return null;
-	if (declared.size === 1) {
-		const segments = [...lesson.matchAll(/`([^`\n]+)`/gu)]
-			.map((match) => commandSegment((match[1] ?? "").trim()))
-			.filter((segment): segment is CommandSegment => segment !== null && declared.has(segment.key));
-		const segment = segments[0];
-		return segment === undefined ? null : commandClaimOf(segment);
+	if (hashes.size > 1) return null;
+	const [hash] = [...hashes];
+	if (hash !== undefined) {
+		for (const match of lesson.matchAll(/`([^`\n]+)`/gu)) {
+			const span = (match[1] ?? "").trim();
+			const segment = commandSegment(span, root);
+			if (segment === null) continue;
+			const named = segmentKeyRef(hash)
+				? segment.key === hash || commandSegment(span)?.key === hash
+				: legacyCommandHash(span) === hash;
+			if (named) return commandClaimOf(segment);
+		}
+		return null;
 	}
 	const sources = evidenceRefs.flatMap((ref) => parseSourceEvidenceRef(ref) ?? []);
 	const source = sources.length === 1 ? sources[0] : undefined;
@@ -225,7 +241,7 @@ function commandClaimOf(segment: CommandSegment): MemoryClaim | null {
 
 /** The claim a record makes: the one it stores, or, for a record written before claim identity, its refs' claim. */
 export function recordClaim(record: MemoryRecord): MemoryClaim | null {
-	return record.claim ?? claimFromEvidence(record.lesson, record.evidenceRefs);
+	return record.claim ?? claimFromEvidence(record.lesson, record.evidenceRefs, record.repository?.key);
 }
 
 /**
@@ -244,7 +260,16 @@ export function memoryClaimKey(record: MemoryRecord): string | null {
 }
 
 function claimBody(claim: MemoryClaim): unknown {
-	const command = (item: MemoryClaimCommand) => [item.key, item.scratchParameter ?? null];
+	// A declared scratch parameter is a parameter: its value is masked, keeping any `--flag=` prefix, so every
+	// session's concrete scratch path names the one claim. An undeclared argv is its evidence key.
+	const command = (item: MemoryClaimCommand) => {
+		const at = item.scratchParameter;
+		if (at === undefined) return [item.key, null];
+		const argv = item.argv.map((word, index) =>
+			index === at ? `${word.startsWith("-") ? word.slice(0, word.indexOf("=") + 1) : ""}\u0000scratch` : word,
+		);
+		return [item.assignments, argv, at];
+	};
 	switch (claim.kind) {
 		case "command":
 			return command(claim.command);
@@ -282,39 +307,48 @@ export function revisionAuthor(record: MemoryRecord): string | undefined {
 }
 
 /**
- * Why a claim may not be written, or null. A note binds only paths of the repository it is filed under: an
- * absolute path outside the canonical root, inside a linked worktree, or under a scratch root is a fact about one
- * checkout or one run, and is refused at write. A declared scratch parameter is the exception it declares.
+ * Why a claim may not be written, or null. A note binds only paths of the repository it is filed under, judged where
+ * they land with symlinks resolved: a path outside the canonical root, inside a linked worktree, or under a scratch
+ * root is a fact about one checkout or one run, and is refused at write. A relative source path is read against the
+ * root. A repository that itself sits under a scratch root still owns its own paths. The program word may name an
+ * installed tool outside the repository (`/usr/bin/python3`), never a file of another checkout or a scratch root. A
+ * declared scratch parameter is the one exception, and only when it holds a path under a scratch root.
  */
 export function claimPathRefusal(
 	claim: MemoryClaim,
 	repositoryRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
 ): string | null {
-	const root = resolve(repositoryRoot);
-	const worktrees = (relatedRepositoryRoots(root)?.roots ?? []).filter((other) => strictlyInside(other, root));
-	const scratch = [tmpdir(), "/tmp", "/var/tmp", ...scratchRoots]
-		.filter((dir) => isAbsolute(dir))
-		.map((dir) => resolve(dir));
-	const refused = ({ path, program }: { path: string; program: boolean }): boolean => {
-		const target = resolve(path);
-		if (worktrees.some((other) => target === other || strictlyInside(target, other))) return true;
-		if (scratch.some((dir) => target === dir || strictlyInside(target, dir))) {
-			// The repository may itself sit under a scratch root; then only a scratch root inside it marks scratch.
-			if (!strictlyInside(target, root)) return true;
-			if (scratch.some((dir) => strictlyInside(dir, root) && (target === dir || strictlyInside(target, dir)))) return true;
-		}
-		// An installed program (`/usr/bin/python3`) names the host's tool, not a file of another checkout.
-		return !program && target !== root && !strictlyInside(target, root);
+	const root = landedPath(repositoryRoot);
+	const worktrees = (relatedRepositoryRoots(root)?.roots ?? []).map(landedPath).filter((other) => other !== root);
+	const scratch = [...new Set([tmpdir(), "/tmp", "/var/tmp", ...scratchRoots].filter((dir) => isAbsolute(dir)))].map(
+		landedPath,
+	);
+	const within = (path: string, dir: string) => path === dir || strictlyInside(path, dir);
+	const inWorktree = (target: string) => worktrees.some((other) => within(target, other));
+	const inRepository = (target: string) =>
+		within(target, root) &&
+		!inWorktree(target) &&
+		!scratch.some((dir) => strictlyInside(dir, root) && within(target, dir));
+	const underScratch = (target: string) => scratch.some((dir) => within(target, dir));
+	const refused = ({ path, use }: { path: string; use: "word" | "program" | "scratch" }): boolean => {
+		const target = landedPath(resolve(root, path));
+		if (use === "scratch") return !underScratch(target) || within(target, root) || inWorktree(target);
+		if (inRepository(target)) return false;
+		if (use === "word") return true;
+		return underScratch(target) || inWorktree(target) || enclosingRepository(target) !== null;
 	};
-	const paths: Array<{ path: string; program: boolean }> = [];
+	const paths: Array<{ path: string; use: "word" | "program" | "scratch" }> = [];
 	const command = (item: MemoryClaimCommand) => {
 		for (const [index, word] of [...item.assignments, ...item.argv].entries()) {
 			const at = index - item.assignments.length;
-			if (at === item.scratchParameter) continue;
 			const value = word.includes("=") ? word.slice(word.indexOf("=") + 1) : word;
+			if (at === item.scratchParameter) {
+				paths.push({ path: isAbsolute(value) ? value : "\u0000", use: "scratch" });
+				continue;
+			}
 			for (const candidate of new Set([word, value]))
-				if (isAbsolute(candidate)) paths.push({ path: candidate, program: at === 0 });
+				if (isAbsolute(candidate)) paths.push({ path: candidate, use: at === 0 ? "program" : "word" });
 		}
 	};
 	if (claim.kind === "command") command(claim.command);
@@ -322,14 +356,32 @@ export function claimPathRefusal(
 		command(claim.failed);
 		command(claim.fixed);
 	}
-	if (claim.kind === "source" && isAbsolute(claim.path)) paths.push({ path: claim.path, program: false });
+	if (claim.kind === "source") paths.push({ path: claim.path, use: "word" });
 	const bad = paths.find(refused);
-	return bad === undefined ? null : `memory note binds a path outside its repository checkout: ${bad.path}`;
+	if (bad === undefined) return null;
+	return bad.use === "scratch"
+		? "memory note declares a scratch parameter that holds no path under a scratch root"
+		: `memory note binds a path outside its repository checkout: ${bad.path}`;
 }
 
 function strictlyInside(path: string, root: string): boolean {
 	const inside = relative(root, path);
 	return inside.length > 0 && inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
+}
+
+/** Where a path lands: the real path of its nearest existing ancestor, with the rest unchanged. */
+function landedPath(path: string): string {
+	const rest: string[] = [];
+	for (let current = resolve(path); ; ) {
+		try {
+			return join(realpathSync(current), ...rest.reverse());
+		} catch {
+			const parent = dirname(current);
+			if (parent === current) return resolve(path);
+			rest.push(basename(current));
+			current = parent;
+		}
+	}
 }
 
 /**
@@ -344,6 +396,8 @@ export function claimNote(input: {
 	claim: MemoryClaim;
 	repository: MemoryRepositoryIdentity;
 	at: string;
+	/** Conditions the claim holds under beyond its repository; they are part of its identity. */
+	appliesWhen?: ReadonlyArray<string>;
 }): MemoryRecord {
 	const lesson = redactSecretsPreservingMarkers(input.lesson, createRedactionTally()).replace(/\s+/gu, " ").trim();
 	const claimText = JSON.stringify(input.claim);
@@ -360,7 +414,10 @@ export function claimNote(input: {
 		key: `claim:${claim.kind}`,
 		lesson,
 		evidenceRefs: [`session:${input.sessionId}`, evidence],
-		appliesWhen: [`repository:${input.repository.kind}:${input.repository.key}`],
+		appliesWhen: [
+			`repository:${input.repository.kind}:${input.repository.key}`,
+			...new Set((input.appliesWhen ?? []).map((item) => item.trim()).filter((item) => item.length > 0)),
+		],
 		avoidWhen: [],
 		confidence: 0.6,
 		createdAt: input.at,

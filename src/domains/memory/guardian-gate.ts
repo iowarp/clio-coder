@@ -88,13 +88,29 @@ export function operatorDecided(record: MemoryRecord): boolean {
 }
 
 /**
+ * The records the gate may approve alone: a task-bank knowledge entry, as before claims, and a note composed from a
+ * receipt pair (`claimNote`), which DESIGN 4.4 adds (the Note row's "composed by rule from a receipt pair" and the
+ * promotion bar of "Promotion and demotion"). A procedural entry records one attempt, and a handoff snapshot or an
+ * evidence proposal was filed for the operator; those wait for them.
+ */
+function gateSpeaksFor(record: MemoryRecord): boolean {
+	const provenance = record.provenance;
+	if (provenance?.sourceKind === "task-bank-entry") return provenance.sourceEntryKind === "knowledge";
+	return (
+		provenance?.sourceKind === "evidence" &&
+		record.claim !== undefined &&
+		provenance.sourceSessionId !== undefined &&
+		provenance.evidenceId === `session:${provenance.sourceSessionId}`
+	);
+}
+
+/**
  * Pure verdict over one record's retained verdicts. `store` is the rest of the
  * store as read inside the same locked mutation, so a record approved a moment
  * earlier counts.
  */
 export function evaluateMemoryGate(record: MemoryRecord, store: ReadonlyArray<MemoryRecord> = []): MemoryGateVerdict {
-	if (record.scope !== "repo" || operatorDecided(record)) return "hold";
-	if (record.provenance?.sourceKind !== "task-bank-entry" && record.claim === undefined) return "hold";
+	if (record.scope !== "repo" || operatorDecided(record) || !gateSpeaksFor(record)) return "hold";
 	const observations = record.observations ?? [];
 	if (record.approved) {
 		const approvedAt = record.approval?.at ?? "";
@@ -124,19 +140,21 @@ export function evaluateMemoryGate(record: MemoryRecord, store: ReadonlyArray<Me
 }
 
 /**
- * A record written before claim identity can share its command with another
- * record of the same repository. Approving it on its own is a different
- * matter: when an approved or operator-rejected record already carries one of
- * its `command:` refs, which wording should stand is the operator's call, so it
- * waits as a pending proposal. A stored record's unverified `command-claimed:`
+ * A decided record speaks for its claim and its command. When an approved or
+ * operator-rejected record of the same repository has the same claim identity
+ * (two records of one claim survive from stores written before claims), or
+ * carries one of this record's `command:` refs under any claim (a fix claim
+ * recommending a command the operator rejected as a plain command), which
+ * should stand is the operator's call, so this one waits as a pending note. A stored record's unverified `command-claimed:`
  * ref counts as its claim here, and both sides compare evidence identities, so
  * a ref written before identity existed and a spelling such as
  * `corepack pnpm -s test` against `pnpm test` meet as one command.
  */
 function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<MemoryRecord>): boolean {
 	const commands = commandKeys(record, true);
+	const identity = memoryClaimKey(record);
 	const repository = record.repository;
-	if (commands.size === 0 || repository === undefined) return false;
+	if (repository === undefined) return false;
 	return store.some(
 		(other) =>
 			other.id !== record.id &&
@@ -144,9 +162,8 @@ function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<Memory
 			other.scope === "repo" &&
 			other.repository?.kind === repository.kind &&
 			other.repository.key === repository.key &&
-			// Two records that both store their claim are told apart by claim identity; this guard is for the rest.
-			(record.claim === undefined || other.claim === undefined) &&
-			[...commandKeys(other, false)].some((key) => commands.has(key)),
+			((identity !== null && memoryClaimKey(other) === identity) ||
+				[...commandKeys(other, false)].some((key) => commands.has(key))),
 	);
 }
 
@@ -263,6 +280,8 @@ export async function recordMemoryObservations(
 					outcome.missing.push(input.memoryId);
 					continue;
 				}
+				// The operator's decision stands as they left it: no automatic observation rewrites it.
+				if (operatorDecided(current)) continue;
 				const next = touched.has(current.id) ? current : cloneMemoryRecord(current);
 				observeMemoryRecord(next, input, at);
 				touched.set(next.id, next);
@@ -302,15 +321,16 @@ export interface ClaimReceipt {
 }
 
 /**
- * What one session's receipts, in order, say about a claim. A command claim is
- * held by a success of a segment that vouches for it (`receiptVouches`), and
- * contradicted by a lone invocation of it failing with no such success. A fix
- * claim is held only by its failed pattern failing and its fixed pattern then
- * succeeding; it is contradicted when, after the failed pattern failed, the
- * fixed pattern failed too and never succeeded. A failed chain does not say
- * which segment failed, so only a lone invocation counts as a failure. A
- * source claim is not judged by shell receipts. An unrelated success on the
- * same subject vouches for nothing.
+ * What one session's receipts, in order, say about a claim; the session's
+ * last word on it decides. A command claim is held by a success of a segment
+ * that vouches for it (`receiptVouches`) and contradicted by a later lone
+ * invocation of it failing. A fix claim is held by its failed pattern failing
+ * and its fixed pattern then succeeding with no success of the failed pattern
+ * in between (DESIGN 4.4, rules capture); a later failure of the fixed pattern
+ * contradicts it, as does the fixed pattern failing right after the failed
+ * one. A failed chain does not say which segment failed, so only a lone
+ * invocation counts as a failure. A source claim is not judged by shell
+ * receipts. An unrelated success on the same subject vouches for nothing.
  */
 export function claimDemonstration(
 	claim: MemoryClaim,
@@ -325,18 +345,24 @@ export function claimDemonstration(
 		if (!ok && segments.length !== 1) return false;
 		return segments.some((segment) => receiptVouches(pattern, segment, scratchRoots));
 	};
+	let verdict: "held" | "contradicted" | null = null;
 	if (claim.kind === "command") {
-		if (receipts.some((receipt) => vouches(claim.command, receipt, true))) return "held";
-		return receipts.some((receipt) => vouches(claim.command, receipt, false)) ? "contradicted" : null;
+		for (const receipt of receipts) {
+			if (vouches(claim.command, receipt, true)) verdict = "held";
+			else if (vouches(claim.command, receipt, false)) verdict = "contradicted";
+		}
+		return verdict;
 	}
-	let failedSeen = false;
-	let fixedFailed = false;
+	let failedOpen = false;
 	for (const receipt of receipts) {
-		if (vouches(claim.failed, receipt, false)) failedSeen = true;
-		else if (failedSeen && vouches(claim.fixed, receipt, true)) return "held";
-		else if (failedSeen && vouches(claim.fixed, receipt, false)) fixedFailed = true;
+		if (vouches(claim.failed, receipt, false)) failedOpen = true;
+		else if (vouches(claim.failed, receipt, true)) failedOpen = false;
+		else if (failedOpen && vouches(claim.fixed, receipt, true)) {
+			verdict = "held";
+			failedOpen = false;
+		} else if ((failedOpen || verdict === "held") && vouches(claim.fixed, receipt, false)) verdict = "contradicted";
 	}
-	return fixedFailed ? "contradicted" : null;
+	return verdict;
 }
 
 /**
@@ -367,6 +393,8 @@ export interface ClaimSessionInput {
 	/** The note's words, written as the current revision when this session demonstrates the claim. */
 	lesson: string;
 	claim: MemoryClaim;
+	/** Conditions the claim holds under beyond its repository; a claim under other conditions is another record. */
+	appliesWhen?: ReadonlyArray<string>;
 	receipts: ReadonlyArray<ClaimReceipt>;
 	/** The note had been delivered to this session before its receipts. */
 	prompted?: boolean;
@@ -408,11 +436,13 @@ export async function recordClaimSession(dataDir: string, input: ClaimSessionInp
 		dataDir,
 		(records) => {
 			const existing = records.find((record) => record.id === candidate.id || memoryClaimKey(record) === identity);
-			if (verdict === null) return { result: { record: existing ?? null, created: false, verdict, gate: null } };
+			// No receipt verdict, or the operator's decision: nothing is written.
+			if (verdict === null || (existing !== undefined && operatorDecided(existing)))
+				return { result: { record: existing ?? null, created: false, verdict, gate: null } };
 			if (existing === undefined && verdict !== "held")
 				return { result: { record: null, created: false, verdict, gate: null } };
 			const record = existing === undefined ? candidate : cloneMemoryRecord(existing);
-			if (existing !== undefined && verdict === "held" && !record.approved && !operatorDecided(record))
+			if (existing !== undefined && verdict === "held" && !record.approved)
 				reviseMemoryLesson(record, candidate.lesson, record.evidenceRefs, input.sessionId, at);
 			observeMemoryRecord(record, { sessionId: input.sessionId, kind: verdict, ...scope }, at);
 			const next =
@@ -452,5 +482,12 @@ function claimNoteRecord(
 	repository: NonNullable<ReturnType<typeof canonicalMemoryRepositoryIdentity>>,
 	at: string,
 ): MemoryRecord {
-	return claimNote({ sessionId: input.sessionId, lesson: input.lesson, claim: input.claim, repository, at });
+	return claimNote({
+		sessionId: input.sessionId,
+		lesson: input.lesson,
+		claim: input.claim,
+		repository,
+		at,
+		...(input.appliesWhen !== undefined ? { appliesWhen: input.appliesWhen } : {}),
+	});
 }

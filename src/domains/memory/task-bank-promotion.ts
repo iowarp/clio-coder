@@ -15,7 +15,13 @@
  * made by hand from `/memory`.
  */
 
-import { commandClaimRef, commandEvidenceRef, simpleInvocation, sourceEvidenceRef } from "./command-evidence.js";
+import {
+	commandClaimRef,
+	commandEvidenceRef,
+	parseSourceEvidenceRef,
+	simpleInvocation,
+	sourceEvidenceRef,
+} from "./command-evidence.js";
 import { applyMemoryGate, observeMemoryRecord, operatorDecided, reviseMemoryLesson } from "./guardian-gate.js";
 import { canonicalMemoryRepositoryIdentity, checkoutPosition, cloneMemoryRecord } from "./operations.js";
 import { memoryClaimKey, memoryRecordFromPromotion } from "./promotion.js";
@@ -107,12 +113,23 @@ export async function proposeInjectedTaskMemory(
 					continue;
 				}
 				const record = cloneMemoryRecord(existing ?? item.record);
-				// A lesson keeps the words and evidence it was promoted on.
-				if (existing && !record.approved) {
-					const addedEvidence = item.record.evidenceRefs.filter(
-						(ref) => !record.evidenceRefs.includes(ref) && /^(?:command|source):/u.test(ref),
+				// Only a grounded filing revises a note: a delivered, ungrounded or scope-end proposal brings words no
+				// session demonstrated, and a lesson keeps the words and evidence it was promoted on. A newer quote of a
+				// file replaces the older quote of that same file rather than sitting beside it.
+				if (existing && !record.approved && input.observation === "held") {
+					const incoming = item.record.evidenceRefs.filter((ref) => /^(?:command|source):/u.test(ref));
+					const requoted = new Set(incoming.flatMap((ref) => parseSourceEvidenceRef(ref)?.path ?? []));
+					const kept = record.evidenceRefs.filter((ref) => {
+						const source = parseSourceEvidenceRef(ref);
+						return source === null || !requoted.has(source.path) || incoming.includes(ref);
+					});
+					reviseMemoryLesson(
+						record,
+						item.record.lesson,
+						[...kept, ...incoming.filter((ref) => !kept.includes(ref))],
+						sessionId,
+						at,
 					);
-					reviseMemoryLesson(record, item.record.lesson, [...record.evidenceRefs, ...addedEvidence], sessionId, at);
 				}
 				if (input.observation === "held") {
 					observeMemoryRecord(
