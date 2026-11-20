@@ -225,4 +225,59 @@ describe("verifier task gates", () => {
 		if (verdict.kind === "blocked") match(verdict.reason, /unverified: no OS sandbox/u);
 		deepStrictEqual(ran, []);
 	});
+
+	it("truncates passing verify output to max_output_bytes (head, marker, tail) without killing the check (XR-7)", async () => {
+		const noisyPass = 'process.stdout.write("HEAD_START\\n" + "x".repeat(4000) + "\\nTAIL_SUMMARY\\n");\n';
+		enter({
+			"noisy-pass.js": noisyPass,
+			"package.json": JSON.stringify({ name: "xr7-pass", scripts: { test: "node noisy-pass.js" } }),
+		});
+		configureTaskGates("Run `node noisy-pass.js`.", { confined: false });
+
+		const gateResult = await verify("gate-1", { max_output_bytes: 500 });
+		strictEqual(gateResult.kind, "ok");
+		strictEqual(gateResult.details?.exitCode, 0);
+		strictEqual(gateResult.details?.outputCapped, false);
+		strictEqual(judgementOf(gateResult), "succeeded");
+		if (gateResult.kind === "ok") {
+			ok(Buffer.byteLength(gateResult.output, "utf8") <= 500);
+			match(gateResult.output, /HEAD_START/u);
+			match(gateResult.output, /\[\.\.\. \d+ bytes omitted \.\.\.\]/u);
+			match(gateResult.output, /TAIL_SUMMARY/u);
+		}
+
+		clearTaskGates();
+		const scriptResult = await verify("test", { max_output_bytes: 500 });
+		strictEqual(scriptResult.kind, "ok");
+		strictEqual(scriptResult.details?.exitCode, 0);
+		strictEqual(scriptResult.details?.outputCapped, false);
+		strictEqual(judgementOf(scriptResult), "succeeded");
+		if (scriptResult.kind === "ok") {
+			ok(Buffer.byteLength(scriptResult.output, "utf8") <= 500);
+			match(scriptResult.output, /HEAD_START/u);
+			match(scriptResult.output, /\[\.\.\. \d+ bytes omitted \.\.\.\]/u);
+			match(scriptResult.output, /TAIL_SUMMARY/u);
+		}
+	});
+
+	it("keeps a failing verify check's non-zero exit code when output exceeds max_output_bytes (XR-7)", async () => {
+		enter({
+			"noisy-fail.js":
+				'process.stdout.write("HEAD_START\\n" + "y".repeat(4000) + "\\nTAIL_FAILURE\\n"); process.exit(3);\n',
+		});
+		configureTaskGates("Run `node noisy-fail.js`.", { confined: false });
+
+		const failed = await verify("gate-1", { max_output_bytes: 500 });
+		strictEqual(failed.kind, "error");
+		strictEqual(failed.details?.exitCode, 3);
+		strictEqual(failed.details?.outputCapped, false);
+		strictEqual(judgementOf(failed), "failed");
+		if (failed.kind === "error") {
+			match(failed.message, /^verify: exited with code 3:/u);
+			ok(!/output exceeded/u.test(failed.message));
+			match(failed.message, /HEAD_START/u);
+			match(failed.message, /\[\.\.\. \d+ bytes omitted \.\.\.\]/u);
+			match(failed.message, /TAIL_FAILURE/u);
+		}
+	});
 });

@@ -23,7 +23,7 @@ import {
 import { checkGitFields, GIT_OPS, gitInspectArgv, isGitInspectOp } from "./git-inspect.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { COMMIT_IDENTITY } from "./task-worktree.js";
-import { truncateUtf8 } from "./truncate-utf8.js";
+import { truncateHeadTailUtf8, truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
 
@@ -73,12 +73,20 @@ export async function runVectorTool(
 		shellSandbox?: MainSandboxPolicy;
 		/** The root `cwd` must stay inside; the process working directory when absent. */
 		workspaceRoot?: string;
+		/**
+		 * When true, `args.max_output_bytes` only trims the returned text
+		 * (head, dropped-byte marker, tail); the child runs under the default
+		 * safe-exec output cap so a small cap never kills the check.
+		 */
+		truncateOutputOnly?: boolean;
 	},
 ): Promise<ToolResult> {
 	const timeoutMs = timeoutArg(args);
-	const maxOutputBytes = maxOutputArg(args);
+	const requestedMaxOutputBytes = maxOutputArg(args);
+	const truncateOnly = options?.truncateOutputOnly === true;
+	const processMaxOutputBytes = truncateOnly ? SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES : requestedMaxOutputBytes;
 	try {
-		const runOptions: Parameters<typeof runCommandVector>[2] = { timeoutMs, maxOutputBytes };
+		const runOptions: Parameters<typeof runCommandVector>[2] = { timeoutMs, maxOutputBytes: processMaxOutputBytes };
 		const cwd = cwdArg(args);
 		if (cwd !== undefined) runOptions.cwd = cwd;
 		if (options?.signal !== undefined) runOptions.signal = options.signal;
@@ -87,7 +95,10 @@ export async function runVectorTool(
 		if (options?.shellSandbox !== undefined) runOptions.shellSandbox = options.shellSandbox;
 		if (options?.workspaceRoot !== undefined) runOptions.workspaceRoot = options.workspaceRoot;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
-		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
+		const combined = combineSafeOutput(result);
+		const output = truncateOnly
+			? truncateHeadTailUtf8(combined, requestedMaxOutputBytes)
+			: truncateUtf8(combined, requestedMaxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
 		if (result.timedOut) {
@@ -99,12 +110,13 @@ export async function runVectorTool(
 				kind: "error",
 				message:
 					output.trim().length > 0
-						? `${action}: output exceeded ${maxOutputBytes} bytes\n\n${output.trim()}`
-						: `${action}: output exceeded ${maxOutputBytes} bytes`,
+						? `${action}: output exceeded ${processMaxOutputBytes} bytes\n\n${output.trim()}`
+						: `${action}: output exceeded ${processMaxOutputBytes} bytes`,
 				details,
 			};
 		if (result.exitCode !== 0) {
-			const sandboxHint = options?.shellSandbox === undefined ? null : mainSandboxWriteHint(output, options.shellSandbox);
+			const sandboxHint =
+				options?.shellSandbox === undefined ? null : mainSandboxWriteHint(combined, options.shellSandbox);
 			return {
 				kind: "error",
 				message: `${action}: exited with code ${result.exitCode ?? "?"}: ${output.trim()}${sandboxHint === null ? "" : `\n${sandboxHint}`}`,

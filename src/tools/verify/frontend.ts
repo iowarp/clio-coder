@@ -4,14 +4,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Script } from "node:vm";
 import { prepareBoundedImage } from "../../core/file-references.js";
-import { combineSafeOutput, runCommandVector } from "../../core/safe-exec.js";
+import { combineSafeOutput, runCommandVector, SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES } from "../../core/safe-exec.js";
 import { acceptsImageInput } from "../../domains/providers/image-input.js";
 import type { ImageContent } from "../../engine/types.js";
 import { escapeRegExp } from "../ignore-policy.js";
 import { resolveReadPath } from "../path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "../registry.js";
 import { maxOutputArg, timeoutArg } from "../safe-exec.js";
-import { truncateUtf8 } from "../truncate-utf8.js";
+import { truncateHeadTailUtf8, truncateUtf8 } from "../truncate-utf8.js";
 import { BROWSER_MODES } from "./surface.js";
 
 export { BROWSER_MODES } from "./surface.js";
@@ -118,7 +118,7 @@ export async function runFrontendCheck(
 	const browserMode = browserModeArg(args.browser);
 	const validateOptions: ValidationOptions = {
 		timeoutMs: timeoutArg(args),
-		maxOutputBytes: maxOutputArg(args),
+		maxOutputBytes: SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
 		supportsImages: options?.supportsImages === true,
 		imageMaxBytes: Math.min(maxOutputArg(args), options?.toolResultMaxBytes ?? 50_000) - 4096,
 		images: [],
@@ -139,7 +139,7 @@ export async function runFrontendCheck(
 
 	const failed = checks.filter((check) => check.status === "fail");
 	const details = resultDetails(artifactPath, browserMode, checks);
-	const output = renderChecks(artifactPath, checks);
+	const output = truncateHeadTailUtf8(renderChecks(artifactPath, checks), maxOutputArg(args));
 	if (failed.length > 0) {
 		return {
 			kind: "error",

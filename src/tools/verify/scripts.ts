@@ -249,7 +249,7 @@ export async function runToolchainCheck(
 		file,
 		vector,
 		{ ...args, cwd, timeout_ms: typeof args.timeout_ms === "number" ? args.timeout_ms : check.timeoutMs },
-		options,
+		{ ...options, truncateOutputOnly: true },
 	);
 	return withDeclaredEvidence(result, { ...check, command: [...argv] });
 }
@@ -267,7 +267,13 @@ export async function runTaskGateCheck(
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: task gate '${check.id}' has empty argv` };
 	const bounds = taskGateBounds(args);
-	const result = await runVectorTool("verify", file, vector, { cwd: process.cwd(), ...bounds }, options);
+	const result = await runVectorTool(
+		"verify",
+		file,
+		vector,
+		{ cwd: process.cwd(), ...bounds },
+		{ ...options, truncateOutputOnly: true },
+	);
 	return withDeclaredEvidence(result, { ...check, timeoutMs: bounds.timeout_ms });
 }
 
@@ -918,10 +924,11 @@ export async function runScriptCheck(
 	const vector = ["run", check];
 	if (extraArgs.length > 0) vector.push("--", ...extraArgs);
 	return withCommandJudgement(
-		classifyUnavailable(await runVectorTool("verify", "npm", vector, { ...args, cwd }, options), check, [
-			"npm",
-			...vector,
-		]),
+		classifyUnavailable(
+			await runVectorTool("verify", "npm", vector, { ...args, cwd }, { ...options, truncateOutputOnly: true }),
+			check,
+			["npm", ...vector],
+		),
 	);
 }
 

@@ -226,7 +226,11 @@ export function taskGateCheck(gate: TaskGate): DeclaredCheck {
 	};
 }
 
-/** The bounds a gate runs under: the model may shorten them, never lift them past the ceilings. */
+/**
+ * The bounds a gate runs under: the model may shorten timeout_ms (never past
+ * the gate ceiling), while max_output_bytes bounds only the returned text and
+ * leaves the child under SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES.
+ */
 export function taskGateBounds(args: Record<string, unknown>): { timeout_ms: number; max_output_bytes: number } {
 	const timeout =
 		typeof args.timeout_ms === "number" && args.timeout_ms > 0
