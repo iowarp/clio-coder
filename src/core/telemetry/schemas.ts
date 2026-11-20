@@ -294,9 +294,14 @@ export const CallSettledSchema = Type.Object(
 				),
 				/** Superseded tool-result bytes a v6 observation-aging batch took out of this request; no longer written (CF-5). */
 				observationAgingBytes: Type.Optional(count),
+				/**
+				 * An upper bound on the previous request's prompt this one prefilled again: the lesser of this request's
+				 * uncached input plus cache writes and the previous prompt less this cache read. Both terms also count tokens
+				 * this request added, so the true re-prefill is at most this figure, never more.
+				 */
 				rePrefilledTokens: factSchema(count),
 				uncachedPrefillTokens: factSchema(count),
-				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle (#434). */
+				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle, so also an upper bound (#434). */
 				bill: Type.Optional(PricingSchema),
 				verdict: vocabulary(["hot", "partial", "cold", "small", "unknown"]),
 				/**
