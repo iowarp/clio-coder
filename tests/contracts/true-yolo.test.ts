@@ -468,6 +468,10 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'B=$TMPDIR/base; read B < /dev/null; rm -rf "$B"',
 		"B='$TMPDIR/base'; rm -rf \"$B\"",
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H/etc"',
+		// The shell rewrites PWD and OLDPWD on cd, and a later cd drops every pin.
+		`PWD=$TMPDIR; cd ${process.cwd()}; rm -f "$PWD/fixture.txt"`,
+		`OLDPWD=$TMPDIR; cd ${process.cwd()}; rm -f "$OLDPWD/fixture.txt"`,
+		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);

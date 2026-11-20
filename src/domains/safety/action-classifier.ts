@@ -519,10 +519,14 @@ const SCRATCH_WORD = String.raw`[\w./+@%,:-]*`;
 const SCRATCH_REFERENCE = new RegExp(String.raw`^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))(/${SCRATCH_WORD})?$`, "u");
 const SCRATCH_LITERAL = new RegExp(`^${SCRATCH_WORD}$`, "u");
 const SCRATCH_ASSIGNMENT = /^([A-Za-z_]\w*)(\+?=)(.*)$/u;
+/**
+ * Names the shell itself sets, rewrites (cd sets PWD and OLDPWD; read, getopts and mapfile set theirs), refuses
+ * (readonly) or reads for its own behaviour; an assignment to one never proves the value a later reference sees.
+ */
 const SCRATCH_SPECIAL =
-	/^(?:BASH\w*|CDPATH|DIRSTACK|EUID|GLOBIGNORE|GROUPS|HISTCMD|IFS|LINENO|OPTIND|PATH|PIPESTATUS|POSIXLY_CORRECT|RANDOM|SECONDS|SHELLOPTS|SRANDOM|UID|_)$/u;
+	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TIMEFORMAT|TMOUT|TMPDIR|UID|_)$/u;
 const SCRATCH_CONTROL =
-	/^(?:if|then|elif|else|fi|case|esac|for|select|while|until|do|done|in|function|time|coproc|set|shopt|trap|hash|command|exec|printf|pushd|popd)$/u;
+	/^(?:if|then|elif|else|fi|case|esac|for|select|while|until|do|done|in|function|time|coproc|set|shopt|trap|hash|command|exec|printf|pushd|popd|fc)$/u;
 
 function plainScratchWord(raw: string): string | null {
 	const word = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
@@ -544,7 +548,8 @@ function scratchTemplate(raw: string, temp: string): string | null {
  * XR-43: project operands only for the path classifier and the snapshot check, never for command execution or
  * other rails. Only flat, literal shell syntax proves a binding. A conditional assignment or reassignment kills
  * the old proof; substitutions other than the exact mktemp form, shell control flow and dynamic assigners leave
- * the original command to the conservative walk.
+ * the original command to the conservative walk. A name the shell manages is never pinned, and any cd but the
+ * leading temp cd drops every pin.
  */
 export function resolveScratchDeleteOperands(command: string): { command: string; leadingCd: string | null } {
 	const unchanged = { command, leadingCd: null };
@@ -600,9 +605,10 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 		}
 		if (!/^[\w./+-]+$/u.test(raw) || SCRATCH_CONTROL.test(raw)) return unchanged;
 		if (segment.slice(1).some((t) => plainScratchWord(expanded.slice(t.start, t.end)) === null)) return unchanged;
-		if (raw === "cd" && index === 0 && segment.length === 2) {
+		if (raw === "cd") {
 			const target = segment[1]?.value ?? "";
-			if (underTemp(target)) leadingCd = target;
+			if (index === 0 && segment.length === 2 && underTemp(target)) leadingCd = target;
+			else pins.clear();
 		}
 		if (!/^(?:rm|unlink|rmdir)$/u.test(raw)) continue;
 		hasDelete = true;
