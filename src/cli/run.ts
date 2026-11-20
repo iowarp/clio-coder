@@ -20,6 +20,7 @@ import { createContextDomainModule } from "../domains/context/runtime.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { WORKER_PROCESS_CLEANUP_BOUND_MS } from "../domains/dispatch/worker-spawn.js";
@@ -485,11 +486,6 @@ async function executeRunCommand(
 			// A worker's run settles inside the dispatch domain, where a
 			// failed outcome also feeds retry policy, so the no-op verdict stays a
 			// main-agent contract rather than a flag --agent would silently ignore.
-			if (parsed.maxCostUsd !== undefined && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch\n");
-				process.stderr.write(USAGE);
-				return 2;
-			}
 			if (parsed.failOnNoop && parsed.agentId !== undefined) {
 				writeRunDiagnostic("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
@@ -823,6 +819,11 @@ async function runDispatch(
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
 	if (noSkills) dispatchReq.noSkills = true;
 	if (skillPaths.length > 0) dispatchReq.skillPaths = skillPaths;
+	// As `/run --worktree`: an isolated task worktree, kept for review rather than merged.
+	if (parsed.worktree) Object.assign(dispatchReq, { worktree: true as const, apply: "preserve" as const });
+	// The one worker run's spend bound, checked at route admission against the route's conservative estimate.
+	if (parsed.maxCostUsd !== undefined)
+		dispatchReq.routingIntent = { ...defaultRoutingIntent(dispatchReq), maxCostUsd: parsed.maxCostUsd };
 	try {
 		const settings = effectiveSettings;
 		if (settings.integrations.projectResources?.trustProjectImports) {

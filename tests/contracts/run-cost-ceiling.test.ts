@@ -18,6 +18,12 @@ test("clio-coder run --max-cost-usd bounds what the run adds, under any lower co
 		parseRunCliArgs(["--max-cost-usd", "0", "task"]).diagnostics.map((entry) => entry.message),
 		["--max-cost-usd must be a positive number of US dollars"],
 	);
+	// With --agent it bounds that one worker run (SPEC 6.9), and --worktree is an --agent flag.
+	deepStrictEqual(parseRunCliArgs(["--agent", "scout", "--max-cost-usd", "0.01", "--worktree", "x"]).diagnostics, []);
+	deepStrictEqual(
+		parseRunCliArgs(["--worktree", "x"]).diagnostics.map((entry) => entry.message),
+		["fleet dispatch flags require --agent <recipe-id>"],
+	);
 	// A continued session already spent $2; the run may add $1.50 more.
 	const ceiling = runCostCeilingUsd({ spentUsd: 2, runMaxUsd: 1.5, configuredUsd: 0 });
 	strictEqual(ceiling, 3.5);

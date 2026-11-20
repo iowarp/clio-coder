@@ -66,7 +66,8 @@ Flags:
                             running worker plus the main agent's. Unpriced routes are not bounded; stderr names each
                             configured one: chat, compaction, fleet default, fleet profiles (which recipe pins name),
                             roster members and every target at its default model. A model the main agent names for one
-                            dispatch is not checked
+                            dispatch is not checked. With --agent: the worker's route is admitted only when its
+                            conservative cost estimate is under N
   --answers <file.yaml>     answer the questions only the author may answer (extension interviews, operator_only
                             ask_user questions) from this file; an unanswered one ends the run with exit 5 (see below)
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
@@ -74,6 +75,7 @@ Flags:
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
+  --worktree                run the --agent worker in a Clio-created task worktree, kept on its branch for review
   --skill <path>            make one explicit skill available for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 

@@ -74,8 +74,10 @@ export interface RunCliArgs {
 	cwd?: string;
 	/** Fail a main-agent run whose receipt records a no-op. */
 	failOnNoop: boolean;
-	/** Priced spend this run may add, in US dollars. */
+	/** Priced spend this run may add, in US dollars; with `--agent`, the bound on that one worker run. */
 	maxCostUsd?: number;
+	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
+	worktree?: boolean;
 	/** Wall-clock limit for the whole run, in seconds. */
 	timeoutSeconds?: number;
 	/** `--verify`: shell commands the run declares as its acceptance checks, in flag order. */
@@ -103,10 +105,10 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  *
  * | input                                                          | main  | agent |
  * | -------------------------------------------------------------- | ----- | ----- |
- * | --record, --agent-profile, --agent-runtime, --tool-profile, --require | usage | ok |
- * | --turn-mode, --allow-tools, --delegate-tools, --no-delegate     | ok    | usage |
+ * | --record, --agent-profile, --agent-runtime, --tool-profile, --require, --worktree | usage | ok |
+ * | --turn-mode, --allow-tools, --deny-tools, --delegate-tools, --no-delegate | ok | usage |
  * | --resume, --session, --continue, --fork, --name                | ok    | usage |
- * | --max-cost-usd, --fail-on-noop, --verify, --answers            | ok    | usage |
+ * | --fail-on-noop, --verify, --answers                            | ok    | usage |
  * | --systemone                                                    | ok    | usage |
  * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
  * | --autonomy                                                     | ok    | usage |
@@ -127,6 +129,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 			parsed.agentProfile !== undefined ||
 			parsed.agentRuntime !== undefined ||
 			parsed.toolProfile !== undefined ||
+			parsed.worktree === true ||
 			parsed.required.length > 0;
 		if (dispatchOnly) errors.push("fleet dispatch flags require --agent <recipe-id>");
 		return errors;
@@ -145,7 +148,6 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		errors.push("--resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript");
 	}
 	const mainOnly: Array<[boolean, string]> = [
-		[parsed.maxCostUsd !== undefined, "--max-cost-usd"],
 		[parsed.failOnNoop, "--fail-on-noop"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
@@ -206,6 +208,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--record") {
 			parsed.record = true;
+			continue;
+		}
+		if (arg === "--worktree") {
+			parsed.worktree = true;
 			continue;
 		}
 		if (arg === "--json") {
