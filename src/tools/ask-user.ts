@@ -864,7 +864,7 @@ function renderAskUserState(
 		event === "standalone_answered"
 			? "The operator answered this standalone question. Act on the answer within the requested scope. The earlier completed interview and its decisions are unchanged."
 			: policy.status === "active"
-				? "Act on the answers now: approval means do the work, and if the operator declines or says the work is enough, end in one sentence without restating earlier output. Ask another round only if a new necessary question remains; otherwise continue directly and the interview closes automatically with the recorded decisions below."
+				? "Act on the answers now. Ask another round only if a new necessary question remains; otherwise continue directly and the interview closes automatically with the recorded decisions below."
 				: event === "unscripted"
 					? "No entry in this run's --answers file matches this question, so nobody answered it and the run ends here. Make no edits, run no commands and dispatch no workers on a guessed answer."
 					: policy.status === "cancelled"
