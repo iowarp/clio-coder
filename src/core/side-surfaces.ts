@@ -38,6 +38,11 @@ export interface SideSurface {
 	role: AgentRole;
 	/** Who reads the output, in words. */
 	consumer: string;
+	/**
+	 * The route runtimes that can exercise it; absent means any route can. On any other route the surface is
+	 * `unsupported`, which is not the same as a surface that could have fired and did not.
+	 */
+	runtimes?: readonly string[];
 }
 
 export const SIDE_SURFACES: readonly SideSurface[] = [
@@ -53,7 +58,13 @@ export const SIDE_SURFACES: readonly SideSurface[] = [
 	{ id: "compaction.history", role: "compaction", consumer: "the first request after the fold" },
 	{ id: "compaction.split", role: "compaction", consumer: "the first request after the fold, for a split turn" },
 	{ id: "compaction.live", role: "compaction", consumer: "the first request after the fold, inside the live prefix" },
-	{ id: "compaction.native", role: "compaction", consumer: "the first request after the provider's own fold" },
+	{
+		id: "compaction.native",
+		role: "compaction",
+		consumer: "the first request after the provider's own fold",
+		// The provider's own compaction exists only on the Codex Responses route (`settings.context.compaction.provider`).
+		runtimes: ["openai-codex"],
+	},
 	{ id: "judge", role: "safety-judge", consumer: "the admission of the call that would have parked" },
 	{ id: "judge.screen", role: "system-one", consumer: "the safety judge's review of the same call" },
 	{ id: "triage", role: "helper", consumer: "the operator's queued steering messages" },

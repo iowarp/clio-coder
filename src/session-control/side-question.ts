@@ -132,6 +132,8 @@ export interface SideQuestionInput extends SideCallAuth {
  * machine. Only the system prompt and the appended message differ.
  */
 export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question"> {
+	/** The surface this round is for, when its role alone does not say (`helper` serves triage and `/draft`). */
+	purpose?: SurfaceId;
 	/** Ignored with `livePrefix`, which sends the live turn's own prompt. */
 	systemPrompt: string;
 	/** The one message appended to the read-only copy of the history. */
@@ -352,13 +354,14 @@ function schemaBindingFor(input: OutOfTurnRoundInput): SchemaBinding | null {
 
 /**
  * The surface a side round's role names on its own. `helper` carries more than one surface (triage and `/draft`), so
- * its callers name theirs.
+ * its callers name theirs through `purpose`.
  */
 const ROLE_PURPOSE: Partial<Record<AgentRole, SurfaceId>> = { btw: "btw", handoff: "handoff" };
 
 /** The shared round. See {@link OutOfTurnRoundInput}. */
 export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
-	const purpose = input.telemetry?.purpose ?? (input.telemetry ? ROLE_PURPOSE[input.telemetry.role] : undefined);
+	const purpose =
+		input.purpose ?? input.telemetry?.purpose ?? (input.telemetry ? ROLE_PURPOSE[input.telemetry.role] : undefined);
 	const scope = await openCallScope(
 		input.telemetry && purpose !== undefined ? { ...input.telemetry, purpose } : input.telemetry,
 		input.model,

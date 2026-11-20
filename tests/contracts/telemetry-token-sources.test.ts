@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { renderTokenSources } from "../../src/cli/telemetry-tokens.js";
+import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SurfaceId } from "../../src/core/side-surfaces.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
@@ -12,31 +13,32 @@ import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallSettled, CallStarted } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
 import { safetyJudgedPayload } from "../../src/domains/safety/decision-events.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
+import { compact } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { loadTokenSourcesReport } from "../../src/domains/session/token-sources.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { CallJournalOptions } from "../../src/domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { foldSideSurfaces } from "../../src/domains/telemetry/read-model.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
-import {
-	capturedJudgeCallId,
-	createSideRequestAdmission,
-	withJudgeCallCapture,
-	withSidePurpose,
-} from "../../src/entry/side-request-admission.js";
+import { createSafetyJudgeHost } from "../../src/entry/safety-judge-host.js";
+import { createSideRequestAdmission, withSidePurpose } from "../../src/entry/side-request-admission.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { goldenSessionJournal, telemetryCall } from "../harness/telemetry-view.js";
 
@@ -590,14 +592,27 @@ it("names every side producer by purpose: one row per purpose under its role, un
 		strictEqual(surface("triage")?.status, "unexercised", "a surface that made no call is never a pass");
 		const bank = surface("memory.bank")?.totals;
 		strictEqual(`${bank?.logicalCalls}/${bank?.neverSent}/${surface("memory.bank")?.exercised}`, "2/1/1");
+		// A never-sent sibling is unknown with its reason, never zero or not applicable.
+		strictEqual(surface("memory.bank")?.unknownUsage["never-sent"], 1, JSON.stringify(surface("memory.bank")));
+		strictEqual(`${bank?.usage.output.unknownCount}/${bank?.usage.output.absentCount}`, "1/0");
 		const correct = surface("memory.correct")?.totals;
 		strictEqual(correct?.sentUnsettled, 1);
+		strictEqual(surface("memory.correct")?.unknownUsage["sent-unsettled"], 1);
 		ok((correct?.usage.output.unknownCount ?? 0) > 0, "a sent-unsettled sibling stays unknown, never zero");
+		// The fixture's one unpurposed call stands for the triage side round, which MD2 owns; nothing else is residual.
 		strictEqual(
 			fold.residual.map(({ role, totals }) => `${role}:${totals.logicalCalls}`).join(","),
 			"helper:1",
 			"only the call that named no purpose is residual",
 		);
+		// Native compaction exists only on the Codex route: elsewhere it is unsupported, not merely unexercised.
+		const status = (runtimeId: string | undefined, id: SurfaceId) =>
+			foldSideSurfaces([], runtimeId === undefined ? undefined : { runtimeId }).surfaces.find((row) => row.surface === id)
+				?.status;
+		strictEqual(status("anthropic", "compaction.native"), "unsupported");
+		strictEqual(status("openai-codex", "compaction.native"), "unexercised");
+		strictEqual(status("anthropic", "compaction.history"), "unexercised");
+		strictEqual(status(undefined, "compaction.native"), "unexercised", "no route named, no capability claimed");
 
 		const header = scanTelemetrySegment(goldenSessionJournal(sessionId)).rows.find((row) => row.kind === "header");
 		ok(header?.kind === "header");
@@ -667,21 +682,52 @@ it("names every side producer by purpose: one row per purpose under its role, un
 			});
 		const signal = new AbortController().signal;
 		const parent = { callId: newCallId(), attemptId: newAttemptId() };
-		const payload = await withTelemetryContext({ sessionId, agent: { role: "main", id: sessionId }, ...parent }, () =>
-			withJudgeCallCapture(async () => {
-				(
-					await withSidePurpose("judge.screen", () => admit("system-one")({ targetId: "judge-target", model: "m", signal }))
-				)(null);
-				(await admit("safety-judge")({ targetId: "judge-target", model: "m", signal }))(null);
-				const judgeCallId = capturedJudgeCallId();
-				return safetyJudgedPayload({
-					sessionId,
-					tool: "bash",
-					actionClass: "exec",
-					verdict: "allow",
-					latencyMs: 1,
-					...(judgeCallId !== undefined ? { judgeCallId } : {}),
-				});
+		// The screen's System One ask names its surface through the host's wrapper.
+		(await withSidePurpose("judge.screen", () => admit("system-one")({ targetId: "judge-target", model: "m", signal })))(
+			null,
+		);
+		// The real judge host: its review captures the judge call the completion opens, and its decision row names it.
+		const judged: Array<ReturnType<typeof safetyJudgedPayload>> = [];
+		const ledger: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: at(1),
+				role: "user",
+				payload: { text: "Push main to origin." },
+			} as SessionEntry,
+		];
+		const seat = createSafetyJudgeHost({
+			settings: () =>
+				({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "judge-target", model: "m" } }) as ClioSettings,
+			complete: async (request) => {
+				(await admit("safety-judge")({ targetId: request.targetId, model: request.model ?? "m", signal }))(null);
+				return { text: JSON.stringify({ verdict: "allow", rule: "operator-named", reason: "Asked for." }) };
+			},
+			session: () =>
+				({
+					current: () => ({ id: sessionId }),
+					readEntries: () => ledger,
+					leafId: () => "u1",
+					appendEntry: (input: unknown) => input,
+				}) as unknown as SessionContract,
+			safety: {
+				decisions: { recordSafetyJudge: (input: SafetyJudgementInput) => judged.push(safetyJudgedPayload(input)) },
+			} as never,
+		});
+		await withTelemetryContext({ sessionId, agent: { role: "main", id: sessionId }, ...parent }, () =>
+			seat.review({
+				tool: ToolNames.Bash,
+				args: { command: "git push origin main" },
+				decision: {
+					kind: "ask",
+					classification: { actionClass: "execute", reasons: [] },
+					confirmationRuleId: "bash-unrecognized",
+					rejection: { short: "asks", detail: "asks", hints: [] },
+				},
+				approvalAuthority: "operator",
+				turnId: "u1",
 			}),
 		);
 		const judgeCall = started.find((item) => item.purpose === "judge");
@@ -690,8 +736,75 @@ it("names every side producer by purpose: one row per purpose under its role, un
 			started.some((item) => item.purpose === "judge.screen"),
 			JSON.stringify(started),
 		);
-		strictEqual(payload.judgeCallId, judgeCall.callId);
-		strictEqual(payload.parentCallId, parent.callId);
+		strictEqual(judged.length, 1, JSON.stringify(judged));
+		strictEqual(judged[0]?.verdict, "allow");
+		strictEqual(judged[0]?.judgeCallId, judgeCall.callId);
+		strictEqual(judged[0]?.parentCallId, parent.callId);
+
+		// A real producer names its own purpose: the history summary of a compaction opens its call scope as such.
+		const faux = registerEngineFauxProvider({
+			api: "token-sources-compaction",
+			models: [{ id: "summary" }],
+			tokensPerSecond: 0,
+		});
+		try {
+			faux.setResponses([
+				(_context, _options, _state, resolved) => ({
+					role: "assistant",
+					content: [{ type: "text", text: syntheticCompactionSummary("Push main to origin") }],
+					api: resolved.api,
+					provider: resolved.provider,
+					model: resolved.id,
+					stopReason: "stop",
+					timestamp: Date.now(),
+					usage: {
+						input: 10,
+						output: 5,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 15,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+				}),
+			]);
+			const summaryModel = faux.getModel("summary");
+			ok(summaryModel);
+			const entry = (turnId: string, role: "user" | "assistant", payload: unknown, parentTurnId: string | null) =>
+				({ kind: "message", turnId, parentTurnId, timestamp: at(1), role, payload }) as SessionEntry;
+			const before = started.length;
+			const result = await compact({
+				entries: [
+					entry("u1", "user", { text: "Push main to origin and report the result." }, null),
+					entry("a1", "assistant", { content: [{ type: "text", text: "Pushed main. ".repeat(40) }] }, "u1"),
+					entry("u2", "user", { text: "Now tag it." }, "a1"),
+				],
+				model: { ...summaryModel, contextWindow: 32768, maxTokens: 4096 },
+				keepRecentTokens: 10,
+				cwd: env.dir,
+				telemetry: {
+					origin: { id: sessionId, cwdHash: "token-sources-repo" },
+					acquire: async () => ({
+						journaled: true,
+						context: { sessionId, agent: { role: "compaction", id: sessionId } },
+						release: async () => {},
+					}),
+					role: "compaction",
+					targetId: "fixture",
+					runtimeId: "fixture",
+					pricedBy: "catalog",
+				} as unknown as CallJournalOptions,
+			});
+			ok(result.summary.length > 0);
+			strictEqual(
+				started
+					.slice(before)
+					.map((item) => item.purpose)
+					.join(","),
+				"compaction.history",
+			);
+		} finally {
+			faux.unregister();
+		}
 	} finally {
 		unsubscribe();
 		env.restore();

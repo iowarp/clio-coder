@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { Value } from "typebox/value";
 import { processIdentityAlive } from "../../core/process-identity.js";
-import { SIDE_SURFACES, type SurfaceId } from "../../core/side-surfaces.js";
+import type { SurfaceId } from "../../core/side-surfaces.js";
+import { SIDE_SURFACES } from "../../core/side-surfaces.js";
 import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryOwner } from "../../core/telemetry/context.js";
@@ -31,7 +32,7 @@ import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemet
 import type { AgentRole, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
-import type { Fact, FactSum } from "../../core/telemetry/fact.js";
+import type { Fact, FactSum, UnknownReason } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
 	agreedFreeRule,
@@ -4129,11 +4130,25 @@ export interface SideSurfaceFold {
 	role: AgentRole;
 	/** Attempts that reached a model: sent, whatever came back. */
 	exercised: number;
-	/** `unexercised` when no attempt reached a model, which is never a pass. */
-	status: "exercised" | "unexercised";
+	/**
+	 * `unexercised` when no attempt reached a model, which is never a pass; `unsupported` when, in addition, the route the
+	 * caller named cannot exercise the surface at all.
+	 */
+	status: "exercised" | "unexercised" | "unsupported";
+	/** A never-sent attempt's usage counts as unknown in every sum here, never as zero or not applicable. */
 	totals: CallTotals;
+	/** Attempts whose usage is unknown, by why: the fact's own reason, or what became of the request. */
+	unknownUsage: Partial<Record<SideUsageGap, number>>;
 	/** Summed attempt service time; overlapping calls each count, so this is never time saved. */
 	serviceMs: number;
+}
+
+/** Why an attempt's usage is unknown. */
+export type SideUsageGap = UnknownReason | "never-sent" | "sent-unsettled" | "not-settled";
+
+/** The route a fold is read for, as its caller knows it: what its runtime can exercise decides `unsupported`. */
+export interface SideSurfaceRoute {
+	runtimeId: string;
 }
 
 export interface SideSurfacesFold {
@@ -4146,9 +4161,53 @@ export interface SideSurfacesFold {
 }
 
 const NOT_SIDE_ROLES: ReadonlySet<AgentRole> = new Set(["main", "coordinator", "worker"]);
+const NOT_OBSERVED: Fact<number> = { kind: "unknown", reason: "not-observed" };
 
-/** Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1). */
-export function foldSideSurfaces(records: readonly TelemetryRecord[]): SideSurfacesFold {
+/**
+ * A surface's call totals with never-sent usage read as unknown: the request never left, so what it would have cost is
+ * not known, and a side fold must not read it as zero (memory design MD1). The rest follows `addCallTotals`.
+ */
+function sideCallTotals(attempts: readonly FoldedAttempt[]): {
+	totals: CallTotals;
+	unknownUsage: Partial<Record<SideUsageGap, number>>;
+} {
+	const totals = foldCalls(attempts);
+	const fresh = emptyCallTotals();
+	totals.usage = fresh.usage;
+	totals.promptTokens = fresh.promptTokens;
+	totals.totalTokens = fresh.totalTokens;
+	const unknownUsage: Partial<Record<SideUsageGap, number>> = {};
+	for (const { settled } of attempts) {
+		const neverSent = settled?.disposition === "never_sent";
+		const fact = (field: keyof CallTotals["usage"]): Fact<number> =>
+			neverSent ? NOT_OBSERVED : (settled?.usage?.[field] ?? NOT_OBSERVED);
+		const bound = settled?.disposition === "sent_unsettled" ? [NOT_OBSERVED] : [];
+		for (const field of Object.keys(totals.usage) as Array<keyof CallTotals["usage"]>)
+			addGroup(totals.usage[field], [fact(field), ...bound]);
+		const prompt = [fact("input"), fact("cacheRead"), fact("cacheWrite")];
+		addGroup(totals.promptTokens, [...prompt, ...bound]);
+		const total = neverSent ? undefined : settled?.usage?.total;
+		addGroup(totals.totalTokens, [...(total ? [total] : [...prompt, fact("output")]), ...bound]);
+		const output = fact("output");
+		const gap: SideUsageGap | undefined = neverSent
+			? "never-sent"
+			: settled === null
+				? "not-settled"
+				: settled.disposition === "sent_unsettled"
+					? "sent-unsettled"
+					: output.kind === "unknown"
+						? output.reason
+						: undefined;
+		if (gap !== undefined) unknownUsage[gap] = (unknownUsage[gap] ?? 0) + 1;
+	}
+	return { totals, unknownUsage };
+}
+
+/**
+ * Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1).
+ * `route` is the caller's: without it no surface can read `unsupported`, only `unexercised`.
+ */
+export function foldSideSurfaces(records: readonly TelemetryRecord[], route?: SideSurfaceRoute): SideSurfacesFold {
 	const folded = foldCallJournal(records).attempts;
 	// The journal fold keeps a start's request identity only; purpose is read from the records that carry it.
 	const purposes = new Map<string, SurfaceId>();
@@ -4164,21 +4223,22 @@ export function foldSideSurfaces(records: readonly TelemetryRecord[]): SideSurfa
 			unpurposed.set(attempt.agent.role, [...(unpurposed.get(attempt.agent.role) ?? []), attempt]);
 		else bySurface.set(purpose, [...(bySurface.get(purpose) ?? []), attempt]);
 	}
-	const surfaces = SIDE_SURFACES.map(({ id, role }): SideSurfaceFold => {
+	const surfaces = SIDE_SURFACES.map(({ id, role, runtimes }): SideSurfaceFold => {
 		const attempts = bySurface.get(id) ?? [];
 		const exercised = attempts.filter(({ settled }) => settled !== null && settled.disposition !== "never_sent").length;
+		const unsupported = route !== undefined && runtimes !== undefined && !runtimes.includes(route.runtimeId);
 		return {
 			surface: id,
 			role,
 			exercised,
-			status: exercised > 0 ? "exercised" : "unexercised",
-			totals: foldCalls(attempts),
+			status: exercised > 0 ? "exercised" : unsupported ? "unsupported" : "unexercised",
+			...sideCallTotals(attempts),
 			serviceMs: attempts.reduce((sum, { settled }) => sum + (settled?.stages.settle ?? 0), 0),
 		};
 	});
 	const residual = [...unpurposed]
 		.sort(([a], [b]) => a.localeCompare(b))
-		.map(([role, attempts]) => ({ role, totals: foldCalls(attempts) }));
+		.map(([role, attempts]) => ({ role, totals: sideCallTotals(attempts).totals }));
 	return { surfaces, residual, memory: foldMemorySpend(records, folded) };
 }
 
