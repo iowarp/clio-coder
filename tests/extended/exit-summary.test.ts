@@ -186,7 +186,7 @@ test("the exit card reads a settled worker's receipt that no card handed over, a
 	collector.dispose();
 });
 
-test("a /resume mid-visit keeps the visit's turns, files and workers on the exit card (bt-11)", () => {
+test("a /resume mid-visit keeps the visit's turns, files and workers on the exit card (bt-11, TUI-6, TUI-9)", () => {
 	const bus = createTelemetryHub();
 	let current = { id: "session-1", hasModelTurn: true };
 	let turns = 0;
@@ -223,18 +223,38 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	const snapshot = collector.snapshot();
 	strictEqual(snapshot?.sessionId, "session-2");
 	const card = renderExitSummary(snapshot, "standard", 160, false).join("\n");
-	match(card, /^This visit, workers included: 4 turns · 2 files changed · 1 worker · 2 sessions$/mu);
-	// Tools are the named session's own calls, so the parked one's `bash 2` stays out (bt-11 h), and a tool no call ran
-	// is no `verify 0` row.
-	match(card, /^Tools: bash 1 · read 4$/mu);
-	// Resumed back, a session keeps the calls it made before it was parked.
+	match(
+		card,
+		/^This visit, workers included: 4 turns \(1 in this session\) · 2 files changed · 1 worker · 2 sessions$/mu,
+	);
+	// Tools are the named session's own calls, its workers' included, so the parked one's `bash 2` and the `read 4` of
+	// the worker it dispatched stay out (bt-11 h, TUI-9) and are counted as the other session's; a tool no call ran is
+	// no `verify 0` row.
+	match(card, /^Tools: bash 1 · 6 calls in other sessions this visit$/mu);
+	// Resumed back, a session keeps the calls it made before it was parked, and its worker's.
 	bus.emit("session.parked", { sessionId: "session-2", reason: "resume_other", at: 0 });
 	current = { id: "session-1", hasModelTurn: true };
 	bus.emit("session.reattached", { sessionId: "session-1", via: "resume" } as never);
 	footerTools.clear();
 	collector.sessionChanged();
 	footerTools.set("bash", 1);
-	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Tools: bash 3 · read 4$/mu);
+	match(
+		renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"),
+		/^Tools: bash 3 · read 4 · 1 call in other sessions this visit$/mu,
+	);
+	// After /new the fresh session has run nothing, so the row says so rather than vanishing (bt-48-7).
+	bus.emit("session.parked", { sessionId: "session-1", reason: "create_new", at: 0 });
+	current = { id: "session-3", hasModelTurn: true };
+	turns = 0;
+	footerTools.clear();
+	collector.sessionChanged();
+	turns = 1;
+	const fresh = renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n");
+	match(
+		fresh,
+		/^This visit, workers included: 5 turns \(1 in this session\) · 2 files changed · 1 worker · 3 sessions$/mu,
+	);
+	match(fresh, /^Tools: none in this session · 8 calls in other sessions this visit$/mu);
 	collector.dispose();
 });
 

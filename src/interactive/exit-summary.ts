@@ -324,8 +324,10 @@ export function renderExitSummary(
 		// A visit that switched sessions keeps its counts across them, but the call count is the named session's.
 		const unrecorded = snapshot.unrecordedWorkerFiles;
 		const sessions = snapshot.visitSessions ?? 1;
+		const otherTools = snapshot.otherSessionToolCalls ?? 0;
+		// Turns name the session's own share beside the visit's, as the call count beside them is the session's (TUI-6).
 		add(snapshot.workers.length > 0 ? "This visit, workers included" : "This visit", [
-			countLabel(snapshot.turns, "turn"),
+			`${countLabel(snapshot.turns, "turn")}${snapshot.sessionTurns !== undefined && sessions > 1 ? ` (${count(snapshot.sessionTurns)} in this session)` : ""}`,
 			...(spend.kind === "ready"
 				? [`${countLabel(spend.visitCalls, "model call")}${sessions > 1 ? " in this session" : ""}`]
 				: []),
@@ -364,10 +366,14 @@ export function renderExitSummary(
 				for (const model of models.slice(0, 3)) add("Model", [routeLabel(model.target, model.model)]);
 				if (models.length > 3) add("Models", [`${count(models.length - 3)} more`]);
 			}
-			if (snapshot.tools.length > 0) {
+			// Tools are the named session's own; a visit that switched sessions says what the others ran instead of
+			// dropping the row when this session ran none (TUI-6).
+			if (snapshot.tools.length > 0 || otherTools > 0) {
 				add("Tools", [
+					...(snapshot.tools.length === 0 ? ["none in this session"] : []),
 					...snapshot.tools.slice(0, 8).map(({ tool, count: n }) => `${tool} ${count(n)}`),
 					...(snapshot.tools.length > 8 ? [countLabel(snapshot.tools.length - 8, "more kind")] : []),
+					...(otherTools > 0 ? [`${countLabel(otherTools, "call")} in other sessions this visit`] : []),
 				]);
 			}
 			if (snapshot.workers.length > 0) add("Workers", outcomes(snapshot));
@@ -398,11 +404,14 @@ export function renderExitSummary(
 				`Tools (${countLabel(
 					snapshot.tools.reduce((sum, tool) => sum + tool.count, 0),
 					"call",
-				)})`,
-				snapshot.tools.map((tool) => [
-					`${tool.tool}: ${countLabel(tool.count, "call")}`,
-					countLabel(tool.failures, "observed failure"),
-				]),
+				)}${sessions > 1 ? " in this session" : ""})`,
+				[
+					...snapshot.tools.map((tool) => [
+						`${tool.tool}: ${countLabel(tool.count, "call")}`,
+						countLabel(tool.failures, "observed failure"),
+					]),
+					...(otherTools > 0 ? [[`other sessions this visit: ${countLabel(otherTools, "call")}`]] : []),
+				],
 			);
 			section(
 				`Workers (${count(snapshot.workers.length)}; ${outcomes(snapshot).join(", ")})`,
