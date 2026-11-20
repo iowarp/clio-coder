@@ -43,8 +43,8 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 // First in the file on purpose: the login capture settles once per process, and the
 // describe below settles it before its own rg cases.
-describe("rg recognition before the login environment is captured", () => {
-	it("asks until the capture settles, then follows what the environment holds", async () => {
+describe("rg recognition before any bash command ran", () => {
+	it("judges the first rg on the environment bash will run it with", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-coder-safety-pending-"));
 		const saved = process.env.RIPGREP_CONFIG_PATH;
 		delete process.env.RIPGREP_CONFIG_PATH;
@@ -52,17 +52,11 @@ describe("rg recognition before the login environment is captured", () => {
 			writeFileSync(join(dir, "a.txt"), "x\n");
 			const policy = createSafetyPolicyEngine({ cwd: dir, projectPolicy: loadProjectSafetyPolicy(dir) });
 			const evaluate = () => policy.evaluate({ tool: ToolNames.Bash, args: { command: "rg x a.txt" } });
-			const pending = evaluate();
-			strictEqual(pending.execRecognition !== "recognized", true, "an uncaptured login profile may export the variable");
-			strictEqual(
-				pending.reasons?.some((reason) => reason.includes("not been captured")),
-				true,
-			);
+			const first = evaluate();
 			await runBashCommand("true", { cwd: dir });
-			strictEqual(
-				evaluate().reasons?.some((reason) => reason.includes("not been captured")),
-				false,
-			);
+			const later = evaluate();
+			strictEqual(first.execRecognition, later.execRecognition);
+			deepStrictEqual(first.reasons, later.reasons);
 		} finally {
 			if (saved !== undefined) process.env.RIPGREP_CONFIG_PATH = saved;
 			rmSync(dir, { recursive: true, force: true });

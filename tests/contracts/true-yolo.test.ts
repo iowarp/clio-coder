@@ -686,7 +686,7 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 	const other = workspace("clio-yolo-script-other-");
 	const home = workspace("clio-yolo-script-home-");
 	const sub = workspace("clio-yolo-script-sub-");
-	writeFileSync(join(home, ".bash_profile"), `export PATH=${bin}:"$PATH"\n`);
+	writeFileSync(join(home, ".bash_profile"), `echo x >> ${join(home, "captures")}\nexport PATH=${bin}:"$PATH"\n`);
 	writeFileSync(join(sub, "child.sh"), "clio-coder config trust safety\n");
 	// Rewriting only the cwd copy leaves the PATH copy bash loads unchanged, so it is still read.
 	writeFileSync(join(bin, "shadow.sh"), "clio-coder config trust safety\n");
@@ -717,19 +717,23 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 	writeFileSync(
 		probe,
 		[
-			`import { bashSearchPath, bashSecretValues } from ${source("src/core/bash-exec.ts")};`,
+			`import { bashSearchPath, runBashCommand } from ${source("src/core/bash-exec.ts")};`,
 			`import { createSafetyPolicyEngine } from ${source("src/domains/safety/policy-engine.ts")};`,
 			`import { loadProjectSafetyPolicy } from ${source("src/domains/safety/project-policy.ts")};`,
 			`const cwd = ${JSON.stringify(cwd)};`,
 			"const engine = createSafetyPolicyEngine({ cwd, projectPolicy: loadProjectSafetyPolicy(cwd) });",
 			'const judge = (command) => engine.evaluate({ tool: "bash", args: { command } }, "yolo", { scratchRoots: [] });',
-			// The session's first bash call is judged while the login capture has not run; bash will run it on that PATH.
+			// The session's first bash call is judged while another one is already starting and an rg probe has run; the
+			// profile, which counts its runs, is sourced once, and that command runs on the PATH admission judged on.
+			"const running = runBashCommand('printf %s \"$PATH\"', { cwd });",
+			'judge("rg x shadow.sh");',
 			'const first = judge("source shadow.sh").reasonCode;',
-			"await bashSecretValues();",
+			"const judgedPath = bashSearchPath();",
+			"const ranPath = (await running).stdout;",
 			`process.env.PATH = ${JSON.stringify(`${other}:`)} + process.env.PATH;`,
 			`const codes = [first, ...${JSON.stringify(commands)}.map((command) => judge(command).reasonCode)];`,
 			`const searchPath = (bashSearchPath() ?? "").split(":");`,
-			`process.stdout.write(JSON.stringify([searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
+			`process.stdout.write(JSON.stringify([ranPath === judgedPath, searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
 		].join("\n"),
 	);
 	const out = execFileSync(process.execPath, ["--import", "tsx", probe], {
@@ -737,7 +741,13 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 		env: { ...process.env, HOME: home },
 		encoding: "utf8",
 	});
-	deepStrictEqual(JSON.parse(out), [true, false, ...["first", ...commands].map(() => "yolo-floor:trust-authority")]);
+	deepStrictEqual(JSON.parse(out), [
+		true,
+		true,
+		false,
+		...["first", ...commands].map(() => "yolo-floor:trust-authority"),
+	]);
+	strictEqual(readFileSync(join(home, "captures"), "utf8"), "x\n");
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.

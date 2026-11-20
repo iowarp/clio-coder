@@ -651,21 +651,15 @@ function quotedStep(step: string): string {
  * that file can add `--follow`, `--pre` and `-z`, which {@link parseRgArgs}
  * refuses on the command line. Admission judges from the command text alone,
  * so an rg that would run with a config is never recognized. The variable is
- * left in the tool environment so the operator's rg keeps working. Until the
- * login profile has been captured the tool environment is unknown, and that
- * asks the same way.
+ * left in the tool environment so the operator's rg keeps working.
  */
 const RG_CONFIG_ENV = "RIPGREP_CONFIG_PATH";
 
-const RG_CONFIG_REASONS = {
-	set: `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`,
-	pending: `the login environment has not been captured yet, so whether ${RG_CONFIG_ENV} names a ripgrep config that can add --follow, --pre or -z is unknown; rg is not recognized as read-only until it is`,
-} as const;
+const RG_CONFIG_REASON = `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`;
 
 /** Why rg cannot be recognized under the tool environment it would run with, or null when it can. */
 function rgConfigRefusal(): string | null {
-	const probe = probeToolEnv(RG_CONFIG_ENV);
-	return probe === "unset" ? null : RG_CONFIG_REASONS[probe];
+	return probeToolEnv(RG_CONFIG_ENV) === "set" ? RG_CONFIG_REASON : null;
 }
 
 /** The reason a command with an `rg` step is not recognized because of the ripgrep config variable, or none. */
