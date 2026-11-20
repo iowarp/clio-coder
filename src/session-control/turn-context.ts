@@ -1030,6 +1030,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		extra: Partial<CaptureContextSnapshotInput> = {},
 	): ContextSnapshot => {
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		const systemPrompt = engineInitialSystemPrompt(agentRuntime.agent);
+		// The compiled prompt the agent carries splits itself, so a capture that names no
+		// segments (a checkpoint, an eviction) keeps the Agent fleet and Project rows
+		// instead of folding the whole prompt into System prompt (bt-48).
+		const compiled = sessionPrompt !== null && sessionPrompt.systemPrompt === systemPrompt ? sessionPrompt : null;
 		// The snapshot row belongs to the named Clio session whose ledger it is
 		// appended to; the engine agent's own sessionId is unset in practice.
 		return captureContextSnapshot({
@@ -1038,7 +1043,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			providerId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,
 			modelId: agentRuntime.wireModelId,
-			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
+			systemPrompt,
 			conversationMessages: agentRuntime.agent.state.messages.filter(
 				(message) => message.role !== "system" || isHostPolicyMessage(message),
 			),
@@ -1048,6 +1053,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			contextWindowSource: details.contextWindowSource,
 			compactionThreshold,
 			...extra,
+			...(compiled
+				? {
+						promptSegments: compiled.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate })),
+						promptHash: compiled.systemPromptHash,
+					}
+				: {}),
 		});
 	};
 
