@@ -134,6 +134,39 @@ describe("evidence integrity boundary", () => {
 		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /mutations:yes/u);
 	});
 
+	it("does not call a run whose validation failed a first-pass success (FL-3, bt-48-9)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("validation-failed-first-pass"));
+		draft.quality.resultContract = {
+			sourceId: `agent-result-contract:mutation-report:${"a".repeat(64)}`,
+			validatorDigest: "b".repeat(64),
+			conformance: "pass",
+			quality: "fail",
+		};
+		const settlement = settleFinishedRun(draft, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: 0,
+			frameType: null,
+			usage: undefined,
+		});
+		const ctx = { sessionId: null, runId: draft.runId, agent: { role: "worker" as const, id: draft.runId } };
+		const assessed = assessRun(draft.runId, {
+			records: [
+				makeTelemetryRecord(
+					"run.settled",
+					{ ...settlement.facts, result: telemetryObjectRef("run-result", settlement.result) },
+					ctx,
+					{ t: draft.endedAt, mono: 1 },
+				),
+			],
+			context: { sessionId: null, cwd: "/repo", attempt: 0, decisionRefs: [], pipeline: null, personaOverride: null },
+			gateDecisions: [],
+			decisions: null,
+		});
+		ok(assessed);
+		strictEqual(settlement.facts.outcome, "succeeded");
+		strictEqual(assessed.data.trust.validationGrounding.state, "failed");
+		strictEqual(assessed.data.firstPassSuccess, false);
+	});
 
 	it("treats run ids as identities, never paths", async () => {
 		for (const id of ["../receipt", "nested/receipt", "/absolute"]) {
