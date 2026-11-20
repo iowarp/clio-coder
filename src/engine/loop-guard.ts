@@ -831,8 +831,8 @@ export function readOrchTurnToolCallBudget(): OrchTurnToolCallBudget {
 
 export interface CreateLoopGuardRegistrationOptions {
 	safety: SafetyContract;
-	/** Enables returned-read coverage only when the caller supplies its result-shaping cap. */
-	readResultMaxBytes?: number;
+	/** Enables returned-read coverage only when the caller supplies its result-shaping cap; a getter reads a live cap. */
+	readResultMaxBytes?: number | (() => number);
 	/** Orchestrator only: LoopBlocked events for the interactive layer. */
 	bus?: TelemetryHub;
 	/** Loop blocks tolerated per turn before the block reason announces a stop. */
@@ -1261,8 +1261,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// Any extension tool that did not declare itself read-only may have
 		// written, and so may any bash command that is not a plain read, and a
 		// typed git add or commit, direct or through the gateway (Astra r2-4).
-		// These re-key repeats only; the workspace epoch the registry's denial
-		// memory and read coverage key on still moves for file writes alone.
+		// These re-key repeats and forget read coverage; the workspace epoch the
+		// registry's denial memory keys on still moves for file writes alone.
 		const stateChange =
 			ok &&
 			input.toolName !== undefined &&
@@ -1291,10 +1291,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// Evicting an identity only raises its epoch, which admits more, never less.
 			bumpBoundedCounter(byIdentity, callIdentity(input.toolName, input.toolArgs), SUCCEEDED_FINGERPRINT_LIMIT);
 		}
-		if (!workspaceWrite) return false;
-		bumpBoundedCounter(mutationEpochByTurn, turnKey);
+		// Coverage keys on size and mtime, which a state change can keep
+		// (an equal-length sed -i in one mtime tick, cp -p, git checkout), and
+		// the guard cannot tell which paths a command touched, so forget it all.
 		readCoverage.clear();
 		redundantReadsByTurn.clear();
+		if (!workspaceWrite) return false;
+		bumpBoundedCounter(mutationEpochByTurn, turnKey);
 		return true;
 	};
 
@@ -1842,6 +1845,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			redundantReadsByTurn.delete(turnKey);
 			return [];
 		};
+		// Only a read that may have shown new lines ends a redundant run: a
+		// grep between two rereads of one range is still a reread (X5). A
+		// failed read showed nothing; an ok read this guard cannot measure may
+		// have shown new lines, so it resets.
+		if (input.toolName !== ToolNames.Read || input.metadata?.resultKind !== "ok") return [];
 		const details = input.toolResultDetails;
 		const file = details?.file as { bytes?: unknown; mtimeMs?: unknown } | undefined;
 		const observation = details?.observation as
@@ -1852,15 +1860,21 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const resultBytes = input.metadata?.resultBytes;
 		// after_tool precedes the registry's final shaping pass. If that pass
 		// could shorten the source, its pre-shaping line count is not evidence.
-		const deliveredCap = Math.min(options.readResultMaxBytes ?? 0, resolveGuardrail("readMaxBytes"));
+		// A getter that throws turns coverage off for this read, not the rest of after_tool.
+		let shapingCap: number | undefined;
+		try {
+			shapingCap =
+				typeof options.readResultMaxBytes === "function" ? options.readResultMaxBytes() : options.readResultMaxBytes;
+		} catch {
+			return reset();
+		}
+		const deliveredCap = Math.min(shapingCap ?? 0, resolveGuardrail("readMaxBytes"));
 		if (
 			!Number.isFinite(deliveredCap) ||
 			deliveredCap <= 0 ||
 			typeof resultBytes !== "number" ||
 			!Number.isFinite(resultBytes) ||
 			resultBytes > deliveredCap ||
-			input.toolName !== ToolNames.Read ||
-			input.metadata?.resultKind !== "ok" ||
 			typeof path !== "string" ||
 			input.toolArgs?.tail !== undefined ||
 			typeof offset !== "number" ||
@@ -1892,7 +1906,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		} catch {
 			return reset();
 		}
-		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}`;
+		// A PDF page range or an archive member renders its own numbered lines, so
+		// each is separate coverage, keyed as read normalizes them.
+		const pages = input.toolArgs?.pages;
+		const member = input.toolArgs?.member;
+		const document = JSON.stringify([
+			typeof pages === "string" && pages.trim().length > 0 ? pages : null,
+			typeof member === "string" && member.length > 0 ? member : null,
+		]);
+		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}\0${document}`;
 		let entry = readCoverage.get(key);
 		if (!entry || entry.bytes !== file.bytes || entry.mtimeMs !== file.mtimeMs) {
 			entry = { bytes: file.bytes, mtimeMs: file.mtimeMs, ranges: [] };
@@ -1920,14 +1942,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (!redundant) return reset();
 		const streak = bumpBoundedCounter(redundantReadsByTurn, turnKey);
 		if (streak < RESULT_STAGNATION_THRESHOLD || lockoutByTurn.has(turnKey)) return [];
-		const reason = `loop detected: ${streak} consecutive read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`;
-		// The read already ran and remains successful. Reuse the existing loop
-		// budget/lock transition, delivering its reason as a result annotation.
-		return blockAsLoop(input, turnKey, ToolNames.Read, streak, reason, options.now?.() ?? Date.now()).map((effect) =>
-			effect.kind === "block_tool"
-				? { kind: "annotate_tool_result" as const, message: effect.reason, severity: "warn" as const }
-				: effect,
-		);
+		// The read already ran and remains successful. The threshold is an
+		// annotation (DESIGN 3.5): it spends no loop block budget and cannot
+		// lock the turn, and the count starts over once it fires. The text is
+		// advice: wording a model can read as a block makes it report one (ACP-H5).
+		redundantReadsByTurn.delete(turnKey);
+		return [
+			{
+				kind: "annotate_tool_result",
+				message: "These lines were already shown in this turn; reuse them unless the file changed.",
+				severity: "warn",
+			},
+		];
 	};
 
 	// Read's typed EOF result proves that changing offsets cannot reveal more
@@ -1981,7 +2007,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
 			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
-		hooks: ["before_tool", "after_tool"],
+		hooks: ["before_tool", "after_tool", "on_compaction"],
 		evidence: "count:repeated-call@tool-args",
 		callCount: () => count,
 		turnMeter: (settledSinceSubmit, fallbackBudget) => {
@@ -2018,6 +2044,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			return true;
 		},
 		evaluate(hookInput): ReadonlyArray<MiddlewareEffect> {
+			if (hookInput.hook === "on_compaction") {
+				// A fold removed results whose lines coverage counts as shown, so a
+				// later reread is not redundant (X5). A recall only adds context, and
+				// a superseded result leaves the later identical call's lines in place.
+				const stage = hookInput.metadata?.stage;
+				if (stage !== "working_set_recall" && stage !== "superseded") {
+					readCoverage.clear();
+					redundantReadsByTurn.clear();
+				}
+				return [];
+			}
 			// A nested invocation (the gateway calling the capability the model
 			// asked for) is the same model call the outer gateway occurrence
 			// already counted and fingerprinted. Counting it again would spend

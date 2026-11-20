@@ -81,6 +81,11 @@ export {
 } from "./marketplace-offer.js";
 export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
 export {
+	createReadStreakRegistration,
+	READ_STREAK_REGISTRATION_ID,
+	type ReadStreakClassifiers,
+} from "./read-streak.js";
+export {
 	createMiddlewareRegistrationTable,
 	MIDDLEWARE_REGISTRATION_OWNERS,
 	type MiddlewareRegistrationConflict,

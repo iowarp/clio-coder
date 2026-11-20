@@ -50,7 +50,7 @@ export {
 export { proposeMemoryFromEvidence } from "./proposal.js";
 export { markMemoryOffRecording } from "./recording-marker.js";
 export { MemoryRuntime } from "./runtime.js";
-export { loadMemoryRecords, loadMemoryRecordsSync, memoryStatus, memoryStorePath } from "./store.js";
+export { loadMemoryRecords, loadMemoryRecordsSync, loadMemoryStore, memoryStatus, memoryStorePath } from "./store.js";
 export { TaskMemoryBank, type TaskMemoryEntry, type TaskMemorySnapshot } from "./task-bank.js";
 export {
 	parseTaskMemoryHandoffSnapshot,

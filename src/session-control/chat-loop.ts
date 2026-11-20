@@ -3599,13 +3599,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnCollectedDetachedBatch = false;
 				state.turnCompletion = null;
 				state.turnSealedCompletion = null;
-				if (options.requestContinuation !== true) {
+				// The finish round and the bare-finish refusal are once per operator prompt (fleet M5, FX-40, FX-41): a yolo
+				// continuation of the prompt keeps them; a handed-over operator message resets the refusal (turn-persistence).
+				if (options.requestContinuation !== true && options.yoloContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
-					if (options.yoloContinuation !== true && options.machineTurn === undefined)
-						headlessObservation?.reset(options.hostRun?.runId);
+					if (options.machineTurn === undefined) headlessObservation?.reset(options.hostRun?.runId);
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
