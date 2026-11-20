@@ -11,12 +11,17 @@ import {
 import { runEvidenceDetail } from "./evidence-detail.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder evidence inspect <runId> [--json]
+const HELP = `clio-coder evidence inspect <runId> [--json] [--exit-code]
 clio-coder evidence list
 
 Inspect a finished run's evidence: its seal's verdict and the assessment the run
 journaled before sealing. Each run is assessed when it settles; there is nothing
 to build.
+
+Exit codes:
+  inspect exits 1 when the seal was checked and rejected or the run has not
+  settled. inspect --json prints its document and exits 0 for either; add
+  --exit-code to exit 1 for them there too.
 `;
 
 type EvidenceCommand = "inspect" | "list";
@@ -24,12 +29,13 @@ type EvidenceCommand = "inspect" | "list";
 interface ParsedEvidenceArgs {
 	command?: EvidenceCommand;
 	json: boolean;
+	exitCode: boolean;
 	runId?: string;
 	help: boolean;
 }
 
 function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
-	const parsed: ParsedEvidenceArgs = { help: false, json: false };
+	const parsed: ParsedEvidenceArgs = { help: false, json: false, exitCode: false };
 	for (const arg of args) {
 		if (arg === "--help" || arg === "-h") {
 			parsed.help = true;
@@ -49,6 +55,10 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 		}
 		if (parsed.command === "inspect" && arg === "--json" && !parsed.json) {
 			parsed.json = true;
+			continue;
+		}
+		if (parsed.command === "inspect" && arg === "--exit-code" && !parsed.exitCode) {
+			parsed.exitCode = true;
 			continue;
 		}
 		if (parsed.command === "inspect" && parsed.runId === undefined) {
@@ -82,7 +92,7 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 	const stateDir = clioStateDir();
 	try {
 		if (parsed.command === "inspect" && parsed.runId !== undefined) {
-			if (parsed.json) return runEvidenceDetail(parsed.runId);
+			if (parsed.json) return runEvidenceDetail(parsed.runId, { exitCode: parsed.exitCode });
 			const evidence = await inspectRunEvidence(stateDir, parsed.runId);
 			if (evidence.settled === null && evidence.integrity.state !== "failed") {
 				printError(
