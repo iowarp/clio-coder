@@ -17,7 +17,7 @@ import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchPlanView, ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 import type { DispatchRunEventRegistry } from "./dispatch-run-events.js";
 import type { DispatchSchemaComposition } from "./dispatch-schema.js";
-import type { ToolInvokeOptions } from "./registry.js";
+import type { DispatchReadRootTask, ToolInvokeOptions } from "./registry.js";
 
 export type DispatchMode = "parallel" | "sequential" | "pipeline" | "compete" | "council";
 
@@ -106,6 +106,8 @@ export interface DispatchToolDeps {
 	approveExternalRead?: (
 		root: string,
 		options?: ToolInvokeOptions,
+		/** The dispatched task the approval serves, for the card; the dispatch tool supplies it. */
+		task?: DispatchReadRootTask,
 	) => Promise<{ requestId: string; requestedBy: string } | null>;
 	/** Synchronous read of the active model-visible history, before admission can park. */
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
