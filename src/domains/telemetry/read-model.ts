@@ -4170,7 +4170,7 @@ export interface SideSurfacesFold {
 
 /**
  * One surface's firings and their settlements: a middleware rule by its registration id, or a host surface such as
- * `triage`. A rule that only reminds or notifies is count-only: it fires and never settles.
+ * `triage`. A rule none of whose firings settle is count-only: it fires and never settles.
  */
 export interface SurfaceLedgerRow {
 	surface: string;

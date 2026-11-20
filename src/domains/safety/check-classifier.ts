@@ -429,14 +429,6 @@ export function classifyCall(
 	};
 }
 
-/**
- * Whether a call changed the workspace tree, by the same reading the finish gate makes ({@link classifyCall}). The
- * read-streak rule resets on it, so a `sed -i` or a `git apply` counts as the edit it is.
- */
-export function callChangesTree(toolName: string, args: Record<string, unknown> | undefined, cwd: string): boolean {
-	return classifyCall(toolName, args, { cwd }).changesTree;
-}
-
 export interface CheckCallSettlement {
 	/** The call counts as a workspace change, so no earlier pass stands on the tree it left. */
 	mutation: boolean;

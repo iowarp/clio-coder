@@ -18,9 +18,9 @@ many calls left them unknown, and its summed service time. A surface whose calls
 never reached a model prints unexercised, never a pass. Below it, every
 middleware rule and host surface that fired: firings, those that settle, how
 many a request carried, and the outcomes they settled with (acted, recovered,
-ignored, moot, suppressed, exhausted, expired and the rest). A rule that only
-reminds or notifies is count only; a firing drawn inside a worker run is shown
-as in workers, no ledger, since only a session settles its firings. Without
+ignored, moot, suppressed, exhausted, expired and the rest). A rule whose
+firings do not settle is count only; a firing drawn inside a worker run that its
+run did not settle is shown as in workers, no ledger. Without
 --session it folds every session journal in the state directory. It reads
 structure only, never content. --json emits the fold verbatim.
 `;

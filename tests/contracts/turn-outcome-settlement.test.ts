@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
@@ -13,7 +13,11 @@ import { createUnbackedWorkerClaimRegistration } from "../../src/domains/middlew
 import { createExplorationNudgeRegistrations, createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
-import { callChangesTree } from "../../src/domains/safety/check-classifier.js";
+import {
+	callChangesTree,
+	createRunEffectsRecorder,
+	recordToolExecutionEffects,
+} from "../../src/domains/safety/run-effects.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
@@ -554,15 +558,16 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 		/** One model round: its calls, then the request that carries their results; returns that request's id. */
 		const round = (
 			tools: ReadonlyArray<{ name: string; args?: Record<string, unknown>; details?: Record<string, unknown> }>,
+			turnId = "u1",
 		) => {
 			for (const tool of tools) {
 				calls += 1;
 				const toolCallId = `t-${calls}`;
 				const toolArgs = tool.args ?? { path: join(scratch.dir, areas[calls % 3] ?? "alpha", "notes.md") };
-				hook({ hook: "before_tool", turnId: "u1", toolName: tool.name, toolCallId, toolArgs });
+				hook({ hook: "before_tool", turnId, toolName: tool.name, toolCallId, toolArgs });
 				hook({
 					hook: "after_tool",
-					turnId: "u1",
+					turnId,
 					toolName: tool.name,
 					toolCallId,
 					toolArgs,
@@ -605,8 +610,11 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 		strictEqual(settled.get(firingOf("nudge.read-streak", 1)), undefined, "nine reads after the note");
 		round(reads(1));
 		strictEqual(settled.get(firingOf("nudge.read-streak", 1))?.outcome, "ignored", "ten reads after the note");
-		// Read forty draws the second note, which the turn's end leaves moot.
+		// Read forty draws the second note. A write outside the workspace is not the edit it asks for, and the in-run
+		// continuation of the same user turn ends the note's scope, moot, but not the turn's measure.
 		const lastCarried = round(reads(5));
+		round([{ name: "write", args: { path: join(dirname(scratch.dir), "x4-outside.txt"), content: "x" } }]);
+		hook({ hook: "turn_start", turnId: "u1", metadata: { userTurnId: "u1", requestContinuation: true } });
 		hook({ hook: "turn_end", turnId: "a1", metadata: { userTurnId: "u1" } });
 
 		const outcome = (firingId: string) => settled.get(firingId);
@@ -638,6 +646,12 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 		strictEqual(fired.filter((row) => row.ruleId === "nudge.read-streak").length, 4);
 		strictEqual(settled.size, 5, "every exploration firing settles once");
 		deepStrictEqual(collector.take("u1").exploration, { maxReadStreak: 40, serialRounds: 5, notes: 4 });
+		// A message handed to the run mid-turn files its own user turn: the streak and the turn's measure restart there.
+		hook({ hook: "turn_start", turnId: "u5", metadata: { userTurnId: "u5", turnOrigin: "operator" } });
+		round(reads(5), "u5");
+		round(reads(5), "u5");
+		round(reads(3), "u6");
+		deepStrictEqual(collector.take("u5", "u6").exploration, { maxReadStreak: 3, serialRounds: 0, notes: 0 });
 
 		// A worker settles its one thrash note itself, under its run: ten reads after the request that carried it.
 		const run = { sessionId: "x4-parent", runId: "run-x4", agent: { role: "worker" as const, id: "run-x4" } };
@@ -649,7 +663,7 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 				workerSettled.push(payload);
 			}),
 		);
-		const thrash = createThrashOutcome({ context: run, mutatedPaths: () => 0 });
+		const thrash = createThrashOutcome({ context: run });
 		const thrashFiring = thrash.fire();
 		const thrashCarried = newCallId();
 		const event = (value: object) => thrash.observe(value as AgentEvent);
@@ -662,6 +676,32 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 			event({ type: "tool_execution_end", toolCallId: `w-${index}`, toolName: "read", isError: false });
 		}
 		thrash.end([]);
+		// A request never sent carried the note to no model; a write outside the workspace answers nothing; the edit
+		// after it settles the note under its own id, events in the worker's order (effects, then observe).
+		const answered = createThrashOutcome({ context: run });
+		const effects = createRunEffectsRecorder(scratch.dir, {
+			onWorkspaceChange: (toolCallId) => answered.changed(toolCallId),
+		});
+		const answeredFiring = answered.fire();
+		const answeredCarried = newCallId();
+		const workerEvent = (value: { type: string } & Record<string, unknown>) => {
+			recordToolExecutionEffects(effects, value);
+			answered.observe(value as unknown as AgentEvent);
+		};
+		const message = (callId: string, usage: Record<string, unknown>) => ({
+			type: "message_end",
+			message: { role: "assistant", callId, content: [], stopReason: "toolUse", usage },
+		});
+		workerEvent(message(newCallId(), { callInvoked: false }));
+		workerEvent(message(answeredCarried, { callInvoked: true }));
+		const workerCall = (toolCallId: string, toolName: string, args: Record<string, unknown>) => {
+			workerEvent({ type: "tool_execution_start", toolCallId, toolName, args });
+			workerEvent({ type: "tool_execution_end", toolCallId, toolName, isError: false, result: { content: [] } });
+		};
+		workerCall("w-out", "write", { path: join(dirname(scratch.dir), "x4-worker-outside.txt"), content: "x" });
+		workerCall("w-edit", "edit", { path: join(scratch.dir, "alpha", "notes.md"), oldText: "notes", newText: "n" });
+		workerCall("w-read", "read", { path: join(scratch.dir, "beta", "notes.md") });
+		answered.end([]);
 		deepStrictEqual(workerSettled, [
 			{
 				firingId: thrashFiring,
@@ -669,6 +709,13 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 				admittedIn: thrashCarried,
 				outcome: "ignored",
 				fact: { kind: "none" },
+			},
+			{
+				firingId: answeredFiring,
+				surface: "worker.thrash",
+				admittedIn: answeredCarried,
+				outcome: "acted",
+				fact: { kind: "receipt", ref: "w-edit" },
 			},
 		]);
 	} finally {

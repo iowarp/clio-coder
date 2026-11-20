@@ -14,7 +14,6 @@ export {
 	autonomyFromUserInput,
 	modelMayActivateSkills,
 } from "./autonomy.js";
-export { callChangesTree } from "./check-classifier.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
 export type {
 	FinishContractAssessment,
@@ -56,6 +55,7 @@ export {
 	type RigorSource,
 	resolveRigor,
 } from "./rigor.js";
+export { callChangesTree } from "./run-effects.js";
 export {
 	describeValidationContract,
 	loadValidationContract,

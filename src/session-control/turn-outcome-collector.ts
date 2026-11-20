@@ -77,8 +77,8 @@ type SettlementFact = SurfaceSettled["fact"];
  * An exploration note's own settlement (exploration design 3.4, X4). A ladder note (`streak`) is acted on by a call
  * that resets the streak and ignored after {@link NOTE_IGNORED_AFTER_READS} more reads; a serial-round note is acted
  * on by a round with two or more reads, ignored after {@link NOTE_IGNORED_AFTER_ROUNDS} rounds without one, and moot
- * when the streak resets first. Either is moot at a fold or when its turn ends. A scout-survey note is acted on by a
- * dispatch that starts later in its turn and ignored when the turn ends without one.
+ * when the streak resets first. Either is moot at a fold, at a message handed over mid-turn, or when its turn ends. A
+ * scout-survey note is acted on by a dispatch that starts later in its turn and ignored when the turn ends without one.
  */
 interface NoteSettlement {
 	rule: "streak" | "serial" | "survey";
@@ -450,6 +450,13 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				for (const firing of openNotes(step.sessionId, "streak", "serial")) settle(firing, "moot", { kind: "fold" });
 				return;
 			}
+			if (step.kind === "handover") {
+				// A message handed over mid-turn closed the streak the notes asked about, and the turn's exploration restarts
+				// with the streak the rule restarts: nothing measured before it runs on into the new message's work.
+				for (const firing of openNotes(step.sessionId, "streak", "serial")) settle(firing, "moot", { kind: "scope-end" });
+				active = { ...active, exploration: emptyTurn(previousClarificationStreak).exploration };
+				return;
+			}
 			const measured = active.exploration;
 			active = {
 				...active,
@@ -483,10 +490,15 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		evaluate(input) {
 			if (input.sessionId !== undefined) enterSession(input.sessionId);
 			if (input.hook === "turn_start") {
+				// An in-run continuation of the same user turn keeps measuring it: its read streak runs on (X4).
+				const continued =
+					input.metadata?.requestContinuation === true && userTurnId !== null && input.metadata.userTurnId === userTurnId;
+				const exploration = active.exploration;
 				// A turn that ended without a turn_end hook still ended; what it carried settles before this one starts.
 				endTurn();
 				active = emptyTurn(previousClarificationStreak);
-				userTurnId = input.turnId ?? null;
+				if (continued) active = { ...active, exploration };
+				userTurnId = input.turnId ?? (continued ? userTurnId : null);
 				assistantTurnId = null;
 				dispatched = false;
 				return [];

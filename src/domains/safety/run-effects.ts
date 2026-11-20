@@ -169,6 +169,11 @@ export interface RunEffectsRecorderOptions {
 	 * shell run of one is a check, as the finish contract credits it (x7-5).
 	 */
 	sessionVerifiers?: ReadonlyArray<SessionVerifier>;
+	/**
+	 * Fires once for each successful call, a chain step on its own, that changed the workspace as the exploration notes
+	 * read it ({@link callChangesTree}), so a write outside `cwd` or in a scratch root never fires it (X4).
+	 */
+	onWorkspaceChange?(toolCallId: string): void;
 }
 
 export interface RunEffectsRecorder {
@@ -186,6 +191,7 @@ export interface RunEffectsRecorder {
 interface PendingEffects {
 	proofCheck: string | null;
 	tool: string;
+	args: Record<string, unknown> | undefined;
 	toolCallId: string;
 	reading: CallClassification;
 	validationCommands: string[];
@@ -292,7 +298,7 @@ export function checkOutputReader(
 	/** Git's ignore and tracking answers, shared by every reader of one run and never kept past it (x6-7). */
 	gitAnswers = new Map<string, boolean>(),
 	startedAt?: number,
-): CheckOutputReader {
+): CheckOutputReader & { outsideOrScratch(base: string): (target: string) => boolean } {
 	const git = (args: string[], target: string, answer: (status: number | null) => boolean): boolean => {
 		const key = `${args[0]}\0${target}`;
 		let known = gitAnswers.get(key);
@@ -355,7 +361,37 @@ export function checkOutputReader(
 				return expanded !== null && landsOutside(path.resolve(base, expanded), false);
 			};
 		},
+		/** As `outside`, but a target in the temp dir or a scratch root inside the workspace lands outside it too (X4). */
+		outsideOrScratch(base: string) {
+			return (target: string) => {
+				const expanded = expand(target);
+				return expanded !== null && landsOutside(path.resolve(base, expanded), true);
+			};
+		},
 	});
+}
+
+/**
+ * Whether a call changed the workspace as the exploration notes read progress (exploration design 3.4, X4): the
+ * finish gate's reading ({@link classifyCall}), except that a named write landing outside `cwd`, in the temp dir or in
+ * a scratch root leaves the tree as it was, so a scratch file is never the edit a note asked for. The read-streak rule
+ * resets on it, and a worker's thrash note settles `acted` on it.
+ */
+export function callChangesTree(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	cwd: string,
+	options: { env?: NodeJS.ProcessEnv; scratchRoots?: ReadonlyArray<string>; gitHelpers?: boolean } = {},
+): boolean {
+	const reader = checkOutputReader(cwd, options.env, options.scratchRoots);
+	const outputTarget: CheckOutputReader = Object.assign(
+		(base: string, logs?: ReadonlySet<string>) => reader(base, logs),
+		{
+			changed: reader.changed,
+			outside: reader.outsideOrScratch,
+		},
+	);
+	return classifyCall(toolName, args, { cwd, outputTarget, gitHelpers: options.gitHelpers === true }).changesTree;
 }
 
 /**
@@ -428,6 +464,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			pending.set(toolCallId, {
 				proofCheck,
 				tool: toolName,
+				args,
 				toolCallId,
 				reading,
 				validationCommands,
@@ -526,6 +563,16 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				for (const target of reading.paths) failedMutationPaths.add(target);
 				return;
 			}
+			if (
+				mutation &&
+				options.onWorkspaceChange !== undefined &&
+				callChangesTree(effects.tool, effects.args, cwd, {
+					...(options.env !== undefined ? { env: options.env } : {}),
+					...(options.scratchRoots !== undefined ? { scratchRoots: options.scratchRoots } : {}),
+					gitHelpers,
+				})
+			)
+				options.onWorkspaceChange(toolCallId);
 			// Success-gated on purpose. A shell command the safety policy blocked,
 			// or one that came back an error, never reached the filesystem, so it
 			// leaves the record closed.

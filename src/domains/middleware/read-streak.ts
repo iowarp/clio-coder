@@ -65,7 +65,10 @@ export interface ReadStreakClassifiers {
 		args: unknown,
 		declared: (tool: string) => { readOnly?: boolean; idempotent?: boolean } | undefined,
 	): boolean;
-	/** The finish gate's reading of whether a bash call changed the workspace (`callChangesTree`). */
+	/**
+	 * Whether a call changed the workspace (`callChangesTree` in run-effects): the finish gate's reading, with a named
+	 * write outside the workspace or in a scratch root changing nothing.
+	 */
 	changesTree(toolName: string, args: Record<string, unknown> | undefined, cwd: string): boolean;
 }
 
@@ -73,7 +76,8 @@ export interface ReadStreakClassifiers {
  * What the rule saw, reported to the outcome ledger so it settles the rule's notes and measures the turn from the
  * rule's own reading of each call instead of a second classifier (exploration design 3.4, X4). A `call` is one model
  * call the rule judged, with the streak after it and the rounds it added to a serial run; a `fold` is a compaction
- * that may have removed earlier results.
+ * that may have removed earlier results; a `handover` is a user message handed to the run mid-turn (a queued steer),
+ * which starts a new streak as an operator turn does.
  */
 export type ReadStreakStep =
 	| {
@@ -88,7 +92,8 @@ export type ReadStreakStep =
 			/** The note this call carries, if any. */
 			note: "ladder" | "serial" | null;
 	  }
-	| { kind: "fold"; sessionId?: string };
+	| { kind: "fold"; sessionId?: string }
+	| { kind: "handover"; sessionId?: string };
 
 export interface ReadStreakObserver {
 	observeReadStreak(step: ReadStreakStep): void;
@@ -102,6 +107,8 @@ interface TurnSurface {
 
 interface StreakState {
 	sessionId: string | undefined;
+	/** The user turn the streak runs under, from turn_start; a tool hook naming another one ran after a handover. */
+	userTurnId: string | undefined;
 	reads: number;
 	serial: number;
 	serialNoted: boolean;
@@ -199,6 +206,7 @@ export function createReadStreakRegistration(deps: {
 }): MiddlewareHookRegistration {
 	const state: StreakState = {
 		sessionId: undefined,
+		userTurnId: undefined,
 		reads: 0,
 		serial: 0,
 		serialNoted: false,
@@ -226,8 +234,12 @@ export function createReadStreakRegistration(deps: {
 			return call.toolName === ToolNames.Tasks && call.args?.action === "list" ? "other" : "progress";
 		}
 		if (call.toolName === ToolNames.Dispatch) return call.args?.list === true ? "other" : "progress";
+		const root = deps.workspaceRoot?.() ?? process.cwd();
+		// A write outside the workspace or in a scratch root is not the edit the note asks for.
 		if (call.toolName === ToolNames.Edit || call.toolName === ToolNames.Write)
-			return input.toolResultDetails?.unchanged === true ? "other" : "progress";
+			return input.toolResultDetails?.unchanged !== true && deps.classifiers.changesTree(call.toolName, call.args, root)
+				? "progress"
+				: "other";
 		// Only a declared read-only extension tool is a read here; an idempotent one may still write.
 		const readOnly = input.metadata?.toolReadOnly;
 		const declared = typeof readOnly === "boolean" ? { readOnly } : {};
@@ -235,7 +247,6 @@ export function createReadStreakRegistration(deps: {
 		// Typed git reads as a read only for its inspection ops, so any other op that succeeded (add, commit) is progress.
 		if (call.toolName === ToolNames.Git) return "progress";
 		if (call.toolName === ToolNames.Bash) {
-			const root = deps.workspaceRoot?.() ?? process.cwd();
 			if (deps.classifiers.changesTree(call.toolName, call.args, root)) return "progress";
 		}
 		return "other";
@@ -292,6 +303,8 @@ export function createReadStreakRegistration(deps: {
 				state.chain = null;
 				if (operatorTurnStart(input)) reset();
 				state.surface = turnSurface(input);
+				const userTurnId = input.metadata?.userTurnId;
+				state.userTurnId = typeof userTurnId === "string" ? userTurnId : undefined;
 				return NONE;
 			}
 			if (input.hook === "on_compaction") {
@@ -304,6 +317,20 @@ export function createReadStreakRegistration(deps: {
 					});
 				}
 				return NONE;
+			}
+			// A user message handed to the run mid-turn files its own user turn with no turn_start: a new streak starts.
+			if (
+				state.userTurnId !== undefined &&
+				input.turnId !== undefined &&
+				input.turnId !== state.userTurnId &&
+				input.metadata?.origin !== "harness"
+			) {
+				state.userTurnId = input.turnId;
+				reset();
+				deps.observer?.observeReadStreak({
+					kind: "handover",
+					...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				});
 			}
 			if (input.hook === "before_tool") {
 				if (outerChain(input)) {

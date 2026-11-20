@@ -1105,7 +1105,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The write-side equivalent: what this run changed and what it validated,
 	// so a mutation report is judged against the run instead of believed. Scratch roots read as the orchestrator's copy
 	// reads them, so a check logged under one is output in both recorders (x6-8).
-	const runEffects = createRunEffectsRecorder(contractCwd, { scratchRoots: workerSettings.safety.scratchRoots });
+	// X4: the thrash note's settlement, from the request that carries it to the change or report that answers it.
+	const thrashOutcome = createThrashOutcome({ context: input.telemetryContext });
+	const runEffects = createRunEffectsRecorder(contractCwd, {
+		scratchRoots: workerSettings.safety.scratchRoots,
+		onWorkspaceChange: (toolCallId) => thrashOutcome.changed(toolCallId),
+	});
 	const acceptHelperResult = (data: unknown): string | null => {
 		if (!input.resultContract) return "missing helper result contract";
 		const validationInput = {
@@ -2039,11 +2044,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			agent.followUp(repairMessage as unknown as AgentMessage);
 		}
 	};
-	// X4: the thrash note's settlement, from the request that carries it to the write or report that answers it.
-	const thrashOutcome = createThrashOutcome({
-		context: input.telemetryContext,
-		mutatedPaths: () => runEffects.snapshot().mutatedPaths.size,
-	});
 	const unsubscribe = agent.subscribe(async (event) => {
 		if (
 			event.type === "message_end" &&
@@ -2055,6 +2055,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
 				workerTelemetry?.settle(event.message);
+				// This answer is a request the thrash note may have ridden, though the round ends here.
+				thrashOutcome.observe(event);
 				// The middleware round must run before this answer can seal a terminal result (#423).
 				const tail: AgentMessage = { role: "user", content: reminder, timestamp: Date.now() };
 				if (event.message.content.some((block) => block.type === "toolCall")) agent.steer(tail);
@@ -2113,7 +2115,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			usage.usageReported = reported;
 		}
 		if (event.type === "message_end" && isAssistantMessage(event.message)) workerTelemetry?.settle(event.message);
-		thrashOutcome.observe(event);
 		// Detect the whole terminal batch before any call is prepared/executed.
 		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
 		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
@@ -2138,6 +2139,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
 			recordToolExecutionEffects(runEffects, event);
 		}
+		// After the effects, so a call that changed the workspace has settled the note under its own id first.
+		thrashOutcome.observe(event);
 		if (event.type === "tool_execution_start") {
 			const call = effectiveToolCall(event.toolName, event.args);
 			if (call.toolName === ToolNames.Read) {
