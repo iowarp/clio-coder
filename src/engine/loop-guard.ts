@@ -810,8 +810,8 @@ export function readOrchTurnToolCallBudget(): OrchTurnToolCallBudget {
 
 export interface CreateLoopGuardRegistrationOptions {
 	safety: SafetyContract;
-	/** Enables returned-read coverage only when the caller supplies its result-shaping cap. */
-	readResultMaxBytes?: number;
+	/** Enables returned-read coverage only when the caller supplies its result-shaping cap; a getter reads a live cap. */
+	readResultMaxBytes?: number | (() => number);
 	/** Orchestrator only: LoopBlocked events for the interactive layer. */
 	bus?: TelemetryHub;
 	/** Loop blocks tolerated per turn before the block reason announces a stop. */
@@ -1819,6 +1819,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			redundantReadsByTurn.delete(turnKey);
 			return [];
 		};
+		// Only a read that may have shown new lines ends a redundant run: a
+		// grep between two rereads of one range is still a reread (X5). A
+		// failed read showed nothing; an ok read this guard cannot measure may
+		// have shown new lines, so it resets.
+		if (input.toolName !== ToolNames.Read || input.metadata?.resultKind !== "ok") return [];
 		const details = input.toolResultDetails;
 		const file = details?.file as { bytes?: unknown; mtimeMs?: unknown } | undefined;
 		const observation = details?.observation as
@@ -1829,15 +1834,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const resultBytes = input.metadata?.resultBytes;
 		// after_tool precedes the registry's final shaping pass. If that pass
 		// could shorten the source, its pre-shaping line count is not evidence.
-		const deliveredCap = Math.min(options.readResultMaxBytes ?? 0, resolveGuardrail("readMaxBytes"));
+		const shapingCap =
+			typeof options.readResultMaxBytes === "function" ? options.readResultMaxBytes() : options.readResultMaxBytes;
+		const deliveredCap = Math.min(shapingCap ?? 0, resolveGuardrail("readMaxBytes"));
 		if (
 			!Number.isFinite(deliveredCap) ||
 			deliveredCap <= 0 ||
 			typeof resultBytes !== "number" ||
 			!Number.isFinite(resultBytes) ||
 			resultBytes > deliveredCap ||
-			input.toolName !== ToolNames.Read ||
-			input.metadata?.resultKind !== "ok" ||
 			typeof path !== "string" ||
 			input.toolArgs?.tail !== undefined ||
 			typeof offset !== "number" ||
@@ -1897,7 +1902,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (!redundant) return reset();
 		const streak = bumpBoundedCounter(redundantReadsByTurn, turnKey);
 		if (streak < RESULT_STAGNATION_THRESHOLD || lockoutByTurn.has(turnKey)) return [];
-		const reason = `loop detected: ${streak} consecutive read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`;
+		const reason = `loop detected: the last ${streak} read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`;
 		// The read already ran and remains successful. Reuse the existing loop
 		// budget/lock transition, delivering its reason as a result annotation.
 		return blockAsLoop(input, turnKey, ToolNames.Read, streak, reason, options.now?.() ?? Date.now()).map((effect) =>
@@ -1958,7 +1963,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
 			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
-		hooks: ["before_tool", "after_tool"],
+		hooks: ["before_tool", "after_tool", "on_compaction"],
 		evidence: "count:repeated-call@tool-args",
 		callCount: () => count,
 		turnMeter: (settledSinceSubmit, fallbackBudget) => {
@@ -1995,6 +2000,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			return true;
 		},
 		evaluate(hookInput): ReadonlyArray<MiddlewareEffect> {
+			if (hookInput.hook === "on_compaction") {
+				// A fold removed results whose lines coverage counts as shown, so a
+				// later reread is not redundant (X5). A recall only adds context, and
+				// a superseded result leaves the later identical call's lines in place.
+				const stage = hookInput.metadata?.stage;
+				if (stage !== "working_set_recall" && stage !== "superseded") {
+					readCoverage.clear();
+					redundantReadsByTurn.clear();
+				}
+				return [];
+			}
 			// A nested invocation (the gateway calling the capability the model
 			// asked for) is the same model call the outer gateway occurrence
 			// already counted and fingerprinted. Counting it again would spend

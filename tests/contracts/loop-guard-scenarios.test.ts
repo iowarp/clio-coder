@@ -8,6 +8,7 @@ import type { ToolName } from "../../src/core/tool-names.js";
 import { type TurnConstraints, turnScopeGuidance } from "../../src/core/turn-constraints.js";
 import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import {
 	type CreateLoopGuardRegistrationOptions,
 	createLoopGuardRegistration,
@@ -622,5 +623,53 @@ test("template budget: min(template, max(operator, ceiling)) bounds the turn's c
 	} finally {
 		configureGuardrails(undefined);
 		env.restore();
+	}
+});
+
+test("loop guard read coverage: a grep between rereads keeps the count, a fold forgets what was shown (X5)", () => {
+	const read: MiddlewareHookInput = {
+		hook: "after_tool",
+		turnId: "turn-1",
+		toolName: "read",
+		toolArgs: { path: "coverage.ts", offset: 1, limit: 40 },
+		metadata: { resultKind: "ok", resultBytes: 1000 },
+		toolResultDetails: {
+			file: { bytes: 4000, mtimeMs: 1 },
+			observation: { tool: "read", unit: "lines", format: "text", shownCount: 40, truncated: false },
+		},
+	};
+	const grep: MiddlewareHookInput = {
+		hook: "after_tool",
+		turnId: "turn-1",
+		toolName: "grep",
+		toolArgs: { pattern: "coverage" },
+		metadata: { resultKind: "ok", resultFingerprint: "coverage.ts:1" },
+	};
+	const fold = (stage: string): MiddlewareHookInput => ({
+		hook: "on_compaction",
+		turnId: "turn-1",
+		metadata: { stage },
+	});
+	const rows = [
+		{
+			name: "read, grep, read, grep, recall, read, grep, read of one range draws the annotation on the third reread",
+			steps: [read, grep, read, grep, fold("working_set_recall"), read, grep, read],
+			annotated: true,
+		},
+		{
+			name: "read, working-set fold, then three rereads of the same range draw none",
+			steps: [read, fold("working_set_evict"), read, read, read],
+			annotated: false,
+		},
+	];
+	for (const row of rows) {
+		// A getter cap, as the main session passes its live context.toolResultMaxBytes.
+		const guard = createLoopGuardRegistration({ safety: loopSafety(), readResultMaxBytes: () => 64 * 1024 });
+		const effects = row.steps.flatMap((step) => guard.evaluate(step));
+		strictEqual(
+			effects.some((effect) => effect.kind === "annotate_tool_result" && effect.message.includes("already observed")),
+			row.annotated,
+			`${row.name}: ${JSON.stringify(effects)}`,
+		);
 	}
 });
