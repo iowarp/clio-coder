@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import { createConsultTool } from "../../src/tools/consult.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { runGatewayChain } from "../../src/tools/gateway/chain.js";
 import { createDataTool } from "../../src/tools/gateway/data-tool.js";
 import type { Observation } from "../../src/tools/observation.js";
 import { createHeadlessObservationPool } from "../../src/tools/observation.js";
@@ -566,6 +567,22 @@ describe("read windowed reader", () => {
 		const settings = await createContextTool().run({ scope: "settings" }, invalid.options("batch-1"));
 		ok(settings.kind === "error" && /settings snapshot is unavailable/.test(settings.message), JSON.stringify(settings));
 		strictEqual(invalid.run.stopped(), false);
+		// A gateway chain's sequential steps share their call's tracker, so its fourth refusal fails and ends the chain.
+		const chained = await drained(`${scratch.dir}#chain`);
+		const kinds: string[] = [];
+		await runGatewayChain(
+			Array.from({ length: 6 }, (_, n) => ({ id: `s${n}`, capability: "read", args: { path } })),
+			{
+				getSpec: () => undefined,
+				call: async (_name, args, options) => {
+					const result = await readTool.run(args, options);
+					kinds.push(result.kind);
+					return result;
+				},
+			},
+			chained.options("batch-1"),
+		);
+		deepStrictEqual(kinds, ["ok", "ok", "ok", "error"]);
 		// A steer or triage submit names no host run; the run's later --output-schema repair turn keeps its fact.
 		const steered = await drained(`${scratch.dir}#steer`);
 		steered.run.reset("run_1");

@@ -136,9 +136,19 @@ export interface ObservationReservation {
 	 * marks the pool spent, so it rolls at the next tool batch while the turn runs on (CLI-P42).
 	 */
 	roll?: () => void;
-	/** A headless run's tracker for this call (CLI-P42): told when the call returns and when that drains the pool. */
+	/**
+	 * A headless run's tracker for this call (CLI-P42): told when the call returns and when that drains the pool. On an
+	 * exhausted reservation it is present only when it did the rolling, and it counts that tool call's refusals.
+	 */
 	poolEvent?: (event: ObservationPoolEvent) => void;
 }
+
+/**
+ * Refusals per headless tool call (CLI-P42). Each model tool call gets its own pool tracker, which a gateway chain passes
+ * to every step it runs in turn, so a chain's sequential refusals escalate as one call's would; parallel siblings each
+ * hold their own and are refused once.
+ */
+const callRefusals = new WeakMap<(event: ObservationPoolEvent) => void, number>();
 
 // A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).
 // A tool that folds an input argument into it (`mode=path query=<arg>`) can grow
@@ -344,12 +354,13 @@ export function reserveObservation(
 	pruneBudgetMap();
 	const remaining = Math.max(0, limitBytes - state.usedBytes - state.reservedBytes);
 	if (remaining < MIN_BUDGET_SLICE_BYTES) {
+		const pooled = options?.turnBudgetContinues !== true && poolEvent !== undefined;
 		const roll =
 			options?.turnBudgetContinues === true
 				? options.observationBudgetRoll
-				: poolEvent === undefined
-					? undefined
-					: () => poolEvent("refused");
+				: pooled
+					? () => poolEvent("refused")
+					: undefined;
 		return {
 			key,
 			limitBytes,
@@ -363,6 +374,7 @@ export function reserveObservation(
 			settled: false,
 			...bound,
 			...(roll === undefined ? {} : { roll }),
+			...(pooled ? { poolEvent } : {}),
 		};
 	}
 	// A call that got a slice is progress, so the exhausted streak starts over.
@@ -466,6 +478,12 @@ function bumpExhaustedStreak(key: string | null): number {
 	return state.exhaustedStreak;
 }
 
+function bumpCallRefusals(poolEvent: (event: ObservationPoolEvent) => void): number {
+	const count = (callRefusals.get(poolEvent) ?? 0) + 1;
+	callRefusals.set(poolEvent, count);
+	return count;
+}
+
 /**
  * Structured result for a call that found the turn pool already spent.
  * `subject` names what the call was about (a path, a pattern); `hint` names
@@ -491,7 +509,11 @@ export function observationBudgetExhausted(input: {
 	// the model is told the call waits for it instead of being asked to re-plan or summarize (XR-6).
 	const rolled = reservation.roll !== undefined;
 	reservation.roll?.();
-	const streak = rolled ? 1 : bumpExhaustedStreak(reservation.key);
+	const streak = !rolled
+		? bumpExhaustedStreak(reservation.key)
+		: reservation.poolEvent !== undefined
+			? bumpCallRefusals(reservation.poolEvent)
+			: 1;
 	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
 		const message =
 			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
@@ -618,6 +640,8 @@ function jsonStubBudgetNote(reservation: ObservationReservation): string {
 export function reportPoolDelivery(reservation: ObservationReservation): void {
 	const poolEvent = reservation.poolEvent;
 	if (poolEvent === undefined || reservation.exhausted) return;
+	// A call that got its result breaks the run of refusals, as a granted slice resets a turn's streak.
+	callRefusals.delete(poolEvent);
 	poolEvent("delivered");
 	if (reservation.key === null) return;
 	const state = turnBudgets.get(reservation.key);
