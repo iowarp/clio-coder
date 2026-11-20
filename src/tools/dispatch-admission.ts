@@ -399,6 +399,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				// The ids verify runs, derived toolchain checks included, so a worker verifies as the main agent does (bt-7).
 				const declared = discovery.checks;
 				const byId = new Map(declared.map((check) => [check.id, check]));
+				// A family word verify runs through its one derived owner seals that owner (FL-12).
+				const aliases = "familyAliases" in discovery ? discovery.familyAliases : undefined;
+				for (const [word, check] of aliases ?? []) byId.set(word, check);
 				const normalized = normalizeDispatchIntent(rawIntent, byId);
 				if (!normalized.ok)
 					return { ok: false, reason: normalized.reason, message: `${normalized.reason}: ${normalized.message}` };
