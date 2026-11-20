@@ -1,5 +1,6 @@
 import { existsSync, type FSWatcher, readdirSync, watch } from "node:fs";
 import path from "node:path";
+import { relativePathEscapes } from "../core/path-containment.js";
 import type { ExtensionsContract } from "../domains/extensions/contract.js";
 import { DEV_EXTENSIONS_DIR, type DevConsentRequest, ExtensionDevScope } from "../domains/extensions/dev-scope.js";
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../domains/extensions/envelope-review.js";
@@ -92,7 +93,7 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 		const base = path.join(cwd, DEV_EXTENSIONS_DIR);
 		const pending = [
 			...(existsSync(base) ? [base] : []),
-			...scope.sources().filter((source) => path.relative(base, source).startsWith("..")),
+			...scope.sources().filter((source) => relativePathEscapes(path.relative(base, source))),
 		];
 		const wanted = new Set<string>();
 		if (!existsSync(base)) {
