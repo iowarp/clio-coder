@@ -14,6 +14,7 @@ import {
 } from "../../src/domains/telemetry/worker-progress.js";
 import {
 	InstrumentedTuiAltScreen,
+	InstrumentedTuiMainScreen,
 	ScrollView,
 	stripTerminalSequences,
 	type Terminal,
@@ -2198,6 +2199,52 @@ describe("Pi TUI compatibility", () => {
 		);
 		frame(60);
 		frame(100);
+	});
+
+	it("keeps the complete regular frame equal to a fresh paint after composer edits and resizes", () => {
+		const prefix = Array.from({ length: 80 }, (_, i) => `\x1b[36mTranscript ${i}\x1b[39m ${"x".repeat(55)}`);
+		const parts = (draft: string) => ({
+			banner: new Text("banner", 0, 0),
+			chat: { render: () => prefix, renderRegions: () => ({ prefix, tail: ["reply"] }), invalidate() {} },
+			editor: new Text(draft, 0, 0),
+			footer: new Text("footer", 0, 0),
+		});
+		const terminal = new RenderingTerminal();
+		const tui = new InstrumentedTuiMainScreen(terminal, {
+			beginFrame() {},
+			endFrame() {},
+			beginPhase() {},
+			endPhase() {},
+		});
+		const live = parts("draft");
+		tui.addChild(buildLayout(live));
+		tui.start();
+		const check = (draft: string) => {
+			live.editor.setText(draft);
+			tui.renderNow();
+			const freshTerminal = new RenderingTerminal();
+			freshTerminal.columns = terminal.columns;
+			freshTerminal.rows = terminal.rows;
+			const fresh = new TuiMainScreen(freshTerminal);
+			fresh.addChild(buildLayout(parts(draft)));
+			fresh.start();
+			try {
+				fresh.renderNow();
+				deepStrictEqual(tui.captureRenderState().previousLines, fresh.captureRenderState().previousLines);
+			} finally {
+				fresh.stop();
+			}
+		};
+		try {
+			// Cycle the pool, including an idle frame where the baseline is older than the reset memo.
+			for (const draft of ["draft", "draf", "draf", "d", "edited", "e"]) check(draft);
+			terminal.columns = 46;
+			terminal.rows = 31;
+			check("e");
+			check("edited after resize");
+		} finally {
+			tui.stop();
+		}
 	});
 
 	it("returns a scrolled-up fullscreen transcript to its live edge when the operator submits", async () => {

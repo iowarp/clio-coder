@@ -356,11 +356,11 @@ class RegularRoot implements Component {
 		this.renderCount += 1;
 		let row = 0;
 		// The first row this frame wrote a string other than the one already there.
-		let firstChanged = -1;
 		// A settled turn hands back a new prefix array of the same rows, and measuring every one of them again cost a
 		// long session tens of milliseconds a turn. A row already in place at the same width was measured when it was
 		// written; a new width measures every row, since one that fit the old width may not fit this one.
 		const sameWidth = width === this.heldWidth;
+		let firstChanged = sameWidth ? -1 : 0;
 		this.heldWidth = width;
 		const put = (raw: string): void => {
 			if (sameWidth && out[row] === raw) {
@@ -384,7 +384,7 @@ class RegularRoot implements Component {
 		if (regions !== undefined) {
 			if (regions.prefix.length + regions.tail.length > 0) {
 				put("");
-				if (regions.prefix === this.heldPrefix && row === this.heldPrefixAt) {
+				if (sameWidth && regions.prefix === this.heldPrefix && row === this.heldPrefixAt) {
 					row += regions.prefix.length;
 				} else {
 					this.heldPrefix = regions.prefix;
@@ -392,7 +392,7 @@ class RegularRoot implements Component {
 					write(regions.prefix);
 				}
 				// The tail rows its panel vouches for are already in place, so a streaming reply writes only its end.
-				const kept = row === this.heldTailAt ? keptRows(regions.tail, this.heldTail) : 0;
+				const kept = sameWidth && row === this.heldTailAt ? keptRows(regions.tail, this.heldTail) : 0;
 				tail = regions.tail;
 				this.heldTailAt = row;
 				row += kept;
@@ -405,9 +405,9 @@ class RegularRoot implements Component {
 			this.heldPrefix = null;
 			const chat = this.parts.chat.render(width);
 			if (chat.length > 0) {
-				out[row++] = "";
+				put("");
 				write(chat);
-				out[row++] = "";
+				put("");
 			}
 		}
 		if (!this.dockReleased) {
@@ -432,6 +432,7 @@ class RegularRoot implements Component {
 	}
 
 	invalidate(): void {
+		this.heldWidth = -1;
 		this.heldPrefix = null;
 		this.heldTail = undefined;
 		this.parts.banner.invalidate();

@@ -135,9 +135,13 @@ class RegularFrameRows {
 	 * Three because a frame must not write into either array the renderer reads while rendering it: the diff baseline
 	 * and the memo's last output. They differ after a frame that changed nothing, which keeps the older baseline.
 	 */
-	private readonly pool: string[][] = [[], [], []];
+	private readonly pool = Array.from({ length: 3 }, () => ({ rows: [] as string[], validPrefix: 0 }));
 	/** The last array the reset memo kept. */
 	memoOutput: readonly string[] | undefined;
+
+	invalidate(): void {
+		for (const slot of this.pool) slot.validPrefix = 0;
+	}
 
 	next(
 		lines: readonly string[],
@@ -153,10 +157,13 @@ class RegularFrameRows {
 		const raw = this.raw;
 		const resolved = this.resolved;
 		// Without a baseline to steer around, a fresh array is the only safe one.
-		const rows = (baseline && this.pool.find((rows) => rows !== baseline && rows !== this.memoOutput)) ?? [];
-		// Kept rows are the strings `raw` holds, so they resolve as they did.
+		const slot = baseline && this.pool.find(({ rows }) => rows !== baseline && rows !== this.memoOutput);
+		const rows = slot?.rows ?? [];
 		const from = Math.min(kept, raw.length);
-		for (let index = 0; index < from; index++) rows[index] = resolved[index] as string;
+		// Only this offscreen region is safe to leave normalized: nothing reads it before pi-tui copies the reset
+		// memo's prefix over it. The renderer reports zero kept rows on resize or while any overlay is mounted.
+		for (const slot of this.pool) slot.validPrefix = Math.min(slot.validPrefix, from);
+		for (let index = slot?.validPrefix ?? 0; index < from; index++) rows[index] = resolved[index] as string;
 		for (let index = from; index < lines.length; index++) {
 			const line = lines[index] as string;
 			if (line !== raw[index]) {
@@ -168,6 +175,7 @@ class RegularFrameRows {
 		rows.length = lines.length;
 		raw.length = lines.length;
 		resolved.length = lines.length;
+		if (slot !== undefined) slot.validPrefix = from;
 		return rows;
 	}
 }
@@ -197,7 +205,19 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 
 	override stop(options?: TuiStopOptions): void {
 		this.widthChanges.cancel();
+		this.invalidateFrameRows();
 		super.stop(options);
+	}
+
+	protected override resetRenderState(): void {
+		super.resetRenderState();
+		this.frameRows.memoOutput = undefined;
+		this.invalidateFrameRows();
+	}
+
+	private invalidateFrameRows(): void {
+		this.frameRows.invalidate();
+		this.keptRoot = undefined;
 	}
 
 	/** A lone root needs no stacking, and `resolveFakeCursors` below already copies what the renderer will rewrite. */
@@ -245,22 +265,25 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 		const columns = this.terminal.columns;
 		if (this.widthChanges.defer(columns)) return;
 		this.widthChanges.painted(columns);
+		const showHardwareCursor = this.getShowHardwareCursor();
+		if (showHardwareCursor !== this.paintedHardwareCursor) this.invalidateFrameRows();
+		this.paintedHardwareCursor = showHardwareCursor;
 		this.awaitingFrameRows = true;
-		if (this.renderObserver.isEnabled?.() === false) {
-			super.doRender();
-			return;
-		}
-		const frame = this.renderObserver.beginFrame({
-			mode: this.mode,
-			columns: this.terminal.columns,
-			rows: this.terminal.rows,
-		});
+		const redraws = this.fullRedraws;
+		const observed = this.renderObserver.isEnabled?.() !== false;
+		const frame = observed
+			? this.renderObserver.beginFrame({ mode: this.mode, columns, rows: this.terminal.rows })
+			: undefined;
 		this.currentFrame = frame;
 		try {
 			super.doRender();
+		} catch (error) {
+			this.invalidateFrameRows();
+			throw error;
 		} finally {
+			if (redraws !== this.fullRedraws) this.invalidateFrameRows();
 			this.currentFrame = undefined;
-			this.renderObserver.endFrame(frame);
+			if (observed) this.renderObserver.endFrame(frame);
 		}
 	}
 
@@ -269,9 +292,11 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	}
 
 	protected override applyLineResets(lines: string[]): string[] {
-		const output = this.measure("normalization", () => super.applyLineResets(lines));
-		this.frameRows.memoOutput = output;
-		return output;
+		return this.measure("normalization", () => {
+			const output = super.applyLineResets(lines);
+			this.frameRows.memoOutput = output;
+			return output;
+		});
 	}
 
 	protected override extractCursorPosition(lines: string[], height: number): { row: number; col: number } | null {
@@ -295,6 +320,7 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	private readonly widthChanges: WidthChangeCoalescer;
 	private readonly frameRows = new RegularFrameRows();
 	private awaitingFrameRows = false;
+	private paintedHardwareCursor: boolean | undefined;
 	private keptRoot: unknown;
 	private keptRootRenders = -1;
 }
