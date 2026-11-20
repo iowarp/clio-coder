@@ -1,4 +1,5 @@
 import type { ExecutionPlanStep } from "../domains/dispatch/execution-plan.js";
+import { writeCliFailure } from "./kit/json-out.js";
 import { inspectPlaybook } from "./playbook-preflight.js";
 import { parsePlaybookVars, playbookVarsOrUndefined } from "./playbook-vars.js";
 
@@ -40,9 +41,19 @@ export function runPlaybookGraph(args: ReadonlyArray<string>): number {
 	const name = rest.find((arg) => !arg.startsWith("-"));
 	const unknown = rest.find((arg, index) => (arg.startsWith("-") && arg !== "--json") || index > 1);
 	if (name === undefined || unknown !== undefined || error !== undefined) {
-		process.stderr.write(
-			`clio-coder playbook: graph: ${error !== undefined ? `${error}; ` : ""}usage: clio-coder playbook graph <name> [--var key=value ...] [--json]\n`,
-		);
+		const flag = unknown?.startsWith("-") === true;
+		writeCliFailure({
+			path: ["playbook", "graph"],
+			slug: flag ? "unknown_flag" : "usage",
+			message:
+				error ??
+				(flag
+					? `unknown flag: ${unknown}`
+					: unknown !== undefined
+						? `unexpected argument: ${unknown}`
+						: "name a playbook: clio-coder playbook graph <name> [--var key=value ...] [--json]"),
+			json,
+		});
 		return 2;
 	}
 	try {
@@ -100,7 +111,12 @@ export function runPlaybookGraph(args: ReadonlyArray<string>): number {
 		}
 		return 0;
 	} catch (error) {
-		process.stderr.write(`clio-coder playbook: ${error instanceof Error ? error.message : String(error)}\n`);
+		writeCliFailure({
+			path: ["playbook", "graph"],
+			slug: "not_found",
+			message: error instanceof Error ? error.message : String(error),
+			json,
+		});
 		return 1;
 	}
 }
