@@ -305,7 +305,7 @@ function optionalCompactMs(durationMs: number | undefined): string | null {
  * diagnosis as the body line.
  */
 const COMMAND_STATUS_LINE =
-	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: this command ran past its own .+ (?<newTimeout>timeout) and was stopped\..*|bash: command (?<aborted>aborted)(?: after \d+s of its \S+ time limit\. The host ended the run(?:: (?<cause>.+)| and recorded no cause\.))?)$/u;
+	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: this command ran past its own .+ (?<newTimeout>timeout) and was stopped\..*|bash: this command printed nothing and used no CPU for .+ and was stopped as (?<idle>idle) \(.*|bash: command (?<aborted>aborted)(?: after \d+s of its \S+ time limit\. The host ended the run(?:: (?<cause>.+)| and recorded no cause\.))?)$/u;
 
 const VERIFY_TIMEOUT_LINE =
 	/^verify: (?:run \d+\/\d+: )?timed out after (?:(?<seconds>\d+(?:\.\d+)?) s|(?<ms>\d+)ms)$/u;
@@ -315,6 +315,8 @@ interface CommandStatus {
 	index: number;
 	exit: string | null;
 	timedOut: boolean;
+	/** The command was stopped as idle (safety.limits.bashIdleSeconds), not by its timeout. */
+	idle: boolean;
 	/** Explicit timeout wording from a verify timeout line (`<N> s`), when present. */
 	timeoutSeconds: string | null;
 	aborted: boolean;
@@ -343,6 +345,7 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 			index,
 			exit,
 			timedOut: match.groups.timeout !== undefined || match.groups.newTimeout !== undefined,
+			idle: match.groups.idle !== undefined,
 			timeoutSeconds: null,
 			aborted: match.groups.aborted !== undefined,
 			// `command exited with code 3` after `(exit 3)` restates the row's own fact, so it is no diagnosis.
@@ -365,6 +368,7 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 			index,
 			exit: null,
 			timedOut: true,
+			idle: false,
 			timeoutSeconds,
 			aborted: false,
 			message: null,
@@ -372,6 +376,15 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 		};
 	}
 	return null;
+}
+
+/**
+ * A command stopped as idle rather than by its timeout: the details say so
+ * (`timedOut` with `timedOutBy: "idle"`), or, when a bridge dropped the
+ * details, the status line bash wrote does (FX-40).
+ */
+function stoppedIdle(details: Record<string, unknown> | null | undefined, status: CommandStatus | null): boolean {
+	return (details?.timedOut === true && details.timedOutBy === "idle") || status?.idle === true;
 }
 
 /** A failed command's output without the status line its row already states. */
@@ -813,9 +826,9 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 		if (isTruncatedResult(finished) && !parts.includes("truncated")) parts.push("truncated");
 		const details = detailsOf(finished.result);
 		const status = row.spec.class === "execute" && finished.isError ? commandStatusLine(finished.result) : null;
-		if (details?.timedOutBy === "idle") {
+		if (stoppedIdle(details, status)) {
 			// An idle stop is not the timeout budget running out; its figure is how long the command sat idle (FX-40).
-			const idle = typeof details.idleMs === "number" ? optionalCompactMs(details.idleMs) : null;
+			const idle = typeof details?.idleMs === "number" && details.idleMs > 0 ? optionalCompactMs(details.idleMs) : null;
 			parts.push(idle === null ? "stopped idle" : `stopped idle after ${idle}`);
 		} else if (details?.timedOut === true || status?.timedOut === true) {
 			// The row does not state a timeout the command stayed under; one it hit is the fact.
@@ -1839,7 +1852,8 @@ function outputFacts(finished: ToolExecutionFinished): string[] {
 	}
 	if (isTruncatedResult(finished)) parts.push("truncated");
 	const details = detailsOf(finished.result);
-	if (details?.timedOut === true) parts.push("timed out");
+	if (stoppedIdle(details, null)) parts.push("stopped idle");
+	else if (details?.timedOut === true) parts.push("timed out");
 	if (details?.outputCapped === true) parts.push("output capped");
 	const usage = toolUsageFact(finished.result);
 	if (usage !== null) parts.push(usage);
