@@ -504,12 +504,20 @@ function armedTimeoutLimit(timeout: number, deadlineAt: number | undefined): Bas
 /** Process groups of commands this process started that may still hold members, keyed by leader pid. */
 const liveCommandGroups = new Set<number>();
 
+/** What the idle watchdog read of a command's processes: their summed CPU ticks and how many were still live. */
+interface CommandCpuSample {
+	ticks: number;
+	members: number;
+}
+
 /**
- * CPU clock ticks spent so far by `rootPid` and every descendant, children it already reaped included, read from
- * `/proc`; null where `/proc` is not available. Descendants are found by parent pid, not process group, because a
- * sandboxed payload runs in its own session.
+ * CPU clock ticks spent so far by a command's processes, read from `/proc`; null where `/proc` is not available. The
+ * members are the root and its descendants by parent pid (a sandboxed payload runs in its own session), every process
+ * in the command's group (a backgrounded child outlives the shell and is reparented away from it), the descendants of
+ * both, and every process seen in an earlier sample that is still the same process (`known`, pid to start time; it
+ * keeps a `setsid` descendant found while the shell lived). `known` is updated to this sample's members.
  */
-function processTreeCpuTicks(rootPid: number): number | null {
+function commandCpuSample(rootPid: number, groupId: number, known: Map<number, string>): CommandCpuSample | null {
 	let names: string[];
 	try {
 		names = readdirSync("/proc");
@@ -518,6 +526,8 @@ function processTreeCpuTicks(rootPid: number): number | null {
 	}
 	const children = new Map<number, number[]>();
 	const ticks = new Map<number, number>();
+	const started = new Map<number, string>();
+	const seeds: number[] = [];
 	for (const name of names) {
 		if (!/^\d+$/u.test(name)) continue;
 		let stat: string;
@@ -538,18 +548,23 @@ function processTreeCpuTicks(rootPid: number): number | null {
 			pid,
 			[11, 12, 13, 14].reduce((sum, index) => sum + (Number(fields[index]) || 0), 0),
 		);
+		const start = fields[19] ?? "";
+		started.set(pid, start);
+		// A zombie spends no more CPU and is not a live member.
+		if (fields[0] === "Z") continue;
+		if (pid === rootPid || Number(fields[2]) === groupId || known.get(pid) === start) seeds.push(pid);
 	}
-	if (!ticks.has(rootPid)) return null;
 	let total = 0;
-	const pending = [rootPid];
 	const seen = new Set<number>();
-	for (let pid = pending.pop(); pid !== undefined; pid = pending.pop()) {
+	for (let pid = seeds.pop(); pid !== undefined; pid = seeds.pop()) {
 		if (seen.has(pid)) continue;
 		seen.add(pid);
 		total += ticks.get(pid) ?? 0;
-		pending.push(...(children.get(pid) ?? []));
+		seeds.push(...(children.get(pid) ?? []));
 	}
-	return total;
+	known.clear();
+	for (const pid of seen) known.set(pid, started.get(pid) ?? "");
+	return { ticks: total, members: seen.size };
 }
 
 /**
@@ -736,16 +751,21 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let lastActivity = performance.now();
 		if (idleMs > 0 && child.pid !== undefined) {
 			const pid = child.pid;
+			const known = new Map<number, string>();
 			let lastTicks: number | null = null;
 			idleTimer = setInterval(
 				() => {
 					if (settled || killSent) return;
-					const ticks = processTreeCpuTicks(pid);
-					if (ticks !== null && ticks !== lastTicks) {
-						lastTicks = ticks;
+					// Off Linux (no /proc) only output counts. With /proc, the command's processes are sampled by group and by
+					// descent, so a busy child the shell left behind still counts after the shell is reaped.
+					const sample = commandCpuSample(pid, groupId ?? pid, known);
+					if (sample !== null && sample.members > 0 && sample.ticks !== lastTicks) {
+						lastTicks = sample.ticks;
 						lastActivity = performance.now();
 					}
 					if (performance.now() - lastActivity < idleMs) return;
+					// Nothing could be sampled, yet the command's group still has a member: not proof of idleness.
+					if (sample !== null && sample.members === 0 && hasOwnedProcesses()) return;
 					idledOut = true;
 					timedOut = true;
 					killChild();

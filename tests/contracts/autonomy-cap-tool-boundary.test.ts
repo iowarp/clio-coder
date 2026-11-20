@@ -99,7 +99,7 @@ function transport(toolRounds = 1, reply: string | ReadonlyArray<string> = "PONG
 /** A real engine and session journal over the fixture wire, with `run` standing in for the read tool. */
 function fixture(
 	toolRounds: number,
-	run: (loop: ChatLoop, signal: AbortSignal | undefined) => Promise<void>,
+	run: (loop: ChatLoop, signal: AbortSignal | undefined, steered: (() => boolean) | undefined) => Promise<void>,
 	reply?: string | ReadonlyArray<string>,
 	/** Keep the turn runtime's own stream (tool rounds and tool_choice) and swap only its fetch. */
 	throughToolRounds = false,
@@ -169,7 +169,7 @@ function fixture(
 		baseActionClass: "read",
 		...(steerGraceMs === undefined ? {} : { steerInterruptible: true as const }),
 		async run(_args, options) {
-			await run(loop, options?.signal);
+			await run(loop, options?.signal, options?.steerInterrupted);
 			return { kind: "ok", output: "recorded" };
 		},
 	});
@@ -395,6 +395,30 @@ it("a steer queued during an interruptible tool ends the call after its grace; t
 		);
 	} finally {
 		await f.close();
+	}
+	// The operator cancels the run after the steer fired, while the call is still stopping (bash's TERM-to-KILL grace):
+	// the cancel wins, so the call does not read as aborted-by-steer and nothing says the run goes on.
+	const late = { steered: true as boolean | undefined };
+	const cancelled = fixture(
+		1,
+		async (loop, signal, steered) => {
+			ok(loop.steer("Stop waiting; read the log instead."));
+			await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+			loop.cancel();
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			late.steered = steered?.();
+		},
+		"PONG",
+		false,
+		50,
+	);
+	try {
+		await cancelled.loop.submit("Record the section.");
+		await cancelled.loop.whenSettled();
+		strictEqual(late.steered, false, "a run cancelled after the steer fired still reported aborted-by-steer");
+		strictEqual(cancelled.wire.calls(), 1, "a cancelled run sent another model request");
+	} finally {
+		await cancelled.close();
 	}
 });
 

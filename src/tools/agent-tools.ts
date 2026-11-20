@@ -631,10 +631,14 @@ function steerInterruptible(spec: ToolSpec, params: unknown, registry: ToolRegis
 
 const STEER_ABORT_NOTE = `\n\n[CLIO Coder] ${STEER_ABORT_MARK}: the operator queued a steer while this call ran, so the host ended it; any output above is partial. The run goes on, and the steer follows as the next message.`;
 
-/** A tool that settled on its own after the steer's abort still says so, unless its own result already did. */
+/**
+ * A tool that settled on its own after the steer's abort still says so, unless its own result already did. That is
+ * judged on the host-owned `details.abortedBy`, never on result text, which may quote the mark from untrusted output.
+ */
 function markSteerAborted(result: WorkerAgentToolResult): WorkerAgentToolResult {
+	const details = result.details as unknown;
+	if (isRecord(details) && details.abortedBy === "steer") return result;
 	const [first, ...rest] = result.content;
-	if (first?.type === "text" && first.text.includes(STEER_ABORT_MARK)) return result;
 	const text = first?.type === "text" ? `${first.text}${STEER_ABORT_NOTE}` : STEER_ABORT_NOTE.trimStart();
 	return {
 		...result,
@@ -670,8 +674,16 @@ function toAgentTool(
 			const interrupt =
 				steerHost !== undefined && steerInterruptible(spec, params, registry) ? steerHost.begin(spec.name) : undefined;
 			const runSignal = signal;
+			// The stop cause is decided once, when the call settles: a run cancellation wins over a steer, so only an abort
+			// the steer caused alone reads as aborted-by-steer. The first read latches the answer, so a cancel landing after
+			// the tool settled cannot make this seam disagree with the tool's own result.
+			let steerCause: boolean | undefined;
+			const steered = (): boolean => {
+				steerCause ??= interrupt?.fired() === true && runSignal?.aborted !== true;
+				return steerCause;
+			};
 			if (interrupt !== undefined) {
-				options.steerInterrupted = interrupt.fired;
+				options.steerInterrupted = steered;
 				signal = runSignal === undefined ? interrupt.signal : AbortSignal.any([runSignal, interrupt.signal]);
 			}
 			const callInput: RunValidatedToolCallInput = {
@@ -696,15 +708,13 @@ function toAgentTool(
 			if (telemetry) callInput.telemetry = telemetry;
 			if (Object.keys(options).length > 0) callInput.invokeOptions = options;
 			if (interrupt === undefined) return runValidatedToolCall(callInput);
-			// Only a steer that ended the call, not a run that ended too, marks the result.
-			const steered = (): boolean => interrupt.fired() && runSignal?.aborted !== true;
 			try {
 				const result = await runValidatedToolCall(callInput);
 				return steered() ? markSteerAborted(result) : result;
 			} catch (err) {
 				if (!steered()) throw err;
-				const message = errorMessage(err);
-				throw new Error(message.includes(STEER_ABORT_MARK) ? message : `${message}${STEER_ABORT_NOTE}`);
+				// A thrown error carries no host metadata, so the host note is always added here.
+				throw new Error(`${errorMessage(err)}${STEER_ABORT_NOTE}`);
 			} finally {
 				interrupt.end();
 			}

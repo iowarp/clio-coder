@@ -575,7 +575,10 @@ export interface ToolInvokeOptions {
 	 * agent-tool seam begins one interruption per call and never hands this to the tool.
 	 */
 	steerInterrupt?: SteerInterruptHost;
-	/** Set by the agent-tool seam: true once a queued steer ended this call; read after `signal` fired. */
+	/**
+	 * Set by the agent-tool seam: true when a queued steer alone ended this call, false when the run was cancelled too.
+	 * Read once, when the call settles; the first read decides the stop cause for the tool and the seam alike.
+	 */
 	steerInterrupted?: () => boolean;
 	/** Main session: `safety.limits.bashIdleSeconds` in ms. A foreground bash call idle this long ends as timed out. */
 	bashIdleMs?: number;

@@ -266,6 +266,13 @@ describe("bash abort settlement (#445)", () => {
 			{ bashIdleMs: 400 },
 		);
 		strictEqual(busy.kind, "ok", busy.kind === "error" ? busy.message : "");
+		// The shell leaves a silent, busy child holding stdout and exits: once the shell is reaped the child still counts.
+		const orphan = await bashTool.run(
+			{ command: "(end=$((SECONDS+2)); while [ $SECONDS -lt $end ]; do :; done; echo done) & exit 0" },
+			{ bashIdleMs: 400 },
+		);
+		strictEqual(orphan.kind, "ok", orphan.kind === "error" ? orphan.message : "");
+		match(JSON.stringify(orphan), /done/u);
 	});
 });
 
