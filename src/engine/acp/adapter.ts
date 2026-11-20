@@ -324,13 +324,16 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		const installed = findExecutableOnPath("claude");
 		if (installed) transportOptions.env = { ...transportOptions.env, CLAUDE_CODE_EXECUTABLE: installed };
 	}
-	const antigravity = isAntigravityAcp(input.agent) ? prepareAntigravityLaunch(input.agent, transportOptions.env) : null;
+	const antigravity = isAntigravityAcp(input.agent)
+		? prepareAntigravityLaunch(input.agent, transportOptions.env, transportOptions.cwd)
+		: null;
 	if (antigravity) transportOptions.env = antigravity.env;
 	const agy = antigravity
 		? createAntigravityShims({
 				command: input.agent.command,
 				launchArgs: antigravity.args,
 				toolGovernance: input.agent.toolGovernance ?? "clio-coder-policy",
+				profileDir: antigravity.profileDir,
 			})
 		: null;
 	if (agy) Object.assign(transportOptions, agy.transportHooks);
@@ -687,6 +690,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				}
 			}
 			requireActive();
+			agy?.sidebandBaseline(sessionId);
 			promptInFlight = true;
 			const turnPrompt = transport.request<AcpPromptResponse>(
 				"session/prompt",
@@ -724,6 +728,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					emit({ type: "clio_coder_peer_steer_failed", payload: { reason: acpErrorMessage(outcome.error) } });
 			}
 			if (agy !== null && steerPrompts.length > 0) promptResponse = agy.settleTurn(settledTurn);
+			// agy ends some failed turns as if they succeeded and records why only in its own store.
+			const sideband = aborted ? {} : (agy?.sideband(sessionId) ?? {});
 			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
 			// _meta; other agents (Copilot/Codex/OpenCode) report nothing here, so usage
 			// is best-effort. Fall back to legacy top-level fields for older peers.
@@ -737,9 +743,13 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			} else {
 				recordUsage(promptResponse?.usage ?? promptResponse?.tokenUsage, "run", "complete");
 			}
+			const peerFailure = authFailure ?? mapper.reportedFailure();
+			// The quota fails only a turn agy closed as end_turn with no failure of its own; any other end stands.
+			const usageLimit =
+				peerFailure === null && promptResponse?.stopReason === "end_turn" ? sideband.usageLimit : undefined;
 			const reportedFailure =
-				authFailure ??
-				mapper.reportedFailure() ??
+				peerFailure ??
+				usageLimit?.message ??
 				(typeof promptResponse?.stopReason === "string" && promptResponse.stopReason.length > 0
 					? null
 					: "ACP prompt response missing stopReason");
@@ -761,8 +771,10 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(reportedFailure !== null || (stopReason !== "end_turn" && stopReason !== "cancelled")
 					? { failureMessage: reportedFailure ?? `ACP stopReason=${stopReason}` }
 					: {}),
+				...(usageLimit !== undefined ? { usageLimit } : {}),
 				delegation: {
 					acpSessionId: sessionId,
+					...(sideband.nonResumable !== undefined ? { nonResumable: sideband.nonResumable } : {}),
 					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
 					toolCallsRequested: toolSnapshot.toolCallsRequested,

@@ -1,4 +1,6 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout } from "node:timers/promises";
 
@@ -128,17 +130,42 @@ function advertisesClientCapability(capabilities) {
 }
 
 /**
- * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null|steer|labels>`. Every frame it receives
- * is appended to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends `interaction_`
- * requests: tool-shaped ones (an execute command, a path or a URL under kind other or none) and questions whose
- * locations are null or empty, then agy's own tool shapes (probed on 1.5.13): `run_command`, `run_workflow` and a tool
- * no shim maps. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer
- * end_turn, then a later update arrives, then the second steer fails. In `abort` mode a steer makes the turn answer
- * end_turn and is never answered itself. In `null` mode a steer is answered with a null result, then the turn with
- * end_turn. In `steer` mode a steer is answered end_turn, then the turn with end_turn; `labels` does the same and
- * offers options whose names repeat, collide with a suffixed repeat, or are blank.
+ * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null|steer|labels|sideband*>`. Every frame
+ * it receives is appended to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends
+ * `interaction_` requests: tool-shaped ones (an execute command, a path or a URL under kind other or none) and
+ * questions whose locations are null or empty, then agy's own tool shapes (probed on 1.5.13): `run_command`,
+ * `run_workflow` and a tool no shim maps. In `ok` mode the first steer prompt ends at max_tokens; the second makes the
+ * turn answer end_turn, then a later update arrives, then the second steer fails. In `abort` mode a steer makes the
+ * turn answer end_turn and is never answered itself. In `null` mode a steer is answered with a null result, then the
+ * turn with end_turn. In `steer` mode a steer is answered end_turn, then the turn with end_turn; `labels` does the
+ * same and offers options whose names repeat, collide with a suffixed repeat, or are blank. The `sideband*` modes
+ * share one store under `$HOME/.gemini/antigravity-cli` (the 1.5.13 `steps` DDL), kept open as agy does: `sideband`
+ * records a quota error and a thinking-signature error and answers end_turn, `sideband-max` records the same and
+ * answers max_tokens, and `sideband-clean` records only a user step and answers end_turn.
  */
-const agyState = { firstPrompt: undefined, steers: 0, answered: false };
+const agyState = { firstPrompt: undefined, steers: 0, answered: false, store: undefined };
+function recordAgySteps(errors) {
+	const conversations = join(process.env.HOME, ".gemini", "antigravity-cli", "conversations");
+	mkdirSync(conversations, { recursive: true });
+	const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
+	const store = new DatabaseSync(join(conversations, "agy-session.db"));
+	store.exec("PRAGMA journal_mode = WAL");
+	store.exec(
+		"CREATE TABLE IF NOT EXISTS `steps` (`idx` integer,`step_type` integer NOT NULL DEFAULT 0,`status` integer NOT NULL DEFAULT 0,`has_subtrajectory` numeric NOT NULL DEFAULT false,`metadata` blob,`error_details` blob,`permissions` blob,`task_details` blob,`render_info` blob,`step_payload` blob,`step_format` integer NOT NULL DEFAULT 0,PRIMARY KEY (`idx`))",
+	);
+	const insert = store.prepare("INSERT INTO steps (step_type, status, step_payload) VALUES (?, 3, ?)");
+	insert.run(14, Buffer.from("user input"));
+	if (errors) {
+		insert.run(
+			17,
+			Buffer.from(
+				'429 {"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"QUOTA_EXHAUSTED","metadata":{"model":"gemini-x-high","quotaResetDelay":"2h","quotaResetTimeStamp":"2026-11-21T01:00:00Z"}} {"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"7s"}',
+			),
+		);
+		insert.run(17, Buffer.from("API error: INVALID_ARGUMENT (code 400): INVALID_THINKING_SIGNATURE"));
+	}
+	agyState.store = store;
+}
 function agyUpdate(text) {
 	send({
 		jsonrpc: "2.0",
@@ -252,6 +279,11 @@ function agy(request) {
 							],
 			},
 		});
+		if (scenario.startsWith("sideband")) {
+			recordAgySteps(scenario !== "sideband-clean");
+			const stopReason = scenario === "sideband-max" ? "max_tokens" : "end_turn";
+			send({ jsonrpc: "2.0", id: request.id, result: { stopReason } });
+		}
 	} else if (request.method === "session/prompt" && scenario === "ok") {
 		agyState.steers += 1;
 		if (agyState.steers === 1) {
