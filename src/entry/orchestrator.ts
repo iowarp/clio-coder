@@ -2245,7 +2245,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				? { scores: Object.fromEntries(ranked.map((hit) => [hit.id, hit.score])), source: "capability gate" }
 				: null;
 		};
-	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
+	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers, telemetry, session });
 	const jobHost = createJobHost({
 		registry: toolRegistry,
 		bus,

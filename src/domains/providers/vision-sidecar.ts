@@ -1,7 +1,11 @@
 /** Image perception on a separately configured llama.cpp target. */
 
 import type { ClioSettings } from "../../core/config.js";
+import { pricingBasisFields } from "../../core/telemetry/pricing.js";
 import type { ImageContent } from "../../engine/types.js";
+import type { SessionContract } from "../session/contract.js";
+import { type CallScope, openCallScope } from "../telemetry/call-scope.js";
+import type { TelemetryContract } from "../telemetry/contract.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import type { ProvidersContract } from "./contract.js";
 import { modelEndpointKey, registerForegroundStream } from "./endpoint-capacity.js";
@@ -132,11 +136,45 @@ function parseAnalysis(raw: unknown, count: number, binding: VisionBinding): Vis
 	return { target: binding.targetId, model: binding.model, images: descriptions, answer: record.answer.trim() };
 }
 
+const count = (value: unknown): number | null =>
+	typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+
+/**
+ * The sidecar's answer as a settlement message: llama.cpp's OpenAI usage read the way Pi reads a completion chunk, so
+ * the cached part of the prompt is cache read and a count the server left out stays unknown, never zero.
+ */
+function settlementMessage(payload: unknown): Record<string, unknown> {
+	const raw = (payload && typeof payload === "object" ? payload : {}) as {
+		model?: unknown;
+		usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } };
+		choices?: Array<{ finish_reason?: unknown }>;
+	};
+	const prompt = count(raw.usage?.prompt_tokens);
+	const cached = count(raw.usage?.prompt_tokens_details?.cached_tokens);
+	const output = count(raw.usage?.completion_tokens);
+	return {
+		role: "assistant",
+		stopReason: raw.choices?.[0]?.finish_reason === "length" ? "length" : "stop",
+		servedModel: typeof raw.model === "string" ? raw.model : null,
+		usage: {
+			...(prompt !== null ? { input: Math.max(0, prompt - (cached ?? 0)) } : {}),
+			...(output !== null ? { output } : {}),
+			...(cached !== null ? { cacheRead: cached } : {}),
+			cacheReadField: cached !== null ? "sent" : "omitted",
+		},
+	};
+}
+
 export async function analyzeVision(
 	binding: VisionBinding,
 	images: ReadonlyArray<ImageContent>,
 	question: string,
-	options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+	options: {
+		signal?: AbortSignal;
+		fetchImpl?: typeof fetch;
+		/** The journaled call this request is, started once validation passes and settled with the server's usage. */
+		call?: Pick<CallScope, "startAttempt" | "settle">;
+	} = {},
 ): Promise<VisionAnalysis> {
 	validateImages(images);
 	const trimmedQuestion = question.trim();
@@ -149,9 +187,11 @@ export async function analyzeVision(
 		{ type: "text", text: `Question: ${trimmedQuestion}` },
 		...images.map((image) => ({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.data}` } })),
 	];
+	const url = completionUrl(binding.url);
+	options.call?.startAttempt();
 	let response: Response;
 	try {
-		response = await (options.fetchImpl ?? fetch)(completionUrl(binding.url), {
+		response = await (options.fetchImpl ?? fetch)(url, {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -171,11 +211,23 @@ export async function analyzeVision(
 			signal,
 		});
 	} catch (error) {
+		options.call?.settle({ stopReason: signal.aborted ? "aborted" : "error", usage: {} });
 		if (timeout.aborted && options.signal?.aborted !== true) throw new Error("vision sidecar timed out");
 		throw error;
 	}
-	if (!response.ok) throw new Error(`vision sidecar returned HTTP ${response.status}`);
-	const payload = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+	if (!response.ok) {
+		options.call?.settle({ stopReason: "error", usage: {}, failure: { httpStatus: response.status } });
+		throw new Error(`vision sidecar returned HTTP ${response.status}`);
+	}
+	let payload: { choices?: Array<{ message?: { content?: unknown } }> };
+	try {
+		payload = (await response.json()) as typeof payload;
+	} catch (error) {
+		options.call?.settle({ stopReason: signal.aborted ? "aborted" : "error", usage: {} });
+		throw error;
+	}
+	// Settled before the answer is parsed: the server billed the call whether or not its answer is usable.
+	options.call?.settle(settlementMessage(payload));
 	return parseAnalysis(payload.choices?.[0]?.message?.content, images.length, binding);
 }
 
@@ -188,6 +240,9 @@ export function createVisionSidecar(input: {
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	fetchImpl?: typeof fetch;
+	/** Each request is a `helper` call with purpose `vision`, in the current session's journal (memory design 4.5). */
+	telemetry?: Pick<TelemetryContract, "acquireTelemetrySession"> | undefined;
+	session?: Pick<SessionContract, "current"> | undefined;
 }): VisionSidecar {
 	const profile = () => input.getSettings().fleet.profiles[VISION_PROFILE];
 	return {
@@ -242,15 +297,30 @@ export function createVisionSidecar(input: {
 				url: route.target.url,
 				...(credential?.apiKey ? { apiKey: credential.apiKey } : {}),
 			};
+			const acquire = input.telemetry?.acquireTelemetrySession;
+			const call = await openCallScope(
+				acquire && {
+					origin: input.session?.current() ?? null,
+					acquire,
+					role: "helper",
+					purpose: "vision",
+					targetId: route.targetId,
+					runtimeId: route.runtimeId,
+					...pricingBasisFields(route),
+				},
+				{ api: route.runtime.apiFamily, id: route.wireModelId },
+			);
 			const endpoint = modelEndpointKey(route.target, route.wireModelId);
 			const release = endpoint ? registerForegroundStream(endpoint) : () => {};
 			try {
 				return await analyzeVision(binding, images, question, {
 					...(signal ? { signal } : {}),
 					...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+					call,
 				});
 			} finally {
 				release();
+				await call.close();
 			}
 		},
 	};
