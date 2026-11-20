@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type { CallFailureRecord } from "../../../core/call-failure.js";
 import { trackCallFetch } from "../../../core/call-failure.js";
+import type { ThinkingLevel } from "../../../core/defaults.js";
 import type { SideCallAuth } from "../../../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../../core/oauth-retry.js";
 import { prepareProviderCheckpoint } from "../../../core/provider-checkpoint.js";
@@ -245,6 +246,12 @@ export interface CompactInput extends SideCallAuth {
 
 	/** Resolved orchestrator or compaction-override model. */
 	model: EngineModel;
+	/**
+	 * The thinking level the portable summary request runs at: what its route resolves for a request with thinking off,
+	 * so an always-on model still reads as thinking. Under `summaryOutputCap` only a level above off reserves reasoning
+	 * room in the summary's output cap (CTX-3); an uncapped summary keys on the model. Absent reads as off.
+	 */
+	summaryThinkingLevel?: ThinkingLevel;
 	/** API key for the model. Optional because local engines accept a fallback handled upstream. */
 	apiKey?: string;
 	/** Per-provider headers to pass through with the stream request. */
@@ -319,6 +326,8 @@ export interface CompactInput extends SideCallAuth {
 export interface LivePrefixSummary {
 	/** The route the request goes to; a compaction resolved to any other model cannot use it. */
 	model: { id: string; provider: string };
+	/** The turn's effective thinking level, which this request keeps; a capped request is sized for it (CTX-3). Absent reads as off. */
+	thinkingLevel?: ThinkingLevel;
 	/** Base-input-equivalent tokens the request costs before output, with `tail` as the appended message. */
 	inputCost(tail: string): number;
 	/** Estimated input tokens of the whole request, for the window fit check. */
@@ -1679,7 +1688,12 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		);
 		if (!hasConversation(span)) return emptyResult("nothing-to-summarize");
 		// A capped summary on a small window keeps to the room its cap leaves, so a span above that still gains (bt-18).
-		const room = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap).summaryRoom;
+		const room = summaryOutputBudget(
+			input.model,
+			reserveTokens,
+			input.summaryOutputCap,
+			input.summaryThinkingLevel,
+		).summaryRoom;
 		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < room)
 			return { ...emptyResult("below-summary-room"), noGain: true };
 	}
@@ -1717,30 +1731,36 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	if (!Number.isFinite(reserveTokens) || reserveTokens <= 0) {
 		throw new Error("compaction requires a positive finite reserve token budget");
 	}
-	// A fixed cap let reasoning consume it and the summary was never saved (pi
-	// upstream #9512); summaryOutputBudget sizes it per route.
-	const outputBudget = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap);
-	const { summaryRoom } = outputBudget;
 	// A cumulative checkpoint told nothing of its room outgrew a small window's history space a little more each cycle,
 	// while the retained suffix could shrink no further than the newest tool batch, so each cut landed closer to the
 	// trigger (bt-18). The request names what the target leaves once the kept suffix and Clio's blocks are counted.
 	// A capped summary on a small window always names its budget, the tighter of that and its own room (item 8).
 	const capped = input.summaryOutputCap !== undefined;
-	const checkpointRoom = (() => {
-		if (input.retainedTargetTokens === undefined) return capped ? summaryRoom : undefined;
+	const retainedRoom = (() => {
+		if (input.retainedTargetTokens === undefined) return undefined;
 		const kept = entries.slice(cut.firstKeptEntryIndex).reduce((tokens, entry) => tokens + estimateTokens(entry), 0);
-		const room = Math.max(
+		return Math.max(
 			CHECKPOINT_ROOM_FLOOR,
 			Math.floor(input.retainedTargetTokens / 3),
 			input.retainedTargetTokens - kept - ceilChars(trailer.length),
 		);
-		return room < summaryRoom ? room : capped ? summaryRoom : undefined;
 	})();
-	// The stated budget is the request's too: the output cap leaves it past the route's reasoning share.
-	const maxTokens =
-		capped && checkpointRoom !== undefined && outputBudget.maxTokens !== undefined
-			? Math.min(outputBudget.maxTokens, summaryOutputForRoom(input.model, checkpointRoom))
-			: outputBudget.maxTokens;
+	// A fixed cap let reasoning consume it and the summary was never saved (pi upstream #9512); summaryOutputBudget
+	// sizes it per route. Under a cap each send is sized at the thinking level it runs at: a capped summary with
+	// thinking off keeps no reasoning room, whatever the model could do (CTX-3). An uncapped one keys on the model.
+	const sendBudget = (thinking: ThinkingLevel | undefined) => {
+		const outputBudget = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap, thinking);
+		const { summaryRoom } = outputBudget;
+		const checkpointRoom =
+			retainedRoom !== undefined && retainedRoom < summaryRoom ? retainedRoom : capped ? summaryRoom : undefined;
+		// The stated budget is the request's too: the output cap leaves it past the send's reasoning share.
+		const maxTokens =
+			capped && checkpointRoom !== undefined && outputBudget.maxTokens !== undefined
+				? Math.min(outputBudget.maxTokens, summaryOutputForRoom(input.model, checkpointRoom, thinking))
+				: outputBudget.maxTokens;
+		return { summaryRoom, checkpointRoom, maxTokens };
+	};
+	const { summaryRoom, checkpointRoom, maxTokens } = sendBudget(input.summaryThinkingLevel);
 	// A split turn's summary is the smaller part of the checkpoint, so it gets a third of the room.
 	const historyRoom =
 		checkpointRoom === undefined || turnPrefix.length === 0 ? checkpointRoom : Math.ceil((checkpointRoom * 2) / 3);
@@ -1858,17 +1878,21 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			: undefined;
 	// T4: the live request is chosen only when its cached price is below the portable requests' plain input, and it
 	// fits the window with the whole transcript in it.
-	const chooseLivePrefix = async (): Promise<{ port: LivePrefixSummary; tail: string } | undefined> => {
+	const chooseLivePrefix = async (): Promise<
+		{ port: LivePrefixSummary; tail: string; budget: ReturnType<typeof sendBudget> } | undefined
+	> => {
 		if (!input.livePrefix) return undefined;
 		const port = await input.livePrefix(input.signal);
 		input.signal?.throwIfAborted();
 		if (!port || port.model.id !== input.model.id || port.model.provider !== input.model.provider) return undefined;
+		// The live request keeps the turn's thinking, so its cap and stated room are sized at that level (CTX-3).
+		const budget = sendBudget(port.thinkingLevel);
 		const retainedFrom = retainedOpening(entries, cut.firstKeptEntryIndex);
 		const tail = buildLivePrefixUserText({
 			...(retainedFrom !== undefined ? { retainedFrom } : {}),
 			...(activeRequest !== undefined ? { activeRequest } : {}),
 			...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-			...(checkpointRoom !== undefined ? { roomTokens: checkpointRoom } : {}),
+			...(budget.checkpointRoom !== undefined ? { roomTokens: budget.checkpointRoom } : {}),
 		});
 		const portable = [historyText, prefixText].reduce(
 			(tokens, text) =>
@@ -1879,7 +1903,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		);
 		const cost = port.inputCost(tail);
 		const window = input.model.contextWindow;
-		const fits = !(window > 0) || port.inputTokens(tail) + (maxTokens ?? summaryRoom) <= window;
+		const fits = !(window > 0) || port.inputTokens(tail) + (budget.maxTokens ?? budget.summaryRoom) <= window;
 		if (observationTracing())
 			traceObservation("compaction-route", {
 				portable,
@@ -1887,7 +1911,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				fits,
 				chosen: fits && cost < portable,
 			});
-		return fits && cost < portable ? { port, tail } : undefined;
+		return fits && cost < portable ? { port, tail, budget } : undefined;
 	};
 	// The exact requests about to be sent, on the route that would serve them.
 	// Credentials and headers stay out; they do not change what is summarized.
@@ -1918,7 +1942,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	let liveCovered = false;
 	if (live) {
 		try {
-			const liveSummary = await runSummaryStream(input, live.tail, systemPrompt, maxTokens, live.port);
+			const liveSummary = await runSummaryStream(input, live.tail, systemPrompt, live.budget.maxTokens, live.port);
 			usage = addCompactionUsage(usage, liveSummary.usage);
 			if (liveSummary.text.length === 0)
 				throw tagCompactionFailure(new Error("compaction returned an empty history summary"), "checkpoint_format", "empty");
@@ -2031,6 +2055,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				"\n\n",
 			),
 	).trim()}${trailer}`.trim();
+	// The send that wrote the checkpoint names its own cap and room.
+	const written = liveCovered && live ? live.budget : { maxTokens, checkpointRoom };
 
 	return {
 		summary,
@@ -2044,8 +2070,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			(summarizePriorSuffix ? conversationMessages(priorSuffix) : 0),
 		isSplitTurn: cut.isSplitTurn,
 		summaryDigest,
-		...(maxTokens !== undefined ? { summaryMaxTokens: maxTokens } : {}),
-		...(checkpointRoom !== undefined ? { summaryRoomTokens: checkpointRoom } : {}),
+		...(written.maxTokens !== undefined ? { summaryMaxTokens: written.maxTokens } : {}),
+		...(written.checkpointRoom !== undefined ? { summaryRoomTokens: written.checkpointRoom } : {}),
 		...(memoryOffer !== null ? { memoryReceipt: (memoryOffer as MemoryCompactionOffer).receipt } : {}),
 		...(usage !== undefined ? { usage } : {}),
 		...(skillContext !== undefined ? { skillContext } : {}),

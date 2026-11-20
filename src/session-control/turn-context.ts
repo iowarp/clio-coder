@@ -1397,8 +1397,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			model,
 		);
 		let reserve: number | undefined;
-		const summaryReserve = (): number =>
-			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
+		// A chat-route summary under its A5 cap reserves reasoning room only when it thinks (CTX-3). It may ride the live
+		// prefix at the turn's thinking or go portable with thinking off, which resolves no higher, so the turn's level
+		// holds the larger. Every other reserve keys on the model, as ContextFold pins.
+		const summaryReserve = (): number => {
+			if (reserve !== undefined) return reserve;
+			const onChatRoute = summaryOnChatRoute(agentRuntime, cfg?.model);
+			const capped = onChatRoute && resolveSummaryOutputCap(agentRuntime) !== undefined;
+			reserve = summaryOutputReserve(model, {
+				summaryOnChatRoute: onChatRoute,
+				...(capped ? { capped: { thinking: agentRuntime.runtimeResolution.effectiveThinkingLevel } } : {}),
+			});
+			return reserve;
+		};
 		const triggerReserve = (tokens: number): number =>
 			foldTriggerReserve({
 				window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
@@ -2717,7 +2728,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								{ free: agentRuntime.runtimeResolution.pricedBy === "free" },
 								prefixSignal,
 							);
-							return typeof prepared === "string" ? null : prepared;
+							if (typeof prepared === "string") return null;
+							// The live request keeps the turn's thinking, so its output cap is sized for it (CTX-3).
+							const thinkingLevel = agentRuntime.runtimeResolution.effectiveThinkingLevel;
+							return thinkingLevel !== undefined ? { ...prepared, thinkingLevel } : prepared;
 						},
 						...(summarySignal ? { signal: summarySignal } : {}),
 						...(automaticSummary && noGainSummaryDigest !== null ? { skipSummaryDigest: noGainSummaryDigest } : {}),

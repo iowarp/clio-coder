@@ -101,6 +101,8 @@ export interface CompactionResolution extends SideCallAuth {
 	runtimeTier?: RuntimeTier;
 	endpointKey: string | null;
 	wireModelId: string;
+	/** What the summarizer route resolves for the summary's request with thinking off; above off on an always-on model. */
+	effectiveThinkingLevel: ResolvedRuntimeTarget["effectiveThinkingLevel"];
 	headers?: Record<string, string>;
 	apiKey?: string;
 }
@@ -179,6 +181,7 @@ async function resolveCompactionModel(
 		runtimeId: route.runtime.id,
 		...(route.runtime.tier !== undefined ? { runtimeTier: route.runtime.tier } : {}),
 		wireModelId: route.wireModelId,
+		effectiveThinkingLevel: refined.effectiveThinkingLevel,
 		endpointKey: modelEndpointKey(route.target, route.wireModelId),
 		...sideAuth,
 		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
@@ -336,6 +339,8 @@ export async function runCompactionFlow(
 					);
 				},
 				continuityNote,
+				// The summary's output cap reserves reasoning room only when its request still thinks (CTX-3).
+				summaryThinkingLevel: resolved.effectiveThinkingLevel,
 				...compactionBudget,
 				...(nativeEnabled && providerCompaction ? { providerCompaction } : {}),
 				...(nativeEnabled ? { providerCheckpointSource: { sessionId: meta.id, archive: sessionPaths(meta).current } } : {}),
