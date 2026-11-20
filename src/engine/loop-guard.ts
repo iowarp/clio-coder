@@ -1570,6 +1570,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	};
 
 	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
+		// `finish` ends the turn instead of extending it, so a spent budget never refuses the declaration and it
+		// spends none: a run that used its calls can still say how it ended (CLI-P43).
+		if (effectiveToolCall(input.toolName ?? "unknown", input.toolArgs).toolName === ToolNames.Finish) return null;
 		const resolved = resolveTurnBudget(input);
 		if (resolved === undefined) return null;
 		const turnBudget = resolved.budget;

@@ -414,6 +414,13 @@ test("loop guard block reasons restate a prior failure and name where the turn's
 			admitted: [true, true, true, false, false],
 			reasons: [["every", /this turn has made its 3 tool calls/u]],
 		},
+		{
+			name: "finish stays admitted after the soft budget and the hard ceiling are spent, since it ends the turn (CLI-P43)",
+			guard: { turnToolCallBudget: () => ({ soft: 2, hard: 3 }) },
+			calls: [...times(5, (index) => read(`${index}.md`)), { tool: "finish", args: { state: "partly_done" } }],
+			admitted: [true, true, false, false, false, true],
+			reasons: [[1, /passed the hard ceiling \(3\)/u]],
+		},
 	];
 	for (const row of rows) check(row);
 });
