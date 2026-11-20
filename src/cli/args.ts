@@ -61,10 +61,14 @@ export interface RunCliArgs {
 	skillPaths: string[];
 	maxContextTokens?: number;
 	steerChannel?: string;
-	/** Resume this exact session and append the turn to it. */
+	/** `--resume <id|prefix|name>` (or the deprecated `--session`): resume this session and append the turn to it. */
 	sessionId?: string;
 	/** Resume the most recent session for this workspace. */
 	continueSession: boolean;
+	/** `--fork`: branch a new session from the resumed one, which is read and never written (SPEC L3). */
+	forkSession: boolean;
+	/** `--name <text>`: the session's name, set when the run's session is created, forked or resumed. */
+	sessionName?: string;
 	/** Directory the run enters before it resolves anything against the working directory. */
 	cwd?: string;
 	/** Fail a main-agent run whose receipt records a no-op. */
@@ -100,17 +104,21 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  * | -------------------------------------------------------------- | ----- | ----- |
  * | --record, --agent-profile, --agent-runtime, --tool-profile, --require | usage | ok |
  * | --turn-mode, --allow-tools, --delegate-tools, --no-delegate     | ok    | usage |
- * | --session, --continue                                          | ok    | usage |
+ * | --resume, --session, --continue, --fork, --name                | ok    | usage |
  * | --max-cost-usd, --fail-on-noop, --verify, --answers            | ok    | usage |
  * | --systemone                                                    | ok    | usage |
  * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
  * | --autonomy                                                     | ok    | usage |
- * | --session with --continue                                      | usage | usage |
+ * | --resume with --continue                                       | usage | usage |
+ * | --fork without --resume or --continue                          | usage | usage |
  */
 function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 	const errors: string[] = [];
 	if (parsed.sessionId !== undefined && parsed.continueSession) {
-		errors.push("--session and --continue name different sessions; pass one");
+		errors.push("--resume and --continue name different sessions; pass one");
+	}
+	if (parsed.forkSession && parsed.sessionId === undefined && !parsed.continueSession) {
+		errors.push("--fork branches the session --resume <id> or --continue names; pass one of them");
 	}
 	if (parsed.agentId === undefined) {
 		const dispatchOnly =
@@ -125,8 +133,13 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 	if (parsed.constraints) {
 		errors.push("--turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task");
 	}
-	if (parsed.sessionId !== undefined || parsed.continueSession) {
-		errors.push("--session and --continue apply to the main agent, not --agent dispatch");
+	if (
+		parsed.sessionId !== undefined ||
+		parsed.continueSession ||
+		parsed.forkSession ||
+		parsed.sessionName !== undefined
+	) {
+		errors.push("--resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript");
 	}
 	const mainOnly: Array<[boolean, string]> = [
 		[parsed.maxCostUsd !== undefined, "--max-cost-usd"],
@@ -155,6 +168,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		required: [],
 		noSkills: false,
 		continueSession: false,
+		forkSession: false,
 		failOnNoop: false,
 		verify: [],
 		skillPaths: [],
@@ -368,11 +382,24 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			else if (n !== null) parsed.diagnostics.push({ type: "error", message: n.error });
 			continue;
 		}
-		if (arg === "--session") {
-			const value = need(arg);
-			if (value !== null) {
-				parsed.sessionId = value;
-			}
+		if (arg === "--resume" || arg === "-r" || arg?.startsWith("--resume=") || arg === "--session") {
+			const value = arg.startsWith("--resume=") ? arg.slice("--resume=".length) : need(arg);
+			if (value === "") parsed.diagnostics.push({ type: "error", message: "--resume requires a session" });
+			else if (value !== null) parsed.sessionId = value;
+			// One release of the old spelling (SPEC D6): it still resumes, and says what replaces it.
+			if (arg === "--session")
+				parsed.diagnostics.push({ type: "warning", message: "--session is deprecated; use --resume <id|prefix|name>" });
+			continue;
+		}
+		if (arg === "--fork") {
+			parsed.forkSession = true;
+			continue;
+		}
+		if (arg === "--name" || arg?.startsWith("--name=")) {
+			const value = arg === "--name" ? need(arg) : arg.slice("--name=".length);
+			if (value !== null && value.trim() === "")
+				parsed.diagnostics.push({ type: "error", message: "--name requires a non-empty name" });
+			else if (value !== null) parsed.sessionName = value.trim();
 			continue;
 		}
 		if (arg === "--continue") {

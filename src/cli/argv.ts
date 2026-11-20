@@ -165,6 +165,7 @@ export function extractGlobalFlags(
 	let sessionFile: string | undefined;
 	let maxContextTokens: number | undefined;
 	let resume: StartupResume | undefined;
+	let fork = false;
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
 	const rootFlags: string[] = [];
@@ -269,6 +270,11 @@ export function extractGlobalFlags(
 			}
 			continue;
 		}
+		if (arg === "--fork") {
+			// Branch the session `--resume <id>` or `--continue` names; the parent is read and never written (SPEC L3).
+			fork = true;
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) return failed(`${arg} requires a value`);
@@ -281,7 +287,16 @@ export function extractGlobalFlags(
 		if (arg === "-p" || arg === "--print" || arg === "--prompt") {
 			return failed(`unknown global option: ${arg}; for one headless task use clio-coder run "<task>"`);
 		}
+		if (arg === "--session" || arg.startsWith("--session=")) {
+			// CLI-1: `run --session` spells resume headless; the interactive app spells it --resume.
+			return failed(`unknown global option: ${arg}; to open on a session use clio-coder --resume <id|prefix|name>`);
+		}
 		return failed(`unknown global option: ${arg}`);
+	}
+	if (fork) {
+		if (resume === undefined || resume.kind === "picker")
+			return failed("--fork branches the session --resume <id> or --continue names; pass one of them");
+		resume = { ...resume, fork: true };
 	}
 	return {
 		noContextFiles,

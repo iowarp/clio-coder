@@ -22,7 +22,7 @@ import {
 	type SessionManagerState,
 	startSession,
 } from "./manager.js";
-import { forkFromState } from "./tree/fork.js";
+import { forkFromState, forkSessionAtRest } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, computeLeafId, type TreeInputNode, type TreeSnapshot } from "./tree/navigator.js";
 import { buildTurnPreview } from "./tree/preview.js";
@@ -42,6 +42,8 @@ import { probeWorkspace, WORKSPACE_PROBE_REUSE_MS } from "./workspace/index.js";
 export function createSessionBundle(context: DomainContext): DomainBundle<SessionContract> {
 	let state: SessionManagerState | null = null;
 	let currentTurnId: string | null = null;
+	/** `run --name` before the run's session exists: `create()` writes it with the session (SPEC L3). */
+	let pendingName: string | null = null;
 
 	// The workspace hash rides on lifecycle events so the call journal can record them (#434). The meta's own hash
 	// names the directory the session is filed under; a session written by another build may not rehash to it.
@@ -223,6 +225,11 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			state = next;
 			currentTurnId = null;
 			flushPackageActivities();
+			if (pendingName !== null) {
+				const name = pendingName;
+				pendingName = null;
+				contract.setName(name);
+			}
 			const opened = hashOf(next.meta).cwdHash;
 			if (opened !== undefined)
 				context.bus.emit("session.created", { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
@@ -310,6 +317,11 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			context.bus.emit("session.resume_started", { sessionId, at: Date.now() });
 			state = resumed.state;
 			currentTurnId = leafTurnId;
+			if (pendingName !== null) {
+				const name = pendingName;
+				pendingName = null;
+				contract.setName(name);
+			}
 			emitResume(resumed.state.meta.id, "resume", resumed.state.meta);
 			return resumed.state.meta;
 		},
@@ -339,6 +351,31 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			if (opened !== undefined)
 				context.bus.emit("session.created", { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
 			return next.meta;
+		},
+		forkFrom(sessionId, input) {
+			// The parent is read from its file and never written; it may be open elsewhere (SPEC L3, 6.7).
+			// A pending `run --name` is part of the fork's creation, so a named fork never exists unnamed.
+			const name = input?.name ?? pendingName ?? undefined;
+			const { next, nodes } = forkSessionAtRest(sessionId, {
+				...(input?.atTurnId !== undefined ? { atTurnId: input.atTurnId } : {}),
+				...(name !== undefined ? { name } : {}),
+			});
+			pendingName = null;
+			if (state) {
+				const prior = state;
+				emitPark(prior.meta.id, "fork", prior.meta);
+				void prior.writer.close();
+			}
+			state = next;
+			currentTurnId = computeLeafId(nodes);
+			const opened = hashOf(next.meta).cwdHash;
+			if (opened !== undefined)
+				context.bus.emit("session.created", { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
+			return next.meta;
+		},
+		nameSession(name) {
+			if (state) contract.setName(name);
+			else pendingName = name;
 		},
 		tree(sessionId) {
 			const id = sessionId ?? state?.meta.id;

@@ -180,7 +180,7 @@ function fenced(text: string, info = ""): string {
 	return `${fence}${info}\n${text}\n${fence}`;
 }
 
-function renderTranscriptMarkdown(input: TranscriptExportInput): { text: string; turns: number } {
+export function renderTranscriptMarkdown(input: TranscriptExportInput): { text: string; turns: number } {
 	const { blocks, turns } = transcriptBlocks(input);
 	const lines = [`# Clio Coder session ${input.sessionId}`, "", `Exported ${input.exportedAt}`, ""];
 	for (const block of blocks) {
@@ -281,6 +281,8 @@ export function writeTranscriptExport(input: {
 	readEntries: (sessionId: string) => ReadonlyArray<SessionEntry>;
 	cwd: string;
 	path?: string;
+	/** `session export --format`: wins over the path's extension and names the default file's extension. */
+	format?: "md" | "html";
 	now?: () => Date;
 }): { level: "success" | "error"; text: string } {
 	const { sessionId } = input;
@@ -294,7 +296,7 @@ export function writeTranscriptExport(input: {
 	const requested = input.path?.trim() ?? "";
 	const target = resolve(
 		input.cwd,
-		requested.length > 0 ? requested : join(".clio-coder", "exports", `${sessionId}-${date}.html`),
+		requested.length > 0 ? requested : join(".clio-coder", "exports", `${sessionId}-${date}.${input.format ?? "html"}`),
 	);
 	const source = {
 		sessionId,
@@ -302,9 +304,8 @@ export function writeTranscriptExport(input: {
 		entries: input.readEntries(sessionId),
 		leafTurnId: input.leafTurnId(sessionId),
 	};
-	const rendered = target.toLowerCase().endsWith(".md")
-		? renderTranscriptMarkdown(source)
-		: renderTranscriptHtml(source);
+	const markdown = input.format !== undefined ? input.format === "md" : target.toLowerCase().endsWith(".md");
+	const rendered = markdown ? renderTranscriptMarkdown(source) : renderTranscriptHtml(source);
 	if (requested.length === 0) ensureProjectIgnore(input.cwd);
 	safeResourceWrite(target, rendered.text, { encoding: "utf8" });
 	const shown = relative(input.cwd, target);

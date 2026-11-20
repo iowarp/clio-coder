@@ -123,6 +123,17 @@ export interface SessionContract {
 	/** Fork from a parent turn, producing a new session with parentId pointer. */
 	fork(parentTurnId: string, input?: { cwd?: string }): SessionMeta;
 	/**
+	 * Fork `sessionId` from its file and make the child current, never writing the parent, which may be open in
+	 * another process (SPEC L3). The fork point is `atTurnId` or the parent's last committed turn; `name` is part of
+	 * the child's creation.
+	 */
+	forkFrom(sessionId: string, input?: { atTurnId?: string; name?: string }): SessionMeta;
+	/**
+	 * Name the current session; with none current, the name waits for the next `create()`, `resume()` or
+	 * `forkFrom()`, which writes it as part of opening that session (`run --name`).
+	 */
+	nameSession(name: string): void;
+	/**
 	 * Return a serializable snapshot of the tree for a given session (defaults
 	 * to the current session). Built from `tree.json` + resolved labels via
 	 * `tree/navigator.ts`; the underlying on-disk artifacts stay engine-owned.

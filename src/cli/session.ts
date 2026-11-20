@@ -1,6 +1,7 @@
 /**
  * `clio-coder session list|terminate`: see and end open sessions on a shared
- * state dir from any node (#439).
+ * state dir from any node (#439). The persisted-session leaves
+ * (`history|show|export|artifacts|rename|fork|rm`) live in session-history.ts.
  *
  * Every open session keeps `live/<id>.json` fresh (domains/session/heartbeat.ts).
  * A terminate request is a file the owner reads on its next beat; a signal is
@@ -44,18 +45,35 @@ import {
 } from "../domains/session/heartbeat.js";
 import { endAbandonedSession } from "../domains/session/history.js";
 import { type ClioSessionMeta, cwdHash } from "../engine/session.js";
+import type { SessionHistoryVerb } from "./session-history.js";
 
 const USAGE = `usage: clio-coder session list [--json] [--stale]
        clio-coder session terminate <id> [--force] [--reason <text>] [--json]
+       clio-coder session history [--all-projects] [--limit N] [--json]
+       clio-coder session show <session> [--all-projects] [--transcript] [--json]
+       clio-coder session export <session> [--format md|html|jsonl] [--out <path>] [--all-projects] [--json]
+       clio-coder session artifacts <session> [read <id>] [--all-projects] [--json]
+       clio-coder session rename <session> <name> [--json]
+       clio-coder session fork <session> [--at <turnId>] [--name <name>] [--json]
+       clio-coder session rm <session> [--yes] [--json]
+<session> is an id, a unique id prefix or a session name in this directory; --all-projects widens reads only.
+rm asks first; --yes skips the question and never removes a session open elsewhere or one with forks.
 `;
+/** Persisted-session leaves, implemented in session-history.ts and loaded only when one runs (SPEC L3). */
+const HISTORY_VERBS: ReadonlySet<string> = new Set(["history", "show", "export", "artifacts", "rename", "fork", "rm"]);
 /** A same-host SIGTERM normally ends the owner well inside this; past it the request still stands. */
 const SIGNAL_SETTLE_WAIT_MS = 5_000;
 
 export async function runSessionCommand(args: ReadonlyArray<string>): Promise<number> {
 	const [sub, ...rest] = args;
-	if ((sub === "list" || sub === "terminate") && (rest.includes("--help") || rest.includes("-h"))) {
+	const historyVerb = sub !== undefined && HISTORY_VERBS.has(sub);
+	if ((sub === "list" || sub === "terminate" || historyVerb) && (rest.includes("--help") || rest.includes("-h"))) {
 		process.stdout.write(USAGE);
 		return 0;
+	}
+	if (historyVerb) {
+		const { runSessionHistoryCommand } = await import("./session-history.js");
+		return runSessionHistoryCommand(sub as SessionHistoryVerb, rest);
 	}
 	if (sub === "list") return runList(rest);
 	if (sub === "terminate") return runTerminate(rest);
@@ -287,7 +305,7 @@ async function runTerminate(args: ReadonlyArray<string>): Promise<number> {
 			{
 				...base,
 				action: "released",
-				message: `released ${id} (${why}); ${freed}; resume it with clio-coder run --session ${id}`,
+				message: `released ${id} (${why}); ${freed}; resume it with clio-coder run --resume ${id}`,
 				released,
 			},
 			json,

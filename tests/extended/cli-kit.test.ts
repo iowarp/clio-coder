@@ -1,4 +1,5 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
@@ -10,6 +11,7 @@ import { jsonDocument, writeCliFailure } from "../../src/cli/kit/json-out.js";
 import { type RunExitFact, resolveRunExit } from "../../src/cli/modes/run-json-schema-v2.js";
 import { startRefusalCause } from "../../src/cli/run-failure.js";
 import { COMMAND_SPECS } from "../../src/cli/specs/table.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const root = resolve(import.meta.dirname, "../..");
 
@@ -152,6 +154,7 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 			"failed",
 			["flag_conflict", "not_configured"],
 		],
+		["a resumed session open elsewhere refuses before work", [{ code: "session_live" }], 2, "failed", ["session_live"]],
 	];
 	for (const [name, facts, exitCode, outcome, codes] of rows) {
 		const resolved = resolveRunExit(facts);
@@ -168,9 +171,43 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 	for (const [diagnostics, code] of [
 		[["clio-coder run: --output-format cannot be combined with --json or --json-events"], "flag_conflict"],
 		[["clio-coder run: not configured: no model target is saved; run `clio-coder configure`"], "not_configured"],
+		[
+			[
+				"clio-coder run: failed to resume session 019a: session 019a is open in another process (pid 41 on zbook); end it there first",
+			],
+			"session_live",
+		],
+		[["clio-coder run: failed to resume session 019a: session file is unreadable"], "not_started"],
 		[["clio-coder run: empty task"], "not_started"],
 	] as const)
 		equal(startRefusalCause(diagnostics).code, code, diagnostics[0]);
+});
+
+test("a v2 envelope names the parent session of a forked run", async () => {
+	const env = await isolateClioEnv("cli-kit-fork-envelope-");
+	try {
+		const script = `
+			const { noteMainRunV2, withRunResultV2 } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
+			const code = await withRunResultV2({ format: "json", mode: "main", verify: [] }, async () => {
+				noteMainRunV2({ parentSessionId: "parent-1" });
+				writeFrame({ type: "session", schemaVersion: 1, mode: "main", id: "child-1", timestamp: new Date().toISOString(), cwd: process.cwd() });
+				return 0;
+			});
+			process.exitCode = code;
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		equal(child.status, 0, child.stderr);
+		const lines = child.stdout.trim().split("\n");
+		const envelope = JSON.parse(lines[lines.length - 1] ?? "{}") as { sessionId?: string; parentSessionId?: string };
+		equal(envelope.sessionId, "child-1");
+		equal(envelope.parentSessionId, "parent-1");
+	} finally {
+		env.restore();
+	}
 });
 
 test("json-out writes the C6 failure document and the C3 diagnostic", () => {

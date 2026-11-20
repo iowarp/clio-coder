@@ -17,8 +17,8 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
 /**
  * Every cause code, in precedence order. The first fact present sets the exit code; `causes[]` lists every fact,
  * winner first. `not_started` covers a request refused before any work (usage, configuration, admission), and
- * `run_failed` a failure no narrower code names. `flag_conflict` and `not_configured` are the two pre-work refusals
- * with a narrower name of their own.
+ * `run_failed` a failure no narrower code names. `flag_conflict`, `not_configured` and `session_live` (the resumed
+ * session is open in another process) are the pre-work refusals with a narrower name of their own.
  */
 const CAUSE_ORDER = [
 	"interrupted",
@@ -26,6 +26,7 @@ const CAUSE_ORDER = [
 	"reader_closed",
 	"flag_conflict",
 	"not_configured",
+	"session_live",
 	"not_started",
 	"unscripted",
 	"permission_required",
@@ -95,6 +96,7 @@ function exitCodeFor(cause: RunCause): number {
 			return EXIT_CODES.readerClosed;
 		case "flag_conflict":
 		case "not_configured":
+		case "session_live":
 		case "not_started":
 			return EXIT_CODES.notStarted;
 		case "unscripted":
@@ -237,6 +239,8 @@ export interface RunResultEnvelopeV2 {
 	mode: "main" | "agent";
 	runId?: string;
 	sessionId?: string;
+	/** The session this run's `run --fork` branched `sessionId` from; absent when the run did not fork. */
+	parentSessionId?: string;
 	agentId?: string;
 	pid: number;
 	cwd: string;

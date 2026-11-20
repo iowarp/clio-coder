@@ -73,6 +73,33 @@ describe("global startup flags before a subcommand", () => {
 		}
 	});
 
+	it("run --resume takes the session, --session is a deprecated alias, and --fork needs a session (SPEC L3)", () => {
+		const resume = parseRunCliArgs(["--resume", "abc", "--fork", "--name", " beta ", "hello"]);
+		deepStrictEqual(
+			[resume.sessionId, resume.forkSession, resume.sessionName, resume.diagnostics],
+			["abc", true, "beta", []],
+		);
+		const alias = parseRunCliArgs(["--session", "abc", "hello"]);
+		equal(alias.sessionId, "abc");
+		deepStrictEqual(
+			alias.diagnostics.map((entry) => entry.type),
+			["warning"],
+		);
+		match(alias.diagnostics[0]?.message ?? "", /--session is deprecated; use --resume/u);
+		for (const args of [
+			["--fork", "hello"],
+			["--resume", "abc", "--continue", "hello"],
+			["--name", "", "hello"],
+			["--resume", "abc", "--agent", "coder", "hello"],
+		]) {
+			const parsed = parseRunCliArgs(args);
+			ok(
+				parsed.diagnostics.some((entry) => entry.type === "error"),
+				`${args.join(" ")}: ${JSON.stringify(parsed.diagnostics)}`,
+			);
+		}
+	});
+
 	it("names an unknown run option without repeating the command the caller prefixes", () => {
 		const parsed = parseRunCliArgs(["--bogus", "hello"]);
 		const message = parsed.diagnostics.map((entry) => entry.message).join(" ");

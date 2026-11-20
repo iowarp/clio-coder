@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { removeSessionAtRest, renameSessionAtRest, sessionRemovalRefusal } from "../../src/domains/session/at-rest.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { liveRecordPath, liveSessionsDir } from "../../src/domains/session/heartbeat.js";
 import { listSessionsForCwd, resolveSessionIdForCwd } from "../../src/domains/session/history.js";
 import type { SessionEntry, SessionMeta } from "../../src/domains/session/index.js";
 import { resolveSessionTarget, suggestSessionName } from "../../src/domains/session/names.js";
@@ -249,4 +253,66 @@ test("resume uses a unique saved name directly and opens a filtered picker for d
 	assert.equal(query, "duplicate");
 	assert.equal(session.current()?.id, first.id);
 	assert.notEqual(session.current()?.id, second.id);
+});
+
+test("a CLI fork names its child at creation, never writes the parent, and blocks removal while live or forked (SPEC L3)", async (t) => {
+	const env = await isolateClioEnv("session-at-rest-");
+	const session = createSession();
+	t.after(async () => {
+		await session.close();
+		env.restore();
+	});
+	const parent = session.create({ cwd: env.dir, target: "gateway", model: "solver" });
+	const user = session.append({ parentId: null, kind: "user", payload: { text: "Fix checkpoint output" } });
+	session.append({ parentId: user.id, kind: "assistant", payload: { text: "Investigating" } });
+	await session.close();
+	const parentFile = readFileSync(sessionPaths(parent).current, "utf8");
+	const parentMeta = readFileSync(sessionPaths(parent).meta, "utf8");
+
+	const child = session.forkFrom(parent.id, { name: "beta" });
+	assert.equal(child.name, "beta");
+	assert.equal(child.parentSessionId, parent.id);
+	assert.equal(JSON.parse(readFileSync(sessionPaths(child).meta, "utf8")).name, "beta", "the name is part of creation");
+	await session.close();
+	assert.equal(readFileSync(sessionPaths(parent).current, "utf8"), parentFile, "the parent ledger is untouched");
+	assert.equal(readFileSync(sessionPaths(parent).meta, "utf8"), parentMeta, "the parent meta is untouched");
+	assert.equal(resolveSessionIdForCwd(env.dir, "beta"), child.id, "a resume target resolves by name");
+
+	assert.equal(renameSessionAtRest(parent.id, "alpha"), null);
+	assert.equal(listSessionsForCwd(env.dir).find((meta) => meta.id === parent.id)?.name, "alpha");
+	assert.deepEqual(sessionRemovalRefusal(parent.id), { kind: "children", children: [child.id] });
+
+	// Another live process on this host holds the parent: the registry alone is enough to refuse.
+	const now = new Date().toISOString();
+	mkdirSync(liveSessionsDir(), { recursive: true });
+	writeFileSync(
+		liveRecordPath(parent.id),
+		`${JSON.stringify({ schema: 1, id: parent.id, cwd: env.dir, cwdHash: cwdHash(env.dir), host: hostname(), pid: process.ppid, birth: null, startedAt: now, at: now, surface: "run", version: "0.0.0", user: "u" })}\n`,
+	);
+	assert.equal(sessionRemovalRefusal(parent.id)?.kind, "live");
+	assert.equal(renameSessionAtRest(parent.id, "gamma")?.pid, process.ppid);
+	assert.throws(() => session.resume(parent.id), new RegExp(`${process.ppid}`));
+	assert.equal(session.forkFrom(parent.id).parentSessionId, parent.id, "a live parent can still be forked");
+	await session.close();
+
+	// The owner died: terminate --force releases the record and points at the resume flag, not the retired alias.
+	writeFileSync(
+		liveRecordPath(parent.id),
+		`${JSON.stringify({ schema: 1, id: parent.id, cwd: env.dir, cwdHash: cwdHash(env.dir), host: hostname(), pid: 99_999_999, birth: null, startedAt: now, at: now, surface: "run", version: "0.0.0", user: "u" })}\n`,
+	);
+	const script = `process.argv = [process.execPath, "clio-coder", "session", "terminate", ${JSON.stringify(parent.id)}, "--force", "--json"]; await import(${JSON.stringify(join(process.cwd(), "src/cli/index.ts"))});`;
+	const terminated = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+		env: process.env,
+		encoding: "utf8",
+	});
+	assert.equal(terminated.status, 0, terminated.stderr);
+	assert.match(terminated.stdout, new RegExp(`clio-coder run --resume ${parent.id}`));
+	assert.doesNotMatch(terminated.stdout, /run --session/);
+	rmSync(liveRecordPath(parent.id), { force: true });
+
+	removeSessionAtRest(child.id);
+	assert.equal(
+		listSessionsForCwd(env.dir).some((meta) => meta.id === child.id),
+		false,
+	);
 });
