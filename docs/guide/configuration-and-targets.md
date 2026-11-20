@@ -269,8 +269,8 @@ explains worker route selection.
 | `context.memory.trajectorySteps` | `8` | next turn |
 | `context.memory.maxOutputTokens` | `2000` | next turn |
 | `context.memory.timeoutMs` | `60000` | next turn |
-| `context.memory.observations.enabled` | `false` | next turn |
-| `context.memory.surfaces.observe` | `off` | next turn; off as a policy choice (observation cost is measured, its benefit is not) until eligible pairs show a benefit. Preparation runs only when the next automatic fold would send history to a separate summary request, starts within an uncalibrated 0.15 of the window below the compaction trigger, and stops for the session after two folds in a row decline its notes. `context.memory.observations.enabled: true` still turns it on when this key is unset |
+| `context.memory.observations.enabled` | absent | next turn; an alias of `context.memory.surfaces.observe`: `true` turns the surface on when that key is unset |
+| `context.memory.surfaces.observe` | `off` | next turn; off as a policy choice (observation cost is measured, its benefit is not), and it turns on by default only when eligible pairs show the substituted summary request fitting where the raw one does not, an avoided failed or second summary call, or a better checkpoint, counting the largest request across all roles (the observer's own calls included), committed coverage, downstream correctness and total spend. Preparation runs only when the next automatic fold would send history to a separate summary request, starts within an uncalibrated 0.15 of the window below the compaction trigger, and stops for the session after two committed folds in a row decline its notes for no gain |
 | `context.semantic.enabled` | `false` | next turn |
 | `context.semantic.target` | `null` | next turn or semantic CLI request |
 | `context.semantic.model` | `null` | next turn or semantic CLI request |

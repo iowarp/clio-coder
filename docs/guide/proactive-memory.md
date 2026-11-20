@@ -327,10 +327,14 @@ references; they do not approve a durable record. Source:
 
 Preparation is sized so a session that never nears compaction pays little:
 
-- It waits until the live context fills 0.4 of the main route's usable history.
-  When the live budget cannot say what that share is, preparation defers with
-  the status reason `pressure-unknown`; only a composition that supplies no
-  pressure signal at all runs without the gate.
+- It runs only when the next automatic fold would send history to a separate
+  summary request: a separate compaction model, or a chat route whose cached
+  prefix cannot carry the summary. It waits until the live context is within
+  0.15 of the window (uncalibrated) below the compaction trigger. When the live
+  budget cannot say, preparation defers with the status reason
+  `pressure-unknown`; only a composition that supplies no fold planner at all
+  runs without the gate. Two committed folds in a row that decline its notes
+  for no gain stop preparation for the session.
 - The observer is called only for a source group of at least the smaller of
   1,024 and half the source budget (and at least 256) estimated tokens, never
   for a group whose exact user material leaves no room for smaller notes. Each
