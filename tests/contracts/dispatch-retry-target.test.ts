@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+import { defaultRoutingIntent } from "../../src/domains/dispatch/routing-intent.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -169,14 +170,57 @@ describe("retry target selection", () => {
 			const pinned = await settle({ target: "default" });
 			deepStrictEqual(fleet.spawned, ["default"]);
 			strictEqual(pinned?.status, "failed");
-			match(pinned?.outcomeDetail ?? "", /^obligation observed-evidence unmet, not retried because failover is none/u);
+			strictEqual(
+				pinned?.outcomeDetail,
+				"obligation observed-evidence unmet, not retried because the route is explicitly pinned to default/gpt-4o",
+			);
 			const automatic = await settle({});
 			deepStrictEqual(fleet.spawned, ["default", "default"], "one attempt, no second spawn");
 			strictEqual(automatic?.status, "failed");
 			strictEqual(
 				automatic?.outcomeDetail,
-				"obligation observed-evidence unmet, not retried because no other eligible model can take it, and default/gpt-4o left it unmet",
+				"obligation observed-evidence unmet, not retried because there is no other eligible model (default/gpt-4o left it unmet)",
 			);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("moves an unpinned obligation retry sealed at failover none to another model, past a refused one", async () => {
+		// Tool admission stamps the resolved route and seals failover none on every unpinned request.
+		const models: string[] = [];
+		const fleet = await retryFleet(["default"], new Set(), new Set(), {
+			models: ["gpt-4o-mini", "gpt-4.1"],
+			onSpawn: (spec) => {
+				models.push(spec.wireModelId);
+				if (spec.wireModelId === "gpt-4o-mini") throw new Error("gpt-4o-mini refused the launch");
+			},
+		});
+		try {
+			const scope = declaredScopeIntent({ readRoots: ["src/"] });
+			ok(scope.ok);
+			const settle = async (pins: { target?: string }) => {
+				const first = await fleet.bundle.contract.dispatch({
+					...REQUEST,
+					cwd: scratch.dir,
+					intent: scope.intent,
+					target: "default",
+					model: "gpt-4o",
+					failover: "none",
+					routingIntent: defaultRoutingIntent(pins),
+				});
+				await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+				return fleet.bundle.contract.assignments?.get(first.runId);
+			};
+			const pinned = await settle({ target: "default" });
+			deepStrictEqual(models, ["gpt-4o"], "an explicit pin never moves");
+			strictEqual(
+				pinned?.outcomeDetail,
+				"obligation observed-evidence unmet, not retried because the route is explicitly pinned to default/gpt-4o",
+			);
+			models.length = 0;
+			await settle({});
+			deepStrictEqual(models, ["gpt-4o", "gpt-4o-mini", "gpt-4.1"], "one retry, on the next other model");
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}
