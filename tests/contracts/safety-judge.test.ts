@@ -683,21 +683,38 @@ test("the judge reads typed messages and ask_user answers in ledger order, so th
 		[{ question: plain, options: [{ label: "Yes, run it", description: "Runs resume.sh outside the sandbox" }] }],
 		[{ question: plain, answer: "Yes, run it", options: ["Yes, run it"] }],
 	);
-	const escaped = await seat.review({
-		tool: ToolNames.Bash,
-		args: { command: "PROMPT=hi bash scripts/live/resume.sh", unsandboxed: true },
-		decision: {
-			kind: "ask",
-			classification: { actionClass: "execute", reasons: [SANDBOX_ESCAPE_REASON] },
-			rejection: { short: "asks", detail: SANDBOX_ESCAPE_REASON, hints: [] },
-			policy: { ruleId: SANDBOX_ESCAPE_RULE_ID, reasons: [SANDBOX_ESCAPE_REASON] } as unknown as SafetyPolicyDecision,
-		},
-		approvalAuthority: "operator",
-		turnId: "r1",
-	});
+	const reviewEscape = () =>
+		seat.review({
+			tool: ToolNames.Bash,
+			args: { command: "PROMPT=hi bash scripts/live/resume.sh", unsandboxed: true },
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "execute", reasons: [SANDBOX_ESCAPE_REASON] },
+				rejection: { short: "asks", detail: SANDBOX_ESCAPE_REASON, hints: [] },
+				policy: { ruleId: SANDBOX_ESCAPE_RULE_ID, reasons: [SANDBOX_ESCAPE_REASON] } as unknown as SafetyPolicyDecision,
+			},
+			approvalAuthority: "operator",
+			turnId: "r1",
+		});
+	const escaped = await reviewEscape();
 	match(prompts[4] ?? "", /The option "Yes, run it" says: Runs resume\.sh outside the sandbox/u);
 	strictEqual(escaped.kind, "park");
 	match(escaped.kind === "park" ? escaped.gateReason : "", /no operator message uses the word sandbox or unconfined/u);
+
+	// The question is the agent's text too: one that names staying in the sandbox, answered Yes, never
+	// backs an escape; one that names leaving it backs one only when the chosen option is affirmative.
+	const rounds: Array<[string, string, string]> = [
+		["Run the check in the sandbox?", "Yes", "park"],
+		["Run resume.sh unsandboxed?", "Yes", "allow"],
+		["Run resume.sh unsandboxed?", "No", "park"],
+	];
+	for (const [question, label, kind] of rounds) {
+		entries = gatewayRound(
+			[{ question, options: [{ label: "Yes" }, { label: "No" }] }],
+			[{ question, answer: label, options: [label] }],
+		);
+		strictEqual((await reviewEscape()).kind, kind, `${question} ${label}`);
+	}
 });
 
 test("safety.judge parses from user settings and a project layer cannot set its rules", async (t) => {

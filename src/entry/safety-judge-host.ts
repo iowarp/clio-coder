@@ -43,8 +43,8 @@ export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
  * prompt, follow-up and observation, and a yolo continuation are skipped, and
  * injected reminders and expansions are stripped by `operatorTextOfUserPayload`.
  * And what the operator answered on an ask_user round, a gateway call or chain
- * step included, with what the options they chose say as context beside their words
- * (`operatorAnswersOfToolResult`). Assistant messages, thinking and
+ * step included, read as the agent's question and options with only what the
+ * operator typed as their words (`operatorAnswersOfToolResult`). Assistant messages, thinking and
  * every other tool result never reach the judge.
  *
  * `currentTurnId` is the turn the judged call serves, from the chat loop's
@@ -167,8 +167,10 @@ function chosenOptionText(
  * What the operator answered in one recorded ask_user result. A round Clio
  * answered for an absent operator (#421), a cancelled round and an answer Clio
  * picked (`auto`) are no operator's word, as the registry's own reading holds.
- * What a chosen option says is the agent's text, so it rides as context: the
- * judge reads it, and no guard that needs the operator's own words counts it.
+ * The question, the chosen labels and what those options say are the agent's
+ * text, so the judge reads them but only what the operator typed counts as their
+ * words; the escape backstop reads the question and labels as an approval only
+ * through `askApprovesSandboxEscape`.
  */
 function operatorAnswersOfToolResult(payload: unknown, asked: AskedQuestions): SafetyJudgeOperatorMessage[] {
 	if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.isError === true) return [];
@@ -182,9 +184,17 @@ function operatorAnswersOfToolResult(payload: unknown, asked: AskedQuestions): S
 		if (!isRecord(raw) || raw.auto === true) return [];
 		const { question, answer } = raw;
 		if (typeof question !== "string" || typeof answer !== "string" || answer.trim().length === 0) return [];
-		const words = `Asked "${question}", the operator answered: ${answer}`;
-		const context = chosenOptionText(questions, { count: answers.length, index }, question, raw.options);
-		return [context.length > 0 ? { words, context } : words];
+		const chosen = Array.isArray(raw.options)
+			? raw.options.flatMap((label: unknown) => (typeof label === "string" ? [label.trim()] : []))
+			: [];
+		return [
+			{
+				text: `Asked "${question}", the operator answered: ${answer}`,
+				context: chosenOptionText(questions, { count: answers.length, index }, question, raw.options),
+				words: typeof raw.value === "string" ? raw.value : "",
+				asked: { question, chosen },
+			},
+		];
 	});
 }
 

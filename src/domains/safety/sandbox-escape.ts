@@ -34,6 +34,42 @@ export function operatorMentionsSandbox(messages: ReadonlyArray<string>): boolea
 	return messages.some((text) => /sandbox|unconfined/i.test(text));
 }
 
+/** An answered ask_user question and the option labels the operator chose on it, as ask_user recorded them. */
+export interface AskedApproval {
+	readonly question: string;
+	readonly chosen: ReadonlyArray<string>;
+}
+
+/**
+ * Text that names leaving the sandbox: unsandboxed (the flag included), unconfined, or outside, out of,
+ * without, leaving, escaping, exiting or bypassing the sandbox, unless not, never, no, without or don't
+ * stands right before it. The bare word sandbox never counts: "Run it in the sandbox?" names staying in.
+ */
+const LEAVES_SANDBOX =
+	/(?<!\b(?:not|never|no|without|don't|do not)\s+)(?:\bunsandboxed\b|\bunconfined\b|\b(?:outside|out of|without|leav(?:e|es|ing)|escap(?:e|es|ing)|exit(?:s|ing)?|bypass(?:es|ing)?)\s+(?:of\s+)?(?:the\s+|its\s+|this\s+|a\s+)?sandbox\b)/iu;
+
+/**
+ * The one reading of an affirmative option: its label starts with yes, allow, approve or run it, as a
+ * whole word, and is not a "yes, but" counter-offer or a label that speaks of the sandbox without
+ * naming leaving it ("Yes, in the sandbox").
+ */
+function affirmativeOption(label: string): boolean {
+	const text = label.trim();
+	if (!/^(?:yes|allow|approve|run it)\b/iu.test(text)) return false;
+	if (/^yes\b[\s,;:.!-]*but\b/iu.test(text)) return false;
+	return !/sandbox/iu.test(text) || LEAVES_SANDBOX.test(text);
+}
+
+/**
+ * True when an answered ask_user round approves leaving the sandbox: the question itself names
+ * leaving it and every option the operator chose is affirmative. The question and the labels are the
+ * agent's text, so neither counts as the operator's words for any guard; together with the operator's
+ * choice they are the approval the escape backstop accepts beside the operator's own typed words.
+ */
+export function askApprovesSandboxEscape(asked: AskedApproval): boolean {
+	return asked.chosen.length > 0 && LEAVES_SANDBOX.test(asked.question) && asked.chosen.every(affirmativeOption);
+}
+
 /**
  * The outside-workspace paths a shell call writes or deletes, or a write or
  * edit call changes, when the operator's own text names every one of them;

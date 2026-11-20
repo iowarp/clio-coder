@@ -19,7 +19,13 @@ import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { CLIO_SETTINGS_RULE_ID } from "./routing-settings.js";
-import { asksToLeaveSandbox, operatorMentionsSandbox, operatorNamedOutsideTargets } from "./sandbox-escape.js";
+import {
+	type AskedApproval,
+	askApprovesSandboxEscape,
+	asksToLeaveSandbox,
+	operatorMentionsSandbox,
+	operatorNamedOutsideTargets,
+} from "./sandbox-escape.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
@@ -324,12 +330,21 @@ export type SafetyJudgeScreen = (request: {
 }) => Promise<{ source: string } | null> | null;
 
 /**
- * One operator message for the judge. A string is the operator's own words. `context` is
- * agent-authored text the operator saw beside their words, such as what an ask_user option
- * they chose says: the judge reads it after the words, but no guard that needs the operator's
- * own words (the sandbox mention, an outside path they spelled) ever counts it.
+ * One operator message for the judge. A string is the operator's own words. An object is an answered
+ * ask_user round: `text` is the line the judge reads (the agent's question, then the answer), `context`
+ * what the options they chose say, and `words` only what the operator typed themselves, empty when they
+ * only chose. The question, labels and descriptions are agent-authored, so no guard that needs the
+ * operator's own words (the sandbox mention, an outside path they spelled) counts them; `asked` lets the
+ * escape backstop read the round as an approval only by `askApprovesSandboxEscape`.
  */
-export type SafetyJudgeOperatorMessage = string | { readonly words: string; readonly context: string };
+export type SafetyJudgeOperatorMessage =
+	| string
+	| {
+			readonly text: string;
+			readonly context: string;
+			readonly words: string;
+			readonly asked: AskedApproval;
+	  };
 
 export interface SafetyJudgeDeps {
 	config: () => SafetyJudgeConfig;
@@ -460,9 +475,11 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				}
 				const system = safetyJudgeSystemPrompt(config);
 				const turn = subject.turnId !== undefined ? { turnId: subject.turnId } : {};
-				const { shown: operatorMessages, words: operatorWords } = boundOperatorMessages(
-					safeRead(() => deps.operatorMessages(turn), []),
-				);
+				const {
+					shown: operatorMessages,
+					words: operatorWords,
+					escapeApproved,
+				} = boundOperatorMessages(safeRead(() => deps.operatorMessages(turn), []));
 				prompted = { operatorMessages: operatorMessages.length };
 				const user = safetyJudgeUserPrompt({ operatorMessages, operatorWords, subject, consequences });
 
@@ -543,13 +560,13 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					const source = parsed.rule === OPERATOR_NAMED_RULE ? null : screened.source;
 					// A sandbox escape runs as the operator, with their credentials: a repository file or
 					// the model's own reading cannot grant it, so any other allow goes to the operator.
-					// operator-named stands only when the operator's own words the judge read speak of the sandbox,
-					// never the agent-authored text of an option they chose.
+					// operator-named stands only when the operator's own words the judge read speak of the sandbox, or they
+					// chose an affirmative option on a question that names leaving it; never the agent's text alone.
 					const citedOperator = parsed.rule === OPERATOR_NAMED_RULE;
 					const unnamedEscape =
 						source === null &&
 						asksToLeaveSandbox(subject.decision) &&
-						!(citedOperator && operatorMentionsSandbox(operatorWords));
+						!(citedOperator && (escapeApproved || operatorMentionsSandbox(operatorWords)));
 					record({
 						...base,
 						...prompted,
@@ -567,7 +584,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 							kind: "park",
 							cause: "unnamed-escape",
 							gateReason: citedOperator
-								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
+								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, and the operator approved no question that names leaving the sandbox, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
 								: `Clio's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
 							build,
 							latencyMs,
@@ -751,31 +768,48 @@ function safetyJudgeRefusal(
 /**
  * The operator text the judge reads, oldest first: the newest message whole
  * (up to a hard ceiling), then older messages while they fit the budget, the
- * first one that does not fit cut to what is left.
+ * first one that does not fit cut to what is left. `words` holds only the
+ * operator's own words among them, and `escapeApproved` is true when a kept
+ * ask_user round approves leaving the sandbox with its question and answer whole.
  */
 function boundOperatorMessages(
 	messages: ReadonlyArray<SafetyJudgeOperatorMessage>,
 	budgetBytes = SAFETY_JUDGE_OPERATOR_BYTES,
-): { shown: string[]; words: string[] } {
-	const texts = messages.flatMap((message) => {
-		const words = (typeof message === "string" ? message : message.words).trim();
-		const context = typeof message === "string" ? "" : message.context.trim();
-		if (words.length === 0) return [];
-		return [{ words, shown: context.length > 0 ? `${words}\n${context}` : words }];
+): { shown: string[]; words: string[]; escapeApproved: boolean } {
+	type Bounded = { shown: string; lead: string; words: string; approves: boolean };
+	const texts = messages.flatMap((message): Bounded[] => {
+		if (typeof message === "string") {
+			const words = message.trim();
+			return words.length === 0 ? [] : [{ shown: words, lead: words, words, approves: false }];
+		}
+		const lead = message.text.trim();
+		if (lead.length === 0) return [];
+		const context = message.context.trim();
+		return [
+			{
+				shown: context.length > 0 ? `${lead}\n${context}` : lead,
+				lead,
+				words: message.words.trim(),
+				approves: askApprovesSandboxEscape(message.asked),
+			},
+		];
 	});
-	// The words open what is shown, so a cut keeps of them exactly what the judge read.
-	const cut = (text: { words: string; shown: string }, maxBytes: number) => {
+	// The lead opens what is shown. A typed message cut keeps of its words exactly what the judge read;
+	// an answered round whose question and answer the cut does not keep whole keeps no words and no approval.
+	const cut = (text: Bounded, maxBytes: number): Bounded => {
 		const shown = headBytes(text.shown, maxBytes);
 		if (shown === text.shown) return text;
 		const head = shown.slice(0, -1);
-		return { shown, words: head.length >= text.words.length ? text.words : `${head}…` };
+		if (head.length >= text.lead.length) return { ...text, shown };
+		if (text.words === text.lead) return { ...text, shown, words: `${head}…` };
+		return { ...text, shown, words: "", approves: false };
 	};
 	const newest = texts.at(-1);
-	if (newest === undefined) return { shown: [], words: [] };
+	if (newest === undefined) return { shown: [], words: [], escapeApproved: false };
 	const kept = [cut(newest, NEWEST_MESSAGE_MAX_BYTES)];
 	let used = Buffer.byteLength(kept[0]?.shown ?? "", "utf8");
 	for (let index = texts.length - 2; index >= 0 && kept.length < OPERATOR_MESSAGE_LIMIT; index -= 1) {
-		const text = texts[index] as { words: string; shown: string };
+		const text = texts[index] as Bounded;
 		const size = Buffer.byteLength(text.shown, "utf8");
 		if (used + size <= budgetBytes) {
 			kept.unshift(text);
@@ -786,7 +820,11 @@ function boundOperatorMessages(
 		if (left >= 200) kept.unshift(cut(text, left));
 		break;
 	}
-	return { shown: kept.map((text) => text.shown), words: kept.map((text) => text.words) };
+	return {
+		shown: kept.map((text) => text.shown),
+		words: kept.flatMap((text) => (text.words.length > 0 ? [text.words] : [])),
+		escapeApproved: kept.some((text) => text.approves),
+	};
 }
 
 function headBytes(text: string, maxBytes: number): string {
