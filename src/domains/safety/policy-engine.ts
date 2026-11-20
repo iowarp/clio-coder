@@ -4007,8 +4007,8 @@ function scanScript(
  * in: the ones that exist, or the first candidate when none does, so its scan
  * reports it. A dynamic name, or a relative one from an unknown directory, is
  * a null candidate. A sourced name with no slash is looked up as bash does, on
- * every PATH directory and then the directory, and every regular file found is
- * a candidate (CLI-P31).
+ * every directory of the bash tool's PATH in its order and then the directory,
+ * and every regular file found is a candidate, the one bash loads first (CLI-P31).
  */
 function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, sourced = false): Array<string | null> {
 	if (/[$`*?[{]/u.test(operand)) return [null];
@@ -4027,16 +4027,15 @@ function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, s
 }
 
 /**
- * The directories `source name` searches: those on the PATH bash commands run with and on this process's PATH, both,
- * since either may be the one the command sees. A relative entry is placed from every directory the shell may be in.
+ * The directories `source name` searches, in bash's order: the PATH bash commands run with, alone, so the first hit is
+ * the file bash loads; this process's PATH only while the bash tool has none yet. A relative entry is placed from every
+ * directory the shell may be in.
  */
 function sourceSearchDirs(cwds: ReadonlyArray<string> | null): string[] {
 	const dirs = new Set<string>();
-	for (const searchPath of [bashSearchPath(), process.env.PATH ?? null]) {
-		for (const entry of (searchPath ?? "").split(path.delimiter)) {
-			if (path.isAbsolute(entry)) dirs.add(entry);
-			else for (const cwd of cwds ?? []) dirs.add(path.resolve(cwd, entry));
-		}
+	for (const entry of (bashSearchPath() ?? process.env.PATH ?? "").split(path.delimiter)) {
+		if (path.isAbsolute(entry)) dirs.add(entry);
+		else for (const cwd of cwds ?? []) dirs.add(path.resolve(cwd, entry));
 	}
 	return [...dirs];
 }

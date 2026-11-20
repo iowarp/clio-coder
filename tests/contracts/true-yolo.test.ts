@@ -673,31 +673,62 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 	])
 		strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
 	strictEqual(judged(join(outside, "grant.py")).kind, "allow");
-	// `source name` reads the first PATH hit before the cwd, so a PATH-shadowed name is read wherever it is found.
-	const onPath = workspace("clio-yolo-script-path-");
-	writeFileSync(join(onPath, "shadow.sh"), "clio-coder config trust safety\n");
+	// `source name` loads the first hit on the bash tool's PATH, else the cwd one. A fresh process whose login profile puts
+	// `bin` on that PATH while its own PATH alone leads with `other`, so the two differ as they can in a session.
+	const bin = workspace("clio-yolo-script-path-");
+	const other = workspace("clio-yolo-script-other-");
+	const home = workspace("clio-yolo-script-home-");
+	const sub = workspace("clio-yolo-script-sub-");
+	writeFileSync(join(home, ".bash_profile"), `export PATH=${bin}:"$PATH"\n`);
+	writeFileSync(join(sub, "child.sh"), "clio-coder config trust safety\n");
+	// Rewriting only the cwd copy leaves the PATH copy bash loads unchanged, so it is still read.
+	writeFileSync(join(bin, "shadow.sh"), "clio-coder config trust safety\n");
 	writeFileSync(join(cwd, "shadow.sh"), "echo ok\n");
-	const savedPath = process.env.PATH;
-	process.env.PATH = `${onPath}:${savedPath ?? ""}`;
-	try {
-		// Rewriting only the cwd copy leaves the PATH copy bash loads unchanged, so it is still read.
-		for (const command of ["source shadow.sh", ". shadow.sh", "echo ok > shadow.sh; source shadow.sh"])
-			strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
-		// The script continues from the copy bash loads, the PATH one, so its `D` places the later relative child.
-		const sub = workspace("clio-yolo-script-sub-");
-		writeFileSync(join(sub, "child.sh"), "clio-coder config trust safety\n");
-		writeFileSync(join(onPath, "setup.sh"), `D=${sub}\n`);
-		writeFileSync(join(cwd, "setup.sh"), "true\n");
-		writeFileSync(join(cwd, "parent.sh"), 'source setup.sh\ncd "$D"\nsource ./child.sh\n');
-		strictEqual(judged("bash parent.sh").reasonCode, "yolo-floor:trust-authority");
-		// One copy's write does not hide a child another copy sources.
-		writeFileSync(join(onPath, "pick.sh"), `echo ok > ${join(sub, "child.sh")}\n`);
-		writeFileSync(join(cwd, "pick.sh"), `source ${join(sub, "child.sh")}\n`);
-		writeFileSync(join(cwd, "picker.sh"), "source pick.sh\n");
-		strictEqual(judged("bash picker.sh").reasonCode, "yolo-floor:trust-authority");
-	} finally {
-		process.env.PATH = savedPath;
-	}
+	// The script continues from the copy bash loads, the PATH one, so its `D` places the later relative child.
+	writeFileSync(join(bin, "setup.sh"), `D=${sub}\n`);
+	writeFileSync(join(cwd, "setup.sh"), "true\n");
+	writeFileSync(join(cwd, "parent.sh"), 'source setup.sh\ncd "$D"\nsource ./child.sh\n');
+	// One copy's write does not hide a child another copy sources.
+	writeFileSync(join(bin, "pick.sh"), `echo ok > ${join(sub, "child.sh")}\n`);
+	writeFileSync(join(cwd, "pick.sh"), `source ${join(sub, "child.sh")}\n`);
+	writeFileSync(join(cwd, "picker.sh"), "source pick.sh\n");
+	// Only this process's PATH holds a no-op init.sh; bash finds none on its own PATH and loads the cwd one, which sets D.
+	writeFileSync(join(other, "init.sh"), "true\n");
+	writeFileSync(join(cwd, "init.sh"), `D=${sub}\n`);
+	writeFileSync(join(cwd, "starter.sh"), 'source init.sh\nsource "$D/child.sh"\n');
+	const commands = [
+		"source shadow.sh",
+		". shadow.sh",
+		"echo ok > shadow.sh; source shadow.sh",
+		"bash parent.sh",
+		"bash picker.sh",
+		"bash starter.sh",
+	];
+	const root = process.cwd();
+	const probe = join(workspace("clio-yolo-script-probe-"), "probe.mts");
+	const source = (module: string) => JSON.stringify(join(root, module));
+	writeFileSync(
+		probe,
+		[
+			`import { bashSearchPath, bashSecretValues } from ${source("src/core/bash-exec.ts")};`,
+			`import { createSafetyPolicyEngine } from ${source("src/domains/safety/policy-engine.ts")};`,
+			`import { loadProjectSafetyPolicy } from ${source("src/domains/safety/project-policy.ts")};`,
+			"await bashSecretValues();",
+			`process.env.PATH = ${JSON.stringify(`${other}:`)} + process.env.PATH;`,
+			`const cwd = ${JSON.stringify(cwd)};`,
+			"const engine = createSafetyPolicyEngine({ cwd, projectPolicy: loadProjectSafetyPolicy(cwd) });",
+			`const codes = ${JSON.stringify(commands)}.map((command) =>`,
+			'\tengine.evaluate({ tool: "bash", args: { command } }, "yolo", { scratchRoots: [] }).reasonCode);',
+			`const searchPath = (bashSearchPath() ?? "").split(":");`,
+			`process.stdout.write(JSON.stringify([searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
+		].join("\n"),
+	);
+	const out = execFileSync(process.execPath, ["--import", "tsx", probe], {
+		cwd: root,
+		env: { ...process.env, HOME: home },
+		encoding: "utf8",
+	});
+	deepStrictEqual(JSON.parse(out), [true, false, ...commands.map(() => "yolo-floor:trust-authority")]);
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.
