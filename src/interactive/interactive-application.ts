@@ -439,6 +439,8 @@ export interface KeyBindingDeps {
 	/** Note a harness feature the operator used, for demo guidance. */
 	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
+	/** Empty the composer; false when there is no draft to clear. */
+	clearDraft?: () => boolean;
 	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 	openQueueNavigator: () => void;
@@ -473,6 +475,8 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio-coder.editor.external":
 			deps.openExternalEditor();
 			return true;
+		case "clio-coder.editor.clear":
+			return deps.clearDraft?.() ?? false;
 		case "clio-coder.message.interrupt":
 			deps.interruptWithMessage();
 			return true;
@@ -2203,6 +2207,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
+		noteDraftCleared: (undoKey) =>
+			notifications.add({
+				level: "info",
+				key: "keyboard:draft-cleared",
+				text: `Draft cleared · ${undoKey} brings it back`,
+				ttlMs: 4_000,
+			}),
 		explainDraftUnderApproval: (draft) => {
 			const notice = slashDraftUnderApprovalNotice(draft);
 			if (notice !== null) notify("info", notice, "permission:slash-draft");
