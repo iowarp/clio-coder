@@ -10,6 +10,7 @@ import type {
 	PermissionRequestedPayload,
 	SafetyBlockedPayload,
 } from "../core/telemetry/live-events.js";
+import { HOOK_BUDGET_STALL_FACTOR } from "../domains/middleware/index.js";
 import { actionClassWords } from "../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { safetyNetRailText } from "../domains/safety/decision-presentation.js";
@@ -153,6 +154,11 @@ function middlewareHookFailedNotice(
 	}
 	const elapsed = payload.elapsedMs !== undefined ? `${payload.elapsedMs.toFixed(1)}ms` : "unknown";
 	const budget = payload.budgetMs !== undefined ? `${payload.budgetMs}ms` : "budget";
+	if (isHookStall(payload))
+		return {
+			level: "warn",
+			text: `[middleware] hook '${payload.registrationId}' stalled on ${payload.hook} for ${elapsed} (soft budget ${budget}); the turn waited for it. Further budget warnings for this hook are suppressed.`,
+		};
 	const trend =
 		payload.overCount !== undefined && payload.windowSamples !== undefined && payload.windowSamples > 0
 			? ` slow on ${payload.overCount} of the last ${payload.windowSamples} ${payload.hook} calls${
@@ -167,17 +173,28 @@ function middlewareHookFailedNotice(
 	};
 }
 
+/** A lone overrun of ten times the budget or more: the turn sat waiting on the hook (a cold spawn, a blocking read). */
+function isHookStall(payload: MiddlewareHookFailedPayload): boolean {
+	return (
+		payload.kind === "budget_exceeded" &&
+		payload.elapsedMs !== undefined &&
+		payload.budgetMs !== undefined &&
+		payload.elapsedMs >= payload.budgetMs * HOOK_BUDGET_STALL_FACTOR
+	);
+}
+
 /**
- * Interactive-notice gate. Only steady-state slowness surfaces to the operator.
- * Notice gating relies on `steadyStateWarn`; a false value suppresses a lone
- * post-warmup spike that still rides the bus for telemetry. The warning set
- * ensures each registration and hook pair is shown only once.
+ * Interactive-notice gate. Steady-state slowness and a stall surface to the
+ * operator; a lone post-warmup spike short of a stall (`steadyStateWarn` false)
+ * rides the bus for telemetry only. The warning set ensures each registration
+ * and hook pair is shown only once.
  */
 export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWarnings: Set<string>): BusNotice | null {
 	if (
 		isMiddlewareHookFailedPayload(payload) &&
 		payload.kind === "budget_exceeded" &&
-		payload.steadyStateWarn === false
+		payload.steadyStateWarn === false &&
+		!isHookStall(payload)
 	) {
 		return null;
 	}
