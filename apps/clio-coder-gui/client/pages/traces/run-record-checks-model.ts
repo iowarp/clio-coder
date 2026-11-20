@@ -203,10 +203,20 @@ function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 			const duration = count(check?.durationMs);
 			const evidence = string(check?.evidenceRunId);
 			const tail = string(check?.outputTail);
+			// A reused pass came from an earlier run's execution, not this run's, so it never reads as this run passing.
+			const reused = check?.memo === true && !notRun && exit === 0;
 			return {
 				name: string(check?.check) ?? "Unnamed check",
-				tone: notRun ? "warn" : exit === 0 ? "success" : exit === null ? "unverified" : "fail",
-				word: notRun ? "Did not run" : exit === 0 ? "Passed" : exit === null ? "Not recorded" : "Failed",
+				tone: notRun ? "warn" : reused ? "unverified" : exit === 0 ? "success" : exit === null ? "unverified" : "fail",
+				word: notRun
+					? "Did not run"
+					: reused
+						? "Reused"
+						: exit === 0
+							? "Passed"
+							: exit === null
+								? "Not recorded"
+								: "Failed",
 				facts: [
 					notRun
 						? `did not run: ${NOT_RUN_REASONS[notRun] ?? notRun}`
@@ -214,7 +224,7 @@ function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 							? "exit not recorded"
 							: `exit ${exit}`,
 					duration === null ? "" : `${duration} ms`,
-					check?.memo === true ? "reused result" : "",
+					reused ? "not run for this run: an earlier run's pass was reused" : check?.memo === true ? "reused result" : "",
 					evidence ? `evidence from run ${evidence}` : "",
 				].filter(Boolean),
 				...(tail ? { output: tail } : {}),
@@ -223,9 +233,13 @@ function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 	);
 	const batch =
 		value.strategy === "batch-settled" ? " They ran once for the whole batch after every member finished." : "";
+	const reusedCount = items.filter((item) => item.word === "Reused").length;
+	const reuse = reusedCount
+		? ` ${plural(reusedCount, "check")} reused an earlier run's pass instead of running for this run.`
+		: "";
 	const [tone, word, meaning]: [StatusTone, string, string] =
 		status === "verified"
-			? ["success", "Passed", `Every declared check passed.${batch}`]
+			? ["success", "Passed", `Every declared check passed.${batch}${reuse}`]
 			: status === "rejected"
 				? ["fail", "Rejected", `A declared check rejected the result.${batch}`]
 				: status === "skipped"
