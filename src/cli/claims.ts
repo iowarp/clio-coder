@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { canonicalCheckout, checkoutHead } from "../core/project-root.js";
-import { clioDataDir } from "../core/xdg.js";
 import {
 	CLAIMS_LOG_MAX_CLAIMS,
 	type ClaimDisputeRecord,
@@ -21,6 +20,7 @@ import {
 	type HypothesisState,
 	type HypothesisStatus,
 	hypothesisStatuses,
+	memoryCitedClaimIds,
 	readClaims,
 	supersedeConditions,
 } from "../domains/claims/index.js";
@@ -463,16 +463,8 @@ async function runCompact(operands: string[], json: boolean): Promise<number> {
 			json,
 		);
 	let cited: Set<string> | undefined;
-	if (before !== undefined) {
-		// A claim a memory record cites stays, whatever its age: pruning it would orphan the record's evidence.
-		const { loadMemoryRecords } = await import("../domains/memory/index.js");
-		const records = await loadMemoryRecords(clioDataDir());
-		cited = new Set(
-			records.flatMap((record) =>
-				record.evidenceRefs.filter((ref) => ref.startsWith("claim:")).map((ref) => ref.slice("claim:".length)),
-			),
-		);
-	}
+	// A claim a memory record cites stays, whatever its age: pruning it would orphan the record's evidence.
+	if (before !== undefined) cited = await memoryCitedClaimIds();
 	const result = await compactClaimsLog(claimsProjectRoot(process.cwd()), {
 		dryRun,
 		...(before !== undefined ? { pruneSupersededBefore: new Date(before) } : {}),

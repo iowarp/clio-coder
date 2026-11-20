@@ -36,6 +36,7 @@ import {
 	overturnedAgreements,
 	readClaims,
 	recordAcceptedWorkerSlates,
+	recordClaims,
 	recordHostVerificationClaims,
 	snapshotAcceptedWorkerSlates,
 } from "../../src/domains/claims/index.js";
@@ -45,6 +46,7 @@ import {
 	approveMemoryRecord,
 	loadMemoryRecords,
 	type MemoryRecord,
+	proposeMemoryFromClaim,
 	readClearedMemoryRegressions,
 } from "../../src/domains/memory/index.js";
 import { memoryRecordEligible } from "../../src/domains/memory/operations.js";
@@ -358,7 +360,7 @@ describe("claims ledger (#406)", () => {
 		}
 	});
 
-	it("evicts the oldest superseded claims nothing names once an append crosses the count cap (MEM-3)", async () => {
+	it("evicts the oldest superseded claims nothing names or memory cites once recording crosses the count cap (MEM-3)", async () => {
 		const env = await isolateClioEnv("clio-claims-");
 		try {
 			const repo = join(env.dir, "repo");
@@ -387,16 +389,35 @@ describe("claims ledger (#406)", () => {
 				`${[...history, ...edges].map((record) => JSON.stringify(record)).join("\n")}\n`,
 			);
 			const newest = claimAt(CLAIMS_LOG_MAX_CLAIMS, true, CLAIMS_LOG_MAX_CLAIMS);
-			await appendClaims([newest]);
+			// A memory record cites the oldest superseded claim, so it stays as the manual prune keeps it.
+			const citedClaim = history[2];
+			assert.ok(citedClaim);
+			await proposeMemoryFromClaim(clioDataDir(), {
+				claimId: citedClaim.id,
+				text: citedClaim.text,
+				check: "stats",
+				project,
+				at: citedClaim.at,
+			});
+			await recordClaims([newest], new Date("2026-11-19T00:00:00.000Z"));
 			const read = readClaims(project);
 			const ids = new Set(read.records.map((record) => record.id));
 			assert.equal(read.records.length, 3072);
 			assert.ok(ids.has(newest.id) && ids.has(history[0]?.id ?? "") && ids.has(history[1]?.id ?? ""));
-			assert.equal(ids.has(history[2]?.id ?? ""), false, "the oldest superseded claim nothing names is evicted");
-			assert.ok(read.edges.every((edge) => ids.has(edge.from) && ids.has(edge.to)));
+			assert.ok(ids.has(citedClaim.id), "a superseded claim a memory record cites is never evicted");
+			assert.equal(ids.has(history[3]?.id ?? ""), false, "the oldest superseded claim nothing names is evicted");
+			assert.ok(
+				read.edges.every((edge) => ids.has(edge.to)),
+				"an edge leaves with the claim it points at",
+			);
+			const statuses = claimStatuses(read.records, read.edges);
+			assert.equal(statuses.get(citedClaim.id), "superseded", "a kept claim stays superseded after its superseder goes");
+			assert.equal(statuses.get(history[1]?.id ?? ""), "superseded");
 			const evicted = claimsEvicted(project);
 			assert.equal(evicted?.claims, CLAIMS_LOG_MAX_CLAIMS + 1 - 3072);
-			match(readFileSync(evicted?.path ?? "", "utf8"), new RegExp(history[2]?.id ?? "missing"));
+			const evictedText = readFileSync(evicted?.path ?? "", "utf8");
+			match(evictedText, new RegExp(history[3]?.id ?? "missing"));
+			assert.equal(evictedText.includes(citedClaim.id), false);
 		} finally {
 			env.restore();
 		}

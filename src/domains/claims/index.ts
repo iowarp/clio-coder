@@ -36,6 +36,7 @@ export {
 	CLAIM_CAPTURE_REGISTRATION_ID,
 	createClaimCaptureRegistration,
 	createHypothesisCaptureRegistration,
+	memoryCitedClaimIds,
 	recordAcceptedWorkerSlates,
 	recordAgentLedgerDispute,
 	recordClaims,

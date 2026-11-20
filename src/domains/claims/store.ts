@@ -116,10 +116,10 @@ function withinLineBound(line: string): boolean {
 }
 
 /**
- * The most claims one project's log holds before an append evicts (MEM-3). A claim is never refused, and a live claim
- * or one a regression, hypothesis test or contradiction names is never evicted: only superseded claims nothing names
- * go, oldest first, down to `CLAIMS_LOG_EVICT_TO`, with the edges naming them. Evicted lines move to
- * `<digest>.evicted.jsonl`; nothing is deleted. A log that cannot get under the cap tries again each
+ * The most claims one project's log holds before recording evicts (MEM-3). A claim is never refused, and a live claim,
+ * one a regression, hypothesis test or contradiction names, or one a memory record cites is never evicted: only
+ * superseded claims nothing names go, oldest first, down to `CLAIMS_LOG_EVICT_TO`, with the edges pointing at them. Evicted
+ * lines move to `<digest>.evicted.jsonl`; nothing is deleted. A log that cannot get under the cap tries again each
  * `CLAIMS_LOG_EVICT_STEP` claims past it, so an append never pays a rewrite every time.
  */
 export const CLAIMS_LOG_MAX_CLAIMS = 4096;
@@ -456,8 +456,7 @@ export function claimsFullReadCount(): number {
 
 /**
  * Write lines to the end of a project's log under its lock. `lines` sees the index, and the whole log on request, as
- * they stand once the lock is held. A line over the bound is dropped. An append that takes the log past the claim cap
- * evicts under the same lock (`CLAIMS_LOG_MAX_CLAIMS`). Returns the index after the append.
+ * they stand once the lock is held. A line over the bound is dropped. Returns the index after the append.
  */
 async function appendLines(project: string, lines: (context: AppendContext) => string[]): Promise<ClaimsIndex> {
 	const path = claimsLogPath(project);
@@ -467,7 +466,6 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 	let result: ClaimsIndex = emptyIndex();
 	await withStateFileLock(path, () => {
 		const fd = openSync(path, "a+", 0o600);
-		let evict = false;
 		try {
 			const size = fstatSync(fd).size;
 			let full: ClaimsLogRead | undefined;
@@ -480,7 +478,6 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 			};
 			const index = loadIndex(project, fd, size) ?? indexFromRead(readFull());
 			result = index;
-			const claimsBefore = index.claims;
 			const next = lines({ index, full: readFull }).filter(withinLineBound);
 			if (next.length === 0) return;
 			// A line torn by a crash is closed off, so the append starts a line of its own.
@@ -489,15 +486,8 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 			fsyncSync(fd);
 			foldIndexText(index, project, next.join("\n"));
 			writeIndex(project, index, fd, fstatSync(fd).size);
-			evict = crossesClaimsCap(claimsBefore, index.claims);
 		} finally {
 			closeSync(fd);
-		}
-		if (!evict) return;
-		try {
-			rewriteLogLocked(project, {}, emptyCompaction(path, false), CLAIMS_LOG_EVICT_TO);
-		} catch {
-			// The append landed; eviction tries again at the next step past the cap.
 		}
 	});
 	if (created) fsyncDirectory(dir);
@@ -507,17 +497,21 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 /**
  * Append claims to their project's log, each followed by the edges it adds against the log (#406). Records for several
  * projects are grouped per log. Edges are derived from the log's index, so an append costs the claims of the check it
- * touches, not the log. Returns the edges written and, per project, the contradictions still awaiting a regression.
+ * touches, not the log. Returns the edges written, per project the contradictions still awaiting a regression, and
+ * the projects whose log this append took past the claim cap (`evictClaimsPastCap`).
  */
 async function appendClaimsIndexed(
 	records: ReadonlyArray<ClaimRecord>,
-): Promise<{ edges: ClaimEdgeRecord[]; pending: Map<string, string[]> }> {
+): Promise<{ edges: ClaimEdgeRecord[]; pending: Map<string, string[]>; overCap: string[] }> {
 	const byProject = new Map<string, ClaimRecord[]>();
 	for (const record of records) byProject.set(record.project, [...(byProject.get(record.project) ?? []), record]);
 	const written: ClaimEdgeRecord[] = [];
 	const pending = new Map<string, string[]>();
+	const overCap: string[] = [];
 	for (const [project, group] of byProject) {
+		let claimsBefore = 0;
 		const index = await appendLines(project, ({ index }) => {
+			claimsBefore = index.claims;
 			const lines: string[] = [];
 			for (const claim of group) {
 				// Checked here, not only in appendLines, so an unwritten claim derives no edges.
@@ -529,8 +523,24 @@ async function appendClaimsIndexed(
 			return lines;
 		});
 		pending.set(project, [...index.pending]);
+		if (crossesClaimsCap(claimsBefore, index.claims)) overCap.push(project);
 	}
-	return { edges: written, pending };
+	return { edges: written, pending, overCap };
+}
+
+/**
+ * Evict, under the log's lock, the oldest superseded claims nothing names down to `CLAIMS_LOG_EVICT_TO` (MEM-3).
+ * `cited` holds the claim ids memory records cite, which stay like any claim the log itself names; the caller reads
+ * memory, so a caller that cannot must not evict. Returns how many claims were evicted.
+ */
+export async function evictClaimsPastCap(project: string, cited: ReadonlySet<string>): Promise<number> {
+	const path = claimsLogPath(project);
+	if (!existsSync(path)) return 0;
+	let evicted = 0;
+	await withStateFileLock(path, () => {
+		evicted = rewriteLogLocked(project, { cited }, emptyCompaction(path, false), CLAIMS_LOG_EVICT_TO);
+	});
+	return evicted;
 }
 
 export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise<ClaimEdgeRecord[]> {
@@ -1206,10 +1216,15 @@ function emptyCompaction(path: string, dryRun: boolean): ClaimsCompaction {
 
 /**
  * The compaction rewrite, with the log's lock held. With `evictTo`, superseded claims nothing names are also evicted,
- * oldest first, until at most that many claims remain or none is left to evict (MEM-3); they and the edges naming them
- * are appended to `<digest>.evicted.jsonl`, not deleted.
+ * oldest first, until at most that many claims remain or none is left to evict (MEM-3); they and the edges pointing at
+ * them are appended to `<digest>.evicted.jsonl`, not deleted.
  */
-function rewriteLogLocked(project: string, options: CompactOptions, result: ClaimsCompaction, evictTo?: number): void {
+function rewriteLogLocked(
+	project: string,
+	options: CompactOptions,
+	result: ClaimsCompaction,
+	evictTo?: number,
+): number {
 	const path = result.path;
 	const text = readFileSync(path, "utf8");
 	result.bytesBefore = Buffer.byteLength(text, "utf8");
@@ -1284,10 +1299,9 @@ function rewriteLogLocked(project: string, options: CompactOptions, result: Clai
 			result.prunedEdges += 1;
 			continue;
 		}
-		if (
-			evicted.has(id) ||
-			(value.type === "edge" && (evicted.has(String(value.from)) || evicted.has(String(value.to))))
-		) {
+		// An edge leaves with the claim it points at: a kept claim keeps the edge saying what superseded it, even when that
+		// later claim is evicted, so eviction never makes an old verdict read as current.
+		if (evicted.has(id) || (value.type === "edge" && evicted.has(String(value.to)))) {
 			if (!written.has(id)) evictedLines.push(line);
 			written.add(id);
 			continue;
@@ -1307,9 +1321,9 @@ function rewriteLogLocked(project: string, options: CompactOptions, result: Clai
 	result.linesAfter = keptLines.length;
 	const next = keptLines.length === 0 ? "" : `${keptLines.join("\n")}\n`;
 	result.bytesAfter = Buffer.byteLength(next, "utf8");
-	if (options.dryRun === true) return;
+	if (options.dryRun === true) return 0;
 	// Eviction with nothing to evict rewrites nothing: an unasked compaction would only churn the previous generation.
-	if (evictTo !== undefined && evicted.size === 0) return;
+	if (evictTo !== undefined && evicted.size === 0) return 0;
 	if (quarantine.length > 0) writeFileLines(siblingPath(path, "quarantine.jsonl"), quarantine);
 	if (evictedLines.length > 0) writeFileLines(claimsEvictedPath(project), evictedLines);
 	copyFileSync(path, siblingPath(path, "prev.jsonl"));
@@ -1325,6 +1339,7 @@ function rewriteLogLocked(project: string, options: CompactOptions, result: Clai
 	fsyncDirectory(dirname(path));
 	// The index described the old generation; the next append rebuilds it from this one.
 	rmSync(claimsIndexPath(project), { force: true });
+	return evicted.size;
 }
 
 /** Append lines to an audit file beside the log, created 0600. */
