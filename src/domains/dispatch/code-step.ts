@@ -26,6 +26,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import {
 	createProcessGroupCleanup,
 	type ProcessGroupCleanupStatus,
@@ -289,7 +290,7 @@ export function workspaceChangeSnapshot(root: string): WorkspaceChangeSnapshot |
 	} catch {
 		return null;
 	}
-	if (prefix.startsWith("..") || isAbsolute(prefix)) return null;
+	if (relativePathEscapes(prefix)) return null;
 	return { checkout, prefix: prefix === "" ? "" : `${prefix.split(sep).join("/")}/` };
 }
 

@@ -13,6 +13,7 @@
  */
 
 import { isAbsolute, relative } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../worker/protocol.js";
 import type { SettledRunRecord } from "../telemetry/index.js";
 import type { RunEnvelope, RunLedgerProjection, RunOutcome, RunStatus } from "./types.js";
@@ -171,7 +172,7 @@ function citedPathKey(path: string): string {
 	if (trimmed.length === 0) return trimmed;
 	const absolute = isAbsolute(trimmed);
 	const candidate = absolute ? relative(process.cwd(), trimmed) : trimmed;
-	if (absolute && (candidate.length === 0 || candidate.startsWith(".."))) return trimmed;
+	if (absolute && (candidate.length === 0 || relativePathEscapes(candidate))) return trimmed;
 	const normalized = candidate
 		.split("/")
 		.filter((segment) => segment.length > 0 && segment !== ".")

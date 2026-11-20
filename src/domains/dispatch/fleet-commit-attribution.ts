@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { testRunExecutes } from "../../tools/verify/test-files.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "./execution-plan.js";
 
@@ -187,7 +188,7 @@ export function changedCheckFiles(
 		if (isAbsolute(cwd)) {
 			if (workspaceRoot === undefined) continue;
 			cwd = relative(workspaceRoot, cwd).split(sep).join("/");
-			if (cwd.startsWith("..") || isAbsolute(cwd)) continue;
+			if (relativePathEscapes(cwd)) continue;
 		}
 		commandOperands({ argv: command.argv, cwd }, workspaceRoot, operands, ran, 0, seen);
 	}
