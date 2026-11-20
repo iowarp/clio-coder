@@ -139,14 +139,15 @@ function normalizeLimitations(value: unknown): unknown {
 
 export const finishTool: ToolSpec = {
 	name: ToolNames.Finish,
-	description:
-		"Declare how the turn ended. Call it alone, in the same response as your final reply; it ends the turn. done: all of it; partly_done: some, list remaining; not_done: none, or declined. Required when nobody watches the turn.",
+	// The schema stays at its floor (fleet design open question 10): the enums carry the meaning, and the operating
+	// fragments carry the guidance on when and how to declare.
+	description: "Declare how the turn ended. Call it alone with your final reply; it ends the turn.",
 	parameters: Type.Object({
 		state: StringEnum(COMPLETION_STATES),
 		limitations: Type.Optional(
 			Type.Array(Type.Object({ what: Type.String(), why: StringEnum(COMPLETION_LIMITATION_REASONS) })),
 		),
-		unverified: Type.Optional(Type.Array(Type.String(), { description: "Claims no check backs." })),
+		unverified: Type.Optional(Type.Array(Type.String())),
 		remaining: Type.Optional(Type.Array(Type.String())),
 	}),
 	baseActionClass: "read",
