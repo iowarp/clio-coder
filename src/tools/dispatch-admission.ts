@@ -8,7 +8,7 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { councilJudgeAgentId, gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
+import { councilJudgeAgentId, gateDeciderAgentId, reviewDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
 	COUNCIL_MAX_MEMBERS,
@@ -855,6 +855,20 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				return shapeRejection(args, "council_verification_unsupported");
 			}
 		}
+		// A detach the runner cannot honour is refused here, with the runner's own words, so normalize notices
+		// describing rewrites of a request that never runs are dropped with it (CLI-P34).
+		if (args.detach === true) {
+			if (mode !== "parallel") return shapeRejection(args, `dispatch: detach only supports parallel mode; got '${mode}'`);
+			if (reviewResult.review !== undefined) {
+				return shapeRejection(args, "dispatch: detach cannot combine with a review gate; run gated dispatch attached");
+			}
+			if (timeoutMsArg(args) !== undefined) {
+				return shapeRejection(
+					args,
+					'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
+				);
+			}
+		}
 		const snapshotFields = {
 			requests: parsed.requests,
 			positions: parsed.positions,
@@ -894,7 +908,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					tasks.push(
 						resolveTask(
 							{
-								agentId: gateDeciderAgentId(reviewResult.review.reviewer),
+								agentId: reviewDeciderAgentId(reviewResult.review.reviewer, (id) =>
+									deps.getAgentSpecs().some((spec) => spec.id === id),
+								),
 								...(base.budget === undefined ? {} : { budget: base.budget }),
 								...(base.record === undefined ? {} : { record: base.record }),
 								executionRole: "reviewer",

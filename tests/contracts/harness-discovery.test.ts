@@ -111,7 +111,7 @@ describe("coordinator discovery and dependency composition", () => {
 			const tools = resolveAgentTools({ registry });
 			deepStrictEqual(
 				tools.map((tool) => tool.name),
-				["bash", "dispatch", "edit", "finish", "gateway", "read", "verify", "write"],
+				["bash", "code_nav", "dispatch", "edit", "finish", "gateway", "grep", "read", "verify", "write"],
 			);
 			const wireDispatch = tools.find((tool) => tool.name === "dispatch");
 			ok(wireDispatch);
@@ -170,7 +170,7 @@ describe("coordinator discovery and dependency composition", () => {
 			middleware.fireTurnStart(runtime, "Implement solver");
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "fixture", toolName: "gateway" });
 			for (const input of observed) {
-				strictEqual(input.metadata?.activeToolNames, "bash,dispatch,edit,finish,gateway,read,verify,write");
+				strictEqual(input.metadata?.activeToolNames, "bash,code_nav,dispatch,edit,finish,gateway,grep,read,verify,write");
 				for (const name of ["tasks", "monitor", "grep"]) {
 					ok(String(input.metadata?.activeCapabilityNames).split(",").includes(name));
 				}

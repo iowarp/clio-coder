@@ -2,8 +2,9 @@ import { resolve } from "node:path";
 import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
 import { canonicalizeExistingPath } from "../core/path-canonical.js";
 import { ToolNames } from "../core/tool-names.js";
+import { DISPATCH_JOB_TABLE_TEXT } from "../domains/agents/dispatch-jobs.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
-import { councilJudgeAgentId, gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
+import { councilJudgeAgentId, gateDeciderAgentId, reviewDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import { canonicalWriteRoots } from "../domains/dispatch/parallel-writers.js";
 import type { ToolCallDispatchRole, ToolCallDispatchTask, ToolCallLanding } from "../domains/middleware/index.js";
 import { createDispatchAdmissionController } from "./dispatch-admission.js";
@@ -84,6 +85,7 @@ function dispatchHookLanding(
 	snapshot: DispatchExecutionSnapshot | undefined,
 	plan: ResolvedDispatchPlanArtifact | undefined,
 	isReadOnlyAgent: (agentId: string) => boolean,
+	hasAgent: (agentId: string) => boolean,
 ): ToolCallLanding | null {
 	if (snapshot === undefined) return null;
 	if (snapshot.kind === "list") return { dispatch: { kind: "list" } };
@@ -95,7 +97,9 @@ function dispatchHookLanding(
 	const tasks: ToolCallDispatchTask[] = [];
 	if (base !== undefined && snapshot.review !== undefined) {
 		tasks.push(writerLanding(base, "builder", base.worktree === true, isReadOnlyAgent));
-		tasks.push(readerLanding("reviewer", planned("reviewer") ?? gateDeciderAgentId(snapshot.review.reviewer), base.cwd));
+		tasks.push(
+			readerLanding("reviewer", planned("reviewer") ?? reviewDeciderAgentId(snapshot.review.reviewer, hasAgent), base.cwd),
+		);
 	} else if (base !== undefined && snapshot.compete !== undefined) {
 		// Each candidate runs in a scratch worktree the host creates for it.
 		tasks.push(writerLanding(base, "candidate", true, isReadOnlyAgent));
@@ -135,6 +139,31 @@ function admissionFailureResult(message: string) {
 	};
 }
 
+/**
+ * Hands each outside read-root approval the dispatched task that reads the root, matched by root in the
+ * order the runner asks, so the card shows that task instead of the operator's last message (CLI-P35).
+ */
+function withReadRootTasks(deps: DispatchToolDeps, snapshot: DispatchExecutionSnapshot | undefined): DispatchToolDeps {
+	const approve = deps.approveExternalRead;
+	if (approve === undefined || snapshot?.kind !== "dispatch") return deps;
+	const count = snapshot.requests.length + (snapshot.rejectedTasks?.length ?? 0);
+	const pending = snapshot.requests.flatMap((request, index) =>
+		request.externalReadRoot === undefined
+			? []
+			: [{ root: request.externalReadRoot, text: request.task, position: snapshot.positions?.[index] ?? index + 1 }],
+	);
+	if (pending.length === 0) return deps;
+	return {
+		...deps,
+		approveExternalRead: (root, options, task) => {
+			const at = pending.findIndex((entry) => entry.root === root);
+			const [entry] = at === -1 ? [] : pending.splice(at, 1);
+			const served = task ?? (entry === undefined ? undefined : { text: entry.text, position: entry.position, count });
+			return approve(root, options, served);
+		},
+	};
+}
+
 export function createDispatchTool(
 	inputDeps: DispatchToolDeps,
 	surfaceOptions: DispatchToolSurfaceOptions = {},
@@ -152,10 +181,9 @@ export function createDispatchTool(
 
 	return {
 		name: ToolNames.Dispatch,
-		// Keep the selection cue beside the schema; detailed coordination and
+		// The job table leads as the selection cue; detailed coordination and
 		// evidence discipline live in the role prompt.
-		description:
-			"Delegate work to Clio workers; configured profiles select their models. task sends one assignment; tasks sends a batch and leaves task empty. Waits for run results unless detach:true, which returns ids to collect with monitor before synthesis. Declare intent on every dispatch. The host commits task worktrees; workers edit and report even when the task says 'and commit'. expected_outputs are repository-relative file paths such as src/duration.js, never commit, prose, or '.'.",
+		description: `${DISPATCH_JOB_TABLE_TEXT} Delegate work to Clio workers; configured profiles select their models. task sends one assignment; tasks sends a batch and leaves task empty. Waits for run results unless detach:true, which returns ids to collect with monitor before synthesis. Declare intent on every dispatch. The host commits task worktrees; workers edit and report even when the task says 'and commit'. expected_outputs are repository-relative file paths such as src/duration.js, never commit, prose, or '.'.`,
 		// Composed once per session: council, compete, and adaptive-routing fields
 		// are advertised only when the fleet can exercise them (see dispatch-schema.ts).
 		parameters: buildDispatchParameters(deps.getSchemaComposition?.() ?? FULL_DISPATCH_SCHEMA_COMPOSITION),
@@ -172,6 +200,7 @@ export function createDispatchTool(
 				admission.state.trustedExecutionSnapshots.get(args),
 				admission.state.trustedResolvedPlans.get(args),
 				(agentId) => deps.getAgentSpecs().find((spec) => spec.id === agentId)?.capabilityClass === "read-only",
+				(agentId) => deps.getAgentSpecs().some((spec) => spec.id === agentId),
 			),
 		async run(rawArgs, options) {
 			const args = admission.prepareArguments(rawArgs);
@@ -188,8 +217,8 @@ export function createDispatchTool(
 						`dispatch: implementation unavailable: ${error instanceof Error ? error.message : String(error)}`,
 				};
 			}
-			const result = await runner.runDispatchTool(deps, admission.state, args, options);
 			const snapshot = admission.state.trustedExecutionSnapshots.get(args);
+			const result = await runner.runDispatchTool(withReadRootTasks(deps, snapshot), admission.state, args, options);
 			const notices = snapshot?.kind === "dispatch" ? (snapshot.notices ?? []) : [];
 			const noted: ToolResult =
 				notices.length === 0

@@ -28,18 +28,22 @@ export type ToolPlacement = "direct" | "gateway";
 
 /**
  * The coordinator's attached surface: the four basic coding tools a minimal
- * coding agent carries (read, bash, edit, write), gateway as the composition
+ * coding agent carries (read, bash, edit, write), grep and code_nav so finding
+ * code never goes through the shell (row 145), gateway as the composition
  * wrapper, the three the orchestrator needs to do its own job (dispatch, verify,
  * ask_user), and consult, whose filter only pays off when the agent reaches for
  * it before reading. consult registers only when a route is named at startup, so
- * an unbound session attaches exactly the other eight. Everything else is learned
- * on demand; workers retain their recipe surface.
+ * an unbound session attaches exactly the other ten. The set is fixed for the
+ * session (#423). Everything else is learned on demand; workers retain their
+ * recipe surface.
  */
 export const COORDINATOR_DIRECT_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Read,
 	ToolNames.Bash,
 	ToolNames.Edit,
 	ToolNames.Write,
+	ToolNames.Grep,
+	ToolNames.CodeNav,
 	ToolNames.Gateway,
 	ToolNames.Dispatch,
 	ToolNames.Verify,
