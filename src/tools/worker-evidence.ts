@@ -66,12 +66,11 @@ export interface FinishedRun {
 		| "permissionRequestedAttempts"
 		| "escalations"
 		| "worktree"
+		| "routeWarnings"
 	>;
 	delivered: RunResultObject | null;
 	/** The run's journaled assessment; null when the run has none or the producer has not read it back. */
 	assessment: Pick<EvidenceAssessed, "firstPassSuccess" | "findings" | "trust"> | null;
-	/** Calls that started and never finished, as the producing process saw them; a sealed reader does not have them. */
-	unfinishedCalls?: number;
 }
 
 const authenticated = (integrity: RunIntegrity) => integrity.state === "verified";
@@ -273,7 +272,7 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 		labels.push(
 			`work=calls:${activity.calls} ok:${activity.succeeded} failed:${activity.failed} blocked:${activity.blocked} mutations:${
 				landed ? "yes" : "no"
-			}${(run.unfinishedCalls ?? 0) > 0 ? ` unfinished:${run.unfinishedCalls}` : ""}`,
+			}${(activity.unfinished ?? 0) > 0 ? ` unfinished:${activity.unfinished}` : ""}`,
 		);
 		// The case this whole label set exists for: the task was to change
 		// something and nothing changed, under an exit code that says success.
@@ -599,7 +598,6 @@ export function finishedRun(result: RunResultDraft | RunResult): FinishedRun {
 			record?.seal?.status === "verified" && record.settled?.digest === ("digest" in result ? result.digest : null)
 				? record.assessment
 				: null,
-		unfinishedCalls: result.safety?.toolTelemetry?.unfinished.reduce((sum, entry) => sum + entry.count, 0) ?? 0,
 	};
 }
 

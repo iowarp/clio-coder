@@ -149,6 +149,43 @@ describe("evidence integrity boundary", () => {
 		deepStrictEqual(settle(), { tool: "bash", calls: 61, ok: 0, errors: 0, blocked: 11, asked: 50 });
 	});
 
+	it("keeps unfinished calls and route warnings on the sealed record, so a sealed reader shows them too (FL-6)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("unfinished-sealed"));
+		draft.toolActivity = { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false };
+		draft.safety = {
+			decisions: { allowed: 1, blocked: 0, permissionRequested: 0 },
+			blockedAttempts: [],
+			toolTelemetry: {
+				coverage: "partial",
+				ingestionErrors: 0,
+				unfinished: [{ tool: "bash", count: 1 }],
+				workspaceMutationPossible: true,
+			},
+		};
+		draft.runtimeResolution = {
+			diagnostics: [
+				{ severity: "warning", code: "thinking-coerced", message: "thinking high is not supported; ran medium" },
+				{ severity: "info", code: "window", message: "context window from catalog" },
+			],
+		} as unknown as NonNullable<typeof draft.runtimeResolution>;
+		const settlement = settleFinishedRun(draft, {
+			terminal: { terminalReason: "worker_failed" },
+			processExitCode: 1,
+			frameType: null,
+			usage: undefined,
+		});
+		strictEqual(settlement.facts.toolActivity?.unfinished, 1);
+		deepStrictEqual(settlement.facts.routeWarnings, ["thinking high is not supported; ran medium"]);
+		const sealed = {
+			runId: draft.runId,
+			digest: null,
+			facts: settlement.facts,
+			delivered: settlement.result,
+			assessment: null,
+		};
+		match(runEvidenceLabels(sealed, PRODUCER_INTEGRITY).join(" "), /work=calls:0 .* unfinished:1/u);
+	});
+
 	it("reads mutations:no when the only state change was refused and a shell call left the tree unmoved (FL-1)", () => {
 		const draft = fixtureReceiptDraft(fixtureEnvelope("refused-only-mutation"));
 		draft.toolStats = [

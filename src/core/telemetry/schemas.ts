@@ -1059,6 +1059,8 @@ export const RunSettledSchema = Type.Object(
 					mutatingSucceeded: Type.Boolean(),
 					/** The worker wrote at least one blob into a granted store tag; absent when it wrote none. */
 					storeWritten: Type.Optional(Type.Boolean()),
+					/** Calls that started and never finished, so a sealed reader shows them too (FL-6); absent when none. */
+					unfinished: Type.Optional(count),
 				},
 				closed,
 			),
@@ -1197,6 +1199,11 @@ export const RunSettledSchema = Type.Object(
 		unclassifiedAfterLastCheck: Type.Optional(
 			Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
 		),
+		/**
+		 * The warnings dispatch resolved the run's route with, such as a thinking level the model could not run, so a
+		 * sealed reader names them as the dispatch result did (FL-6). Absent when there were none and in older journals.
+		 */
+		routeWarnings: Type.Optional(Type.Array(diagnostic, { maxItems: 16 })),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
 			Type.Object(
