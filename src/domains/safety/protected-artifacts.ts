@@ -1639,10 +1639,7 @@ const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
 /** Read-only git subcommands that only read objects and refs, so no configured helper program can run under them. */
 const HELPER_FREE_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set(["rev-parse", "rev-list", "ls-tree", "cat-file"]);
 
-/**
- * Git global options that take no value and change neither the repository git reads nor a program it runs (x6-2).
- * `-C`, `--git-dir` and `--work-tree` stay outside: helper config is read at the recorder's cwd only.
- */
+/** Git globals that take no value and change neither the repository nor a program Git runs (x6-2). */
 const READ_ONLY_GIT_GLOBALS: ReadonlySet<string> = new Set([
 	"--no-pager",
 	"-P",
@@ -1664,12 +1661,32 @@ const READ_ONLY_GIT_GLOBALS: ReadonlySet<string> = new Set([
 const READ_ONLY_GIT_CONFIG_KEY =
 	/^(?:color\.[^=]+|advice\.[^=.]+|column\.ui|core\.quotepath|core\.abbrev|diff\.(?:noprefix|mnemonicprefix|relative|renames|renamelimit|algorithm|indentheuristic|context|interhunkcontext|statgraphwidth)|log\.(?:decorate|abbrevcommit|date|follow)|status\.(?:short|branch|showuntrackedfiles|relativepaths)|grep\.(?:linenumber|patterntype|extendedregexp|column|fullname))$/u;
 
+/** Helper config is probed at the recorder's cwd, so only selectors of that same checkout are transparent (x6). */
+function sameGitDirectory(cwd: string | undefined, target: string, metadata = false): boolean {
+	if (cwd === undefined || target === "" || /[~$`*?[\]{}]/u.test(target)) return false;
+	const selected = canonicalizeRawPath(target, cwd);
+	const expected = canonicalizeRawPath(metadata ? ".git" : ".", cwd);
+	return selected !== null && expected !== null && path.relative(expected, selected) === "";
+}
+
 /** The git subcommand and its arguments past the read-only global options; null when a global may run or relocate. */
-function gitSubcommand(args: ReadonlyArray<string>): { subcommand: string; rest: ReadonlyArray<string> } | null {
+function gitSubcommand(
+	args: ReadonlyArray<string>,
+	gitCwd?: string,
+): { subcommand: string; rest: ReadonlyArray<string> } | null {
 	let index = 0;
 	for (; index < args.length; index += 1) {
 		const arg = args[index] ?? "";
 		if (READ_ONLY_GIT_GLOBALS.has(arg)) continue;
+		if (arg === "-C") {
+			if (!sameGitDirectory(gitCwd, args[index + 1] ?? "")) return null;
+			index += 1;
+			continue;
+		}
+		if (arg.startsWith("--git-dir=") || arg.startsWith("--work-tree=")) {
+			if (!sameGitDirectory(gitCwd, arg.slice(arg.indexOf("=") + 1), arg.startsWith("--git-dir="))) return null;
+			continue;
+		}
 		if (arg !== "-c") break;
 		const setting = args[index + 1] ?? "";
 		const key = setting.split("=", 1)[0] ?? "";
@@ -1706,11 +1723,11 @@ const READ_ONLY_GIT_BRANCH_FLAGS: ReadonlySet<string> = new Set([
 	"--no-color",
 ]);
 
-function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean): boolean {
+function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean, gitCwd?: string): boolean {
 	const [executable, ...args] = argv;
 	if (executable === undefined) return false;
 	if (executable === "git") {
-		const invocation = gitSubcommand(args);
+		const invocation = gitSubcommand(args, gitCwd);
 		if (invocation === null || !READ_ONLY_GIT_SUBCOMMANDS.has(invocation.subcommand)) return false;
 		const { subcommand, rest } = invocation;
 		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
@@ -1987,12 +2004,39 @@ function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
 	return checkWritesTree([executable, ...args]);
 }
 
+/** Do not reuse the recorder's Git config after shell setup can change cwd, environment or command lookup. */
+function shellGitCwd(steps: ReadonlyArray<ShellStep>, cwd: string | undefined): string | undefined {
+	if (cwd === undefined) return undefined;
+	return steps.some((step) => {
+		const executable = step.index === null ? "" : (step.argv[step.index] ?? "");
+		return (
+			executable === "export" ||
+			LIST_BENDING_BUILTINS.has(executable) ||
+			SHELL_STATE_BUILTINS.has(executable) ||
+			COMPOUND_COMMAND_WORDS.has(executable) ||
+			(step.index === null && step.argv.length > 0)
+		);
+	})
+		? undefined
+		: cwd;
+}
+
+/** A prefixed Git step or a hidden shell word can select a different repository than its visible argv. */
+function stepGitCwd(step: ShellStep, cwd: string | undefined): string | undefined {
+	return cwd !== undefined &&
+		step.index === 0 &&
+		step.argv[0] === "git" &&
+		!step.tokens.some((token) => token.hiddenContent || token.unterminated || token.substitutions || token.ansiCQuoted)
+		? cwd
+		: undefined;
+}
+
 /** A step outside any recognized check: setup and inspection only read, a known writer writes, the rest is unknown. */
-function stepVerdict(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean): CommandVerdict {
+function stepVerdict(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean, gitCwd?: string): CommandVerdict {
 	const [first] = argv;
 	if (first === undefined) return "inspection";
 	if (SHELL_SETUP_STEPS.has(first)) return first === "source" || first === "." ? "unknown" : "inspection";
-	if (readOnlyInspectionStep(argv, gitHelpersConfigured)) return "inspection";
+	if (readOnlyInspectionStep(argv, gitHelpersConfigured, gitCwd)) return "inspection";
 	return writerStep(basenameToken(first), argv.slice(1)) ? "mutation" : "unknown";
 }
 
@@ -2003,16 +2047,22 @@ function stepVerdict(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean)
  * only reads, and `unknown` otherwise. A check inside a substitution or an inline shell is not this call's check, so
  * there it reads as unknown.
  */
-export function shellCommandVerdict(command: string, gitHelpersConfigured: boolean, depth = 0): CommandVerdict {
+export function shellCommandVerdict(
+	command: string,
+	gitHelpersConfigured: boolean,
+	recorderCwd?: string,
+	depth = 0,
+): CommandVerdict {
 	const tokens = scanShellLike(command, true);
 	const steps = shellSteps(tokens);
 	if (steps.length === 0) return "unknown";
 	if (steps.some(isCheckStep)) return "check";
 	if (extractCommandWriteTargets(command).length > 0 || extractCommandDeleteTargets(command).length > 0)
 		return "mutation";
+	const gitCwd = shellGitCwd(steps, recorderCwd);
 	const nested = (script: string | undefined): CommandVerdict => {
 		if (script === undefined || depth >= INNER_SHELL_MAX_DEPTH) return "unknown";
-		const verdict = shellCommandVerdict(script, gitHelpersConfigured, depth + 1);
+		const verdict = shellCommandVerdict(script, gitHelpersConfigured, undefined, depth + 1);
 		return verdict === "check" ? "unknown" : verdict;
 	};
 	const join = (a: CommandVerdict, b: CommandVerdict): CommandVerdict =>
@@ -2026,7 +2076,10 @@ export function shellCommandVerdict(command: string, gitHelpersConfigured: boole
 		const script = segmentShellScript(step.argv);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		const inline = script === null ? inlinePythonVerdict(command, step) : null;
-		verdict = join(verdict, inline ?? (script === null ? stepVerdict(argv, gitHelpersConfigured) : nested(script)));
+		verdict = join(
+			verdict,
+			inline ?? (script === null ? stepVerdict(argv, gitHelpersConfigured, stepGitCwd(step, gitCwd)) : nested(script)),
+		);
 		if (verdict === "mutation") return verdict;
 	}
 	return verdict;
@@ -2088,16 +2141,21 @@ const NAMED_TARGET_WRITERS: ReadonlySet<string> = new Set(["tee", "mkdir", "touc
  * a bare redirect, or is a writer whose targets those extractors list in full. A here-document body is data unless a
  * shell or interpreter reads it, and either of those, git, a substitution or an inline script stays unenumerable.
  */
-export function shellWritesOnlyNamedTargets(command: string, gitHelpersConfigured: boolean): boolean {
+export function shellWritesOnlyNamedTargets(
+	command: string,
+	gitHelpersConfigured: boolean,
+	recorderCwd?: string,
+): boolean {
 	const steps = shellSteps(scanShellLike(command, true));
 	if (steps.length === 0) return false;
+	const gitCwd = shellGitCwd(steps, recorderCwd);
 	return steps.every((step) => {
 		if (step.tokens.some((token) => token.substitutions?.length || token.hiddenContent || token.unterminated))
 			return false;
 		if (segmentShellScript(step.argv) !== null) return false;
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		if (argv.length === 0 || NAMED_TARGET_WRITERS.has(basenameToken(argv[0]))) return true;
-		return stepVerdict(argv, gitHelpersConfigured) === "inspection";
+		return stepVerdict(argv, gitHelpersConfigured, stepGitCwd(step, gitCwd)) === "inspection";
 	});
 }
 
@@ -2342,9 +2400,11 @@ export function checkCommandShape(
 	stepWritesTree: (step: string) => boolean = () => true,
 	/** The directory the check runs in ({@link checkLogTargets}). */
 	directory = "",
+	recorderCwd?: string,
 ): CheckCommandShape | null {
 	const tokens = scanShellLike(command, true);
 	const parsed = shellSteps(tokens);
+	const gitCwd = shellGitCwd(parsed, recorderCwd);
 	const isCheck = (step: ShellStep, index: number) => isCheckStep(step) || declaredSteps.has(index);
 	if (!parsed.some(isCheck)) return null;
 	const steps = parsed.map((step, index) => {
@@ -2359,7 +2419,7 @@ export function checkCommandShape(
 			(check && !checkWritesTree(argv) && !updatesGoldensByEnv(step.argv.slice(0, step.index))) ||
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
 			(basenameToken(argv[0]) === "tee" && pathArgs(argv, 0).every(isOutput)) ||
-			readOnlyInspectionStep(argv, gitHelpersConfigured);
+			readOnlyInspectionStep(argv, gitHelpersConfigured, stepGitCwd(step, gitCwd));
 		const changes = readOnly
 			? writes.some((target) => isInterestingWriteTarget(target) && !isOutput(target))
 			: check || stepWritesTree(command.slice(step.tokens[0]?.start ?? 0, step.tokens.at(-1)?.end ?? 0));
