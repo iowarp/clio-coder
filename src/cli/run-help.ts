@@ -7,6 +7,8 @@ export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
 Run one headless main-agent turn. Fleet dispatch is explicit with --agent.
 Everything after "--" is the task text, even when it starts with "-" or "@".
+Stdin is read only when you pass -: run - takes the task from stdin, run "<task>" - appends stdin as a <stdin>
+block after the task, and a pipe without - is ignored. No task text and no - is exit 2 (empty_task).
 
 Flags:
   --cwd <dir>               run as if started in <dir>; applies to --agent too

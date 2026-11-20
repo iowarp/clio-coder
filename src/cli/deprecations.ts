@@ -91,7 +91,6 @@ export const DEPRECATED_SPELLINGS: ReadonlyArray<DeprecatedSpelling> = [
 	viaModule("run --json-events terminal", "run --output-format json", "src/cli/run.ts", "migration"),
 	// The warning also feeds the run's failure record, so it keeps run's own `clio-coder run:` prefix.
 	viaModule("run --session <id>", "run --resume <id>", "src/cli/args.ts", "identical"),
-	viaModule("run <task> with piped stdin and no -", "run <task> -", "src/cli/initial-message.ts", "identical"),
 	viaModule("fleet run --json", "fleet run --output-format stream-json", "src/cli/fleet.ts", "migration"),
 	// Text matches; under --json the old spellings keep their pretty `{ "admission" }` without `version`.
 	viaDispatcher("fleet drain", "fleet admission drain", verb("fleet", ["drain"]), "migration"),

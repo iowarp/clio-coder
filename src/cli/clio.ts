@@ -117,9 +117,10 @@ export async function runClioCommand(
 	) {
 		process.env.CLIO_CODER_INTERACTIVE = "1";
 	}
-	// A task piped to bare `clio-coder` would be discarded by the bannered boot; point at `run` instead.
+	// A task piped to bare `clio-coder` would be discarded by the bannered boot; point at `run -`, the only spelling that
+	// reads stdin (SPEC 6.2).
 	if (!options.headless && !options.acp && process.env.CLIO_CODER_INTERACTIVE === undefined && (await stdinHasData())) {
-		process.stderr.write('clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"\n');
+		process.stderr.write("clio-coder: a task on stdin needs a subcommand; use: clio-coder run -\n");
 		return 2;
 	}
 	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {

@@ -215,11 +215,9 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		process.stderr.write(USAGE);
 		return 2;
 	}
-	const stdinContent =
-		// SPEC 6.2: a --task-file run never reads stdin for task text; the envelope carries the task.
-		parsed.taskFile !== undefined
-			? undefined
-			: await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0, parsed.stdin === true);
+	// SPEC 6.2 (maintainer ruling of 2026-11-20): stdin is read only for a bare `-`, never implicitly and with no
+	// wait; a --task-file run never reads it for task text, since the envelope carries the task.
+	const stdinContent = parsed.taskFile === undefined && parsed.stdin === true ? await readPipedStdin() : undefined;
 	// Boot has not armed the termination coordinator yet, so without this listener
 	// SIGINT killed the process by default while a PDF extraction ran on.
 	const interrupt = new AbortController();
@@ -259,7 +257,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
 	});
 	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
-		writeRunDiagnostic("clio-coder run: empty task\n");
+		writeRunDiagnostic('clio-coder run: empty task; give it as text (run "<task>") or pass - to read it from stdin\n');
 		process.stderr.write(USAGE);
 		return 2;
 	}

@@ -461,3 +461,20 @@ describe("run --task-file envelope (SPEC 6.3)", () => {
 		equal(typeof parsed.outputSchema, "object");
 	});
 });
+
+describe("run stdin (SPEC 6.2)", () => {
+	it("reads stdin only with -: a pipe with no task and no - is empty_task naming -", () => {
+		const result = spawnSync(process.execPath, [ENTRY, "run", "--output-format", "json"], {
+			cwd: home.dir,
+			env: { ...process.env, ...home.env, NO_COLOR: "1" },
+			encoding: "utf8",
+			input: "B",
+			timeout: 60_000,
+		});
+		equal(result.status, 2, result.stderr);
+		const cause = JSON.parse(result.stdout).causes[0];
+		equal(cause.code, "empty_task");
+		match(cause.message, / - /u);
+		doesNotMatch(result.stderr, /deprecated/u);
+	});
+});

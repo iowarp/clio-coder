@@ -367,7 +367,7 @@ Rules match author questions only. `id` is bound to an extension's gate, and `he
 
 ### Headless Prompt Assembly
 
-The task is every non-flag argument joined with spaces. An argument that starts with `@` and has a path after it is a file reference, read relative to the working directory: text files follow the task and image files travel as images. The assembled prompt is the task, then the referenced file text, then piped stdin, joined by blank lines. Piped stdin is read whenever stdin is not a terminal. With neither a task nor an `@file` argument, `run` reads it to the end. With either, it waits 2 seconds for the first byte and then continues without it, printing `clio-coder run: no data on stdin after 2s; ignoring it (redirect </dev/null to skip)`. An empty assembled task exits 2 with `clio-coder run: empty task`. A missing `@file` path, a directory or an unreadable file exits 2 before any model call.
+The task is every non-flag argument joined with spaces. An argument that starts with `@` and has a path after it is a file reference, read relative to the working directory: text files follow the task and image files travel as images. The assembled prompt is the task, then the referenced file text, then stdin, joined by blank lines. Stdin is read only when `-` is passed: `run -` takes the task from stdin, and `run "<task>" -` appends stdin to the task as a `<stdin>` block. A pipe without `-` is ignored. An empty assembled task exits 2 with `clio-coder run: empty task; give it as text (run "<task>") or pass - to read it from stdin`. A missing `@file` path, a directory or an unreadable file exits 2 before any model call.
 
 ### File References
 
