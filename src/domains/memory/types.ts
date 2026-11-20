@@ -114,9 +114,6 @@ export interface MemoryRevision {
 /** Wordings a record keeps; the oldest fall off first and the current one always stays. */
 export const MEMORY_REVISIONS_MAX = 8;
 
-/** Delivering sessions in a row with no verdict that return a lesson to the note layer. */
-export const MEMORY_UNSETTLED_SESSIONS_MAX = 3;
-
 /** Who flipped `approved`. Absent on records approved before the guardian gate existed. */
 export interface MemoryApproval {
 	by: "operator" | "guardian";
@@ -154,11 +151,6 @@ export interface MemoryRecord {
 	/** Deliveries recorded since the counter existed; legacy `delivered` observations join it on the first mutation. */
 	deliveredCount?: number;
 	lastDeliveredAt?: string;
-	/**
-	 * Sessions, oldest first, that were delivered the record since its last verdict; any verdict clears it. Three that
-	 * are not the current session demote a lesson no operator decided when it is next loaded for delivery.
-	 */
-	unsettledSessions?: string[];
 }
 
 export interface MemoryStoreFile {

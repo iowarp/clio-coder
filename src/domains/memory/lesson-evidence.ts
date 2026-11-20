@@ -333,13 +333,37 @@ export function programResolves(word: string, root?: string): boolean {
 	if (word.length === 0) return false;
 	if (word.includes("/")) {
 		if (isAbsolute(word)) return executableFile(word);
-		return root === undefined ? SCRIPT_PATH.test(word) : repositoryFile(word, root) !== null;
+		return root === undefined ? SCRIPT_PATH.test(word) : repositoryProgram(word, root);
 	}
 	if (KNOWN_RUNNERS.has(word) || INTERPRETERS.has(word)) return true;
 	return onPath(word);
 }
 
+/**
+ * A repository-relative program that exists inside the checkout as an executable file. It is judged by `stat` alone:
+ * a program is never read, so its size cannot make it look missing.
+ */
+function repositoryProgram(word: string, root: string): boolean {
+	const path = repositoryRelativePath(word, [root]);
+	if (path === null) return false;
+	try {
+		const realRoot = realpathSync(root);
+		const target = realpathSync(resolve(realRoot, path));
+		const inside = relative(realRoot, target);
+		return inside.length > 0 && !escapesRoot(inside) && executableFile(target);
+	} catch {
+		return false;
+	}
+}
+
+/** The `PATH` the remembered answers were found under; a new `PATH` forgets them. */
+let pathProgramsFor: string | undefined;
+
 function onPath(word: string): boolean {
+	if (pathProgramsFor !== process.env.PATH) {
+		pathPrograms.clear();
+		pathProgramsFor = process.env.PATH;
+	}
 	const known = pathPrograms.get(word);
 	if (known !== undefined) return known;
 	const found = (process.env.PATH ?? "")

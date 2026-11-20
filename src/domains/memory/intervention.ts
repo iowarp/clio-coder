@@ -610,6 +610,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	const pendingOffers = new Map<string, PendingOffer>();
 	/** Exact contents already submitted this scope; the same text is never offered again. */
 	const submittedContents = new Set<string>();
+	/**
+	 * Whether this session's `# Memory` section (or a `# Memory update` it was sent) already carries a lesson, as the
+	 * host last reported it with the turn's task. No reminder repeats a fact the section carries (DESIGN 4.4).
+	 */
+	let sectionCarries: (id: string) => boolean = () => false;
 	let offerSequence = 0;
 
 	interface PendingOffer {
@@ -694,6 +699,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			return acknowledged;
 		},
 		offerLessonsForTask(task, carried) {
+			sectionCarries = carried;
 			if (disposed || !settings().enabled) return "";
 			try {
 				const lessons = lessonsForTask(
@@ -1220,6 +1226,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		pendingOffers.clear();
 		submittedContents.clear();
 		offeredLessons.clear();
+		sectionCarries = () => false;
 		try {
 			const lessons = deps.bank.snapshot().knowledge.filter((entry) => entry.durable === true);
 			if (lessons.length > 0) deps.onScopeEnd?.({ sessionId: observedSessionId, lessons });
@@ -1274,6 +1281,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		contextLostAt = null;
 		observedSessionId = undefined;
 		stepContext = undefined;
+	}
+
+	function carriedBySection(id: string): boolean {
+		try {
+			return sectionCarries(id);
+		} catch {
+			return false;
+		}
 	}
 
 	function deliveryMode(): MemoryDeliveryMode {
@@ -1927,14 +1942,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const touched = new Set(touchedPaths(toolName, args));
 		if (touched.size === 0) return NO_EFFECTS;
 		const root = workspaceRoot();
+		// A command names a path as an argument or as an option's value (`--config=scripts/cfg.json`).
 		const names = (lesson: KeptLesson): boolean =>
-			commandEvidence(lesson)
-				? lesson.commands.recommended.some((command) =>
-						command.split(/\s+/u).some((word) => touched.has(repositoryRelativePath(word, [root]) ?? "")),
-					)
-				: lesson.approval === "operator" &&
-					lesson.sourcePaths.length > 0 &&
-					[...lesson.paths, ...lesson.sourcePaths].some((path) => touched.has(path));
+			(commandEvidence(lesson) &&
+				lesson.commands.recommended.some((command) =>
+					command.split(/[\s=]+/u).some((word) => touched.has(repositoryRelativePath(word, [root]) ?? "")),
+				)) ||
+			(lesson.approval === "operator" &&
+				lesson.sourcePaths.length > 0 &&
+				[...lesson.paths, ...lesson.sourcePaths].some((path) => touched.has(path)));
 		return deliverDurableLessons(
 			"durable_lesson_subject",
 			// A lesson whose recommended command already succeeded here has nothing left to say.
@@ -2008,6 +2024,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		let lines: string[] = [];
 		for (const lesson of candidates) {
 			if (deliveredLessons.has(lesson.id) || offeredLessons.has(lesson.id)) continue;
+			if (carriedBySection(lesson.id)) continue;
 			if (!channelCarries(trigger, lesson)) continue;
 			const next = [...lines, renderKeptLesson(lesson)];
 			if (next.join("\n").length > budget) continue;

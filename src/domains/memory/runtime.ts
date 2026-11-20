@@ -58,6 +58,7 @@ import {
 	sourceCoverageDigest,
 } from "./observations.js";
 import { memorySectionBlocks } from "./prompt-section.js";
+import { readDemotedMemoryIds } from "./recall-use.js";
 import { memoryRouteJson } from "./secret-text.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
@@ -283,7 +284,16 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			if (!dataDir) throw new Error("memory data root unavailable");
 			return dataDir;
 		},
+		stateDir: () => {
+			const stateDir = this.#infrastructure?.stateDir();
+			if (!stateDir) throw new Error("memory state root unavailable");
+			return stateDir;
+		},
 		sessionId: () => this.#infrastructure?.currentSession?.()?.id,
+		demoted: () => {
+			const stateDir = this.#infrastructure?.stateDir();
+			return stateDir ? readDemotedMemoryIds(stateDir) : new Set<string>();
+		},
 		mode: () => this.#infrastructure?.settings().surfaces.delivery ?? "decision",
 		notice: (line) => this.#infrastructure?.notice?.(line),
 		diagnostic: (line) => this.#infrastructure?.diagnostic?.(line),
@@ -340,27 +350,36 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	}
 
 	/**
-	 * Kept lessons reminders may carry in this session: admitted by the delivery gate, and, mid-session, only those
-	 * this session could see when it began or that an operator approved since. A lesson another running session got
-	 * approved reaches this session's successor, not this session (DESIGN 4.4).
+	 * Kept lessons reminders may carry in this session: admitted by the delivery gate, not demoted by recall-use, and,
+	 * mid-session, only those this session could see when it began or that an operator approved since. A lesson another
+	 * running session got approved reaches this session's successor, not this session (DESIGN 4.4).
 	 */
 	deliverableLessons(): readonly KeptLesson[] {
 		const infra = this.#infrastructure;
 		if (!infra?.settings().enabled || !infra.dataDir) return [];
 		try {
 			const root = infra.cwd?.() ?? process.cwd();
-			const lessons = this.#keptLessons.lessons(root, (record) => this.delivery.admit(record, root));
-			const baseline = this.#sessionBaseline(lessons);
-			return lessons.filter((lesson) => baseline.has(lesson.revision) || lesson.approval === "operator");
+			const baseline = this.#sessionBaseline(root);
+			const demoted = this.delivery.demoted();
+			return this.#keptLessons
+				.lessons(root, (record) => !demoted.has(record.id) && this.delivery.admit(record, root))
+				.filter((lesson) => baseline.has(lesson.revision) || lesson.approval === "operator");
 		} catch {
 			return []; /* An unreadable store surfaces nothing; the session continues without it. */
 		}
 	}
 
-	#sessionBaseline(lessons: readonly KeptLesson[]): Set<string> {
+	/**
+	 * The kept lessons this session could see when it began, fixed on its first prompt read whatever the delivery mode,
+	 * so turning delivery on mid-session admits no lesson a peer got approved since. Only reads: no delivery check runs.
+	 */
+	#sessionBaseline(root: string): Set<string> {
 		const session = this.#infrastructure?.currentSession?.()?.id;
 		if (this.#deliveryBaseline === null || this.#deliveryBaseline.session !== session)
-			this.#deliveryBaseline = { session, revisions: new Set(lessons.map((lesson) => lesson.revision)) };
+			this.#deliveryBaseline = {
+				session,
+				revisions: new Set(this.#keptLessons.lessons(root).map((lesson) => lesson.revision)),
+			};
 		return this.#deliveryBaseline.revisions;
 	}
 
@@ -1181,8 +1200,15 @@ export class MemoryRuntime implements MemoryObservationCommands {
 
 	recordPromptSelection(selection: MemoryPromptSelection): void {
 		this.#promptSelection = structuredClone(selection);
-		// The section is read as a session begins, so its lessons fix what later reminders may carry.
-		if (this.#deliveryBaseline?.session !== this.#infrastructure?.currentSession?.()?.id) this.deliverableLessons();
+		// The section is read as a session begins, under every delivery mode, so it fixes what later reminders may carry.
+		const infra = this.#infrastructure;
+		if (infra?.settings().enabled && infra.dataDir && this.#deliveryBaseline?.session !== infra.currentSession?.()?.id) {
+			try {
+				this.#sessionBaseline(infra.cwd?.() ?? process.cwd());
+			} catch {
+				// An unreadable store leaves the baseline to the first reminder.
+			}
+		}
 	}
 
 	/**

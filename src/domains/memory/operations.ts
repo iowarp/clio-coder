@@ -195,7 +195,6 @@ export function cloneMemoryRecord(record: MemoryRecord): MemoryRecord {
 	if (record.revisions !== undefined) next.revisions = record.revisions.map((item) => ({ ...item }));
 	if (record.deliveredCount !== undefined) next.deliveredCount = record.deliveredCount;
 	if (record.lastDeliveredAt !== undefined) next.lastDeliveredAt = record.lastDeliveredAt;
-	if (record.unsettledSessions !== undefined) next.unsettledSessions = [...record.unsettledSessions];
 	return next;
 }
 

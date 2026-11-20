@@ -96,6 +96,24 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 		try {
 			const mode = options.delivery?.mode() ?? "decision";
 			if (!deliveryOpens(mode, "section")) {
+				// An empty selection is still a selection: the owner fixes the session's delivery baseline from it, so turning
+				// delivery on later admits no lesson approved since, and a stale earlier section is not counted as carried.
+				try {
+					options.onSelection?.({
+						turnId: request.turnId,
+						repository: activeRepository?.key ?? null,
+						runtime: request.runtimeId,
+						model: request.modelId,
+						preparedAt: new Date().toISOString(),
+						submittedAt: null,
+						section,
+						tokenBudget: selection.tokenBudget ?? MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
+						items: [],
+					});
+				} catch {
+					/* Inspection cannot change which facts the prompt carries. */
+				}
+				selected = null;
 				frame = request.turnId === null ? null : Object.freeze({ key: frameKey, section });
 				return section;
 			}

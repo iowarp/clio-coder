@@ -42,7 +42,6 @@ import { mutateMemoryRecords } from "./store.js";
 import {
 	MEMORY_OBSERVATIONS_MAX,
 	MEMORY_REVISIONS_MAX,
-	MEMORY_UNSETTLED_SESSIONS_MAX,
 	type MemoryClaim,
 	type MemoryClaimCommand,
 	type MemoryObservation,
@@ -74,6 +73,17 @@ export interface MemoryGateOutcome {
 	demoted: MemoryRecord[];
 	/** Ids named by an observation that the store no longer holds. */
 	missing: string[];
+	/**
+	 * Each observation as recorded: the record's claim revision after it, and whether an operator decided the record.
+	 * Delivery's unsettled-session ledger is fed from this; the record itself carries nothing more.
+	 */
+	observed: Array<{
+		memoryId: string;
+		sessionId: string;
+		kind: MemoryObservationKind;
+		revision: string;
+		operator: boolean;
+	}>;
 }
 
 /**
@@ -225,13 +235,8 @@ export function observeMemoryRecord(
 	if (input.kind === "delivered") {
 		record.deliveredCount = (record.deliveredCount ?? 0) + 1;
 		if (record.lastDeliveredAt === undefined || at > record.lastDeliveredAt) record.lastDeliveredAt = at;
-		// A session delivering again stays one session; only the newest few are needed to stop delivery.
-		const sessions = (record.unsettledSessions ?? []).filter((id) => id !== input.sessionId);
-		record.unsettledSessions = [...sessions, input.sessionId].slice(-(MEMORY_UNSETTLED_SESSIONS_MAX + 1));
 		return;
 	}
-	// A verdict settles the deliveries before it, whichever session gave it.
-	Reflect.deleteProperty(record, "unsettledSessions");
 	const revision = memoryRevision(record);
 	const seen = (record.observations ?? []).some(
 		(item) => item.sessionId === input.sessionId && item.kind === input.kind && item.revision === revision,
@@ -272,7 +277,7 @@ export async function recordMemoryObservations(
 	now: Date = new Date(),
 	options: MemoryMutationOptions = {},
 ): Promise<MemoryGateOutcome> {
-	const outcome: MemoryGateOutcome = { approved: [], demoted: [], missing: [] };
+	const outcome: MemoryGateOutcome = { approved: [], demoted: [], missing: [], observed: [] };
 	if (inputs.length === 0) return outcome;
 	const at = now.toISOString();
 	return mutateMemoryRecords(
@@ -291,6 +296,13 @@ export async function recordMemoryObservations(
 				const next = touched.has(current.id) ? current : cloneMemoryRecord(current);
 				observeMemoryRecord(next, input, at);
 				touched.set(next.id, next);
+				outcome.observed.push({
+					memoryId: next.id,
+					sessionId: input.sessionId,
+					kind: input.kind,
+					revision: memoryRevision(next),
+					operator: operatorDecided(next),
+				});
 			}
 			if (touched.size === 0) return { result: outcome };
 			gateTouched(records, touched, at, outcome);

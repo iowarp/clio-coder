@@ -11,9 +11,17 @@
  */
 
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import type { MemoryDeliveryMode } from "../../core/defaults.js";
+import { canonicalCheckout } from "../../core/project-root.js";
 import { COMMAND_EVIDENCE_REF_PREFIX, parseSourceEvidenceRef, type SourceEvidence } from "./command-evidence.js";
+import {
+	MEMORY_UNSETTLED_SESSIONS_MAX,
+	readUnsettledLedger,
+	type UnsettledLedger,
+	unsettledSessions,
+} from "./delivery-ledger.js";
 import { evaluateMemoryGate, operatorDecided } from "./guardian-gate.js";
 import {
 	type LessonCommands,
@@ -26,7 +34,7 @@ import {
 import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord, eligibleMemoryRecords } from "./operations.js";
 import { memoryRevision, recordClaim } from "./promotion.js";
 import { memoryStorePath, mutateMemoryRecords, readMemoryStoreSnapshot } from "./store.js";
-import { MEMORY_UNSETTLED_SESSIONS_MAX, type MemoryClaimCommand, type MemoryRecord } from "./types.js";
+import type { MemoryClaimCommand, MemoryRecord } from "./types.js";
 
 export type KeptLessonApproval = "operator" | "automatic";
 
@@ -167,27 +175,51 @@ function compact(value: string): string {
 	return value.replace(/\s+/gu, " ").trim();
 }
 
+/** What the delivery check reads: a checkout file once per session, `null` when it is gone, `undefined` unread. */
+interface DeliveryCheckInput {
+	/** The checkout root of the session's workspace: source and program paths resolve here, never against its cwd. */
+	readonly root: string;
+	readonly file: (path: string) => SourceFile | null | undefined;
+}
+
+/** A source file as delivery read it, with the digests of its line windows computed on first need. */
+interface SourceFile {
+	readonly content: string;
+	windows?: Set<string>;
+}
+
 /**
- * The delivery check of DESIGN 4.3, made when a lesson is loaded for delivery: the first word of the command it
- * recommends still resolves (a program on `PATH`, a repository script or a known runner), and every quoted span it
- * pins is still in its file. Null when it holds, otherwise why not. It withholds a lesson that is certainly dead and
- * proves nothing about a subcommand, a flag or the claim; validity rests on verdicts.
+ * The delivery check of DESIGN 4.3, made when a lesson is loaded for delivery. It withholds only a lesson that is
+ * certainly dead: the first word of the command it recommends no longer resolves (a program on `PATH`, a repository
+ * program, a known runner), a file it quotes is gone, or the span it pins is known exactly (found as whole lines of
+ * the file, or recovered from the lesson's own words) and the file no longer holds it. A span it cannot locate either
+ * way is undecided, and the lesson is delivered. Null when nothing is certainly dead, otherwise why. It proves nothing
+ * about a subcommand, a flag or the claim; validity rests on verdicts.
  */
-function memoryDeliveryCheck(record: MemoryRecord, root: string): string | null {
+function memoryDeliveryCheck(record: MemoryRecord, input: DeliveryCheckInput): string | null {
 	const claim = recordClaim(record);
 	const recommended = claim?.kind === "command" ? claim.command : claim?.kind === "fix" ? claim.fixed : null;
 	if (recommended !== null) {
 		const word = recommended.argv[0] ?? "";
-		if (!programResolves(word, root)) return `its command \`${word}\` no longer resolves here`;
+		if (!programResolves(word, input.root)) return `its command \`${word}\` no longer resolves here`;
 	} else if (
 		record.evidenceRefs.some((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)) &&
-		lessonCommands(record.lesson, record.evidenceRefs, root).recommended.length === 0
+		lessonCommands(record.lesson, record.evidenceRefs, input.root).recommended.length === 0
 	) {
 		return "its command no longer resolves here";
 	}
 	for (const ref of record.evidenceRefs) {
 		const source = parseSourceEvidenceRef(ref);
-		if (source !== null && !spanHeld(record, source, root)) return `its quoted span is no longer in ${source.path}`;
+		if (source === null) continue;
+		const path = repositoryRelativePath(source.path, [
+			input.root,
+			...(record.repository === undefined ? [] : [record.repository.key]),
+		]);
+		if (path === null) continue;
+		const file = input.file(path);
+		if (file === null) return `${path} is gone`;
+		if (file !== undefined && spanState(record, source, file) === "gone")
+			return `its quoted span is no longer in ${path}`;
 	}
 	return null;
 }
@@ -207,31 +239,58 @@ function spanMatches(text: string, spanHash: string): boolean {
 	return spanHash.length === 64 ? digest === spanHash : digest.startsWith(spanHash);
 }
 
+/** Quote marks and punctuation a quoted span may be wrapped in or followed by in a lesson's prose. */
+const SPAN_WRAP_START = /^[`"'([]+/u;
+const SPAN_WRAP_END = /[`"'),;:.!?\]]+$/u;
+
 /**
- * The file still holds the pinned span. Only its hash is stored, so the span is looked for as whole lines of the file,
- * then as a run of words of the lesson's text (a source lesson quotes what it read) that the file still contains.
+ * Whether the file still holds the pinned span. Only its hash is stored. A source lesson quotes what it read, so the
+ * span is first recovered from a run of the lesson's own words: then its text is known exactly, and the file holds it
+ * or not. Otherwise it is looked for as whole lines of the file. Neither is `unknown`, which withholds nothing.
  */
-function spanHeld(record: MemoryRecord, source: SourceEvidence, root: string): boolean {
-	const roots = [root, ...(record.repository === undefined ? [] : [record.repository.key])];
-	const path = repositoryRelativePath(source.path, roots);
-	const content = path === null ? null : readInsideRoot(root, path);
-	if (content === null) return false;
-	const lines = content.split("\n");
-	for (let start = 0; start < lines.length; start++)
-		for (let end = start; end < Math.min(lines.length, start + SPAN_WINDOW_LINES); end++)
-			if (spanMatches(lines.slice(start, end + 1).join("\n"), source.spanHash)) return true;
-	const file = compact(content);
+function spanState(record: MemoryRecord, source: SourceEvidence, file: SourceFile): "held" | "gone" | "unknown" {
 	const words = compact(record.lesson).split(" ");
-	const trim = (word: string) => word.replace(/^[`"'(]+|[`"'),;:]+$/gu, "");
 	for (let start = 0; start < words.length; start++)
 		for (let end = start; end < Math.min(words.length, start + SPAN_WINDOW_WORDS); end++) {
-			const run = words.slice(start, end + 1);
-			for (const candidate of new Set([
-				run.join(" "),
-				[trim(run[0] ?? ""), ...run.slice(1, -1), trim(run.at(-1) ?? "")].join(" "),
-			]))
-				if (spanMatches(candidate, source.spanHash)) return file.includes(compact(candidate));
+			const raw = words.slice(start, end + 1).join(" ");
+			const trimmed = raw.replace(SPAN_WRAP_START, "").replace(SPAN_WRAP_END, "");
+			for (const candidate of new Set([raw, trimmed]))
+				if (candidate.length > 0 && spanMatches(candidate, source.spanHash))
+					return holdsTokens(compact(file.content), compact(candidate)) ? "held" : "gone";
 		}
+	file.windows ??= lineWindowDigests(file.content);
+	const pinned = source.spanHash.length === 64 ? source.spanHash : null;
+	if (
+		pinned !== null ? file.windows.has(pinned) : [...file.windows].some((digest) => digest.startsWith(source.spanHash))
+	)
+		return "held";
+	return "unknown";
+}
+
+/** The digest of every run of up to `SPAN_WINDOW_LINES` whole lines, computed once per file per session. */
+function lineWindowDigests(content: string): Set<string> {
+	const lines = content.split("\n");
+	const digests = new Set<string>();
+	for (let start = 0; start < lines.length; start++)
+		for (let end = start; end < Math.min(lines.length, start + SPAN_WINDOW_LINES); end++)
+			digests.add(spanDigest(lines.slice(start, end + 1).join("\n")));
+	return digests;
+}
+
+const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
+
+/** `text` contains `span` with token boundaries: `port = 8080` is not held by `port = 80801`. */
+function holdsTokens(text: string, span: string): boolean {
+	if (span.length === 0) return false;
+	const startsWord = WORD_CHARACTER.test(span[0] ?? "");
+	const endsWord = WORD_CHARACTER.test(span.at(-1) ?? "");
+	for (let at = text.indexOf(span); at >= 0; at = text.indexOf(span, at + 1)) {
+		const before = text[at - 1];
+		const after = text[at + span.length];
+		if (startsWord && before !== undefined && WORD_CHARACTER.test(before)) continue;
+		if (endsWord && after !== undefined && WORD_CHARACTER.test(after)) continue;
+		return true;
+	}
 	return false;
 }
 
@@ -249,13 +308,13 @@ export type MemoryDeliveryVerdict =
  * DESIGN 4.4 at load for delivery. A lesson failing its delivery check is withheld, and demoted unless an operator
  * decided it: an operator-approved lesson is withheld for the session with its approval intact. A guardian approval
  * that does not meet the current promotion bar returns to the note layer. A lesson delivered in three sessions in a
- * row (other than this one) with no verdict is demoted. Nothing here reads or writes the store.
+ * row (other than this one) with no verdict, by the state-root ledger, is demoted. Nothing here writes the store.
  */
 function memoryDeliveryVerdict(
 	record: MemoryRecord,
-	input: { root: string; sessionId: string | undefined },
+	input: { check: DeliveryCheckInput; sessionId: string | undefined; unsettled: readonly string[] },
 ): MemoryDeliveryVerdict {
-	const failed = memoryDeliveryCheck(record, input.root);
+	const failed = memoryDeliveryCheck(record, input.check);
 	const operator = operatorDecided(record);
 	if (failed !== null)
 		return {
@@ -277,7 +336,7 @@ function memoryDeliveryVerdict(
 				action: "note",
 			};
 	}
-	const unsettled = (record.unsettledSessions ?? []).filter((id) => id !== input.sessionId);
+	const unsettled = input.unsettled.filter((id) => id !== input.sessionId);
 	if (unsettled.length >= MEMORY_UNSETTLED_SESSIONS_MAX)
 		return {
 			deliver: false,
@@ -318,7 +377,11 @@ async function returnLessonsToNotes(
 
 export interface MemoryDeliveryPorts {
 	dataDir(): string;
+	/** The state root, where the unsettled-session ledger lives beside recall-use. */
+	stateDir(): string;
 	sessionId(): string | undefined;
+	/** Records recall-use demoted for being carried unused; every delivery path honours them. */
+	demoted(): ReadonlySet<string>;
 	mode(): MemoryDeliveryMode;
 	notice(line: string): void;
 	diagnostic(line: string): void;
@@ -339,6 +402,10 @@ export class MemoryDeliveryGate {
 	#byRecord = new WeakMap<MemoryRecord, { root: string; deliver: boolean }>();
 	readonly #refused = new Set<string>();
 	readonly #inFlight = new Set<Promise<unknown>>();
+	/** Per session: each cwd's checkout root, each checkout file as read, and the unsettled-session ledger. */
+	readonly #roots = new Map<string, string>();
+	readonly #files = new Map<string, SourceFile | null | undefined>();
+	#ledger: UnsettledLedger | null = null;
 
 	constructor(ports: MemoryDeliveryPorts) {
 		this.#ports = ports;
@@ -352,15 +419,28 @@ export class MemoryDeliveryGate {
 		}
 	}
 
+	/** Recall-use's demoted ids, the one source every delivery path reads; none when the ledger cannot be read. */
+	demoted(): ReadonlySet<string> {
+		try {
+			return this.#ports.demoted();
+		} catch {
+			return new Set();
+		}
+	}
+
 	/** Whether this session may deliver the record; the first refusal of a record is journaled and acted on. */
-	admit(record: MemoryRecord, root: string): boolean {
+	admit(record: MemoryRecord, cwd: string): boolean {
 		const session = this.#ports.sessionId();
 		if (session !== this.#session) {
 			this.#session = session;
 			this.#verdicts.clear();
 			this.#refused.clear();
 			this.#byRecord = new WeakMap();
+			this.#roots.clear();
+			this.#files.clear();
+			this.#ledger = null;
 		}
+		const root = this.#checkoutRoot(cwd);
 		if (this.#refused.has(record.id)) return false;
 		const known = this.#byRecord.get(record);
 		if (known?.root === root) return known.deliver;
@@ -368,7 +448,11 @@ export class MemoryDeliveryGate {
 		let verdict = this.#verdicts.get(key);
 		if (verdict === undefined) {
 			try {
-				verdict = memoryDeliveryVerdict(record, { root, sessionId: session });
+				verdict = memoryDeliveryVerdict(record, {
+					check: { root, file: (path) => this.#file(root, path) },
+					sessionId: session,
+					unsettled: unsettledSessions(this.#unsettled(), record.id, memoryRevision(record)),
+				});
 			} catch {
 				// A check that cannot run proves nothing either way; the lesson stands as it did.
 				verdict = { deliver: true };
@@ -378,6 +462,46 @@ export class MemoryDeliveryGate {
 		}
 		this.#byRecord.set(record, { root, deliver: verdict.deliver });
 		return verdict.deliver;
+	}
+
+	/** The checkout a session's cwd belongs to, so a session started in a subdirectory resolves repository paths. */
+	#checkoutRoot(cwd: string): string {
+		let root = this.#roots.get(cwd);
+		if (root === undefined) {
+			try {
+				root = canonicalCheckout(cwd).checkout;
+			} catch {
+				root = cwd;
+			}
+			this.#roots.set(cwd, root);
+		}
+		return root;
+	}
+
+	/** A checkout file, read once per session: `null` when it is gone, `undefined` when it exists but is not read. */
+	#file(root: string, path: string): SourceFile | null | undefined {
+		const key = resolve(root, path);
+		if (!this.#files.has(key)) {
+			let file: SourceFile | null | undefined;
+			if (!existsSync(key)) file = null;
+			else {
+				const content = readInsideRoot(root, path);
+				file = content === null ? undefined : { content };
+			}
+			this.#files.set(key, file);
+		}
+		return this.#files.get(key);
+	}
+
+	#unsettled(): UnsettledLedger {
+		if (this.#ledger === null) {
+			try {
+				this.#ledger = readUnsettledLedger(this.#ports.stateDir());
+			} catch {
+				this.#ledger = { version: 1, records: {} };
+			}
+		}
+		return this.#ledger;
 	}
 
 	/** Resolves when every store write this gate started has settled. */
