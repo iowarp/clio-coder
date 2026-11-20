@@ -300,7 +300,7 @@ export function renderPosixShellShim(platform: NodeJS.Platform): string {
 	];
 	return [
 		"#!/bin/sh",
-		"# Written by Clio Coder for its private pane host. Every pane starts here:",
+		"# Written by CLIO Coder for its private pane host. Every pane starts here:",
 		"# the operator's own XDG roots go back in place, the Clio pane runs Clio,",
 		"# and the operator's shell takes over.",
 		...restore,
