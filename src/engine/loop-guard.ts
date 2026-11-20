@@ -2037,7 +2037,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						turnKey,
 						ToolNames.Verify,
 						2,
-						`verify: unavailable '${check}' was already reported in this run. Rerunning this entry with other arguments or cwd cannot help; report the limitation and stop. Previous error: ${unavailable}`,
+						`verify: unavailable '${check}' was already reported in this run. Rerunning this entry with other arguments or cwd cannot help; follow the previous error. Previous error: ${unavailable}`,
 						now,
 					);
 				}

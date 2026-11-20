@@ -524,7 +524,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of reading.paths) mutatedPaths.add(target);
-			if (fresh && statusAttributable() && reading.shell?.outsideCwd !== true)
+			if (fresh && statusAttributable() && reading.shell?.outsideCwd !== true && reading.shell?.outsideLockedEnv !== true)
 				for (const command of effects.validationCommands) validationCommands.add(command);
 			if (effects.verificationCommand !== null)
 				(statusAttributable() ? verificationCommands : unattributableVerificationCommands).add(effects.verificationCommand);

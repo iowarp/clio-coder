@@ -3,14 +3,17 @@ import { ToolNames } from "../../core/tool-names.js";
 import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { isVerifyListing } from "../../tools/verify/surface.js";
+import { pythonLauncher } from "../../tools/verify/toolchain.js";
 import { classify } from "./action-classifier.js";
 import { type DeclaredVerifierCommand, declaredCheckRuns, typedValidationSummary } from "./finish-contract.js";
+import { isSameOrDescendant } from "./path-policy.js";
 import {
 	type CheckCommandShape,
 	type CommandVerdict,
 	checkCommandShape,
 	checkFailureAttributable,
 	checkLogTargets,
+	checkRunsBareInterpreter,
 	checkRunsOutside,
 	checkWritesTree,
 	commandArgumentSegments,
@@ -85,6 +88,11 @@ export interface ShellCheckReading {
 	failureAttributable: boolean;
 	/** The check ran outside `cwd` ({@link checkRunsOutside}), so its pass is not this workspace's. */
 	outsideCwd: boolean;
+	/**
+	 * A Python test ran on a bare interpreter where `uv.lock` has no `.venv` beside it, as verify refuses that project
+	 * ({@link checkRunsBareInterpreter}), so its pass judged the system interpreter, not the locked environment (FL-2).
+	 */
+	outsideLockedEnv: boolean;
 }
 
 export interface CallClassification {
@@ -256,6 +264,7 @@ function shellCheckReading(
 	let statusAttributable: boolean | undefined;
 	let failureAttributable: boolean | undefined;
 	let outsideCwd: boolean | undefined;
+	let outsideLockedEnv: boolean | undefined;
 	return {
 		get statusAttributable() {
 			if (statusAttributable === undefined) {
@@ -271,6 +280,14 @@ function shellCheckReading(
 		get outsideCwd() {
 			outsideCwd ??= checkRunsOutside(command, base, cwd);
 			return outsideCwd;
+		},
+		get outsideLockedEnv() {
+			outsideLockedEnv ??= checkRunsBareInterpreter(
+				command,
+				base,
+				(directory) => isSameOrDescendant(directory, cwd) && pythonLauncher(cwd).length === 2,
+			);
+			return outsideLockedEnv;
 		},
 	};
 }
@@ -408,6 +425,6 @@ export function settleCheckCall(
 		call.verdict === "check" &&
 		(failed
 			? outcome === "error" && call.shell?.failureAttributable !== false
-			: outcome !== "blocked" && fresh && call.shell?.outsideCwd !== true);
+			: outcome !== "blocked" && fresh && call.shell?.outsideCwd !== true && call.shell?.outsideLockedEnv !== true);
 	return { mutation, checkedAfterOwnMutation, fresh, settled };
 }

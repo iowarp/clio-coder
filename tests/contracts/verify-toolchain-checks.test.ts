@@ -105,6 +105,11 @@ describe("verify in repositories without package.json", () => {
 				scientificValidity: "not established by this check",
 			});
 			match(textOf(refused), /other arguments or cwd cannot help/u);
+			// FL-2: the refusal names the locked command a bash fallback runs, never a bare interpreter.
+			match(
+				textOf(refused),
+				/With bash, run the project's locked command instead: uv run python -m pytest; never a bare python/u,
+			);
 			strictEqual(refused.details?.exitCode, undefined, "uv was never spawned");
 			strictEqual(refused.details?.unresolved, true, "an unavailable runner ran nothing, so no receipt seals it failed");
 			mkdirSync(join(root, ".venv"));
