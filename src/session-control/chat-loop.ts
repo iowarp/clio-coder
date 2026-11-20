@@ -22,6 +22,8 @@ import type { FailureCause, TurnNoAnswerCause } from "../core/telemetry/enums.js
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { pricesCalls, pricingBasisFields } from "../core/telemetry/pricing.js";
 import { routeCallsPerRound, turnBudgetWidthScale } from "../core/turn-budget-width.js";
+import type { EffectivePricing } from "../domains/providers/catalog.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -2555,11 +2557,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					runtimeId: string;
 					pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
 					freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
+					rates?: EffectivePricing["rates"];
 			  },
 		role: CallJournalOptions["role"],
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
 		const acquire = deps.telemetry?.acquireTelemetrySession;
+		// The route's rates price a target-rates side call from its settled counts (#434).
+		const rates =
+			"runtimeResolution" in runtime
+				? resolveEffectivePricing(
+						runtime.runtimeResolution.target,
+						runtime.runtimeResolution.runtime,
+						runtime.runtimeResolution.wireModelId,
+					).rates
+				: runtime.rates;
 		return acquire
 			? {
 					telemetry: {
@@ -2569,6 +2581,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
 						...pricingBasisFields("runtimeResolution" in runtime ? runtime.runtimeResolution : runtime),
+						...(rates !== undefined ? { rates } : {}),
 					},
 				}
 			: {};
@@ -2852,6 +2865,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		wireModelId: string;
 		pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
 		freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
+		rates: EffectivePricing["rates"];
 		apiKey: string | undefined;
 		thinkingLevel: ThinkingLevel;
 	};
@@ -2901,6 +2915,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtimeId: resolution.runtime.id,
 				wireModelId: runtime.wireModelId,
 				...pricingBasisFields(resolution),
+				rates: resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId).rates,
 				apiKey: sideAuth.apiKey,
 				...sideAuth,
 				thinkingLevel: triageThinkingLevel(
@@ -2937,6 +2952,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtimeId: route.runtimeId,
 			wireModelId: route.wireModelId,
 			...pricingBasisFields(route),
+			rates: resolveEffectivePricing(route.target, route.runtime, route.wireModelId).rates,
 			apiKey: sideAuth.apiKey,
 			...sideAuth,
 			thinkingLevel: triageThinkingLevel(triage.thinkingLevel, route.targetId, route.wireModelId, model),

@@ -1015,16 +1015,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// still trips; an uncapped session prices nothing extra.
 				const capped = deps.getSettings().safety.limits.sessionCostUsd > 0;
 				let interrupted = capped || (message as { stopReason?: unknown }).stopReason === "aborted" ? unreported : null;
-				if (unreported && capped) {
-					const resolution = localRuntime.runtimeResolution;
-					const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
-					if (rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
-				}
+				const resolution = localRuntime.runtimeResolution;
+				const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
+				if (unreported && capped && rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
 				const quota = quotaReadingFromMessage(message, localRuntime.runtimeId, localRuntime.targetId);
 				const settlement = withCachePhysics(
 					callSettlementFromMessage(
 						message,
-						localRuntime.runtimeResolution,
+						{ ...resolution, rates },
 						message.role === "assistant" && message.stopReason === "aborted" ? harnessAbortCause() : undefined,
 						interrupted,
 					),
@@ -1303,8 +1301,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const failure = terminal
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
+						const resolution = localRuntime.runtimeResolution;
+						const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
 						const settlement = withCachePhysics(
-							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, localRuntime.runtimeResolution),
+							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, { ...resolution, rates }),
 							message,
 							modelCall.attemptId,
 						);

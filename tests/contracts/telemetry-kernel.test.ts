@@ -347,6 +347,24 @@ test("a settled breakdown keeps its measured zeros beside a larger total; only a
 	deepStrictEqual(totalOnly.usage?.total, { kind: "measured", value: 500, source: "provider" });
 });
 
+test("declared target rates price a runtime's settled counts, not its placeholder cost, and unknown stays unknown (#434)", () => {
+	// copilot-sdk seeds a zero cost and lists the counts it measured; rates are per million, an omitted cacheWrite is 0.
+	const usage = { input: 3, output: 27, cacheRead: 9905, cacheWrite: 226, totalTokens: 10161, cost: { total: 0 } };
+	const rates = { input: 2, output: 8, cacheRead: 2, cacheWrite: 0 };
+	const copilot = (reportedFields: string[]) =>
+		callSettlementFromMessage(
+			{ stopReason: "stop", usage: { ...usage, reportedFields } },
+			{ pricedBy: "target-rates", rates },
+		).pricing;
+	deepStrictEqual(copilot(["input", "output", "cacheRead", "cacheWrite"]), {
+		usd: { kind: "measured", value: (3 * 2 + 27 * 8 + 9905 * 2) / 1_000_000, source: "local-count" },
+		pricedBy: "target-rates",
+	});
+	// A rated count the provider never reported cannot be priced; a zero-rated one does not matter.
+	strictEqual(copilot(["input", "output", "cacheWrite"]).usd.kind, "unknown");
+	strictEqual(copilot(["input", "output", "cacheRead"]).usd.kind, "measured");
+});
+
 test("message facts preserve unknown placeholders, explicit zero, terminal errors and unsent calls", () => {
 	const usage = { input: 0, output: 0, cacheRead: 0, cost: { total: 0 } };
 	const omitted = callSettlementFromMessage({ stopReason: "stop", usage }, "none");

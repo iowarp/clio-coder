@@ -17,6 +17,8 @@ import { sessionPaths } from "../../../engine/session.js";
 import type { AgentMessage, EngineModel } from "../../../engine/types.js";
 import type { MemoryRuntime } from "../../memory/runtime.js";
 import { prepareBackgroundModelMetadata } from "../../providers/background-model-metadata.js";
+import type { EffectivePricing } from "../../providers/catalog.js";
+import { resolveEffectivePricing } from "../../providers/catalog.js";
 import type { ProvidersContract, ResolvedRuntimeTarget, RuntimeTier } from "../../providers/index.js";
 import {
 	applyModelCapabilityPatch,
@@ -95,6 +97,8 @@ export interface CompactionResolution extends SideCallAuth {
 	model: EngineModel;
 	pricedBy: ResolvedRuntimeTarget["pricedBy"];
 	freeRule?: ResolvedRuntimeTarget["freeRule"];
+	/** The summarizer route's rates, so its target-rates calls are priced from their settled counts (#434). */
+	rates?: EffectivePricing["rates"];
 	targetId: string;
 	runtimeId: string;
 	/** The summarizer route's tier, which sets its first-token stall window (CLI-P9). */
@@ -177,6 +181,7 @@ async function resolveCompactionModel(
 	return {
 		model,
 		...pricingBasisFields(route),
+		rates: resolveEffectivePricing(route.target, route.runtime, route.wireModelId).rates,
 		targetId: route.targetId,
 		runtimeId: route.runtime.id,
 		...(route.runtime.tier !== undefined ? { runtimeTier: route.runtime.tier } : {}),
@@ -316,6 +321,7 @@ export async function runCompactionFlow(
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
 								...pricingBasisFields(resolved),
+								...(resolved.rates !== undefined ? { rates: resolved.rates } : {}),
 								onSettled: (facts) => {
 									callIds.add(facts.callId);
 								},

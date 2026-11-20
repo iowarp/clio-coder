@@ -161,13 +161,33 @@ export function sideCallShutdownCause(message: unknown): "shutdown" | undefined 
 	return record(message).stopReason === "aborted" && terminationPhase() !== "idle" ? "shutdown" : undefined;
 }
 
+/**
+ * Declared per-million target rates priced against a call's settled counts, so no runtime's placeholder cost decides
+ * the amount. A count with a non-zero rate that is not measured cannot be priced, so the amount is unknown, never a
+ * zero (#434). A 1h cache write bills twice the input rate, as Pi's calculateCost prices it.
+ */
+function targetRatesUsd(counts: CallUsage, rates: NonNullable<EffectivePricing["rates"]>): number | null {
+	let perMillion = 0;
+	for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) {
+		const rate = rates[key] ?? 0;
+		if (rate === 0) continue;
+		const fact = counts[key];
+		if (fact.kind !== "measured") return null;
+		perMillion += fact.value * rate;
+	}
+	const longWrite = counts.cacheWrite1h.kind === "measured" ? counts.cacheWrite1h.value : 0;
+	if (longWrite > 0) perMillion += longWrite * (rates.input * 2 - (rates.cacheWrite ?? 0));
+	return perMillion / 1_000_000;
+}
+
 export function callSettlementFromMessage(
 	message: unknown,
-	priced: EffectivePricing["pricedBy"] | PricingBasisSource,
+	priced: EffectivePricing["pricedBy"] | (PricingBasisSource & { rates?: EffectivePricing["rates"] }),
 	cause?: FailureCause,
 	interrupted?: InterruptedUsageEstimate | null,
 ): Omit<CallSettled, keyof CallStarted | "stages"> {
 	const { pricedBy, freeRule } = pricingBasis(priced);
+	const rates = typeof priced === "string" ? null : (priced.rates ?? null);
 	const raw = record(message);
 	const usage = record(raw.usage);
 	const failure = record(raw.failure);
@@ -240,7 +260,16 @@ export function callSettlementFromMessage(
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
 	else if (pricedBy === "free") pricing = pricedUsd("free", 0, freeRule);
-	else if (usd !== null && observed) {
+	else if (
+		observed &&
+		pricedBy === "target-rates" &&
+		rates !== null &&
+		!(usd !== null && (external.cost === "provider-reported" || cost.totalFromProvider === true))
+	) {
+		// A runtime that writes no cost of its own (copilot-sdk seeds a zero total) is priced from its settled counts (#434).
+		const ratedUsd = targetRatesUsd(counts, rates);
+		if (ratedUsd !== null) pricing = pricedUsd("target-rates", ratedUsd);
+	} else if (usd !== null && observed) {
 		// Declared target rates price measured tokens as measured, ranked only below a provider's own cost. The Pi
 		// catalog rate is a guess at someone else's price list and stays estimated (#434). Pi marks a total the provider
 		// billed with totalFromProvider, which OpenRouter reports for every call, on an unpriced target too.
