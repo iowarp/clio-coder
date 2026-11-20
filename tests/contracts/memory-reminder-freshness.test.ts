@@ -12,7 +12,11 @@ import { MemoryDeliveryGate, projectKeptLesson } from "../../src/domains/memory/
 import { canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/operations.js";
 import { claimCommand, memoryRevision } from "../../src/domains/memory/promotion.js";
 import { createMemoryPromptReader } from "../../src/domains/memory/prompt-cache.js";
-import { memorySectionDelta, renderMemoryPromptSection } from "../../src/domains/memory/prompt-section.js";
+import {
+	memoryCarried,
+	memorySectionDelta,
+	renderMemoryPromptSection,
+} from "../../src/domains/memory/prompt-section.js";
 import { readDemotedMemoryIds } from "../../src/domains/memory/recall-use.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { insertMemoryRecordIfAbsent, loadMemoryRecordsSync } from "../../src/domains/memory/store.js";
@@ -189,7 +193,7 @@ test("card D delivery: a changed quote withholds its lessons, an operator approv
 		/** A repository lesson an operator approved, or one the gate kept on two non-author demonstrations. */
 		const lesson = (n: number, text: string, refs: string[], by: "operator" | "guardian"): MemoryRecord => {
 			const record: MemoryRecord = {
-				id: `mem-00000000000000a${n}`,
+				id: `mem-00000000000000${(0xa0 + n).toString(16)}`,
 				scope: "repo",
 				key: `lesson-${n}`,
 				lesson: text,
@@ -248,7 +252,9 @@ test("card D delivery: a changed quote withholds its lessons, an operator approv
 			[sourceEvidenceRef("notes.txt", "owner: ops")],
 			"operator",
 		);
-		for (const record of [operatorQuote, marker, unrelated, unsettled, singleWord, undecidable])
+		// A quote that itself ends in punctuation, wrapped in quote marks and a full stop by the lesson's prose.
+		const wrapped = lesson(10, `guide.txt says "${quote}".`, [sourceEvidenceRef("guide.txt", quote)], "operator");
+		for (const record of [operatorQuote, marker, unrelated, unsettled, singleWord, undecidable, wrapped])
 			await insertMemoryRecordIfAbsent(dataDir, record);
 		// Three earlier sessions were reminded of it and none gave a verdict. The count lives in the state-root ledger,
 		// never on the record, and an operator-decided record is never counted.
@@ -294,7 +300,7 @@ test("card D delivery: a changed quote withholds its lessons, an operator approv
 		const first = section(join(root, "sub"));
 		for (const record of [operatorQuote, marker, unrelated]) ok(first.includes(`[${record.id}]`), record.id);
 		// Past the section's budget, the gate itself: a found single-word quote and an undecidable span are delivered.
-		for (const record of [singleWord, undecidable]) ok(gate.admit(record, join(root, "sub")), record.id);
+		for (const record of [singleWord, undecidable, wrapped]) ok(gate.admit(record, join(root, "sub")), record.id);
 		strictEqual(first.includes(unsettled.id), false, "three sessions in a row without a verdict stop delivery");
 
 		// The quote changes to AMBER: the next session withholds every lesson pinned to it.
@@ -305,6 +311,11 @@ test("card D delivery: a changed quote withholds its lessons, an operator approv
 		strictEqual(second.includes(marker.id), false);
 		strictEqual(second.includes(operatorQuote.id), false);
 		strictEqual(gate.admit(operatorQuote, root), false, "refused on every path for the rest of the session");
+		strictEqual(
+			gate.admit(wrapped, root),
+			false,
+			"a wrapped quote ending in a full stop is recovered, so its change is seen",
+		);
 		await gate.whenSettled();
 		const stored = new Map(loadMemoryRecordsSync(dataDir).map((record) => [record.id, record]));
 		strictEqual(stored.get(marker.id)?.approved, false, "demoted");
@@ -326,7 +337,9 @@ test("card D delivery: a changed quote withholds its lessons, an operator approv
 		strictEqual(section(), "");
 		const live = renderMemoryPromptSection([unrelated]);
 		strictEqual(memorySectionDelta("", live, [], new Map([[unrelated.id, "automatic"]])), "");
-		match(memorySectionDelta("", live, [], new Map([[unrelated.id, "eligible"]])), /^# Memory update/u);
+		const update = memorySectionDelta("", live, [], new Map([[unrelated.id, "eligible"]]));
+		match(update, /^# Memory update/u);
+		ok(memoryCarried("", [], update)(unrelated.id), "a lesson riding this turn's update is not repeated by a reminder");
 
 		// Reminders: a fix claim reaches only its own failed pattern, a quote nobody reviewed reaches no channel,
 		// and the first-change broadcast exists only under the documented opt-in.

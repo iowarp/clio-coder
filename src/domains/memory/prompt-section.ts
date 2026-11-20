@@ -224,6 +224,19 @@ function lastDeliveredMemory(frozen: string, framed: readonly string[]): Map<str
 }
 
 /**
+ * Whether this session's prompt already carries a record, so no tool-time reminder repeats it (DESIGN 4.4): the
+ * frozen section, a `# Memory update` already sent, a framed reminder naming it, or the update this turn adds.
+ */
+export function memoryCarried(compiled: string, framed: readonly string[], delta: string): (id: string) => boolean {
+	const ids = new Set(
+		[compiled, delta, ...framed.filter((text) => text.includes("# Memory update"))].flatMap((section) =>
+			memorySectionBlocks(section).map((block) => block.id),
+		),
+	);
+	return (id) => ids.has(id) || framed.some((text) => text.includes(`[${id}]`));
+}
+
+/**
  * The records whose live text differs from what the model last received for
  * that id, and the lapsed records it last received as text. A memory approval
  * or revision between turns then reaches the model as tail text instead of

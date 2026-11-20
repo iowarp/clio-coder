@@ -239,9 +239,41 @@ function spanMatches(text: string, spanHash: string): boolean {
 	return spanHash.length === 64 ? digest === spanHash : digest.startsWith(spanHash);
 }
 
-/** Quote marks and punctuation a quoted span may be wrapped in or followed by in a lesson's prose. */
-const SPAN_WRAP_START = /^[`"'([]+/u;
-const SPAN_WRAP_END = /[`"'),;:.!?\]]+$/u;
+/** Outer delimiters a lesson's prose may wrap a quoted span in, each with its closer. */
+const SPAN_DELIMITERS: Readonly<Record<string, string>> = { "`": "`", '"': '"', "'": "'", "(": ")", "[": "]" };
+/** Sentence punctuation the prose may put after a quoted span. */
+const SENTENCE_PUNCTUATION = /[.,;:!?]$/u;
+/** Peels tried per run of words: enough for punctuation, a pair, punctuation again and a nested pair. */
+const SPAN_PEEL_STEPS = 4;
+
+/**
+ * The texts a run of the lesson's words may quote: the run itself, then the run with one outer layer peeled at a
+ * time, a matching delimiter pair or one trailing sentence mark, never both at once. A quote that itself ends in
+ * punctuation or a quote mark (`"The marker is COBALT."`, `` `MODE = "prod"` ``, `` `runBuild()` ``) is kept whole at
+ * some step, so its hash is found. Only an exact hash match is ever acted on, so a wrong peel proves nothing.
+ */
+function spanCandidates(raw: string): string[] {
+	const seen = new Set([raw]);
+	let frontier = [raw];
+	for (let step = 0; step < SPAN_PEEL_STEPS && frontier.length > 0; step++) {
+		const next: string[] = [];
+		for (const text of frontier) {
+			const closer = SPAN_DELIMITERS[text[0] ?? ""];
+			const peeled = [
+				...(closer !== undefined && text.length >= 2 && text.endsWith(closer) ? [text.slice(1, -1)] : []),
+				...(SENTENCE_PUNCTUATION.test(text) ? [text.slice(0, -1)] : []),
+			];
+			for (const item of peeled) {
+				const trimmed = item.trim();
+				if (trimmed.length === 0 || seen.has(trimmed)) continue;
+				seen.add(trimmed);
+				next.push(trimmed);
+			}
+		}
+		frontier = next;
+	}
+	return [...seen];
+}
 
 /**
  * Whether the file still holds the pinned span. Only its hash is stored. A source lesson quotes what it read, so the
@@ -252,10 +284,8 @@ function spanState(record: MemoryRecord, source: SourceEvidence, file: SourceFil
 	const words = compact(record.lesson).split(" ");
 	for (let start = 0; start < words.length; start++)
 		for (let end = start; end < Math.min(words.length, start + SPAN_WINDOW_WORDS); end++) {
-			const raw = words.slice(start, end + 1).join(" ");
-			const trimmed = raw.replace(SPAN_WRAP_START, "").replace(SPAN_WRAP_END, "");
-			for (const candidate of new Set([raw, trimmed]))
-				if (candidate.length > 0 && spanMatches(candidate, source.spanHash))
+			for (const candidate of spanCandidates(words.slice(start, end + 1).join(" ")))
+				if (spanMatches(candidate, source.spanHash))
 					return holdsTokens(compact(file.content), compact(candidate)) ? "held" : "gone";
 		}
 	file.windows ??= lineWindowDigests(file.content);

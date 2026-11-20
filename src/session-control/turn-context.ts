@@ -105,6 +105,7 @@ import { type PinnedContextBlock, pinnedContextDelta } from "../domains/extensio
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import {
 	type MemoryRecordStanding,
+	memoryCarried,
 	memorySectionBlocks,
 	memorySectionDelta,
 } from "../domains/memory/prompt-section.js";
@@ -3827,7 +3828,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					beforeSend && memoryTurn !== null
 						? deps.memoryCommitBridge?.offerLessonsForTask(
 								memoryTurn.taskText,
-								(id) => ids.includes(id) || framed.some((text) => text.includes(`[${id}]`)),
+								// The update this turn adds counts as carried: a reminder never repeats it on its first turn.
+								memoryCarried(compiled, framed, delta),
 							)
 						: "";
 				return [delta, lessons ?? ""].filter((part) => part.length > 0).join("\n");
