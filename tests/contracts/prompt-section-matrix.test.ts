@@ -533,6 +533,22 @@ const rows: Row[] = [
 			absent: ["against active decisions", ...(headless ? [] : ["reproduction test", "map each clause"])],
 		}),
 	),
+	...(["v1", "v2"] as const).map(
+		(profile): Row => ({
+			name: `tells a dispatching session an undeclared verification check id is refused with the declared ids named (${profile})`,
+			inputs: {
+				tier: "session" as const,
+				profile,
+				toolNames: [ToolNames.Read, ToolNames.Dispatch],
+				session: { coordinatorCapabilities: [ToolNames.Read, ToolNames.Dispatch] },
+			},
+			present: [
+				profile === "v2"
+					? "An undeclared `intent.verification` check id is refused with the declared ids named, so you need no `verify()`"
+					: "an undeclared id is refused with the declared ids named, so no verify()",
+			],
+		}),
+	),
 	...(["v1", "v2"] as const).flatMap((profile): Row[] => [
 		{
 			name: `renders the report rule for headless and attended yolo main sessions only (${profile} headless)`,
