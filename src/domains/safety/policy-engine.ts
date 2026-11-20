@@ -2504,6 +2504,9 @@ const FILE_READERS: ReadonlySet<string> = new Set([
 	"zstd",
 ]);
 
+/** Commands whose quoted patterns name the files they select, so every operand keeps the base judgement (FX-7). */
+const FILE_FINDERS: ReadonlySet<string> = new Set(["find", "fd", "fdfind", "locate", "plocate", "mlocate", "slocate"]);
+
 /** Reserved words that may stand before the command word of a segment (`if cat x.key; then`). */
 const READER_PREFIX_WORDS: ReadonlySet<string> = new Set([
 	"{",
@@ -2570,7 +2573,9 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 		while (READER_PREFIX_WORDS.has(words[reader]?.value ?? "")) reader += 1;
 		const readerWord = words[reader]?.value ?? "";
 		// A program named by path (`./tool`, `bin/run`) is the workspace's own code, so any operand may be a file it opens.
-		if (FILE_READERS.has(path.basename(readerWord)) || readerWord.includes("/")) {
+		// A file finder's pattern (`find -name '*.key'`) selects the files its -exec or a later xargs reads.
+		const readerName = path.basename(readerWord);
+		if (FILE_READERS.has(readerName) || FILE_FINDERS.has(readerName) || readerWord.includes("/")) {
 			for (const arg of words.slice(reader + 1)) positioned.add(arg);
 		}
 		if (name === "cp" || name === "mv" || name === "install" || name === "ln") {

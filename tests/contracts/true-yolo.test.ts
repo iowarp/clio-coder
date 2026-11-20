@@ -423,7 +423,35 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	const atDefault = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as const;
 	strictEqual(engine.evaluate(scratchRm, "default", atDefault).kind, "allow");
 	strictEqual(engine.evaluate(scratchRm, "yolo", OPERATOR_YOLO).reasonCode.startsWith("yolo-admitted"), false);
-	strictEqual(engine.evaluate(bash('rm -rf "$TMPDIR"'), "default", atDefault).kind, "ask");
+	// The scratch root and its contents get exactly the verdict of the same literal path, on every posture.
+	const temp = process.env.TMPDIR as string;
+	const verdict = (command: string, mode?: "default" | "yolo") => {
+		const decision =
+			mode === undefined
+				? engine.evaluate(bash(command))
+				: engine.evaluate(bash(command), mode, mode === "yolo" ? OPERATOR_YOLO : atDefault);
+		return `${decision.kind}/${decision.reasonCode}`;
+	};
+	const pairs: ReadonlyArray<readonly [string, string]> = [
+		['rm -rf "$TMPDIR"', `rm -rf "${temp}"`],
+		['rm -rf "$TMPDIR/"*', `rm -rf "${temp}/"*`],
+		['rm -f "$TMPDIR/p.txt"', `rm -f "${temp}/p.txt"`],
+	];
+	for (const [spelled, literal] of pairs) {
+		for (const mode of [undefined, "default", "yolo"] as const)
+			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
+	}
+	// A command that can reassign TMPDIR keeps it named at run time, so the delete-outside signal stays.
+	for (const command of [
+		`TMPDIR=${homedir()}; rm -rf "$TMPDIR/project"`,
+		"export TMPDIR=/; rm -rf $TMPDIR/etc",
+		`TMPDIR=${process.cwd()}/.. rm -rf "$TMPDIR/x"`,
+		'read TMPDIR < /dev/null; rm -rf "$TMPDIR/x"',
+		`rm -rf "\${TMPDIR:=/}/etc"`,
+	]) {
+		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
+		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
+	}
 	// Reading Clio's own state, cleaning the workspace and writing /dev/null stay off the floor.
 	for (const command of [
 		`cat ${join(home.dir, "config", "settings.yaml")}`,

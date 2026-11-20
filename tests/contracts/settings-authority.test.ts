@@ -94,7 +94,13 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"cat > y.ts <<'EOF'\nevent.key\nEOF",
 	])
 		strictEqual(engine.evaluate(bash(command)).kind, "allow", command);
-	for (const command of ["wc -c < nope.key", "if head nope.key; then :; fi", "od -c *.key"])
+	for (const command of [
+		"wc -c < nope.key",
+		"if head nope.key; then :; fi",
+		"od -c *.key",
+		"find . -name '*.key' -exec cat {} +",
+		"locate '*.key' | xargs cat",
+	])
 		strictEqual(engine.evaluate(bash(command)).reasonCode, "secret_path_bash", command);
 });
 
