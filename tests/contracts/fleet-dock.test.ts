@@ -15,10 +15,10 @@ class CapturedFullscreen extends TuiAltScreen {
 	}
 }
 
-function fullscreenFrame(root: Component, width: number): string[] {
+function fullscreenFrame(root: Component, width: number, rows = 35): string[] {
 	const terminal = {
 		columns: width,
-		rows: 35,
+		rows,
 		kittyProtocolActive: false,
 		start() {},
 		stop() {},
@@ -84,6 +84,41 @@ test("live Fleet runs reserve normal-flow rows and leave transcript words intact
 		}
 	}
 	match(fleet.render(80).map(stripTerminalSequences).join("\n"), /Fleet Runs/);
+});
+
+test("the rails keep the transcript's budget and fold the fleet dock and context rail under 30 rows (TUI-13)", () => {
+	const block = (name: string, count: number): Component => ({
+		render: () => Array.from({ length: count }, (_, index) => `${name} ${index + 1}`),
+		invalidate() {},
+	});
+	for (const mode of ["regular", "fullscreen"] as const) {
+		for (const terminalRows of [24, 40]) {
+			const root = buildLayout(
+				{
+					banner: block("header", 1),
+					chat: block("transcript", 1),
+					pending: block("queued", 15),
+					fleet: block("worker", 2),
+					contextProgress: block("context", 3),
+					editor: block("composer", 4),
+					footer: block("footer", 2),
+				},
+				{ mode, getTerminalRows: () => terminalRows },
+			);
+			const frame = (mode === "fullscreen" ? fullscreenFrame(root, 80, terminalRows) : root.render(80)).map((line) =>
+				stripTerminalSequences(line).trim(),
+			);
+			const label = `${mode} at ${terminalRows} rows: ${JSON.stringify(frame)}`;
+			const rails = frame.filter((row) => /^(queued|worker|context) \d+$|more rows?$/u.test(row));
+			const floor = terminalRows < 30 ? 6 : Math.ceil(terminalRows / 3);
+			ok(rails.length + 4 + 2 <= terminalRows - floor, label);
+			ok(frame.includes("composer 4") && frame.includes("footer 2"), label);
+			strictEqual(frame.includes("worker 1"), terminalRows >= 30, label);
+			strictEqual(frame.includes("context 1"), terminalRows >= 30, label);
+			if (terminalRows < 30) ok(frame.includes("… 4 more rows"), label);
+			else ok(frame.includes("queued 15"), label);
+		}
+	}
 });
 
 test("a live run is never drawn by a transcript-covering ticker overlay (BT-007)", () => {

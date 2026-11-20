@@ -2,6 +2,7 @@ import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui
 import { ScrollView, TuiAltScreen, truncateToWidth, VStack, visibleWidth } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
 import { keptRows } from "./kept-rows.js";
+import { fitRails, railsFolded, railsRoom } from "./rails-budget.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
@@ -26,6 +27,77 @@ export interface LayoutOptions {
 	mode?: TuiMode;
 	fullscreenScrollbar?: ScrollViewScrollbar;
 	onTranscript?: (view: ScrollView) => void;
+	/** Terminal height. With it the rails above the composer keep to the transcript's budget and fold on a short screen. */
+	getTerminalRows?: () => number;
+}
+
+/** The rails between the transcript and the composer, in screen order; the operator's own queued words keep rows first. */
+function railEntries(parts: LayoutParts): Array<{ component: Component; priority: number; foldable: boolean }> {
+	return [
+		...(parts.workspace ? [{ component: parts.workspace, priority: 1, foldable: false }] : []),
+		...(parts.pending ? [{ component: parts.pending, priority: 0, foldable: false }] : []),
+		...(parts.fleet ? [{ component: parts.fleet, priority: 2, foldable: true }] : []),
+		...(parts.contextProgress ? [{ component: parts.contextProgress, priority: 3, foldable: true }] : []),
+	];
+}
+
+/** Each rail's rows this frame, cut to the budget a composer and footer of these heights leave. */
+function budgetRails(
+	rails: ReadonlyArray<{ priority: number; foldable: boolean }>,
+	rendered: ReadonlyArray<readonly string[]>,
+	width: number,
+	terminalRows: number | undefined,
+	fixedRows: () => number,
+): ReadonlyArray<readonly string[]> {
+	if (terminalRows === undefined || rendered.every((lines) => lines.length === 0)) return rendered;
+	const fixed = fixedRows();
+	return fitRails(
+		rails.map((rail, index) => ({ ...rail, lines: rendered[index] ?? [] })),
+		railsRoom(terminalRows, fixed, 0),
+		railsFolded(terminalRows),
+		width,
+	);
+}
+
+/**
+ * Fullscreen lays the dock out child by child, measuring each once a frame in screen order, so the rails render ahead
+ * of the composer. The first rail of a frame renders them all, measures the composer and footer, and hands each rail
+ * its share; the composer and footer stay the layout's own children, so focus and mouse still reach them.
+ */
+class RailsAllocator {
+	private granted: Array<readonly string[] | null> = [];
+	private grantedWidth = -1;
+
+	constructor(
+		private readonly rails: ReadonlyArray<{ component: Component; priority: number; foldable: boolean }>,
+		private readonly fixedRows: (width: number) => number,
+		private readonly getTerminalRows: () => number,
+	) {}
+
+	take(index: number, width: number): string[] {
+		if (this.granted[index] == null || this.grantedWidth !== width) {
+			const rendered = this.rails.map((rail) => rail.component.render(width));
+			this.granted = [...budgetRails(this.rails, rendered, width, this.getTerminalRows(), () => this.fixedRows(width))];
+			this.grantedWidth = width;
+		}
+		const lines = this.granted[index] ?? [];
+		this.granted[index] = null;
+		return [...lines];
+	}
+
+	slot(index: number): Component {
+		const inner = this.rails[index]?.component;
+		const slot: Component = {
+			render: (width) => this.take(index, width),
+			invalidate: () => {
+				this.granted = [];
+				inner?.invalidate();
+			},
+		};
+		if (inner?.handleInput) slot.handleInput = (data) => inner.handleInput?.(data);
+		if (inner?.handleMouse) slot.handleMouse = (event) => inner.handleMouse?.(event);
+		return slot;
+	}
 }
 
 export interface FullscreenLayout {
@@ -209,10 +281,19 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
 	});
 	options.onTranscript?.(transcript);
 	const dock = new VStack();
-	if (parts.workspace) dock.addChild(parts.workspace, { shrink: 1, minSize: 0 });
-	if (parts.pending) dock.addChild(parts.pending, { shrink: 1, minSize: 0 });
-	if (parts.fleet) dock.addChild(parts.fleet, { shrink: 1, minSize: 0 });
-	if (parts.contextProgress) dock.addChild(parts.contextProgress, { shrink: 1, minSize: 0 });
+	const rails = railEntries(parts);
+	const getTerminalRows = options.getTerminalRows;
+	if (getTerminalRows) {
+		// Measuring the composer here renders it a second time this frame, which only a frame with a rail showing pays.
+		const allocator = new RailsAllocator(
+			rails,
+			(width) => parts.editor.render(width).length + parts.footer.render(width).length,
+			getTerminalRows,
+		);
+		for (const index of rails.keys()) dock.addChild(allocator.slot(index), { shrink: 1, minSize: 0 });
+	} else {
+		for (const rail of rails) dock.addChild(rail.component, { shrink: 1, minSize: 0 });
+	}
 	dock.addChild(parts.editor, { shrink: 1, minSize: 3 });
 	dock.addChild(parts.footer, { shrink: 1, minSize: 1 });
 	const root = new VStack();
@@ -256,7 +337,14 @@ class RegularRoot implements Component {
 	/** Set for the exit frame: the composer, rails and footer go so the exit summary follows the transcript. */
 	private dockReleased = false;
 
-	constructor(private readonly parts: LayoutParts) {}
+	private readonly rails: ReturnType<typeof railEntries>;
+
+	constructor(
+		private readonly parts: LayoutParts,
+		private readonly getTerminalRows?: () => number,
+	) {
+		this.rails = railEntries(parts);
+	}
 
 	render(width: number): string[] {
 		if (this.renderedSkinEpoch !== skinEpoch()) {
@@ -323,12 +411,14 @@ class RegularRoot implements Component {
 			}
 		}
 		if (!this.dockReleased) {
-			if (this.parts.workspace) write(this.parts.workspace.render(width));
-			if (this.parts.pending) write(this.parts.pending.render(width));
-			if (this.parts.fleet) write(this.parts.fleet.render(width));
-			if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
-			write(this.parts.editor.render(width));
-			write(this.parts.footer.render(width));
+			const rendered = this.rails.map((rail) => rail.component.render(width));
+			const editor = this.parts.editor.render(width);
+			const footer = this.parts.footer.render(width);
+			const rows = this.getTerminalRows?.();
+			for (const lines of budgetRails(this.rails, rendered, width, rows, () => editor.length + footer.length))
+				write(lines);
+			write(editor);
+			write(footer);
 		}
 		this.heldTail = tail;
 		if (tail === undefined) this.heldTailAt = -1;
@@ -357,7 +447,7 @@ class RegularRoot implements Component {
 
 export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Component {
 	if (options.mode === "fullscreen") return buildFullscreenLayout(parts, options).root;
-	return new RegularRoot(parts);
+	return new RegularRoot(parts, options.getTerminalRows);
 }
 
 /**
