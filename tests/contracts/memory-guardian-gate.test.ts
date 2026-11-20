@@ -337,20 +337,48 @@ describe("memory guardian gate", () => {
 		ok(decided.every((item) => kept.has(item.id)));
 		strictEqual(kept.has(notes[0]?.id ?? ""), false, "the note with no evidence goes first");
 
-		// An operator decision is never written by an automatic path, and its command blocks every other claim on it.
+		// An automatic path never rewords, revises, merges or re-decides an operator's record, and a decided command
+		// blocks every other claim on it. Observations still accrue: they are what delivery holds or withholds it by.
 		const strictId = strictNote.record?.id ?? "";
 		await rejectMemoryRecord(dataDir, strictId);
-		const rejectedBefore = (await loadMemoryRecords(dataDir)).find((item) => item.id === strictId);
+		const current = async (id: string) => (await loadMemoryRecords(dataDir)).find((item) => item.id === id);
+		const rejectedBefore = await current(strictId);
 		await session("s20", strict, [passed("strict")]);
-		await recordMemoryObservations(dataDir, [
-			{ memoryId: strictId, sessionId: "s21", kind: "delivered" },
-			{ memoryId: strictId, sessionId: "s21", kind: "held" },
-		]);
-		deepStrictEqual(
-			(await loadMemoryRecords(dataDir)).find((item) => item.id === strictId),
-			rejectedBefore,
-			"the operator's rejection is left exactly as they left it",
+		deepStrictEqual(await current(strictId), rejectedBefore, "a receipt session leaves the rejection as it was");
+		const decision = (record: MemoryRecord | undefined) =>
+			JSON.stringify([
+				record?.lesson,
+				record?.evidenceRefs,
+				record?.claim,
+				record?.revisions,
+				record?.approved,
+				record?.approval,
+				record?.rejectedAt,
+			]);
+		const approvedId = fork.find((item) => item.claim?.kind === "fix")?.id ?? "";
+		await approveMemoryRecord(dataDir, approvedId);
+		const approvedBefore = await current(approvedId);
+		await recordMemoryObservations(
+			dataDir,
+			[
+				{ memoryId: approvedId, sessionId: "s21", kind: "delivered" },
+				{ memoryId: approvedId, sessionId: "s21", kind: "held", prompted: true },
+				{ memoryId: approvedId, sessionId: "s22", kind: "delivered" },
+				{ memoryId: approvedId, sessionId: "s22", kind: "contradicted" },
+			],
+			new Date("2099-06-01T00:00:00.000Z"),
 		);
+		const approvedAfter = await current(approvedId);
+		strictEqual(decision(approvedAfter), decision(approvedBefore), "text and decision are byte-identical");
+		strictEqual(approvedAfter?.deliveredCount, (approvedBefore?.deliveredCount ?? 0) + 2);
+		deepStrictEqual(
+			approvedAfter?.observations?.slice(-2).map((item) => [item.sessionId, item.kind]),
+			[
+				["s21", "held"],
+				["s22", "contradicted"],
+			],
+		);
+		ok((approvedAfter?.lastVerifiedAt ?? "") > (approvedBefore?.lastVerifiedAt ?? ""), "a held re-verifies it");
 		const otherFix: MemoryClaim = { kind: "fix", failed: pattern(run("old")), fixed: pattern(run("strict")) };
 		const otherPair = [failed("old"), passed("strict")];
 		for (const sessionId of ["s22", "s23"]) await session(sessionId, otherFix, otherPair);

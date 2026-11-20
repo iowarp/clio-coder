@@ -280,8 +280,8 @@ export async function recordMemoryObservations(
 					outcome.missing.push(input.memoryId);
 					continue;
 				}
-				// The operator's decision stands as they left it: no automatic observation rewrites it.
-				if (operatorDecided(current)) continue;
+				// An operator-decided record still collects verdicts and deliveries, which delivery holds or withholds it
+				// by; `observeMemoryRecord` touches neither its words, its claim nor the decision, and the gate holds it.
 				const next = touched.has(current.id) ? current : cloneMemoryRecord(current);
 				observeMemoryRecord(next, input, at);
 				touched.set(next.id, next);
