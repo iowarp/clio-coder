@@ -63,10 +63,6 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			if (stopReason !== undefined && stopReason !== "stop") return [];
 			const turnToolCalls = input.metadata?.turnToolCalls;
 			if (typeof turnToolCalls !== "number" || turnToolCalls <= 0) return [];
-			// A surface without access to tasks can never update the board, so
-			// nudging it would loop against a wall.
-			const activeToolNames = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
-			if (typeof activeToolNames === "string" && !activeToolNames.split(",").includes(ToolNames.Tasks)) return [];
 			let board: TaskBoardSnapshot | null;
 			try {
 				board = options.getBoard();
@@ -74,6 +70,14 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 				return [];
 			}
 			if (board === null || openTasks(board).length === 0) return [];
+			// A surface without access to tasks can never update the board, so nudging it would loop against a wall.
+			// The open board is still a fact the host seals (fleet design 4.3), carried on a note that asks for no tool.
+			const activeToolNames = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
+			if (typeof activeToolNames === "string" && !activeToolNames.split(",").includes(ToolNames.Tasks)) {
+				const open = openTasks(board).length;
+				const message = `[CLIO Coder] Task board "${board.title}" still has ${open} open ${open === 1 ? "task" : "tasks"}; this turn cannot reach the tasks tool, so the board stays open.`;
+				return [{ kind: "inject_reminder", message, severity: "info", audience: "model", fact: "open_task" }];
+			}
 			const message = buildOpenTasksMessage(board);
 			return [
 				// Row 162, fleet design 4.3: an undeclared turn is carried onward; on a declared one the host seals the fact.

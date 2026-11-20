@@ -184,13 +184,30 @@ describe("coordinator discovery and dependency composition", () => {
 			state.continuation.dropRequest();
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "scoped", toolName: "read" });
 			strictEqual(observed.at(-1)?.metadata?.activeCapabilityNames, "read");
-			strictEqual(middleware.flushPendingReminders(), "");
+			// Without tasks the board cannot be repaired, so nothing nudges; the open board is still a note and a fact.
+			const scopedNote = middleware.flushPendingReminders();
+			match(scopedNote, /cannot reach the tasks tool/u);
+			strictEqual(scopedNote.includes("action="), false);
 			strictEqual(state.continuation.requested, false);
+			deepStrictEqual(state.turnSealedCompletion?.facts, ["open_task"]);
+			// A declared done whose scope admits finish but not tasks seals partly_done from the board alone.
+			state.currentTurnConstraints = { allowedTools: ["read", "finish"] };
+			state.turnCompletion = { state: "done", limitations: [], unverified: [] };
+			await middleware.fireTurnEnd(runtime, [], { toolCallId: "declared", toolName: "finish" });
+			strictEqual(String(observed.at(-1)?.metadata?.activeCapabilityNames).split(",").includes("tasks"), false);
+			deepStrictEqual(
+				[state.turnSealedCompletion?.claimed, state.turnSealedCompletion?.assessed, state.turnSealedCompletion?.facts],
+				["done", "partly_done", ["open_task"]],
+			);
+			strictEqual(state.continuation.requested, false);
+			middleware.flushPendingReminders();
+			state.turnCompletion = null;
 			state.currentTurnConstraints = undefined;
 			runtime.agent.state.tools = [];
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "no-tools", toolName: "read" });
 			strictEqual(observed.at(-1)?.metadata?.activeCapabilityNames, "");
-			strictEqual(middleware.flushPendingReminders(), "");
+			match(middleware.flushPendingReminders(), /cannot reach the tasks tool/u);
+			strictEqual(state.continuation.requested, false);
 		} finally {
 			await bundle.extension.stop?.();
 		}
