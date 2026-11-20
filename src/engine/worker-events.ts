@@ -202,6 +202,15 @@ export interface ClioPeerQuestionEvent {
 	};
 }
 
+/**
+ * A steer prompt sent into a running ACP turn failed after the turn itself answered. The run keeps its own
+ * outcome; this records that the guidance may not have reached the peer.
+ */
+export interface ClioPeerSteerFailedEvent {
+	type: "clio_coder_peer_steer_failed";
+	payload: { reason: string };
+}
+
 export type ClioWorkerEvent =
 	| WorkerTelemetryFrame
 	| ClioToolStartEvent
@@ -217,4 +226,5 @@ export type ClioWorkerEvent =
 	| ClioHelperResultEvent
 	| ClioHelperResultRejectedEvent
 	| ClioRepositoryInstructionsEvent
-	| ClioPeerQuestionEvent;
+	| ClioPeerQuestionEvent
+	| ClioPeerSteerFailedEvent;

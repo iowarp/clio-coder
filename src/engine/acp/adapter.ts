@@ -25,7 +25,7 @@ import type { ClioWorkerEvent } from "../worker-events.js";
 import { isAntigravityAcp, prepareAntigravityLaunch } from "./antigravity-launch.js";
 import { createAntigravityShims } from "./antigravity-shims.js";
 import { withInstalledCodex } from "./codex-launch.js";
-import { AcpAuthRequiredError, AcpTimeoutError } from "./errors.js";
+import { AcpAuthRequiredError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
 import { AcpToolMediator } from "./tool-mediator.js";
 import {
@@ -464,9 +464,15 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		}),
 	];
 
+	// Wakes the turn's wait on pending steer prompts once the run is aborted or killed.
+	let wakeOnAbort = (): void => {};
+	const abortWake = new Promise<"aborted">((resolve) => {
+		wakeOnAbort = () => resolve("aborted");
+	});
 	const abort = (): void => {
 		if (finished) return;
 		aborted = true;
+		wakeOnAbort();
 		if (sessionId) {
 			try {
 				transport.notify("session/cancel", { sessionId });
@@ -495,21 +501,32 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		void beginForceTermination();
 	});
 	const promptTimeoutMs = turnTimeoutMs === 0 ? undefined : turnTimeoutMs;
-	// Prompts a steer sent into the running turn; the run settles after the last of them.
+	// Steer prompts sent into the running turn, and every prompt response of the turn in the order it settled.
 	const steerPrompts: Array<Promise<AcpPromptResponse>> = [];
+	const settledTurn: AcpPromptResponse[] = [];
+	// True from the turn's first session/prompt until its response lands; a steer after that would open a new turn.
 	let promptInFlight = false;
 	const steer = (text: string): boolean => {
 		const body = text.trim();
-		if (finished || aborted || !promptInFlight || sessionId === null || body.length === 0) return false;
-		if (agy?.steersByPrompt() !== true) return false;
-		const sent = transport.request<AcpPromptResponse>(
-			"session/prompt",
-			{ sessionId, prompt: [{ type: "text", text: body }] },
-			promptTimeoutMs,
-		);
-		// Awaited in turn order below; this only keeps an early rejection from going unhandled.
-		sent.catch(() => {});
-		steerPrompts.push(sent);
+		if (finished || aborted || forceTermination !== null || transport.closed || !promptInFlight) return false;
+		if (sessionId === null || body.length === 0 || agy?.steersByPrompt() !== true) return false;
+		let sent: Promise<AcpPromptResponse>;
+		try {
+			sent = transport.request<AcpPromptResponse>(
+				"session/prompt",
+				{ sessionId, prompt: [{ type: "text", text: body }] },
+				promptTimeoutMs,
+			);
+		} catch {
+			return false;
+		}
+		const tracked = sent.then((response) => {
+			settledTurn.push(response);
+			return response;
+		});
+		// Awaited after the turn's own prompt; this only keeps an early rejection from going unhandled.
+		tracked.catch(() => {});
+		steerPrompts.push(tracked);
 		return true;
 	};
 	const promise = (async (): Promise<AcpDelegationResult> => {
@@ -553,10 +570,11 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			sessionId = sessionIdFrom(session);
 			requireActive();
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
-			const defaultMode = agy?.defaultMode(sessionId, session) ?? null;
-			if (defaultMode !== null) {
-				await transport.request<unknown>("session/set_mode", defaultMode, connectTimeoutMs);
+			const modeReset = agy?.defaultMode(sessionId, session) ?? null;
+			if (modeReset !== null) {
+				const reset = await transport.request<unknown>(modeReset.method, modeReset.params, connectTimeoutMs);
 				requireActive();
+				if (modeReset.method === "session/set_config_option") agy?.confirmMode(reset);
 			}
 			const configOptions = isRecord(session) ? session.configOptions : undefined;
 			const modelOption = peerSelectOption(configOptions, "model", "model");
@@ -629,7 +647,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			}
 			requireActive();
 			promptInFlight = true;
-			let promptResponse = await transport.request<AcpPromptResponse>(
+			const turnPrompt = transport.request<AcpPromptResponse>(
 				"session/prompt",
 				{
 					sessionId,
@@ -637,12 +655,34 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 				promptTimeoutMs,
 			);
-			// A steer continues the same turn, so the turn ends with the last prompt sent into it.
-			for (let index = 0; index < steerPrompts.length; index++) {
+			// Registered before the await below, so steers are refused as soon as the turn's answer lands.
+			turnPrompt.then(
+				(response) => {
+					promptInFlight = false;
+					settledTurn.push(response);
+				},
+				() => {
+					promptInFlight = false;
+				},
+			);
+			let promptResponse = await turnPrompt;
+			// A steer continues the same turn: wait for every steer prompt, stop waiting on abort, and keep a steer
+			// that failed after the turn answered as a record rather than the run's failure.
+			for (let index = 0; index < steerPrompts.length && !aborted; index++) {
 				const steered = steerPrompts[index];
-				if (steered !== undefined) promptResponse = await steered;
+				if (steered === undefined) continue;
+				const outcome = await Promise.race([
+					steered.then(
+						() => "settled" as const,
+						(error: unknown) => ({ error }),
+					),
+					abortWake,
+				]);
+				if (outcome === "aborted") break;
+				if (outcome !== "settled")
+					emit({ type: "clio_coder_peer_steer_failed", payload: { reason: acpErrorMessage(outcome.error) } });
 			}
-			promptInFlight = false;
+			if (agy !== null && steerPrompts.length > 0) promptResponse = agy.settleTurn(settledTurn);
 			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
 			// _meta; other agents (Copilot/Codex/OpenCode) report nothing here, so usage
 			// is best-effort. Fall back to legacy top-level fields for older peers.
@@ -750,6 +790,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const kill = (): void => {
 		if (finished) return;
 		aborted = true;
+		wakeOnAbort();
 		clearCancelTimer();
 		void beginForceTermination();
 	};
@@ -760,7 +801,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		promise,
 		abort,
 		kill,
-		steer,
+		...(agy !== null ? { steer } : {}),
 		heartbeatAt,
 		toolCallLog: () => mediator.snapshot().toolCallLog,
 	};

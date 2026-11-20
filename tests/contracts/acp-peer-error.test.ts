@@ -251,6 +251,8 @@ interface AgyFrame {
 		clientInfo?: { name?: string };
 		_meta?: unknown;
 		prompt?: Array<{ text?: string }>;
+		configId?: string;
+		value?: string;
 	};
 	result?: unknown;
 }
@@ -261,7 +263,7 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
 	const cwd = process.cwd();
-	const launch = async (name: string, version: string, session: "ok" | "auth") => {
+	const launch = async (name: string, version: string, session: "ok" | "auth" | "abort") => {
 		const dir = join(scratch, name);
 		await mkdir(dir);
 		const log = join(dir, "frames.jsonl");
@@ -277,6 +279,8 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 				env: { HOME: scratch },
 				connectTimeoutMs: 5_000,
 			},
+			// A pending steer must not hold an aborted run open until this grace forces termination.
+			cancelGraceMs: 600_000,
 			task: "pick a branch",
 			systemPrompt: "SYSTEM RULES",
 			cwd,
@@ -310,16 +314,28 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 		const live = await launch("live", "1.5.13", "ok");
 		const questions: unknown[] = [];
 		const steered: boolean[] = [];
+		const steerFailures: unknown[] = [];
+		let lateSteer: boolean | undefined;
 		for await (const event of live.run.events) {
-			const typed = event as { type: string; payload?: unknown };
+			const typed = event as { type: string; payload?: unknown; text?: string };
+			if (typed.type === "clio_coder_peer_steer_failed") steerFailures.push(typed.payload);
+			// The turn's own prompt has answered by now; a steer here would open a new turn, so it is refused.
+			if (typed.type === "text_delta" && typed.text === "initial-done") lateSteer = live.run.steer?.("too late");
 			if (typed.type !== "clio_coder_peer_question") continue;
 			questions.push(typed.payload);
-			steered.push(live.run.steer?.("use the topic branch") === true);
+			steered.push(live.run.steer?.("use the topic branch") === true, live.run.steer?.("second steer") === true);
 		}
 		const result = await live.run.promise;
-		strictEqual(result.stopReason, "end_turn", result.failureMessage);
-		strictEqual(result.delegation.toolCallsRequested, 0);
-		deepStrictEqual(steered, [true]);
+		// The first steer settled first at max_tokens; the turn's later end_turn does not hide it, and the second
+		// steer's failure after the turn answered is recorded, not the run's failure.
+		strictEqual(result.stopReason, "max_tokens", result.failureMessage);
+		strictEqual(result.failureMessage, "ACP stopReason=max_tokens");
+		deepStrictEqual(steerFailures, [{ reason: "ACP session/prompt failed: steer lost" }]);
+		strictEqual(lateSteer, false);
+		strictEqual(live.run.steer?.("after the run"), false);
+		// interaction_2 has an execute kind and a command: a tool call for the mediator, not a question.
+		strictEqual(result.delegation.toolCallsRequested, 1);
+		deepStrictEqual(steered, [true, true]);
 		deepStrictEqual(questions, [
 			{
 				questionId: "interaction_1",
@@ -345,14 +361,28 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 		const prompts = frames
 			.filter((frame) => frame.method === "session/prompt")
 			.map((frame) => frame.params?.prompt?.[0]?.text ?? "");
-		strictEqual(prompts.length, 2);
-		const [first = "", second] = prompts;
+		const [first = "", ...steers] = prompts;
 		ok(!first.includes("SYSTEM RULES") && first.includes("pick a branch"), first);
-		strictEqual(second, "use the topic branch");
+		deepStrictEqual(steers, ["use the topic branch", "second steer"]);
 		ok(!frames.some((frame) => frame.method === "session/cancel"));
 		deepStrictEqual(frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
 			outcome: { outcome: "cancelled" },
 		});
+
+		// Abort with a steer the peer never answers: the run settles cancelled without waiting on it. This session
+		// reports its mode only as a config option, which is reset to default the same way.
+		const aborting = await launch("abort", "1.5.13", "abort");
+		for await (const event of aborting.run.events) {
+			if ((event as { type: string }).type !== "clio_coder_peer_question") continue;
+			strictEqual(aborting.run.steer?.("never answered"), true);
+			aborting.run.abort();
+		}
+		strictEqual((await aborting.run.promise).stopReason, "cancelled");
+		const abortFrames = await aborting.frames();
+		deepStrictEqual(
+			abortFrames.filter((frame) => frame.method === "session/set_config_option").map((frame) => frame.params?.value),
+			["default"],
+		);
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
 	}

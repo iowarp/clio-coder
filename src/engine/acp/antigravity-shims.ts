@@ -1,7 +1,7 @@
 import type { DelegationToolGovernance } from "../../core/defaults.js";
 import { AcpAuthRequiredError, AcpProtocolError } from "./errors.js";
 import { boundAcpSessionUpdate, routeNonJsonRpcStdout, type StdioTransportOptions } from "./transport.js";
-import type { AcpInitializeResponse, AcpRequestPermissionResponse } from "./types.js";
+import type { AcpInitializeResponse, AcpPromptResponse, AcpRequestPermissionResponse } from "./types.js";
 
 type Version = readonly [number, number, number];
 
@@ -13,6 +13,8 @@ const DEFAULT_MODE = "default";
 /** A permission request with this tool call id prefix is agy asking the user a fixed-choice question. */
 const QUESTION_ID_PREFIX = "interaction_";
 const SECURITY_WARNING_KEY = "agy.security.warning";
+/** ACP tool kinds: an `interaction_*` request of one of these kinds is a tool call, mediated like any other. */
+const TOOL_KINDS = new Set(["execute", "edit", "delete", "move", "fetch", "read", "search"]);
 const PROFILE_FLAGS = new Set(["--gemini-dir", "--gemini_dir", "--app-data-dir", "--app_data_dir"]);
 /** agy's own JSON-RPC code and text for a session request made before sign-in (probed on 1.5.13). */
 const AUTH_REQUIRED_CODE = -32000;
@@ -21,6 +23,11 @@ const MAX_QUESTION_CHARS = 2_000;
 const MAX_CHOICES = 16;
 const MAX_CHOICE_CHARS = 200;
 const MAX_WARNING_CHARS = 1_000;
+
+/** The request that returns agy to `default`: the stable session mode, or a `mode` session config option. */
+export type AntigravityModeReset =
+	| { method: "session/set_mode"; params: { sessionId: string; modeId: string } }
+	| { method: "session/set_config_option"; params: { sessionId: string; configId: string; value: string } };
 
 /** A fixed-choice question agy put to the user through `session/request_permission`, bounded for the run feed. */
 export interface AntigravityQuestion {
@@ -43,8 +50,19 @@ export interface AntigravityShims {
 		cwd: string,
 		systemPrompt: string | undefined,
 	): { params: Record<string, unknown>; systemPromptSent: boolean };
-	/** `session/set_mode` params that return agy to `default` while Clio mediates, or null when nothing changes. */
-	defaultMode(sessionId: string, session: unknown): { sessionId: string; modeId: string } | null;
+	/**
+	 * The request that returns agy to `default` while Clio mediates, or null when nothing changes. Throws when the
+	 * session reports no mode at all, or no `default` one, under a governance that needs agy to ask.
+	 */
+	defaultMode(sessionId: string, session: unknown): AntigravityModeReset | null;
+	/** Throws when a `session/set_config_option` answer still shows a mode other than `default`. */
+	confirmMode(response: unknown): void;
+	/**
+	 * One result for a turn that took steer prompts, from its responses in the order they settled: the last one,
+	 * except that a stop reason other than `end_turn` (or a missing one) is never hidden by a later `end_turn`, and
+	 * usage is the sum of every response's counts.
+	 */
+	settleTurn(settled: ReadonlyArray<AcpPromptResponse>): AcpPromptResponse;
 	/** The typed sign-in failure for agy's `Authentication required`, or the error unchanged. */
 	authFailure(error: unknown): unknown;
 	/** Whether a mid-turn steer goes out as another `session/prompt`. */
@@ -74,6 +92,57 @@ function atLeast(version: Version, floor: Version): boolean {
 		if (left !== right) return left > right;
 	}
 	return true;
+}
+
+interface ModeOption {
+	id: string;
+	current: string | null;
+	values: string[];
+}
+
+/** The `select` session config option in category `mode`, its values flattened out of any groups. */
+function modeOption(configOptions: unknown): ModeOption | null {
+	if (!Array.isArray(configOptions)) return null;
+	for (const option of configOptions) {
+		if (!isRecord(option) || option.category !== "mode" || option.type !== "select") continue;
+		if (typeof option.id !== "string" || option.id.length === 0) continue;
+		const values: string[] = [];
+		for (const entry of Array.isArray(option.options) ? option.options : []) {
+			if (!isRecord(entry)) continue;
+			if (typeof entry.value === "string") values.push(entry.value);
+			for (const grouped of Array.isArray(entry.options) ? entry.options : []) {
+				if (isRecord(grouped) && typeof grouped.value === "string") values.push(grouped.value);
+			}
+		}
+		return { id: option.id, current: typeof option.currentValue === "string" ? option.currentValue : null, values };
+	}
+	return null;
+}
+
+/** Per-key sums of the numeric counts in each usage record; `estimated` holds when any record says so. */
+function summedUsage(records: ReadonlyArray<unknown>): Record<string, unknown> | undefined {
+	const sum: Record<string, unknown> = {};
+	let any = false;
+	for (const record of records) {
+		if (!isRecord(record)) continue;
+		any = true;
+		for (const [key, value] of Object.entries(record)) {
+			if (typeof value === "number" && Number.isFinite(value)) {
+				const prior = sum[key];
+				sum[key] = (typeof prior === "number" ? prior : 0) + value;
+			} else if (key === "estimated" && value === true) sum.estimated = true;
+		}
+	}
+	return any ? sum : undefined;
+}
+
+/** A permission request shaped like a tool call: a tool kind, a command, or file locations. */
+function hasToolShape(toolCall: Record<string, unknown>): boolean {
+	const kind = typeof toolCall.kind === "string" ? toolCall.kind.toLowerCase() : "";
+	if (TOOL_KINDS.has(kind)) return true;
+	if (toolCall.locations !== undefined) return true;
+	const raw = toolCall.rawInput;
+	return isRecord(raw) && ["command", "cmd", "shell"].some((key) => Object.hasOwn(raw, key));
 }
 
 function bounded(text: string, chars: number): string {
@@ -154,16 +223,45 @@ export function createAntigravityShims(input: {
 			// agent-managed hands approvals to agy itself; every other governance needs agy to ask, which only
 			// the default mode does for edits and commands.
 			if (input.toolGovernance === "agent-managed") return null;
+			const unmediated = (detail: string): Error =>
+				new Error(`Antigravity session ${detail}, so CLIO Coder cannot mediate its tool calls`);
 			const modes = isRecord(session) && isRecord(session.modes) ? session.modes : null;
 			const current = modes?.currentModeId;
-			if (typeof current !== "string" || current === DEFAULT_MODE) return null;
-			const available = Array.isArray(modes?.availableModes) ? modes.availableModes : [];
-			if (!available.some((mode) => isRecord(mode) && mode.id === DEFAULT_MODE)) {
-				throw new Error(
-					`Antigravity session started in mode '${bounded(current, 64)}' and offers no '${DEFAULT_MODE}' mode, so CLIO Coder cannot mediate its tool calls`,
-				);
+			if (typeof current === "string") {
+				if (current === DEFAULT_MODE) return null;
+				const available = Array.isArray(modes?.availableModes) ? modes.availableModes : [];
+				if (!available.some((mode) => isRecord(mode) && mode.id === DEFAULT_MODE))
+					throw unmediated(`started in mode '${bounded(current, 64)}' and offers no '${DEFAULT_MODE}' mode`);
+				return { method: "session/set_mode", params: { sessionId, modeId: DEFAULT_MODE } };
 			}
-			return { sessionId, modeId: DEFAULT_MODE };
+			const option = modeOption(isRecord(session) ? session.configOptions : undefined);
+			if (option === null) throw unmediated("reported no mode (neither modes nor a mode config option)");
+			if (option.current === DEFAULT_MODE) return null;
+			if (!option.values.includes(DEFAULT_MODE))
+				throw unmediated(`offers no '${DEFAULT_MODE}' value for its mode option '${bounded(option.id, 64)}'`);
+			return {
+				method: "session/set_config_option",
+				params: { sessionId, configId: option.id, value: DEFAULT_MODE },
+			};
+		},
+		confirmMode(response) {
+			const option = modeOption(isRecord(response) ? response.configOptions : undefined);
+			if (option !== null && option.current !== null && option.current !== DEFAULT_MODE)
+				throw new Error(
+					`Antigravity kept mode '${bounded(option.current, 64)}' after CLIO Coder selected '${DEFAULT_MODE}', so CLIO Coder cannot mediate its tool calls`,
+				);
+		},
+		settleTurn(settled) {
+			const last = settled.at(-1) ?? {};
+			const unfinished = settled.filter((response) => response.stopReason !== "end_turn").at(-1);
+			const usage = summedUsage(settled.map((response) => response.usage ?? response.tokenUsage));
+			const { stopReason: _lastStop, tokenUsage: _lastTokens, ...rest } = last;
+			const stopReason = unfinished !== undefined ? unfinished.stopReason : last.stopReason;
+			return {
+				...rest,
+				...(stopReason !== undefined ? { stopReason } : {}),
+				...(usage !== undefined ? { usage } : {}),
+			};
 		},
 		authFailure(error) {
 			if (!(error instanceof AcpProtocolError) || !isRecord(error.data)) return error;
@@ -179,7 +277,7 @@ export function createAntigravityShims(input: {
 			if (!isRecord(params) || !isRecord(params.toolCall)) return null;
 			const toolCall = params.toolCall;
 			const id = toolCall.toolCallId;
-			if (typeof id !== "string" || !id.startsWith(QUESTION_ID_PREFIX)) return null;
+			if (typeof id !== "string" || !id.startsWith(QUESTION_ID_PREFIX) || hasToolShape(toolCall)) return null;
 			const options = Array.isArray(params.options) ? params.options : [];
 			const choices = options
 				.slice(0, MAX_CHOICES)
