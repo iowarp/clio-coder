@@ -184,16 +184,35 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 				match(String(feedback[1]?.content), /Observed read ranges:/u);
 				match(String(feedback[1]?.content), /Required arguments schema:/u);
 				// Terminal helper repair preserves the work-tool lock. Existing read
-				// evidence survives, but the only remaining tool is the handoff.
+				// evidence survives. A handoff names its tool over the scout's full
+				// tool list for the cached prefill; this fixture answers in text, which
+				// ignores the named choice, so later handoffs on the route narrow to the
+				// one tool with "required" and never widen again.
+				let narrowed = false;
 				for (const request of scoutRequests.filter((entry) => repairs(entry).length > 0)) {
 					ok(Array.isArray(request.tools));
-					deepStrictEqual(
-						request.tools.map((tool) => tool.function?.name),
-						["clio_submit_result"],
-					);
-					strictEqual(request.tool_choice, "required");
+					if (request.tool_choice === "required") narrowed = true;
+					if (narrowed) {
+						deepStrictEqual(
+							request.tools.map((tool) => tool.function?.name),
+							["clio_submit_result"],
+						);
+						strictEqual(request.tool_choice, "required");
+					} else {
+						deepStrictEqual(request.tools, scoutRequests[0]?.tools);
+						deepStrictEqual(request.tool_choice, { type: "function", function: { name: "clio_submit_result" } });
+					}
 					match(String(repairs(request).at(-1)?.content), /Work tools remain disabled/u);
 				}
+				ok(
+					scoutRequests.some(
+						(entry) =>
+							JSON.stringify(entry.tool_choice) ===
+								JSON.stringify({ type: "function", function: { name: "clio_submit_result" } }) &&
+							JSON.stringify(entry.tools) === JSON.stringify(scoutRequests[0]?.tools),
+					),
+					"the first handoff names its tool over the full list",
+				);
 			}
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);

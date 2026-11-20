@@ -94,11 +94,11 @@ const declared = (body: Record<string, unknown>) => {
 	return names(head.tools.flatMap((entry) => (entry.type === "namespace" ? (entry.tools ?? []) : [entry])));
 };
 
-test("terminal handoff overrides work-tool lock with one required tool", async () => {
+test("completions terminal handoff overrides work-tool lock and names its tool over the full list", async () => {
 	const model = catalog("openrouter", "google/gemini-2.5-flash");
 	const body = await wire(model, [handoff, lock]);
-	deepStrictEqual(names(body.tools), [name]);
-	strictEqual(body.tool_choice, "required");
+	deepStrictEqual(names(body.tools), ["write", name]);
+	deepStrictEqual(body.tool_choice, { type: "function", function: { name } });
 	strictEqual(body.parallel_tool_calls, false);
 });
 test("Anthropic terminal handoff disables thinking and parallel calls", async () => {

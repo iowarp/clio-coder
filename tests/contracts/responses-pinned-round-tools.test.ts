@@ -1,5 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
@@ -148,4 +152,79 @@ test("codex: a rejected named choice falls back to auto over the same full tool 
 	strictEqual(after.body.tool_choice, "auto");
 	strictEqual(prefix(after.body), prefix(plain.body));
 	deepStrictEqual([after.record?.choice, after.record?.downgradeReason], ["auto", rejection]);
+});
+
+test("completions: a terminal handoff names its tool over the full list and narrows only after a rejection", async (t) => {
+	const env = await isolateClioEnv("clio-coder-completions-handoff-");
+	t.after(() => env.restore());
+	const model = catalog("openrouter", "google/gemini-2.5-flash");
+	const targetId = "completions-handoff";
+	const handoff: ToolRound = { ...pinned, handoff: true };
+	const named = { type: "function", function: { name: "extension_desk__next_step" } };
+	const plain = await wire(model, [], "fixture", targetId);
+	const first = await wire(model, [handoff], "fixture", targetId);
+	strictEqual(JSON.stringify(first.body.tools), JSON.stringify(plain.body.tools));
+	deepStrictEqual(first.body.tool_choice, named);
+	strictEqual(first.body.parallel_tool_calls, false);
+	const sent: unknown[] = [];
+	const rejection = "400 Invalid tool_choice type: 'object'. Supported string values: none, auto, required";
+	const controlled = applyToolRounds(model, context(model), { apiKey: "fixture" }, [handoff], targetId);
+	const result = await streamToolRound(
+		model,
+		controlled,
+		(request) => {
+			sent.push([request.options?.toolChoice, request.context.tools?.map((entry) => entry.name)]);
+			const events = createAssistantMessageEventStream();
+			const message = {
+				role: "assistant" as const,
+				content: [],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: { ...usage, cost: zeroCost },
+				stopReason: sent.length === 1 ? ("error" as const) : ("stop" as const),
+				...(sent.length === 1 ? { errorMessage: rejection } : {}),
+				timestamp: 4,
+			};
+			events.push(
+				message.stopReason === "error"
+					? { type: "error", reason: "error", error: message }
+					: { type: "done", reason: "stop", message },
+			);
+			events.end(message);
+			return events;
+		},
+		targetId,
+	).result();
+	strictEqual(result.stopReason, "stop");
+	deepStrictEqual(sent, [
+		[named, ["read", "write", "extension_desk__next_step"]],
+		["required", ["extension_desk__next_step"]],
+	]);
+	// The rejection is remembered: later handoffs on the route narrow from the start, as before row 158.
+	const after = await wire(model, [handoff], "fixture", targetId);
+	deepStrictEqual(
+		(after.body.tools as Array<{ function: { name: string } }>).map((entry) => entry.function.name),
+		["extension_desk__next_step"],
+	);
+	strictEqual(after.body.tool_choice, "required");
+	deepStrictEqual([after.record?.choice, after.record?.downgradeReason], ["required", rejection]);
+	// The mark is kept in the state root, so a fresh process on the same target, endpoint and model narrows at once.
+	ok(readFileSync(join(env.dir, "state", "tool-choice-routes.json"), "utf8").includes("Invalid tool_choice"));
+	const script = `
+		const { applyToolRounds } = await import(${JSON.stringify(new URL("../../src/engine/provider-payload.ts", import.meta.url).href)});
+		const { engineModels } = await import(${JSON.stringify(new URL("../../src/engine/models.ts", import.meta.url).href)});
+		const model = engineModels.getModel("openrouter", "google/gemini-2.5-flash");
+		const context = { messages: [], tools: ["read", "extension_desk__next_step"].map((name) => ({ name, description: name, parameters: {} })) };
+		const controlled = applyToolRounds(model, context, {}, [${JSON.stringify(handoff)}], ${JSON.stringify(targetId)});
+		process.stdout.write(JSON.stringify([controlled.options?.toolChoice, controlled.context.tools.map((entry) => entry.name), controlled.toolRounds[0].downgradeReason, controlled.fallback === undefined]));
+	`;
+	const { stdout } = await promisify(execFile)(
+		process.execPath,
+		["--import", "tsx", "--input-type=module", "-e", script],
+		{
+			env: process.env,
+		},
+	);
+	deepStrictEqual(JSON.parse(stdout), ["required", ["extension_desk__next_step"], rejection, true]);
 });
