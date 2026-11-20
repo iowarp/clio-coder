@@ -14,6 +14,7 @@ import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { buildExtensionPromptGate } from "../../src/entry/extension-runtime-hooks.js";
 import type { CreateChatLoopDeps, PromptSubmitInput } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { ContinuationState } from "../../src/session-control/turn-state.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -23,10 +24,11 @@ const SECRET = "sk-ant-api03-continuationfixture0123456789abcdefghijklmnop";
  * A yolo turn the tool budget stopped after a failed bash call, through the real chat loop and turn runtime. With
  * `declared`, the same turn also calls `finish` alone while a required tool is still pending, and the fixture records
  * the turn runtime's finishTurn decision. With `handover`, an operator message is queued when that declared turn
- * finishes and carries the run into a second, undeclared turn that ends with a required tool still pending.
+ * finishes and carries the run into a second, undeclared turn that ends with a required tool still pending. With
+ * `rounds`, two yolo continuations of that prompt each run a tool and end undeclared; the first crosses the budget again.
  */
-async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "handover") {
-	const declared = mode !== "undeclared";
+async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "handover" | "rounds") {
+	const declared = mode === "declared" || mode === "handover";
 	let queued = false;
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -180,6 +182,38 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 						await listener({ type: "agent_end", messages: [message] });
 						return;
 					}
+					if (mode === "rounds" && (prompts === 2 || prompts === 3)) {
+						// An unattended continuation that did work and ended without declaring: the finish round's case.
+						(state as { tools?: Array<{ name: string }> }).tools = [{ name: "finish" }];
+						const args = { command: "true" };
+						await listener({ type: "tool_execution_start", toolCallId: `call-${prompts}`, toolName: "bash", args });
+						await listener({
+							type: "tool_execution_end",
+							toolCallId: `call-${prompts}`,
+							toolName: "bash",
+							result: { content: [{ type: "text", text: "ok" }] },
+							isError: false,
+						} as unknown as AgentEvent);
+						const reply = {
+							role: "assistant",
+							content: [{ type: "text", text: "Still going." }],
+							stopReason: "stop",
+							timestamp: Date.now(),
+						} as AgentMessage;
+						await push(reply);
+						decisions.push(await agent.finishTurn?.({ message: reply, toolResults: [] }));
+						if (prompts === 2)
+							context.bus.emit("safety.tool_budget_exceeded", {
+								tool: "bash",
+								callsThisTurn: 60,
+								softBudget: 60,
+								hardCeiling: 75,
+								interrupted: false,
+								at: Date.now(),
+							});
+						await listener({ type: "agent_end", messages: [reply] });
+						return;
+					}
 					const message = {
 						role: "assistant",
 						content: [{ type: "text", text: "fixture reply" }],
@@ -307,4 +341,27 @@ test("a turn declared through finish is never continued: no required-tool round,
 	const terminal = rowOf((payload) => payload.terminalToolResult === true && payload.toolCallId === "call-f");
 	const followUp = rowOf((payload) => payload.text === "also update the notes");
 	ok(terminal >= 0 && followUp > terminal, `terminal row ${terminal}, follow-up row ${followUp}`);
+});
+
+test("yolo continuations of one operator prompt share its finish round and nudges (FX-41)", async (t) => {
+	const scratch = await isolateClioEnv("clio-coder-continuation-rounds-");
+	t.after(() => scratch.restore());
+	const { submitted, decisions } = await stoppedTurn(scratch.dir, "rounds");
+	deepStrictEqual(
+		submitted.map((input) => input.origin.origin),
+		["operator", "continuation", "continuation"],
+	);
+	// The first unattended continuation that did work and ended undeclared takes the one finish round; the next
+	// continuation of the same prompt does not take another.
+	deepStrictEqual(decisions, [{ action: "continue" }, undefined]);
+
+	const caps = new ContinuationState();
+	ok(caps.request());
+	ok(caps.request("verification"));
+	caps.takeRequest();
+	caps.beginPrompt({ requestContinuation: false, yoloContinuation: true });
+	strictEqual(caps.request(), false);
+	strictEqual(caps.request("verification"), false);
+	caps.beginPrompt({ requestContinuation: false, yoloContinuation: false });
+	ok(caps.request());
 });

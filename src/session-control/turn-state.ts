@@ -149,11 +149,12 @@ export class ContinuationState {
 		return this.#stop;
 	}
 
-	/** Prompt acceptance: a fresh operator prompt resets the caps its own continuations do not. */
+	/** Prompt acceptance: a fresh operator prompt resets the caps its own continuations, middleware or yolo, do not (FX-41). */
 	beginPrompt(kind: { requestContinuation: boolean; yoloContinuation: boolean }): void {
 		this.#inRun = false;
 		this.#stop = null;
-		if (!kind.yoloContinuation) this.#yoloContinuations = 0;
+		if (kind.yoloContinuation) return;
+		this.#yoloContinuations = 0;
 		if (!kind.requestContinuation) {
 			this.#nudgeSpent = false;
 			this.#verificationNudgeSpent = false;

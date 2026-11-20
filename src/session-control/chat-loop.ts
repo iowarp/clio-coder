@@ -3540,7 +3540,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnCollectedDetachedBatch = false;
 				state.turnCompletion = null;
 				state.turnSealedCompletion = null;
-				if (options.requestContinuation !== true) {
+				// The finish round is once per operator prompt (fleet M5, FX-41): a yolo continuation of the prompt keeps it.
+				if (options.requestContinuation !== true && options.yoloContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 				}
