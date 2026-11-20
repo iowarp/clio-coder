@@ -21,6 +21,7 @@ import { type MemoryGateOutcome, recordMemoryObservations } from "./guardian-gat
 import type { MemoryDeliveryOutcome, MemoryKnowledgeReview } from "./intervention.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationDigest } from "./observations.js";
+import { checkoutPosition } from "./operations.js";
 import { takeMemoryStoreNotices } from "./store.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
@@ -145,7 +146,10 @@ export class MemoryLessonFeedback {
 					current.held = true;
 				}
 				const proposed = await current.record;
-				return proposed ? { ...proposed, kind: outcome.kind } : null;
+				// A held delivery followed the reminder that carried the lesson.
+				return proposed
+					? { ...proposed, kind: outcome.kind, ...(outcome.kind === "held" ? { prompted: true } : {}) }
+					: null;
 			}),
 		);
 		if (final) this.#proposed.clear();
@@ -155,7 +159,7 @@ export class MemoryLessonFeedback {
 				.then((resolved) =>
 					recordMemoryObservations(
 						this.#ports.dataDir(),
-						resolved.filter((item) => item !== null),
+						resolved.filter((item) => item !== null).map((item) => ({ ...this.#position(), ...item })),
 					),
 				)
 				.then((outcome) => this.#reportGate(outcome))
@@ -184,7 +188,8 @@ export class MemoryLessonFeedback {
 		this.#observe(
 			[
 				...input.delivered.map((memoryId) => ({ memoryId, sessionId, kind: "delivered" as const })),
-				...input.held.map((memoryId) => ({ memoryId, sessionId, kind: "held" as const })),
+				// The recommended command succeeded after the lesson was delivered: a prompted success.
+				...input.held.map((memoryId) => ({ memoryId, sessionId, kind: "held" as const, prompted: true })),
 			],
 			"durable lesson outcomes not recorded",
 		);
@@ -416,7 +421,7 @@ export class MemoryLessonFeedback {
 					this.#reportGate(
 						await recordMemoryObservations(
 							this.#ports.dataDir(),
-							ids.map((memoryId) => ({ memoryId, sessionId, kind })),
+							ids.map((memoryId) => ({ ...this.#position(), memoryId, sessionId, kind })),
 						),
 					);
 				}
@@ -449,7 +454,7 @@ export class MemoryLessonFeedback {
 				.then((resolved) =>
 					recordMemoryObservations(
 						this.#ports.dataDir(),
-						resolved.filter((item) => item !== null).map((item) => ({ ...item, kind })),
+						resolved.filter((item) => item !== null).map((item) => ({ ...this.#position(), ...item, kind })),
 					),
 				)
 				.then((outcome) => this.#reportGate(outcome))
@@ -461,10 +466,21 @@ export class MemoryLessonFeedback {
 		if (inputs.length === 0) return;
 		this.#track(
 			Promise.resolve()
-				.then(() => recordMemoryObservations(this.#ports.dataDir(), inputs))
+				.then(() =>
+					recordMemoryObservations(
+						this.#ports.dataDir(),
+						inputs.map((item) => ({ ...this.#position(), ...item })),
+					),
+				)
 				.then((outcome) => this.#reportGate(outcome))
 				.catch(this.#storeFailure(failure)),
 		);
+	}
+
+	/** The current checkout's branch and head, which scope a verdict; nothing when no session or repository is known. */
+	#position(): { branch?: string; head?: string } {
+		const cwd = this.#ports.session()?.cwd;
+		return cwd ? checkoutPosition(cwd) : {};
 	}
 
 	/** Nobody reviews these by hand any more, so a gate change is told to the operator. */

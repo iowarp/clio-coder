@@ -632,6 +632,10 @@ function publicMemoryRecord(record: MemoryRecord, cleared: ReadonlyArray<Cleared
 		...(record.approved && record.approval !== undefined ? { approval: { ...record.approval } } : {}),
 		...(record.rejectedAt !== undefined ? { rejectedAt: record.rejectedAt } : {}),
 		...(record.repository !== undefined ? { repository: record.repository } : {}),
+		...(record.claim !== undefined ? { claim: record.claim } : {}),
+		...(record.revisions !== undefined ? { revisions: record.revisions.map((item) => ({ ...item })) } : {}),
+		...(deliveries(record) > 0 ? { deliveredCount: deliveries(record) } : {}),
+		...(record.lastDeliveredAt !== undefined ? { lastDeliveredAt: record.lastDeliveredAt } : {}),
 		...(record.regressions !== undefined && record.regressions.length > 0
 			? { regressions: [...record.regressions] }
 			: {}),
@@ -645,6 +649,11 @@ function publicMemoryRecord(record: MemoryRecord, cleared: ReadonlyArray<Cleared
 				}
 			: {}),
 	};
+}
+
+/** A record written before the delivery counter still lists its deliveries as observations until it next changes. */
+function deliveries(record: MemoryRecord): number {
+	return (record.deliveredCount ?? 0) + (record.observations ?? []).filter((item) => item.kind === "delivered").length;
 }
 
 function renderMemoryList(

@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, sep } from "node:path";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
-import { canonicalProjectRoot } from "../../core/project-root.js";
+import { canonicalProjectRoot, checkoutHead } from "../../core/project-root.js";
 import {
 	type MemoryMutationOptions,
 	memoryRoot,
@@ -13,11 +13,14 @@ import {
 } from "./store.js";
 import type {
 	MemoryAgentIdentity,
+	MemoryClaim,
+	MemoryClaimCommand,
 	MemoryRecord,
 	MemoryRepositoryIdentity,
 	MemoryRetrievalOptions,
 	MemoryRuntimeIdentity,
 } from "./types.js";
+import { validSourceValue } from "./validate.js";
 
 export async function approveMemoryRecord(
 	dataDir: string,
@@ -188,7 +191,61 @@ export function cloneMemoryRecord(record: MemoryRecord): MemoryRecord {
 	}
 	if (record.approval !== undefined) next.approval = { ...record.approval };
 	if (record.observations !== undefined) next.observations = record.observations.map((item) => ({ ...item }));
+	if (record.claim !== undefined) next.claim = cloneClaim(record.claim);
+	if (record.revisions !== undefined) next.revisions = record.revisions.map((item) => ({ ...item }));
+	if (record.deliveredCount !== undefined) next.deliveredCount = record.deliveredCount;
+	if (record.lastDeliveredAt !== undefined) next.lastDeliveredAt = record.lastDeliveredAt;
 	return next;
+}
+
+function cloneClaim(claim: MemoryClaim): MemoryClaim {
+	const command = (item: MemoryClaimCommand): MemoryClaimCommand => ({
+		...item,
+		assignments: [...item.assignments],
+		argv: [...item.argv],
+	});
+	switch (claim.kind) {
+		case "command":
+			return { kind: "command", command: command(claim.command) };
+		case "fix":
+			return { kind: "fix", failed: command(claim.failed), fixed: command(claim.fixed) };
+		case "source":
+			return { ...claim };
+	}
+}
+
+/**
+ * Where a verdict was observed: the branch the checkout holding `cwd` has checked out and its head commit, read
+ * from Git's files with no subprocess. Either is absent when it cannot be read (no repository, a detached head has
+ * no branch, an unborn branch has no head).
+ */
+export function checkoutPosition(cwd: string): { branch?: string; head?: string } {
+	let root: string | null = null;
+	for (let dir = cwd; isAbsolute(dir); ) {
+		if (existsSync(join(dir, ".git"))) {
+			root = dir;
+			break;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	if (root === null) return {};
+	const head = checkoutHead(root);
+	let branch: string | undefined;
+	try {
+		const dotGit = join(root, ".git");
+		const pointer = lstatSync(dotGit).isFile()
+			? /^gitdir:\s*(.+?)\s*$/mu.exec(readFileSync(dotGit, "utf8"))?.[1]
+			: dotGit;
+		if (pointer !== undefined) {
+			const ref = /^ref:\s*refs\/heads\/(\S+)$/u.exec(readFileSync(join(resolve(root, pointer), "HEAD"), "utf8").trim());
+			if (ref?.[1] !== undefined && validSourceValue(ref[1])) branch = ref[1];
+		}
+	} catch {
+		// An unreadable HEAD names no branch.
+	}
+	return { ...(branch !== undefined ? { branch } : {}), ...(head !== null ? { head } : {}) };
 }
 
 /**
