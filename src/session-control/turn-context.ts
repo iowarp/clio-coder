@@ -721,6 +721,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		measured: boolean;
 	} | null = null;
 	let lastCompactionNoGain = false;
+	/**
+	 * The route's measured tokens per chars/4 token (CTX-1): a provider count over the chars/4 figure of the same
+	 * request, held per route so a compaction or an eviction that drops the anchor does not drop the calibration.
+	 */
+	let routeCalibration: { key: string; ratio: number } | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
 	// prompt was reused. Shown together in /context so "prompt reused" can
@@ -1452,11 +1457,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			reconciledTokens === null
 				? estimateAgentContextTokens(estimateInput) + pendingPolicyTokens
 				: breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
+		const ratio = routeTokenRatio(agentRuntime, observed);
 		return {
 			// The estimate is a floor, not a competing verdict: it prices material
 			// the attested call never saw, so a provider count below it would be
-			// answering about a smaller conversation.
-			tokens: Math.max(estimatedTokens, reconciledTokens ?? 0),
+			// answering about a smaller conversation. It is priced at the route's
+			// measured chars per token when the route has one, else at chars/4.
+			tokens: Math.max(ratio === 1 ? estimatedTokens : Math.ceil(estimatedTokens * ratio), reconciledTokens ?? 0),
 			estimatedTokens,
 			reconciledTokens,
 			contextWindow,
@@ -1508,6 +1515,31 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			systemPromptTokens: statics.systemPromptTokens,
 			toolSchemaTokens: statics.toolSchemaTokens,
 		};
+	};
+
+	/**
+	 * The route's tokens per chars/4 token (CTX-1), or 1 where it has no measurement. The provider-measured anchor
+	 * `measuredAnchor` admits, live or a resumed reply's usage, sets it: its count over the chars/4 figure of the
+	 * request it measured. A held ratio prices the context after a compaction or eviction dropped that anchor, on the
+	 * same route only. A ratio outside 0.5 to 2 (8 to 2 characters a token) is a count of something chars/4 never
+	 * saw, such as server-side state, not a tokenizer, and leaves chars/4 in place. Without `observed` (a replay
+	 * estimate) only the held ratio applies.
+	 */
+	const routeTokenRatio = (agentRuntime: AgentRuntime, observed?: MessageListDigests): number => {
+		const key = JSON.stringify([
+			agentRuntime.targetId,
+			agentRuntime.runtimeId,
+			agentRuntime.wireModelId,
+			anchorModelKey(agentRuntime),
+		]);
+		const anchor = observed ? measuredAnchor(agentRuntime, observed) : null;
+		if (observed && anchor) {
+			let estimate = anchor.systemPromptTokens + anchor.toolSchemaTokens;
+			for (let index = 0; index < anchor.covered; index += 1) estimate += observed.messageTokens[index] ?? 0;
+			const ratio = estimate > 0 ? anchor.tokens / estimate : 0;
+			routeCalibration = ratio >= 0.5 && ratio <= 2 ? { key, ratio } : null;
+		}
+		return routeCalibration?.key === key ? routeCalibration.ratio : 1;
 	};
 
 	/**
@@ -3338,7 +3370,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				status: "available",
 				capability: "native",
 				view: refreshLiveBudget(),
-				...(live ? { outputReserveAt: (tokens: number) => resolveFitOutputReserve(live, tokens) } : {}),
+				...(live
+					? {
+							outputReserveAt: (tokens: number) => resolveFitOutputReserve(live, tokens),
+							priceAt: (tokens: number) => {
+								const ratio = routeTokenRatio(live);
+								return ratio === 1 ? tokens : Math.ceil(tokens * ratio);
+							},
+						}
+					: {}),
 				...(sessionPrompt
 					? { promptSections: sessionPrompt.sections.map((section) => ({ id: section.id, tokens: section.tokenEstimate })) }
 					: {}),

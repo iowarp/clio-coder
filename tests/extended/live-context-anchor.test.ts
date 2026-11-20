@@ -223,6 +223,52 @@ describe("live measured context anchor", () => {
 		strictEqual(f.context.liveContextEstimate(f.runtime).reconciledTokens, 120);
 	});
 
+	it("prices the trigger and the gauge at the route's measured chars per token live, after a compaction and on resume (CTX-1)", () => {
+		const structural = (f: ReturnType<typeof fixture>): number => {
+			const breakdown = estimateAgentContextBreakdown(f.runtime.agent.state);
+			return breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.toolSchemaTokens;
+		};
+		// Sparse prose: the route measured 0.8 of chars/4, so a chars/4 floor read the live context 1.24x high.
+		const prose = fixture();
+		const proseMeasured = Math.round(structural(prose) * 0.8);
+		prose.context.reconcileUsage(usage(proseMeasured - 61, 61));
+		const tail = result("prose ".repeat(2000));
+		prose.runtime.agent.state.messages.push(tail);
+		const live = prose.context.liveContextEstimate(prose.runtime);
+		strictEqual(live.tokens, proseMeasured + estimateAgentMessageTokens(tail));
+		ok(live.estimatedTokens > live.tokens * 1.15, "the raw chars/4 figure stays reported beside it");
+		// The gauge republishes at run settlement and then names the trigger's figure.
+		prose.context.flushReconciledSnapshot();
+		strictEqual(prose.context.liveBudget().inputTokens, live.tokens);
+		// After a compaction the anchor is gone, and the route still charges 1.3x chars/4 (it read about 10K low).
+		const dense = fixture();
+		const atAnchor = structural(dense);
+		const denseMeasured = Math.round(atAnchor * 1.3);
+		dense.context.reconcileUsage(usage(denseMeasured - 61, 61));
+		dense.runtime.agent.state.messages = [
+			{ role: "user", content: [{ type: "text", text: "Summary of the earlier work. ".repeat(300) }], timestamp: 3 },
+		];
+		const after = dense.context.liveContextEstimate(dense.runtime);
+		strictEqual(after.reconciledTokens, null);
+		strictEqual(after.tokens, Math.ceil(after.estimatedTokens * (denseMeasured / atAnchor)));
+		dense.context.flushReconciledSnapshot();
+		strictEqual(dense.context.liveBudget().inputTokens, after.tokens);
+		// A resumed session takes the ratio its newest same-route reply measured (the resume read 11.5% low).
+		const resumed = fixture();
+		const model = resumed.runtime.agent.state.model;
+		ok(model);
+		Object.assign(model, { api: "openai-completions", provider: "fixture" });
+		const atReply = structural(resumed);
+		const replyMeasured = Math.round(atReply * 1.3);
+		resumed.runtime.agent.state.messages = [assistant(usage(replyMeasured - 61, 61)), tail];
+		resumed.context.resetForSession();
+		const reopened = resumed.context.liveContextEstimate(resumed.runtime);
+		ok(reopened.tokens > reopened.estimatedTokens * 1.25 && reopened.tokens < reopened.estimatedTokens * 1.35);
+		// A measurement no tokenizer explains (here 0.02 of chars/4) leaves chars/4 in place.
+		resumed.context.reconcileUsage(usage(100, 20));
+		strictEqual(resumed.context.liveContextEstimate(resumed.runtime).tokens, structural(resumed));
+	});
+
 	for (const change of ["shorter", "replaced", "runtime", "target", "model", "endpoint", "reset"] as const) {
 		it(`declines a stale measured anchor after ${change}`, () => {
 			const f = fixture();

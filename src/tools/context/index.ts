@@ -768,6 +768,8 @@ interface RecallRoom {
 	input: number;
 	/** The fit output reserve at a request's input; it shrinks as the batch's input grows (Astra #7). */
 	reserve(input: number): number;
+	/** A chars/4 count priced as the view prices its input: at the route's measured chars per token (CTX-1). */
+	price(tokens: number): number;
 	window: number;
 	spent(): number;
 	charge(tokens: number): void;
@@ -789,9 +791,11 @@ function recallRoom(deps: ContextToolDeps, options: ToolInvokeOptions | undefine
 	if (input === null || reserve === null || window === null) return null;
 	const key = [options?.sessionId ?? "", options?.turnId ?? "", window, reserve, input].join(":");
 	const reserveAt = budget.outputReserveAt;
+	const priceAt = budget.priceAt;
 	return {
 		input,
 		reserve: (tokens) => reserveAt?.(tokens) ?? reserve,
+		price: (tokens) => priceAt?.(tokens) ?? tokens,
 		window,
 		spent: () => recallRoomSpent.get(key) ?? 0,
 		charge: (tokens) => {
@@ -890,12 +894,18 @@ function runRecallScope(
 		maxLines: Number.MAX_SAFE_INTEGER,
 	});
 	const room = recallRoom(deps, options);
-	const cost = estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: truncation.content }] });
+	const chars4 = estimateAgentMessageTokens({
+		role: "toolResult",
+		content: [{ type: "text", text: truncation.content }],
+	});
+	const cost = room === null ? chars4 : room.price(chars4);
 	const carried = room === null ? 0 : room.input + room.spent() + cost;
 	if (room !== null && !requestFits(carried, room.reserve(carried), room.window)) {
 		// Nothing was readmitted, so no contextRecall entry and no recalled event. The stub still lands in the
 		// request, so later siblings see its cost.
-		room.charge(estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: RECALL_NO_ROOM }] }));
+		room.charge(
+			room.price(estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: RECALL_NO_ROOM }] })),
+		);
 		return finalizeObservation({
 			tool: ToolNames.Context,
 			unit: "results",
