@@ -22,6 +22,7 @@ import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
 import { externalUsageFacts, reportedUsageSums } from "../external-call-telemetry.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
+import { isAntigravityAcp, prepareAntigravityLaunch } from "./antigravity-launch.js";
 import { withInstalledCodex } from "./codex-launch.js";
 import { AcpTimeoutError } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
@@ -339,9 +340,15 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		const installed = findExecutableOnPath("claude");
 		if (installed) transportOptions.env = { ...transportOptions.env, CLAUDE_CODE_EXECUTABLE: installed };
 	}
+	const antigravity = isAntigravityAcp(input.agent) ? prepareAntigravityLaunch(input.agent, transportOptions.env) : null;
+	if (antigravity) transportOptions.env = antigravity.env;
 	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
 	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
-	const transport = createStdioTransport(input.agent.command, input.agent.args ?? [], transportOptions);
+	const transport = createStdioTransport(
+		input.agent.command,
+		antigravity?.args ?? input.agent.args ?? [],
+		transportOptions,
+	);
 	let sessionId: string | null = null;
 	let initialized: AcpInitializeResponse | null = null;
 	let aborted = false;
@@ -669,6 +676,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					await beginForceTermination();
 				}
 			}
+			// The child is gone (or past the kill bound), so its unpacked runtime can go.
+			await antigravity?.cleanup();
 			if (!usageRecorded) recordUsage(undefined, "run", "unknown");
 			forwarder?.close();
 			queue.close();

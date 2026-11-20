@@ -1,5 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, readlinkSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
@@ -135,6 +137,58 @@ test("ACP adapter fails a peer turn that returns an error envelope with end_turn
 	strictEqual(result.exitCode, 1);
 	strictEqual(result.stopReason, "error");
 	strictEqual(result.failureMessage, "ACP peer reported HTTP 400: The model is not supported.");
+});
+
+test("ACP adapter launches agy with an allowlisted env and a private TMPDIR removed after exit", {
+	skip: process.platform === "win32",
+}, async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-launch-"));
+	// An orphan from a crashed Clio in this pid namespace (owner pid long gone) is swept by the next agy launch;
+	// one from another namespace is left alone, since its pid says nothing here.
+	const namespace = existsSync("/proc/self/ns/pid")
+		? (/\[(\d+)\]/u.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0")
+		: "0";
+	const orphan = join(tmpdir(), `clio-coder-agy-${namespace}-2147483646-orphan`);
+	const foreign = join(tmpdir(), `clio-coder-agy-${namespace}1-2147483646-foreign`);
+	await mkdir(join(orphan, "unpacked"), { recursive: true });
+	await mkdir(foreign, { recursive: true });
+	const seen = join(scratch, "seen");
+	const agy = join(scratch, "agy");
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	await writeFile(
+		agy,
+		`#!/bin/sh\n{ echo "$TMPDIR"; [ -d "$TMPDIR" ] && echo dir; echo "$@"; echo "\${GEMINI_API_KEY-}|\${GOOGLE_CLOUD_PROJECT-}|\${BROWSER-}|$AGY_CLI_DISABLE_AUTO_UPDATE$AGY_ACP_FORCE_FILE_STORAGE$PYTHONUNBUFFERED"; } > "${seen}"\nexec "${process.execPath}" "${fixture}"\n`,
+		{ mode: 0o755 },
+	);
+	try {
+		const cwd = process.cwd();
+		const result = await startAcpDelegationRun({
+			agent: {
+				id: "antigravity",
+				command: agy,
+				args: ["acp", "--gemini-dir", "~/.gemini/antigravity-cli", "--app-data-dir", "antigravity-acp"],
+				env: { BROWSER: "none" },
+				connectTimeoutMs: 5_000,
+			},
+			environment: { HOME: scratch, GEMINI_API_KEY: "leak", GOOGLE_CLOUD_PROJECT: "leak" },
+			task: "report package version",
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+		}).promise;
+		strictEqual(result.stopReason, "error");
+		const [tempDir = "", isDir, args, env] = (await readFile(seen, "utf8")).trim().split("\n");
+		ok(tempDir.startsWith(join(tmpdir(), `clio-coder-agy-${namespace}-${process.pid}-`)), tempDir);
+		strictEqual(isDir, "dir");
+		strictEqual(args, `acp --gemini-dir ${join(scratch, ".gemini", "antigravity-cli")} --app-data-dir antigravity-acp`);
+		strictEqual(env, "||none|111");
+		strictEqual(existsSync(tempDir), false);
+		strictEqual(existsSync(orphan), false);
+		strictEqual(existsSync(foreign), true);
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
+		await rm(orphan, { recursive: true, force: true });
+		await rm(foreign, { recursive: true, force: true });
+	}
 });
 
 test("ACP adapter fails a statusless Anthropic error envelope with end_turn", async () => {

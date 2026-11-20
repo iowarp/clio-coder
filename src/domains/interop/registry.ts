@@ -209,6 +209,12 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		projectDir: ".gemini/antigravity-cli",
 		legacyProjectDirs: [".antigravitycli"],
 		instructionFiles: [],
+		// Clio expands `~` in the profile flags at launch (engine/acp/antigravity-launch.ts); agy never sees it.
+		acp: {
+			command: "agy",
+			args: ["acp", "--gemini-dir", "~/.gemini/antigravity-cli", "--app-data-dir", "antigravity-acp"],
+		},
+		versionProbe: false,
 		headlessRuntimeId: "antigravity-code",
 	},
 	{
