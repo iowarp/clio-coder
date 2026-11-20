@@ -1,5 +1,5 @@
 import { doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -251,5 +251,30 @@ describe("clio-coder run --timeout", () => {
 		const envelope = JSON.parse(turn.stdout) as { causes?: Array<{ code?: string; checks?: string[] }> };
 		strictEqual(envelope.causes?.[0]?.code, "verify_failed");
 		strictEqual(JSON.stringify(envelope.causes?.[0]?.checks), JSON.stringify(["exit 3"]));
+	});
+
+	it("a deadline that expires while a --verify check runs aborts it: exit 124, check skipped for the deadline", async () => {
+		// The marker proves the check started before the deadline, so this row exercises expiry during a check,
+		// not the expiry before one that already skipped it (CLI-P6).
+		const { turn, scratch } = await headlessTurn([], "default", [
+			"--output-format",
+			"json",
+			"--verify",
+			"touch started && sleep 30",
+			"--timeout",
+			"4",
+			"--fail-on-verify",
+		]);
+		strictEqual(turn.code, 124, turn.stderr);
+		ok(turn.elapsedMs < 10_000, `the check must be cut off, not waited out: ${turn.elapsedMs}ms`);
+		ok(existsSync(join(scratch.root, "project", "started")), "the check must have started before the deadline");
+		const envelope = JSON.parse(turn.stdout) as {
+			causes?: Array<{ code?: string }>;
+			verify?: { checks?: Array<{ status?: string; reason?: string }> };
+		};
+		strictEqual(JSON.stringify(envelope.causes?.map((cause) => cause.code)), JSON.stringify(["deadline"]));
+		const [check] = envelope.verify?.checks ?? [];
+		strictEqual(check?.status, "skipped");
+		strictEqual(check?.reason, "deadline");
 	});
 });
