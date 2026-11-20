@@ -7,6 +7,7 @@ import { parseDuration } from "../../src/cli/kit/duration.js";
 import { parseCommandFlags } from "../../src/cli/kit/flags.js";
 import { defineCommandSpec, helpRequested } from "../../src/cli/kit/help.js";
 import { jsonDocument, writeCliFailure } from "../../src/cli/kit/json-out.js";
+import { type RunExitFact, resolveRunExit } from "../../src/cli/modes/run-json-schema-v2.js";
 import { COMMAND_SPECS } from "../../src/cli/specs/table.js";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -81,6 +82,80 @@ describe("cli kit duration parser", () => {
 		deepStrictEqual(parseDuration("0", { bareUnit: "s", allowZero: true }), { ok: true, ms: 0 });
 		equal(parseDuration("99999999999999999h", { bareUnit: "s" }).ok, false);
 	});
+});
+
+test("run exit precedence: the highest applying row sets the exit code and leads causes[]", () => {
+	const rows: Array<[string, RunExitFact[], number, string, string[]]> = [
+		["nothing failed", [], 0, "succeeded", []],
+		[
+			"forced second signal wins, no payload",
+			[{ code: "forced_exit", exitCode: 130 }, { code: "provider_error" }],
+			130,
+			"failed",
+			["provider_error"],
+		],
+		[
+			"signal over deadline",
+			[
+				{ code: "deadline", seconds: 5 },
+				{ code: "interrupted", signal: "SIGHUP" },
+			],
+			129,
+			"canceled",
+			["interrupted", "deadline"],
+		],
+		[
+			"deadline over limit",
+			[
+				{ code: "max_requests", limit: 1, observed: 2 },
+				{ code: "deadline", seconds: 5 },
+			],
+			124,
+			"timed_out",
+			["deadline", "max_requests"],
+		],
+		["reader closed", [{ code: "noop" }, { code: "reader_closed" }], 141, "failed", ["reader_closed", "noop"]],
+		[
+			"unscripted over approval",
+			[{ code: "permission_required" }, { code: "unscripted", id: "q1" }],
+			5,
+			"failed",
+			["unscripted", "permission_required"],
+		],
+		[
+			"approval over limit",
+			[{ code: "autonomous_cap" }, { code: "judge_streak", window: 3 }],
+			3,
+			"failed",
+			["judge_streak", "autonomous_cap"],
+		],
+		[
+			"limit over work failure",
+			[{ code: "verify_failed" }, { code: "session_cost_ceiling" }],
+			4,
+			"failed",
+			["session_cost_ceiling", "verify_failed"],
+		],
+		[
+			"work failures keep table order",
+			[{ code: "output_write_failed", path: "o" }, { code: "no_answer" }, { code: "provider_error" }],
+			1,
+			"failed",
+			["provider_error", "no_answer", "output_write_failed"],
+		],
+		["worker exit 2 is a failed run", [{ code: "worker_failed", exitCode: 2 }], 1, "failed", ["worker_failed"]],
+	];
+	for (const [name, facts, exitCode, outcome, codes] of rows) {
+		const resolved = resolveRunExit(facts);
+		equal(resolved.exitCode, exitCode, name);
+		equal(resolved.outcome, outcome, name);
+		deepStrictEqual(
+			resolved.causes.map((cause) => cause.code),
+			codes,
+			name,
+		);
+	}
+	equal(resolveRunExit([], { displayed: true }).outcome, "displayed");
 });
 
 test("json-out writes the C6 failure document and the C3 diagnostic", () => {

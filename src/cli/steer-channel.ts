@@ -3,8 +3,10 @@ import { Socket } from "node:net";
 import * as readline from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 
-export function setupSteerChannel(filePath: string, onLine: (line: string) => void): () => void {
+/** `lineNumber` is the 1-based index of the line in the channel, blank lines included, so one writer can correlate. */
+export function setupSteerChannel(filePath: string, onLine: (line: string, lineNumber: number) => void): () => void {
 	let closed = false;
+	let lineNumber = 0;
 	let watcher: fs.FSWatcher | null = null;
 	let stream: Socket | null = null;
 	let rl: readline.Interface | null = null;
@@ -44,9 +46,10 @@ export function setupSteerChannel(filePath: string, onLine: (line: string) => vo
 			rl.on("error", reportError);
 			rl.on("line", (line) => {
 				if (closed) return;
+				lineNumber += 1;
 				const trimmed = line.trim();
 				if (trimmed.length > 0) {
-					onLine(trimmed);
+					onLine(trimmed, lineNumber);
 				}
 			});
 		} else {
@@ -75,9 +78,10 @@ export function setupSteerChannel(filePath: string, onLine: (line: string) => vo
 						leftover = lines.pop() ?? "";
 						for (const line of lines) {
 							if (closed && !final) return;
+							lineNumber += 1;
 							const trimmed = line.trim();
 							if (trimmed.length > 0) {
-								onLine(trimmed);
+								onLine(trimmed, lineNumber);
 							}
 						}
 					}
@@ -90,7 +94,7 @@ export function setupSteerChannel(filePath: string, onLine: (line: string) => vo
 				readNewContent(true);
 				const trimmed = `${leftover}${decoder.end()}`.trim();
 				leftover = "";
-				if (trimmed.length > 0) onLine(trimmed);
+				if (trimmed.length > 0) onLine(trimmed, lineNumber + 1);
 			};
 
 			// Read initial content

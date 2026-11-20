@@ -111,7 +111,11 @@ it("headless run prints a display-only template to stdout and exits without boot
 			strictEqual(json.error, undefined, task);
 			strictEqual(json.status, 0, `${task}: ${json.stderr}`);
 			strictEqual(json.stdout, "", `${task}: display-only output must preserve JSONL stdout`);
-			strictEqual(json.stderr, "━━━ pkg ━━━\n /pkg:help   This help\n", task);
+			strictEqual(
+				json.stderr,
+				"clio-coder run: --json and --json-events are deprecated (removed in 0.9.0); use --output-format json|stream-json for schema v2\n━━━ pkg ━━━\n /pkg:help   This help\n",
+				task,
+			);
 		}
 	} finally {
 		rmSync(root, { recursive: true, force: true });

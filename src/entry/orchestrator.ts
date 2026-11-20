@@ -3912,14 +3912,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
 				...(telemetry
 					? {
-							runUsage: async (from: string) => {
+							runUsage: async (from: string, roles = ["main", "compaction"]) => {
 								// Every queued settlement is written and the live fold seeded before the calls are read (#434).
 								await telemetry.settledSessionSpend();
 								const view = telemetry.read?.live();
 								// The run's own turn calls and the compactions it ran, folded as the read model folds them.
-								return view
-									? runUsageFromCallRecords(view.callRecords({ roles: ["main", "compaction"], from }), READ_MODEL_FOLD)
-									: null;
+								return view ? runUsageFromCallRecords(view.callRecords({ roles, from }), READ_MODEL_FOLD) : null;
 							},
 							segmentUsage: async (messages) => {
 								// The segment's calls are journaled and the live fold seeded before they are read (#434).
