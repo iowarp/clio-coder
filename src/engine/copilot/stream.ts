@@ -969,12 +969,17 @@ class Step {
 			if (this.usageUncertain) this.billing = { premiumRequests: null, nanoAiu: null, modelCalls: this.usageEvents };
 			this.message.copilotBilling = { ...this.billing };
 		}
-		// A count is reported only when every call of the step sent it and no unplaceable report was mixed in.
+		// A count is reported only when every call of the step sent it and no unplaceable report was mixed in;
+		// a reasoning count every call sent, zero included, is the provider's measurement too (PV-4).
+		const reported = (reports: number) => this.usageEvents > 0 && reports === this.usageEvents;
 		(this.message.usage as { reportedFields?: string[] }).reportedFields = this.usageUncertain
 			? []
-			: Object.entries(this.fieldReports)
-					.filter(([, reports]) => this.usageEvents > 0 && reports === this.usageEvents)
-					.map(([field]) => field);
+			: [
+					...Object.entries(this.fieldReports)
+						.filter(([, reports]) => reported(reports))
+						.map(([field]) => field),
+					...(reported(this.reasoningReports) ? ["reasoning"] : []),
+				];
 		if (this.billing.modelCalls > 0) {
 			(this.message as { responseModelIdObservation?: unknown }).responseModelIdObservation = this.servedModel
 				? { state: "reported", reportedModelId: this.servedModel }

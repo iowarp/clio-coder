@@ -1212,8 +1212,9 @@ test("usage facts keep per-field presence and billing coverage", async () => {
 	for (const field of ["input", "cacheRead", "cacheWrite"] as const)
 		strictEqual(omitted.usage?.[field].kind, "unknown", `${field} was omitted, so it is not a measured zero`);
 	const zeros = callSettlementFromMessage(await step({ messages: [user("zero usage")] }, "facts-session"), "none");
-	for (const field of ["input", "output", "cacheRead", "cacheWrite"] as const)
+	for (const field of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const)
 		deepStrictEqual(zeros.usage?.[field], { kind: "measured", value: 0, source: "provider" });
+	strictEqual(omitted.usage?.reasoning.kind, "unknown", "an absent reasoning count is not a measured zero");
 	const partial = callSettlementFromMessage(
 		await step({ messages: [user("partial credits")] }, "facts-session"),
 		"none",
@@ -1221,6 +1222,7 @@ test("usage facts keep per-field presence and billing coverage", async () => {
 	strictEqual(partial.billing?.nanoAiu.kind, "unknown", "one of two calls reported credits");
 	strictEqual(partial.billing?.premiumRequests.kind, "unknown", "no accounting answer is not zero");
 	strictEqual(partial.usage?.cacheWrite.kind, "unknown", "one of two calls omitted cache writes");
+	strictEqual(partial.usage?.reasoning.kind, "unknown", "one of two calls omitted reasoning");
 	deepStrictEqual(partial.usage?.output, { kind: "measured", value: 2, source: "provider" });
 	// PV-4: the requested model served the step, so no response model is stamped; reasoning needs every call's count.
 	const served = await step({ messages: [user("zero usage")] }, "facts-session");
