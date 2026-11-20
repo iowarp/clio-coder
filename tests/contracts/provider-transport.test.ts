@@ -636,6 +636,11 @@ describe("provider transport boundary", () => {
 			capabilitiesFromLiteLLMModelInfo({ max_tokens: 1_048_576, max_input_tokens: 880_128 }).contextWindow,
 			880_128,
 		);
+		// PV-7: an output limit equal to the window is the gateway's filler, not the model's limit.
+		strictEqual(
+			capabilitiesFromLiteLLMModelInfo({ max_input_tokens: 262_144, max_output_tokens: 262_144 }).maxTokens,
+			undefined,
+		);
 	});
 
 	it("aggregates a LiteLLM alias to capabilities guaranteed by every deployment", () => {

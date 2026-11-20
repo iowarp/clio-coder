@@ -119,8 +119,10 @@ export function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>):
 	// max_input_tokens is the serving limit Clio can admit a request against.
 	const contextWindow = positiveInteger(info.max_input_tokens);
 	if (contextWindow !== undefined) caps.contextWindow = contextWindow;
+	// An output limit as large as the whole window is a filler a gateway writes for every model, not a limit; the
+	// model's known or default output limit then holds (PV-7).
 	const maxTokens = positiveInteger(info.max_output_tokens);
-	if (maxTokens !== undefined) caps.maxTokens = maxTokens;
+	if (maxTokens !== undefined && (contextWindow === undefined || maxTokens < contextWindow)) caps.maxTokens = maxTokens;
 	const tools = boolean(info.supports_function_calling);
 	if (tools !== undefined) caps.tools = tools;
 	const vision = boolean(info.supports_vision);

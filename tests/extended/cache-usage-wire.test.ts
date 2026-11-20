@@ -90,7 +90,8 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 				[usage.input, usage.cacheRead, usage.cacheWrite, usage.output, usage.totalTokens],
 				[2000, 6000, 2000, 100, 10100],
 			);
-			strictEqual(usage.cacheReadField, api === "openai-responses" ? "sent" : undefined);
+			// PV-8: Anthropic's cache_read_input_tokens is a sent count too, so a keepalive read of zero is a miss.
+			strictEqual(usage.cacheReadField, "sent");
 			const long = api === "anthropic-messages" ? 500 : undefined;
 			strictEqual(usage.cacheWrite1h, long);
 			const expectedCost = (2000 * 3 + 6000 * 0.3 + (2000 - (long ?? 0)) * 3.75 + (long ?? 0) * 6 + 100 * 15) / 1e6;
