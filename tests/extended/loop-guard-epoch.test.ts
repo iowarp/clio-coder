@@ -370,7 +370,7 @@ describe("read coverage stagnation", () => {
 		}
 	});
 
-	it("locks repeated subsets after successful reads, preserving the existing loop budget", () => {
+	it("annotates repeated subsets after successful reads without spending the loop budget", () => {
 		const f = coverageGuard();
 		f.guard.evaluate(observedRead(1, 747));
 		// Other useful evidence does not erase already observed source coverage.
@@ -378,14 +378,11 @@ describe("read coverage stagnation", () => {
 		for (const offset of [560, 640]) deepStrictEqual(f.guard.evaluate(observedRead(offset, 20)), []);
 		const warning = f.guard.evaluate(observedRead(628, 15));
 		ok(JSON.stringify(warning).includes("already observed"));
+		ok(warning.every((effect) => effect.kind === "annotate_tool_result"));
+		// The count starts over once the annotation fires; no lockout follows.
+		deepStrictEqual(f.guard.evaluate(observedRead(598, 12)), []);
 		strictEqual(f.locks(), 0);
-		const locked = f.guard.evaluate(observedRead(598, 12));
-		strictEqual(f.locks(), 1);
-		ok(locked.every((effect) => effect.kind === "annotate_tool_result"));
-		ok(JSON.stringify(locked).includes("required result format"));
-		ok(
-			f.guard.evaluate(before("coverage", ToolNames.Read, "new-request")).some((effect) => effect.kind === "block_tool"),
-		);
+		deepStrictEqual(f.guard.evaluate(before("coverage", ToolNames.Read, "new-request")), []);
 	});
 
 	it("merges complementary windows and allows partially overlapping windows with new lines", () => {
@@ -394,8 +391,12 @@ describe("read coverage stagnation", () => {
 			deepStrictEqual(f.guard.evaluate(observedRead(offset, 10)), []);
 		}
 		// A subset spanning two formerly separate windows is now redundant.
-		for (const offset of [5, 15, 25, 35]) f.guard.evaluate(observedRead(offset, 10));
-		strictEqual(f.locks(), 1);
+		const effects = [5, 15, 25, 35].map((offset) => f.guard.evaluate(observedRead(offset, 10)));
+		deepStrictEqual(
+			effects.map((row) => JSON.stringify(row).includes("already observed")),
+			[false, false, true, false],
+		);
+		strictEqual(f.locks(), 0);
 	});
 
 	it("does not count gaps between observed windows as evidence", () => {
@@ -510,9 +511,8 @@ describe("read coverage stagnation", () => {
 			deepStrictEqual(await read({ offset: 16, limit: 30, line_numbers: true }), []);
 			deepStrictEqual(await read({ offset: 9, limit: 2, line_numbers: true }), []);
 			ok(JSON.stringify(await read({ offset: 30, limit: 1, line_numbers: true })).includes("already observed"));
+			deepStrictEqual(await read({ offset: 20, limit: 1, line_numbers: true }), []);
 			strictEqual(f.locks(), 0);
-			ok(JSON.stringify(await read({ offset: 20, limit: 1, line_numbers: true })).includes("required result format"));
-			strictEqual(f.locks(), 1);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -542,18 +542,21 @@ describe("read coverage stagnation", () => {
 			writeFileSync(path, Array.from({ length: 747 }, (_, i) => `const line${i} = ${i};`).join("\n"));
 			symlinkSync(path, alias);
 			const f = coverageGuard();
+			const annotated: boolean[] = [];
 			for (const args of [{ path }, ...[560, 640, 628, 598].map((offset) => ({ path: alias, offset, limit: 12 }))]) {
 				const result = await readTool.run(args);
 				strictEqual(result.kind, "ok");
-				f.guard.evaluate({
+				const effects = f.guard.evaluate({
 					hook: "after_tool",
 					toolName: "read",
 					toolArgs: args,
 					metadata: { resultKind: result.kind, resultBytes: result.kind === "ok" ? Buffer.byteLength(result.output) : 0 },
 					toolResultDetails: result.details ?? {},
 				});
+				annotated.push(JSON.stringify(effects).includes("already observed"));
 			}
-			strictEqual(f.locks(), 1);
+			deepStrictEqual(annotated, [false, false, false, true, false]);
+			strictEqual(f.locks(), 0);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

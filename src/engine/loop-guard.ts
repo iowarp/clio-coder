@@ -1238,8 +1238,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// Any extension tool that did not declare itself read-only may have
 		// written, and so may any bash command that is not a plain read, and a
 		// typed git add or commit, direct or through the gateway (Astra r2-4).
-		// These re-key repeats only; the workspace epoch the registry's denial
-		// memory and read coverage key on still moves for file writes alone.
+		// These re-key repeats and forget read coverage; the workspace epoch the
+		// registry's denial memory keys on still moves for file writes alone.
 		const stateChange =
 			ok &&
 			input.toolName !== undefined &&
@@ -1268,10 +1268,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// Evicting an identity only raises its epoch, which admits more, never less.
 			bumpBoundedCounter(byIdentity, callIdentity(input.toolName, input.toolArgs), SUCCEEDED_FINGERPRINT_LIMIT);
 		}
-		if (!workspaceWrite) return false;
-		bumpBoundedCounter(mutationEpochByTurn, turnKey);
+		// Coverage keys on size and mtime, which a state change can keep
+		// (an equal-length sed -i in one mtime tick, cp -p, git checkout), and
+		// the guard cannot tell which paths a command touched, so forget it all.
 		readCoverage.clear();
 		redundantReadsByTurn.clear();
+		if (!workspaceWrite) return false;
+		bumpBoundedCounter(mutationEpochByTurn, turnKey);
 		return true;
 	};
 
@@ -1834,8 +1837,14 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const resultBytes = input.metadata?.resultBytes;
 		// after_tool precedes the registry's final shaping pass. If that pass
 		// could shorten the source, its pre-shaping line count is not evidence.
-		const shapingCap =
-			typeof options.readResultMaxBytes === "function" ? options.readResultMaxBytes() : options.readResultMaxBytes;
+		// A getter that throws turns coverage off for this read, not the rest of after_tool.
+		let shapingCap: number | undefined;
+		try {
+			shapingCap =
+				typeof options.readResultMaxBytes === "function" ? options.readResultMaxBytes() : options.readResultMaxBytes;
+		} catch {
+			return reset();
+		}
 		const deliveredCap = Math.min(shapingCap ?? 0, resolveGuardrail("readMaxBytes"));
 		if (
 			!Number.isFinite(deliveredCap) ||
@@ -1874,7 +1883,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		} catch {
 			return reset();
 		}
-		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}`;
+		// A PDF page range or an archive member renders its own numbered lines, so
+		// each is separate coverage, keyed as read normalizes them.
+		const pages = input.toolArgs?.pages;
+		const member = input.toolArgs?.member;
+		const document = JSON.stringify([
+			typeof pages === "string" && pages.trim().length > 0 ? pages : null,
+			typeof member === "string" && member.length > 0 ? member : null,
+		]);
+		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}\0${document}`;
 		let entry = readCoverage.get(key);
 		if (!entry || entry.bytes !== file.bytes || entry.mtimeMs !== file.mtimeMs) {
 			entry = { bytes: file.bytes, mtimeMs: file.mtimeMs, ranges: [] };
@@ -1902,14 +1919,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (!redundant) return reset();
 		const streak = bumpBoundedCounter(redundantReadsByTurn, turnKey);
 		if (streak < RESULT_STAGNATION_THRESHOLD || lockoutByTurn.has(turnKey)) return [];
-		const reason = `loop detected: the last ${streak} read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`;
-		// The read already ran and remains successful. Reuse the existing loop
-		// budget/lock transition, delivering its reason as a result annotation.
-		return blockAsLoop(input, turnKey, ToolNames.Read, streak, reason, options.now?.() ?? Date.now()).map((effect) =>
-			effect.kind === "block_tool"
-				? { kind: "annotate_tool_result" as const, message: effect.reason, severity: "warn" as const }
-				: effect,
-		);
+		// The read already ran and remains successful. The threshold is an
+		// annotation (DESIGN 3.5): it spends no loop block budget and cannot
+		// lock the turn, and the count starts over once it fires.
+		redundantReadsByTurn.delete(turnKey);
+		return [
+			{
+				kind: "annotate_tool_result",
+				message: `loop detected: the last ${streak} read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`,
+				severity: "warn",
+			},
+		];
 	};
 
 	// Read's typed EOF result proves that changing offsets cannot reveal more

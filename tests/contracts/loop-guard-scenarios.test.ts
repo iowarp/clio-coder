@@ -627,17 +627,24 @@ test("template budget: min(template, max(operator, ceiling)) bounds the turn's c
 });
 
 test("loop guard read coverage: a grep between rereads keeps the count, a fold forgets what was shown (X5)", () => {
-	const read: MiddlewareHookInput = {
+	const read = (args: Record<string, unknown> = {}, shownCount = 40): MiddlewareHookInput => ({
 		hook: "after_tool",
 		turnId: "turn-1",
 		toolName: "read",
-		toolArgs: { path: "coverage.ts", offset: 1, limit: 40 },
+		toolArgs: { path: "coverage.ts", offset: 1, limit: shownCount, ...args },
 		metadata: { resultKind: "ok", resultBytes: 1000 },
 		toolResultDetails: {
 			file: { bytes: 4000, mtimeMs: 1 },
-			observation: { tool: "read", unit: "lines", format: "text", shownCount: 40, truncated: false },
+			observation: { tool: "read", unit: "lines", format: "text", shownCount, truncated: false },
 		},
-	};
+	});
+	const call = (toolName: string, toolArgs: Record<string, unknown>): MiddlewareHookInput => ({
+		hook: "before_tool",
+		turnId: "turn-1",
+		toolName,
+		toolArgs,
+		metadata: { callFingerprint: JSON.stringify([toolName, toolArgs]) },
+	});
 	const grep: MiddlewareHookInput = {
 		hook: "after_tool",
 		turnId: "turn-1",
@@ -645,31 +652,109 @@ test("loop guard read coverage: a grep between rereads keeps the count, a fold f
 		toolArgs: { pattern: "coverage" },
 		metadata: { resultKind: "ok", resultFingerprint: "coverage.ts:1" },
 	};
+	// Each keeps the file's size and mtime, so only the call itself can tell coverage it is stale.
+	const bash = (command: string): MiddlewareHookInput => ({
+		hook: "after_tool",
+		turnId: "turn-1",
+		toolName: "bash",
+		toolArgs: { command },
+		metadata: { resultKind: "ok" },
+	});
 	const fold = (stage: string): MiddlewareHookInput => ({
 		hook: "on_compaction",
 		turnId: "turn-1",
 		metadata: { stage },
 	});
-	const rows = [
+	let locks = 0;
+	// The main session's guard: block budget 3, same-call limit 2, synthesis lockout.
+	const main: Omit<CreateLoopGuardRegistrationOptions, "safety"> = {
+		readResultMaxBytes: () => 64 * 1024,
+		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
+		sameCallBlockLimit: INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
+		turnSynthesisLockout: true,
+		onSynthesisLockout: () => {
+			locks += 1;
+		},
+	};
+	const subranges = [5, 12, 30, 41, 77, 90, 120, 150].flatMap((offset) => [
+		call("read", { path: "coverage.ts", offset, limit: 10 }),
+		read({ offset }, 10),
+	]);
+	const rows: Array<{
+		name: string;
+		steps: MiddlewareHookInput[];
+		annotations: number;
+		guard?: Omit<CreateLoopGuardRegistrationOptions, "safety">;
+		also?: RegExp;
+	}> = [
 		{
 			name: "read, grep, read, grep, recall, read, grep, read of one range draws the annotation on the third reread",
-			steps: [read, grep, read, grep, fold("working_set_recall"), read, grep, read],
-			annotated: true,
+			steps: [read(), grep, read(), grep, fold("working_set_recall"), read(), grep, read()],
+			annotations: 1,
 		},
 		{
 			name: "read, working-set fold, then three rereads of the same range draw none",
-			steps: [read, fold("working_set_evict"), read, read, read],
-			annotated: false,
+			steps: [read(), fold("working_set_evict"), read(), read(), read()],
+			annotations: 0,
 		},
+		{
+			name: "main session: one whole read then eight subranges annotates twice and never locks or blocks",
+			steps: [call("read", { path: "coverage.ts" }), read({}, 200), ...subranges, call("read", { path: "other.ts" })],
+			annotations: 2,
+			guard: main,
+		},
+		{
+			name: "four page ranges of one PDF are separate coverage",
+			steps: ["1-2", "3-4", "5-6", "7-8"].map((pages) => read({ pages })),
+			annotations: 0,
+		},
+		{
+			name: "four members of one archive are separate coverage",
+			steps: ["a.txt", "b.txt", "c.txt", "d.txt"].map((member) => read({ member })),
+			annotations: 0,
+		},
+		{
+			name: "a throwing cap getter turns coverage off and the rest of after_tool still runs",
+			steps: [call("read", { path: "coverage.ts" }), read(), read(), read(), read()],
+			annotations: 0,
+			guard: {
+				readResultMaxBytes: () => {
+					throw new Error("settings unavailable");
+				},
+				toolBudgetAdvisory: true,
+				toolCallSoftLimit: 1,
+			},
+			also: /Advisory tool estimate reached/,
+		},
+		...["sed -i 's/a/b/' coverage.ts", "cp -p backup.ts coverage.ts", "git checkout -- coverage.ts"].map((command) => ({
+			name: `${command} between rereads forgets coverage`,
+			steps: [read(), read(), bash(command), read(), read()],
+			annotations: 0,
+		})),
 	];
 	for (const row of rows) {
+		locks = 0;
 		// A getter cap, as the main session passes its live context.toolResultMaxBytes.
-		const guard = createLoopGuardRegistration({ safety: loopSafety(), readResultMaxBytes: () => 64 * 1024 });
+		const guard = createLoopGuardRegistration({
+			safety: loopSafety(),
+			...(row.guard ?? { readResultMaxBytes: () => 64 * 1024 }),
+		});
 		const effects = row.steps.flatMap((step) => guard.evaluate(step));
+		const detail = `${row.name}: ${JSON.stringify(effects)}`;
 		strictEqual(
-			effects.some((effect) => effect.kind === "annotate_tool_result" && effect.message.includes("already observed")),
-			row.annotated,
-			`${row.name}: ${JSON.stringify(effects)}`,
+			effects.filter((effect) => effect.kind === "annotate_tool_result" && effect.message.includes("already observed"))
+				.length,
+			row.annotations,
+			detail,
 		);
+		ok(!effects.some((effect) => effect.kind === "block_tool" || effect.kind === "lock_tools"), detail);
+		strictEqual(locks, 0, detail);
+		if (row.also !== undefined) {
+			const also = row.also;
+			ok(
+				effects.some((effect) => effect.kind === "annotate_tool_result" && also.test(effect.message)),
+				detail,
+			);
+		}
 	}
 });
