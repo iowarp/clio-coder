@@ -221,6 +221,30 @@ function readRuns(path = runsPath()): RunEnvelope[] {
 	return envelopes;
 }
 
+/** A poller's copy of the ledger rows and the runs.json stamp they were read at. */
+export interface LedgerSnapshot {
+	stamp: string | null;
+	runs: ReadonlyArray<RunEnvelope>;
+}
+
+/**
+ * The ledger rows, parsed again only when runs.json changed since `previous` was read. A poller that re-parsed the
+ * whole file every tick paid about 156 ms of CPU a poll at the 1000-row cap whether or not anything was written
+ * (FL-24). A torn or failed read keeps the previous rows, and the stamp it keeps makes the next poll try again.
+ */
+export function readLedgerSnapshot(previous: LedgerSnapshot | null, stateDir: string = clioStateDir()): LedgerSnapshot {
+	const path = join(stateDir, "runs.json");
+	const stamp = fileStamp(path);
+	if (stamp === null) return { stamp: null, runs: [] };
+	if (previous !== null && previous.stamp === stamp) return previous;
+	try {
+		return { stamp, runs: Object.freeze(readRuns(path)) };
+	} catch {
+		// The writer replaces the file atomically; a failed parse is a race the next poll wins.
+		return previous ?? { stamp: null, runs: [] };
+	}
+}
+
 /**
  * When each ledger run ended, in epoch ms, or null while it has not; a run the map does not name is unknown to the
  * ledger. A row without an end may still be recovered, so state kept for a run is kept while its end is null.
