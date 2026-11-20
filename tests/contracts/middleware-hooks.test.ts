@@ -497,8 +497,11 @@ describe("middleware hook boundary", () => {
 			const journals = createSessionJournals(clioStateDir(), () => {
 				throw new Error("fixture journal unavailable");
 			});
-			/** What the faux model does: reply, or fire and carry a block, then throw or reset the conversation. */
-			let mode: "reply" | "throw" | "reset" = "reply";
+			/**
+			 * What the faux model does: reply, or fire and carry a block, then throw (with a follow-up queued that the prompt
+			 * gate refuses, in "throw-queued") or reset the conversation.
+			 */
+			let mode: "reply" | "throw" | "throw-queued" | "reset" = "reply";
 			let settledAtReset: string[] = [];
 			const loop: ReturnType<typeof createChatLoop> = createChatLoop({
 				getSettings: () => settings,
@@ -528,6 +531,10 @@ describe("middleware hook boundary", () => {
 					},
 				} as unknown as SessionContract,
 				readSessionEntries: () => entries,
+				promptSubmit: async (input) =>
+					input.text === "refused follow-up"
+						? { kind: "block", reason: "fixture gate refused the follow-up" }
+						: { kind: "pass", text: input.text },
 				middleware: loopMiddleware,
 				turnOutcomeCollector: loopCollector,
 				bus: hub,
@@ -555,6 +562,7 @@ describe("middleware hook boundary", () => {
 								return () => {};
 							},
 							abort() {},
+							clearAllQueues() {},
 							async prompt() {
 								await listener({ type: "agent_start" });
 								await listener({ type: "turn_start" });
@@ -568,7 +576,8 @@ describe("middleware hook boundary", () => {
 										toolArgs: {},
 									});
 									loopCollector.requestSent(null, []);
-									if (mode === "throw") throw new Error("fixture prompt failed");
+									if (mode === "throw-queued") ok(loop.queueFollowUp("refused follow-up"));
+									if (mode !== "reset") throw new Error("fixture prompt failed");
 									loop.resetForSession(null);
 									settledAtReset = [...loopSettled.keys()];
 									return;
@@ -602,10 +611,18 @@ describe("middleware hook boundary", () => {
 				const [, g5] = loopFired;
 				ok(g5 !== undefined);
 				deepStrictEqual(loopSettled.get(g5), { outcome: "ignored", admittedIn: null });
+				// A follow-up queued during the thrown turn resubmits from its settle and the prompt gate refuses it before any
+				// turn_start: the thrown turn's carried block still settles before that turn's lease releases.
+				mode = "throw-queued";
+				await loop.submit("throw with a follow-up queued");
+				const [, , g7] = loopFired;
+				ok(g7 !== undefined);
+				deepStrictEqual(loopSettled.get(g7), { outcome: "ignored", admittedIn: null });
+				ok(order.indexOf(`settled ${g7}`) < order.lastIndexOf("release"), order.join(", "));
 				// The conversation resets mid-turn: the turn's carried block settles with the reset, not at a later session.
 				mode = "reset";
 				await loop.submit("reset mid-turn");
-				const [, , g6] = loopFired;
+				const [, , , g6] = loopFired;
 				ok(g6 !== undefined && settledAtReset.includes(g6), `open after the reset: ${g6}`);
 				deepStrictEqual(loopSettled.get(g6), { outcome: "ignored", admittedIn: null });
 			} finally {
