@@ -215,6 +215,13 @@ const GRANT_MCP_DESCRIPTION_CHARS = 1000;
  */
 const REJECTED_HELPER_RESULT_MAX_CHARS = 16 * 1024;
 
+/** APIs whose request renders the reasoning effort ahead of the input; a locked round there keeps the run's level. */
+const REASONING_PREFIX_APIS: ReadonlySet<string> = new Set([
+	"openai-responses",
+	"openai-codex-responses",
+	"azure-openai-responses",
+]);
+
 /** An MCP tool's trust class and registered description for a worker's grant request, else undefined. */
 function workerMcpToolFeatures(
 	tool: string,
@@ -1756,12 +1763,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
 						const attemptOptions = { ...attempt.options, clioInputTokens: inputTokens };
 						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attemptOptions;
-						// Codex renders the reasoning effort ahead of the whole input, so a locked round there keeps
-						// the run's level; dropping it made the round miss every cached token.
+						// Responses APIs render the reasoning effort ahead of the whole input, and Pi sends the model's off effort
+						// (and no encrypted reasoning) when the level is dropped, so a locked round there keeps the run's level:
+						// dropping it made a Codex round miss every cached token and turned thinking off mid-run (FL-16).
 						const source = boundWorkerResponse(
 							currentModel,
 							attemptContext,
-							lockedRound && currentModel.api !== "openai-codex-responses" ? thinkingOffOptions : attemptOptions,
+							lockedRound && !REASONING_PREFIX_APIS.has(currentModel.api) ? thinkingOffOptions : attemptOptions,
 							{
 								locked: lockedRound,
 								responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
