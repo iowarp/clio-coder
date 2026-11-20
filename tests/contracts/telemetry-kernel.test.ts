@@ -363,6 +363,36 @@ test("declared target rates price a runtime's settled counts, not its placeholde
 	// A rated count the provider never reported cannot be priced; a zero-rated one does not matter.
 	strictEqual(copilot(["input", "output", "cacheWrite"]).usd.kind, "unknown");
 	strictEqual(copilot(["input", "output", "cacheRead"]).usd.kind, "measured");
+	// Handed no rates, a target-rates settlement never takes the runtime's placeholder total.
+	strictEqual(
+		callSettlementFromMessage(
+			{ stopReason: "stop", usage: { ...usage, reportedFields: ["input", "output"] } },
+			"target-rates",
+		).pricing.usd.kind,
+		"unknown",
+	);
+	// A Pi provider that omits its cache-read field counts the whole prompt as input: no cache read to price.
+	const pi = (extra: Record<string, unknown>, priced = { input: 2, output: 8, cacheRead: 2, cacheWrite: 0 }) =>
+		callSettlementFromMessage(
+			{ stopReason: "stop", usage: { input: 1000, output: 50, cacheRead: 0, cacheWrite: 0, ...extra } },
+			{ pricedBy: "target-rates", rates: priced },
+		).pricing;
+	deepStrictEqual(pi({ cacheReadField: "omitted", cost: { total: 0.0024 } }).usd, {
+		kind: "measured",
+		value: (1000 * 2 + 50 * 8) / 1_000_000,
+		source: "local-count",
+	});
+	// An undeclared cacheWrite rate is the documented $0 for 1h writes too; a declared one bills them at 2x input.
+	const longWrites = { cacheWrite: 100, cacheWrite1h: 100 };
+	const undeclared = pi(longWrites).usd;
+	strictEqual(undeclared.kind === "measured" && undeclared.value, (1000 * 2 + 50 * 8) / 1_000_000);
+	const declared = pi(longWrites, { input: 2, output: 8, cacheRead: 2, cacheWrite: 3 }).usd;
+	strictEqual(declared.kind === "measured" && declared.value, (1000 * 2 + 50 * 8 + 100 * 4) / 1_000_000);
+	// A provider's own cost outranks declared rates.
+	deepStrictEqual(pi({ cost: { total: 0.5, totalFromProvider: true } }), {
+		usd: { kind: "measured", value: 0.5, source: "provider" },
+		pricedBy: "provider",
+	});
 });
 
 test("message facts preserve unknown placeholders, explicit zero, terminal errors and unsent calls", () => {

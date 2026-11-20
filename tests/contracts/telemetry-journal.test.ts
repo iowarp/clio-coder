@@ -490,7 +490,11 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 				clioExternal: { tokenUsage: "provider-reported" },
 			},
 		};
-		const liveFacts = retry.settle(callSettlementFromMessage(message, "target-rates"), reportedModelFromMessage(message));
+		const rates = { input: 0, output: 62_500, cacheRead: 0, cacheWrite: 0 };
+		const liveFacts = retry.settle(
+			callSettlementFromMessage(message, { pricedBy: "target-rates", rates }),
+			reportedModelFromMessage(message),
+		);
 		ok(liveFacts);
 		strictEqual(journal.health().queueDepth, 4);
 		await journal.flush();
@@ -1383,7 +1387,16 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const settle = (start: CallStarted, message: unknown, pricing: "target-rates" | "none" = "none") =>
 		makeTelemetryRecord(
 			"call.settled",
-			{ ...start, ...callSettlementFromMessage(message, pricing), stages: { settle: 1 } },
+			{
+				...start,
+				...callSettlementFromMessage(
+					message,
+					pricing === "none"
+						? pricing
+						: { pricedBy: pricing, rates: { input: 12_500, output: 0, cacheRead: 0, cacheWrite: 0 } },
+				),
+				stages: { settle: 1 },
+			},
 			context,
 			clock,
 		);

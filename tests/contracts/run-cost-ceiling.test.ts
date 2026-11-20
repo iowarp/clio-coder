@@ -112,7 +112,14 @@ describe("--max-cost-usd and parallel dispatches", () => {
 							record: {
 								...makeTelemetryRecord(
 									"call.settled",
-									{ ...started, stages: { settle: 1 }, ...callSettlementFromMessage(message, "target-rates") },
+									{
+										...started,
+										stages: { settle: 1 },
+										...callSettlementFromMessage(message, {
+											pricedBy: "target-rates",
+											rates: { input: callUsd * 1000, output: 0, cacheRead: 0, cacheWrite: 0 },
+										}),
+									},
 									{ ...context, callId: started.callId, attemptId: started.attemptId },
 									{ t: new Date().toISOString(), mono: call },
 								),
