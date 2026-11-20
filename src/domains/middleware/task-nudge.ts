@@ -69,7 +69,15 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			} catch {
 				return [];
 			}
-			if (board === null || openTasks(board).length === 0) return [];
+			if (board === null) return [];
+			if (openTasks(board).length === 0) {
+				// Blocked never nudges, but on a turn that declared through finish it is still an open obligation the host
+				// seals; a declared turn never continues, so this effect is the fact alone.
+				const blocked = taskBoardCounts(board).blocked;
+				if (input.metadata?.completionState === undefined || blocked === 0) return [];
+				const message = `[CLIO Coder] Task board "${board.title}" still has ${blocked} blocked ${blocked === 1 ? "task" : "tasks"}.`;
+				return [{ kind: "request_continuation", message, note: "tasks are still blocked", fact: "open_task" }];
+			}
 			// A surface without access to tasks can never update the board, so nudging it would loop against a wall.
 			// The open board is still a fact the host seals (fleet design 4.3), carried on a note that asks for no tool.
 			const activeToolNames = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;

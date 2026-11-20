@@ -213,6 +213,51 @@ describe("coordinator discovery and dependency composition", () => {
 		}
 	});
 
+	it("never nudges an all-blocked board but seals its blocked tasks as open against a done claim", async () => {
+		const nudge = createTaskNudgeRegistration({
+			getBoard: () => ({
+				boardId: "fixture",
+				title: "Plan",
+				tasks: [
+					{ id: "t1", title: "Wire solver", status: "blocked", reason: "awaits operator" },
+					{ id: "t2", title: "Run sweep", status: "blocked", reason: "awaits operator" },
+				],
+				activeRunIds: [],
+			}),
+		});
+		const state = createTurnState("off");
+		state.turnToolCalls = 1;
+		const runtime = {
+			wireModelId: "fixture",
+			runtimeId: "fixture",
+			runtimeResolution: {},
+			agent: { state: { tools: resolveAgentTools({ registry }), messages: [] } },
+		} as unknown as AgentRuntime;
+		const middleware = createTurnMiddleware({
+			state,
+			toolRegistry: registry,
+			middleware: {
+				runHook: (input: MiddlewareHookInput) => runMiddlewareRegistrations(input, [nudge]),
+			} as MiddlewareContract,
+			middlewareToolChoice: createMiddlewareToolChoiceControl(),
+			emitNotice: () => {},
+			emitFooterNotice: () => {},
+		});
+		middleware.fireTurnStart(runtime, "Plan the sweep");
+		await middleware.fireTurnEnd(runtime, [], { toolCallId: "undeclared", toolName: "tasks" });
+		strictEqual(middleware.flushPendingReminders(), "");
+		strictEqual(state.continuation.requested, false);
+		deepStrictEqual(state.turnSealedCompletion?.facts, []);
+		state.turnCompletion = { state: "done", limitations: [], unverified: [] };
+		await middleware.fireTurnEnd(runtime, [], { toolCallId: "declared", toolName: "finish" });
+		deepStrictEqual(
+			[state.turnSealedCompletion?.claimed, state.turnSealedCompletion?.assessed, state.turnSealedCompletion?.facts],
+			["done", "partly_done", ["open_task"]],
+		);
+		strictEqual(middleware.flushPendingReminders(), "");
+		strictEqual(state.continuation.requested, false);
+	});
+
 	it("keeps a hidden named capability reachable without admitting unrelated tools", async () => {
 		const constraints = { allowedTools: ["context"] };
 		deepStrictEqual(
