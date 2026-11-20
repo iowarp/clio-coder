@@ -126,6 +126,15 @@ jobs:
         with:
           name: candidate-${{ inputs.sha }}
           path: ${{ runner.temp }}/candidate
+      # The state-file-lock pid-namespace contracts skip unless `unshare -Urpf` works; Ubuntu 24.04 blocks it through
+      # AppArmor. Each key is set only where the kernel has it, and the probe fails this step instead of a silent skip.
+      - name: Allow unprivileged user namespaces
+        run: |
+          for setting in kernel.unprivileged_userns_clone=1 kernel.apparmor_restrict_unprivileged_userns=0; do
+            key="${setting%%=*}"
+            if test -e "/proc/sys/${key//.//}"; then sudo sysctl -w "$setting"; fi
+          done
+          unshare -Urpf --kill-child --mount-proc true
       - name: Selected contracts, GUI behavior, and installed package
         env:
           CANDIDATE_SHA: ${{ inputs.sha }}
