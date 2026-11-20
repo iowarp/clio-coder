@@ -8,6 +8,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js";
 import type { AgentEvent } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
+import { workerRefusalReportDirective } from "../../src/engine/worker-refusals.js";
 import { startWorkerRun, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../src/worker/spec-contract.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
@@ -133,6 +134,15 @@ describe("worker execute refusals", () => {
 			[true, true, true],
 			final,
 		);
+	});
+
+	it("asks for the result tool at the cap only when the round can force it (FL-11)", () => {
+		// openai-completions forces the handoff (above); an API with no named tool choice, such as pi-messages or
+		// azure-openai-responses, may hide the tool that round, so the worker reports in prose instead.
+		ok(workerRefusalReportDirective("clio_submit_result").includes("calling clio_submit_result"));
+		const prose = workerRefusalReportDirective(null);
+		ok(prose.includes("Reply now with your final report"), prose);
+		ok(!prose.includes("clio_submit_result"), prose);
 	});
 
 	it("names the refused command and its rule to the model and the receipt", { timeout: 30_000 }, async () => {

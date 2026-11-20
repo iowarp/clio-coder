@@ -69,8 +69,18 @@ export const WORKER_REFUSAL_REPORT_DIRECTIVE =
 /**
  * The same last reply for a worker that reports through the helper result tool, which stays callable in it (x2-3).
  */
-export function workerRefusalHelperDirective(resultTool: string): string {
+function workerRefusalHelperDirective(resultTool: string): string {
 	return `Work tools are unavailable for the rest of this run. Submit your final result now by calling ${resultTool} alone with the complete result object: what you changed, what you verified, and what the refused commands blocked. Any other tool call ends the run without a result.`;
+}
+
+/**
+ * The last-reply directive for a worker at the limit. Only a forced handoff, a round that exposes the result tool and
+ * names it in the request, may ask for the tool; on an API with no named tool choice the tool can be hidden that round
+ * (a mutation report) or the model may ignore it, so the worker reports in prose, which dispatch judges as it stands
+ * (FL-11).
+ */
+export function workerRefusalReportDirective(forcedHandoffTool: string | null): string {
+	return forcedHandoffTool === null ? WORKER_REFUSAL_REPORT_DIRECTIVE : workerRefusalHelperDirective(forcedHandoffTool);
 }
 
 /** Every tool call in that last reply gets this instead of running. */
