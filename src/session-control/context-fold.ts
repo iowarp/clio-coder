@@ -1,17 +1,14 @@
 /**
- * ContextFold's session-control half (CF-1): the structural eviction stage, the
- * replay rebuild every reduction ends on, and the publication tails a summary
- * checkpoint and a step checkpoint run after their entry is on the ledger. The
- * turn context owns the state these read and write and lends it through the
- * port; this module owns no state of its own. The two tails stay separate
- * until one publication function replaces both.
+ * ContextFold's session-control half: the structural eviction stage, the replay
+ * rebuild every reduction ends on, and the one publication a summary checkpoint
+ * or a step checkpoint runs after its entry is on the ledger. The turn context
+ * owns the state these read and write and lends it through the port; this
+ * module owns no state of its own.
  */
 
 import type { ClioSettings } from "../core/config.js";
-import type { ContextOperationFact } from "../core/context-operation.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
-import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
 import { evictionPressure } from "../domains/context/fold/pressure.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
@@ -67,8 +64,8 @@ export interface ContextFoldPort {
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
 	/** The overflow path's one count (A4): the live estimate or Pi's chars/3.5 count, whichever is larger. */
 	overflowFitTokens(agentRuntime: AgentRuntime, pendingUserText?: string): number;
-	/** An overflow fold fit: the next main request pins the same count. */
-	armOverflowInputPin(): void;
+	/** Whether the request now fits on the A4 count; a fit pins that count for the next main request. */
+	pinOverflowFit(agentRuntime: AgentRuntime, pendingUserText?: string): boolean;
 	/** `commit` seeds a live anchor from a replayed usage when none exists, so the carry has a figure (§4 Commit). */
 	reconciledHistoryTokens(agentRuntime: AgentRuntime, commit?: boolean): number | null;
 	/** What the carry will leave behind, stored on the eviction record; undefined with no live anchor (§4). */
@@ -84,8 +81,12 @@ export interface ContextFoldPort {
 	): void;
 	/** A rewrite the attestation did not describe: the next call re-anchors. */
 	dropReconciledAnchor(): void;
-	captureRuntimeContextSnapshot: TurnContext["captureRuntimeContextSnapshot"];
-	setCurrentSnapshot(snapshot: ContextSnapshot): void;
+	/** Capture the rebuilt context, make it the current snapshot and persist it. */
+	publishSnapshot(
+		agentRuntime: AgentRuntime,
+		threshold: number | null,
+		metadata?: Parameters<TurnContext["captureRuntimeContextSnapshot"]>[3],
+	): ContextSnapshot;
 	persistContextSnapshot(snapshot: ContextSnapshot): void;
 	noteCompactionEvent(event: CompactionEvent): void;
 	notifyMemoryCommit: TurnContext["notifyMemoryCommit"];
@@ -94,12 +95,10 @@ export interface ContextFoldPort {
 	refreshLiveBudget(pendingUserText?: string): void;
 	emitCompactionActivity(status: ContextActivityStatus, message: string): void;
 	compactionFailureMessage(error: unknown): string;
-	recordCompactionFact(fact: ContextOperationFact): void;
-	recordCompactionTokens(tokens: { before: number; after: number; basis: "runtime-estimate" }): void;
-	/** A posture generation is in force, so the prompt recompiles after a summary rebuild. */
-	hasPostureGeneration(): boolean;
-	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<unknown>;
-	logPromptCompileIfPending(): void;
+	/** A working-set eviction's facts and figures for the compaction card, and its completed activity. */
+	noteStructuralEviction(planned: EvictionPlan): void;
+	/** After a summary rebuild: recompile the prompt when a posture generation is in force. */
+	recompilePosturePrompt(agentRuntime: AgentRuntime): Promise<void>;
 }
 
 /** One stage's entry in a `context.fold` decision. */
@@ -408,13 +407,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			refreshAgentMessagesFromSession(agentRuntime);
 			port.carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, tokensRemoved);
 
-			const postEvictionSnapshot = port.captureRuntimeContextSnapshot(
-				agentRuntime,
-				state.activeUserTurnId || "compaction",
-				input.compactionThreshold,
-			);
-			port.setCurrentSnapshot(postEvictionSnapshot);
-			port.persistContextSnapshot(postEvictionSnapshot);
+			const postEvictionSnapshot = port.publishSnapshot(agentRuntime, input.compactionThreshold);
 
 			// All event surfaces quote the request anchor less the priced
 			// bodies; the live re-check below remains authoritative (#422).
@@ -435,11 +428,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				} satisfies ContextPrunedPayload,
 				sessionTelemetryContext(input.originSession),
 			);
-			if (!superseded) {
-				port.recordCompactionFact({ kind: "omitted", unit: "observations", count: planned.items.length });
-				const itemsWord = planned.items.length === 1 ? "item" : "items";
-				port.emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
-			}
+			if (!superseded) port.noteStructuralEviction(planned);
 			deps.emitNotice(input.notice);
 
 			// Published only after the carried anchor and the post-eviction
@@ -452,13 +441,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			// fit check reads can sit on another basis: after a resume no live anchor carries through the rebuild, and
 			// the replayed usage this eviction invalidated leaves only the structural estimate (bt-47 D1).
 			decision.committed({ tokensBefore: planned.tokensBefore, tokensAfter: planned.tokensAfter });
-			if (!superseded) {
-				port.recordCompactionTokens({
-					before: planned.tokensBefore,
-					after: planned.tokensAfter,
-					basis: "runtime-estimate",
-				});
-			}
 		} catch (error) {
 			if (!committed) decision.stage({ stage, outcome: "failed", reason: "error" });
 			if (!superseded) port.emitCompactionActivity("failed", port.compactionFailureMessage(error));
@@ -586,13 +568,9 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 					)
 				: `[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
 		});
-		const after = port.liveContextEstimate(agentRuntime, pendingUserText);
-		let fit: boolean;
-		if (requiredFit) {
-			const fitAfter = fitTokens();
-			fit = requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), after.contextWindow);
-			if (fit) port.armOverflowInputPin();
-		} else fit = !input.shouldCompact(after.tokens).shouldCompact;
+		const fit = requiredFit
+			? port.pinOverflowFit(agentRuntime, pendingUserText)
+			: !input.shouldCompact(port.liveContextEstimate(agentRuntime, pendingUserText).tokens).shouldCompact;
 		return { acted: !alone, committed: true, fit, skipNotice: alone && structural ? structuralSkip() : skipNotice };
 	};
 
@@ -667,23 +645,14 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		// Durable before the rebuild, so render places what no attempt has carried yet after the checkpoint.
 		deps.hostInserts?.reissueUnsent();
 		refreshAgentMessagesFromSession(agentRuntime);
-		if (kind === "summary" && port.hasPostureGeneration()) {
-			await port.ensureSessionPrompt(agentRuntime);
-			port.logPromptCompileIfPending();
-		}
+		if (kind === "summary") await port.recompilePosturePrompt(agentRuntime);
 		// A checkpoint replaces the conversation the attestation described, so no
 		// arithmetic carries it forward; the next call re-anchors it.
 		port.dropReconciledAnchor();
 
-		const after = port.captureRuntimeContextSnapshot(
-			agentRuntime,
-			state.activeUserTurnId || "compaction",
-			threshold,
-			input.snapshotMetadata,
-		);
-		port.setCurrentSnapshot(after);
+		// The before snapshot persists ahead of the after one.
 		port.persistContextSnapshot(before);
-		port.persistContextSnapshot(after);
+		const after = port.publishSnapshot(agentRuntime, threshold, input.snapshotMetadata);
 
 		const tokensAfter = port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		const stage = kind === "summary" ? "llm_summary" : "step_checkpoint";

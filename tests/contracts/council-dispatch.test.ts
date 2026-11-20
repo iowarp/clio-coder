@@ -327,10 +327,13 @@ test("a judge council admits round 2 and the judge when host text names an endpo
 		rounds: 2,
 		synthesis: "judge",
 		task: "Does src/core/clock.ts own the clock?",
+		cwd: process.cwd(),
 	};
 	await tool.run(args, {} as never);
 	const judge = seated.find((request) => request.gate?.role === "synthesis");
 	ok(judge !== undefined, "the judge is admitted");
+	// The judge reads in the tree its seats read in, not wherever the host process started (cf-x11).
+	strictEqual(judge.cwd, process.cwd());
 	match(judge.briefing ?? "", /Reason: outcome=failed: provider answered http 400 from \/chat\/completions/u);
 	match(judge.briefing ?? "", /read output\.text in \/\S+ for the whole answer/u);
 	const second = seated.filter((request) => request.council?.round === 2 && request.gate?.role === "member");
