@@ -31,10 +31,10 @@ const PREVIEW_LIMIT = 120;
 
 /**
  * A worker's fit cuts render through the same marker as the session's reasons:
- * `step_overflow` for a protected read the model has seen, `unseen_overflow`
- * for one it has not. Neither joins the session ledger's reasons.
+ * `step_overflow` (a ledger reason too) for a protected read the model has
+ * seen, `unseen_overflow` for one it has not, which never joins the ledger.
  */
-export type MarkerReason = EvictionReason | "step_overflow" | "unseen_overflow";
+export type MarkerReason = EvictionReason | "unseen_overflow";
 
 export interface MarkerInput {
 	alias?: string;

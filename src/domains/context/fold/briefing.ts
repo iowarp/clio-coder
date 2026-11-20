@@ -1,5 +1,5 @@
 /**
- * A fleet recipient's briefing built to a byte cap (ContextFold CF-10). A council seat or judge receives typed parts:
+ * A fleet recipient's briefing built to a byte cap. A council seat or judge receives typed parts:
  * `framing` (what the seat is for), `task` (the original briefing) and `evidence` (one seat's answer or failure). When
  * the parts overflow the cap they are filled in a fixed order, so the briefing never loses a seat to an oversized
  * original briefing or to the first answer that happened to be long:

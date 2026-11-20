@@ -1575,6 +1575,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return anchoredFitCount(agentRuntime, observed, live, []);
 	};
 
+	/** After an overflow fold or the requireFit summary: a request that fits on the A4 count pins it for the next main request. */
+	const pinOverflowFit = (agentRuntime: AgentRuntime, pendingUserText?: string): boolean => {
+		const fitAfter = overflowFitTokens(agentRuntime, pendingUserText);
+		const window = liveContextEstimate(agentRuntime, pendingUserText).contextWindow;
+		if (!requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), window)) return false;
+		overflowInputPin = { sessionId: deps.session?.current()?.id };
+		return true;
+	};
+
 	/**
 	 * Null while the request fits on the A4 count. Otherwise what the overflow fold and the requireFit summary could
 	 * not clear: the A4 count, and the sentence naming the largest tool result the request still carries and its size,
@@ -2109,9 +2118,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
 		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
 		overflowFitTokens: (runtime, pendingUserText) => overflowFitTokens(runtime, pendingUserText),
-		armOverflowInputPin: () => {
-			overflowInputPin = { sessionId: deps.session?.current()?.id };
-		},
+		pinOverflowFit: (runtime, pendingUserText) => pinOverflowFit(runtime, pendingUserText),
 		reconciledHistoryTokens: (runtime, commit) => reconciledHistoryTokens(runtime, undefined, commit),
 		evictionAnchor: (runtime, historyTokens, tokensRemoved) => evictionAnchor(runtime, historyTokens, tokensRemoved),
 		carryReconciledAnchorThroughProjection: (runtime, historyTokens, tokensRemoved) =>
@@ -2119,10 +2126,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		dropReconciledAnchor: () => {
 			reconciledAnchor = null;
 		},
-		captureRuntimeContextSnapshot: (runtime, turnId, threshold, extra) =>
-			captureRuntimeContextSnapshot(runtime, turnId, threshold, extra),
-		setCurrentSnapshot: (snapshot) => {
+		publishSnapshot: (runtime, threshold, metadata) => {
+			const snapshot = captureRuntimeContextSnapshot(runtime, state.activeUserTurnId || "compaction", threshold, metadata);
 			currentContextSnapshot = snapshot;
+			persistContextSnapshot(snapshot);
+			return snapshot;
 		},
 		persistContextSnapshot: (snapshot) => persistContextSnapshot(snapshot),
 		noteCompactionEvent: (event) => {
@@ -2136,15 +2144,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 		emitCompactionActivity: (status, message) => emitCompactionActivity(status, message),
 		compactionFailureMessage,
-		recordCompactionFact: (fact) => {
-			compactionFacts.push(fact);
+		noteStructuralEviction: (planned) => {
+			const count = planned.items.length;
+			compactionFacts.push({ kind: "omitted", unit: "observations", count });
+			emitCompactionActivity("completed", `${count} working-set ${count === 1 ? "item" : "items"} evicted`);
+			compactionTokens = { before: planned.tokensBefore, after: planned.tokensAfter, basis: "runtime-estimate" };
 		},
-		recordCompactionTokens: (tokens) => {
-			compactionTokens = tokens;
+		recompilePosturePrompt: async (runtime) => {
+			if (!postureGeneration) return;
+			await controller.ensureSessionPrompt(runtime);
+			controller.logPromptCompileIfPending();
 		},
-		hasPostureGeneration: () => Boolean(postureGeneration),
-		ensureSessionPrompt: (runtime) => controller.ensureSessionPrompt(runtime),
-		logPromptCompileIfPending: () => controller.logPromptCompileIfPending(),
 	});
 	const refreshAgentMessagesFromSession = contextFold.refreshAgentMessagesFromSession;
 
@@ -2838,12 +2848,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			CONTEXT_STATUS_NOTICE_KEY,
 		);
 		// The requireFit summary cleared what the fold could not: the next main request pins the same A4 count.
-		if (requiredFit) {
-			const fitAfter = overflowFitTokens(agentRuntime, pendingUserText);
-			const window = liveContextEstimate(agentRuntime, pendingUserText).contextWindow;
-			if (requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), window))
-				overflowInputPin = { sessionId: deps.session?.current()?.id };
-		}
+		if (requiredFit) pinOverflowFit(agentRuntime, pendingUserText);
 		refreshLiveBudget(pendingUserText);
 		return true;
 	};
