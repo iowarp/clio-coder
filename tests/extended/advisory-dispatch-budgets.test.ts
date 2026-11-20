@@ -1,4 +1,7 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -9,8 +12,9 @@ import {
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
-
+import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import { openStoreBackend } from "../../src/domains/store/index.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -302,6 +306,48 @@ describe("dispatch advisory admission and explicit authority", () => {
 			ok(reconciled !== undefined && reconciled > preview.costUpperBoundUsd);
 		} finally {
 			await priced.extension.stop?.();
+		}
+	});
+	it("previews the run's store-grant, budget, remote-node and outside-read admission (FL-13)", async () => {
+		const cwd = realpathSync(mkdtempSync(join(tmpdir(), "fl13-preview-")));
+		let node: RunNodeIdentity = { id: "local", kind: "local" };
+		const bundle = makeDispatchBundle(dispatchStubContext(), { previewNode: () => ({ node }) });
+		await bundle.extension.start();
+		try {
+			const preview = bundle.contract.preview;
+			ok(preview);
+			const writer = { ...request, agentId: "coder", executionRole: "builder" as const, cwd, storeTags: ["results"] };
+			throws(() => preview(writer), /store tag 'results' does not exist/u);
+			await (await openStoreBackend(cwd)).getOrCreateTag("results");
+			equal(preview(writer).checkedAtRun, undefined);
+			node = { id: "gpu", kind: "ssh", host: "gpu.example" };
+			throws(() => preview(writer), /node 'gpu' is remote and a worker there cannot reach this host's store/u);
+			node = { id: "local", kind: "local" };
+			const bounded = {
+				posture: "balanced" as const,
+				maxCostUsd: 0.000001,
+				deadlineMs: null,
+				minimumQuality: null,
+				locality: "any" as const,
+				requiredCapabilities: [],
+				failover: "none" as const,
+			};
+			throws(() => preview({ ...request, cwd, routingIntent: bounded }), /budget ceiling crossed/u);
+			const outside = { ...request, cwd, readOnly: true, externalReadRoot: cwd };
+			deepStrictEqual(preview(outside).checkedAtRun, [`outside read root ${cwd}: approval is asked at run`]);
+			throws(() => preview({ ...outside, cwd: tmpdir() }), /external_read_approval_required/u);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+		const over = makeDispatchBundle(
+			dispatchStubContext({ scheduling: { preflight: () => ({ verdict: "over", currentUsd: 100, ceilingUsd: 1 }) } }),
+		);
+		await over.extension.start();
+		try {
+			throws(() => over.contract.preview?.(request), /budget_ceiling/u);
+		} finally {
+			await over.extension.stop?.();
 		}
 	});
 	it("gives an advisory worker a hard ceiling at the recipe maximum and refuses one on an enforced budget", async () => {

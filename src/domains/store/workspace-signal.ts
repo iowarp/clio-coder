@@ -7,9 +7,12 @@ const tagDirs = new Map<string, string>();
 interface WorkspaceStore {
 	readonly signals: ReadonlyArray<string>;
 	readonly tags: ReadonlyArray<string>;
+	/** A clio-core store lists its tags only through its runtime. */
+	readonly listed: boolean;
 }
 
-const NO_STORE: WorkspaceStore = { signals: [], tags: [] };
+const NO_STORE: WorkspaceStore = { signals: [], tags: [], listed: true };
+const CORE_STORE: WorkspaceStore = { signals: [], tags: [], listed: false };
 const answers = new Map<string, { key: string; store: WorkspaceStore }>();
 
 function modified(path: string): number {
@@ -29,6 +32,15 @@ export function workspaceCapabilitySignals(cwd: string): ReadonlyArray<string> {
 /** The project's local store tags, sorted, records tags left out; empty for a clio-core store. */
 export function workspaceStoreTags(cwd: string): ReadonlyArray<string> {
 	return workspaceStore(cwd).tags;
+}
+
+/**
+ * The project's local store tags for a synchronous dispatch preview, or null for a
+ * clio-core store, whose tags only its runtime can list.
+ */
+export function listedStoreTags(cwd: string): ReadonlyArray<string> | null {
+	const store = workspaceStore(cwd);
+	return store.listed ? store.tags : null;
 }
 
 /**
@@ -55,7 +67,7 @@ function workspaceStore(cwd: string): WorkspaceStore {
 function readStore(backend: string, tagsDir: string): WorkspaceStore {
 	try {
 		const record = JSON.parse(readFileSync(backend, "utf8")) as { backend?: unknown };
-		if (record.backend === "clio-core") return NO_STORE;
+		if (record.backend === "clio-core") return CORE_STORE;
 	} catch {
 		// No record, or an unreadable one: the local backend serves this project.
 	}
@@ -75,5 +87,5 @@ function readStore(backend: string, tagsDir: string): WorkspaceStore {
 		})
 		.filter((tag) => validateTagName(tag) === null)
 		.sort();
-	return tags.length > 0 ? { signals: [ToolNames.Store, ToolNames.Data], tags } : NO_STORE;
+	return tags.length > 0 ? { signals: [ToolNames.Store, ToolNames.Data], tags, listed: true } : NO_STORE;
 }

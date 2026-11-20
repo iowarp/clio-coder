@@ -257,6 +257,7 @@ export function prepareScoutContinuation(input: {
 			routingIntent: { ...proposal.routingIntent, maxCostUsd: explicitCostCeiling, deadlineMs, failover: "none" },
 			failover: "none",
 			routeApproval: null,
+			...(proposal.resolution.checkedAtRun === undefined ? {} : { checkedAtRun: [...proposal.resolution.checkedAtRun] }),
 			agentSelection: selection,
 			stepId: step.id,
 			dependencies: [...step.dependencies],
