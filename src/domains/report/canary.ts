@@ -243,7 +243,7 @@ export function canaryRefusal(
 	const more = hits.length > 1 ? ` (and ${hits.length - 1} more)` : "";
 	if (options.modelsKept === true && hits.every((each) => each.path !== null && MODEL_FIELD.test(each.path)))
 		return `${what}: a model id contains this machine's ${hit.kind} name, in ${canaryLocation(hit)}${more}; build it again with --anonymize-models.`;
-	return `${what}: a ${hit.kind} appears in ${canaryLocation(hit)}${more}. This is a Clio Coder bug; \`/report\` it without a bundle.`;
+	return `${what}: a ${hit.kind} appears in ${canaryLocation(hit)}${more}. This is a CLIO Coder bug; \`/report\` it without a bundle.`;
 }
 
 /**

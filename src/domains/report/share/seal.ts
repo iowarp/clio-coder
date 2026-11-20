@@ -29,7 +29,7 @@ export const SHARE_RECIPIENT = {
 } as const;
 
 export const SHARE_KEY_EXPIRED =
-	"this Clio Coder is too old to share a bundle: the maintainers' key it carries has expired; upgrade, or send the report without one";
+	"this CLIO Coder is too old to share a bundle: the maintainers' key it carries has expired; upgrade, or send the report without one";
 
 export const SHARE_PLAIN_FORMAT = "clio-coder.share.plain";
 export const SHARE_SEALED_FORMAT = "clio-coder.share.sealed";

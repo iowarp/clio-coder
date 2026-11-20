@@ -40,7 +40,7 @@ async function createShareGist(
 	deps: GistDeps,
 ): Promise<{ gistId: string } | { failed: string }> {
 	const request = {
-		description: `Clio Coder encrypted share ${envelope.shareId}`,
+		description: `CLIO Coder encrypted share ${envelope.shareId}`,
 		public: false,
 		files: { [shareGistFile(envelope.shareId)]: { content: `${JSON.stringify(envelope, null, 2)}\n` } },
 	};

@@ -308,7 +308,7 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 
 const CLIO_ISSUE_COMMAND = /\bgh\s+(?:issue\s+create\b|api\s+\S*\/issues\b)/u;
 export const CLIO_REPORT_NUDGE =
-	"Clio Coder has /report, which checks for duplicates, shows the operator the exact text and attaches versions.";
+	"CLIO Coder has /report, which checks for duplicates, shows the operator the exact text and attaches versions.";
 
 /**
  * A `gh` issue filed against Clio Coder's own repository bypasses /report (R-12). The call is not blocked, since the
