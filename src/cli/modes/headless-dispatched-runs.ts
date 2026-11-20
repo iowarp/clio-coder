@@ -21,10 +21,28 @@ export interface DispatchedRunsSettlement {
 	/** Final attempts that ended without delivering (a retried attempt is not final). */
 	undelivered: ReadonlyArray<RunEnvelope>;
 	/**
+	 * Final attempts of assignments the dispatching session canceled through steer (ns:61). The caller asked for the
+	 * cancel, so they read canceled and do not fail the run. A cancel during a scheduled retry finds the last attempt
+	 * already sealed failed; its entry here still reads canceled and names that attempt's ending in its detail.
+	 */
+	canceled: ReadonlyArray<RunEnvelope>;
+	/**
 	 * Schema v2 only (CLI-5): final attempts that did not deliver but a later dispatch of the same task by the same
 	 * agent and parent did, so they no longer fail the run. Always empty unless the caller asks for it.
 	 */
 	superseded: ReadonlyArray<RunEnvelope>;
+}
+
+/** A steer-canceled run as it settles: canceled, with the sealed attempt's own ending kept when it was not one. */
+function asSteerCanceled(run: RunEnvelope): RunEnvelope {
+	if (run.outcome === "canceled") return { ...run, outcomeCode: null };
+	const ended = run.outcomeCode ?? run.outcome ?? "unknown";
+	return {
+		...run,
+		outcome: "canceled",
+		outcomeCode: null,
+		outcomeDetail: `canceled through steer by the dispatching session before its retry; the last attempt ended ${ended}`,
+	};
 }
 
 function dispatchedBy(dispatch: Pick<DispatchContract, "listRuns">, rootRunId: string): RunEnvelope[] {
@@ -59,7 +77,7 @@ function supersededBy(failed: RunEnvelope, runs: ReadonlyArray<RunEnvelope>): bo
  * failure a later dispatch of the same task made good moves to `superseded`.
  */
 export async function settleDispatchedRuns(
-	dispatch: Pick<DispatchContract, "listRuns">,
+	dispatch: Pick<DispatchContract, "listRuns" | "canceledBySteer">,
 	rootRunId: string,
 	isShuttingDown: () => boolean,
 	options: { supersede?: boolean } = {},
@@ -79,10 +97,14 @@ export async function settleDispatchedRuns(
 			run.outcome !== null &&
 			UNDELIVERED_OUTCOMES.has(run.outcome),
 	);
-	const superseded = options.supersede === true ? failed.filter((run) => supersededBy(run, runs)) : [];
+	// The dispatch domain's typed marker, never the outcome text: only a cancel the steer tool issued leaves the list.
+	const steerCanceled = failed.filter((run) => dispatch.canceledBySteer?.(run.id) === true);
+	const undeliveredCandidates = failed.filter((run) => !steerCanceled.includes(run));
+	const superseded = options.supersede === true ? undeliveredCandidates.filter((run) => supersededBy(run, runs)) : [];
 	return {
 		live: runs.filter((run) => !isTerminalRunEnvelope(run)),
-		undelivered: failed.filter((run) => !superseded.includes(run)),
+		undelivered: undeliveredCandidates.filter((run) => !superseded.includes(run)),
+		canceled: steerCanceled.map(asSteerCanceled),
 		superseded,
 	};
 }

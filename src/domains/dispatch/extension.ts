@@ -4953,6 +4953,8 @@ export function createDispatchBundle(
 		{ lineage: RunLineage; reservation: DispatchRequest["reservation"]; maxRetries: number; receipt?: RunResult }
 	>();
 	const canceledControlRoots = new Set<string>();
+	/** Control roots the dispatching session canceled through the steer tool (ns:61). */
+	const steerCanceledRoots = new Set<string>();
 	const memberWork = new Map<string, Set<Promise<unknown>>>();
 	function trackMemberWork(runId: string, operation: Promise<unknown>): void {
 		const root = controlRootsByAttempt.get(runId) ?? runId;
@@ -12382,6 +12384,7 @@ export function createDispatchBundle(
 			const rootRunId = controlRootFor(runId);
 			const run = currentAssignmentRun(runId);
 			canceledControlRoots.add(rootRunId);
+			if (reason?.cause === "steer") steerCanceledRoots.add(rootRunId);
 			const queued = pendingCapacity.get(rootRunId);
 			if (queued !== undefined && capacityAdmission.cancel(rootRunId)) {
 				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel-queued`);
@@ -12446,6 +12449,13 @@ export function createDispatchBundle(
 				run.abort();
 			} catch {
 				// child may already be gone
+			}
+		},
+		canceledBySteer(runId) {
+			try {
+				return steerCanceledRoots.has(controlRootFor(runId));
+			} catch {
+				return false;
 			}
 		},
 		steer(runId, text) {

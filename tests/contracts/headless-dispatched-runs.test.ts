@@ -87,6 +87,38 @@ describe("headless dispatched runs", () => {
 			["first"],
 		);
 	});
+	it("settles only a steer-canceled run canceled, off the undelivered list, and names it canceled (ns:61)", async () => {
+		const runs = [
+			{ ...run("steered", "canceled"), outcomeCode: "worker_final_output_missing" as const },
+			run("steered-in-retry", "failed"),
+			run("operator-canceled", "canceled"),
+			run("plain-failure", "failed"),
+		];
+		const steered = new Set(["steered", "steered-in-retry"]);
+		const settlement = await settleDispatchedRuns(
+			{ listRuns: () => runs, canceledBySteer: (id) => steered.has(id) },
+			ROOT,
+			() => false,
+		);
+		deepStrictEqual(
+			settlement.undelivered.map((entry) => entry.id),
+			["operator-canceled", "plain-failure"],
+		);
+		deepStrictEqual(
+			settlement.canceled
+				.map(projectDispatchedRunOutcome)
+				.map(({ runId, outcome, outcomeCode }) => [runId, outcome, outcomeCode]),
+			[
+				["steered", "canceled", null],
+				["steered-in-retry", "canceled", null],
+			],
+		);
+		const description = describeRuns(settlement.canceled);
+		match(
+			description,
+			/^steered \(coder, canceled\), steered-in-retry \(coder, canceled\): .*last attempt ended failed$/u,
+		);
+	});
 });
 
 it("reports the no-work reason on the headless failure line", () => {

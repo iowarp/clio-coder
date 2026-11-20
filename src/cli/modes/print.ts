@@ -1566,7 +1566,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown(), {
 				supersede: runResultV2Active(),
 			})
-		: { live: [], undelivered: [], superseded: [] };
+		: { live: [], undelivered: [], canceled: [], superseded: [] };
 	if (settlement.superseded.length > 0) noteDispatchSupersededV2(settlement.superseded.map(projectDispatchedRunOutcome));
 	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
 		writeJsonHeader(true);
@@ -1771,6 +1771,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// The answer stands, so the run still succeeds; the caller still learns that its last calls never ran.
 		if (result.callsNotRun !== null && !result.sawTerminatingToolResult && !callsNotRunFail) {
 			stderrMessage = [stderrMessage, `clio-coder run: ${result.callsNotRun}`].filter(Boolean).join("\n");
+		}
+		// ns:61: a worker the run canceled through steer did not fail it, but stderr still names it.
+		if (settlement.canceled.length > 0) {
+			const note = `clio-coder run: ${settlement.canceled.length} dispatched worker(s) canceled through steer: ${describeRuns(settlement.canceled)}`;
+			stderrMessage = [stderrMessage, note].filter(Boolean).join("\n");
 		}
 	}
 	// A yolo pause ends the run on purpose, whatever the cancelled turn left behind; a signal still outranks it.
