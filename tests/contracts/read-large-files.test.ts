@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import { createConsultTool } from "../../src/tools/consult.js";
+import { createContextTool } from "../../src/tools/context/index.js";
+import { createDataTool } from "../../src/tools/gateway/data-tool.js";
 import type { Observation } from "../../src/tools/observation.js";
 import { createHeadlessObservationPool } from "../../src/tools/observation.js";
 import {
@@ -554,6 +556,16 @@ describe("read windowed reader", () => {
 		const retried = await consultIn("batch-2");
 		ok(retried.kind === "ok" && retried.output.includes('"filesRead":["headless.txt"]'), JSON.stringify(retried));
 		strictEqual(consulted.run.stopped(), false);
+		// data and context refuse an invalid call for its own reason before the pool can count it.
+		const invalid = await drained(`${scratch.dir}#invalid`);
+		const data = await createDataTool({ getCwd: () => scratch.dir }).run(
+			{ op: "inspect", path: "missing.csv" },
+			invalid.options("batch-1"),
+		);
+		ok(data.kind === "error" && /not-found/.test(data.message), JSON.stringify(data));
+		const settings = await createContextTool().run({ scope: "settings" }, invalid.options("batch-1"));
+		ok(settings.kind === "error" && /settings snapshot is unavailable/.test(settings.message), JSON.stringify(settings));
+		strictEqual(invalid.run.stopped(), false);
 	});
 
 	it("charges parallel reads to the turn pool before any of them awaits", async () => {
