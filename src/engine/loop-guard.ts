@@ -129,6 +129,8 @@ export const ORCH_TURN_TOOL_CALL_HARD_MARGIN = 15;
 
 /** Bounded turn-id memory, matching the registry's dispatch-guard policy. */
 const LOOP_GUARD_TURN_LIMIT = 32;
+/** Direct `finish` attempts a turn may make past its spent tool-call budget (CLI-P43). */
+const FINISH_ATTEMPTS_PAST_BUDGET = 2;
 
 /** Bounded per-fingerprint success memory for the block-reason evidence anchor. */
 const SUCCEEDED_FINGERPRINT_LIMIT = 128;
@@ -981,6 +983,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const identicalBlockStreakByTurn = new Map<string, { identity: string; count: number }>();
 	const unavailableChecks = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
+	/** Per turn: direct `finish` attempts admitted past a spent turn budget (CLI-P43). */
+	const finishesPastBudgetByTurn = new Map<string, number>();
 	/** Per turn: calls by effective tool (a gateway call counts as its capability), named in the budget refusal. */
 	const callsByToolByTurn = new Map<string, Map<string, number>>();
 	/**
@@ -1570,9 +1574,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	};
 
 	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
-		// `finish` ends the turn instead of extending it, so a spent budget never refuses the declaration and it
-		// spends none: a run that used its calls can still say how it ended (CLI-P43).
-		if (effectiveToolCall(input.toolName ?? "unknown", input.toolArgs).toolName === ToolNames.Finish) return null;
 		const resolved = resolveTurnBudget(input);
 		if (resolved === undefined) return null;
 		const turnBudget = resolved.budget;
@@ -2161,6 +2162,22 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const chainWrapper = isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs);
 			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> => {
 				if (rejudge) return [];
+				// A run that spent its turn's calls can still declare how it ended: a direct `finish` past the soft budget
+				// or the hard ceiling runs and spends nothing, at most FINISH_ATTEMPTS_PAST_BUDGET times a turn, so an
+				// invalid or varying declaration cannot spin. A gateway-wrapped finish cannot run, so it counts as any
+				// call does; the repeat and stagnation detectors still see every attempt (CLI-P43).
+				if (hookInput.toolName === ToolNames.Finish) {
+					const soft = resolveTurnBudget(input)?.budget.soft;
+					const spent = callsByTurn.get(turnKey) ?? 0;
+					if (
+						soft !== undefined &&
+						spent >= soft &&
+						(finishesPastBudgetByTurn.get(turnKey) ?? 0) < FINISH_ATTEMPTS_PAST_BUDGET
+					) {
+						bumpBoundedCounter(finishesPastBudgetByTurn, turnKey);
+						return [];
+					}
+				}
 				if (chainWrapper) {
 					const soft = resolveTurnBudget(input)?.budget.soft;
 					if (
