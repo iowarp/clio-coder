@@ -133,6 +133,71 @@ index a27023e070788d2f143b77743eef1c8a5ad0de58..1c8341115ccc621b5a916bf2bb96da1a
      handleInput(data) {
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
+diff --git a/dist/layout.js b/dist/layout.js
+index 0a50deb61a365783f324434ac51e069043a3e933..d9023143d3946b2f1a0be7c13a54f6c78d3a262c 100644
+--- a/dist/layout.js
++++ b/dist/layout.js
+@@ -4,6 +4,9 @@ import { cropKittyImageLine, getKittyImageMetadata, getMaxKittyImageRows, isImag
+ import { CURSOR_MARKER, compositeTuiLine } from "./tui.js";
+ import { extractAnsiCode, getActiveBackgroundAnsi, getGraphemeCellRange, sliceByColumn, visibleWidth, } from "./utils.js";
+ const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
++const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
++/** Each scroll view's painted scrollbar rows from the last frame, by track offset. */
++const scrollbarRows = new WeakMap();
+ function intersect(a, b) {
+     const x = Math.max(a.x, b.x);
+     const y = Math.max(a.y, b.y);
+@@ -209,6 +212,15 @@ function paintScrollbar(box, screen, totalWidth) {
+     const geometry = getScrollbarGeometry(box);
+     if (!geometry || !box.scrollView)
+         return;
++    const preserveTargetBackground = box.scrollView.scrollbar !== "always";
++    // A row whose string, glyph and placement match the last frame's reuses that frame's result instead of
++    // slicing the row three times again.
++    let cache = scrollbarRows.get(box.scrollView);
++    if (!cache) {
++        cache = [];
++        scrollbarRows.set(box.scrollView, cache);
++    }
++    cache.length = Math.min(cache.length, geometry.trackHeight);
+     for (let offset = 0; offset < geometry.trackHeight; offset++) {
+         const row = geometry.trackTop + offset;
+         if (row < box.clip.y || row >= box.clip.y + box.clip.height || row < 0 || row >= screen.length)
+@@ -217,7 +229,20 @@ function paintScrollbar(box, screen, totalWidth) {
+         const replacement = isThumb
+             ? box.scrollView.scrollbarThumbStyle(box.scrollView.isScrollbarActive ? "█" : "┃")
+             : box.scrollView.scrollbarTrackStyle("│");
+-        screen[row] = replaceScrollbarCell(screen[row] ?? "", geometry.column, totalWidth, replacement, box.scrollView.scrollbar !== "always");
++        const line = screen[row] ?? "";
++        const cached = cache[offset];
++        if (cached &&
++            cached.line === line &&
++            cached.replacement === replacement &&
++            cached.column === geometry.column &&
++            cached.totalWidth === totalWidth &&
++            cached.preserveTargetBackground === preserveTargetBackground) {
++            screen[row] = cached.output;
++            continue;
++        }
++        const output = replaceScrollbarCell(line, geometry.column, totalWidth, replacement, preserveTargetBackground);
++        cache[offset] = { line, replacement, column: geometry.column, totalWidth, preserveTargetBackground, output };
++        screen[row] = output;
+     }
+ }
+ function paintBox(box, screen, totalWidth) {
+@@ -245,6 +270,12 @@ function paintBox(box, screen, totalWidth) {
+             if (box.rect.x === 0 && box.rect.width >= totalWidth && (isImageLine(line) || !screen[row])) {
+                 screen[row] = line;
+             }
++            // A box at column 0 narrower than the screen, such as a transcript beside its scrollbar column, takes
++            // the same path on an untouched row when the line already fits it. The reset keeps the line's style
++            // from reaching cells painted after it, as compositing's own reset does.
++            else if (box.rect.x === 0 && !screen[row] && !isImageLine(line) && visibleWidth(line) <= box.rect.width) {
++                screen[row] = `${line}${SEGMENT_RESET}`;
++            }
+             else {
+                 screen[row] = compositeTuiLine(screen[row] ?? "", line, box.rect.x, box.rect.width, totalWidth);
+             }
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
 index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd0e38e9ef 100644
 --- a/dist/tui-alt-screen.d.ts
