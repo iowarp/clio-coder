@@ -171,6 +171,7 @@
 				"max_requests",
 				"max_tool_calls",
 				"provider_error",
+				"context_overflow",
 				"no_answer",
 				"output_limit",
 				"schema_mismatch",

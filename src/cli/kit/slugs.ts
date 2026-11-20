@@ -26,6 +26,7 @@ export const ERROR_SLUGS = [
 	"unsupported_on_route",
 	"busy",
 	"io",
+	"context_overflow",
 ] as const;
 
 export type ErrorSlug = (typeof ERROR_SLUGS)[number];

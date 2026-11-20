@@ -28,6 +28,7 @@ import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../engine/apis/output-budget.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
 import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
 import {
+	CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
 	detectOverflowFromState,
 	detectTerminalFailureFromState,
 	isEmptyAbortedAssistantMessage,
@@ -104,7 +105,8 @@ export interface TurnRecoveryDeps {
 	markPersistedUserEcho: (text: string, prompt: () => Promise<void>) => Promise<void>;
 	emitRetryStatus: (status: RetryStatusPayload) => void;
 	emitFailureMessage: (message: AgentMessage) => void;
-	emitNotice: (text: string) => void;
+	/** `key` marks a notice a headless reader keys on (overflow recovery's stop); the level stays the notice's own. */
+	emitNotice: (text: string, level?: "info", key?: string) => void;
 }
 
 export interface TurnRecovery {
@@ -425,6 +427,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			if (!compacted) {
 				deps.emitNotice(
 					`[CLIO Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
+					"info",
+					CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
 				);
 				return;
 			}
@@ -449,7 +453,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				if (cancelled()) return;
 				const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 				if (stillOverflowed) {
-					deps.emitNotice(`[CLIO Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
+					deps.emitNotice(
+						`[CLIO Coder] context overflow persisted after compaction: ${stillOverflowed.message}`,
+						"info",
+						CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
+					);
 				} else {
 					sizeAccepted = true;
 				}
@@ -458,6 +466,9 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				sizeAccepted = toContextOverflowError(retryErr) === null;
 				deps.emitNotice(
 					`[CLIO Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+					"info",
+					// Only a retry the window refused again is the overflow's stop; any other failure keeps its own cause.
+					sizeAccepted ? undefined : CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
 				);
 			}
 		} finally {
