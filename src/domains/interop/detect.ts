@@ -186,6 +186,7 @@ export async function detectInteropAgents(
 	const versions = new Map<string, Promise<string | undefined>>();
 	if (input.probeVersion === true) {
 		for (const kind of INTEROP_AGENT_KINDS) {
+			if (kind.versionProbe === false) continue;
 			const binary = resolveOnPath(kind.binaryNames).binary;
 			if (binary !== undefined) versions.set(kind.id, probeVersion(binary));
 		}
@@ -211,7 +212,7 @@ export async function detectInteropAgents(
 		};
 		if (resolved.binary !== undefined) {
 			const version =
-				input.probeVersion === true
+				input.probeVersion === true && kind.versionProbe !== false
 					? await versions.get(kind.id)
 					: // A run that did not probe keeps the last version seen for the same
 						// binary, so the fingerprint does not flip between probing callers.
