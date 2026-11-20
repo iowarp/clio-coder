@@ -663,6 +663,9 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 				!underTemp(target)
 			)
 				return unchanged;
+			// After the leading temp cd a relative operand is that temp path: spelled out, the snapshot and scratch-only checks
+			// place it where it lands instead of reading it as a workspace delete (XR-43).
+			if (target !== null && !path.isAbsolute(word)) edits.push({ start: token.start, end: token.end, target });
 		}
 	}
 	if (!hasDelete) return unchanged;

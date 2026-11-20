@@ -466,7 +466,8 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		for (const mode of [undefined, "default", "yolo"] as const)
 			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
 	}
-	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge.
+	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge, and none asks for a
+	// workspace snapshot: after the leading temp cd a relative operand is placed under the temp root.
 	for (const command of [
 		'B=$TMPDIR/base; mkdir -p "$B"; rm -rf "$B"',
 		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
@@ -474,10 +475,7 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'H=$(mktemp -d); rm -rf "$H"',
 		'cd "$TMPDIR" && mkdir -p probe-rows; rm -rf probe-rows',
 	]) {
-		const decision = engine.evaluate(bash(command), "default", {
-			...atDefault,
-			snapshots: command.startsWith("cd "),
-		});
+		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
 	}
