@@ -9820,12 +9820,14 @@ export function createDispatchBundle(
 					}
 				}
 				// Ruling 5: a builder that ran no tool over an unchanged tree left its obligation unmet, whichever side sealed it.
+				// A declared request for wider write roots is the "declared" half of change-or-declared, so it meets it.
 				if (
 					outcomeCode === "worker_no_work" &&
 					runObligation === "change-or-declared" &&
 					lifecycle.runtimeKind !== "subprocess" &&
 					finishContract?.assessment.mutatedPaths.length === 0 &&
-					summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass).calls === 0
+					summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass).calls === 0 &&
+					writeRootRequestFromEntries(finishContractEntries) === null
 				) {
 					evidence.obligationUnmet = runObligation;
 				}
