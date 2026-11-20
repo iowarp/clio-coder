@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import type { MemoryDeliveryMode } from "../../core/defaults.js";
 import { neutralizeFraming } from "../../core/reminder-framing.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { Fact } from "../../core/telemetry/fact.js";
@@ -23,6 +25,7 @@ import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
 import {
 	atWorkspaceRoot,
+	COMMAND_EVIDENCE_REF_PREFIX,
 	type CommandSegment,
 	commandSegment,
 	commandSegments,
@@ -344,6 +347,8 @@ export interface MemoryInterventionDeps {
 	 * the turn-end pass is shown a bounded subset so it does not rewrite them.
 	 */
 	getKeptLessons?: () => readonly KeptLesson[];
+	/** `context.memory.surfaces.delivery`, read at each decision point; absent means the default, `decision`. */
+	getDelivery?: () => MemoryDeliveryMode;
 	/** Kept lessons the turn-end pass deleted because the turn showed them wrong. */
 	onKeptLessonsRetired?: (memoryIds: ReadonlyArray<string>) => void;
 	onScopeEnd?: (scope: { sessionId: string | undefined; lessons: ReadonlyArray<TaskMemoryEntry> }) => void;
@@ -1271,6 +1276,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		stepContext = undefined;
 	}
 
+	function deliveryMode(): MemoryDeliveryMode {
+		try {
+			return deps.getDelivery?.() ?? "decision";
+		} catch {
+			return "decision";
+		}
+	}
+
 	function settings(): MemoryInterventionSettings {
 		const live = deps.getSettings?.();
 		return {
@@ -1878,7 +1891,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * changed file first. No model call, no cadence.
 	 */
 	function surfaceDurableLessons(args: Readonly<Record<string, unknown>> | undefined): ReadonlyArray<MiddlewareEffect> {
-		if (durableLessonsChecked || !settings().enabled) return NO_EFFECTS;
+		// The first-change broadcast is an opt-in (`delivery: broadcast`): it repeats the section, and none of the
+		// lane broadcasts settled (DESIGN 5).
+		if (durableLessonsChecked || !settings().enabled || deliveryMode() !== "broadcast") return NO_EFFECTS;
 		durableLessonsChecked = true;
 		const changed = new Set(touchedPaths(ToolNames.Write, args));
 		const pending = commandLessons().filter((lesson) => !lesson.commands.recommended.some(commandSucceeded));
@@ -1901,8 +1916,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	/**
-	 * The session read, changed or ran a repository file an approved lesson's own
-	 * text names: it is working on exactly what that lesson is about.
+	 * The session read, changed or ran a repository file an approved lesson is about: a source lesson an operator
+	 * approved that quotes or names it, or a command lesson whose recommended command names it (DESIGN 4.4 channel
+	 * table). A quote no operator reviewed never rides this channel.
 	 */
 	function surfaceForSubject(
 		toolName: string,
@@ -1910,12 +1926,19 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	): ReadonlyArray<MiddlewareEffect> {
 		const touched = new Set(touchedPaths(toolName, args));
 		if (touched.size === 0) return NO_EFFECTS;
+		const root = workspaceRoot();
+		const names = (lesson: KeptLesson): boolean =>
+			commandEvidence(lesson)
+				? lesson.commands.recommended.some((command) =>
+						command.split(/\s+/u).some((word) => touched.has(repositoryRelativePath(word, [root]) ?? "")),
+					)
+				: lesson.approval === "operator" &&
+					lesson.sourcePaths.length > 0 &&
+					[...lesson.paths, ...lesson.sourcePaths].some((path) => touched.has(path));
 		return deliverDurableLessons(
 			"durable_lesson_subject",
 			// A lesson whose recommended command already succeeded here has nothing left to say.
-			keptLessons().filter(
-				(lesson) => lesson.paths.some((path) => touched.has(path)) && !lesson.commands.recommended.some(commandSucceeded),
-			),
+			keptLessons().filter((lesson) => names(lesson) && !lesson.commands.recommended.some(commandSucceeded)),
 		);
 	}
 
@@ -1941,19 +1964,22 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * A failed command that runs the same repository file through the same
 	 * program as a command an approved lesson recommends, or that is exactly a
 	 * failed example the lesson quotes: the session is on the trap that lesson's
-	 * recipe fixes. It rides back on the failed result.
+	 * recipe fixes. It rides back on the failed result. A fix claim reaches the
+	 * failed call only when its failed pattern is that call's evidence identity.
 	 */
 	function surfaceRecipeForFailure(command: string): ReadonlyArray<MiddlewareEffect> {
 		const root = workspaceRoot();
+		const failedCall = commandSegment(command, root);
 		return deliverDurableLessons(
 			"durable_lesson_variant",
-			keptLessons().filter(
-				(lesson) =>
-					lesson.commands.recommended.some(
-						(quoted) => !sameCommandIdentity(quoted, command, root) && sharesInvocationTarget(command, quoted, root),
-					) ||
-					(lesson.commands.recommended.length > 0 &&
-						lesson.commands.examples.some((quoted) => sameCommandIdentity(quoted, command, root))),
+			keptLessons().filter((lesson) =>
+				lesson.failed !== undefined
+					? failedCall !== null && receiptVouches(lesson.failed, failedCall, [tmpdir()])
+					: lesson.commands.recommended.some(
+							(quoted) => !sameCommandIdentity(quoted, command, root) && sharesInvocationTarget(command, quoted, root),
+						) ||
+						(lesson.commands.recommended.length > 0 &&
+							lesson.commands.examples.some((quoted) => sameCommandIdentity(quoted, command, root))),
 			),
 		);
 	}
@@ -1974,11 +2000,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			| "durable_lesson_task",
 		candidates: ReadonlyArray<KeptLesson>,
 	): ReadonlyArray<MiddlewareEffect> {
+		// The broadcast opens only under `broadcast`, every other reminder from `decision` up (DESIGN 4.1).
+		const mode = deliveryMode();
+		if (mode === "off" || mode === "section" || (trigger === "durable_lesson" && mode !== "broadcast")) return NO_EFFECTS;
 		const budget = settings().maxTokens * 4;
 		const chosen: KeptLesson[] = [];
 		let lines: string[] = [];
 		for (const lesson of candidates) {
 			if (deliveredLessons.has(lesson.id) || offeredLessons.has(lesson.id)) continue;
+			if (!channelCarries(trigger, lesson)) continue;
 			const next = [...lines, renderKeptLesson(lesson)];
 			if (next.join("\n").length > budget) continue;
 			lines = next;
@@ -2051,7 +2081,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		reportDurableLessons([], held);
 	}
 
-	/** This session already ran a command with that evidence identity successfully. */
+	/** This session ran a command with that evidence identity successfully. */
 	function commandSucceeded(quoted: string): boolean {
 		const claim = commandSegment(quoted, workspaceRoot());
 		if (claim === null) return false;
@@ -2310,6 +2340,37 @@ const WORKSPACE_CHANGING_CLASSES: ReadonlySet<string> = new Set([
 	"destructive",
 	"dispatch",
 ]);
+
+/** A lesson carries command evidence: a `command:` ref, which only a succeeded receipt writes. */
+function commandEvidence(lesson: Pick<KeptLesson, "evidenceRefs">): boolean {
+	return lesson.evidenceRefs.some((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX));
+}
+
+/**
+ * The evidence each reminder channel requires (DESIGN 4.4 channel table). A failed call and a verification gap take
+ * command evidence; the broadcast and the task reminder repeat the section's rule, command evidence or an operator's
+ * approval; a touched file's own rule is applied by its caller, which knows the path.
+ */
+function channelCarries(
+	trigger:
+		| "durable_lesson"
+		| "durable_lesson_variant"
+		| "durable_lesson_verify"
+		| "durable_lesson_subject"
+		| "durable_lesson_task",
+	lesson: KeptLesson,
+): boolean {
+	switch (trigger) {
+		case "durable_lesson_variant":
+		case "durable_lesson_verify":
+			return commandEvidence(lesson);
+		case "durable_lesson_subject":
+			return commandEvidence(lesson) || (lesson.approval === "operator" && lesson.sourcePaths.length > 0);
+		case "durable_lesson":
+		case "durable_lesson_task":
+			return commandEvidence(lesson) || lesson.approval === "operator";
+	}
+}
 
 function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {
 	const toolName = input.toolName?.trim();

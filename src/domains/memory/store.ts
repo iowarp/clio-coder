@@ -207,6 +207,7 @@ function needsCurrentVersion(record: MemoryRecord): boolean {
 		record.revisions !== undefined ||
 		record.deliveredCount !== undefined ||
 		record.lastDeliveredAt !== undefined ||
+		record.unsettledSessions !== undefined ||
 		(record.observations ?? []).some((item) => Object.keys(item).some((key) => !LEGACY_OBSERVATION_FIELDS.has(key)))
 	);
 }

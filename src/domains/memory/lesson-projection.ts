@@ -12,11 +12,21 @@
 
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
-import { COMMAND_EVIDENCE_REF_PREFIX } from "./command-evidence.js";
-import { type LessonCommands, lessonCommands, lessonSubject } from "./lesson-evidence.js";
-import { canonicalMemoryRepositoryIdentity, eligibleMemoryRecords } from "./operations.js";
-import { memoryStorePath, readMemoryStoreSnapshot } from "./store.js";
-import type { MemoryRecord } from "./types.js";
+import type { MemoryDeliveryMode } from "../../core/defaults.js";
+import { COMMAND_EVIDENCE_REF_PREFIX, parseSourceEvidenceRef, type SourceEvidence } from "./command-evidence.js";
+import { evaluateMemoryGate, operatorDecided } from "./guardian-gate.js";
+import {
+	type LessonCommands,
+	lessonCommands,
+	lessonSubject,
+	programResolves,
+	readInsideRoot,
+	repositoryRelativePath,
+} from "./lesson-evidence.js";
+import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord, eligibleMemoryRecords } from "./operations.js";
+import { memoryRevision, recordClaim } from "./promotion.js";
+import { memoryStorePath, mutateMemoryRecords, readMemoryStoreSnapshot } from "./store.js";
+import { MEMORY_UNSETTLED_SESSIONS_MAX, type MemoryClaimCommand, type MemoryRecord } from "./types.js";
 
 export type KeptLessonApproval = "operator" | "automatic";
 
@@ -32,6 +42,10 @@ export interface KeptLesson {
 	readonly evidenceRefs: readonly string[];
 	readonly commands: LessonCommands;
 	readonly paths: readonly string[];
+	/** Repository paths its `source:` evidence quotes. */
+	readonly sourcePaths: readonly string[];
+	/** A fix claim's failed pattern; a failed call reaches the lesson only with this identity. */
+	readonly failed?: MemoryClaimCommand;
 	/** Changes whenever the text, conditions or approval change; a reminder cites this. */
 	readonly revision: string;
 }
@@ -47,6 +61,7 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 	const evidenceRefs = record.evidenceRefs.filter(
 		(ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX) || ref.startsWith("source:"),
 	);
+	const claim = recordClaim(record);
 	return Object.freeze({
 		id: record.id,
 		text: record.lesson,
@@ -56,6 +71,8 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 		evidenceRefs: Object.freeze(evidenceRefs),
 		commands: Object.freeze(lessonCommands(record.lesson, record.evidenceRefs)),
 		paths: Object.freeze([...lessonSubject(record.lesson).paths]),
+		sourcePaths: Object.freeze(evidenceRefs.flatMap((ref) => parseSourceEvidenceRef(ref)?.path ?? [])),
+		...(claim?.kind === "fix" ? { failed: claim.failed } : {}),
 		revision: createHash("sha256")
 			.update(JSON.stringify([record.lesson, appliesWhen, avoidWhen, approval, evidenceRefs]))
 			.digest("hex")
@@ -84,8 +101,11 @@ export function renderKeptLesson(lesson: KeptLesson): string {
 }
 
 export interface KeptLessonSource {
-	/** Approved lessons for the repository the workspace belongs to; empty outside a repository. */
-	lessons(workspaceRoot: string): readonly KeptLesson[];
+	/**
+	 * Approved lessons for the repository the workspace belongs to; empty outside a repository. With `admit`, only
+	 * the lessons whose records it admits, asked on every call: delivery decides per session, not per store revision.
+	 */
+	lessons(workspaceRoot: string, admit?: (record: MemoryRecord) => boolean): readonly KeptLesson[];
 }
 
 /**
@@ -95,7 +115,7 @@ export interface KeptLessonSource {
  */
 export function createKeptLessonSource(dataDir: () => string): KeptLessonSource {
 	let file: { path: string; stamp: string; revision: string; records: readonly MemoryRecord[] } | null = null;
-	let projected: { key: string; lessons: readonly KeptLesson[] } | null = null;
+	let projected: { key: string; pairs: ReadonlyArray<readonly [MemoryRecord, KeptLesson]> } | null = null;
 	const repositories = new Map<string, string | null>();
 	const repositoryKey = (root: string): string | null => {
 		if (!repositories.has(root)) {
@@ -105,7 +125,7 @@ export function createKeptLessonSource(dataDir: () => string): KeptLessonSource 
 		return repositories.get(root) ?? null;
 	};
 	return {
-		lessons(workspaceRoot) {
+		lessons(workspaceRoot, admit) {
 			const root = dataDir();
 			const path = memoryStorePath(root);
 			let stamp = "missing";
@@ -133,13 +153,303 @@ export function createKeptLessonSource(dataDir: () => string): KeptLessonSource 
 					scopes: ["repo"],
 					activeRepository: { kind: "canonical-path", key: repository },
 				});
-				projected = { key, lessons: Object.freeze(eligible.map(projectKeptLesson)) };
+				projected = {
+					key,
+					pairs: Object.freeze(eligible.map((record) => [record, projectKeptLesson(record)] as const)),
+				};
 			}
-			return projected.lessons;
+			return projected.pairs.flatMap(([record, lesson]) => (admit === undefined || admit(record) ? [lesson] : []));
 		},
 	};
 }
 
 function compact(value: string): string {
 	return value.replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * The delivery check of DESIGN 4.3, made when a lesson is loaded for delivery: the first word of the command it
+ * recommends still resolves (a program on `PATH`, a repository script or a known runner), and every quoted span it
+ * pins is still in its file. Null when it holds, otherwise why not. It withholds a lesson that is certainly dead and
+ * proves nothing about a subcommand, a flag or the claim; validity rests on verdicts.
+ */
+function memoryDeliveryCheck(record: MemoryRecord, root: string): string | null {
+	const claim = recordClaim(record);
+	const recommended = claim?.kind === "command" ? claim.command : claim?.kind === "fix" ? claim.fixed : null;
+	if (recommended !== null) {
+		const word = recommended.argv[0] ?? "";
+		if (!programResolves(word, root)) return `its command \`${word}\` no longer resolves here`;
+	} else if (
+		record.evidenceRefs.some((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)) &&
+		lessonCommands(record.lesson, record.evidenceRefs, root).recommended.length === 0
+	) {
+		return "its command no longer resolves here";
+	}
+	for (const ref of record.evidenceRefs) {
+		const source = parseSourceEvidenceRef(ref);
+		if (source !== null && !spanHeld(record, source, root)) return `its quoted span is no longer in ${source.path}`;
+	}
+	return null;
+}
+
+/** Lines a pinned span may cover when it is looked for in its file rather than in the lesson's words. */
+const SPAN_WINDOW_LINES = 6;
+/** Words a span recovered from the lesson's own text may run to. */
+const SPAN_WINDOW_WORDS = 64;
+
+function spanDigest(text: string): string {
+	return createHash("sha256").update(compact(text)).digest("hex");
+}
+
+/** A pinned hash is the full digest, or the 16-character prefix a ref written before the full hash carries. */
+function spanMatches(text: string, spanHash: string): boolean {
+	const digest = spanDigest(text);
+	return spanHash.length === 64 ? digest === spanHash : digest.startsWith(spanHash);
+}
+
+/**
+ * The file still holds the pinned span. Only its hash is stored, so the span is looked for as whole lines of the file,
+ * then as a run of words of the lesson's text (a source lesson quotes what it read) that the file still contains.
+ */
+function spanHeld(record: MemoryRecord, source: SourceEvidence, root: string): boolean {
+	const roots = [root, ...(record.repository === undefined ? [] : [record.repository.key])];
+	const path = repositoryRelativePath(source.path, roots);
+	const content = path === null ? null : readInsideRoot(root, path);
+	if (content === null) return false;
+	const lines = content.split("\n");
+	for (let start = 0; start < lines.length; start++)
+		for (let end = start; end < Math.min(lines.length, start + SPAN_WINDOW_LINES); end++)
+			if (spanMatches(lines.slice(start, end + 1).join("\n"), source.spanHash)) return true;
+	const file = compact(content);
+	const words = compact(record.lesson).split(" ");
+	const trim = (word: string) => word.replace(/^[`"'(]+|[`"'),;:]+$/gu, "");
+	for (let start = 0; start < words.length; start++)
+		for (let end = start; end < Math.min(words.length, start + SPAN_WINDOW_WORDS); end++) {
+			const run = words.slice(start, end + 1);
+			for (const candidate of new Set([
+				run.join(" "),
+				[trim(run[0] ?? ""), ...run.slice(1, -1), trim(run.at(-1) ?? "")].join(" "),
+			]))
+				if (spanMatches(candidate, source.spanHash)) return file.includes(compact(candidate));
+		}
+	return false;
+}
+
+/** What delivery does with a kept lesson it loaded. `note` returns it to the note layer; `demote` also records a regression. */
+export type MemoryDeliveryVerdict =
+	| { readonly deliver: true }
+	| {
+			readonly deliver: false;
+			readonly code: "delivery-check" | "promotion-bar" | "unsettled";
+			readonly reason: string;
+			readonly action: "withhold" | "note" | "demote";
+	  };
+
+/**
+ * DESIGN 4.4 at load for delivery. A lesson failing its delivery check is withheld, and demoted unless an operator
+ * decided it: an operator-approved lesson is withheld for the session with its approval intact. A guardian approval
+ * that does not meet the current promotion bar returns to the note layer. A lesson delivered in three sessions in a
+ * row (other than this one) with no verdict is demoted. Nothing here reads or writes the store.
+ */
+function memoryDeliveryVerdict(
+	record: MemoryRecord,
+	input: { root: string; sessionId: string | undefined },
+): MemoryDeliveryVerdict {
+	const failed = memoryDeliveryCheck(record, input.root);
+	const operator = operatorDecided(record);
+	if (failed !== null)
+		return {
+			deliver: false,
+			code: "delivery-check",
+			reason: `failed its delivery check: ${failed}`,
+			action: operator ? "withhold" : "demote",
+		};
+	if (operator) return { deliver: true };
+	if (record.approval?.by === "guardian") {
+		const note = cloneMemoryRecord(record);
+		note.approved = false;
+		Reflect.deleteProperty(note, "approval");
+		if (evaluateMemoryGate(note) !== "approve")
+			return {
+				deliver: false,
+				code: "promotion-bar",
+				reason: "its automatic approval is below the promotion bar",
+				action: "note",
+			};
+	}
+	const unsettled = (record.unsettledSessions ?? []).filter((id) => id !== input.sessionId);
+	if (unsettled.length >= MEMORY_UNSETTLED_SESSIONS_MAX)
+		return {
+			deliver: false,
+			code: "unsettled",
+			reason: `delivered in ${unsettled.length} sessions in a row with no verdict`,
+			action: "demote",
+		};
+	return { deliver: true };
+}
+
+/**
+ * Return lessons delivery refused to the note layer, inside the store's locked read-modify-write. A record an operator
+ * decided, or one no longer approved, is left exactly as it is; nothing is deleted. Returns the records it changed.
+ */
+async function returnLessonsToNotes(
+	dataDir: string,
+	items: ReadonlyArray<{ id: string; reason: string; regression: boolean }>,
+	now: Date = new Date(),
+): Promise<MemoryRecord[]> {
+	const at = now.toISOString();
+	return mutateMemoryRecords(dataDir, (records) => {
+		const wanted = new Map(items.map((item) => [item.id, item]));
+		const changed: MemoryRecord[] = [];
+		const next = records.map((record) => {
+			const item = wanted.get(record.id);
+			if (item === undefined || !record.approved || operatorDecided(record)) return record;
+			const note = cloneMemoryRecord(record);
+			note.approved = false;
+			Reflect.deleteProperty(note, "approval");
+			if (item.regression)
+				note.regressions = [...(note.regressions ?? []), `withheld at delivery at ${at}: ${item.reason}`];
+			changed.push(note);
+			return note;
+		});
+		return changed.length === 0 ? { result: changed } : { records: next, result: changed };
+	});
+}
+
+export interface MemoryDeliveryPorts {
+	dataDir(): string;
+	sessionId(): string | undefined;
+	mode(): MemoryDeliveryMode;
+	notice(line: string): void;
+	diagnostic(line: string): void;
+	event(name: "lesson-withheld" | "lesson-demoted", facts: Record<string, unknown>): void;
+}
+
+/**
+ * Delivery's per-session memory of the verdicts above. Each lesson is checked once per session and revision, the
+ * access-driven cadence DESIGN 4.4 takes from the Anthropic study; a refusal is journaled once, an operator-approved
+ * lesson is named once in a notice, and a demotion is written once. Every delivery path asks this one gate, so a
+ * lesson refused on one path is refused on all of them before the store write lands.
+ */
+export class MemoryDeliveryGate {
+	readonly #ports: MemoryDeliveryPorts;
+	#session: string | undefined | null = null;
+	readonly #verdicts = new Map<string, MemoryDeliveryVerdict>();
+	/** The same verdicts by record object: the store snapshot is cached, so a boundary usually hands the same objects. */
+	#byRecord = new WeakMap<MemoryRecord, { root: string; deliver: boolean }>();
+	readonly #refused = new Set<string>();
+	readonly #inFlight = new Set<Promise<unknown>>();
+
+	constructor(ports: MemoryDeliveryPorts) {
+		this.#ports = ports;
+	}
+
+	mode(): MemoryDeliveryMode {
+		try {
+			return this.#ports.mode();
+		} catch {
+			return "decision";
+		}
+	}
+
+	/** Whether this session may deliver the record; the first refusal of a record is journaled and acted on. */
+	admit(record: MemoryRecord, root: string): boolean {
+		const session = this.#ports.sessionId();
+		if (session !== this.#session) {
+			this.#session = session;
+			this.#verdicts.clear();
+			this.#refused.clear();
+			this.#byRecord = new WeakMap();
+		}
+		if (this.#refused.has(record.id)) return false;
+		const known = this.#byRecord.get(record);
+		if (known?.root === root) return known.deliver;
+		const key = JSON.stringify([record.id, memoryRevision(record), record.approval?.by ?? null, root]);
+		let verdict = this.#verdicts.get(key);
+		if (verdict === undefined) {
+			try {
+				verdict = memoryDeliveryVerdict(record, { root, sessionId: session });
+			} catch {
+				// A check that cannot run proves nothing either way; the lesson stands as it did.
+				verdict = { deliver: true };
+			}
+			this.#verdicts.set(key, verdict);
+			if (!verdict.deliver) this.#refuse(record, verdict);
+		}
+		this.#byRecord.set(record, { root, deliver: verdict.deliver });
+		return verdict.deliver;
+	}
+
+	/** Resolves when every store write this gate started has settled. */
+	async whenSettled(): Promise<void> {
+		while (this.#inFlight.size > 0) await Promise.allSettled([...this.#inFlight]);
+	}
+
+	#refuse(record: MemoryRecord, verdict: Extract<MemoryDeliveryVerdict, { deliver: false }>): void {
+		this.#refused.add(record.id);
+		const by = operatorDecided(record) ? "operator" : "guardian";
+		this.#emit("lesson-withheld", { id: record.id, reason: verdict.code, by });
+		if (verdict.action === "withhold") {
+			this.#say(
+				`Memory: withheld an operator-approved lesson for this session (${record.id}); it ${verdict.reason}. Its approval stands; review it with \`clio-coder memory list\`.`,
+			);
+			return;
+		}
+		let dataDir: string;
+		try {
+			dataDir = this.#ports.dataDir();
+		} catch {
+			return;
+		}
+		const write = returnLessonsToNotes(dataDir, [
+			{ id: record.id, reason: verdict.reason, regression: verdict.action === "demote" },
+		])
+			.then((changed) => {
+				for (const note of changed) {
+					this.#emit("lesson-demoted", { id: note.id, reason: verdict.code });
+					this.#say(`Memory: returned a repository lesson to the notes (${note.id}); it ${verdict.reason}.`);
+				}
+			})
+			.catch((error: unknown) => {
+				try {
+					this.#ports.diagnostic(
+						`withheld lesson not returned to the notes: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				} catch {
+					// Diagnostics are best effort.
+				}
+			});
+		const settled = write.finally(() => this.#inFlight.delete(settled));
+		this.#inFlight.add(settled);
+	}
+
+	#emit(name: "lesson-withheld" | "lesson-demoted", facts: Record<string, unknown>): void {
+		try {
+			this.#ports.event(name, facts);
+		} catch {
+			// The journal is best effort; delivery decided already.
+		}
+	}
+
+	#say(line: string): void {
+		try {
+			this.#ports.notice(line);
+		} catch {
+			// A notice sink failure never reaches delivery.
+		}
+	}
+}
+
+/**
+ * Which channels a delivery mode opens. The `# Memory` section opens from `section` up; decision-point reminders
+ * from `decision` up; the first-change broadcast only under `broadcast`.
+ */
+export function deliveryOpens(mode: MemoryDeliveryMode, channel: "section" | "decision" | "broadcast"): boolean {
+	const order: readonly MemoryDeliveryMode[] = ["off", "section", "decision", "broadcast"];
+	return order.indexOf(mode) >= order.indexOf(channel);
+}
+
+/** The `# Memory` section carries a lesson with command evidence, or one an operator approved (DESIGN 4.4 channel table). */
+export function sectionCarries(record: MemoryRecord): boolean {
+	return operatorDecided(record) || record.evidenceRefs.some((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX));
 }

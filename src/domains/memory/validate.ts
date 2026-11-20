@@ -88,6 +88,7 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 			"revisions",
 			"deliveredCount",
 			"lastDeliveredAt",
+			"unsettledSessions",
 		],
 		issues,
 	);
@@ -125,6 +126,7 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	const revisions = readOptionalRevisions(value, `${path}.revisions`, issues);
 	const deliveredCount = readOptionalCount(value, `${path}.deliveredCount`, issues);
 	const lastDeliveredAt = readOptionalIsoString(value, `${path}.lastDeliveredAt`, issues);
+	const unsettledSessions = readOptionalStringArray(value, `${path}.unsettledSessions`, issues);
 	if (approved === true && rejectedAt !== undefined) {
 		issues.push({ path: `${path}.rejectedAt`, message: "approved records must not be rejected" });
 	}
@@ -185,6 +187,7 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	if (revisions !== undefined) record.revisions = revisions;
 	if (deliveredCount !== undefined) record.deliveredCount = deliveredCount;
 	if (lastDeliveredAt !== undefined) record.lastDeliveredAt = lastDeliveredAt;
+	if (unsettledSessions !== undefined) record.unsettledSessions = unsettledSessions;
 	return record;
 }
 

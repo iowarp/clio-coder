@@ -649,6 +649,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 				"unavailable",
 				"split",
 				"count",
+				"bytes",
 				"grounded",
 				"ungrounded",
 				"rejected",

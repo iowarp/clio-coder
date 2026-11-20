@@ -42,6 +42,7 @@ import { mutateMemoryRecords } from "./store.js";
 import {
 	MEMORY_OBSERVATIONS_MAX,
 	MEMORY_REVISIONS_MAX,
+	MEMORY_UNSETTLED_SESSIONS_MAX,
 	type MemoryClaim,
 	type MemoryClaimCommand,
 	type MemoryObservation,
@@ -224,8 +225,13 @@ export function observeMemoryRecord(
 	if (input.kind === "delivered") {
 		record.deliveredCount = (record.deliveredCount ?? 0) + 1;
 		if (record.lastDeliveredAt === undefined || at > record.lastDeliveredAt) record.lastDeliveredAt = at;
+		// A session delivering again stays one session; only the newest few are needed to stop delivery.
+		const sessions = (record.unsettledSessions ?? []).filter((id) => id !== input.sessionId);
+		record.unsettledSessions = [...sessions, input.sessionId].slice(-(MEMORY_UNSETTLED_SESSIONS_MAX + 1));
 		return;
 	}
+	// A verdict settles the deliveries before it, whichever session gave it.
+	Reflect.deleteProperty(record, "unsettledSessions");
 	const revision = memoryRevision(record);
 	const seen = (record.observations ?? []).some(
 		(item) => item.sessionId === input.sessionId && item.kind === input.kind && item.revision === revision,

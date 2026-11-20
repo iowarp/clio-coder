@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { MemoryPromptSelection } from "./contract.js";
+import { deliveryOpens, type MemoryDeliveryGate, sectionCarries } from "./lesson-projection.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import {
 	inspectMemoryPromptSelection,
@@ -40,6 +41,11 @@ export interface MemoryPromptReaderOptions {
 	selection?: Pick<MemoryPromptOptions, "scopes" | "tokenBudget" | "maxItems">;
 	/** Source seam for deterministic read-count tests; production reads the real bounded store. */
 	readStore?: typeof readMemoryStoreSnapshot;
+	/**
+	 * The session's delivery gate (DESIGN 4.4). `off` leaves the section empty; a record the gate refuses at load is
+	 * left out and the selection fills its place. Without it every eligible record may be selected, as before.
+	 */
+	delivery?: Pick<MemoryDeliveryGate, "mode" | "admit">;
 }
 
 /**
@@ -88,6 +94,11 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 		if (request.turnId !== null && frame?.key === frameKey) return frame.section;
 		let section = "";
 		try {
+			const mode = options.delivery?.mode() ?? "decision";
+			if (!deliveryOpens(mode, "section")) {
+				frame = request.turnId === null ? null : Object.freeze({ key: frameKey, section });
+				return section;
+			}
 			const snapshot = readStore(dataDir);
 			const relevance = {
 				taskText: request.taskText,
@@ -109,12 +120,26 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 				.digest("hex");
 			if (selected?.key === key) section = selected.section;
 			else {
-				const built = inspectMemoryPromptSelection(snapshot.records, {
-					...selection,
-					activeRepository,
-					activeRuntime: { kind: "runtime", key: request.runtimeId },
-					...(demoted === null ? {} : { relevance, gate: { demoted } }),
-				});
+				// The section carries lessons with command evidence or an operator's approval, and none the delivery
+				// check refuses. A refusal leaves the record out and the selection runs again without it.
+				const refused = new Set<string>();
+				const carried = snapshot.records.filter(sectionCarries);
+				const choose = () =>
+					inspectMemoryPromptSelection(
+						carried.filter((record) => !refused.has(record.id)),
+						{
+							...selection,
+							activeRepository,
+							activeRuntime: { kind: "runtime", key: request.runtimeId },
+							...(demoted === null ? {} : { relevance, gate: { demoted } }),
+						},
+					);
+				let built = choose();
+				for (const gate = options.delivery; gate !== undefined; built = choose()) {
+					const refusedNow = built.records.filter((record) => !gate.admit(record, request.cwd));
+					if (refusedNow.length === 0) break;
+					for (const record of refusedNow) refused.add(record.id);
+				}
 				section = renderMemoryPromptSection(built.records);
 				const records = new Map(snapshot.records.map((record) => [record.id, record]));
 				const items = built.decisions.flatMap((decision, index) => {

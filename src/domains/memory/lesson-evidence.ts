@@ -321,7 +321,15 @@ const PATH_PROGRAMS_REMEMBERED = 256;
 function realCommand(span: string, root?: string): boolean {
 	const invocation = simpleInvocation(span);
 	if (invocation === null) return false;
-	const word = identityArgv(invocation.argv)[0] ?? "";
+	return programResolves(identityArgv(invocation.argv)[0] ?? "", root);
+}
+
+/**
+ * Whether a command's first word, after the identity rewrites, resolves to a program on `PATH`, a repository script or
+ * a known runner. Delivery checks a kept lesson's command by this word: it withholds a lesson that is certainly dead
+ * and proves nothing about a subcommand, a flag or the claim.
+ */
+export function programResolves(word: string, root?: string): boolean {
 	if (word.length === 0) return false;
 	if (word.includes("/")) {
 		if (isAbsolute(word)) return executableFile(word);

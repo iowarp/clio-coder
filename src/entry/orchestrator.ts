@@ -2227,6 +2227,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getDataDir: clioDataDir,
 		onSelection: (selection) => memoryOwner.recordPromptSelection(selection),
 		relevanceGate: { demoted: () => demotedMemoryIds(readRecallUseLedger(clioStateDir())) },
+		delivery: memoryOwner.delivery,
 	});
 	// The turn's own words, for a listing asked for without a query and for triage.
 	let operatorTask = "";

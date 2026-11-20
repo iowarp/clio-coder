@@ -3814,7 +3814,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						),
 					),
 				];
-				const statuses = ids.length > 0 ? deps.getMemoryRecordStatuses?.(ids) : undefined;
+				// Live records are asked about too: one no operator stands behind waits for the next session (DESIGN 4.4).
+				const liveIds = memorySectionBlocks(liveMemorySection)
+					.map((block) => block.id)
+					.filter((id) => !ids.includes(id));
+				const asked = [...ids, ...liveIds];
+				const statuses = asked.length > 0 ? deps.getMemoryRecordStatuses?.(asked) : undefined;
 				const delta = memorySectionDelta(compiled, liveMemorySection, framed, statuses);
 				// Only here is the frozen section known, so a record it already carries
 				// is never repeated. A prewarm compile has no turn to answer.

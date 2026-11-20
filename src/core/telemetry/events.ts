@@ -128,6 +128,7 @@ function projectMemoryObservation(payload: {
 	const facts: Record<string, unknown> = {};
 	for (const key of [
 		"count",
+		"bytes",
 		"grounded",
 		"ungrounded",
 		"rejected",
