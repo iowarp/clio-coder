@@ -776,6 +776,7 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 	writeFileSync(join(cwd, "sub", "child.sh"), "echo ok\n");
 	writeFileSync(join(cwd, "run.sh"), `exec "$JAVA_HOME/bin/java" "$@"\nexec ${process.execPath} app.js\n`);
 	writeFileSync(join(cwd, "version.sh"), "bash --version\nbash -euo pipefail ./lib.sh\n");
+	writeFileSync(join(cwd, "home.sh"), 'HOME=/tmp/evil\nsource "$HOME/payload.sh"\n');
 	mkdirSync(join(cwd, "locked"));
 	writeFileSync(join(cwd, "locked", "secret.sh"), "echo ok\n");
 	chmodSync(join(cwd, "locked"), 0o000);
@@ -795,6 +796,14 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 		["bash loopcd.sh", /child\.sh/u],
 		["bash locked/secret.sh", /secret\.sh/u],
 		["source ~-/evil.sh", /~-\/evil\.sh/u],
+		// A here-string fed to a shell is unplaced, and never hides the script named beside it.
+		['bash env.sh && bash <<< ""', /without naming it.*\$NVM_DIR\/nvm\.sh/u],
+		// zsh reads `-opipefail` inline, so env.sh is the script and `--version` its argument.
+		["zsh -opipefail env.sh --version", /\$NVM_DIR\/nvm\.sh/u],
+		// A HOME the command sets first is not the operator's home.
+		[`bash -c 'HOME=/tmp/evil; source "$HOME/payload.sh"'`, /payload\.sh \(HOME may change/u],
+		// A HOME the script sets leaves every variable unknown, HOME included.
+		["bash home.sh", /\$HOME\/payload\.sh \(named at run time\)/u],
 	] as const) {
 		const judged = engine.evaluate(bash(command), level, contained);
 		deepStrictEqual([judged.kind, judged.reasonCode], ["ask", "script-unplaceable"], command);
@@ -824,10 +833,16 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 	match(leaving.reasons.join("\n"), /\$NVM_DIR\/nvm\.sh/u);
 	const library = engine.evaluate(bash('source "$X"; clio-coder library install foo'), level, contained);
 	deepStrictEqual([library.kind, library.ruleId], ["ask", "library-confirm"]);
-	// Each named child is bounded so the reason fits the judge's finding.
-	const long = engine.evaluate(bash(`source "$A${"y".repeat(600)}"; source "$B${"z".repeat(600)}"`), level, contained);
+	// Each named child is bounded so the reason fits the judge's finding, keeping both ends of a long name around a mark.
+	const deep = `source "$C/${"harmless/".repeat(40)}steal_credentials.sh"`;
+	const long = engine.evaluate(
+		bash(`source "$A${"y".repeat(600)}"; source "$B${"z".repeat(600)}"; ${deep}`),
+		level,
+		contained,
+	);
 	strictEqual(long.reasonCode, "script-unplaceable");
 	strictEqual((long.reasons[0]?.length ?? 0) <= 400, true);
+	match(long.reasons[0] ?? "", /\$C\/harmless.*\.\.\.<\d+ chars>\.\.\..*steal_credentials\.sh \(named at run time\)/u);
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.
