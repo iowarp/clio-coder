@@ -16,6 +16,7 @@ import type {
 	RunJsonVerifyResult,
 } from "./modes/run-json-schema.js";
 import {
+	createToolCallIdMinter,
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
 	type RunCompletionV2,
@@ -249,6 +250,8 @@ export function noteStructuredV2(note: StructuredNoteV2): void {
 
 let v2Started: number | null = null;
 let v2StreamJson = false;
+/** CLI-8: rewrites a stream-json frame's tool-call ids to Clio's; null outside a stream-json run. */
+let toolCallIds: ((frame: object) => object) | null = null;
 /** Steer frames read before the session frame went out; null once it has. */
 let heldSteer: string[] | null = null;
 let textSummary = false;
@@ -265,16 +268,29 @@ let mainRunNote: MainRunNoteV2 = {};
 /** CLI-5: dispatched failures a later dispatch of the same task delivered, for the envelope's `dispatch.superseded`. */
 let supersededRuns: RunDispatchedRunV2[] = [];
 
-/** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
-export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
-	if (v2Started === null) return;
-	supersededRuns = runs.map((run) => ({
+/** Every run the main agent dispatched, for the envelope's `dispatch.runs` (row 164); `--agent` lists its receipt instead. */
+let dispatchedRuns: RunDispatchedRunV2[] = [];
+
+function dispatchedRunV2(run: RunJsonDispatchedRunOutcome): RunDispatchedRunV2 {
+	return {
 		runId: run.runId,
 		agentId: run.agentId,
 		...(run.outcome !== null ? { outcome: run.outcome } : {}),
 		...(run.outcomeCode !== null ? { outcomeCode: run.outcomeCode } : {}),
 		...(run.outcomeDetail !== null ? { outcomeDetail: run.outcomeDetail } : {}),
-	}));
+	};
+}
+
+/** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
+export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+	if (v2Started === null) return;
+	supersededRuns = runs.map(dispatchedRunV2);
+}
+
+/** Hand the v2 writer every run the main agent dispatched, as they settled; a no-op for v1 runs. */
+export function noteDispatchRunsV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+	if (v2Started === null) return;
+	dispatchedRuns = runs.map(dispatchedRunV2);
 }
 /** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
 let runPlan: Readonly<Record<string, unknown>> | undefined;
@@ -486,7 +502,7 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			return null;
 		}
 	}
-	return format === "json" ? null : frame;
+	return format === "json" ? null : (toolCallIds?.(frame) ?? frame);
 }
 
 /**
@@ -577,9 +593,11 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
 	v2Started = performance.now();
 	v2StreamJson = request.format === "stream-json";
+	toolCallIds = v2StreamJson ? createToolCallIdMinter() : null;
 	heldSteer = [];
 	mainRunNote = {};
 	supersededRuns = [];
+	dispatchedRuns = [];
 	structuredNote = undefined;
 	runPlan = undefined;
 	runCompletion = undefined;
@@ -639,7 +657,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			...(usage !== undefined ? { usage } : {}),
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
 			dispatch: {
-				runs: seen.receipt !== undefined ? [seen.receipt] : [],
+				runs: seen.receipt !== undefined ? [seen.receipt] : dispatchedRuns,
 				live: seen.live,
 				undelivered: seen.undelivered,
 				...(supersededRuns.length > 0 ? { superseded: supersededRuns } : {}),
@@ -723,6 +741,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			process.off("exit", onExit);
 			setFrameProjector(null);
 			v2StreamJson = false;
+			toolCallIds = null;
 		}
 	});
 }
