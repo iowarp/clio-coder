@@ -14,6 +14,7 @@
  * nothing here imports TUI code.
  */
 
+import { awkOnlyPrints, commandName, sedOnlyPrints, wrappedCommand } from "../core/command-words.js";
 import {
 	resolveGuardrail,
 	resolveTemplateCeiling,
@@ -40,6 +41,7 @@ import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.j
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
+import { scanShellLike, shellCommandWords, splitSegments } from "../domains/safety/protected-artifacts.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import { gitCallIdentity } from "../tools/git-inspect.js";
 import { resolveReadPath } from "../tools/path-utils.js";
@@ -185,14 +187,21 @@ export function effectiveCallIdentity(toolName: string, args: unknown): string {
 	return callIdentity(unwrapped.toolName, unwrapped.args);
 }
 
-/** Output to the null device or between descriptors writes no file. */
-const SHELL_NULL_REDIRECT = /\d?>>?\s*\/dev\/null|\d?>&\d/g;
-/** Signs a read-only-looking command still writes: redirection, in-place edits, find actions, file utilities. */
-const SHELL_WRITE_SIGN =
-	/>|(?:^|\s)(?:-i\b|--in-place\b|-delete\b|-exec(?:dir)?\b|-ok(?:dir)?\b|-fprint\w*|-fls\b)|\b(?:tee|rm|mv|cp|mkdir|touch|chmod|chown|ln)\b/;
 /** Plain inspections outside the shared read list. `env` reads only bare; with words it runs a command (Astra r2-4). */
-const SHELL_INSPECTION_PATTERN =
-	/^\s*(?:(?:pwd|whoami|id|uname|date|which|stat|file|du|df|echo|printenv|test|\[|realpath|readlink|basename|dirname)(?:\s|$)|env\s*$)/;
+const SHELL_INSPECTIONS: ReadonlySet<string> = new Set(
+	"pwd whoami id uname date which stat file du df echo printenv test [ realpath readlink basename dirname".split(" "),
+);
+/** Redirections that write a file unless their target is the null device or a descriptor. */
+const SHELL_WRITE_REDIRECTIONS: ReadonlySet<string> = new Set([">", ">>", ">|", "&>", "&>>", "<>", ">&"]);
+/** Read-list programs with an option that writes a file or runs a command. */
+const READ_PROGRAM_WRITES: Readonly<Record<string, (args: ReadonlyArray<string>) => boolean>> = {
+	find: (args) => args.some((word) => /^-(?:delete|exec(?:dir)?|ok(?:dir)?|fprint\w*|fls)$/.test(word)),
+	fd: (args) => args.some((word) => /^(?:-[A-Za-z]*[xX]|--exec(?:-batch)?)(?:=|$)/.test(word)),
+	rg: (args) => args.some((word) => /^--(?:pre|hostname-bin)/.test(word)),
+	tree: (args) => args.some((word) => word.startsWith("-o")),
+	sed: (args) => !sedOnlyPrints(args),
+	awk: (args) => !awkOnlyPrints(args),
+};
 /** Git subcommands that only print, whatever their arguments, save `--output`. */
 const GIT_INSPECTIONS = new Set([
 	"status",
@@ -234,6 +243,7 @@ function gitSegmentOnlyReads(words: ReadonlyArray<string>): boolean {
 	const rest = words.slice(index + 1);
 	if (rest.some((word) => word.startsWith("--output"))) return false;
 	if (GIT_INSPECTIONS.has(sub)) return true;
+	if (sub === "config") return gitConfigOnlyReads(rest);
 	if (sub === "branch") return rest.every((word) => GIT_BRANCH_LIST_FLAGS.has(word));
 	if (sub === "tag") return rest.length === 0 || rest[0] === "-l" || rest[0] === "--list";
 	if (sub === "remote") return rest.length === 0 || ["-v", "--verbose", "get-url", "show"].includes(rest[0] ?? "");
@@ -242,19 +252,71 @@ function gitSegmentOnlyReads(words: ReadonlyArray<string>): boolean {
 }
 
 /**
- * Whether a bash command can only read: every `&&`, `||`, `;` or pipe segment
- * starts with a read-only command or a plain inspection, a git segment is a
- * git inspection, and nothing in it writes. Anything else may have changed
- * what a later identical read returns.
+ * Whether `git config` with these words only reads: a get or list action, or
+ * one key name with no value.
+ */
+function gitConfigOnlyReads(words: ReadonlyArray<string>): boolean {
+	const operands: string[] = [];
+	let read = false;
+	for (let index = 0; index < words.length; index++) {
+		const word = words[index] ?? "";
+		if (["-f", "--file", "--blob", "--type", "--default"].includes(word)) index++;
+		else if (/^--(?:get(?:-all|-regexp|-urlmatch)?|list)$|^-l$/.test(word)) read = true;
+		else if (word.startsWith("-")) {
+			const modifier =
+				/^--(?:global|system|local|worktree|show-origin|show-scope|null|name-only|bool|int|bool-or-int|path|expiry-date|includes|no-includes|all|regexp|fixed-value)$|^-z$/;
+			if (!modifier.test(word) && !/^--(?:file|blob|type|default|value|url)=/.test(word)) return false;
+		} else operands.push(word);
+	}
+	if (operands[0] === "get" || operands[0] === "list") return true;
+	return read || operands.length === 1;
+}
+
+/**
+ * Whether one simple command only reads, read from its words after the shell
+ * split them: leading assignments and wrappers are looked through, a program
+ * named by path is judged by its name, and a read-list program is judged by
+ * its options (Astra r2-4, SF-4).
+ */
+function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
+	let words = input;
+	while (/^[A-Za-z_]\w*=/.test(words[0] ?? "")) words = words.slice(1);
+	for (let depth = 0; depth < 8; depth++) {
+		const inner = wrappedCommand(words);
+		if (inner === undefined) break;
+		if (inner === null) return false;
+		if (inner.length === 0) return words.length === 1 && commandName(words[0] ?? "") === "env";
+		words = inner;
+	}
+	const program = commandName(words[0] ?? "");
+	const args = words.slice(1);
+	if (program === "git") return gitSegmentOnlyReads(["git", ...args]);
+	const listed = READ_ONLY_SHELL_COMMAND_PATTERN.exec(program)?.[0].trim() === program;
+	return (listed || SHELL_INSPECTIONS.has(program)) && READ_PROGRAM_WRITES[program]?.(args) !== true;
+}
+
+/**
+ * Whether a bash command can only read: every simple command in it reads, by
+ * the words the shell would pass it, so an operator inside quotes splits
+ * nothing, and no redirection writes a file. A substitution, a here-document
+ * or a line the scanner cannot bound may have changed what a later identical
+ * read returns.
  */
 function shellCommandOnlyReads(command: unknown): boolean {
-	if (typeof command !== "string" || command.trim().length === 0) return false;
-	const text = command.replace(SHELL_NULL_REDIRECT, " ");
-	if (SHELL_WRITE_SIGN.test(text) || /[`]|\$\(/.test(text) || text.includes("\n")) return false;
-	return text.split(/&&|\|\||;|\|/).every((segment) => {
-		const words = segment.trim().split(/\s+/);
-		if (/^git\b/.test(words[0] ?? "")) return words[0] === "git" && gitSegmentOnlyReads(words);
-		return READ_ONLY_SHELL_COMMAND_PATTERN.test(segment) || SHELL_INSPECTION_PATTERN.test(segment);
+	if (typeof command !== "string" || command.trim().length === 0 || command.includes("\n")) return false;
+	const tokens = scanShellLike(command);
+	if (tokens.some((token) => token.unterminated || token.hiddenContent || token.substitutions !== undefined))
+		return false;
+	return splitSegments(tokens).every((segment) => {
+		for (const [index, token] of segment.entries()) {
+			if (!token.operator) continue;
+			if (token.value.startsWith("<<")) return false;
+			if (!SHELL_WRITE_REDIRECTIONS.has(token.value)) continue;
+			const target = segment[index + 1];
+			if (target === undefined || target.operator) return false;
+			if (target.value !== "/dev/null" && !(token.value === ">&" && /^(?:\d+|-)$/.test(target.value))) return false;
+		}
+		return segmentOnlyReads(shellCommandWords(segment).map((token) => token.value));
 	});
 }
 

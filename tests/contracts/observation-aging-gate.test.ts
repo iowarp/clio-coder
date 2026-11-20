@@ -111,6 +111,20 @@ it("only a call A1 reads as making no change is superseded; a step tool never is
 	strictEqual(superseded("bash", { command: "cat intro.md | wc -l" }), true);
 	strictEqual(superseded("bash", { command: "make build" }), false);
 	strictEqual(superseded("bash", { command: "cat intro.md > copy.md" }), false);
+	// SF-4: bash is read by its words, so a quoted operator splits nothing and a wrapped or path-spelled read is a read.
+	for (const [command, read] of [
+		['rg "a|b" src 2>&1', true],
+		["env git status", true],
+		["/usr/bin/git log -1", true],
+		["git config --get user.name", true],
+		["sed -n 1p intro.md", true],
+		["git config user.name x", false],
+		["sed -i s/a/b/ intro.md", false],
+		[`awk '{print > "f"}' intro.md`, false],
+		["tree -o out.txt", false],
+		["rg --pre cat x .", false],
+	] as const)
+		strictEqual(callRepeatsAsRead("bash", { command }, declared), read, command);
 	// Typed git: an inspection qualifies, a commit does not.
 	strictEqual(superseded("git", { op: "status" }), true);
 	strictEqual(superseded("git", { op: "commit", message: "x" }), false);
