@@ -3642,6 +3642,52 @@ describe("tool classes", () => {
 			true,
 		);
 		match(timedOut[0] ?? "", /^\$ ran `npm test` · timed out after 30s ✗/u);
+		// An idle stop states the idle figure, never the timeout budget it stopped short of (FX-40). The status is the
+		// text bash writes for an idle stop; the row states it, so the body does not repeat it.
+		const idleStatus =
+			"bash: this command printed nothing and used no CPU for 20 s and was stopped as idle (safety.limits.bashIdleSeconds), before the 650 s timeout ran out. The bash tool still works; the next call runs normally. Validation did not finish. Narrow the test selection or enable verbose test names before another bounded run.";
+		const idleResult = (details?: Record<string, unknown>) => ({
+			content: [{ type: "text", text: `> jest\n\n${idleStatus}` }],
+			...(details !== undefined ? { details } : {}),
+		});
+		const idleDetails = { timedOut: true, timedOutBy: "idle", idleMs: 20_000 };
+		const idled = rows({ command: "npm test", timeout_ms: 650_000 }, idleResult(idleDetails), true);
+		match(idled[0] ?? "", /^\$ ran `npm test` · stopped idle after 20s ✗/u);
+		doesNotMatch(idled[0] ?? "", /timed out/u);
+		match(idled.join("\n"), /> jest/u);
+		doesNotMatch(idled.slice(1).join("\n"), /stopped as idle|timeout ran out|bash tool still works/u);
+		// The full body's output facts say the same, never "timed out".
+		const idleBody = stripTerminalSequences(
+			renderToolExecution(
+				{
+					toolCallId: "b",
+					toolName: "bash",
+					args: { command: "npm test", timeout_ms: 650_000 },
+					result: idleResult(idleDetails),
+					isError: true,
+				},
+				140,
+				{ unbounded: true },
+			).join("\n"),
+		);
+		match(idleBody, /output · .*stopped idle/u);
+		doesNotMatch(idleBody, /timed out/u);
+		// A missing or zero idle figure, or details a bridge dropped, still read as an idle stop.
+		for (const details of [
+			{ timedOut: true, timedOutBy: "idle" },
+			{ timedOut: true, timedOutBy: "idle", idleMs: 0 },
+			undefined,
+		]) {
+			const bare = rows({ command: "npm test", timeout_ms: 650_000 }, idleResult(details), true);
+			match(bare[0] ?? "", /^\$ ran `npm test` · stopped idle ✗/u, JSON.stringify(details));
+			doesNotMatch(bare.join("\n"), /timed out|stopped as idle/u, JSON.stringify(details));
+		}
+		// timedOutBy idle on a result that did not time out is no idle stop.
+		const notIdle = rows(
+			{ command: "npm test" },
+			{ content: [{ type: "text", text: "ok" }], details: { timedOutBy: "idle" } },
+		);
+		deepStrictEqual(notIdle, ["$ ran `npm test` ✓", "  │ ok"]);
 	});
 
 	it("keeps every character of a command the full body echoes, a lone & included", () => {
