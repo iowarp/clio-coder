@@ -1,8 +1,8 @@
-import { ok, strictEqual } from "node:assert/strict";
-import { existsSync, readlinkSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -139,55 +139,89 @@ test("ACP adapter fails a peer turn that returns an error envelope with end_turn
 	strictEqual(result.failureMessage, "ACP peer reported HTTP 400: The model is not supported.");
 });
 
-test("ACP adapter launches agy with an allowlisted env and a private TMPDIR removed after exit", {
+test("ACP adapter launches agy with an allowlisted env and an owned, marked TMPDIR removed after exit", {
 	skip: process.platform === "win32",
 }, async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-launch-"));
-	// An orphan from a crashed Clio in this pid namespace (owner pid long gone) is swept by the next agy launch;
-	// one from another namespace is left alone, since its pid says nothing here.
+	const root = join(tmpdir(), "clio-coder-agy");
 	const namespace = existsSync("/proc/self/ns/pid")
-		? (/\[(\d+)\]/u.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0")
-		: "0";
-	const orphan = join(tmpdir(), `clio-coder-agy-${namespace}-2147483646-orphan`);
-	const foreign = join(tmpdir(), `clio-coder-agy-${namespace}1-2147483646-foreign`);
-	await mkdir(join(orphan, "unpacked"), { recursive: true });
-	await mkdir(foreign, { recursive: true });
+		? (/\[(\d+)\]/u.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? null)
+		: null;
+	// Only a marked dir from this host and pid namespace whose Clio owner and agy child are both gone is swept.
+	const seed = async (name: string, marker: Record<string, unknown> | null): Promise<string> => {
+		const dir = join(root, name);
+		await mkdir(join(dir, "tmp"), { recursive: true });
+		if (marker !== null)
+			await writeFile(
+				join(dir, "owner.json"),
+				JSON.stringify({ version: 1, host: hostname(), namespace, pid: 2147483646, birthToken: "gone", ...marker }),
+			);
+		return dir;
+	};
+	const orphan = await seed("run-test-orphan", { childPid: 2147483645 });
+	const unmarked = await seed("run-test-unmarked", null);
+	const liveChild = await seed("run-test-live-child", { childPid: process.pid });
+	const foreign = await seed("run-test-foreign", { namespace: `${namespace}1` });
 	const seen = join(scratch, "seen");
 	const agy = join(scratch, "agy");
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
 	await writeFile(
 		agy,
-		`#!/bin/sh\n{ echo "$TMPDIR"; [ -d "$TMPDIR" ] && echo dir; echo "$@"; echo "\${GEMINI_API_KEY-}|\${GOOGLE_CLOUD_PROJECT-}|\${BROWSER-}|$AGY_CLI_DISABLE_AUTO_UPDATE$AGY_ACP_FORCE_FILE_STORAGE$PYTHONUNBUFFERED"; } > "${seen}"\nexec "${process.execPath}" "${fixture}"\n`,
+		`#!/bin/sh\n{ echo "$TMPDIR"; [ -d "$TMPDIR" ] && echo dir; echo "$@"; echo "\${GEMINI_API_KEY-}|\${CLIO_TEST_TOKEN-}|\${BROWSER-}|$AGY_CLI_DISABLE_AUTO_UPDATE$AGY_ACP_FORCE_FILE_STORAGE$PYTHONUNBUFFERED"; } > "${seen}"\nexec "${process.execPath}" "${fixture}"\n`,
 		{ mode: 0o755 },
 	);
+	const cwd = process.cwd();
+	const agent = {
+		id: "antigravity",
+		command: agy,
+		args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+		// The entry's env is the whole overlay; the forced keys win over it.
+		env: { HOME: scratch, BROWSER: "none", AGY_CLI_DISABLE_AUTO_UPDATE: "0" },
+		connectTimeoutMs: 5_000,
+	};
 	try {
-		const cwd = process.cwd();
-		const result = await startAcpDelegationRun({
-			agent: {
-				id: "antigravity",
-				command: agy,
-				args: ["acp", "--gemini-dir", "~/.gemini/antigravity-cli", "--app-data-dir", "antigravity-acp"],
-				env: { BROWSER: "none" },
-				connectTimeoutMs: 5_000,
-			},
-			environment: { HOME: scratch, GEMINI_API_KEY: "leak", GOOGLE_CLOUD_PROJECT: "leak" },
+		const seeded = new Set([orphan, unmarked, liveChild, foreign].map((dir) => basename(dir)));
+		const run = startAcpDelegationRun({
+			agent,
+			environment: { GEMINI_API_KEY: "leak", CLIO_TEST_TOKEN: "leak" },
 			task: "report package version",
 			cwd,
 			safety: createWorkerSafety({ cwd }),
-		}).promise;
-		strictEqual(result.stopReason, "error");
+		});
+		// The marker names the spawned child by the time start returns (the child itself may read it earlier).
+		const launched = readdirSync(root).filter((name) => !seeded.has(name));
+		strictEqual(launched.length, 1);
+		const owner = JSON.parse(readFileSync(join(root, launched[0] ?? "", "owner.json"), "utf8")) as {
+			pid: number;
+			childPid: number;
+		};
+		strictEqual(owner.pid, process.pid);
+		strictEqual(owner.childPid, run.pid);
+		strictEqual((await run.promise).stopReason, "error");
 		const [tempDir = "", isDir, args, env] = (await readFile(seen, "utf8")).trim().split("\n");
-		ok(tempDir.startsWith(join(tmpdir(), `clio-coder-agy-${namespace}-${process.pid}-`)), tempDir);
+		strictEqual(tempDir, join(root, launched[0] ?? "", "tmp"));
 		strictEqual(isDir, "dir");
-		strictEqual(args, `acp --gemini-dir ${join(scratch, ".gemini", "antigravity-cli")} --app-data-dir antigravity-acp`);
+		strictEqual(args, `acp --gemini-dir ${join(scratch, ".gemini")} --app-data-dir antigravity-cli`);
 		strictEqual(env, "||none|111");
-		strictEqual(existsSync(tempDir), false);
-		strictEqual(existsSync(orphan), false);
-		strictEqual(existsSync(foreign), true);
+		strictEqual(existsSync(join(tempDir, "..")), false);
+		strictEqual(existsSync(orphan), namespace === null);
+		for (const kept of [unmarked, liveChild, foreign]) strictEqual(existsSync(kept), true, kept);
+		// spawn rejects a NUL byte synchronously; the launch dir made before it must not survive the throw.
+		const before = (await readdir(root)).sort();
+		throws(
+			() =>
+				startAcpDelegationRun({
+					agent: { ...agent, args: ["acp", "bad\0arg"] },
+					task: "never runs",
+					cwd,
+					safety: createWorkerSafety({ cwd }),
+				}),
+			/null bytes/u,
+		);
+		deepStrictEqual((await readdir(root)).sort(), before);
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
-		await rm(orphan, { recursive: true, force: true });
-		await rm(foreign, { recursive: true, force: true });
+		for (const dir of [orphan, unmarked, liveChild, foreign]) await rm(dir, { recursive: true, force: true });
 	}
 });
 

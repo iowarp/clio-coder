@@ -344,11 +344,16 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	if (antigravity) transportOptions.env = antigravity.env;
 	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
 	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
-	const transport = createStdioTransport(
-		input.agent.command,
-		antigravity?.args ?? input.agent.args ?? [],
-		transportOptions,
-	);
+	const transport = (() => {
+		try {
+			return createStdioTransport(input.agent.command, antigravity?.args ?? input.agent.args ?? [], transportOptions);
+		} catch (error) {
+			// No run will reach the finally below, so the launch dir goes now (spawn rejects, e.g., a NUL in an arg).
+			antigravity?.discard();
+			throw error;
+		}
+	})();
+	antigravity?.recordChild(transport.pid);
 	let sessionId: string | null = null;
 	let initialized: AcpInitializeResponse | null = null;
 	let aborted = false;

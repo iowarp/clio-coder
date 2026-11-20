@@ -1,25 +1,14 @@
-import { mkdtempSync, readlinkSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { lstat, readdir, readFile, rm } from "node:fs/promises";
+import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
 import type { DelegationAgentConfig } from "../../core/defaults.js";
-import { processAlive } from "../../core/process-identity.js";
+import { processAlive, processBirthToken, processIdentityAlive } from "../../core/process-identity.js";
 
-/**
- * Per-process temp dirs are named `clio-coder-agy-<pid namespace>-<owner pid>-<random>` so a later launch can sweep
- * orphans. A pid is only meaningful inside its namespace (a sandboxed run sees itself as pid 5), so a sweep touches
- * only dirs from its own namespace and leaves the rest alone.
- */
-const TEMP_PREFIX = "clio-coder-agy-";
-const TEMP_OWNER = /^clio-coder-agy-(\d+)-(\d+)-/u;
-/** Credentials and launch hooks agy would otherwise act on; kept only when the entry names them in `env`. */
-const STRIPPED = new Set([
-	"GEMINI_API_KEY",
-	"GOOGLE_API_KEY",
-	"GOOGLE_APPLICATION_CREDENTIALS",
-	"GEMINI_HOME",
-	"BROWSER",
-]);
+/** Clio-owned directory (0700) under the temp root that holds one `run-*` dir per agy launch. */
+const ROOT_NAME = "clio-coder-agy";
+const MARKER = "owner.json";
+/** Always set for agy, over any entry value: no self-update mid-run, file-backed storage, unbuffered helpers. */
 const FORCED: Readonly<Record<string, string>> = {
 	AGY_CLI_DISABLE_AUTO_UPDATE: "1",
 	AGY_ACP_FORCE_FILE_STORAGE: "1",
@@ -27,10 +16,23 @@ const FORCED: Readonly<Record<string, string>> = {
 };
 const PATH_FLAGS = new Set(["--gemini-dir", "--gemini_dir", "--app-data-dir", "--app_data_dir"]);
 
+interface OwnerMarker {
+	version: 1;
+	host: string;
+	namespace: string;
+	pid: number;
+	birthToken: string | null;
+	childPid?: number;
+}
+
 export interface AntigravityLaunch {
 	args: string[];
 	env: Record<string, string>;
-	/** Waits for the orphan sweep, then removes this launch's temp dir. Call after the child exited. */
+	/** Record the spawned agy pid in the owner marker, so a sweep waits for the child as well as for Clio. */
+	recordChild(pid: number | null): void;
+	/** Synchronous removal for a launch that never reached its run (transport creation threw). */
+	discard(): void;
+	/** Waits for the orphan sweep, then removes this launch's dir. Call after the child exited. */
 	cleanup(): Promise<void>;
 }
 
@@ -43,21 +45,57 @@ export function isAntigravityAcp(agent: DelegationAgentConfig): boolean {
 	return name === "agy" && agent.args[0] === "acp";
 }
 
-function expandHome(value: string, home: string): string {
+function expandHome(value: string, home: string | undefined): string {
+	if (home === undefined) return value;
 	return value === "~" ? home : value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
 }
 
-/** Inode of this process's pid namespace on Linux, else "0". */
-function pidNamespace(): string {
+/** Inode of this process's pid namespace on Linux; null where it cannot be read, which disables the sweep. */
+function pidNamespace(): string | null {
 	try {
-		return /\[(\d+)\]/u.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0";
+		return /\[(\d+)\]/u.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? null;
 	} catch {
-		return "0";
+		return null;
 	}
 }
 
-/** Remove temp dirs whose owning Clio process is gone; agy unpacks about 1 GB into each one. */
-async function sweepOrphans(root: string, namespace: string): Promise<void> {
+/** Create the root 0700, or accept an existing one only when it is a real directory this user owns. */
+function ownedRoot(parent: string): string {
+	const root = path.join(parent, ROOT_NAME);
+	mkdirSync(root, { recursive: true, mode: 0o700 });
+	const stat = lstatSync(root);
+	const uid = process.getuid?.();
+	if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid))
+		throw new Error(`Antigravity temp root ${root} is not a directory owned by this user`);
+	if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) chmodSync(root, 0o700);
+	return root;
+}
+
+function parseMarker(text: string): OwnerMarker | null {
+	try {
+		const value = JSON.parse(text) as Partial<OwnerMarker>;
+		if (
+			value.version !== 1 ||
+			typeof value.host !== "string" ||
+			typeof value.namespace !== "string" ||
+			!Number.isInteger(value.pid) ||
+			!(typeof value.birthToken === "string" || value.birthToken === null) ||
+			!(value.childPid === undefined || Number.isInteger(value.childPid))
+		)
+			return null;
+		return value as OwnerMarker;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Remove launch dirs left by crashed runs (agy unpacks about 1 GB into each). A dir goes only when its marker parses,
+ * names this host and pid namespace, and both the Clio owner (pid and birth token) and the recorded agy child are
+ * gone. Anything else, including a dir without a marker, is left alone.
+ */
+async function sweepOrphans(root: string, namespace: string | null): Promise<void> {
+	if (namespace === null) return;
 	let names: string[];
 	try {
 		names = await readdir(root);
@@ -66,51 +104,86 @@ async function sweepOrphans(root: string, namespace: string): Promise<void> {
 	}
 	await Promise.all(
 		names.map(async (name) => {
-			const match = TEMP_OWNER.exec(name);
-			if (match === null || match[1] !== namespace) return;
-			const owner = Number(match[2]);
-			if (owner === process.pid || processAlive(owner)) return;
-			await rm(path.join(root, name), { recursive: true, force: true }).catch(() => {});
+			const dir = path.join(root, name);
+			try {
+				if (!(await lstat(dir)).isDirectory()) return;
+				const marker = parseMarker(await readFile(path.join(dir, MARKER), "utf8"));
+				if (marker === null || marker.host !== hostname() || marker.namespace !== namespace) return;
+				if (processIdentityAlive({ host: marker.host, pid: marker.pid, birthToken: marker.birthToken }) !== false) return;
+				if (marker.childPid !== undefined && processAlive(marker.childPid)) return;
+				await rm(dir, { recursive: true, force: true });
+			} catch {
+				// Unreadable or vanished: leave it.
+			}
 		}),
 	);
 }
 
 /**
- * Launch facts for an `agy acp` peer: `~` in the profile flags resolved against the child's HOME, the overlay
- * environment cut to an allowlist (the transport adds only its safe base), and a temp dir private to this process.
+ * Launch facts for an `agy acp` peer: `~` in the profile flags resolved against the child's HOME, an environment
+ * overlay that is exactly the entry's own `env` plus the forced keys (credentials the adapter resolved for other
+ * peers never reach agy), and a private temp dir with an owner marker.
  */
 export function prepareAntigravityLaunch(
 	agent: DelegationAgentConfig,
 	overlay: Record<string, string> = {},
 ): AntigravityLaunch {
-	const configured = agent.env ?? {};
-	const home = overlay.HOME ?? process.env.HOME ?? homedir();
+	const env: Record<string, string> = {};
+	for (const name of Object.keys(agent.env ?? {})) {
+		const value = overlay[name];
+		if (value !== undefined) env[name] = value;
+	}
+	Object.assign(env, FORCED);
+	const home = [env.HOME, process.env.HOME, homedir()].find((value) => value !== undefined && value.length > 0);
 	const args = agent.args.map((arg, index) => {
 		const [flag, inline] = arg.split(/=(.*)/su, 2);
 		if (inline !== undefined && flag !== undefined && PATH_FLAGS.has(flag)) return `${flag}=${expandHome(inline, home)}`;
 		return PATH_FLAGS.has(agent.args[index - 1] ?? "") ? expandHome(arg, home) : arg;
 	});
-	const env: Record<string, string> = {};
-	for (const [name, value] of Object.entries(overlay)) {
-		if ((STRIPPED.has(name) || name.startsWith("GOOGLE_CLOUD_")) && !Object.hasOwn(configured, name)) continue;
-		env[name] = value;
-	}
-	for (const [name, value] of Object.entries(FORCED)) if (!Object.hasOwn(configured, name)) env[name] = value;
-	const root = Object.hasOwn(configured, "TMPDIR") && env.TMPDIR ? env.TMPDIR : tmpdir();
+	// An entry TMPDIR relocates the Clio-owned root; the entry's directory itself is never scanned.
+	const root = ownedRoot(env.TMPDIR ? env.TMPDIR : tmpdir());
 	const namespace = pidNamespace();
 	const sweep = sweepOrphans(root, namespace);
-	const tempDir = mkdtempSync(path.join(root, `${TEMP_PREFIX}${namespace}-${process.pid}-`));
-	env.TMPDIR = tempDir;
+	const dir = mkdtempSync(path.join(root, "run-"));
+	const marker: OwnerMarker = {
+		version: 1,
+		host: hostname(),
+		namespace: namespace ?? "unknown",
+		pid: process.pid,
+		birthToken: processBirthToken(),
+	};
+	const writeMarker = (): void => writeFileSync(path.join(dir, MARKER), `${JSON.stringify(marker)}\n`, { mode: 0o600 });
+	const childTemp = path.join(dir, "tmp");
+	try {
+		writeMarker();
+		mkdirSync(childTemp, { mode: 0o700 });
+	} catch (error) {
+		rmSync(dir, { recursive: true, force: true });
+		throw error;
+	}
+	env.TMPDIR = childTemp;
 	if (process.platform === "win32") {
-		env.TEMP = tempDir;
-		env.TMP = tempDir;
+		env.TEMP = childTemp;
+		env.TMP = childTemp;
 	}
 	return {
 		args,
 		env,
+		recordChild(pid) {
+			if (pid === null) return;
+			marker.childPid = pid;
+			try {
+				writeMarker();
+			} catch {
+				// The marker keeps the owner identity; a sweep still waits for this Clio process.
+			}
+		},
+		discard() {
+			rmSync(dir, { recursive: true, force: true });
+		},
 		async cleanup() {
 			await sweep;
-			await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+			await rm(dir, { recursive: true, force: true }).catch(() => {});
 		},
 	};
 }
