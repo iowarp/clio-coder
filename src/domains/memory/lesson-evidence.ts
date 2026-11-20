@@ -5,8 +5,9 @@
  * lets the durable store's gate approve it without an operator, only when the
  * host can bind it to something it observed itself:
  *
- * - command evidence: the exact complete command the shell tool reported
- *   succeeding with exit 0, quoted whole in the lesson text; or
+ * - command evidence: a command the shell tool reported succeeding with exit
+ *   0 whose evidence identity (`commandSegments`) equals the lesson's own
+ *   command, quoted whole in the lesson text; or
  * - source evidence: a quote the lesson text contains, found in the excerpt
  *   of a successful read result for that repository-relative path that the
  *   reviewed activity actually showed the model, and still present in the
@@ -17,13 +18,20 @@
  * Model confidence, wording, or a path the agent never read is never evidence.
  */
 
-import { readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, delimiter, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import {
+	COMMAND_CLAIM_REF_PREFIX,
 	COMMAND_EVIDENCE_REF_PREFIX,
-	commandEvidenceRef,
+	type CommandSegment,
+	commandSegment,
+	commandSegments,
 	diagnosticInvocation,
+	identityArgv,
+	legacyCommandHash,
+	receiptVouches,
 	type SimpleInvocation,
+	segmentKeyRef,
 	simpleInvocation,
 	trivialInvocation,
 } from "./command-evidence.js";
@@ -32,7 +40,7 @@ import type { TaskMemoryEntry } from "./task-bank.js";
 export type LessonEvidenceKind = "command" | "source";
 
 export interface LessonEvidenceInput {
-	/** Complete commands the shell tool reported succeeding, byte for byte. */
+	/** Commands the shell tool reported succeeding, byte for byte, each already admitted from the workspace root. */
 	succeededCommands: ReadonlySet<string>;
 	/**
 	 * Repository-relative POSIX path to the bounded, redacted excerpts of its
@@ -48,16 +56,18 @@ const SOURCE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
 
 export function lessonEvidence(entry: TaskMemoryEntry, input: LessonEvidenceInput): LessonEvidenceKind | null {
 	if (entry.durable !== true) return null;
+	const claim = entry.evidenceCommand === undefined ? null : commandSegment(entry.evidenceCommand, input.workspaceRoot);
 	if (
+		claim !== null &&
 		entry.evidenceCommand !== undefined &&
-		input.succeededCommands.has(entry.evidenceCommand) &&
 		// A compound, commented or background command exits 0 without proving
 		// the program it names finished, a help call exercises nothing, and
 		// `echo ok` could not have failed.
 		simpleEvidenceCommand(entry.evidenceCommand) &&
 		// The text has to make the same claim the evidence supports: the exact
 		// command, delimited, so `node a.mjs --quick` does not vouch for `--full`.
-		entry.content.includes(`\`${entry.evidenceCommand}\``)
+		entry.content.includes(`\`${entry.evidenceCommand}\``) &&
+		receiptsVouch(claim, input.succeededCommands, input.workspaceRoot)
 	) {
 		return "command";
 	}
@@ -76,6 +86,13 @@ export function lessonEvidence(entry: TaskMemoryEntry, input: LessonEvidenceInpu
 function simpleEvidenceCommand(command: string): boolean {
 	const invocation = simpleInvocation(command);
 	return invocation !== null && !diagnosticInvocation(invocation) && !trivialInvocation(invocation);
+}
+
+/** One of the succeeded commands has a segment that vouches for the claim; nothing else is consulted. */
+function receiptsVouch(claim: CommandSegment, succeeded: ReadonlySet<string>, root: string): boolean {
+	for (const command of succeeded)
+		for (const segment of commandSegments(command, root)) if (receiptVouches(claim, segment)) return true;
+	return false;
 }
 
 /** Whether a `relative()` result leaves its root; a child named `..x` stays inside. */
@@ -157,7 +174,7 @@ export interface LessonSubject {
 }
 
 export function lessonSubject(text: string): LessonSubject {
-	const spans = [...text.matchAll(/`([^`\n]+)`/gu)].map((match) => (match[1] ?? "").trim()).filter(Boolean);
+	const spans = backtickedSpans(text);
 	// A span that opens with a flag (`--mode native`) is part of a command, not one.
 	const commands = unique(spans.filter((span) => /\s/u.test(span) && !span.startsWith("-")));
 	const prose = text.replace(/`[^`\n]*`/gu, " ");
@@ -180,6 +197,37 @@ export function lessonSubject(text: string): LessonSubject {
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
+}
+
+function backtickedSpans(text: string): string[] {
+	return [...text.matchAll(/`([^`\n]+)`/gu)].map((match) => (match[1] ?? "").trim()).filter(Boolean);
+}
+
+/**
+ * The evidence keys a record's `command:` and `command-claimed:` refs name. A ref written before segment keys
+ * hashed the command's text; it is resolved by finding the quoted span with that hash and running the span through
+ * `commandSegment`, the same function every new ref comes from, so a rejection recorded under an old ref still
+ * meets a rewording under a new one. A legacy ref no quoted span resolves stays its own hash, equal only to itself.
+ */
+export function commandRefKeys(text: string, refs: readonly string[]): Set<string> {
+	const keys = new Set<string>();
+	let spans: string[] | null = null;
+	for (const ref of refs) {
+		const hash = ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)
+			? ref.slice(COMMAND_EVIDENCE_REF_PREFIX.length)
+			: ref.startsWith(COMMAND_CLAIM_REF_PREFIX)
+				? ref.slice(COMMAND_CLAIM_REF_PREFIX.length)
+				: null;
+		if (hash === null) continue;
+		if (segmentKeyRef(hash)) {
+			keys.add(hash);
+			continue;
+		}
+		spans ??= backtickedSpans(text);
+		const span = spans.find((candidate) => legacyCommandHash(candidate) === hash);
+		keys.add((span === undefined ? undefined : commandSegment(span)?.key) ?? `legacy:${hash}`);
+	}
+	return keys;
 }
 
 function collapse(value: string): string {
@@ -210,19 +258,98 @@ const FAILED_AFTER =
 const PROHIBITED_BEFORE =
 	/\b(?:not|never|avoid|instead of|rather than|don['’]t(?: run| use)?|do not(?: run| use)?|stop|without)\s*$/iu;
 
-export function lessonCommands(text: string, evidenceRefs: readonly string[] = []): LessonCommands {
-	const spans = lessonSubject(text).commands;
-	const declared = new Set(evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)));
+export function lessonCommands(text: string, evidenceRefs: readonly string[] = [], root?: string): LessonCommands {
+	const spans = lessonSubject(text).commands.filter((span) => realCommand(span, root));
+	const declared = commandRefKeys(
+		text,
+		evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)),
+	);
 	const recommended: string[] = [];
 	const examples: string[] = [];
 	for (const span of spans) {
 		const invocation = simpleInvocation(span);
 		const diagnostic = invocation !== null && diagnosticInvocation(invocation);
+		const key = commandSegment(span)?.key;
 		const advised =
-			declared.size > 0 ? declared.has(commandEvidenceRef(span)) : !diagnostic && !contrastedSpan(text, span);
+			declared.size > 0 ? key !== undefined && declared.has(key) : !diagnostic && !contrastedSpan(text, span);
 		(advised && !diagnostic ? recommended : examples).push(span);
 	}
 	return { recommended, examples };
+}
+
+/** Runners a lesson may name though the host running the check lacks them on `PATH`. */
+const KNOWN_RUNNERS: ReadonlySet<string> = new Set([
+	"npm",
+	"npx",
+	"pnpm",
+	"pnpx",
+	"yarn",
+	"bunx",
+	"corepack",
+	"pip",
+	"pip3",
+	"uv",
+	"uvx",
+	"poetry",
+	"pipenv",
+	"pytest",
+	"cargo",
+	"go",
+	"make",
+	"cmake",
+	"ninja",
+	"mvn",
+	"gradle",
+	"java",
+	"bundle",
+	"rake",
+	"dotnet",
+	"git",
+	"docker",
+]);
+const SCRIPT_PATH = /^(?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)*$/u;
+/** Whether a bare word names an executable on `PATH`, remembered per word; the answer cannot widen what vouches. */
+const pathPrograms = new Map<string, boolean>();
+const PATH_PROGRAMS_REMEMBERED = 256;
+
+/**
+ * A backticked span is a command only when it parses as one simple invocation and its first word resolves to a
+ * program on `PATH`, a repository script or a known runner; `const x = 1` parses, and is not one. Without a root a
+ * path-shaped first word is taken as a script it cannot check. This is a delivery-time check: it drops a span that
+ * is certainly not a command and proves nothing about a subcommand, a flag or the claim.
+ */
+function realCommand(span: string, root?: string): boolean {
+	const invocation = simpleInvocation(span);
+	if (invocation === null) return false;
+	const word = identityArgv(invocation.argv)[0] ?? "";
+	if (word.length === 0) return false;
+	if (word.includes("/")) {
+		if (isAbsolute(word)) return executableFile(word);
+		return root === undefined ? SCRIPT_PATH.test(word) : repositoryFile(word, root) !== null;
+	}
+	if (KNOWN_RUNNERS.has(word) || INTERPRETERS.has(word)) return true;
+	return onPath(word);
+}
+
+function onPath(word: string): boolean {
+	const known = pathPrograms.get(word);
+	if (known !== undefined) return known;
+	const found = (process.env.PATH ?? "")
+		.split(delimiter)
+		.some((dir) => dir.length > 0 && executableFile(join(dir, word)));
+	if (pathPrograms.size >= PATH_PROGRAMS_REMEMBERED) pathPrograms.delete(pathPrograms.keys().next().value ?? word);
+	pathPrograms.set(word, found);
+	return found;
+}
+
+function executableFile(path: string): boolean {
+	try {
+		if (!existsSync(path)) return false;
+		const info = statSync(path);
+		return info.isFile() && (info.mode & 0o111) !== 0;
+	} catch {
+		return false;
+	}
 }
 
 function contrastedSpan(text: string, span: string): boolean {
@@ -287,17 +414,7 @@ export interface ExecutedFile {
  * interpreter was asked to run.
  */
 export function executedFile(invocation: SimpleInvocation, root: string): ExecutedFile | null {
-	let argv = [...invocation.argv];
-	for (let changed = true; changed; ) {
-		changed = false;
-		for (const launcher of LAUNCHERS) {
-			if (argv.length > launcher.length && launcher.every((word, index) => argv[index] === word)) {
-				argv = argv.slice(launcher.length);
-				while (argv[0]?.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(argv[0] ?? "")) argv.shift();
-				changed = true;
-			}
-		}
-	}
+	const argv = withoutLaunchers(invocation.argv);
 	const program = argv[0];
 	if (program === undefined) return null;
 	const direct = repositoryFile(program, root);
@@ -317,4 +434,60 @@ export function executedFile(invocation: SimpleInvocation, root: string): Execut
 function repositoryFile(token: string, root: string): string | null {
 	const path = repositoryRelativePath(token, [root]);
 	return path !== null && readInsideRoot(root, path) !== null ? path : null;
+}
+
+function withoutLaunchers(words: readonly string[]): string[] {
+	let argv = [...words];
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (const launcher of LAUNCHERS) {
+			if (argv.length > launcher.length && launcher.every((word, index) => argv[index] === word)) {
+				argv = argv.slice(launcher.length);
+				while (argv[0]?.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(argv[0] ?? "")) argv.shift();
+				changed = true;
+			}
+		}
+	}
+	return argv;
+}
+
+/**
+ * Search key, never evidence: the program, its subcommand and the script it runs. It finds candidate claims for a
+ * failed call; equal subjects vouch for nothing, since `node x.mjs --a` and `node x.mjs --b` share one.
+ */
+export interface CommandSubject {
+	readonly program: string;
+	readonly subcommand?: string;
+	readonly script?: string;
+	/** The existing repository file the command executes, resolved only when a root was given. */
+	readonly file?: string;
+	readonly key: string;
+}
+
+export function commandSubject(argv: readonly string[], root?: string): CommandSubject | null {
+	const words = identityArgv(argv);
+	const executed = root === undefined ? null : executedFile({ assignments: [], argv: words }, root);
+	if (executed !== null) return subjectOf(executed.program, undefined, executed.file, executed.file);
+	const [program, ...rest] = withoutLaunchers(words);
+	if (program === undefined || program.length === 0) return null;
+	const name = basename(program);
+	const operands = rest.filter((word) => !word.startsWith("-"));
+	if (INTERPRETERS.has(name)) return subjectOf(name, undefined, operands[0], undefined);
+	const subcommand = operands[0];
+	return subjectOf(name, subcommand, subcommand === "run" ? operands[1] : undefined, undefined);
+}
+
+function subjectOf(
+	program: string,
+	subcommand: string | undefined,
+	script: string | undefined,
+	file: string | undefined,
+): CommandSubject {
+	return {
+		program,
+		...(subcommand !== undefined ? { subcommand } : {}),
+		...(script !== undefined ? { script } : {}),
+		...(file !== undefined ? { file } : {}),
+		key: JSON.stringify([program, subcommand ?? "", script ?? ""]),
+	};
 }

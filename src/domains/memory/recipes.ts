@@ -24,9 +24,15 @@
  * and a help or version call teaches nothing about running the file.
  */
 
-import { commandChain, commandEvidenceRef, diagnosticInvocation, simpleInvocation } from "./command-evidence.js";
+import {
+	commandChain,
+	commandSegment,
+	diagnosticInvocation,
+	type SimpleInvocation,
+	simpleInvocation,
+} from "./command-evidence.js";
 import type { CommandRun, CompletedLessonSource } from "./history-review.js";
-import { type ExecutedFile, executedFile, readInsideRoot } from "./lesson-evidence.js";
+import { commandRefKeys, commandSubject, type ExecutedFile, executedFile, readInsideRoot } from "./lesson-evidence.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
 
 export type RecipeRule = "trap_fix" | "read_run";
@@ -45,12 +51,14 @@ export function provenRecipes(
 	const recipes = new Map<string, ProvenRecipe>();
 	const runs = source.commandRuns;
 	runs.forEach((run, index) => {
-		if (!run.ok || recipes.has(run.command)) return;
+		// One recipe per evidence identity: `corepack pnpm -s x` and `pnpm x` are one command.
+		const identity = commandSegment(run.command, root)?.key ?? run.command;
+		if (!run.ok || recipes.has(identity)) return;
 		const executed = executedInvocation(run.command, root);
 		if (executed === null) return;
 		const trap = latestTrap(runs.slice(0, index), executed, root);
 		if (trap !== null) {
-			recipes.set(run.command, {
+			recipes.set(identity, {
 				command: run.command,
 				rule: "trap_fix",
 				content: bounded(
@@ -60,7 +68,7 @@ export function provenRecipes(
 			return;
 		}
 		if (readRunFile(executed, source, root))
-			recipes.set(run.command, {
+			recipes.set(identity, {
 				command: run.command,
 				rule: "read_run",
 				content: bounded(
@@ -73,46 +81,53 @@ export function provenRecipes(
 
 /**
  * A host recipe claims only that its command works here. When another kept
- * claim already carries that command as evidence in different wording, the
- * template adds a second record saying less, so it is not filed; the same
- * template text still is, which is how a later session re-verifies it.
+ * claim already carries that command's evidence identity in different wording,
+ * the template adds a second record saying less, so it is not filed; the same
+ * template text still is, which is how a later session re-verifies it. A ref
+ * written before evidence identity is resolved through the same function.
  */
 export function recipeAlreadyClaimed(
 	recipe: ProvenRecipe,
 	kept: ReadonlyArray<{ text: string; evidenceRefs?: readonly string[] }>,
 ): boolean {
-	const ref = commandEvidenceRef(recipe.command);
+	const key = commandSegment(recipe.command)?.key;
+	if (key === undefined) return false;
 	const text = recipe.content.replace(/\s+/gu, " ").trim();
 	return kept.some(
-		(lesson) => lesson.evidenceRefs?.includes(ref) === true && lesson.text.replace(/\s+/gu, " ").trim() !== text,
+		(lesson) =>
+			commandRefKeys(lesson.text, lesson.evidenceRefs ?? []).has(key) && lesson.text.replace(/\s+/gu, " ").trim() !== text,
 	);
 }
 
 /**
- * The failed command (or, for a pure `&&` chain, any of its segments)
- * executes the same repository file through the same program as a recommended
- * command. This selects advice to show, never evidence, so a chain whose
- * failing segment is unknown may still match on one of them.
+ * The failed command (or, for a pure `&&` chain, any of its segments) has the
+ * same search subject as a recommended command, and that subject is an
+ * existing repository file run by the same program. This selects advice to
+ * show, never evidence, so a chain whose failing segment is unknown may still
+ * match on one of them.
  */
 export function sharesInvocationTarget(command: string, other: string, root: string): boolean {
-	const right = executedInvocation(other, root, false);
+	const right = fileSubject(simpleInvocation(other), root);
 	if (right === null) return false;
-	const candidates = [command, ...(commandChain(command)?.segments.map((segment) => segment.text) ?? [])];
-	return candidates.some((candidate) => {
-		const left = executedInvocation(candidate, root, false);
-		return left !== null && left.program === right.program && left.file === right.file;
-	});
+	const candidates = [simpleInvocation(command), ...(commandChain(command)?.segments ?? [])];
+	return candidates.some((candidate) => fileSubject(candidate, root)?.key === right.key);
+}
+
+/** A subject scoped to a repository file; a package script or a bare program has none here. */
+function fileSubject(invocation: SimpleInvocation | null, root: string): { key: string } | null {
+	if (invocation === null) return null;
+	const subject = commandSubject(invocation.argv, root);
+	return subject?.file === undefined ? null : subject;
 }
 
 /**
  * The file a simple, non-diagnostic invocation executes. A failed trap may be
  * a help call too: `--help` failing still says nothing about the run that
- * worked, so diagnostics are refused on both sides unless the caller only
- * compares targets.
+ * worked, so diagnostics are refused on both sides.
  */
-function executedInvocation(command: string, root: string, refuseDiagnostic = true): ExecutedFile | null {
+function executedInvocation(command: string, root: string): ExecutedFile | null {
 	const invocation = simpleInvocation(command);
-	if (invocation === null || (refuseDiagnostic && diagnosticInvocation(invocation))) return null;
+	if (invocation === null || diagnosticInvocation(invocation)) return null;
 	return executedFile(invocation, root);
 }
 
