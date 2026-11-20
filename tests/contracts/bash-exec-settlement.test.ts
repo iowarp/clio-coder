@@ -181,8 +181,39 @@ describe("bash abort settlement (#445)", () => {
 			setRunDeadline(performance.now() - 1);
 			const result = await bashTool.run({ command: `touch '${marker}'` }, {});
 			strictEqual(result.kind, "error");
-			if (result.kind === "error") match(result.message, /before this command started, so it did not run/u);
+			if (result.kind === "error") {
+				match(result.message, /before this command started, so it did not run/u);
+				// It never ran, so it neither printed nothing nor leaves a next call to run in this run.
+				ok(!/printed nothing|next call runs normally/u.test(result.message), result.message);
+			}
 			strictEqual(existsSync(marker), false);
+		} finally {
+			setRunDeadline(null);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	// The run's --timeout aborts the run at the instant the command's deadline timer fires; whichever lands first, the
+	// result names the deadline, never "recorded no cause" or a time span past its own limit (wave-10 live result).
+	it("names the run's --timeout deadline when the run's abort and the deadline race on a spawned command", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-bash-deadline-"));
+		const marker = join(dir, "started");
+		const controller = new AbortController();
+		const deadlineAt = performance.now() + 1_000;
+		setRunDeadline(deadlineAt);
+		// The run's shutdown abort, armed before the command's timer as `--timeout` arms its timer at boot.
+		setTimeout(() => controller.abort(), Math.ceil(deadlineAt - performance.now()));
+		try {
+			const result = await bashTool.run(
+				{ command: `touch '${marker}'; sleep 30`, timeout_ms: 604_800_000 },
+				{ signal: controller.signal },
+			);
+			strictEqual(existsSync(marker), true, "the child never spawned");
+			strictEqual(result.kind, "error");
+			if (result.kind !== "error") return;
+			strictEqual(result.details?.outcome, "timeout");
+			match(result.message, /stopped at the run's --timeout deadline \(\d+ s\)/u);
+			ok(!/recorded no cause|aborted after|next call runs normally/u.test(result.message), result.message);
 		} finally {
 			setRunDeadline(null);
 			rmSync(dir, { recursive: true, force: true });

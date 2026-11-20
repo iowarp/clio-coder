@@ -438,11 +438,16 @@ function deadlinePassedResult(): BashCommandResult {
 	};
 }
 
-/** The timer's delay and which limit sets it, measured now; null when no limit applies. */
+/**
+ * The timer's delay and which limit sets it, measured now; null when no limit applies. Which limit wins is decided on
+ * the unrounded time left, so a deadline a fraction of a millisecond short of `timeout` is still named as the cause.
+ */
 function armedTimeoutLimit(timeout: number, deadlineAt: number | undefined): BashTimeoutLimit | null {
 	if (deadlineAt === undefined) return timeout > 0 ? { by: "timeout", ms: timeout } : null;
-	const left = Math.max(0, Math.ceil(deadlineAt - performance.now()));
-	return timeout > 0 && timeout <= left ? { by: "timeout", ms: timeout } : { by: "run-deadline", ms: left };
+	const left = deadlineAt - performance.now();
+	return timeout > 0 && timeout <= left
+		? { by: "timeout", ms: timeout }
+		: { by: "run-deadline", ms: Math.max(0, Math.ceil(left)) };
 }
 
 /** Process groups of commands this process started that may still hold members, keyed by leader pid. */
