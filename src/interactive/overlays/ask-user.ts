@@ -911,6 +911,10 @@ class AskUserOverlayView implements Component {
 	 * The legend and the rail name the scroll keys only while the question
 	 * overflows, which the layout itself decides; a layout that changed the answer
 	 * is composed again, so a key the rail drops for PgUp/PgDn still has a row.
+	 * When the second layout flips the answer back (the scroll key's legend row
+	 * cost a windowed option list more rows than it took, so the question fit
+	 * again), no layout agrees with itself, and the third holds the question
+	 * scrolling so the legend, the rail and the region describe the same card.
 	 */
 	private composeSettled(
 		question: AskUserQuestion,
@@ -921,7 +925,11 @@ class AskUserOverlayView implements Component {
 	): { rows: string[]; fits: boolean } {
 		const overflowed = this.questionOverflows;
 		const attempt = this.composeBody(question, width, hasMenu, maxRows, fit);
-		return this.questionOverflows === overflowed ? attempt : this.composeBody(question, width, hasMenu, maxRows, fit);
+		if (this.questionOverflows === overflowed) return attempt;
+		const settled = this.composeBody(question, width, hasMenu, maxRows, fit);
+		if (this.questionOverflows !== overflowed) return settled;
+		this.questionOverflows = true;
+		return this.composeBody(question, width, hasMenu, maxRows, fit, true);
 	}
 
 	private composeBody(
@@ -930,6 +938,7 @@ class AskUserOverlayView implements Component {
 		hasMenu: boolean,
 		maxRows: number,
 		fit: BodyFit,
+		holdScroll = false,
 	): { rows: string[]; fits: boolean } {
 		const theme = clioTheme();
 		const gap = fit.spacing ? [""] : [];
@@ -984,7 +993,11 @@ class AskUserOverlayView implements Component {
 		const controlBudget = Math.max(fit.headers ? 4 : 2, freeRows - questionFloor);
 		this.optionDetailRows = [];
 		this.controlWindowed = false;
-		const control = this.renderControlLines(width, controlBudget, fit.detail, otherPointer);
+		// Blank rows between options are spacing, so they only take rows the whole question leaves over;
+		// spent on a question that then overflows, they vanish once the scroll key takes a legend row and the
+		// layout never settles on whether the question overflows.
+		const spacingRoom = Math.min(controlBudget, freeRows - body.length);
+		const control = this.renderControlLines(width, controlBudget, fit.detail, otherPointer, spacingRoom);
 		const movedDetails = this.optionDetailRows.length > 0;
 		body.push(...this.optionDetailRows);
 		const ledgerBudget = Math.max(
@@ -1001,7 +1014,7 @@ class AskUserOverlayView implements Component {
 		const fixed = fixedTop.length + gap.length + control.length + legend.length + status.length + ledger.length;
 
 		const regionRows = Math.max(1, Math.min(body.length, maxRows - fixed));
-		const overflows = body.length > regionRows;
+		const overflows = holdScroll || body.length > regionRows;
 		this.questionOverflows = overflows;
 		this.questionTotalRows = body.length;
 		const viewRows = overflows ? Math.max(1, regionRows - 1) : regionRows;
@@ -1506,6 +1519,7 @@ class AskUserOverlayView implements Component {
 		rowBudget: number,
 		detail: OptionDetail = "all",
 		otherPointer: string | null = null,
+		spacingRoom = rowBudget,
 	): string[] {
 		this.ensureControl();
 		const state = this.currentState();
@@ -1513,7 +1527,7 @@ class AskUserOverlayView implements Component {
 		if (state?.mode === "text" && question) {
 			return [...(this.text?.render(width) ?? [""]), ...this.textPreview(question, state, width)];
 		}
-		return this.renderSelectControl(width, rowBudget, detail, otherPointer);
+		return this.renderSelectControl(width, rowBudget, detail, otherPointer, spacingRoom);
 	}
 
 	/** Earlier rounds first, then this round's answered siblings. */
@@ -1597,6 +1611,7 @@ class AskUserOverlayView implements Component {
 		rowBudget: number,
 		detail: OptionDetail,
 		otherPointer: string | null,
+		spacingRoom: number,
 	): string[] {
 		const question = this.currentQuestion();
 		const state = this.currentState();
@@ -1610,7 +1625,7 @@ class AskUserOverlayView implements Component {
 		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail, otherPointer);
 		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
 		this.controlWindowed = totalRows > rowBudget;
-		if (totalRows + items.length <= rowBudget) {
+		if (totalRows + items.length <= Math.min(rowBudget, spacingRoom)) {
 			for (const rows of layout.rows) rows.push("");
 		}
 		if ((layout.rows[focusedIndex]?.length ?? 0) >= rowBudget) {
@@ -1965,6 +1980,8 @@ export interface AskUserViewForTesting {
 		round?: AskUserRoundOptions,
 	): Promise<AskUserResult>;
 	render(width: number): string[];
+	/** The dock's order: the rail's room first, then the body, then the rail drawn from what the body settled. */
+	renderDocked(width: number, railRoom: number): { body: string[]; rail: string };
 	handleInput(data: string): void;
 	footerHint(innerWidth?: number): string;
 	cancel(): void;
@@ -1984,6 +2001,11 @@ export function createAskUserViewForTesting(deps: {
 	return {
 		ask: (questions, presentation, round) => view.begin(questions, presentation, round),
 		render: (width) => view.render(width),
+		renderDocked: (width, railRoom) => {
+			view.setRailRoom(railRoom);
+			const body = view.render(width);
+			return { body, rail: view.railHint(railRoom) };
+		},
 		handleInput: (data) => view.handleInput(data),
 		footerHint: () => view.footerHint(),
 		cancel: () => view.cancel(),
