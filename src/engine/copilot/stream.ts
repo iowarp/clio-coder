@@ -257,6 +257,15 @@ class Conversation {
 				return;
 			}
 		}
+		if (event.type === "session.compaction_start") {
+			// Clio owns this transcript's compaction (infiniteSessions is off), yet the runtime still compacts in the
+			// background at its own threshold. Its summary never reaches Clio's transcript and the shrunken live usage
+			// hides the pressure from Clio's meter, so Clio never compacts and a later reseed renders the whole transcript,
+			// about twice what the live session held (FX-5). The runtime's blocking compaction near the window stays.
+			void Promise.resolve()
+				.then(() => this.session.rpc.history.cancelBackgroundCompaction())
+				.catch(() => undefined);
+		}
 		this.activeStep?.handle(event);
 	}
 
@@ -1275,6 +1284,20 @@ async function runStep(
 
 	const framed = core.length > 0 && fingerprint(core[core.length - 1] as CoreMessage) === null;
 	let { conversation } = plan(key, systemHash, kept, prints, framed);
+	// A run still waiting on calls this transcript has already answered was passed over above (its history no longer
+	// matches), so it can never take those results; it is closed instead of staying parked until eviction (CTX-4).
+	const settledCalls = new Set(core.flatMap((message) => (message.role === "toolResult" ? [message.toolCallId] : [])));
+	for (const stale of conversations.filter(
+		(open) =>
+			open !== conversation &&
+			open.key === key &&
+			!open.busy &&
+			open.state === "awaiting-tools" &&
+			open.systemHash === systemHash &&
+			open.pendingToolCallIds.length > 0 &&
+			open.pendingToolCallIds.every((id) => settledCalls.has(id)),
+	))
+		remove(stale, "Clio's transcript moved past the calls this Copilot run waited on; its conversation was closed");
 	const reused = conversation !== null;
 	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
 	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);
