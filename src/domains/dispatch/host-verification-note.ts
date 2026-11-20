@@ -9,6 +9,11 @@ export function hostCheckNotRunNote(notRun: NonNullable<RunHostVerificationCheck
 	return "its process could not start";
 }
 
+/** A failing check the base fails the same way: it predates the task and does not reject it. */
+export function failsTheSameOnBase(check: Pick<RunHostVerificationCheck, "baseComparison">): boolean {
+	return check.baseComparison?.status === "failed" && check.baseComparison.reason === undefined;
+}
+
 export function hostCheckBaseNote(check: {
 	baseComparison?: RunHostVerificationCheck["baseComparison"] | null;
 }): string {

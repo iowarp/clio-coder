@@ -62,6 +62,7 @@ export function routeValidationProjection(
 		resultContractOverride,
 		resultSummary,
 		taskWorktree,
+		candidateWorktree,
 		runIdHint,
 		taskWorktreeDestination,
 		// Host-owned permit narrowing and a retry's inherited cap; a model
@@ -109,6 +110,7 @@ export function routeValidationProjection(
 			...(resultContractOverride !== undefined ? { resultContractOverride } : {}),
 			...(resultSummary !== undefined ? { resultSummary: { ...resultSummary } } : {}),
 			...(taskWorktree !== undefined ? { taskWorktree } : {}),
+			...(candidateWorktree !== undefined ? { candidateWorktree: { ...candidateWorktree } } : {}),
 			...(runIdHint !== undefined ? { runIdHint } : {}),
 			...(taskWorktreeDestination !== undefined ? { taskWorktreeDestination } : {}),
 			...(permitNarrowing !== undefined ? { permitNarrowing: { ...permitNarrowing } } : {}),

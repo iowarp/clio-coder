@@ -315,6 +315,8 @@ for (const agent of ["scout", "coder"] as const) {
 			for (const receipt of receipts) {
 				strictEqual(bundle.contract.getRun(receipt.row.runId)?.gate?.role, "candidate");
 				strictEqual(receipt.settled.outcome, "succeeded");
+				// A compete with no check declared runs none and tells the judge of none (M10a).
+				strictEqual(resolvedRunResult(receipt).hostVerification ?? null, null);
 
 				if (!writer) strictEqual(receipt.settled.toolActivity?.mutatingSucceeded, false);
 			}
@@ -344,6 +346,141 @@ for (const agent of ["scout", "coder"] as const) {
 					writer ? ".clio-coder/profile.yaml\n.gitignore\nnew.txt\ntracked.txt" : ".gitignore\ntracked.txt",
 				);
 			}
+			ok(!judgeTask.includes("hostChecks"));
+		} finally {
+			await bundle.extension.stop?.();
+			process.chdir(previousCwd);
+			env.restore();
+		}
+	});
+}
+
+for (const pick of [1, 2]) {
+	it(`compete runs each candidate's declared check in its own worktree, and a judge pick of candidate ${pick} ${pick === 1 ? "wins verified" : "cannot win rejected"} (M10a)`, {
+		timeout: 30_000,
+	}, async () => {
+		const env = await isolateClioEnv("clio-coder-compete-checks-");
+		const root = join(env.dir, "project");
+		mkdirSync(join(root, ".clio-coder"), { recursive: true });
+		const previousCwd = process.cwd();
+		process.chdir(root);
+		git(root, "init", "-q", "-b", "main");
+		git(root, "config", "user.name", "Compete Contract");
+		git(root, "config", "user.email", "compete@example.invalid");
+		writeFileSync(join(root, "value.txt"), "base\n");
+		writeFileSync(
+			join(root, "check.js"),
+			'process.exit(require("node:fs").readFileSync("value.txt", "utf8").startsWith("broken") ? 1 : 0);\n',
+		);
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			JSON.stringify({
+				version: 2,
+				checks: [
+					{
+						id: "unit",
+						command: [process.execPath, "check.js"],
+						description: "unit",
+						cwd: ".",
+						timeoutMs: 10_000,
+						tags: [],
+					},
+				],
+			}),
+		);
+		git(root, "add", "-A");
+		git(root, "commit", "-qm", "baseline");
+		let judgeTask = "";
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		settings.targets = [{ id: "only-route", runtime: "openai", defaultModel: "fixture-model" }];
+		settings.fleet.default = { target: "only-route", model: "fixture-model", thinkingLevel: "off" };
+		settings.fleet.profiles = {};
+		const context = dispatchStubContext({ settings });
+		const specs = context.getContract("agents")?.listSpecs() ?? [];
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec, options) => {
+				const cwd = options?.cwd;
+				ok(cwd);
+				const judge = spec.agentId !== "coder";
+				if (judge) judgeTask = spec.task;
+				// Candidate 2 takes the stance that breaks the test.
+				else writeFileSync(join(cwd, "value.txt"), cwd.endsWith("candidate-2") ? "broken\n" : "fixed\n");
+				return {
+					pid: null,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					abort() {},
+					events: (async function* () {
+						if (!judge) {
+							yield { type: "tool_execution_start", toolCallId: "w", toolName: "write", args: { path: "value.txt" } };
+							yield { type: "tool_execution_end", toolCallId: "w", toolName: "write", isError: false };
+							yield { type: "clio_coder_tool_finish", payload: { tool: "write", outcome: "ok", durationMs: 1 } };
+						}
+						yield {
+							type: "message_end",
+							message: {
+								role: "assistant",
+								stopReason: "stop",
+								content: JSON.stringify(
+									judge
+										? { winner: pick, checks: [{ name: "hostChecks", passed: true, evidence: "candidate hostChecks" }] }
+										: { mutatedPaths: ["value.txt"], validations: [] },
+								),
+							},
+						};
+					})(),
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				dispatch: bundle.contract,
+				getAgentSpecs: () => specs,
+				getAutonomy: () => "yolo",
+				getSchemaComposition: () => dispatchSchemaCompositionFor(settings.fleet),
+			});
+			const result = await withTelemetryContext(
+				{ sessionId: "compete-checks", agent: { role: "main", id: "compete-checks" } },
+				() =>
+					tool.run({
+						agent: "coder",
+						task: "Change value.txt.",
+						intent: { verification: [{ check: "unit" }] },
+						mode: "compete",
+						candidates: 2,
+						cwd: root,
+					}),
+			);
+			const candidates = bundle.contract
+				.listRuns()
+				.filter((run) => run.gate?.role === "candidate")
+				.sort((a, b) => (a.gate?.cycle ?? 0) - (b.gate?.cycle ?? 0))
+				.map((run) => {
+					const receipt = readVerifiedRun(clioStateDir(), run.id);
+					ok(receipt, JSON.stringify(result));
+					return { worktree: run.gate?.worktree?.path, result: resolvedRunResult(receipt), settled: receipt.settled };
+				});
+			strictEqual(candidates.length, 2, JSON.stringify(result));
+			for (const candidate of candidates) {
+				ok(candidate.worktree);
+				strictEqual(candidate.result.hostVerification?.checks[0]?.cwd, candidate.worktree);
+			}
+			strictEqual(candidates[0]?.settled.hostVerification?.status, "verified");
+			strictEqual(candidates[1]?.settled.outcomeCode, "host_verification_rejected");
+			deepStrictEqual(
+				judgeTask
+					.split("\n\n")
+					.filter((line) => line.startsWith('{"candidate":'))
+					.map((line) => JSON.parse(line))
+					.sort((a, b) => a.candidate - b.candidate)
+					.map((record) => record.hostChecks),
+				[[{ check: "unit", status: "verified" }], [{ check: "unit", status: "rejected" }]],
+			);
+			const decision = readGateDecisionArtifacts().find(({ artifact }) => artifact.topology === "compete")?.artifact;
+			strictEqual(decision?.outcome, pick === 1 ? "winner" : "no-winner", JSON.stringify(result).slice(0, 3000));
+			if (pick === 1) strictEqual(decision?.winner?.index, 1);
 		} finally {
 			await bundle.extension.stop?.();
 			process.chdir(previousCwd);

@@ -116,6 +116,12 @@ export interface DispatchRequest extends JobSpec {
 		base: string;
 		ownerToken: string;
 	};
+	/**
+	 * A compete candidate's own checkout, the checkout it was cut from, and the commit it started at. Host verification
+	 * compares a candidate's failing check against that base, as it does a task worktree's. Set by compete only; never
+	 * model-authored.
+	 */
+	candidateWorktree?: { root: string; path: string; base: string };
 	/** Run identity allocated before task worktree creation. Model arguments cannot author it. */
 	runIdHint?: string;
 	/**

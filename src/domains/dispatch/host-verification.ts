@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -11,10 +12,11 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
-import { internalGitArgv } from "../../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
@@ -53,7 +55,7 @@ import { readVerifiedRun } from "../telemetry/run-record.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { BASE_PREFLIGHT_EXIT, BASE_PREFLIGHT_SCRIPT, baseModulesLinks } from "./host-verification-base.js";
-import { hostCheckBaseNote } from "./host-verification-note.js";
+import { failsTheSameOnBase, hostCheckBaseNote } from "./host-verification-note.js";
 import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerificationCheck } from "./types.js";
 import { type VerificationSlotEvents, withVerificationSlot } from "./verification-slot.js";
 import { captureWorkspaceSnapshot } from "./write-boundary.js";
@@ -538,11 +540,6 @@ function boundedLine(line: string): string {
 	return line.length > 160 ? `${line.slice(0, 157)}...` : line;
 }
 
-/** A failing check the base fails the same way: it predates the task and does not reject it. */
-function failsTheSameOnBase(check: RunHostVerificationCheck): boolean {
-	return check.baseComparison?.status === "failed" && check.baseComparison.reason === undefined;
-}
-
 function resolvedBaseSha(root: string, base: string): string | null {
 	try {
 		return execFileSync("git", internalGitArgv(["-C", root, "rev-parse", "--verify", "-q", `${base}^{commit}`]), {
@@ -571,7 +568,7 @@ function resolvedBaseSha(root: string, base: string): string | null {
  */
 export async function compareHostVerificationBase(input: {
 	verification: RunHostVerification | undefined;
-	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
+	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree" | "candidateWorktree">;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
 	/** Reports the wait for the verification slot each base replay takes; see {@link withVerificationSlot}. */
@@ -579,7 +576,8 @@ export async function compareHostVerificationBase(input: {
 }): Promise<void> {
 	const failures = input.verification?.checks.filter((check) => check.exitCode !== 0) ?? [];
 	if (failures.length === 0) return;
-	const worktree = input.request.taskWorktree;
+	// A compete candidate's checkout is isolated from the base it was cut from, as a task worktree is.
+	const worktree = input.request.taskWorktree ?? input.request.candidateWorktree;
 	for (const check of failures)
 		check.baseComparison = { status: "not_compared", reason: "no isolated task base available" };
 	if (worktree === undefined) return;
@@ -836,7 +834,10 @@ export async function compareHostVerificationBase(input: {
 		}
 	}
 	const verification = input.verification;
-	if (verification?.status === "rejected" && failures.every(failsTheSameOnBase)) {
+	// A candidate's check that never started judged nothing, so it cannot keep its run rejected either (M10a).
+	const judged =
+		input.request.candidateWorktree === undefined ? failures : failures.filter((check) => check.notRun === undefined);
+	if (verification?.status === "rejected" && judged.every(failsTheSameOnBase)) {
 		// Every failure is already present on the base: the task did not cause it.
 		verification.status = "not_implicated";
 		verification.reason = "failures_present_on_base";
@@ -854,11 +855,13 @@ export function hostVerificationRejection(
 	return {
 		outcomeCode: "host_verification_rejected",
 		detail:
-			(failedCheck === undefined
-				? "host verification rejected"
-				: failedCheck.report !== undefined
-					? `host verification check '${failedCheck.check}' rejected: ${failedCheck.report.summary}`
-					: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`) +
+			(verification.reason !== undefined
+				? `host verification rejected: ${verification.reason}`
+				: failedCheck === undefined
+					? "host verification rejected"
+					: failedCheck.report !== undefined
+						? `host verification check '${failedCheck.check}' rejected: ${failedCheck.report.summary}`
+						: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`) +
 			(failedCheck === undefined
 				? "; the base was not compared"
 				: `; ${hostCheckBaseNote(failedCheck)}. The host ran this check; rejection is not evidence that the worker skipped validation.`),
@@ -1254,9 +1257,61 @@ export function hostVerificationSandbox(
 	});
 }
 
+/** What sits at a path, as the mode of its tree entry at a commit names it. */
+function treeEntryKind(mode: string): string {
+	if (mode === "040000" || mode === "160000") return "directory";
+	return mode === "120000" ? "symbolic link" : "file";
+}
+
+/**
+ * A path a compete candidate's check needs that the candidate broke: the check's cwd, or a numeric-compare input,
+ * tracked in the commit the worktree started from but missing from the worktree or replaced by another type (a file
+ * by a directory, a directory by a file or link), so the check cannot start or provenance refuses it (M10a). The
+ * reason names the path; undefined when nothing is broken, or when that commit never had the path (an untracked or
+ * ignored file the worktree never received), which is not the candidate's doing.
+ */
+function candidateBrokenPath(
+	candidate: NonNullable<DispatchRequest["candidateWorktree"]>,
+	check: ResolvedCheck,
+): string | undefined {
+	const inputs = check.kind === "numeric-compare" ? (check.numeric?.inputs ?? []) : [];
+	for (const path of [check.cwd, ...inputs]) {
+		const rel = relative(candidate.path, path);
+		if (rel === "" || relativePathEscapes(rel)) continue;
+		let entry: string;
+		try {
+			const args = ["-C", candidate.root, "ls-tree", "-z", "--full-tree", candidate.base, "--", rel.split(sep).join("/")];
+			entry = execFileSync("git", internalGitArgv(args), {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: 30_000,
+				env: { ...withoutRepositoryEnv(), GIT_LITERAL_PATHSPECS: "1" },
+			});
+		} catch {
+			continue;
+		}
+		const mode = entry.slice(0, entry.indexOf(" "));
+		if (mode === "") continue;
+		const was = treeEntryKind(mode);
+		const stat = lstatSync(path, { throwIfNoEntry: false });
+		if (stat === undefined)
+			return `'${path}' is missing from the candidate's worktree but exists in the commit it started from`;
+		const now = stat.isSymbolicLink()
+			? "symbolic link"
+			: stat.isDirectory()
+				? "directory"
+				: stat.isFile()
+					? "file"
+					: "special file";
+		if (now !== was)
+			return `'${path}' is a ${now} in the candidate's worktree but a ${was} in the commit it started from`;
+	}
+	return undefined;
+}
+
 export async function runHostVerification(input: {
 	runId: string;
-	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
+	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree" | "candidateWorktree">;
 	workerSuccessful: boolean;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
@@ -1272,7 +1327,27 @@ export async function runHostVerification(input: {
 	const stateDir = input.stateDir ?? clioStateDir();
 	const env = input.env ?? process.env;
 	const results: RunHostVerificationCheck[] = [];
+	const brokenPaths: string[] = [];
 	for (const [index, resolvedCheck] of taskChecks(input.request).entries()) {
+		const broken =
+			input.request.candidateWorktree === undefined
+				? undefined
+				: candidateBrokenPath(input.request.candidateWorktree, resolvedCheck);
+		if (broken !== undefined) {
+			// The candidate broke what its check needs: a verdict on the candidate, not a host failure (M10a).
+			const reason = `check '${resolvedCheck.check}' cannot start: ${broken}`;
+			results.push({
+				check: resolvedCheck.check,
+				argv: [...resolvedCheck.argv],
+				cwd: resolvedCheck.cwd,
+				exitCode: 1,
+				durationMs: 0,
+				memo: false,
+				outputTail: outputTail(`${reason}; nothing ran`),
+			});
+			brokenPaths.push(reason);
+			continue;
+		}
 		const outcome = await runResolvedCheck({
 			runId: input.runId,
 			index,
@@ -1284,6 +1359,15 @@ export async function runHostVerification(input: {
 			...(input.slot !== undefined ? { slot: input.slot } : {}),
 		});
 		results.push(outcome.check);
+	}
+	if (input.request.candidateWorktree !== undefined) {
+		if (brokenPaths.length > 0) return { status: "rejected", reason: brokenPaths.join("; "), checks: results };
+		// A compete candidate's check that never started for a host cause (spawn failure, refusal, no configuration,
+		// shutdown) judged nothing: it is not run, never a rejection (M10a).
+		const judged = results.filter((check) => check.notRun === undefined || check.notRun === "nothing-changed");
+		if (judged.length < results.length && judged.every((check) => check.exitCode === 0)) {
+			return { status: "skipped", reason: "check_not_started", checks: results };
+		}
 	}
 	return {
 		status: results.every((check) => check.exitCode === 0) ? "verified" : "rejected",
