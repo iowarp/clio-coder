@@ -55,6 +55,7 @@ import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { loadScriptedAnswers } from "./run-answers.js";
 import {
+	noteStructuredV2,
 	requestRunTextSummary,
 	startRunOutput,
 	withRunFailureReporting,
@@ -568,6 +569,22 @@ async function executeRunCommand(
 					return 2;
 				}
 
+				// SPEC 6.8: the schema is read after --cwd and checked before any model call; a schema the host cannot
+				// enforce is exit 2 schema_unsupported. The module loads only when the flag is given.
+				let outputSchema: Record<string, unknown> | undefined;
+				const structured =
+					parsed.outputSchema === undefined ? undefined : await import("../session-control/chat-loop-messages.js");
+				if (structured !== undefined && parsed.outputSchema !== undefined) {
+					const loaded = await structured.loadOutputSchema(parsed.outputSchema);
+					if (!loaded.ok) {
+						writeRunDiagnostic(`${structured.OUTPUT_SCHEMA_REFUSAL_PREFIX}${loaded.reason}\n`);
+						return 2;
+					}
+					outputSchema = loaded.schema;
+					// result.enforcedBy is present for every run given the flag, whatever ends it (SPEC 6.6).
+					noteStructuredV2({ enforcedBy: "host" });
+				}
+
 				const assembled = await assemblePrompt(parsed);
 				if (typeof assembled === "number") return assembled;
 
@@ -597,10 +614,11 @@ async function executeRunCommand(
 					if (parsed.dryRun === true) {
 						const { buildRunPlan, writeRunPlan } = await import("./run-plan.js");
 						const settings = borrowed?.settings ?? readSettings();
-						return writeRunPlan(
-							parsed,
-							buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS),
-						);
+						const plan = buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS);
+						// SPEC 6.8: the enforcement the run would use, before any spend.
+						const shown: typeof plan & { outputSchema?: { enforcedBy: "host" } } =
+							outputSchema !== undefined ? { ...plan, outputSchema: { enforcedBy: "host" } } : plan;
+						return writeRunPlan(parsed, shown);
 					}
 					// No route at all is a configuration refusal before any work: exit 2 under the v2 opt-in. v1 (no
 					// --output-format) keeps its boot diagnostic and exit 1 until 0.9.0.
@@ -631,7 +649,12 @@ async function executeRunCommand(
 							...(skillPaths.length > 0 ? { skillPaths } : {}),
 							...(borrowed !== null ? { startupSettings: borrowed.settings } : {}),
 							headless: {
-								prompt: assembled.prompt,
+								// SPEC 6.8 step 1: the schema and one line ride the task text; no tool or system fragment varies.
+								prompt:
+									structured !== undefined && outputSchema !== undefined
+										? `${assembled.prompt}\n\n${structured.outputSchemaInstruction(outputSchema)}`
+										: assembled.prompt,
+								...(outputSchema !== undefined ? { outputSchema } : {}),
 								...(borrowed !== null && parsed.json ? { routeNotice: borrowed.notice } : {}),
 								...(parsed.constraints ? { constraints: parsed.constraints } : {}),
 								mode: parsed.json ? "json" : "text",
@@ -686,10 +709,18 @@ async function executeRunCommand(
 
 				if (parsed.json) takeOverStdout();
 				try {
-					const code = await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
+					// The worker is told the shape in its task text; its request never carries the caller's schema (6.8).
+					const task =
+						structured !== undefined && outputSchema !== undefined
+							? `${assembled.prompt}\n\n${structured.outputSchemaInstruction(outputSchema)}`
+							: assembled.prompt;
+					const code = await runDispatch(parsed as RunCliArgs & { agentId: string }, task, {
 						...options,
 						noSkills,
 						skillPaths,
+						...(structured !== undefined && outputSchema !== undefined
+							? { outputSchema: { schema: outputSchema, finish: structured } }
+							: {}),
 					});
 					if (parsed.json) await flushRawStdout();
 					return code;
@@ -716,7 +747,17 @@ function runVerifyChecks(commands: ReadonlyArray<string>): Array<{ id: string; c
 async function runDispatch(
 	parsed: RunCliArgs & { agentId: string },
 	task: string,
-	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> },
+	options: {
+		apiKey?: string;
+		noContextFiles?: boolean;
+		noSkills?: boolean;
+		skillPaths?: ReadonlyArray<string>;
+		/** `--output-schema` (SPEC 6.8): validate the sealed final answer once; no repair, no schema on the request. */
+		outputSchema?: {
+			schema: Record<string, unknown>;
+			finish: typeof import("../session-control/chat-loop-messages.js");
+		};
+	},
 ): Promise<number> {
 	if (parsed.toolProfile !== undefined && !isToolProfileName(parsed.toolProfile)) {
 		writeRunDiagnostic("clio-coder run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
@@ -1032,6 +1073,24 @@ async function runDispatch(
 			cleanupSteer = undefined;
 		}
 		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
+		// SPEC 6.8 (review H02): the host validates the sealed receipt's final answer once. A worker that already failed
+		// keeps its own cause; a mismatch is exit 1 schema_mismatch and the receipt stays the one attempt.
+		const schemaCheck = options.outputSchema;
+		const structuredVerdict =
+			schemaCheck === undefined || receipt.exitCode !== 0
+				? null
+				: await schemaCheck.finish.validateStructuredAnswer(
+						schemaCheck.schema,
+						redactUrlCredentials(receipt.output?.state === "final" ? receipt.output.text : ""),
+					);
+		const schemaMismatch = structuredVerdict !== null && !structuredVerdict.ok;
+		if (schemaCheck !== undefined) {
+			noteStructuredV2({
+				enforcedBy: "host",
+				...(structuredVerdict?.ok === true ? { structured: structuredVerdict.value, json: structuredVerdict.json } : {}),
+				...(structuredVerdict !== null && !structuredVerdict.ok ? { errors: structuredVerdict.errors } : {}),
+			});
+		}
 		if (parsed.json) {
 			for (const frame of credentials.finish<RunJsonAgentFrame>(receipt.exitCode === 0)) writeAgentFrame(frame);
 			const verifier = verifierVerdict(receipt);
@@ -1044,7 +1103,10 @@ async function runDispatch(
 				writeAgentFrame(frame);
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
-			process.stdout.write(formatDispatchHumanOutput(answer, receipt));
+			if (structuredVerdict?.ok === true) process.stdout.write(`${structuredVerdict.json}\n`);
+			else if (schemaCheck !== undefined && structuredVerdict !== null && !structuredVerdict.ok)
+				process.stderr.write(`${schemaCheck.finish.schemaMismatchMessage(structuredVerdict.errors)}\n`);
+			else process.stdout.write(formatDispatchHumanOutput(answer, receipt));
 			if (recording) process.stderr.write(`Recording manifest (relative to Clio state): ${recording.manifestPath}\n`);
 		}
 
@@ -1055,7 +1117,7 @@ async function runDispatch(
 		await dispatch.drain();
 		await workerHooks.drain();
 		await workerHooks.dispose();
-		return await stopDomains(signalExit ?? mapExitCode(receipt));
+		return await stopDomains(signalExit ?? (schemaMismatch ? 1 : mapExitCode(receipt)));
 	} catch (err) {
 		unsubscribeScopeNotices();
 		if (cleanupSteer) {

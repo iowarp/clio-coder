@@ -26,6 +26,7 @@ const CAUSE_ORDER = [
 	"reader_closed",
 	"flag_conflict",
 	"not_configured",
+	"schema_unsupported",
 	"session_live",
 	"not_started",
 	"unscripted",
@@ -96,6 +97,7 @@ function exitCodeFor(cause: RunCause): number {
 			return EXIT_CODES.readerClosed;
 		case "flag_conflict":
 		case "not_configured":
+		case "schema_unsupported":
 		case "session_live":
 		case "not_started":
 			return EXIT_CODES.notStarted;
@@ -269,7 +271,13 @@ export interface RunResultEnvelopeV2 {
 	outcome: RunOutcomeV2;
 	outcomeDetail?: RunCauseCode;
 	causes: RunCause[];
-	result: { text: string; artifacts: string[] };
+	/** `structured` and `enforcedBy` appear only with `--output-schema` (SPEC 6.6); `structured` only on exit 0. */
+	result: {
+		text: string;
+		artifacts: string[];
+		structured?: Record<string, unknown>;
+		enforcedBy?: "host" | "host+provider";
+	};
 	route?: { target?: string; model?: string };
 	usage?: RunUsageV2;
 	tools?: { calls: number; refused: number; writes: number };

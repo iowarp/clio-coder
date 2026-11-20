@@ -3743,6 +3743,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					options.origin,
 					options.operatorAuthored === true,
 				);
+				// A turn that may only answer and call no tool (`run --output-schema`'s repair) goes out text-only, tool_choice
+				// none, with its tool list unchanged so the cached prefix holds (D8, #423). The append above reset the choice.
+				if (state.currentTurnConstraints?.mode === "answer" && state.currentTurnConstraints.allowedTools?.length === 0)
+					middlewareToolChoice.apply([{ kind: "lock_tools" }]);
 				if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
 				const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
 				// A continuation is a synthetic user turn, which the count skips.

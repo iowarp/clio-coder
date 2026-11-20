@@ -50,11 +50,21 @@ afterEach(() => {
 	env.restore();
 });
 
-/** The first `toolRounds` requests each ask for one tool call; any later request answers with `reply`. */
-function transport(toolRounds = 1, reply = "PONG") {
+/**
+ * The first `toolRounds` requests each ask for one tool call; any later request answers with `reply`, or with the
+ * next of a list of replies. Each request's tool count and tool_choice are kept.
+ */
+function transport(toolRounds = 1, reply: string | ReadonlyArray<string> = "PONG") {
 	let calls = 0;
-	const fetch: typeof globalThis.fetch = async () => {
+	const requests: Array<{ tools: number; toolChoice: unknown }> = [];
+	const fetch: typeof globalThis.fetch = async (_input, init) => {
 		calls += 1;
+		const sent = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+			tools?: unknown[];
+			tool_choice?: unknown;
+		};
+		requests.push({ tools: sent.tools?.length ?? 0, toolChoice: sent.tool_choice });
+		const text = typeof reply === "string" ? reply : (reply[Math.min(calls - toolRounds - 1, reply.length - 1)] ?? "");
 		const encoder = new TextEncoder();
 		const chunk = (delta: Record<string, unknown>, finish_reason: string | null = null) =>
 			encoder.encode(
@@ -72,7 +82,7 @@ function transport(toolRounds = 1, reply = "PONG") {
 										{ index: 0, id: `record-${calls}`, type: "function", function: { name: "read", arguments: "{}" } },
 									],
 								}
-							: { role: "assistant", content: reply },
+							: { role: "assistant", content: text },
 					),
 				);
 				controller.enqueue(chunk({}, first ? "tool_calls" : "stop"));
@@ -82,14 +92,16 @@ function transport(toolRounds = 1, reply = "PONG") {
 		});
 		return new Response(body, { headers: { "content-type": "text/event-stream" } });
 	};
-	return { fetch, calls: () => calls };
+	return { fetch, calls: () => calls, requests };
 }
 
 /** A real engine and session journal over the fixture wire, with `run` standing in for the read tool. */
 function fixture(
 	toolRounds: number,
 	run: (loop: ChatLoop, signal: AbortSignal | undefined) => Promise<void>,
-	reply?: string,
+	reply?: string | ReadonlyArray<string>,
+	/** Keep the turn runtime's own stream (tool rounds and tool_choice) and swap only its fetch. */
+	throughToolRounds = false,
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -122,15 +134,29 @@ function fixture(
 		toolRegistry: registry,
 		bus: context.bus,
 		createAgent: (options) =>
-			createEngineAgent({
-				...options,
-				streamFn: (requestModel, requestContext, requestOptions) =>
-					openAICompletionsApiProvider.streamSimple(requestModel as Model<"openai-completions">, requestContext, {
-						...requestOptions,
-						apiKey: "fixture",
-						fetch: (...args) => wire.fetch(...args),
-					}),
-			}),
+			createEngineAgent(
+				throughToolRounds && options?.transcriptStreamFn !== undefined
+					? {
+							...options,
+							transcriptStreamFn: (
+								(stream) => (requestModel, requestContext, requestOptions) =>
+									stream(requestModel, requestContext, {
+										...requestOptions,
+										apiKey: "fixture",
+										fetch: (...args) => wire.fetch(...args),
+									})
+							)(options.transcriptStreamFn),
+						}
+					: {
+							...options,
+							streamFn: (requestModel, requestContext, requestOptions) =>
+								openAICompletionsApiProvider.streamSimple(requestModel as Model<"openai-completions">, requestContext, {
+									...requestOptions,
+									apiKey: "fixture",
+									fetch: (...args) => wire.fetch(...args),
+								}),
+						},
+			),
 	});
 	registry.register({
 		name: ToolNames.Read,
@@ -270,6 +296,36 @@ it("a headless --timeout during a tool after a steer settles the turn on shutdow
 			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.callIds]),
 			[["aborted", "shutdown", calls.map((call) => call.callId)]],
 		);
+	} finally {
+		await f.close();
+	}
+});
+
+it("run --output-schema's repair turn goes out text-only with its tool list kept; an answer turn with tools does not", {
+	timeout: 10_000,
+}, async () => {
+	// SPEC L5: the second request carries no callable tool (tool_choice none) and the same tools for the cache prefix (D8).
+	const f = fixture(0, async () => {}, ["not json", '{"fixed":true}', "plain answer"], true);
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Is it fixed?",
+			mode: "text",
+			outputSchema: { type: "object", properties: { fixed: { type: "boolean" } }, required: ["fixed"] },
+			shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+		});
+		strictEqual(code, 0);
+		strictEqual(f.wire.calls(), 2);
+		const [first, repair] = f.wire.requests;
+		ok(first && repair);
+		ok(first.toolChoice !== "none", JSON.stringify(first));
+		strictEqual(repair.toolChoice, "none", JSON.stringify(f.wire.requests));
+		strictEqual(repair.tools, first.tools);
+		ok(repair.tools > 0);
+		// An ordinary answer-mode turn that keeps its tools is not locked.
+		await f.loop.submit("Answer plainly.", { constraints: { mode: "answer" } });
+		await f.loop.whenSettled();
+		strictEqual(f.wire.calls(), 3);
+		ok(f.wire.requests[2]?.toolChoice !== "none", JSON.stringify(f.wire.requests[2]));
 	} finally {
 		await f.close();
 	}

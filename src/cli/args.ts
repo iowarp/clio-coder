@@ -105,6 +105,8 @@ export interface RunCliArgs {
 	outputFormat?: RunOutputFormat;
 	/** `-o/--output-last-message`: the file that receives the final answer when the run exits 0. */
 	outputLastMessage?: string;
+	/** `--output-schema <file.json>`: the JSON Schema the final answer must validate against (SPEC 6.8). */
+	outputSchema?: string;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -300,6 +302,12 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			const value = arg.startsWith("--output-last-message=") ? arg.slice("--output-last-message=".length) : need(arg);
 			if (value !== null && value.length > 0) parsed.outputLastMessage = value;
 			else if (value !== null) parsed.diagnostics.push({ type: "error", message: `${arg} requires a path` });
+			continue;
+		}
+		if (arg === "--output-schema" || arg?.startsWith("--output-schema=")) {
+			const value = arg === "--output-schema" ? need(arg) : arg.slice("--output-schema=".length);
+			if (value !== null && value.length > 0) parsed.outputSchema = value;
+			else if (value !== null) parsed.diagnostics.push({ type: "error", message: "--output-schema requires a path" });
 			continue;
 		}
 		if (arg === "--json-events") {
