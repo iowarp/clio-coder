@@ -1,6 +1,7 @@
 import { doesNotMatch, ok, strictEqual } from "node:assert/strict";
 import { afterEach, it } from "node:test";
 import { rememberResolvedSecret } from "../../src/core/sandbox/env-scrub.js";
+import { CommandOutputMask } from "../../src/domains/evidence/output-mask.js";
 import { runOperatorShellLine } from "../../src/domains/session/operator-shell.js";
 import { bashTool } from "../../src/tools/bash.js";
 
@@ -83,4 +84,51 @@ it("masks a credential by its shape, even split across writes, and leaves ordina
 	strictEqual(result.output.split("\n").slice(0, 2).join("\n"), `${ordinary}\nsplit [redacted:github-token]`);
 	ok(progress.length > 0, "the command reported progress");
 	for (const shown of progress) doesNotMatch(shown, /ZQXJ/u);
+});
+
+it("masks a stream to the same text wherever it is split and never shows the secret", () => {
+	const secret = ["ghs", "_", "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z"].join("");
+	// Leads that read across a line break, and a literal marker that changes how a block's quoted values are marked.
+	const tricky = [
+		`{"authorization": "token ${secret}"}`,
+		"password '",
+		`token:"authorization": "token ${secret}"token:`,
+		"config token:",
+		` "x": "y", "password": "a ${secret} b"`,
+		"[redacted]",
+		`TOKEN="a ${secret} b" Authorization: Bearer ${secret}`,
+		"",
+	].join("\n");
+	const filler = "2026-11-20T01:00:00Z INFO step done in 12 ms\n".repeat(97);
+	const stream = (filler + tricky).repeat(40);
+	const starts: number[] = [];
+	for (let at = stream.indexOf(tricky); at >= 0; at = stream.indexOf(tricky, at + 1)) starts.push(at);
+	const mask = (pieces: string[]): string => {
+		const output = new CommandOutputMask([]);
+		let text = "";
+		for (const piece of pieces) {
+			text += output.push(piece);
+			ok(!output.frame().includes(secret), "a frame shows the secret");
+		}
+		return text + output.end();
+	};
+	const whole = mask([stream]);
+	ok(!whole.includes(secret));
+	let seed = 7;
+	const next = (below: number): number => {
+		seed = (seed * 1103515245 + 12345) % 2147483648;
+		return Math.floor((seed / 2147483648) * below);
+	};
+	for (let trial = 0; trial < 60; trial += 1) {
+		// Most cuts land inside a tricky stretch, where a line-by-line commit used to change the result.
+		const cuts = new Set<number>();
+		for (let count = 1 + next(6); count > 0; count -= 1) {
+			cuts.add(count % 3 === 0 ? next(stream.length) : (starts[next(starts.length)] ?? 0) + next(tricky.length));
+		}
+		const points = [0, ...[...cuts].sort((a, b) => a - b), stream.length];
+		const pieces = points.slice(1).map((end, index) => stream.slice(points[index], end));
+		const masked = mask(pieces);
+		ok(!masked.includes(secret), `split at ${points.join(",")} shows the secret`);
+		strictEqual(masked, whole, `split at ${points.join(",")} masks differently`);
+	}
 });
