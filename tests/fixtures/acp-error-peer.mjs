@@ -130,15 +130,18 @@ function advertisesClientCapability(capabilities) {
 }
 
 /**
- * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null>`. Every frame it receives is appended
- * to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends `interaction_` requests:
- * tool-shaped ones (an execute command, a path or a URL under kind other or none) and questions whose locations are
- * null or empty, then agy's own tool shapes (probed on 1.5.13): `run_command`, `run_workflow` and a tool no shim maps. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer end_turn,
- * then a later update arrives, then the second steer fails. In `abort` mode a steer makes the turn answer end_turn and
- * is never answered itself. In `null` mode a steer is answered with a null result, then the turn with end_turn. The
- * `sideband*` modes share one store under `$HOME/.gemini/antigravity-cli` (the 1.5.13 `steps` DDL), kept open as agy
- * does: `sideband` records a quota error and a thinking-signature error and answers end_turn, `sideband-max` records
- * the same and answers max_tokens, and `sideband-clean` records only a user step and answers end_turn.
+ * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null|steer|labels|sideband*>`. Every frame
+ * it receives is appended to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends
+ * `interaction_` requests: tool-shaped ones (an execute command, a path or a URL under kind other or none) and
+ * questions whose locations are null or empty, then agy's own tool shapes (probed on 1.5.13): `run_command`,
+ * `run_workflow` and a tool no shim maps. In `ok` mode the first steer prompt ends at max_tokens; the second makes the
+ * turn answer end_turn, then a later update arrives, then the second steer fails. In `abort` mode a steer makes the
+ * turn answer end_turn and is never answered itself. In `null` mode a steer is answered with a null result, then the
+ * turn with end_turn. In `steer` mode a steer is answered end_turn, then the turn with end_turn; `labels` does the
+ * same and offers options whose names repeat, collide with a suffixed repeat, or are blank. The `sideband*` modes
+ * share one store under `$HOME/.gemini/antigravity-cli` (the 1.5.13 `steps` DDL), kept open as agy does: `sideband`
+ * records a quota error and a thinking-signature error and answers end_turn, `sideband-max` records the same and
+ * answers max_tokens, and `sideband-clean` records only a user step and answers end_turn.
  */
 const agyState = { firstPrompt: undefined, steers: 0, answered: false, store: undefined };
 function recordAgySteps(errors) {
@@ -262,10 +265,18 @@ function agy(request) {
 			params: {
 				sessionId: "agy-session",
 				toolCall: { toolCallId: "interaction_1", title: "Which branch?", kind: "other" },
-				options: [
-					{ optionId: "main", name: "main", kind: "allow_once", _meta: { "agy.security.warning": "pushes to main" } },
-					{ optionId: "topic", name: "topic", kind: "allow_once" },
-				],
+				options:
+					scenario === "labels"
+						? [
+								{ optionId: "a", name: "x", kind: "allow_once" },
+								{ optionId: "c", name: "x (b)", kind: "allow_once" },
+								{ optionId: "b", name: "x", kind: "allow_once" },
+								{ optionId: "d", name: "  ", kind: "allow_once" },
+							]
+						: [
+								{ optionId: "main", name: "main", kind: "allow_once", _meta: { "agy.security.warning": "pushes to main" } },
+								{ optionId: "topic", name: "topic", kind: "allow_once" },
+							],
 			},
 		});
 		if (scenario.startsWith("sideband")) {
@@ -288,8 +299,11 @@ function agy(request) {
 		agyState.answered = true;
 		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
 		agyUpdate("turn-answered");
-	} else if (request.method === "session/prompt" && scenario === "null") {
-		send({ jsonrpc: "2.0", id: request.id, result: null });
+	} else if (
+		request.method === "session/prompt" &&
+		(scenario === "null" || scenario === "steer" || scenario === "labels")
+	) {
+		send({ jsonrpc: "2.0", id: request.id, result: scenario === "null" ? null : { stopReason: "end_turn" } });
 		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
 	}
 }

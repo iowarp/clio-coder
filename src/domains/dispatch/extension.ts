@@ -117,6 +117,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
+	type AcpPeerQuestion,
 	DEFAULT_CANCEL_GRACE_MS,
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
@@ -125,7 +126,7 @@ import { engineRetryDelayMs } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import { INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
-import type { AskUserHandler } from "../../tools/ask-user.js";
+import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import {
 	addedUntrackedPaths,
@@ -681,8 +682,9 @@ interface ActiveRun {
 	/** Hard termination used by the reconciler; for native workers this is the SIGTERM→SIGKILL path. */
 	kill: () => void;
 	/**
-	 * Send operator guidance to a live-input HTTP/SDK worker. Returns false when
-	 * the channel is gone. Absent for single-shot subprocess and ACP runs.
+	 * Send operator guidance to a live-input HTTP/SDK worker, or to an ACP peer
+	 * that takes it as another prompt (agy). Returns false when the channel is
+	 * gone. Absent for single-shot subprocess runs and other ACP peers.
 	 */
 	steer?: (text: string) => boolean;
 	/**
@@ -732,6 +734,8 @@ interface ActiveRun {
 	sealing?: boolean;
 	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
 	stallTimeoutMs: number | null;
+	/** An ACP peer's question is parked on the operator, so its silence is not a stall. */
+	peerQuestionOpen?: () => boolean;
 	/** Internal logical assignment/retry lineage, independent of published host ancestry. */
 	lineage: RunLineage;
 	hostRun?: DispatchPreparationOptions["hostRun"];
@@ -913,6 +917,8 @@ interface ProbeClaim {
 }
 /** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
+/** How often a delegated agent's question retries a screen another card holds; the merge card waits the same. */
+const PEER_QUESTION_SCREEN_RETRY_MS = 500;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
@@ -5837,7 +5843,7 @@ export function createDispatchBundle(
 			if (run.runtimeKind === "acp-delegation") {
 				ledger.update(run.runId, { heartbeatAt: heartbeatIso(run.heartbeatAt) });
 				const stallMs = run.stallTimeoutMs;
-				if (stallMs === null || stallMs <= 0) continue;
+				if (stallMs === null || stallMs <= 0 || run.peerQuestionOpen?.() === true) continue;
 				if (tickMonotonic - heartbeatMonotonic <= stallMs) continue;
 				run.stallKilled = true;
 				run.heartbeatStatus = "dead";
@@ -7194,6 +7200,63 @@ export function createDispatchBundle(
 			}
 		}
 		let acp: AcpDelegationRunHandle;
+		// A peer's fixed-choice question (agy interaction_*) goes to a person through the operator's ask surface, the TUI
+		// card or an ACP client's interview, under the same gate as worker asks: nobody attached, contained yolo, or
+		// fleet.permissions.mode deny or fail answers it cancelled. Only the operator's own pick goes back.
+		let peerQuestionsOpen = 0;
+		const askPeerQuestion = async (question: AcpPeerQuestion, questionSignal: AbortSignal): Promise<string | null> => {
+			const operator = options?.operatorAsk;
+			if (operator === undefined || !operator.available()) return null;
+			const live = withLiveAutonomy(getEffectiveSettings());
+			if (operatorContainedYolo(live)) return null;
+			const mode = live?.fleet.permissions.mode;
+			if (mode === "deny" || mode === "fail") return null;
+			// Labels are what the card returns, so a repeated one is told apart by its optionId, and by a counter when that
+			// suffix is itself another option's label; no option is dropped.
+			const byLabel = new Map<string, string>();
+			for (const option of question.options) {
+				let label = option.label;
+				for (let n = 1; byLabel.has(label); n++)
+					label = n === 1 ? `${option.label} (${option.optionId})` : `${option.label} (${option.optionId} ${n})`;
+				byLabel.set(label, option.optionId);
+			}
+			const warning = question.securityWarning !== undefined ? `\n\nSecurity warning: ${question.securityWarning}` : "";
+			const asked: AskUserQuestion = {
+				question: `${req.agentId} asks: ${question.question}${warning}`,
+				header: "Delegated agent",
+				options: [...byLabel.keys()].map((label) => ({ label })),
+				fixedChoices: true,
+				operator_only: true,
+			};
+			peerQuestionsOpen += 1;
+			try {
+				// A harness card, as the merge card asks: the run's end dismisses it, Esc answers only it, and nothing enters
+				// the main transcript. A screen another card holds is retried until it frees or the run ends.
+				let result: AskUserResult;
+				for (;;) {
+					if (questionSignal.aborted || !operator.available()) return null;
+					result = await operator.ask([asked], { origin: "harness", signal: questionSignal });
+					if (questionSignal.aborted) return null;
+					if (result.unavailable !== true) break;
+					await new Promise<void>((resolve) => {
+						const settle = (): void => {
+							clearTimeout(wake);
+							questionSignal.removeEventListener("abort", settle);
+							resolve();
+						};
+						const wake = setTimeout(settle, PEER_QUESTION_SCREEN_RETRY_MS);
+						wake.unref?.();
+						questionSignal.addEventListener("abort", settle, { once: true });
+						if (questionSignal.aborted) settle();
+					});
+				}
+				const answer = result.answers[0];
+				if (result.cancelled === true || answer === undefined || answer.auto === true) return null;
+				return byLabel.get(answer.options?.[0] ?? answer.answer) ?? null;
+			} finally {
+				peerQuestionsOpen -= 1;
+			}
+		};
 		try {
 			let environment: Record<string, string> | undefined;
 			let credentialExpiresAt: number | undefined;
@@ -7232,6 +7295,7 @@ export function createDispatchBundle(
 				clientVersion: readClioVersion(),
 				now,
 				monotonicNow,
+				askPeerQuestion,
 			});
 		} catch (error) {
 			await closeRunJournal();
@@ -7257,6 +7321,10 @@ export function createDispatchBundle(
 		let outcomeCode: RunOutcomeCode | null = null;
 		let reportedSpoofedOutcome = false;
 		let runIdForPermissionAudit: string | null = null;
+		// Steering provenance as a native run keeps it: one entry per message the peer took as another prompt, closed
+		// once the peer answers that prompt; the prose itself is never kept.
+		const steeringProvenance: RunSteeringProvenance[] = [];
+		let steeringProvenanceClosed = false;
 		const outputCapture = createWorkerOutputCapture({
 			maxBytes: workerOutputCaptureBytes(
 				dispatchResultContract(req, req.agentId && maybeAgents ? maybeAgents.getSpec(req.agentId) : null),
@@ -7306,8 +7374,18 @@ export function createDispatchBundle(
 					requestId?: string;
 					mode?: "deny" | "fail" | "escalate";
 					source?: "operator" | "timeout" | "policy" | "remembered";
+					sequence?: unknown;
 				};
 			};
+			if (event.type === "clio_coder_steer_received" && !steeringProvenanceClosed) {
+				const pending = steeringProvenance.find(
+					(entry) => entry.sequence === event.payload?.sequence && !entry.acknowledged,
+				);
+				if (pending !== undefined) {
+					pending.acknowledged = true;
+					pending.acknowledgedAt = new Date().toISOString();
+				}
+			}
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
@@ -7519,6 +7597,21 @@ export function createDispatchBundle(
 		});
 
 		const startedAt = envelope.startedAt;
+		// A peer that takes guidance as another prompt (agy 1.5.0 and later) gets a steer, recorded like a native one.
+		const steerAcp =
+			(send: (text: string) => boolean) =>
+			(text: string): boolean => {
+				const canonicalText = text.trim();
+				if (steeringProvenanceClosed || canonicalText.length === 0 || !send(canonicalText)) return false;
+				steeringProvenance.push({
+					sequence: steeringProvenance.length + 1,
+					bytes: Buffer.byteLength(canonicalText, "utf8"),
+					contentHash: sha256(canonicalText),
+					sentAt: new Date().toISOString(),
+					acknowledged: false,
+				});
+				return true;
+			};
 		let resolveFinal!: (receipt: RunResult) => void;
 		let rejectFinal!: (error: unknown) => void;
 		const finalPromise = new Promise<RunResult>((res, rej) => {
@@ -7531,6 +7624,7 @@ export function createDispatchBundle(
 			req,
 			abort: acp.abort,
 			kill: acp.kill,
+			...(acp.steer !== undefined ? { steer: steerAcp(acp.steer) } : {}),
 			promise: acp.promise.then(
 				() => undefined,
 				() => undefined,
@@ -7552,6 +7646,7 @@ export function createDispatchBundle(
 			abortCause: null,
 			stallKilled: false,
 			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
+			peerQuestionOpen: () => peerQuestionsOpen > 0,
 			// ACP delegation is admitted as unpriced.
 			budgetExempt: true,
 			lineage,
@@ -7569,6 +7664,7 @@ export function createDispatchBundle(
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
 			capturedOutput: RunResultOutput | undefined,
+			steering: ReadonlyArray<RunSteeringProvenance>,
 		): RunResultDraft => {
 			// The peer's own reports reach the run journal as run.usage_reported, so the call fold is the run's spend;
 			// a run whose telemetry never arrived stays unknown (#434).
@@ -7604,6 +7700,7 @@ export function createDispatchBundle(
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.contextSeed ? { workerContext: structuredClone(req.contextSeed.provenance) } : {}),
+				...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
@@ -7780,6 +7877,9 @@ export function createDispatchBundle(
 					}
 				}
 				const capturedOutput = outputCapture.snapshot();
+				// Closed before the receipt snapshot, so a late acknowledgement cannot race the sealed facts.
+				steeringProvenanceClosed = true;
+				const steering = steeringProvenance.map((entry) => ({ ...entry }));
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
 					finalOutcome = "failed";
 					outcomeCode = "worker_final_output_missing";
@@ -7823,7 +7923,15 @@ export function createDispatchBundle(
 				};
 				const failureClass = classifyFailure(evidence, classifiedResult, finalOutcome, outcomeCode);
 				const contextOverflow = isContextOverflowFailure(failureClass, classifiedResult, outcomeCode);
-				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
+				const receiptDraft = buildReceiptDraft(
+					result,
+					endedAt,
+					status,
+					finalOutcome,
+					finalDetail,
+					capturedOutput,
+					steering,
+				);
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
@@ -7838,6 +7946,7 @@ export function createDispatchBundle(
 					sessionId: receiptDraft.sessionId,
 					spend: receiptDraft.spend,
 					spendSums: receiptDraft.spendSums,
+					...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
@@ -12103,7 +12212,7 @@ export function createDispatchBundle(
 				if (run.runtimeKind === "acp-delegation") {
 					const stallMs = run.stallTimeoutMs;
 					if (stallMs !== null && stallMs > 0) {
-						heartbeat = tickMonotonic - heartbeatMonotonic > stallMs ? "dead" : "alive";
+						heartbeat = tickMonotonic - heartbeatMonotonic > stallMs && run.peerQuestionOpen?.() !== true ? "dead" : "alive";
 					}
 				} else {
 					heartbeat = classifyHeartbeat(heartbeatMonotonic, tickMonotonic, heartbeatSpec);
@@ -12749,6 +12858,11 @@ export function createDispatchBundle(
 				throw new Error(`steer: run '${runId}' (${run.runtimeKind}:${run.runtimeId}) does not support live steering`);
 			}
 			if (!run.steer(trimmed)) {
+				if (run.runtimeKind === "acp-delegation") {
+					throw new Error(
+						`steer: run '${runId}' (${run.runtimeKind}:${run.runtimeId}) no longer accepts input; the delegated agent has no turn running that takes guidance`,
+					);
+				}
 				throw new Error(`steer: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`);
 			}
 		},
