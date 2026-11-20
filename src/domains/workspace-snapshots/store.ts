@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { GITLINK_MODE, type GitCall, parseRawDiff, runGit, SnapshotUnavailableError, splitNul } from "./git.js";
 import {
@@ -346,7 +347,7 @@ function occupied(root: string, rel: string): boolean {
 function insideRoot(root: string, rel: string): string {
 	const abs = path.resolve(root, rel);
 	const back = path.relative(root, abs);
-	if (back.length === 0 || back.startsWith("..") || path.isAbsolute(back))
+	if (back.length === 0 || relativePathEscapes(back))
 		throw new SnapshotUnavailableError(`path ${rel} is outside the work tree`);
 	return abs;
 }
