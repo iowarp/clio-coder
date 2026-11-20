@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { Value } from "typebox/value";
 import { processIdentityAlive } from "../../core/process-identity.js";
+import type { SurfaceId } from "../../core/side-surfaces.js";
+import { SIDE_SURFACES } from "../../core/side-surfaces.js";
 import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryOwner } from "../../core/telemetry/context.js";
@@ -27,10 +29,10 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
-import type { TurnNoAnswerCause } from "../../core/telemetry/enums.js";
+import type { AgentRole, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
-import type { Fact, FactSum } from "../../core/telemetry/fact.js";
+import type { Fact, FactSum, UnknownReason } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
 	agreedFreeRule,
@@ -4119,12 +4121,137 @@ export function emptyTaskMemorySpendSummary(): TaskMemorySpendSummary {
 	};
 }
 
-/** Fold memory decisions and their call facts from the same journal records (#434). */
-export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMemorySpendSummary {
+/**
+ * One side surface's calls as its journal holds them: every attempt by disposition, each usage field with its unknown
+ * count as coverage, and the summed service time of its settled attempts (memory design 4.1).
+ */
+export interface SideSurfaceFold {
+	surface: SurfaceId;
+	role: AgentRole;
+	/** Attempts that reached a model: sent, whatever came back. */
+	exercised: number;
+	/**
+	 * `unexercised` when no attempt reached a model, which is never a pass; `unsupported` when, in addition, the route the
+	 * caller named cannot exercise the surface at all.
+	 */
+	status: "exercised" | "unexercised" | "unsupported";
+	/** A never-sent attempt's usage counts as unknown in every sum here, never as zero or not applicable. */
+	totals: CallTotals;
+	/** Attempts whose usage is unknown, by why: the fact's own reason, or what became of the request. */
+	unknownUsage: Partial<Record<SideUsageGap, number>>;
+	/** Summed attempt service time; overlapping calls each count, so this is never time saved. */
+	serviceMs: number;
+}
+
+/** Why an attempt's usage is unknown. */
+export type SideUsageGap = UnknownReason | "never-sent" | "sent-unsettled" | "not-settled";
+
+/** The route a fold is read for, as its caller knows it: what its runtime can exercise decides `unsupported`. */
+export interface SideSurfaceRoute {
+	runtimeId: string;
+}
+
+export interface SideSurfacesFold {
+	/** One row per `SIDE_SURFACES` entry, in table order. */
+	surfaces: SideSurfaceFold[];
+	/** Side-agent calls journaled with no purpose, by role: what attribution has not reached yet. */
+	residual: Array<{ role: AgentRole; totals: CallTotals }>;
+	/** The `/memory` spend line: its steps from `memory.step_decided`, its tokens from every memory-role call. */
+	memory: TaskMemorySpendSummary;
+}
+
+const NOT_SIDE_ROLES: ReadonlySet<AgentRole> = new Set(["main", "coordinator", "worker"]);
+const NOT_OBSERVED: Fact<number> = { kind: "unknown", reason: "not-observed" };
+
+/**
+ * A surface's call totals with never-sent usage read as unknown: the request never left, so what it would have cost is
+ * not known, and a side fold must not read it as zero (memory design MD1). The rest follows `addCallTotals`.
+ */
+function sideCallTotals(attempts: readonly FoldedAttempt[]): {
+	totals: CallTotals;
+	unknownUsage: Partial<Record<SideUsageGap, number>>;
+} {
+	const totals = foldCalls(attempts);
+	const fresh = emptyCallTotals();
+	totals.usage = fresh.usage;
+	totals.promptTokens = fresh.promptTokens;
+	totals.totalTokens = fresh.totalTokens;
+	const unknownUsage: Partial<Record<SideUsageGap, number>> = {};
+	for (const { settled } of attempts) {
+		const neverSent = settled?.disposition === "never_sent";
+		const fact = (field: keyof CallTotals["usage"]): Fact<number> =>
+			neverSent ? NOT_OBSERVED : (settled?.usage?.[field] ?? NOT_OBSERVED);
+		const bound = settled?.disposition === "sent_unsettled" ? [NOT_OBSERVED] : [];
+		for (const field of Object.keys(totals.usage) as Array<keyof CallTotals["usage"]>)
+			addGroup(totals.usage[field], [fact(field), ...bound]);
+		const prompt = [fact("input"), fact("cacheRead"), fact("cacheWrite")];
+		addGroup(totals.promptTokens, [...prompt, ...bound]);
+		const total = neverSent ? undefined : settled?.usage?.total;
+		addGroup(totals.totalTokens, [...(total ? [total] : [...prompt, fact("output")]), ...bound]);
+		const output = fact("output");
+		const gap: SideUsageGap | undefined = neverSent
+			? "never-sent"
+			: settled === null
+				? "not-settled"
+				: settled.disposition === "sent_unsettled"
+					? "sent-unsettled"
+					: output.kind === "unknown"
+						? output.reason
+						: undefined;
+		if (gap !== undefined) unknownUsage[gap] = (unknownUsage[gap] ?? 0) + 1;
+	}
+	return { totals, unknownUsage };
+}
+
+/**
+ * Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1).
+ * `route` is the caller's: without it no surface can read `unsupported`, only `unexercised`.
+ */
+export function foldSideSurfaces(records: readonly TelemetryRecord[], route?: SideSurfaceRoute): SideSurfacesFold {
+	const folded = foldCallJournal(records).attempts;
+	// The journal fold keeps a start's request identity only; purpose is read from the records that carry it.
+	const purposes = new Map<string, SurfaceId>();
+	for (const record of records)
+		if ((record.k === "call.started" || record.k === "call.settled") && record.data.purpose !== undefined)
+			purposes.set(record.data.attemptId, record.data.purpose);
+	const bySurface = new Map<SurfaceId, FoldedAttempt[]>();
+	const unpurposed = new Map<AgentRole, FoldedAttempt[]>();
+	for (const attempt of folded) {
+		if (NOT_SIDE_ROLES.has(attempt.agent.role)) continue;
+		const purpose = purposes.get(attempt.started.attemptId);
+		if (purpose === undefined)
+			unpurposed.set(attempt.agent.role, [...(unpurposed.get(attempt.agent.role) ?? []), attempt]);
+		else bySurface.set(purpose, [...(bySurface.get(purpose) ?? []), attempt]);
+	}
+	const surfaces = SIDE_SURFACES.map(({ id, role, runtimes }): SideSurfaceFold => {
+		const attempts = bySurface.get(id) ?? [];
+		const exercised = attempts.filter(({ settled }) => settled !== null && settled.disposition !== "never_sent").length;
+		const unsupported = route !== undefined && runtimes !== undefined && !runtimes.includes(route.runtimeId);
+		return {
+			surface: id,
+			role,
+			exercised,
+			status: exercised > 0 ? "exercised" : unsupported ? "unsupported" : "unexercised",
+			...sideCallTotals(attempts),
+			serviceMs: attempts.reduce((sum, { settled }) => sum + (settled?.stages.settle ?? 0), 0),
+		};
+	});
+	const residual = [...unpurposed]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([role, attempts]) => ({ role, totals: sideCallTotals(attempts).totals }));
+	return { surfaces, residual, memory: foldMemorySpend(records, folded) };
+}
+
+/** Memory decisions and their call facts; a memory-role call no decision links is still spent, so it is counted too. */
+function foldMemorySpend(
+	records: readonly TelemetryRecord[],
+	folded: readonly FoldedAttempt[],
+): TaskMemorySpendSummary {
 	const summary = emptyTaskMemorySpendSummary();
 	const attempts = new Map<string, FoldedAttempt>();
-	for (const attempt of foldCallJournal(records).attempts) attempts.set(attempt.started.attemptId, attempt);
+	for (const attempt of folded) attempts.set(attempt.started.attemptId, attempt);
 	const seen = new Set<string>();
+	const linkedAttempts = new Set<string>();
 	const value = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0);
 	for (const row of records) {
 		if (row.k !== "memory.step_decided") continue;
@@ -4140,6 +4267,7 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
 		if (record.calls?.length) {
 			const linked: FoldedAttempt[] = [];
 			for (const ref of record.calls) {
+				linkedAttempts.add(ref.attemptId);
 				const key = `${telemetryOwner(row.ctx)}/${ref.attemptId}`;
 				if (seen.has(key)) continue;
 				seen.add(key);
@@ -4165,6 +4293,13 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
 		summary.modelMs += value(record.latencyMs);
 		summary.slowestStepMs = Math.max(summary.slowestStepMs, value(record.latencyMs));
 	}
+	// Observation, reflection, retention and classification calls decide no step, and were missing from this line.
+	const unlinked = foldCalls(
+		folded.filter((attempt) => attempt.agent.role === "memory" && !linkedAttempts.has(attempt.started.attemptId)),
+	);
+	summary.inputTokens = sumFactSums([summary.inputTokens, unlinked.usage.input]);
+	summary.outputTokens = sumFactSums([summary.outputTokens, unlinked.usage.output]);
+	summary.totalTokens = sumFactSums([summary.totalTokens, unlinked.totalTokens]);
 	summary.hitRate = summary.llmSteps === 0 ? 0 : summary.injections / summary.llmSteps;
 	return summary;
 }

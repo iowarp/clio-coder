@@ -46,7 +46,13 @@ test("successful source inspection does not bypass the repeated-failure gate", (
 
 test("source citations do not replace bank-entry citations for spontaneous reminders", async () => {
 	const bank = new TaskMemoryBank();
-	const input = { task: "Remember numerical controls", trajectory: [], deterministicTrigger: false, maxTokens: 2000 };
+	const input = {
+		purpose: "memory.bank" as const,
+		task: "Remember numerical controls",
+		trajectory: [],
+		deterministicTrigger: false,
+		maxTokens: 2000,
+	};
 	const uncited = await runTaskMemoryPolicy(
 		bank,
 		{

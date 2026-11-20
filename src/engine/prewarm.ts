@@ -134,7 +134,7 @@ export function prewarmPromptTokens(result: Pick<PrewarmRoundResult, "usage" | "
  * backend that refuses it must not be able to break the session it was warming.
  */
 export async function runPrewarmRound(input: PrewarmRoundInput): Promise<PrewarmRoundResult> {
-	const scope = await openCallScope(input.telemetry, input.model);
+	const scope = await openCallScope(input.telemetry && { ...input.telemetry, purpose: "prewarm" }, input.model);
 	try {
 		const result = await runPrewarmAttempt(input, scope);
 		return { ...result, ...scope.identity() };

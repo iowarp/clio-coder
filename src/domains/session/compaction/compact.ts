@@ -7,6 +7,7 @@ import type { SideCallAuth } from "../../../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../../core/oauth-retry.js";
 import { prepareProviderCheckpoint } from "../../../core/provider-checkpoint.js";
 import { ProviderCompactionError } from "../../../core/provider-checkpoint-handle.js";
+import type { SurfaceId } from "../../../core/side-surfaces.js";
 import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 import type { CheckpointDefect, CompactionFailureCause } from "../../../core/telemetry/schemas.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
@@ -1242,12 +1243,13 @@ async function* stallWatched<T>(
 
 async function runSummaryStream(
 	input: CompactInput,
+	purpose: Extract<SurfaceId, `compaction.${string}`>,
 	userText: string,
 	systemPrompt: string,
 	maxTokens: number | undefined,
 	prefix?: LivePrefixSummary,
 ): Promise<{ text: string; usage: unknown }> {
-	const scope = await openCallScope(input.telemetry, input.model);
+	const scope = await openCallScope(input.telemetry && { ...input.telemetry, purpose }, input.model);
 	try {
 		return await withOAuthRefresh(input, (auth) =>
 			runSummaryAttempt({ ...input, ...auth }, userText, systemPrompt, maxTokens, scope, prefix),
@@ -1495,7 +1497,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		const selection =
 			input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
 		const skillContext = captureSkillContext(input.entries, selection);
-		const scope = await openCallScope(input.telemetry, input.model);
+		const scope = await openCallScope(
+			input.telemetry && { ...input.telemetry, purpose: "compaction.native" },
+			input.model,
+		);
 		const observations: CompactionCallObservation[] = [];
 		scope.startAttempt({ roundKind: "normal", toolChoice: "auto" });
 		try {
@@ -1942,7 +1947,14 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	let liveCovered = false;
 	if (live) {
 		try {
-			const liveSummary = await runSummaryStream(input, live.tail, systemPrompt, live.budget.maxTokens, live.port);
+			const liveSummary = await runSummaryStream(
+				input,
+				"compaction.live",
+				live.tail,
+				systemPrompt,
+				live.budget.maxTokens,
+				live.port,
+			);
 			usage = addCompactionUsage(usage, liveSummary.usage);
 			if (liveSummary.text.length === 0)
 				throw tagCompactionFailure(new Error("compaction returned an empty history summary"), "checkpoint_format", "empty");
@@ -1966,7 +1978,13 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	const checkedSummary = async (userText: string, history: boolean, check: (text: string) => string) => {
 		let request = userText;
 		for (let attempt = 0; ; attempt++) {
-			const reply = await runSummaryStream(input, request, systemPrompt, maxTokens);
+			const reply = await runSummaryStream(
+				input,
+				history ? "compaction.history" : "compaction.split",
+				request,
+				systemPrompt,
+				maxTokens,
+			);
 			usage = addCompactionUsage(usage, reply.usage);
 			try {
 				return check(reply.text);

@@ -2,6 +2,7 @@ import type { Static, TSchema } from "typebox";
 import type { JobChangedPayload } from "../job-types.js";
 import type { CaptureFlag } from "./capture.js";
 import type { ContentClass, Tier } from "./enums.js";
+import type { Fact } from "./fact.js";
 import type {
 	AgentStatusChangedPayload,
 	AutonomyOpenDecisionPayload,
@@ -172,14 +173,19 @@ function projectMemoryObservation(payload: {
 		if (typeof input[key] === "number") facts[key] = { kind: "estimated", value: input[key], method: "chars/4" };
 	if (typeof input.durationMs === "number")
 		facts.durationMs = { kind: "measured", value: input.durationMs, source: "local-clock" };
+	// A memory step's usage is the call's own facts (`TaskMemoryStepUsage`), copied as they are: measured where the
+	// provider reported a value, unknown with its reason otherwise, never an invented zero. A bare number is a legacy
+	// producer's, read as before.
+	type UsageField = Fact<number> | number;
 	const usage = input.usage as
 		| {
-				input: number;
-				output: number;
-				cacheRead: number;
-				cacheWrite: number;
-				reasoning: number;
-				totalTokens: number;
+				input: UsageField;
+				output: UsageField;
+				cacheRead: UsageField;
+				cacheWrite: UsageField;
+				cacheWrite1h?: UsageField;
+				reasoning: UsageField;
+				totalTokens: UsageField;
 				unmeteredCalls?: number;
 				callId?: string;
 				attemptId?: string;
@@ -187,16 +193,21 @@ function projectMemoryObservation(payload: {
 		| null
 		| undefined;
 	if (usage) {
-		const token = (value: number) =>
-			value > 0 || usage.unmeteredCalls === 0
+		const token = (value: UsageField | undefined): Fact<number> => {
+			if (typeof value === "object" && value !== null) return value;
+			return typeof value === "number" && (value > 0 || usage.unmeteredCalls === 0)
 				? { kind: "measured", value, source: "provider" }
 				: { kind: "unknown", reason: "not-observed" };
+		};
 		facts.usage = {
 			input: token(usage.input),
 			output: token(usage.output),
 			cacheRead: token(usage.cacheRead),
 			cacheWrite: token(usage.cacheWrite),
-			cacheWrite1h: { kind: "absent", reason: "not-applicable" },
+			cacheWrite1h:
+				typeof usage.cacheWrite1h === "object" && usage.cacheWrite1h !== null
+					? usage.cacheWrite1h
+					: { kind: "absent", reason: "not-applicable" },
 			reasoning: token(usage.reasoning),
 			total: token(usage.totalTokens),
 		};

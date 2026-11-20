@@ -28,6 +28,7 @@ import type { EngineDestination, SystemOne } from "../domains/system-one/index.j
 import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
 import { JUDGE_SCREEN_POINT, judgeScreenResults } from "../domains/system-one/points/index.js";
 import { effectiveToolCall, expandChainMessages } from "../tools/surface.js";
+import { capturedJudgeCallId, withJudgeCallCapture, withSidePurpose } from "./side-request-admission.js";
 
 /** Ledger entry type of a judge block or escalation; recorded, never shown or sent to a model. */
 export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
@@ -217,12 +218,14 @@ export function createJudgeScreen(deps: {
 		const read = async (): Promise<{ source: string } | null> => {
 			for (const result of unread) {
 				if (request.signal.aborted) return null;
-				const verdict = await systemOne.ask(JUDGE_SCREEN_POINT, result, {
-					signal: request.signal,
-					avoid: (destination) => onJudgeDestination(deps.providers, judge, destination),
-					...(flow !== null ? { flow } : {}),
-					...(request.toolCallId !== undefined ? { ref: request.toolCallId } : {}),
-				});
+				const verdict = await withSidePurpose("judge.screen", () =>
+					systemOne.ask(JUDGE_SCREEN_POINT, result, {
+						signal: request.signal,
+						avoid: (destination) => onJudgeDestination(deps.providers, judge, destination),
+						...(flow !== null ? { flow } : {}),
+						...(request.toolCallId !== undefined ? { ref: request.toolCallId } : {}),
+					}),
+				);
 				if (verdict === null) continue;
 				if (result.callId !== undefined) remembered.set(result.callId, verdict.value.directing);
 				if (verdict.value.directing) return { source: result.source };
@@ -242,7 +245,7 @@ export function createSafetyJudgeHost(deps: {
 	/** Either escalation threshold was reached; contained yolo ends its run on it (ob-yolo D4). */
 	onEscalation?: (note: SafetyJudgeNote) => void;
 }): SafetyJudgeSeat {
-	return createSafetyJudge({
+	const seat = createSafetyJudge({
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
 		complete: deps.complete,
 		...(deps.screen !== undefined ? { screen: deps.screen } : {}),
@@ -261,7 +264,11 @@ export function createSafetyJudgeHost(deps: {
 			}
 			return operatorMessagesForJudge(session.readEntries(), leaf, turnId);
 		},
-		record: (input) => deps.safety?.decisions.recordSafetyJudge?.(input),
+		record: (input) => {
+			// The judge's own call, beside the parent the row's context names (memory design 4.5).
+			const judgeCallId = capturedJudgeCallId();
+			deps.safety?.decisions.recordSafetyJudge?.(judgeCallId === undefined ? input : { ...input, judgeCallId });
+		},
 		note: (note) => {
 			if (note.kind === "escalation") deps.onEscalation?.(note);
 			const session = deps.session();
@@ -275,4 +282,8 @@ export function createSafetyJudgeHost(deps: {
 			});
 		},
 	});
+	return {
+		review: (subject) => withJudgeCallCapture(() => seat.review(subject)),
+		operatorApproved: () => seat.operatorApproved(),
+	};
 }

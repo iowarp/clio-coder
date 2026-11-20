@@ -65,6 +65,7 @@ for (const role of ["memory", "compaction"] as const) {
 				const route = createBackgroundMemoryModelClient(f.providers, f.settings, 1000, null);
 				ok(route);
 				const result: Awaited<ReturnType<TaskMemoryModelClient["complete"]>> = await route.client.complete({
+					purpose: "memory.bank",
 					systemPrompt: "fixture",
 					userPrompt: "17 times 19" as MemoryRouteText,
 					maxTokens: 4096,
@@ -136,6 +137,7 @@ for (const ending of ["deadline", "cancelled"] as const) {
 					},
 				},
 				{
+					purpose: "memory.correct",
 					task: "fixture",
 					deterministicTrigger: true,
 					trajectory: [],
@@ -163,6 +165,7 @@ for (const ending of ["deadline", "cancelled"] as const) {
 			deepStrictEqual(step.pricing, { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" });
 			strictEqual(f.providers.list()[0]?.health.lastCheckAt, null, "abort is not endpoint-down evidence");
 			const recovered = await route.client.complete({
+				purpose: "memory.bank",
 				systemPrompt: "fixture",
 				userPrompt: "17 times 19" as MemoryRouteText,
 				maxTokens: 512,
@@ -184,6 +187,7 @@ test("context.memory.thinkingLevel low reaches the memory request through the ro
 		const route = createBackgroundMemoryModelClient(f.providers, f.settings, 1000, null);
 		ok(route);
 		await route.client.complete({
+			purpose: "memory.bank",
 			systemPrompt: "fixture",
 			userPrompt: "17 times 19" as MemoryRouteText,
 			maxTokens: 512,
@@ -204,6 +208,7 @@ test("successful unknown background metadata remains unknown and is not repeated
 		ok(route);
 		for (let i = 0; i < 2; i++) {
 			const result: Awaited<ReturnType<TaskMemoryModelClient["complete"]>> = await route.client.complete({
+				purpose: "memory.bank",
 				systemPrompt: "fixture",
 				userPrompt: "17 times 19" as MemoryRouteText,
 				maxTokens: 512,
@@ -284,6 +289,7 @@ test("memory refuses an endpoint changed while metadata was pending", async () =
 		const route = createBackgroundMemoryModelClient(f.providers, f.settings, 1000, null);
 		ok(route);
 		const completion = route.client.complete({
+			purpose: "memory.bank",
 			systemPrompt: "fixture",
 			userPrompt: "fixture" as MemoryRouteText,
 			maxTokens: 512,

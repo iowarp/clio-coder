@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import type { SurfaceId } from "../../core/side-surfaces.js";
 import { asSideAgent } from "../../core/telemetry/context.js";
 import type { AgentRole } from "../../core/telemetry/enums.js";
 import { pricingBasisFields } from "../../core/telemetry/pricing.js";
@@ -16,6 +17,8 @@ export interface CallJournalOptions {
 	acquire: NonNullable<TelemetryContract["acquireTelemetrySession"]>;
 	/** The side agent making the call, named by the session it serves or, with no session, by the process (#434). */
 	role: AgentRole;
+	/** The side surface the call is for, journaled on its `call.started` (memory design 4.1). */
+	purpose?: SurfaceId;
 	/** The turn the call serves, journaled on its context so accounting charges it there. */
 	turnId?: string;
 	targetId: string;
@@ -72,6 +75,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 								reportedModel: { kind: "unknown", reason: "not-observed" },
 							},
 							roundKind: "tools-removed",
+							...(options.purpose !== undefined ? { purpose: options.purpose } : {}),
 							toolChoice: "none",
 							...request,
 						},

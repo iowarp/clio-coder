@@ -199,7 +199,7 @@ export interface MemoryStepsFold {
 	completedByTarget: Record<string, number>;
 }
 
-/** The memory steps a scope decided and the endpoint completions it journaled; spend is `foldTaskMemorySpend`. */
+/** The memory steps a scope decided and the endpoint completions it journaled; spend is `foldSideSurfaces`. */
 export function foldMemorySteps(records: Iterable<TelemetryRecord>): MemoryStepsFold {
 	const fold: MemoryStepsFold = { steps: [], decisions: {}, reasons: {}, completedByTarget: {} };
 	for (const record of records) {

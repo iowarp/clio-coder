@@ -158,6 +158,9 @@ function harnessReadRoots(): string[] {
 	}
 }
 
+/** The classifier's tag on a steer cancel: a control action the read-only gate admits. */
+export const STEER_CANCEL_REASON = "steer:cancel-run";
+
 function baseClassify(tool: string): ActionClass | null {
 	switch (tool) {
 		case ToolNames.Evidence:
@@ -1052,6 +1055,13 @@ function classifyStore(args: Record<string, unknown> | undefined): Classificatio
 export function classify(rawCall: ClassifierCall): Classification {
 	const call = normalizeCallPaths(rawCall);
 	if (call.tool === ToolNames.Store) return classifyStore(call.args);
+	// Cancelling a run stops a worker and changes no file, so the read-only gate
+	// admits it (CLI-P38); the steer tool still refuses a run this session did
+	// not dispatch. The class stays dispatch, and guide, approve and deny carry
+	// no tag: a message or a grant hands work to the worker.
+	if (call.tool === ToolNames.Steer && call.args?.action === "cancel") {
+		return { actionClass: "dispatch", reasons: [STEER_CANCEL_REASON] };
+	}
 	if (call.tool === ToolNames.Panes && call.args?.action === "handoff") {
 		return { actionClass: "dispatch", reasons: ["panes:interactive-peer-handoff"] };
 	}

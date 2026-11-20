@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { BackendCompletionTimings } from "../../core/cache-telemetry.js";
 import type { CallFailureRecord } from "../../core/call-failure.js";
+import type { MemorySurfaceId } from "../../core/side-surfaces.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { CallMessageObserver } from "../../core/telemetry/producer.js";
 import type { CallUsage, Pricing } from "../../core/telemetry/schemas.js";
@@ -82,7 +83,8 @@ export interface TaskMemoryCallReference {
 export interface TaskMemoryModelRequest {
 	onCall?: (reference: TaskMemoryCallReference) => void;
 	callTelemetry?: CallMessageObserver;
-	purpose?: "observation" | "reflection" | "lesson";
+	/** The memory surface asking; it is journaled on the call and names the call in every fold (memory design 4.1). */
+	purpose: MemorySurfaceId;
 	systemPrompt: string;
 	userPrompt: MemoryRouteText;
 	maxTokens: number;
@@ -252,6 +254,8 @@ export interface TaskMemoryEnvelope {
 }
 
 export interface TaskMemoryPolicyInput {
+	/** The memory surface this step is for, passed to the client's request. */
+	purpose: MemorySurfaceId;
 	/** Content authority, checked after inference and before any bank write. */
 	isCurrent?: () => boolean;
 	/** Cancellation releases policy bookkeeping even if the transport ignores abort. */
@@ -482,6 +486,7 @@ export async function runTaskMemoryPolicy(
 		);
 		const completion = client
 			.complete({
+				purpose: input.purpose,
 				systemPrompt: input.pass?.systemPrompt ?? MEMORY_INTERVENTION_SYSTEM_PROMPT,
 				userPrompt,
 				maxTokens: positiveInteger(input.modelMaxTokens, input.maxTokens),
