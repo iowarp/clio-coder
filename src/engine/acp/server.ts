@@ -1,3 +1,4 @@
+import { outputLimitCutOffToolCallIds } from "../../core/assistant-output.js";
 import type { ContextOperationStatus } from "../../core/context-operation.js";
 import {
 	ACP_CONTEXT_STATUS_METHOD,
@@ -124,7 +125,7 @@ import {
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
-import { COMPACTION_LINE_LEAD } from "../../session-control/compaction-lines.js";
+import { CONTEXT_STATUS_NOTICE_KEY } from "../../session-control/compaction-lines.js";
 import {
 	clampThinkingLevel,
 	replayCurrentSession,
@@ -915,13 +916,11 @@ const ACP_VISIBLE_ADMISSION_REASONS = new Set(["handoff-skill-refused"]);
 const ACP_ADMISSION_FALLBACK_REASON = "admission-failed";
 
 /**
- * Context engine status lines: the ones the terminal sends to its footer (working set, aging, the compaction row) and
- * the no-gain compaction line `turn-context.ts` emits. They report Clio's own housekeeping, so they are not reply text.
+ * Context engine status lines (working set, the compaction row, the no-gain line) report Clio's own housekeeping, so
+ * they are not reply text. Their producer tags them with `CONTEXT_STATUS_NOTICE_KEY`; the wording is free to change.
  */
-const ACP_CONTEXT_STATUS_LEADS = ["[context engine] ", COMPACTION_LINE_LEAD, "compaction would not reduce context;"];
-
-function isContextStatusNotice(level: unknown, text: string): boolean {
-	return level === "info" && ACP_CONTEXT_STATUS_LEADS.some((lead) => text.startsWith(lead));
+function isContextStatusNotice(level: unknown, noticeKey: unknown): boolean {
+	return level === "info" && noticeKey === CONTEXT_STATUS_NOTICE_KEY;
 }
 
 function admissionReason(raw: string): string {
@@ -1665,7 +1664,16 @@ function outputText(value: unknown): string {
 }
 
 function toolStatus(event: AcpEventRecord): string {
-	return event.isError === true ? "failed" : "completed";
+	return toolFailed(event) ? "failed" : "completed";
+}
+
+/** The output limit cut the call off before it ran: no error, and the client is told it never ran (bt-39 a). */
+function toolNotRun(event: AcpEventRecord): string | undefined {
+	return typeof event.notRun === "string" ? event.notRun : undefined;
+}
+
+function toolFailed(event: AcpEventRecord): boolean {
+	return event.isError === true && toolNotRun(event) === undefined;
 }
 
 function eventString(event: AcpEventRecord, ...keys: string[]): string | undefined {
@@ -2034,7 +2042,7 @@ function handleChatEvent(
 		) {
 			// A context status line crosses the way startup notices do, so a client that ignores `_meta` shows a reply
 			// carrying only the model's text.
-			if (isContextStatusNotice(event.level, event.text)) {
+			if (isContextStatusNotice(event.level, event.key)) {
 				const notice = { level: "info", text: safeStoredString(event.text, ACP_MAX_CHUNK_BYTES) };
 				sendUpdate(transport, sessionId, active, {
 					sessionUpdate: "session_info_update",
@@ -2142,7 +2150,11 @@ function handleChatEvent(
 				kind: started?.kind ?? toolKind(toolName),
 				status: toolStatus(event),
 				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
-				rawOutput: boundRawRecord({ result: event.result, isError: event.isError === true }),
+				rawOutput: boundRawRecord({
+					result: event.result,
+					isError: toolFailed(event),
+					...(toolNotRun(event) !== undefined ? { notRun: toolNotRun(event) } : {}),
+				}),
 			},
 			withToolTiming(toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)), event.durationMs),
 		);
@@ -2562,6 +2574,7 @@ function prepareAcpReplay(
 	const turns: AcpReplayTurn[] = [];
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
+	const cutOffToolCalls = new Set<string>();
 	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
 		if (entry.kind === "workerRun") {
@@ -2646,6 +2659,8 @@ function prepareAcpReplay(
 		}
 		if (current === null) continue;
 		if (entry.role === "assistant") {
+			// The ledger keeps a cut-off call's error result; the reply before it names the calls that never ran.
+			for (const id of outputLimitCutOffToolCallIds(payload)) cutOffToolCalls.add(id);
 			current.stopReason = payload?.stopReason === "toolUse" ? "error" : mapAcpStopReason(payload?.stopReason);
 			const model = safeStoredIdentifier(payload?.model, ACP_MAX_MODEL_ID_BYTES);
 			if (model) current.model = model;
@@ -2686,7 +2701,10 @@ function prepareAcpReplay(
 			if (toolCallId === null || ids.terminalToolCalls.has(toolCallId)) continue;
 			ids.openToolCalls.delete(toolCallId);
 			ids.terminalToolCalls.add(toolCallId);
-			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
+			const notRun = typeof engineId === "string" && cutOffToolCalls.has(engineId) ? "output_limit" : undefined;
+			const failed =
+				notRun === undefined &&
+				(payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked");
 			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
 			current.frames.push({
@@ -2697,7 +2715,11 @@ function prepareAcpReplay(
 					kind: toolKind(name),
 					status: (failed ? "failed" : "completed") satisfies AcpToolCallStatus,
 					...(output.length > 0 ? { content: toolCallContent(output) } : {}),
-					rawOutput: boundRawRecord({ result: payload?.result, isError: failed }),
+					rawOutput: boundRawRecord({
+						result: payload?.result,
+						isError: failed,
+						...(notRun !== undefined ? { notRun } : {}),
+					}),
 				},
 				...(typeof payload?.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0
 					? { meta: { [ACP_TOOL_TIMING_META_KEY]: { durationMs: Math.round(payload.durationMs) } } }
@@ -5435,7 +5457,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		options.transport.notify("session/update", {
 			sessionId: session.id,
 			update: { sessionUpdate: "config_option_update", configOptions: configOptions(session) },
-			_meta: { [ACP_SESSION_META_KEY]: { target: session.target } },
+			_meta: { [ACP_SESSION_META_KEY]: { target: session.target, model: session.model } },
 		});
 	};
 	/** Why a target's model choices are its configured ones and not the account's live listing. */
@@ -6233,6 +6255,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		request: Record<string, unknown>,
 		chooseTurn: "request" | "leaf",
 		replayToClient: boolean,
+		clientMcpServers?: ReadonlyArray<McpClientServerSpec>,
 	) => {
 		const { session, resetForSession, readEntries, buildMessages } = requireBranches();
 		const bound = getSession(request);
@@ -6245,12 +6268,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// The fork closes the parent's ledger.
 		await checkpointBeforeClose(bound.id, "fork");
 		requireStillIdle(bound, "fork");
+		if (clientMcpServers !== undefined) {
+			// Standard fork names the child's client servers, so the parent's go first; a launch failure refuses the fork
+			// before the session changes, as on an opener.
+			await options.mcpCapabilities?.detachClientServers();
+			await attachClientMcpServers(clientMcpServers, ceiling);
+			requireStillIdle(bound, "fork");
+		}
 		let meta: SessionMeta;
 		try {
 			meta = session.fork(turnId);
 		} catch (error) {
 			// The session domain keeps the parent current when a fork throws.
 			options.diagnostics?.(`fork failed: ${acpErrorMessage(error)}`);
+			if (clientMcpServers !== undefined) await options.mcpCapabilities?.detachClientServers();
 			throw new AcpRequestError(-32603, "fork failed", { code: "internal_error" });
 		}
 		if (
@@ -6318,15 +6349,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireAuthenticated();
 		return forkBoundSession(assertParamKeys(params, new Set(["sessionId", "turnId"])), "request", true);
 	});
-	// Standard ACP fork: the whole active branch, at its leaf. Client MCP servers the parent attached stay attached.
+	// Standard ACP fork: the whole active branch, at its leaf, with the client MCP servers the request names in place of
+	// the parent's.
 	options.transport.onRequest("session/fork", (params) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
 		assertNoAdditionalDirectories(request.additionalDirectories);
 		canonicalSessionCwd(request.cwd);
-		parseClientMcpServers(request.mcpServers, false);
-		return forkBoundSession(request, "leaf", false);
+		const clientMcpServers = parseClientMcpServers(request.mcpServers, false);
+		return forkBoundSession(request, "leaf", false, clientMcpServers);
 	});
 
 	const handoffRefusal = (level: "warn" | "error", code: string, reason: string) => ({
@@ -7054,6 +7086,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					});
 				}
 				notifyConfigOptions(session);
+				// The new route's thinking resolves from a cache that may be cold, so it probes as an opener does.
+				refreshThinkingOption(session);
 				break;
 			}
 			case "thinkingLevel": {

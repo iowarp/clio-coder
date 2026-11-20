@@ -17,6 +17,8 @@ import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js"
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
+import type { McpCapabilitySource, McpClientServerSpec } from "../../src/tools/gateway/mcp-capabilities.js";
+import { stdioPeer } from "../harness/acp-fake-transport.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const AT = (second: number) => `2026-09-26T09:00:${String(second).padStart(2, "0")}.000Z`;
@@ -26,7 +28,7 @@ function readEntries(sessionId: string): SessionEntry[] {
 	return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
 }
 
-async function peer(options: { wired?: boolean } = {}) {
+async function peer(options: { wired?: boolean; stdio?: boolean; mcp?: McpCapabilitySource } = {}) {
 	const scratch = await isolateClioEnv("clio-coder-acp-branches-");
 	const cwd = realpathSync(scratch.dir);
 	const contract: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
@@ -52,11 +54,14 @@ async function peer(options: { wired?: boolean } = {}) {
 		},
 		close: () => close(),
 	};
+	// A stdio peer plays the client over the real transport's JSON-RPC framing.
+	const wire = options.stdio === true ? stdioPeer() : undefined;
 	const wired = options.wired !== false;
 	const done = serveClioAcpAgent({
-		transport,
+		transport: wire?.transport ?? transport,
 		session: contract,
 		cwd,
+		...(options.mcp !== undefined ? { mcpCapabilities: options.mcp } : {}),
 		autonomy: () => "default",
 		routing: () => ({ target: null, model: null }),
 		labelOperatorCommand: () => null,
@@ -82,6 +87,7 @@ async function peer(options: { wired?: boolean } = {}) {
 		},
 	});
 	const call = async (method: string, params: unknown) => {
+		if (wire !== undefined) return await wire.call(method, params);
 		const handler = requests.get(method);
 		if (!handler) throw new Error(`missing handler: ${method}`);
 		return await handler(params);
@@ -96,7 +102,8 @@ async function peer(options: { wired?: boolean } = {}) {
 			streaming = value;
 		},
 		stop: async () => {
-			close();
+			if (wire !== undefined) wire.close();
+			else close();
 			await done;
 			await contract.close();
 			scratch.restore();
@@ -341,6 +348,41 @@ test("standard ACP session/fork forks the whole active branch without replaying 
 			).nodes.map((node) => node.id),
 			["u1", "a1", "u3", "a3"],
 		);
+	} finally {
+		await agent.stop();
+	}
+});
+
+test("standard ACP session/fork swaps the parent's client MCP servers for the ones the request names", async () => {
+	const log: string[] = [];
+	const mcp = {
+		attachClientServers: async (servers: ReadonlyArray<McpClientServerSpec>) => {
+			log.push(`attach ${servers.map((server) => server.name).join(",")}`);
+		},
+		detachClientServers: async () => {
+			log.push("detach");
+		},
+	} as unknown as McpCapabilitySource;
+	const agent = await peer({ stdio: true, mcp });
+	const server = (name: string) => ({ type: "stdio", name, command: "/usr/bin/true", args: [], env: [] });
+	try {
+		await agent.call("initialize", { protocolVersion: 1 });
+		await agent.call("session/new", { cwd: agent.cwd, mcpServers: [server("parent-tools")] });
+		ok(log.includes("attach parent-tools"), JSON.stringify(log));
+		seed(agent.contract);
+		const parentId = agent.contract.current()?.id as string;
+		log.length = 0;
+		const child = (await agent.call("session/fork", {
+			sessionId: parentId,
+			cwd: agent.cwd,
+			mcpServers: [server("child-tools")],
+		})) as { sessionId: string };
+		// ACP-2: the parent's servers stayed attached and the request's were never started.
+		deepStrictEqual(log, ["detach", "attach child-tools"]);
+		strictEqual(agent.contract.current()?.id, child.sessionId);
+		log.length = 0;
+		await agent.call("session/fork", { sessionId: child.sessionId, cwd: agent.cwd, mcpServers: [] });
+		deepStrictEqual(log, ["detach"], "a fork that names no servers keeps none");
 	} finally {
 		await agent.stop();
 	}

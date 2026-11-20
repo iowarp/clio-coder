@@ -1330,6 +1330,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// A headless run exits after its turn, so there is no idle time to use.
 		enabled: () => options.headless === undefined && memoryRouteAvailable(),
 		isForegroundActive: () => isChatStreaming(),
+		// An ACP client binds its session after boot; history review waits for its first prompt.
+		awaitFirstTurn: acpMode,
 		live: memoryIntervention,
 		scopeKey: () => `${session?.current()?.id ?? ""}\u0000${memoryWorkspaceRoot()}`,
 		historySource: () =>

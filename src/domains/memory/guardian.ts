@@ -135,6 +135,12 @@ export interface MemoryGuardianDeps {
 	onStateChange(state: TaskMemoryGuardianState): void;
 	/** Session and workspace the history source belongs to; a change retires in-flight history work. */
 	scopeKey(): string;
+	/**
+	 * Do nothing until this process sees its first turn. An ACP host boots on the client's first session request and
+	 * binds the session right after, so a review the boot wake started was cut off at 0 tokens, and a reopened session
+	 * re-ran the review its last process lost at exit before anyone asked anything of it (ACP-6).
+	 */
+	awaitFirstTurn?: boolean;
 }
 
 export interface MemoryGuardian {
@@ -170,6 +176,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	let parkedBudget = false;
 	let source: HistoryReviewSource | null = null;
 	let sourceScope: string | null = null;
+	let armed = deps.awaitFirstTurn !== true;
 
 	const setState = (next: TaskMemoryGuardianState): void => {
 		if (next === current) return;
@@ -496,6 +503,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		state: () => current,
 		wake(reason) {
 			if (disposed) return;
+			if (reason === "turn-end" || reason === "turn-start") armed = true;
+			if (!armed) return;
 			if (reason === "turn-end" || reason === "turn-start") {
 				idleSinceMs = performance.now();
 				discoveryMs = DISCOVERY_MIN_MS;
@@ -512,7 +521,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			if (disposed) return;
 			retire();
 			setState(deps.enabled() ? "idle" : "off");
-			schedule(WAKE_DEBOUNCE_MS);
+			if (armed) schedule(WAKE_DEBOUNCE_MS);
 		},
 		dispose() {
 			if (disposed) return;

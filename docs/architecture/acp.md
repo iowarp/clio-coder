@@ -549,7 +549,7 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 
 | Key | Where | Payload |
 | --- | --- | --- |
-| `clio-coder/session` | opener, `switch_turn`, `fork`, and `handoff/commit` results | `{sessionId, target, model, autonomy, createdAt, resumed, replayed?}`; `replayFailed: true` on a fork whose replay failed. A `config_option_update` carries `{target}` only. |
+| `clio-coder/session` | opener, `switch_turn`, `fork`, and `handoff/commit` results | `{sessionId, target, model, autonomy, createdAt, resumed, replayed?}`; `replayFailed: true` on a fork whose replay failed. A `config_option_update` carries `{target, model}` only. |
 | `clio-coder/workspace` | opener results, `session_info_update` update | Workspace facts. |
 | `clio-coder/trust` | opener and `session/trust` results | `{ignored}`. |
 | `clio-coder/ceiling` | opener and prompt results | Applied capability ceiling. |

@@ -201,7 +201,7 @@ import {
 } from "./chat-loop-messages.js";
 import { codexEffortGeneration, codexEffortUpdates } from "./codex-effort.js";
 import { coldCacheNoticeText } from "./cold-reasons.js";
-import { footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
+import { CONTEXT_STATUS_NOTICE_KEY, footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
 import type { HostInserts } from "./host-inserts.js";
 import {
 	buildModelReplayAgentMessagesFromTurns,
@@ -304,7 +304,8 @@ export interface TurnContextDeps {
 	getPendingHandoff?: (() => LiveBudgetHandoffProjection | null) | undefined;
 	getLastOutcome?: (() => LiveBudgetOutcomeProjection | null) | undefined;
 	middleware: TurnMiddleware;
-	emitNotice: (text: string) => void;
+	/** `key` names the notice's kind; a context engine status line carries `CONTEXT_STATUS_NOTICE_KEY`. */
+	emitNotice: (text: string, level?: "info" | "success" | "warning" | "error", key?: string) => void;
 	/**
 	 * Report that the next response's prompt cache may be cold, and why. It is
 	 * telemetry about the run rather than the conversation: the footer's notice
@@ -2091,7 +2092,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	// Each hook reads its target when the fold calls it, so ones declared further down this closure resolve.
 	const contextFold = createContextFold({
-		deps,
+		// Every line the fold emits is working-set status, so it carries the context status tag.
+		deps: { ...deps, emitNotice: (text) => deps.emitNotice(text, "info", CONTEXT_STATUS_NOTICE_KEY) },
 		state,
 		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
 		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
@@ -2681,7 +2683,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						},
 						beforeSummaryCall: async (hold) => {
 							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold);
-							if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice);
+							if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice, "info", CONTEXT_STATUS_NOTICE_KEY);
 							evictionSkipNotice = null;
 							if (!summaryLifecycleStarted) startSummaryLifecycle();
 							// Nothing is measurable while the summarizer reads, so the rail
@@ -2750,7 +2752,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (automaticSummary && result.summaryDigest !== undefined) noGainSummaryDigest = result.summaryDigest;
 			// A span below the summary room was skipped before any call, so nothing was paid or discarded (bt-47 cf1j-d).
 			if (result.emptyReason === undefined) {
-				deps.emitNotice("compaction would not reduce context; checkpoint discarded (usage recorded)");
+				deps.emitNotice(
+					"compaction would not reduce context; checkpoint discarded (usage recorded)",
+					"info",
+					CONTEXT_STATUS_NOTICE_KEY,
+				);
 				// A paid call that changed nothing is a failure toward the pause.
 				countAutomaticFailure();
 			}
@@ -2817,6 +2823,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				tokensAfter,
 				isSplitTurn: result.isSplitTurn,
 			}),
+			"info",
+			CONTEXT_STATUS_NOTICE_KEY,
 		);
 		// The requireFit summary cleared what the fold could not: the next main request pins the same A4 count.
 		if (requiredFit) {

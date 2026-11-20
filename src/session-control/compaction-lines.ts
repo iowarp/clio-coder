@@ -39,6 +39,13 @@ export function footerTokens(tokens: number): string {
 /** How the compaction row starts, so a surface that routes it to the footer can tell it apart. */
 export const COMPACTION_LINE_LEAD = "Clio compacted ";
 
+/**
+ * The notice key of a context engine status line: the compaction row, the working-set eviction and skip lines and the
+ * no-gain line. They report Clio's own housekeeping, so a protocol surface routes them off the reply by this tag, not
+ * by their wording.
+ */
+export const CONTEXT_STATUS_NOTICE_KEY = "context.status";
+
 export function renderCompactionSummaryLine(input: CompactionSummaryLineInput): string {
 	const count = input.messagesSummarized;
 	const messages = `${count} earlier message${count === 1 ? "" : "s"} now read${count === 1 ? "s" : ""} as one summary`;
