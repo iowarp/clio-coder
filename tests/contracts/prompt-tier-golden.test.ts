@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
+import { controlInstructions, settingControl } from "../../src/core/settings-controls.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { parseFrontmatter } from "../../src/domains/agents/frontmatter.js";
+import { settingsChangeKind } from "../../src/domains/config/classify.js";
 import {
 	type CompileInputs,
 	compile,
@@ -210,6 +212,25 @@ describe("prompts.profile v2 (S-82)", () => {
 		ok(session("attended-default", { terminal: true }).systemPrompt.includes(mermaid), "terminal");
 		ok(!session("attended-default", { terminal: false }).systemPrompt.includes(mermaid), "ACP or GUI");
 		ok(!session("headless-default").systemPrompt.includes(mermaid), "headless");
+	});
+
+	it("says when a profile change applies the way the classifier applies it", () => {
+		const control = settingControl("prompts.profile");
+		ok(control !== undefined);
+		strictEqual(settingsChangeKind("prompts.profile"), "nextTurn");
+		const text = controlInstructions(control);
+		ok(text.includes("next turn") && !text.includes("next session"), text);
+	});
+
+	it("tells only a session with `job` in its map to wait through a job (S-89)", () => {
+		const jobWait = "Once the job exists, end your turn";
+		const bashWait = "cannot own a job, so there wait inside one bash call";
+		for (const confinement of [{}, { yoloConfinement: "unconfined" }]) {
+			const headless = session("headless-yolo", confinement).systemPrompt;
+			ok(!headless.includes(jobWait) && !headless.includes("with a `job` through the gateway"), "headless");
+			ok(headless.includes(bashWait), "headless keeps the bash wait");
+			ok(session("attended-yolo", confinement).systemPrompt.includes(jobWait), "attended");
+		}
 	});
 
 	it("compact profile drops map examples under a 48k window (S-87)", () => {

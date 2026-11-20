@@ -34,6 +34,7 @@ import { probeWorkspaceAsync, WORKSPACE_PROBE_REUSE_MS, type WorkspaceSnapshot }
 import {
 	compile,
 	compileWorker,
+	isCompactPrompt,
 	type RenderedPromptFragment,
 	renderSessionPostureUpdate,
 	type SessionPromptInputs,
@@ -127,7 +128,10 @@ export function createPromptsBundle(
 		try {
 			snapshot.agents = (agentsDomain()?.listSpecs() ?? [])
 				.filter((spec) => isUserVisibleAgent(spec) || spec.audience === "shadow")
-				.map((spec) => ({ name: spec.id, purpose: agentCatalogPurpose(spec) }));
+				.map((spec) => {
+					const markers = agentCatalogMarkers(spec);
+					return { name: spec.id, purpose: agentCatalogPurpose(spec), ...(markers ? { markers } : {}) };
+				});
 		} catch {
 			// dispatch({list:true}) remains the authoritative roster.
 		}
@@ -664,6 +668,8 @@ export function sessionStartFacts(
 interface CatalogEntry {
 	name: string;
 	purpose: string;
+	/** Routing markers a names-only line keeps, such as "(shadow, read-only)". */
+	markers?: string;
 }
 
 interface CatalogSnapshot {
@@ -707,12 +713,17 @@ function readyPeerLines(catalogs: CatalogSnapshot, inputs: SessionPromptInputs):
  * valid dispatch id; read-only marks the recipes that parallel reviews and
  * investigations can use without declaring write roots.
  */
-export function agentCatalogPurpose(spec: Pick<AgentSpec, "audience" | "capabilityClass" | "description">): string {
+function agentCatalogMarkers(spec: Pick<AgentSpec, "audience" | "capabilityClass">): string {
 	const markers = [
 		...(spec.audience === "shadow" ? ["shadow"] : []),
 		...(spec.capabilityClass === "read-only" ? ["read-only"] : []),
 	];
-	return markers.length > 0 ? `(${markers.join(", ")}) ${spec.description}` : spec.description;
+	return markers.length > 0 ? `(${markers.join(", ")})` : "";
+}
+
+export function agentCatalogPurpose(spec: Pick<AgentSpec, "audience" | "capabilityClass" | "description">): string {
+	const markers = agentCatalogMarkers(spec);
+	return markers ? `${markers} ${spec.description}` : spec.description;
 }
 
 const CATALOG_PURPOSE_MAX_CHARS = 80;
@@ -733,9 +744,11 @@ export function catalogPurpose(description: string): string {
 	return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[,;:]$/u, "")}…`;
 }
 
-function catalogLines(entries: ReadonlyArray<CatalogEntry>): string[] {
+/** Under the compact profile (S-87) a line is the name and its routing markers only. */
+function catalogLines(entries: ReadonlyArray<CatalogEntry>, namesOnly: boolean): string[] {
 	const sorted = [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 	const lines = sorted.slice(0, CATALOG_MAX_ENTRIES).map((entry) => {
+		if (namesOnly) return entry.markers ? `- ${entry.name} ${entry.markers}` : `- ${entry.name}`;
 		const purpose = catalogPurpose(entry.purpose);
 		return purpose.length > 0 ? `- ${entry.name}: ${purpose}` : `- ${entry.name}`;
 	});
@@ -754,14 +767,18 @@ function catalogLines(entries: ReadonlyArray<CatalogEntry>): string[] {
 function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs): RenderedPromptFragment[] {
 	if (inputs.providerSupportsTools === false) return [];
 	const names = new Set(inputs.toolNames ?? []);
+	const namesOnly = isCompactPrompt(inputs);
 	const sections: string[] = [];
 	if (catalogs.skills.length > 0 && inputs.skillDiscoveryEnabled !== false && sessionHasContext(inputs)) {
-		sections.push("Skills (workflows; load one only at the step that needs it):", ...catalogLines(catalogs.skills));
+		sections.push(
+			"Skills (workflows; load one only at the step that needs it):",
+			...catalogLines(catalogs.skills, namesOnly),
+		);
 	}
 	if (catalogs.agents.length > 0 && names.has("dispatch")) {
 		sections.push(
 			`Agents (dispatch one with agent="<name>"; dispatch({list:true}) shows tools and budgets; shadow ones run only through dispatch, so operator /run or \`run --agent\` commands use ${SHADOW_AGENT_OPERATOR_STAND_IN} --read-only):`,
-			...catalogLines(catalogs.agents),
+			...catalogLines(catalogs.agents, namesOnly),
 		);
 	}
 	if (catalogs.playbooks.length > 0) {
@@ -769,7 +786,7 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 			inputs.headless === true
 				? "Playbooks (multi-step workflows the fleet runs; not startable from this run):"
 				: "Playbooks (multi-step workflows the fleet runs; the operator starts one with /fleet run <playbook>, so suggest it rather than dispatching its steps yourself):",
-			...catalogLines(catalogs.playbooks),
+			...catalogLines(catalogs.playbooks, namesOnly),
 		);
 	}
 	const peers = readyPeerLines(catalogs, inputs);

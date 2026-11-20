@@ -750,7 +750,7 @@ const SETTINGS_ROUTING_ROW =
 const GATEWAY_CALLING_RULE =
 	'Call a (gateway) entry with gateway(op="call", capability="<name>", args={...}); naming it does not attach it. With no arguments shown, gateway(op="describe", capability="<name>") first; never guess argument names. Not listed: gateway(op="find", query="<two to four words>"). Discovery grants no authority.';
 
-/** S-87: v2 drops map examples when the chat model's window is under 48,000 tokens. */
+/** S-87: v2 goes compact when the chat model's window is under 48,000 tokens. */
 const COMPACT_CONTEXT_WINDOW_TOKENS = 48_000;
 
 /**
@@ -765,7 +765,12 @@ export const PROMPT_BUDGET_CHARS = {
 	worker: 11_500,
 } as const;
 
-function isCompactPrompt(inputs: SessionPromptInputs): boolean {
+/**
+ * S-87 compact profile: under v2 with a chat window below 48,000 tokens the map
+ * drops its examples and the catalogs list names only. The window is fixed for a
+ * route, so the prompt stays stable within the session.
+ */
+export function isCompactPrompt(inputs: SessionPromptInputs): boolean {
 	return (
 		inputs.promptProfile === "v2" &&
 		typeof inputs.contextWindow === "number" &&

@@ -83,6 +83,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
+	// The main prompt is recompiled at the next turn, so its prefix is read again once; a worker reads it per dispatch.
+	"prompts.profile",
 	"context.memory.observations.enabled",
 	"turnControl",
 	// An engine resolves per call; the use that registers consult at startup is restart-required.
@@ -124,8 +126,6 @@ const NEXT_TURN_FIELDS = new Set<string>([
 ]);
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([
-	// The prompt profile is fixed when a session compiles its prefix.
-	"prompts.profile",
 	// A model's tier settles once per process, so hooks and template variants
 	// never change under a running session (WTF-P 0.8.3 C1).
 	"models",

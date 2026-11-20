@@ -1384,8 +1384,6 @@ const PROMPT_PRECONDITION_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
 	["identity.clio `read`", "the citation rule names where a line number comes from; a tool-less target cites none"],
 	["operating.worker `write`", "names where a worker's writes reach; a worker without write reads it as a limit"],
 	["operating.worker `edit`", "names where a worker's writes reach; a worker without edit reads it as a limit"],
-	["safety.yolo `job`", "the paragraph carries its own headless fallback"],
-	["safety.yolo-unconfined `job`", "the paragraph carries its own headless fallback"],
 	["wiki.page `code_nav`", "rendered by the codewiki pipeline, whose page writers always admit code_nav"],
 	["wiki.plan `code_nav`", "rendered by the codewiki pipeline, whose planners always admit code_nav"],
 ]);
