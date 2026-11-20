@@ -1,6 +1,16 @@
 import { deepStrictEqual, doesNotMatch, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -28,6 +38,7 @@ import antigravityCodeRuntime, {
 import deepseekRuntime from "../../src/domains/providers/runtimes/cloud/deepseek.js";
 import openaiCodexRuntime from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
 import type { ProbeResult } from "../../src/domains/providers/types/runtime-descriptor.js";
+import { readAntigravitySideband } from "../../src/engine/acp/antigravity-sideband.js";
 import {
 	ANTIGRAVITY_MAX_STREAM_BYTES,
 	ANTIGRAVITY_MAX_STREAM_LINE_BYTES,
@@ -769,5 +780,62 @@ describe("Antigravity external subprocess contract", () => {
 				t.diagnostic(`Windows tree cancellation reaped owned fixture PIDs ${ownedPids.join(", ")}`);
 			},
 		);
+	});
+});
+
+describe("Antigravity ACP sideband reader", () => {
+	it("classifies new error steps read-only and answers no signal for unsafe or absent stores", async () => {
+		const { DatabaseSync } = await import("node:sqlite");
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-agy-sideband-"));
+		scratchDirectories.push(root);
+		const profileDir = join(root, "profile");
+		mkdirSync(join(profileDir, "conversations"), { recursive: true });
+		const sessionId = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+		const db = new DatabaseSync(join(profileDir, "conversations", `${sessionId}.db`));
+		// The steps DDL agy 1.5.13 writes.
+		db.exec(
+			"CREATE TABLE `steps` (`idx` integer,`step_type` integer NOT NULL DEFAULT 0,`status` integer NOT NULL DEFAULT 0,`has_subtrajectory` numeric NOT NULL DEFAULT false,`metadata` blob,`error_details` blob,`permissions` blob,`task_details` blob,`render_info` blob,`step_payload` blob,`step_format` integer NOT NULL DEFAULT 0,PRIMARY KEY (`idx`))",
+		);
+		const insert = db.prepare("INSERT INTO steps (idx, step_type, status, step_payload) VALUES (?, ?, 3, ?)");
+		const quota =
+			'{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"QUOTA_EXHAUSTED","domain":"cloudcode-pa.googleapis.com","metadata":{"model":"gemini-x-high","quotaResetDelay":"1h2m3.5s","quotaResetTimeStamp":"2026-10-27T23:39:10Z","uiMessage":"true"}}R{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"3723.5s"}';
+		insert.run(4, 17, Buffer.concat([Buffer.from([0x08, 0x11, 0x20, 0x03]), Buffer.from(quota)]));
+		insert.run(5, 17, Buffer.from("API error (attempt 1): RESOURCE_EXHAUSTED (code 429): try later"));
+		insert.run(6, 9, Buffer.from('"reason":"QUOTA_EXHAUSTED"'));
+		insert.run(7, 17, Buffer.from("400 INVALID_THINKING_SIGNATURE: thought signature rejected"));
+		db.close();
+
+		deepStrictEqual(readAntigravitySideband({ profileDir, sessionId, afterIdx: "latest" }), { cursor: 7, signals: [] });
+		deepStrictEqual(readAntigravitySideband({ profileDir, sessionId, afterIdx: 3 }), {
+			cursor: 7,
+			signals: [
+				{
+					kind: "usage-limit",
+					idx: 4,
+					cause: "usage_limit_reached",
+					reason: "QUOTA_EXHAUSTED",
+					message: "Antigravity quota exhausted for gemini-x-high; resets at 2026-10-27T23:39:10.000Z",
+					model: "gemini-x-high",
+					resetAt: "2026-10-27T23:39:10.000Z",
+					resetDelayMs: 3_723_500,
+					retryAfterMs: 3_723_500,
+				},
+				{ kind: "non-resumable", idx: 7, reason: "INVALID_THINKING_SIGNATURE" },
+			],
+		});
+		deepStrictEqual(readAntigravitySideband({ profileDir, sessionId, afterIdx: 7 }), { cursor: 7, signals: [] });
+
+		const none = (id: string, afterIdx: number | "latest" = -1) =>
+			readAntigravitySideband({ profileDir, sessionId: id, afterIdx }).noSignal;
+		equal(none("../conversations/x"), "invalid-session-id");
+		equal(none(sessionId, 1.5), "invalid-cursor");
+		equal(none("absent-session"), "no-database");
+		new DatabaseSync(join(profileDir, "conversations", "empty.db")).close();
+		equal(none("empty"), "no-steps-table");
+		if (process.platform !== "win32") {
+			copyFileSync(join(profileDir, "conversations", `${sessionId}.db`), join(root, "outside.db"));
+			symlinkSync(join(root, "outside.db"), join(profileDir, "conversations", "escape.db"));
+			equal(none("escape"), "outside-profile");
+		}
 	});
 });
