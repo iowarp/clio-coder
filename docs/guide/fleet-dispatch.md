@@ -129,11 +129,13 @@ escalation reason ([budget-envelope.ts](../../src/domains/dispatch/budget-envelo
 
 The envelope runs in one of two modes; [built-in-agents.md](built-in-agents.md) describes the recipe side.
 In the default advisory mode, `toolCalls` is an estimate. At that count the worker gets
-one reminder that tools stay available until a hard ceiling. The ceiling is the larger of
-the admitted estimate (or revision estimate) and `fleet.limits.toolCallsPerRun`
-(default 300), tightened to the recipe's `maximum.toolCalls` when the recipe declares one.
-A recipe without `maximum` runs up to `fleet.limits.toolCallsPerRun`, and raising
-`budget.toolCalls` raises the floor of the ceiling. Native workers stop at the ceiling. The Claude SDK
+one reminder that tools stay available until a hard ceiling. The ceiling is the recipe's
+`maximum.toolCalls` when it declares one, else `fleet.limits.toolCallsPerRun` (default 300),
+and never above `fleet.limits.toolCallsPerRun`; it is raised to the admitted estimate (or
+revision estimate) when that is larger. Admission holds an estimate above
+`fleet.limits.toolCallsPerRun` at that cap and records a `global-cap-clamp` reason, so a
+larger `budget.toolCalls` can lift the ceiling above a recipe's maximum but never above the
+cap. Native workers stop at the ceiling. The Claude SDK
 runtime mediates each call and, once the ceiling is reached, denies every further tool
 call ([sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts)). In enforced mode, which
 covers native read-only `scout`, `provenance` and `context-bootstrap` runs whose recipe has
@@ -658,11 +660,30 @@ or 403 retries on another target. A 429 retries on another target after at least
 one second. A 408 is not deterministic and retries. Cancellation, policy denials,
 permission failures and the deterministic outcome codes (`worker_tool_call_cap_exhausted`,
 `worker_no_work`, `merge_withheld`, `result_contract_exhausted` and the others in
-`isDeterministicOutcomeCode`) never retry. `result_contract_invalid` is the exception: the host's validator found an otherwise successful worker's final result nonconforming, so the failure is classed `model-quality` and the retry avoids that agent and model without penalizing the target. No automatic retry follows a failed attempt
+`isDeterministicOutcomeCode`) never retry, unless the attempt left its [evidence obligation](#evidence-obligations-and-the-one-retry) unmet. `result_contract_invalid` is the exception: the host's validator found an otherwise successful worker's final result nonconforming, so the failure is classed `model-quality` and the retry avoids that agent and model without penalizing the target. No automatic retry follows a failed attempt
 that ran a state-changing call or whose tool telemetry cannot prove the checkout
 unchanged. Backoff starts at 500 ms, doubles per attempt and stops at 60 seconds.
 The full class table is in
 [worker-dispatch-mechanics.md](../architecture/worker-dispatch-mechanics.md).
+
+#### Evidence obligations and the one retry
+
+Every run owes its result some evidence, resolved once from its role in the work graph and not from its recipe id ([obligation.ts](../../src/domains/dispatch/obligation.ts)). A gate position decides first (reviewer, judge, council seat), then a verification recipe is a checker, then a run that may write is a builder, and any other run is an explorer.
+
+| Role | Obligation |
+| --- | --- |
+| Explorer | `answer`; `observed-evidence` when its contract is `scout-report` or the task declares `read_roots` |
+| Builder | `change-or-declared` |
+| Checker | `executed-checks` |
+| Reviewer, judge | `cited-evidence` |
+| Council seat | `answer` |
+
+A gate's read roots are what it may read, not what it was asked to read, so they never make a reviewer or judge owe `observed-evidence`; a compete judge that ranks from the evidence in its task without a tool call settles normally. In this release two obligations are checked at settlement:
+
+- A run that owes `observed-evidence` and executed no tool settles `failed`, with the detail `obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited`.
+- A native builder that ends `worker_no_work` with no tool call and an unchanged tree leaves `change-or-declared` unmet. A builder that asked for wider write roots has declared, so it meets it.
+
+An unmet obligation is the model's failure, classed `model-quality` even under a deterministic code, and it is retried once, only on another model, within `fleet.retry.maxRetries`. A route the caller pinned is not retried, and the run settles with `obligation <name> unmet, not retried because the route is explicitly pinned to <target>/<model>`. Under `approved` failover the retry moves only to an envelope candidate with another model; otherwise it takes the first eligible route with another wire model on any target. When no such route exists the run settles failed and the detail names why. A builder in a task worktree keeps that worktree for its retry, and it is discarded only when no retry follows.
 
 ### Reporting workers at their tool cap
 
@@ -693,14 +714,14 @@ task worktree (`worktree: true`) or run host verification checks (`intent.verifi
 | Topology | Invocation | Semantics |
 | --- | --- | --- |
 | Singular | `task: "..."` | One assignment, with optional separate `briefing`. |
-| Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. Writers sharing a checkout need disjoint `write_roots`, `worktree: true` or `writers: 1`; overlapping or undeclared roots are refused as `parallel_writer_conflict`. Worktree tasks whose `intent.write_roots` overlap (equal, or one inside the other) still start, with one `write_roots_overlap` warning per call naming each pair and the roots they share; their merges may collide. |
+| Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. Writers sharing a checkout need disjoint `write_roots`, `worktree: true` or `writers: 1`; overlapping roots are refused as `parallel_writer_conflict`, and in a batch of two or more a builder that declares no write roots, no expected outputs and no checks runs read-only instead ([The normalize stage](#the-normalize-stage)). Worktree tasks whose `intent.write_roots` overlap (equal, or one inside the other) still start, with one `write_roots_overlap` warning per call naming each pair and the roots they share; their merges may collide. |
 | Sequential | `mode: "sequential"` | One at a time in request order. A timeout or abort stops the remaining tasks and reports `stopped after N/M task(s)`. |
 | Pipeline | `mode: "pipeline"` | Each step receives the previous step's output as data. The chain halts at the first failed step, or at a step whose conforming report records `quality=fail`, and reports how many later steps were skipped. |
 | Detached | `detach: true` | Parallel mode only. Return logical assignment ids and a batch id immediately; collect later. |
-| Review gate | `review: true` or `review: {reviewer?, max_cycles?, node?, target?, model?}` | Builder, read-only reviewer verdict, bounded revise loop. The reviewer defaults to `verifier`. |
+| Review gate | `review: true` or `review: {reviewer?, max_cycles?, node?, target?, model?}` | Builder, read-only reviewer verdict, bounded revise loop. The reviewer defaults to the builtin `reviewer`. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
 | Council | `mode: "council", roster: "design"` | Two to five read-only members answer the same task, with optional vote or judge synthesis. An operator starts one with `/council [--roster <name>] [--rounds <n>] [--synthesis judge\|vote\|none] [--agent <id>] [--deadline <N\|Ns\|Nm>] <task>`; without `--roster` the roster named `default` is used. |
-| Agent automation | `agent: "auto"` | Picks the agent from the task shape through a shared classifier: `coder` (write, debug, refactor, config), `tester`, `documenter`, `verifier` (review), `researcher`, `world-knowledge` and `scout` (read, unknown). That baseline is the agent that runs; the router's alternative stays shadow-only unless `fleet.adaptiveRouting.agentRoles` activates the pair. |
+| Agent automation | `agent: "auto"` or no `agent` | Classifies the task into a row of the [job table](#job-table-and-the-reviewer-recipe) and runs that row's recipe. That baseline is the agent that runs; the router's alternative stays shadow-only unless `fleet.adaptiveRouting.agentRoles` activates the pair. |
 | Scout split | `from_scout: {run_id, run_digest}` | Second call of the Scout continuation. A terminal Scout run either settles with findings or proposes at most four typed subtasks; this call compiles the proposal into one approval-gated dependency plan. Pass no other argument. |
 
 Native workers of one batch that share a prompt prefix do not all start at once. The
@@ -708,6 +729,41 @@ first one starts, and the others start when it streams its first token, when it 
 or after 15 seconds, whichever comes first, so they read the prompt cache it wrote. Every
 handle of the batch still returns at once. `fleet.staggerSharedPrefix: false` turns the
 wait off ([configuration-and-targets.md](configuration-and-targets.md)).
+
+### Job table and the reviewer recipe
+
+One table says which recipe does which job ([dispatch-jobs.ts](../../src/domains/agents/dispatch-jobs.ts)). The dispatch tool's description and the `dispatch(list: true)` text both open with it, as one line that starts `Job table (omitted agent: the job's recipe):`.
+
+| Job | Recipe | Writes |
+| --- | --- | --- |
+| inspect | `scout` | no |
+| review a diff | `reviewer` | no |
+| run checks | `verifier` | no |
+| diagnose a failure | `debugger` | no |
+| add tests | `tester` | yes |
+| implement | `coder` | yes |
+| docs | `documenter` | yes |
+| supplied sources | `researcher` | no |
+| open-world survey | `world-knowledge` | no |
+| run records | `provenance` | no |
+
+There is no default recipe. A dispatch with no `agent`, or `agent: "auto"`, classifies the task text into a job and runs that row's recipe. A test task is a check and a debug task a diagnosis unless the task asks for a change, which it does when a verb such as fix, add or write opens a clause; "do not edit files" and "change nothing" ask for none. Arguments that declare writes (non-empty `write_roots` or `expected_outputs`, a `review` gate, or compete) turn a read job into `implement`, and `write_roots: []` with no expected outputs turns a writing job into `inspect`. When the row's recipe is not installed, `scout` runs. A capability mismatch is judged on whether the job writes: a recipe that cannot write, pinned to a writing job, is a mismatch whose suggestion is the job's recipe or else `coder`, while a pinned `debugger` diagnosing a crash is not one.
+
+The builtin `reviewer` judges one subject (a diff, a run's result, or a change in the tree) against its acceptance criteria and never edits. It is a verification-class recipe: `verify` required; `read`, `grep`, `find`, `ls`, `git` and `code_nav` optional; no shell; a budget of 20 tool calls with 3 in reserve. Its `review-verdict` contract is the review gate's own shape, one JSON object `{"verdict":"pass|fail","checks":[{"name","passed","evidence"}]}` with no `assurance` field, and a check it could not run reports `passed: false` with evidence that starts `unverified:`. It is the default decider of a [review gate](#review-gate); a compete judge still defaults to `verifier`.
+
+### The normalize stage
+
+Some shapes a model sends name admissible work in a non-canonical form. Before the writer-conflict check, preview and the execution snapshot read a request, one stage rewrites those shapes instead of refusing them ([dispatch-normalize.ts](../../src/tools/dispatch-normalize.ts)). Preview and the run read the same rewritten requests. Each rewrite puts one line in front of the result text, such as `[dispatch normalize] task 2 (coder) runs read-only: its intent.write_roots: [] declares no writes, ...`, so the model learns the canonical form.
+
+| Shape sent | What runs |
+| --- | --- |
+| No typed `intent`, and the task or briefing names an absolute path equal to or under the run's `cwd`, or a leading-slash workspace path | The path is read workspace-relative. Only a path outside the workspace is still refused as `legacy_scope_path_absolute`, and a closed quoted token is read literally. |
+| `intent.write_roots: []` | The task declares no writes, so it runs on the read-only surface and changes no files; `verification: []` beside it asks for no checks. A batch-level `write_roots: []` is a no-write ceiling: members inheriting it run read-only, and a member that declares write roots is refused as `intent_scope_widening`. |
+| A builder recipe in a parallel batch of two or more, without `writers: 1`, that declares no write roots (`.` counts as one), no expected outputs and no checks | It runs read-only as an explorer instead of meeting `parallel_writer_conflict`. |
+| `detach: true` with an outside read root | The root's approval is asked before the batch detaches, and the run starts detached once approved. A detach that cannot run (not parallel, a review gate, or `timeout_ms`) is refused before any approval is asked. |
+| `gateway(op="call", capability="dispatch")` | The gateway forwards the call to the direct `dispatch` tool and adds its own notice line. |
+
+A rewrite to read-only never applies to a request with `worktree: true`, store tags, an outside read root, an `artifact-write` recipe or checks it declared. When the operator named a check in the turn, the request stays as parsed and admission decides with the check in place.
 
 ### Single-writer token
 
@@ -1116,9 +1172,8 @@ as `cwd`, and each worker gets that repository's rules
 
 Narrow write roots confine a native worker one of two ways. When the OS sandbox
 covers the run (`safety.sandbox` is `auto` or `required`, a local bubblewrap backend
-is usable, the worker runs on a local HTTP runtime, and no `fleet.nodes` are
-configured), the worker keeps `bash`, `verify` and `run_script`, and their commands can write only
-inside the roots. A `dispatch` from that worker is still blocked. Otherwise
+is usable, and the worker runs on a local HTTP runtime placed on this host), the worker keeps `bash`, `verify` and `run_script`, and their commands can write only
+inside the roots. A worker placed on a fleet node, or whose placement the preview cannot settle, is not covered. A `dispatch` from that worker is still blocked. Otherwise
 the worker loses `bash`, `verify`, `run_script` and `dispatch` for the run, cannot run
 checks itself, and a `write_roots_checks_withheld` scope notice says so. Declared host
 verification still runs on the host in both cases. A write root of `.` sets no boundary,
@@ -1358,14 +1413,15 @@ wake: the client or the next prompt collects there.
 ### Review gate
 
 The builder runs the task. A reviewer then inspects the workspace against the
-task. The reviewer defaults to the builtin `verifier` recipe
-(`DEFAULT_GATE_DECIDER_AGENT_ID` in [execution-role.ts](../../src/domains/dispatch/execution-role.ts)) and never falls back to the builder's own
+task. The reviewer defaults to the builtin `reviewer` recipe, the job table's
+recipe for reviewing a diff, or to `verifier` when this install has no `reviewer`
+(`reviewDeciderAgentId` in [execution-role.ts](../../src/domains/dispatch/execution-role.ts)), and never falls back to the builder's own
 agent; it is given a read-only dispatch restriction and is routable to a different node,
 model, or target through `review.node`, `review.model` and `review.target`. The
 `review.reviewer` field names another recipe.
 
-The reviewer answers a typed `verifier-report` contract rather than trailing
-prose:
+The reviewer answers the gate's typed `{verdict, checks}` shape rather than trailing
+prose (the `review-verdict` contract on `reviewer`, `verifier-report` on `verifier`):
 
 ```json
 {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}
@@ -1531,6 +1587,14 @@ same plan hash into every run's plan provenance instead
 The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
 a fleet plan carries a positive integer or `null` and a non-fleet plan carries
 explicit `null`. Other versions and missing fields are rejected.
+
+#### Limits on the plan card
+
+Each task on the plan card carries a `limits:` line with the bounds that stop that run, and the TUI approval card shows it among the Plan rows, once when every worker shares it and otherwise under each worker ([run-limits.ts](../../src/domains/dispatch/run-limits.ts)).
+
+- A priced route names its estimate: `cost <estimate> per model call at a <N>-token output bound`. The estimate prices output at the route's output bound, which is `chat.maxOutputTokens` when set, else the model's output cap, never above the model's cap or window.
+- An unpriced route has no cost bound, so the line names what does stop it. A native worker's line starts `unpriced route: each response stops at <S> s` from `safety.limits.workerResponseSeconds`, then says `the run has no wall-clock bound unless timeout_ms is set`, or, when the call sets `timeout_ms`, `the call's timeout_ms stops the run within <ms> ms`.
+- Both end with the tool bound, such as `Clio stops it at 300 tool calls` or `planned for about 40 tool calls; Clio stops it at 300`, with `lowered to Clio's overall limit` added when admission held the estimate at `fleet.limits.toolCallsPerRun`. An external one-shot worker, whose calls CLIO Coder cannot count, is promised no tool ceiling: `one launch whose tool calls Clio cannot count, so no tool ceiling applies`.
 
 ### Shipped playbooks and playbook versions
 
@@ -2392,6 +2456,12 @@ total, plus its route decision hash and mode.
 `monitor(mode="collect")` always returns the compact form
 ([worker-evidence.ts](../../src/tools/worker-evidence.ts),
 [dispatch-runner.ts](../../src/tools/dispatch-runner.ts)).
+
+### Handback and answer budgets
+
+A native worker with a role hands back before its context fills ([handback.ts](../../src/domains/dispatch/handback.ts)). Before each request it compares the request's input with its role's share of the usable window, which is the model's window less the output reserve: 70 percent for an explorer, checker, reviewer, judge or council seat, and 85 percent for a builder. When a request reaches that share, tools lock and the round is the handback round, in which the worker writes its result from what it already holds instead of reading on until the window is full. A builder that has changed nothing is told once, at 70 percent, to write the change now or return a partial report that names what is done and what is left. The share depends on the role alone, not on the run's tools. The worker writes `[worker] handback: context reached the <role>'s share; the next round reports` to stderr, and the run journal records a `middleware.fired` event with rule `worker.handback` and evidence `bound:context`.
+
+The parent's view of each answer is fixed when dispatch admits the call. The batch shares 12,000 bytes equally, at least 2,000 bytes per run, and a lone run gets all 12,000. The worker's prompt states its number (`Answer budget: the dispatching agent sees the first <N> bytes of your final answer; ...`), so it leads with what matters. The receipt and `run.settled` seal the number as `answerBudgetBytes`, and the dispatch result, `collect` and `monitor(mode="record")` all cut the answer at it. `monitor(mode="answer", run_id=...)` returns the whole sealed answer alone, up to 14 KiB. A record written before the budget existed reads as 12,000 bytes.
 
 If worker output exceeds the sealed output bound, capture fails and names the
 bound rather than reporting an ambiguous JSON syntax error. If the requested
