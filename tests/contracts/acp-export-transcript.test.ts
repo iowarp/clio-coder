@@ -119,7 +119,7 @@ test("export writes Markdown to a named .md path with fences longer than any in 
 		});
 		assert.equal(report.text, "wrote 2 requests to notes/session.md");
 		const markdown = readFileSync(join(root, "notes", "session.md"), "utf8");
-		assert.match(markdown, /^# Clio Coder session /);
+		assert.match(markdown, /^# CLIO Coder session /);
 		assert.match(
 			markdown,
 			/````text\nB reads 4\.2 ```\n````/,

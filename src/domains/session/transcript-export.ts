@@ -182,11 +182,11 @@ function fenced(text: string, info = ""): string {
 
 export function renderTranscriptMarkdown(input: TranscriptExportInput): { text: string; turns: number } {
 	const { blocks, turns } = transcriptBlocks(input);
-	const lines = [`# Clio Coder session ${input.sessionId}`, "", `Exported ${input.exportedAt}`, ""];
+	const lines = [`# CLIO Coder session ${input.sessionId}`, "", `Exported ${input.exportedAt}`, ""];
 	for (const block of blocks) {
 		if (block.kind === "request") lines.push("## Request", "", fenced(block.text, "text"), "");
 		if (block.kind === "response") {
-			lines.push("## Clio Coder", "");
+			lines.push("## CLIO Coder", "");
 			if (block.model !== null) lines.push(fenced(`Model: ${block.model}`, "text"), "");
 			if (block.reasoning) lines.push("_Reasoning was reported for this reply and is not included._", "");
 			if (block.text.trim().length > 0) lines.push(block.text, "");
@@ -233,7 +233,7 @@ function renderTranscriptHtml(input: TranscriptExportInput): { text: string; tur
 	for (const block of blocks) {
 		if (block.kind === "request") body.push(`<h2>Request</h2><div class="request">${escapeHtml(block.text)}</div>`);
 		if (block.kind === "response") {
-			body.push("<h2>Clio Coder</h2>");
+			body.push("<h2>CLIO Coder</h2>");
 			if (block.model !== null) body.push(`<p class="meta">Model: ${escapeHtml(block.model)}</p>`);
 			if (block.reasoning) body.push('<p class="meta">Reasoning was reported for this reply and is not included.</p>');
 			if (block.text.trim().length > 0) body.push(`<div class="response">${escapeHtml(block.text)}</div>`);
@@ -253,7 +253,7 @@ function renderTranscriptHtml(input: TranscriptExportInput): { text: string; tur
 		if (block.kind === "note")
 			body.push(`<p class="note-title">${escapeHtml(block.title)}</p><pre>${escapeHtml(block.text)}</pre>`);
 	}
-	const title = `Clio Coder session ${escapeHtml(input.sessionId)}`;
+	const title = `CLIO Coder session ${escapeHtml(input.sessionId)}`;
 	const text = [
 		"<!doctype html>",
 		'<html lang="en">',
