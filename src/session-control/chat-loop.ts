@@ -3543,6 +3543,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.requestContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
+					state.finishReplyRefused = false;
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,

@@ -331,6 +331,8 @@ export interface ChatTurnState {
 	turnCalledWork: boolean;
 	/** The one pinned `finish` round an unattended turn gets is spent; a continuation of that prompt keeps it. */
 	finishRoundSpent: boolean;
+	/** This user turn's one refusal of an attended `finish` with no reply text is spent (FX-40). */
+	finishReplyRefused: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
@@ -388,6 +390,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "turnCompletion"
 	| "turnCalledWork"
 	| "finishRoundSpent"
+	| "finishReplyRefused"
 >;
 
 /** turn-middleware: reads the turn's facts for its hooks; a hard block sets the tool-prose abort reason. */
@@ -424,6 +427,8 @@ export type TurnContextState = TurnStateView<
 export type TurnPersistenceState = TurnStateView<
 	"activeInterruptReason" | "runtime",
 	| "activeUserTurnId"
+	| "currentTurnOrigin"
+	| "finishReplyRefused"
 	| "interruptedAssistantMessage"
 	| "interruptedCall"
 	| "lastTurnId"
@@ -499,6 +504,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnSealedCompletion: null,
 		turnCalledWork: false,
 		finishRoundSpent: false,
+		finishReplyRefused: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		currentTurnOrigin: null,
