@@ -7,6 +7,7 @@ import {
 	type SandboxAvailability,
 	type SandboxBackend,
 	type SandboxMaskedPath,
+	type SandboxMode,
 	type UnixSocketMode,
 	WORKER_SANDBOX_SPEC_VERSION,
 } from "../../core/sandbox/types.js";
@@ -182,7 +183,8 @@ function workspaceSecretMasks(
  * re-bound read-only, new Unix-domain sockets refused unless the operator
  * allowed them, and an empty network namespace unless `net` is declared.
  * Without one the child runs under the Node flags alone and the report says so,
- * so a declared `net: false` is never presented as enforced.
+ * so a declared `net: false` is never presented as enforced. Under
+ * `safety.sandbox: required` it does not run at all, as a worker would not.
  */
 export function planExtensionLaunch(input: {
 	declaration: ExtensionRuntimeDeclarationV2;
@@ -190,6 +192,23 @@ export function planExtensionLaunch(input: {
 	argv: ReadonlyArray<string>;
 	availability?: SandboxAvailability;
 	/** The operator's `safety.sandboxUnixSockets`; absent blocks them, as in every other sandbox. */
+	unixSockets?: UnixSocketMode;
+	/** The operator's `safety.sandbox`; `required` refuses a launch no OS sandbox confines. */
+	sandboxMode?: SandboxMode;
+}): ExtensionLaunch {
+	const launch = planLaunch(input);
+	if (input.sandboxMode === "required" && launch.report.backend === null)
+		throw new Error(
+			`safety.sandbox is "required" but no OS sandbox confines this extension runtime (${launch.report.reason ?? "unavailable"}); it was not started`,
+		);
+	return launch;
+}
+
+function planLaunch(input: {
+	declaration: ExtensionRuntimeDeclarationV2;
+	roots: ExtensionLaunchRoots;
+	argv: ReadonlyArray<string>;
+	availability?: SandboxAvailability;
 	unixSockets?: UnixSocketMode;
 }): ExtensionLaunch {
 	const { declaration, roots, argv } = input;

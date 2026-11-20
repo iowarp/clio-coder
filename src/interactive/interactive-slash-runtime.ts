@@ -915,7 +915,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					body = await renderSessionHtmlAsync({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines });
 				}
 				await mkdir(resolve(target, ".."), { recursive: true });
-				await writeFile(target, body, "utf8");
+				// A transcript is as private as the session file it copies.
+				await writeFile(target, body, { encoding: "utf8", mode: 0o600 });
 				const fromWorkspace = relative(workspace, target);
 				const shownPath =
 					fromWorkspace !== ".." && !fromWorkspace.startsWith(`..${sep}`) && !isAbsolute(fromWorkspace)

@@ -83,7 +83,54 @@ export async function sameInstallation(left: string, right: string) {
 	const root = await nativeInstallRoot(installed);
 	return root !== null && root === (await nativeInstallRoot(current));
 }
+/**
+ * Holds an exclusive lock beside the background directory while `publish` runs. Two app starts
+ * that rotate the token at once otherwise interleave their renames, and the manifest one of them
+ * moves last blesses the other's launch file, so every later start refuses the setup. A lock whose
+ * holder has exited is taken over.
+ */
+async function withPublishLock<T>(directory: string, publish: () => Promise<T>): Promise<T> {
+	const lock = join(dirname(directory), `.${basename(directory)}.publish.lock`);
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			await writeFile(lock, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		const holder = Number.parseInt((await contents(lock)) ?? "", 10);
+		let alive = true;
+		if (Number.isInteger(holder) && holder > 0 && holder !== process.pid) {
+			try {
+				process.kill(holder, 0);
+			} catch (error) {
+				alive = (error as NodeJS.ErrnoException).code === "EPERM";
+			}
+		}
+		if (!alive) {
+			await unlink(lock).catch(() => undefined);
+			continue;
+		}
+		if (attempt >= 400)
+			throw new Error(`Another process is changing the background setup (${lock}). No files were changed.`);
+		await setTimeout(25);
+	}
+	try {
+		return await publish();
+	} finally {
+		await unlink(lock).catch(() => undefined);
+	}
+}
 async function publishOwned(
+	directory: string,
+	config: BackgroundConfig,
+	files: Files,
+	replace: boolean,
+	unitChanged = true,
+) {
+	return withPublishLock(directory, () => publishOwnedUnlocked(directory, config, files, replace, unitChanged));
+}
+async function publishOwnedUnlocked(
 	directory: string,
 	config: BackgroundConfig,
 	files: Files,

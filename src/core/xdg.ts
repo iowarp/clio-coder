@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -158,50 +158,163 @@ const ROLE_OWNERSHIP_FILE: Record<ClioDirRole, string> = {
 };
 
 /**
- * Top-level names Clio creates in a data or cache root, taken from the code that
- * creates them (and, for data, `evals` and `evidence` from releases before 0.6.8).
- * A `fleet-install-` or `update-` entry carries a generated suffix.
+ * Top-level names Clio creates in a cache root, taken from the code that creates
+ * them. A `fleet-install-` or `update-` entry carries a generated suffix.
  */
-const CLIO_ROOT_ENTRIES: Record<"data" | "cache", { names: ReadonlySet<string>; prefixes: ReadonlyArray<string> }> = {
-	data: { names: new Set(["memory", "tools", "components", "store", "evidence", "evals"]), prefixes: [] },
-	cache: {
-		names: new Set([
-			"semantic",
-			"grammars",
-			"data-readers",
-			"system-one",
-			"codewiki-digests",
-			"copilot-sdk",
-			"run",
-			"yazi",
-			"mcp-catalogs",
-			"skill-frontmatter.json",
-			"provider-target-models",
-			"provider-target-checks",
-			"store",
-			"sandbox-cache",
-			"v8-compile-cache",
-			"update-logs",
-		]),
-		prefixes: ["fleet-install-", "update-"],
-	},
+const CLIO_CACHE_ENTRIES: { names: ReadonlySet<string>; prefixes: ReadonlyArray<string> } = {
+	names: new Set([
+		"semantic",
+		"grammars",
+		"data-readers",
+		"system-one",
+		"codewiki-digests",
+		"copilot-sdk",
+		"run",
+		"yazi",
+		"mcp-catalogs",
+		"skill-frontmatter.json",
+		"provider-target-models",
+		"provider-target-checks",
+		"store",
+		"sandbox-cache",
+		"v8-compile-cache",
+		"update-logs",
+	]),
+	prefixes: ["fleet-install-", "update-"],
+};
+
+/** A lock or an interrupted atomic write sits beside the file it guards. */
+function guardedName(entry: string): string {
+	return entry.replace(/(?:\.lock)+(?:\.reclaim\.lock)?$/u, "").replace(/^\.(.+)\.tmp-.*$/u, "$1");
+}
+
+type EntryKind = "dir" | "file" | "other";
+
+/** Entries of a real directory with their kind (a symlink is "other"), or null when it is not one. */
+function directoryEntries(path: string): Array<{ name: string; kind: EntryKind }> | null {
+	try {
+		return readdirSync(path, { withFileTypes: true }).map((entry) => ({
+			name: entry.name,
+			kind: entry.isDirectory() ? "dir" : entry.isFile() ? "file" : "other",
+		}));
+	} catch {
+		return null;
+	}
+}
+
+/** The first entry under `path` (shown relative to `label`) that `accepts` refuses, or null. */
+function firstRefused(
+	path: string,
+	label: string,
+	accepts: (name: string, kind: EntryKind, full: string) => string | null | boolean,
+): string | null {
+	const entries = directoryEntries(path);
+	if (entries === null) return label;
+	for (const { name, kind } of entries) {
+		const verdict = accepts(name, kind, join(path, name));
+		if (verdict === false) return `${label}/${name}`;
+		if (typeof verdict === "string") return verdict;
+	}
+	return null;
+}
+
+/** Directories of directories: `<id>/<version>` and the installers' staging directories beside a version. */
+function versionedInstallTree(path: string, label: string): string | null {
+	return firstRefused(path, label, (id, kind, full) =>
+		kind === "dir" ? firstRefused(full, `${label}/${id}`, (_version, versionKind) => versionKind === "dir") : false,
+	);
+}
+
+const EVAL_ARTIFACT_MAX_BYTES = 64 * 1024 * 1024;
+
+/** An eval artifact `<evalId>.json` that names its own file, as every eval writer before 0.6.8 wrote it. */
+function isEvalArtifact(name: string, full: string): boolean {
+	if (!name.endsWith(".json")) return false;
+	try {
+		if (statSync(full).size > EVAL_ARTIFACT_MAX_BYTES) return false;
+		const value = JSON.parse(readFileSync(full, "utf8")) as unknown;
+		return (
+			typeof value === "object" &&
+			value !== null &&
+			(value as { evalId?: unknown }).evalId === name.slice(0, -".json".length) &&
+			typeof (value as { version?: unknown }).version === "number"
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * What Clio writes under each top-level name of a data root, taken from the code
+ * that writes there (and, for `evals` and `evidence`, the releases before 0.6.8).
+ * A name alone proved nothing: an operator's own `tools/` or `evals/` passed as
+ * Clio's, so reset and uninstall would delete it. Each check returns the first
+ * entry Clio does not write, or null.
+ */
+const CLIO_DATA_ENTRIES: Record<string, (path: string, label: string) => string | null> = {
+	memory: (path, label) =>
+		firstRefused(
+			path,
+			label,
+			(name, kind) =>
+				kind === "file" &&
+				["records.json", "records.invalid.json", "regressions-cleared.jsonl"].includes(guardedName(name)),
+		),
+	tools: versionedInstallTree,
+	components: versionedInstallTree,
+	store: (path, label) =>
+		firstRefused(path, label, (name, kind, full) =>
+			name === "projects" && kind === "dir"
+				? firstRefused(full, `${label}/projects`, (key, keyKind) => keyKind === "dir" && /^[0-9a-f]{16}$/u.test(key))
+				: false,
+		),
+	evidence: (path, label) =>
+		firstRefused(path, label, (bundle, kind, full) =>
+			kind === "dir"
+				? firstRefused(
+						full,
+						`${label}/${bundle}`,
+						(name, fileKind) => fileKind === "file" && /\.(?:json|jsonl|md)$/u.test(guardedName(name)),
+					)
+				: false,
+		),
+	evals: (path, label) =>
+		firstRefused(path, label, (name, kind, full) => {
+			if (kind === "file")
+				return guardedName(name) !== name ? guardedName(name).endsWith(".json") : isEvalArtifact(name, full);
+			if (kind !== "dir") return false;
+			if (name === "skills-eval")
+				return firstRefused(
+					full,
+					`${label}/${name}`,
+					(artifact, artifactKind, artifactPath) => artifactKind === "file" && isEvalArtifact(artifact, artifactPath),
+				);
+			// A suite run's checkpoint and per-case transcripts.
+			return firstRefused(full, `${label}/${name}`, (child, childKind) =>
+				childKind === "file" ? guardedName(child) === "checkpoint.json" : childKind === "dir" && child === "transcripts",
+			);
+		}),
 };
 
 /** The first entry of an unmarked data or cache root that Clio does not create there, or null. */
 function foreignRootEntry(role: "data" | "cache", path: string): string | null {
-	const { names, prefixes } = CLIO_ROOT_ENTRIES[role];
-	const clios = (name: string): boolean =>
-		name === CLIO_ROOT_MARKER || names.has(name) || prefixes.some((prefix) => name.startsWith(prefix));
-	let entries: string[];
-	try {
-		entries = readdirSync(path);
-	} catch {
-		return "(unreadable)";
+	let entries: Array<{ name: string; kind: EntryKind }> | null = directoryEntries(path);
+	if (entries === null) return "(unreadable)";
+	entries = entries.filter(({ name }) => name !== CLIO_ROOT_MARKER);
+	if (role === "cache") {
+		const { names, prefixes } = CLIO_CACHE_ENTRIES;
+		for (const { name } of entries) {
+			const guarded = guardedName(name);
+			if (!names.has(guarded) && !prefixes.some((prefix) => guarded.startsWith(prefix))) return name;
+		}
+		return null;
 	}
-	for (const entry of entries) {
-		// A lock or an interrupted atomic write sits beside the file it guards.
-		const guarded = entry.replace(/(?:\.lock)+(?:\.reclaim\.lock)?$/u, "").replace(/^\.(.+)\.tmp-.*$/u, "$1");
-		if (!clios(guarded)) return entry;
+	for (const { name, kind } of entries) {
+		if (kind === "file" && guardedName(name) !== name && Object.hasOwn(CLIO_DATA_ENTRIES, guardedName(name))) continue;
+		const shape = Object.hasOwn(CLIO_DATA_ENTRIES, name) ? CLIO_DATA_ENTRIES[name] : undefined;
+		if (shape === undefined || kind !== "dir") return name;
+		const foreign = shape(join(path, name), name);
+		if (foreign !== null) return foreign;
 	}
 	return null;
 }

@@ -1,7 +1,8 @@
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { recordPackageActivity } from "../../core/package-activity.js";
-import type { UnixSocketMode } from "../../core/sandbox/types.js";
+import type { SandboxMode, UnixSocketMode } from "../../core/sandbox/types.js";
+import { readLayeredSettings } from "../../core/settings-layers.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import { extensionIdentity } from "./activity.js";
@@ -68,6 +69,11 @@ export interface OperatorRuntimeV2Options {
 	 * a change reaches the next one. Absent blocks them.
 	 */
 	sandboxUnixSockets?: () => UnixSocketMode;
+	/**
+	 * The operator's `safety.sandbox` for a workspace, read as each runtime starts.
+	 * Absent reads the layered settings, so no caller can leave `required` unenforced.
+	 */
+	sandboxMode?: (workspace: string) => SandboxMode;
 	surface?: ExtensionSurfaceModel;
 	/** Processes another manager already holds against the shared cap. */
 	reserved?: () => number;
@@ -216,6 +222,10 @@ interface ObservationQueue {
  * still the current one for the same session and installation. Never used by
  * native workers or model tool bootstrap.
  */
+function layeredSandboxMode(workspace: string): SandboxMode {
+	return readLayeredSettings(workspace).settings.safety.sandbox;
+}
+
 export class OperatorExtensionRuntimeV2 {
 	private activity(entry: InstalledExtension, kind: string, outcome?: string, details?: Record<string, unknown>): void {
 		recordPackageActivity({
@@ -380,6 +390,7 @@ export class OperatorExtensionRuntimeV2 {
 		let reportedState = "";
 		const embed = this.options.embed;
 		const unixSockets = this.options.sandboxUnixSockets?.();
+		const sandboxMode = (this.options.sandboxMode ?? layeredSandboxMode)(context.workspace);
 		created.process = new ExtensionRuntimeProcessV2(entry, {
 			snapshot: { ...context, generation, activeWorkspace, plugin: servedPlugin(entry) },
 			options: Object.fromEntries(entry.runtimeV2.config.map((field) => [field.key, field.default])),
@@ -387,6 +398,7 @@ export class OperatorExtensionRuntimeV2 {
 			storeDir: paths.storeDir,
 			...(embed ? { embed: (request, signal) => embed(request, signal, context.workspace) } : {}),
 			...(unixSockets !== undefined ? { unixSockets } : {}),
+			sandboxMode,
 			...(this.options.readOnly?.() === true ? { readOnly: true } : {}),
 			onState: () => {
 				const runtime = created.process;

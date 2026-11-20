@@ -308,7 +308,8 @@ export function writeTranscriptExport(input: {
 	const markdown = input.format !== undefined ? input.format === "md" : target.toLowerCase().endsWith(".md");
 	const rendered = markdown ? renderTranscriptMarkdown(source) : renderTranscriptHtml(source);
 	if (requested.length === 0) ensureProjectIgnore(input.cwd);
-	safeResourceWrite(target, rendered.text, { encoding: "utf8" });
+	// A transcript is as private as the session file it copies.
+	safeResourceWrite(target, rendered.text, { encoding: "utf8", mode: 0o600 });
 	const shown = relative(input.cwd, target);
 	return {
 		level: "success",

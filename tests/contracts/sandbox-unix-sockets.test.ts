@@ -269,6 +269,27 @@ test("the extension runtime launch masks secret files in the workspace and decla
 		assert.ok(args.includes(realpathSync(file)), `${file} is not masked`);
 });
 
+test("an extension runtime no OS sandbox confines does not start under safety.sandbox required", () => {
+	const roots = { workspace: "/w", packageCopy: "/r/package", storeDir: "/s", bootstrap: "/b/runtime-child-v2.mjs" };
+	const plan = (sandboxMode?: "auto" | "required") =>
+		planExtensionLaunch({
+			declaration: {
+				permissions: { fs: { read: ["workspace"], write: [] }, exec: false, net: false },
+			} as unknown as ExtensionRuntimeDeclarationV2,
+			roots,
+			argv: [process.execPath, roots.bootstrap],
+			availability: { available: false, backend: null, executable: null, reason: "bwrap missing" },
+			...(sandboxMode !== undefined ? { sandboxMode } : {}),
+		});
+	// auto keeps the reported unconfined fallback.
+	for (const mode of [undefined, "auto"] as const) {
+		const launch = plan(mode);
+		assert.equal(launch.report.backend, null);
+		assert.equal(launch.report.network, "unenforced");
+	}
+	assert.throws(() => plan("required"), /safety\.sandbox is "required".*bwrap missing.*not started/u);
+});
+
 test("under bwrap the extension runtime's settings mask survives a save by rename and covers later backups", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {

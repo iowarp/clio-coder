@@ -41,7 +41,8 @@ const CONFIG_SUBDIRS = ["agents"] as const;
 const DATA_SUBDIRS = ["memory"] as const;
 const STATE_SUBDIRS = ["sessions", "interviews", "scratch"] as const;
 // State directories that are only ever Clio's and hold transcripts, tool output or run records.
-const PRIVATE_STATE_SUBDIRS = [...STATE_SUBDIRS, "telemetry", "live", "runs", "fleet-runs"] as const;
+// `memory` holds observations and history candidates drawn from transcripts.
+const PRIVATE_STATE_SUBDIRS = [...STATE_SUBDIRS, "telemetry", "live", "runs", "fleet-runs", "memory"] as const;
 
 interface InstallMetadata {
 	version: string;
@@ -83,10 +84,13 @@ interface InstallMetadata {
  * Close Clio's own state directories an older build left group or world readable. Not recursive: a closed
  * parent hides everything below it. The roots are left alone; an operator may share one with other tools.
  */
-function tightenPrivateStateDirs(stateDir: string): void {
+function tightenPrivateStateDirs(stateDir: string, dataDir: string): void {
 	if (process.platform === "win32") return;
-	for (const sub of PRIVATE_STATE_SUBDIRS) {
-		const full = join(stateDir, sub);
+	const dirs = [
+		...PRIVATE_STATE_SUBDIRS.map((sub) => join(stateDir, sub)),
+		...DATA_SUBDIRS.map((sub) => join(dataDir, sub)),
+	];
+	for (const full of dirs) {
 		try {
 			const stat = lstatSync(full);
 			if (stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) !== 0) chmodSync(full, 0o700);
@@ -138,7 +142,7 @@ export function initializeClioHome(): InitReport {
 			}
 		}
 	}
-	tightenPrivateStateDirs(stateDir);
+	tightenPrivateStateDirs(stateDir, dataDir);
 
 	// Structure only: an existing settings.yaml is never read, validated, or
 	// rewritten here. Content validation belongs to readSettings/doctor.
