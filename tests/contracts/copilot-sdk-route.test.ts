@@ -1265,6 +1265,22 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	disposeCopilotConversations(key);
 });
 
+test("an in-run continuation that adds only a reminder stays a delta on the same session (FX-5)", async () => {
+	const key = "continuation-session";
+	disposeCopilotConversations(key);
+	const start = fake().sessions.length;
+	const ask = user("do the work");
+	const done = await step({ messages: [ask] }, key);
+	strictEqual(done.stopReason, "stop");
+	// The finish gate carries the run on with one host insert and nothing else.
+	const gate = user("<system-reminder>High-rigor finish gate: run a check.</system-reminder>");
+	const continued = await step({ messages: [ask, done, gate] }, key);
+	strictEqual((continued as { copilotContinuation?: string }).copilotContinuation, "delta");
+	strictEqual(fake().sessions.length, start + 1, "the continuation keeps the Copilot session");
+	deepStrictEqual(fake().sessions.at(-1)?.prompts, ["do the work", gate.content], "only the insert is sent");
+	disposeCopilotConversations(key);
+});
+
 test("a full reseed keeps a delivered reminder in place and attaches a retained image at its result (Astra #3)", async () => {
 	const key = "reseed-media-session";
 	disposeCopilotConversations(key);
