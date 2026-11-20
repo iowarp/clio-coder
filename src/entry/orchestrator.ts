@@ -1660,13 +1660,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	}
-	// Marketplace self-promotion: coordinator-only by this wiring (never a
-	// dispatch worker), local matcher and operator-consented installs at every autonomy level. The
+	// Marketplace self-promotion: coordinator-only by this wiring (never a dispatch worker), local matcher, no offer
+	// under yolo, operator-consented installs only, each offer and outcome journaled as `skill.offer`. The
 	// registration also checks the own-marketplace source gate before installing.
 	if (resources && skillDiscoveryEnabled) {
 		middlewareRegistrar.registerHook(
 			createMarketplaceOfferRegistration({
 				interactive,
+				askAllowed: () => resolveEffectiveAutonomy() !== "yolo",
+				record: (payload) => bus.emit("skill.offer", payload, sessionTelemetryContext(session?.current()?.id)),
+				listInstalledSkills: () => resources.skillsForDisplay(process.cwd()).items,
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
 				listInstalledSkillNames: () => [
 					...installedSkillNames(resources.skillsForDisplay(process.cwd()).items, process.cwd()),

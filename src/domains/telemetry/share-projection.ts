@@ -568,6 +568,12 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"library.registered": LIBRARY,
 	"library.imported": LIBRARY,
 	"library.share_imported": LIBRARY,
+	"skill.offer": {
+		...keep("outcome", "mode", "basis", "score", "scope", "choice", "installed"),
+		offerId: "id",
+		skill: "name",
+		version: "token",
+	},
 	"session.parked": keep("reason"),
 	"domain.loaded": { name: "token" },
 	"domain.failed": { name: "token" },

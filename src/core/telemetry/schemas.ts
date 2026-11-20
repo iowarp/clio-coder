@@ -749,6 +749,29 @@ export const LibraryLifecycleSchema = Type.Object(
 	closed,
 );
 export const DomainFailedSchema = Type.Object({ name: ExistingId }, closed);
+/**
+ * One marketplace skill offer and each outcome it reached (FX-28): `offered` when it reached the model as an ask
+ * (`ask`, bound by `offerId`) or a plain mention with no ask (`mention`); `ignored` when the offer's turn ended with no
+ * bound answer; `accepted` or `declined` when the operator's tagged answer arrived. A deferred answer can follow an
+ * `ignored` record, so the last record for an `offerId` is its outcome.
+ */
+export const SkillOfferSchema = Type.Object(
+	{
+		offerId: ExistingId,
+		skill: ExistingId,
+		version: Type.Union([ExistingId, Type.Null()]),
+		outcome: vocabulary(["offered", "accepted", "declined", "ignored"]),
+		mode: vocabulary(["ask", "mention"]),
+		/** How the request named the skill's domain: an authored trigger phrase or the skill's own name. */
+		basis: vocabulary(["trigger", "name"]),
+		score: count,
+		scope: Type.Optional(vocabulary(["user", "project"])),
+		choice: Type.Optional(vocabulary(["not_now", "never", "other"])),
+		/** On `accepted`: whether the install succeeded. */
+		installed: Type.Optional(Type.Boolean()),
+	},
+	closed,
+);
 /** A settings reload the watcher rejected, keeping the last good settings, or the reload that ended the rejection. */
 export const ConfigReloadFailedSchema = Type.Object({ state: vocabulary(["rejected", "recovered"]) }, closed);
 /** The route's context-window warning starting or ending; its text stays on the live notice (#434). */

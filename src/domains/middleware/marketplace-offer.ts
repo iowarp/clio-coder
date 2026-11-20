@@ -6,14 +6,17 @@ import {
 	SKILL_INSTALL_OFFER_OPTION_USER,
 	skillInstallOfferTag,
 } from "../../core/skill-activation.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { MarketplaceSkill } from "../resources/skills/marketplace.js";
 import {
 	assertPromotionInstallSource,
 	declineKey,
+	installedSkillCovers,
 	matchMarketplaceSkills,
 	type PromotionMatch,
+	type PromotionSubject,
 	readPromotionDeclines,
 	recordPromotionNeverDecline,
 } from "../resources/skills/promotion.js";
@@ -29,15 +32,21 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCa
  * install runs harness-side through the injected installer, "Not now" is a
  * session-only decline, and "Never offer this skill" persists.
  *
- * Firing is need-driven, not count-budgeted: any substantive turn whose text
- * matches an uninstalled, undeclined marketplace skill may fire, but each
- * skill is offered at most once per session so a repeated request never
- * becomes a nag. Detection is the local lexical matcher in
- * resources/skills/promotion.ts — no request text leaves the machine.
+ * Firing is need-driven, not count-budgeted: a substantive turn whose text
+ * names an uninstalled, undeclined marketplace skill's domain (an authored
+ * trigger phrase or the skill's own name) may fire, unless an installed skill
+ * already serves the request at the same bar. Each skill is offered at most
+ * once per session so a repeated request never becomes a nag. Detection is the
+ * local lexical matcher in resources/skills/promotion.ts — no request text
+ * leaves the machine.
  *
- * Every autonomy level requires an explicit operator answer. Each consented
- * promotion-flow install passes `assertPromotionInstallSource`, the hard runtime gate
- * that rejects public registries in code rather than prompt text.
+ * An install always needs an explicit operator answer. Where nobody answers
+ * (yolo autonomy) the session gets no offer at all, and a session that cannot
+ * render ask_user gets a plain mention with no ask. Every offer and each
+ * outcome goes to the `record` sink as a typed `skill.offer` record. Each
+ * consented promotion-flow install passes `assertPromotionInstallSource`, the
+ * hard runtime gate that rejects public registries in code rather than prompt
+ * text.
  *
  * Coordinator-only by wiring: this registration is created in the
  * orchestrator entry and never in a dispatch worker's loop, so workers can
@@ -55,13 +64,21 @@ export interface MarketplaceOfferInstallResult {
 	installedHash: string;
 }
 
+export type SkillOfferRecord = EventPayload<"skill.offer">;
+
 export interface MarketplaceOfferDeps {
 	/** Whether the session can render ask_user. Defaults to interactive offers. */
 	interactive?: boolean;
+	/** False while nobody answers an ask (yolo autonomy); the session then gets no offer. Defaults to true. */
+	askAllowed?: () => boolean;
 	/** The submitted turn's explicit scope; a narrowed or skill-free turn gets no offer. */
 	getTurnConstraints?: () => TurnConstraints | undefined;
 	/** Installed skill names the matcher must exclude. */
 	listInstalledSkillNames(): ReadonlyArray<string>;
+	/** Installed skills whose own match at the offer's bar silences an offer; triggers fall back to the catalog entry's. */
+	listInstalledSkills?: () => ReadonlyArray<PromotionSubject>;
+	/** The typed telemetry sink for every offer and outcome (`skill.offer`). */
+	record?: (record: SkillOfferRecord) => void;
 	/** The local marketplace lookup (catalog + index); already local-only. */
 	listMarketplaceEntries(): ReadonlyArray<MarketplaceSkill>;
 	/** Perform the install; the registration gates the source before calling. */
@@ -76,6 +93,16 @@ export interface MarketplaceOfferDeps {
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
+
+/** One offer as it reached the model, with what its telemetry records carry. */
+interface OfferFacts {
+	entry: MarketplaceSkill;
+	tag: string;
+	mode: SkillOfferRecord["mode"];
+	basis: SkillOfferRecord["basis"];
+	score: number;
+	ignoredRecorded: boolean;
+}
 
 /**
  * The tag the model must echo verbatim in its ask_user question so the harness
@@ -172,13 +199,36 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 	// session except for installs, so keep one session snapshot and revalidate
 	// installed names only when cached data is about to produce an offer.
 	let installedNamesCache: Set<string> | null = null;
+	let installedSkillsCache: ReadonlyArray<PromotionSubject> | null = null;
 	let marketplaceEntriesCache: ReadonlyArray<MarketplaceSkill> | null = null;
 	// The offer put to the operator, consumed by the ask_user after_tool
 	// observer. Each offer carries a unique binding tag the model must echo in
 	// its question; the observer acts only on an answer whose question carries
 	// that tag, so an unrelated (or prompt-injected) ask_user answer can never
 	// bind the pending offer.
-	let pendingOffer: { entry: MarketplaceSkill; tag: string } | null = null;
+	let pendingOffer: OfferFacts | null = null;
+
+	const emitRecord = (
+		offer: OfferFacts,
+		outcome: SkillOfferRecord["outcome"],
+		extra: Partial<Pick<SkillOfferRecord, "scope" | "choice" | "installed">> = {},
+	): void => {
+		if (outcome === "ignored") offer.ignoredRecorded = true;
+		try {
+			deps.record?.({
+				offerId: offer.tag,
+				skill: offer.entry.name,
+				version: offer.entry.version ?? null,
+				outcome,
+				mode: offer.mode,
+				basis: offer.basis,
+				score: offer.score,
+				...extra,
+			});
+		} catch {
+			// Telemetry never breaks the offer flow.
+		}
+	};
 
 	const trackSession = (input: MiddlewareHookInput): void => {
 		const sessionId = input.sessionId ?? null;
@@ -188,13 +238,25 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		}
 		if (sessionId !== lastSeenSessionId) {
 			lastSeenSessionId = sessionId;
+			if (pendingOffer && !pendingOffer.ignoredRecorded) emitRecord(pendingOffer, "ignored");
 			offeredNames = new Set<string>();
 			sessionDeclines = new Set<string>();
 			offersPaused = false;
 			pendingOffer = null;
 			installedNamesCache = null;
+			installedSkillsCache = null;
 			marketplaceEntriesCache = null;
 		}
+	};
+
+	// Installed skills rarely carry authored triggers; one installed from the
+	// catalog shares its name with the catalog entry, which does.
+	const installedSubjects = (): PromotionSubject[] => {
+		const catalogTriggers = new Map((marketplaceEntriesCache ?? []).map((entry) => [entry.name, entry.triggers]));
+		return (installedSkillsCache ?? []).map((skill) => {
+			const triggers = skill.triggers ?? catalogTriggers.get(skill.name);
+			return { name: skill.name, description: skill.description, ...(triggers ? { triggers } : {}) };
+		});
 	};
 
 	const bestMatch = (text: string): PromotionMatch | null => {
@@ -202,6 +264,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		let never: Readonly<Record<string, string>>;
 		try {
 			installedNamesCache ??= new Set(deps.listInstalledSkillNames());
+			installedSkillsCache ??= deps.listInstalledSkills?.() ?? [];
 			marketplaceEntriesCache ??= deps.listMarketplaceEntries();
 			never = declines.readNever();
 		} catch {
@@ -211,12 +274,16 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		// version. Declines are version-scoped: a "never"/"not now" on one catalog
 		// version does not suppress a later version of the same skill.
 		const declinedKeys = new Set<string>([...Object.keys(never), ...sessionDeclines]);
-		const findMatch = (): PromotionMatch | null =>
-			matchMarketplaceSkills(
-				text,
-				marketplaceEntriesCache ?? [],
-				new Set<string>([...(installedNamesCache ?? []), ...offeredNames]),
-			).find((candidate) => !declinedKeys.has(declineKey(candidate.entry.name, candidate.entry.version))) ?? null;
+		const findMatch = (): PromotionMatch | null => {
+			const found =
+				matchMarketplaceSkills(
+					text,
+					marketplaceEntriesCache ?? [],
+					new Set<string>([...(installedNamesCache ?? []), ...offeredNames]),
+				).find((candidate) => !declinedKeys.has(declineKey(candidate.entry.name, candidate.entry.version))) ?? null;
+			// An installed skill that already serves the request silences the offer (FX-28).
+			return found && !installedSkillCovers(text, installedSubjects()) ? found : null;
+		};
 		let match = findMatch();
 		if (match && installedWasCached) {
 			// A skills-hub or external install can happen after the session snapshot.
@@ -224,6 +291,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			// an offer, then match again so an already-installed skill is never nagged.
 			try {
 				installedNamesCache = new Set(deps.listInstalledSkillNames());
+				installedSkillsCache = deps.listInstalledSkills?.() ?? [];
 			} catch {
 				return null;
 			}
@@ -260,17 +328,20 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 				pendingOffer = null;
 				sessionDeclines.add(offerKey);
 				offersPaused = true;
+				emitRecord(offer, "declined", { choice: "other" });
 				return NO_EFFECTS;
 			}
 			pendingOffer = null;
 			if (option === SKILL_INSTALL_OFFER_OPTION_NOT_NOW) {
 				offersPaused = true;
 				sessionDeclines.add(offerKey);
+				emitRecord(offer, "declined", { choice: "not_now" });
 				return NO_EFFECTS;
 			}
 			if (option === SKILL_INSTALL_OFFER_OPTION_NEVER) {
 				offersPaused = true;
 				sessionDeclines.add(offerKey);
+				emitRecord(offer, "declined", { choice: "never" });
 				try {
 					declines.recordNever(offer.entry.name, offer.entry.version);
 				} catch {
@@ -281,6 +352,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const scope = option === SKILL_INSTALL_OFFER_OPTION_USER ? "user" : "project";
 			try {
 				const result = installGated(offer.entry, scope);
+				emitRecord(offer, "accepted", { scope, installed: true });
 				return [
 					{
 						kind: "annotate_tool_result",
@@ -294,6 +366,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 				];
 			} catch (error) {
 				sessionDeclines.add(offerKey);
+				emitRecord(offer, "accepted", { scope, installed: false });
 				return [
 					{
 						kind: "annotate_tool_result",
@@ -311,8 +384,8 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 	return {
 		id: MARKETPLACE_OFFER_REGISTRATION_ID,
 		description:
-			"offers an uninstalled marketplace skill via ask_user when the request matches it; consented installs run gated to Clio's own marketplace, declines are remembered",
-		hooks: ["turn_start", "after_tool"],
+			"offers an uninstalled marketplace skill via ask_user when the request names its domain and no installed skill serves it; consented installs run gated to Clio's own marketplace, declines are remembered",
+		hooks: ["turn_start", "after_tool", "turn_end"],
 		evidence: "match:marketplace-capability@task",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			trackSession(input);
@@ -326,6 +399,12 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			if (input.hook === "after_tool") {
 				return input.toolName === ToolNames.AskUser ? evaluateAskUserAnswers(input) : NO_EFFECTS;
 			}
+			// The offer's turn ended with no bound answer: journal it as ignored once.
+			// It stays armed, so a deferred tagged answer still records its outcome.
+			if (input.hook === "turn_end") {
+				if (pendingOffer && !pendingOffer.ignoredRecorded) emitRecord(pendingOffer, "ignored");
+				return NO_EFFECTS;
+			}
 			if (input.hook !== "turn_start") return NO_EFFECTS;
 			if (!isSubstantiveUserTurn(input.text)) return NO_EFFECTS;
 			// The operator already chose a skill for this turn; an offer on top of
@@ -333,6 +412,10 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
 			if (offersPaused) return NO_EFFECTS;
+			// Nobody answers an install card under yolo, and a model that follows the
+			// offer there would stop an unattended run on a question the task never
+			// needed (FX-28), so no offer at all.
+			if (deps.askAllowed?.() === false) return NO_EFFECTS;
 			// A turn whose tools were narrowed (a prompt template's allowed-tools,
 			// --allow-tools) or whose skills are off asked for a bounded job; an
 			// install flow there is noise in someone else's workflow.
@@ -354,7 +437,15 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const match = bestMatch(input.text ?? "");
 			if (!match) return NO_EFFECTS;
 			offeredNames.add(match.entry.name);
+			const facts: Omit<OfferFacts, "mode" | "tag"> = {
+				entry: match.entry,
+				basis: match.matchedTrigger !== undefined ? "trigger" : "name",
+				score: match.score,
+				ignoredRecorded: false,
+			};
 			if (deps.interactive === false) {
+				// A mention arms no interview, so its record id is not a binding tag.
+				emitRecord({ ...facts, tag: randomUUID(), mode: "mention" }, "offered");
 				return [
 					{
 						kind: "inject_reminder",
@@ -363,9 +454,11 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 					},
 				];
 			}
-			const tag = newOfferTag();
-			pendingOffer = { entry: match.entry, tag };
-			return [{ kind: "inject_reminder", severity: "info", message: marketplaceOfferReminder(match.entry, tag) }];
+			pendingOffer = { ...facts, tag: newOfferTag(), mode: "ask" };
+			emitRecord(pendingOffer, "offered");
+			return [
+				{ kind: "inject_reminder", severity: "info", message: marketplaceOfferReminder(match.entry, pendingOffer.tag) },
+			];
 		},
 	};
 }

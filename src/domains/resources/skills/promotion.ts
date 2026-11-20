@@ -20,8 +20,11 @@ import type { MarketplaceSkill } from "./marketplace.js";
  * context(scope="skills")) remain the fallback.
  */
 
-export interface PromotionMatch {
-	entry: MarketplaceSkill;
+/** What the lexical matcher reads from a skill: its name, description and authored trigger phrases. */
+export type PromotionSubject = Pick<MarketplaceSkill, "name" | "description" | "triggers">;
+
+export interface PromotionMatch<T extends PromotionSubject = MarketplaceSkill> {
+	entry: T;
 	score: number;
 	/** The trigger phrase that fired, when the match came from one. */
 	matchedTrigger?: string;
@@ -50,7 +53,7 @@ function describedCapability(description: string): string {
  * phrase is a whole-phrase substring match on normalized text; token overlap
  * is a fallback for skills whose triggers have not been authored yet.
  */
-export function scorePromotionEntry(userText: string, entry: MarketplaceSkill): PromotionMatch | null {
+export function scorePromotionEntry<T extends PromotionSubject>(userText: string, entry: T): PromotionMatch<T> | null {
 	const haystack = ` ${normalize(userText)} `;
 	if (haystack.trim().length === 0) return null;
 	for (const trigger of entry.triggers ?? []) {
@@ -67,9 +70,38 @@ export function scorePromotionEntry(userText: string, entry: MarketplaceSkill): 
 	return overlap >= TOKEN_FIRE_THRESHOLD ? { entry, score: overlap } : null;
 }
 
+/** A plural and its singular count as one word when the request names a skill. */
+function foldPlural(token: string): string {
+	return token.length >= 4 && token.endsWith("s") ? token.slice(0, -1) : token;
+}
+
 /**
- * The uninstalled marketplace entries that match the request, best first.
- * Authored trigger hits precede token fallbacks, even when incidental
+ * Whether the request names the skill's domain (FX-28): an authored trigger
+ * phrase fired, or every distinctive word of the skill's own name appears in
+ * the request. Description overlap alone is keyword coincidence (a price-table
+ * fix matched `ship`, a bug fix with its ticket matched `file-ticket`), so an
+ * unsolicited offer needs one of these two.
+ */
+function namesSkillDomain(userText: string, match: PromotionMatch): boolean {
+	if (match.matchedTrigger !== undefined) return true;
+	const nameTokens = [...distinctiveTokens(match.entry.name.replace(/-/g, " "))].map(foldPlural);
+	if (nameTokens.length === 0) return false;
+	const requestWords = new Set(normalize(userText).split(" ").map(foldPlural));
+	return nameTokens.every((token) => requestWords.has(token));
+}
+
+/**
+ * Whether an installed skill already serves the request at the offer's own bar
+ * (an authored trigger phrase or the token-overlap threshold). An offer is for
+ * expertise nothing installed covers, so any such hit silences it.
+ */
+export function installedSkillCovers(userText: string, installed: ReadonlyArray<PromotionSubject>): boolean {
+	return installed.some((skill) => scorePromotionEntry(userText, skill) !== null);
+}
+
+/**
+ * The uninstalled marketplace entries whose domain the request names, best
+ * first. Authored trigger hits precede token fallbacks, even when incidental
  * description overlap ties or exceeds the trigger's numeric score.
  * `excludedNames` carries installed skills plus every decline scope the
  * caller tracks; the matcher itself is stateless.
@@ -83,7 +115,7 @@ export function matchMarketplaceSkills(
 	for (const entry of entries) {
 		if (entry.kind !== "skill" || excludedNames.has(entry.name)) continue;
 		const match = scorePromotionEntry(userText, entry);
-		if (match) matches.push(match);
+		if (match && namesSkillDomain(userText, match)) matches.push(match);
 	}
 	return matches.sort(
 		(a, b) =>
