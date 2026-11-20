@@ -350,6 +350,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			state.synthesisToolLock = false;
 			state.toolBudgetLock = false;
+			// FX-38: a declaration belongs to the turn that made it; a message handed over inside the run starts an undeclared one.
+			state.turnCompletion = null;
 			deps.middlewareToolChoice.reset();
 			startTurnUsage(userTurn.id);
 		},
