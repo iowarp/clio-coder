@@ -11,6 +11,8 @@ import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.j
 import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
 import { classifyFailure, decideRetry } from "../../src/domains/dispatch/failure-classification.js";
 import { isRunOutcomeCode } from "../../src/domains/dispatch/types.js";
+import openaiRuntime from "../../src/domains/providers/runtimes/cloud/openai.js";
+import openaiCodexRuntime from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { withLocalResidency } from "../../src/engine/apis/openai-completions.js";
@@ -18,6 +20,7 @@ import type { EngineModel } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
 import { boundWorkerResponse } from "../../src/engine/worker-response-stream.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
+import { startCaptureServer } from "../harness/context-capture.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
@@ -238,6 +241,59 @@ test("locked native worker rounds disable thinking, send the model output limit 
 		env.restore();
 	}
 });
+
+// FL-16: Responses APIs render the reasoning effort ahead of the input, so a locked round there keeps the work rounds'
+// request fields; every later input extends the one before it byte for byte.
+for (const runtime of [openaiRuntime, openaiCodexRuntime]) {
+	test(`a locked round on ${runtime.id} keeps the work rounds' reasoning and request prefix`, async () => {
+		const env = await isolateClioEnv("worker-responses-lock-");
+		writeFileSync(join(env.dir, "input.txt"), "known evidence");
+		const account = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+		const server = await startCaptureServer((_request, index) =>
+			index < 2
+				? { calls: [{ id: `call_${index}`, name: "read", arguments: { path: "input.txt" } }] }
+				: { text: "report" },
+		);
+		try {
+			const worker = startWorkerRun(
+				{
+					agentId: "coder",
+					systemPrompt: "Read then report.",
+					task: "Read input.txt twice then report.",
+					target: { id: "fixture", runtime: runtime.id, url: server.url },
+					runtime,
+					wireModelId: "gpt-6-luna",
+					apiKey: runtime === openaiCodexRuntime ? `e30.${account.toString("base64url")}.sig` : "fixture",
+					thinkingLevel: "high",
+					modelCapabilities: { contextWindow: 272000, maxTokens: 16384, tools: true, reasoning: true },
+					allowedTools: ["read"],
+					budget: { mode: "enforced", toolCalls: 2, readReserve: 0, synthesis: true, hardCap: 150 },
+					noSkills: true,
+					cwd: env.dir,
+					onPermission: "deny",
+				},
+				() => {},
+			);
+			strictEqual((await worker.promise).exitCode, 0);
+			const bodies = server.requests.map((request) => request.body);
+			strictEqual(bodies.length, 3);
+			const fields = ({ input: _input, tool_choice: _choice, ...rest }: Record<string, unknown>) => rest;
+			ok((bodies[0]?.reasoning as { effort?: unknown } | undefined)?.effort !== "none", "work rounds think");
+			deepStrictEqual(bodies[1]?.tool_choice, bodies[0]?.tool_choice);
+			strictEqual(bodies[2]?.tool_choice, "none");
+			for (const [index, body] of bodies.entries()) {
+				if (index === 0 || !body) continue;
+				const previous = bodies[index - 1] ?? {};
+				deepStrictEqual(fields(body), fields(previous), `round ${index + 1} request fields`);
+				const input = JSON.stringify(previous.input).slice(0, -1);
+				ok(JSON.stringify(body.input).startsWith(input), `round ${index + 1} extends the previous input`);
+			}
+		} finally {
+			await server.close();
+			env.restore();
+		}
+	});
+}
 
 test("worker response seconds validates as a positive integer and takes effect on next dispatch", () => {
 	strictEqual(DEFAULT_SETTINGS.safety.limits.workerResponseSeconds, 600);

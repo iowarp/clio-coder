@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { zstdDecompressSync } from "node:zlib";
 
 export async function closeServer(server: Server | null): Promise<void> {
 	if (!server) return;
@@ -19,12 +20,15 @@ export async function closeServer(server: Server | null): Promise<void> {
 
 export async function readRequestBody(req: IncomingMessage): Promise<string> {
 	return new Promise((resolve) => {
-		let body = "";
-		req.setEncoding("utf8");
-		req.on("data", (chunk) => {
-			body += chunk;
+		const chunks: Buffer[] = [];
+		req.on("data", (chunk: Buffer) => {
+			chunks.push(chunk);
 		});
-		req.on("end", () => resolve(body));
+		// Pi's Codex adapter zstd-compresses its request bodies when the runtime can.
+		req.on("end", () => {
+			const body = Buffer.concat(chunks);
+			resolve((req.headers["content-encoding"] === "zstd" ? zstdDecompressSync(body) : body).toString("utf8"));
+		});
 	});
 }
 
