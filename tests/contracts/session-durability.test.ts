@@ -1,8 +1,9 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { normalizeClioCoderEventTree, normalizeClioCoderEventType } from "../../src/core/naming-events.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 
 import { recoverAbandonedRuns } from "../../src/domains/dispatch/orphan-recovery.js";
@@ -79,6 +80,58 @@ describe("session durability boundary", () => {
 			runTailEntryFromEvent({ type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } })?.type,
 			"clio_coder_tool_finish",
 		);
+	});
+
+	it("reads a ledger byte-identically to the copying normalizer and returns unchanged lines uncopied", () => {
+		// The normalizer before SC-7, kept as the reference the fast path must equal.
+		const reference = (value: unknown): unknown => {
+			if (Array.isArray(value)) {
+				let changed = false;
+				const next = value.map((entry) => {
+					const normalized = reference(entry);
+					if (normalized !== entry) changed = true;
+					return normalized;
+				});
+				return changed ? next : value;
+			}
+			if (typeof value !== "object" || value === null) return value;
+			const record = value as Record<string, unknown>;
+			let changed = false;
+			const next: Record<string, unknown> = {};
+			for (const [key, entry] of Object.entries(record)) {
+				const normalized = reference(entry);
+				next[key] = normalized;
+				if (normalized !== entry) changed = true;
+			}
+			if (typeof record.type === "string" && normalizeClioCoderEventType(record.type) !== record.type) {
+				next.type = normalizeClioCoderEventType(record.type);
+				changed = true;
+			}
+			return changed ? next : value;
+		};
+		const lines = [
+			'{"kind":"message","role":"user","payload":{"content":[{"type":"text","text":"clio_usage is just text"}]}}',
+			'{"kind":"custom","customType":"clio_coder_memory_off","data":{"type":"clio_coder_usage","n":[1,null,true]}}',
+			'{"type":"event","events":[{"type":"read"},{"deep":{"type":"clio_verification","x":[]}}],"type2":"clio_usage"}',
+			'{"type":"event","event":{"type":"\\u0063lio_tool_start"}}',
+			'{"__proto__":{"type":"clio_usage"},"kind":"x"}',
+			'{"__proto__":{"type":"read"},"kind":"x"}',
+			'[{"type":"clio_unknown_suffix"},{"type":"clio_tool_finish"},"clio_usage",7]',
+			'{"type":7,"kind":"message","payload":{"type":{"type":"clio_tool_start"}}}',
+		];
+		const sessionPath = join(scratch.dir, "identity-session.jsonl");
+		writeFileSync(sessionPath, `${lines.join("\n")}\n`, "utf8");
+		const entries = readSessionFileEntries(sessionPath);
+		strictEqual(entries.length, lines.length);
+		lines.forEach((line, index) => {
+			const expected = reference(JSON.parse(line));
+			deepStrictEqual(entries[index], expected, line);
+			strictEqual(JSON.stringify(entries[index]), JSON.stringify(expected), line);
+		});
+		const current = JSON.parse(lines[1] ?? "") as unknown;
+		strictEqual(normalizeClioCoderEventTree(current), current, "a line with no legacy id comes back uncopied");
+		const legacy = JSON.parse(lines[2] ?? "") as unknown;
+		notStrictEqual(normalizeClioCoderEventTree(legacy), legacy, "a legacy id still copies, as before");
 	});
 
 	it("writes canonical session provenance and normalizes released metadata only in memory", async () => {
