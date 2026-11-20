@@ -12,15 +12,6 @@ import type { Terminal, TuiAltScreenOptions } from "@earendil-works/pi-tui";
 import { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
 import { hasCopyMark, type SelectedRow, selectedRowsText, stripCopyMarks } from "./selection-text.js";
 
-/** pi-tui's flash duration when the caller passes none (`components/alt-screen-flash.js`). */
-const DEFAULT_FLASH_MS = 1000;
-
-/** One row of pi-tui's private flash stack; `dispose` clears whichever timer the row holds. */
-interface FlashRow {
-	readonly message: string;
-	timer: ReturnType<typeof setTimeout>;
-}
-
 export type TuiRenderPhase = "overlay" | "normalization" | "cursor";
 
 export interface TuiRenderObserver {
@@ -303,31 +294,6 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 
 	override requestRender(force = false): void {
 		if (!this.deferredAdmission.request(force)) super.requestRender(force);
-	}
-
-	/**
-	 * A message identical to one still showing restarts that row's timer instead of
-	 * stacking another row, so a repeated copy keeps one row that shows for its whole duration.
-	 */
-	override flash(message: string, durationMs?: number): void {
-		// pi-tui keeps its flash rows private; if a Pi upgrade renames them, a repeat stacks as pi-tui would.
-		const rows = (this as unknown as { flashes?: { entries?: FlashRow[] } }).flashes?.entries;
-		const showing = Array.isArray(rows) ? rows.find((row) => row.message === message && row.timer) : undefined;
-		if (rows === undefined || showing === undefined) {
-			super.flash(message, durationMs);
-			return;
-		}
-		clearTimeout(showing.timer);
-		showing.timer = setTimeout(
-			() => {
-				const index = rows.indexOf(showing);
-				if (index === -1) return;
-				rows.splice(index, 1);
-				this.requestRender();
-			},
-			Math.max(0, durationMs ?? DEFAULT_FLASH_MS),
-		);
-		showing.timer.unref();
 	}
 
 	protected override beforeTerminalStart(): void {

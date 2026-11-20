@@ -25,6 +25,36 @@ index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71
      handleInput(data) {
          const previous = this.input.getValue();
          this.input.handleInput(data);
+diff --git a/dist/components/alt-screen-flash.js b/dist/components/alt-screen-flash.js
+index 129d94a2223d6957b2eb79962f65b3adbdd4e9fc..05357b515c3b23a1e3f75953eeeee09fa5a95714 100644
+--- a/dist/components/alt-screen-flash.js
++++ b/dist/components/alt-screen-flash.js
+@@ -9,7 +9,12 @@ export class AltScreenFlashContainer {
+         this.requestRender = requestRender;
+     }
+     flash(message, durationMs = DEFAULT_DURATION_MS) {
+-        const id = this.nextId++;
++        // A message identical to one still showing restarts that row's timer instead of stacking another row,
++        // so a repeated copy keeps one row that shows for the repeat's whole duration.
++        const showing = this.entries.find((entry) => entry.message === message);
++        if (showing)
++            clearTimeout(showing.timer);
++        const id = showing ? showing.id : this.nextId++;
+         const timer = setTimeout(() => {
+             const index = this.entries.findIndex((entry) => entry.id === id);
+             if (index === -1)
+@@ -18,7 +23,10 @@ export class AltScreenFlashContainer {
+             this.requestRender();
+         }, Math.max(0, durationMs));
+         timer.unref();
+-        this.entries.push({ id, message, timer });
++        if (showing)
++            showing.timer = timer;
++        else
++            this.entries.push({ id, message, timer });
+         this.requestRender();
+     }
+     dispose() {
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
 index 7e6a8bc120ec687d4a647afff50d81fde6d5f23a..b98b2c14ac97c8e43ca0820bd78af2c288ec4e32 100644
 --- a/dist/components/editor.d.ts
