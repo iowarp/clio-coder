@@ -114,7 +114,8 @@ export function acceptanceHostVerification(
 		status: results.every((result) => result.passed) ? "verified" : "rejected",
 		checks: results.map((result) => ({
 			check: result.id,
-			argv: ["bash", "-c", result.command],
+			// The argv the check ran under: runBashCommand adds pipefail, so the seal names it too (CLI-4).
+			argv: ["bash", "-o", "pipefail", "-c", result.command],
 			cwd,
 			// A check that did not pass never seals exit 0, whether it timed out, was capped or ended by a signal.
 			exitCode: result.passed ? 0 : result.exitCode !== null && result.exitCode !== 0 ? result.exitCode : 1,
