@@ -452,7 +452,7 @@ function lastReceiptFact(id: string, scope: string, kind: string): Fact[] {
 function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] {
 	const entry = (key: string, verb: string): string => `${keyCap(theme, key)} ${theme.fg("menuDescription", verb)}`;
 	// Enter opens a package's members and does nothing else, so it is named
-	// only where it opens something; Tab is the detail key.
+	// only where it opens something, with the footer's word for it.
 	const reviews: Array<[string, string]> = [
 		...(actions.install ? [["i", "install"] as [string, string]] : []),
 		...(actions.enable ? [["e", "enable/disable"] as [string, string]] : []),
@@ -468,7 +468,7 @@ function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] 
 				);
 	return [
 		...(actions.use ? [entry("v", "use")] : []),
-		...(actions.open ? [entry("Enter", "members")] : []),
+		...(actions.open ? [entry("Enter", "detail")] : []),
 		...reviewChips,
 	];
 }
