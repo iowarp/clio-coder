@@ -232,7 +232,7 @@ import type { SessionContract, SessionMeta } from "../domains/session/contract.j
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import { runHeadlessCompaction, SessionDomainModule } from "../domains/session/index.js";
+import { runHeadlessCompaction, SessionDomainModule, SessionLiveError } from "../domains/session/index.js";
 import { reconcilePendingProtectedArtifacts } from "../domains/session/protected-artifact-journal.js";
 import {
 	appendProtectedArtifactRegistryEvent,
@@ -1017,6 +1017,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// receive an answer written without that conversation's history. Interactive, a miss opens a fresh session.
 	const requestedResume = options.headless ? options.headless.resumeSession : options.resume;
 	let headlessResumeFailure: string | null = null;
+	let headlessResumeSlug: SessionLiveError["slug"] | undefined;
 	let resolvedResumeId: string | undefined;
 	if (requestedResume !== undefined && requestedResume.kind !== "picker") {
 		if (!session) {
@@ -1045,6 +1046,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			resumedSessionAtBoot = true;
 		} catch (err) {
 			const detail = err instanceof Error ? err.message : String(err);
+			if (err instanceof SessionLiveError) headlessResumeSlug = err.slug;
 			if (requestedResume !== undefined) headlessResumeFailure = `failed to resume session ${resumeId}: ${detail}`;
 			else bootStderr(`CLIO Coder: failed to resume session ${resumeId}: ${detail}\n`);
 		}
@@ -1052,7 +1054,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (headlessResumeFailure !== null && !options.headless)
 		initialNotices.push(`Nothing resumed: ${headlessResumeFailure}. This is a fresh session.`);
 	else if (headlessResumeFailure !== null) {
-		writeRunDiagnostic(`clio-coder run: ${headlessResumeFailure}\n`);
+		writeRunDiagnostic(`clio-coder run: ${headlessResumeFailure}\n`, headlessResumeSlug);
 		await termination.shutdown(2);
 		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
 	}

@@ -12,7 +12,7 @@ import {
 import { runClioRun } from "../../src/cli/run.js";
 import { runLimitsV2, startRefusalCause } from "../../src/cli/run-failure.js";
 import { dryRunPricingRefusal } from "../../src/cli/run-plan.js";
-import { validateSettings } from "../../src/core/config.js";
+import { readSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { pinRunSettings, RUN_OVERRIDES_ENV, requirePricedRefusal } from "../../src/core/run-overrides.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
@@ -211,10 +211,6 @@ test("--require-priced: parsed into limits, carried to admission, and refuses on
 	for (const pricedBy of ["catalog", "target-rates", "free"])
 		strictEqual(requirePricedRefusal(pricedBy, "t/m", required), undefined);
 	strictEqual(requirePricedRefusal("none", "proxy/gpt-x", {}), undefined);
-	deepStrictEqual(
-		startRefusalCause(["clio-coder run: --require-priced: routes this run can reach have no known pricing: a/b"]).code,
-		"not_configured",
-	);
 });
 
 test("--dry-run --require-priced refuses an unpriced route exactly as the run would, instead of previewing it (CLI-P16)", async (t) => {
@@ -237,6 +233,11 @@ test("--dry-run --require-priced refuses an unpriced route exactly as the run wo
 		const code = await runClioRun(["--dry-run", "--require-priced", "--no-delegate", "x"], { noContextFiles: true });
 		strictEqual(code, 2, stderr);
 		match(stderr, /--require-priced: routes this run can reach have no known pricing: proxy\/gpt-x; declare targets/u);
+		// SPEC 6.9: declaring the pricing is the fix, so the preflight's refusal is not_configured at its source.
+		const args = parseRunCliArgs(["--dry-run", "--require-priced", "--no-delegate", "x"]);
+		const refusal = await dryRunPricingRefusal(args, readSettings());
+		strictEqual(refusal?.slug, "not_configured");
+		strictEqual(startRefusalCause(refusal).code, "not_configured");
 	} finally {
 		process.chdir(original);
 		home.restore();
@@ -293,7 +294,10 @@ test("--output-schema: refused schemas are schema_unsupported, and only a whole 
 		const loaded = await loadOutputSchema(refused);
 		ok(!loaded.ok, refused);
 		if (!loaded.ok)
-			strictEqual(startRefusalCause([`${OUTPUT_SCHEMA_REFUSAL_PREFIX}${loaded.reason}`]).code, "schema_unsupported");
+			strictEqual(
+				startRefusalCause({ slug: loaded.slug, message: `${OUTPUT_SCHEMA_REFUSAL_PREFIX}${loaded.reason}` }).code,
+				"schema_unsupported",
+			);
 	}
 	const loaded = await loadOutputSchema(
 		file(

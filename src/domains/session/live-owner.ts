@@ -5,6 +5,14 @@ import type { SessionMeta } from "./contract.js";
 import { formatAge, liveSessionView, ownerOnThisHost } from "./heartbeat.js";
 
 /**
+ * The resume refusal while another process holds the session; its C17 slug rides with it to a run's exit-2 cause
+ * (SPEC L3, 6.7), and its message is `liveSessionRefusal`'s.
+ */
+export class SessionLiveError extends Error {
+	readonly slug = "session_live";
+}
+
+/**
  * The process that holds this session's ledger open right now, or null. A ledger
  * that never ended but whose owner is gone is a crashed session and stays
  * resumable (#420). An owner on another host cannot be checked from here, so it

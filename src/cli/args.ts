@@ -146,13 +146,19 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  * | --resume with --continue                                       | usage | usage |
  * | --fork without --resume or --continue                          | usage | usage |
  */
-function runModeMatrixErrors(parsed: RunCliArgs): string[] {
-	const errors: string[] = [];
+function runModeMatrixErrors(parsed: RunCliArgs): CliArgDiagnostic[] {
+	const errors: CliArgDiagnostic[] = [];
+	const conflict = (message: string): void => {
+		errors.push({ type: "error", slug: "flag_conflict", message });
+	};
 	if (parsed.sessionId !== undefined && parsed.continueSession) {
-		errors.push("--resume and --continue name different sessions; pass one");
+		errors.push({ type: "error", message: "--resume and --continue name different sessions; pass one" });
 	}
 	if (parsed.forkSession && parsed.sessionId === undefined && !parsed.continueSession) {
-		errors.push("--fork branches the session --resume <id> or --continue names; pass one of them");
+		errors.push({
+			type: "error",
+			message: "--fork branches the session --resume <id> or --continue names; pass one of them",
+		});
 	}
 	if (parsed.agentId === undefined) {
 		const dispatchOnly =
@@ -162,11 +168,11 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 			parsed.toolProfile !== undefined ||
 			parsed.worktree === true ||
 			parsed.required.length > 0;
-		if (dispatchOnly) errors.push("fleet dispatch flags require --agent <recipe-id>");
+		if (dispatchOnly) conflict("fleet dispatch flags require --agent <recipe-id>");
 		return errors;
 	}
 	if (parsed.constraints) {
-		errors.push(
+		conflict(
 			"--turn-mode, --allow-tools, --deny-tools, --delegate-tools, and --no-delegate apply to the main-agent task",
 		);
 	}
@@ -176,7 +182,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		parsed.forkSession ||
 		parsed.sessionName !== undefined
 	) {
-		errors.push("--resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript");
+		conflict("--resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript");
 	}
 	const mainOnly: Array<[boolean, string]> = [
 		[parsed.failOnNoop, "--fail-on-noop"],
@@ -190,11 +196,11 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		[parsed.systemOne !== undefined, "--systemone"],
 	];
 	for (const [present, flag] of mainOnly) {
-		if (present) errors.push(`${flag} applies to the main agent, not --agent dispatch`);
+		if (present) conflict(`${flag} applies to the main agent, not --agent dispatch`);
 	}
 	for (const file of parsed.fileArgs) {
 		if (IMAGE_ATTACHMENT.test(file)) {
-			errors.push(`@${file}: image attachments go to the main agent, not --agent dispatch`);
+			conflict(`@${file}: image attachments go to the main agent, not --agent dispatch`);
 		}
 	}
 	return errors;
@@ -611,8 +617,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			continue;
 		}
 		if (arg?.startsWith("-")) {
+			// C17 `unknown_flag`, a global or interactive-only flag written after `run` included.
 			parsed.diagnostics.push({
 				type: "error",
+				slug: "unknown_flag",
 				message: globalFlagPositionHint(arg, "run") ?? `unknown option: ${arg}`,
 			});
 			continue;
@@ -640,10 +648,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	// With --task-file the cross-flag checks run once, on the command line merged with the envelope (task-envelope.ts),
 	// so a flag here and its partner in the envelope are judged together.
 	if (parsed.taskFile !== undefined) return parsed;
-	for (const message of runModeMatrixErrors(parsed)) parsed.diagnostics.push({ type: "error", message });
+	parsed.diagnostics.push(...runModeMatrixErrors(parsed));
 	if (parsed.agentId !== undefined && parsed.autonomy !== undefined) {
 		parsed.diagnostics.push({
 			type: "error",
+			slug: "flag_conflict",
 			message: "--autonomy applies to the main agent; use --read-only to restrict --agent dispatch",
 		});
 	}

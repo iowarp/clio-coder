@@ -444,7 +444,7 @@ describe("run --task-file envelope (SPEC 6.3)", () => {
 		match(message, /route\.model/);
 	});
 
-	it("refuses an unknown key, malformed JSON and a schemaVersion other than 1 as usage", async () => {
+	it("refuses an unknown key and malformed JSON as usage, and a schemaVersion other than 1 as schema_unsupported", async () => {
 		const unknown = await refusal([
 			"--task-file",
 			envelope("unknown", { schemaVersion: 1, task: "x", route: { bogus: 1 } }),
@@ -452,7 +452,9 @@ describe("run --task-file envelope (SPEC 6.3)", () => {
 		equal(unknown.slug, "usage");
 		match(unknown.message, /route\.bogus/);
 		equal((await refusal(["--task-file", envelope("bad", "{")])).slug, "usage");
-		equal((await refusal(["--task-file", envelope("v2", { schemaVersion: 2, task: "x" })])).slug, "usage");
+		// SPEC 6.6: the envelope names the version it cannot read at the source.
+		equal((await refusal(["--task-file", envelope("v2", { schemaVersion: 2, task: "x" })])).slug, "schema_unsupported");
+		equal((await refusal(["--task-file", envelope("nov", { task: "x" })])).slug, "schema_unsupported");
 	});
 
 	it("refuses argv text, @file and - beside --task-file", async () => {

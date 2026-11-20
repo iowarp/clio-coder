@@ -4,6 +4,7 @@ import path from "node:path";
 import { readClioVersion } from "../core/package-root.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 import { serializeJsonLine, setFrameProjector } from "./modes/jsonl.js";
 import type {
 	RunJsonDispatchedRunOutcome,
@@ -30,22 +31,60 @@ import {
 import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js";
 import { steerChannelRefusal } from "./steer-channel.js";
 
+/**
+ * The C17 slugs a refusal before any work names as its own v2 cause (SPEC C17, 6.2-6.9); any other slug, `usage`
+ * included, reads `not_started`.
+ */
+const RUN_REFUSAL_SLUGS = [
+	"unknown_flag",
+	"flag_conflict",
+	"empty_task",
+	"task_file_conflict",
+	"task_flag_conflict",
+	"task_authority",
+	"schema_unsupported",
+	"not_configured",
+	"session_live",
+	"io",
+] as const satisfies ReadonlyArray<ErrorSlug & RunCauseCode>;
+
+export type RunRefusalSlug = (typeof RUN_REFUSAL_SLUGS)[number];
+
+/** A refusal before work as its producer states it: the C17 slug and the diagnostic text. */
+export interface RunRefusal {
+	readonly slug: RunRefusalSlug;
+	readonly message: string;
+}
+
+function isRunRefusalSlug(slug: ErrorSlug): slug is RunRefusalSlug {
+	return (RUN_REFUSAL_SLUGS as ReadonlyArray<ErrorSlug>).includes(slug);
+}
+
 interface RunFailureState {
 	pending: boolean;
 	diagnostic?: string;
-	/** Every diagnostic written before output started, in order; the last one is `diagnostic`. */
-	diagnostics?: string[];
+	/** The first refusal written with a slug of its own, as written; it names the exit-2 cause. */
+	refusal?: RunRefusal;
 }
 
 const runFailureState = new AsyncLocalStorage<RunFailureState>();
 
-export function writeRunDiagnostic(text: string): void {
+/** Keep the first refusal that carries a narrower slug than `not_started`; later ones do not displace it. */
+function noteRefusal(state: RunFailureState, slug: ErrorSlug | undefined, message: string): void {
+	if (state.refusal === undefined && slug !== undefined && isRunRefusalSlug(slug)) state.refusal = { slug, message };
+}
+
+/**
+ * Write a run diagnostic to stderr. `slug` is the C17 slug its producer gave it; written before run output starts,
+ * a refusal slug becomes the exit-2 cause.
+ */
+export function writeRunDiagnostic(text: string, slug?: ErrorSlug): void {
 	// A diagnostic can quote a failure's message, and it reaches stderr and a turn_end frame's error alike (#446).
 	const shown = redactUrlCredentials(text);
 	const state = runFailureState.getStore();
 	if (state?.pending) {
 		state.diagnostic = shown.trim();
-		state.diagnostics = [...(state.diagnostics ?? []), state.diagnostic];
+		noteRefusal(state, slug, state.diagnostic);
 	}
 	process.stderr.write(shown);
 }
@@ -54,54 +93,22 @@ export function writeRunDiagnostic(text: string): void {
  * A refusal the main run makes after boot but before its turn (`--require-priced`): written like any diagnostic and
  * kept for the exit-2 cause even though run output has started.
  */
-export function writeRunRefusal(text: string): void {
-	writeRunDiagnostic(text);
+export function writeRunRefusal(text: string, slug: RunRefusalSlug): void {
+	writeRunDiagnostic(text, slug);
 	const state = runFailureState.getStore();
-	if (state && !state.pending) state.diagnostics = [...(state.diagnostics ?? []), redactUrlCredentials(text).trim()];
+	if (state && !state.pending) noteRefusal(state, slug, redactUrlCredentials(text).trim());
 }
 
-/** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
-const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
-	// SPEC C17: an option `run` does not take, including a global or interactive-only flag written after `run`.
-	[/^clio-coder run: unknown option: /u, "unknown_flag"],
-	[
-		/^clio-coder run: \S+ (?:is a global option and must come before the subcommand|applies only to the interactive session)/u,
-		"unknown_flag",
-	],
-	// SPEC 6.2: no task text, from an empty pipe, a terminal with no task, or `-` on a terminal.
-	[/^clio-coder run: empty task/u, "empty_task"],
-	[/^clio-coder run: `-` reads the task from stdin, but stdin is a terminal/u, "empty_task"],
-	// SPEC 6.4 mode matrix: a main-only input given with --agent, or a dispatch-only flag without it.
-	[/^clio-coder run: .* (?:applies|apply) to the main agent/u, "flag_conflict"],
-	[/^clio-coder run: .* apply to the main-agent task/u, "flag_conflict"],
-	[/^clio-coder run: @\S+: image attachments go to the main agent, not --agent dispatch/u, "flag_conflict"],
-	[/^clio-coder run: fleet dispatch flags require --agent /u, "flag_conflict"],
-	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
-	// SPEC 6.2, 6.3: the task envelope's refusals (src/cli/task-envelope.ts).
-	[/--task-file carries the task and its attachments/u, "task_file_conflict"],
-	[/^clio-coder run: task file key \S+ is also given as /u, "task_flag_conflict"],
-	[/^clio-coder run: task file carries .*pass --trust-task-file/u, "task_authority"],
-	[/^clio-coder run: task file output\.schema: /u, "schema_unsupported"],
-	// SPEC 6.6: an envelope version this release does not read.
-	[/^clio-coder run: task file schemaVersion: /u, "schema_unsupported"],
-	[/^clio-coder run: not configured: /u, "not_configured"],
-	// SPEC 6.8: a schema `--output-schema` cannot enforce, refused before any model call.
-	[/^clio-coder run: --output-schema: /u, "schema_unsupported"],
-	// SPEC 6.9: the preflight's refusal names the unpriced route; declaring its pricing is the fix.
-	[/^clio-coder run: --require-priced: /u, "not_configured"],
-	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
-	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
-	// SPEC 6.6, C17: a --steer-channel that cannot be opened is refused before boot (CLI-P22).
-	[/^clio-coder run: --steer-channel cannot be opened: /u, "io"],
-];
-
-/** The cause of an exit-2 refusal before any work, from the diagnostics it wrote: the first that names one wins. */
-export function startRefusalCause(diagnostics: ReadonlyArray<string>): { code: RunCauseCode; message?: string } {
-	for (const diagnostic of diagnostics) {
-		const row = START_REFUSALS.find(([pattern]) => pattern.test(diagnostic));
-		if (row !== undefined) return { code: row[1], message: diagnostic };
-	}
-	return { code: "not_started" };
+/**
+ * The cause of an exit-2 refusal before any work: the slug its producer gave it, or `not_started` for a refusal
+ * with none narrower (`usage`, or no slug at all).
+ */
+export function startRefusalCause(refusal: { readonly slug?: ErrorSlug; readonly message: string } | undefined): {
+	code: RunCauseCode;
+	message?: string;
+} {
+	if (refusal?.slug === undefined || !isRunRefusalSlug(refusal.slug)) return { code: "not_started" };
+	return { code: refusal.slug, message: refusal.message };
 }
 
 export function startRunOutput(): void {
@@ -474,7 +481,7 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 		case 2: {
 			if (request.mode === "agent" && seen.receipt !== undefined)
 				return [{ code: "worker_failed", exitCode: 2, ...message }];
-			const refusal = startRefusalCause(state.diagnostics ?? []);
+			const refusal = startRefusalCause(state.refusal);
 			return [{ code: refusal.code, ...(refusal.message !== undefined ? { message: refusal.message } : message) }];
 		}
 		case 5:
@@ -655,7 +662,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			const channel = path.resolve(base, request.steerChannel);
 			const refusal = steerChannelRefusal(channel);
 			if (refusal !== undefined) {
-				writeRunDiagnostic(`clio-coder run: --steer-channel cannot be opened: ${channel}: ${refusal}\n`);
+				writeRunDiagnostic(`clio-coder run: --steer-channel cannot be opened: ${channel}: ${refusal}\n`, "io");
 				return finish(2);
 			}
 		}

@@ -9,7 +9,7 @@ import { ALL_TOOL_NAMES } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool, turnDelegatesTool } from "../core/turn-constraints.js";
 import { type RunCliArgs, requestedRunLimits } from "./args.js";
 import type { RunLimitsV2 } from "./modes/run-json-schema-v2.js";
-import { noteRunPlan, runLimitsV2 } from "./run-failure.js";
+import { noteRunPlan, type RunRefusal, runLimitsV2 } from "./run-failure.js";
 
 export interface RunPlan {
 	route: { target: string | null; model: string | null; thinking: string };
@@ -79,12 +79,13 @@ export function buildRunPlan(
 
 /**
  * `--require-priced` under `--dry-run` (CLI-P16): the refusal the real run's preflight would write, or undefined.
- * Same reach as `runHeadlessMainAgent`: the main routes under `--no-delegate`, else the worker routes too.
+ * Same reach as `runHeadlessMainAgent`: the main routes under `--no-delegate`, else the worker routes too. Declaring
+ * the route's pricing is the fix, so it is C17 `not_configured` (SPEC 6.9).
  */
 export async function dryRunPricingRefusal(
 	parsed: RunCliArgs,
 	settings: Readonly<ClioSettings>,
-): Promise<string | undefined> {
+): Promise<RunRefusal | undefined> {
 	if (parsed.requirePriced !== true) return undefined;
 	const [{ loadDomains }, { ConfigDomainModule }, { ProvidersDomainModule }, { unpricedRunRoutes }] = await Promise.all([
 		import("../core/domain-loader.js"),
@@ -97,7 +98,10 @@ export async function dryRunPricingRefusal(
 		const delegating = parsed.constraints?.delegation !== "forbidden";
 		const unpriced = unpricedRunRoutes(settings, loaded.getContract("providers"), delegating ? "delegating" : "main");
 		if (unpriced.length === 0) return undefined;
-		return `clio-coder run: --require-priced: routes this run can reach have no known pricing: ${unpriced.join(", ")}; declare targets[].pricing for them${delegating ? " or add --no-delegate if only worker routes are listed" : ""}\n`;
+		return {
+			slug: "not_configured",
+			message: `clio-coder run: --require-priced: routes this run can reach have no known pricing: ${unpriced.join(", ")}; declare targets[].pricing for them${delegating ? " or add --no-delegate if only worker routes are listed" : ""}\n`,
+		};
 	} finally {
 		await loaded.stop();
 	}

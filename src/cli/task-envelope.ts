@@ -213,7 +213,9 @@ function translateTaskEnvelope(
 ): Translation {
 	if (!isRecord(value)) throw usage(`task file: the envelope must be a JSON object, got ${describeType(value)}`);
 	if (value.schemaVersion !== TASK_ENVELOPE_SCHEMA_VERSION)
-		throw usage(
+		// SPEC 6.6: an envelope version this release does not read.
+		throw new EnvelopeError(
+			"schema_unsupported",
 			value.schemaVersion === undefined
 				? "task file schemaVersion: required, and must be 1"
 				: `task file schemaVersion: this release reads version 1, got ${JSON.stringify(value.schemaVersion)}`,

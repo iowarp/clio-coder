@@ -11,6 +11,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { liveRecordPath, liveSessionsDir } from "../../src/domains/session/heartbeat.js";
 import { listSessionsForCwd, resolveSessionIdForCwd } from "../../src/domains/session/history.js";
 import type { SessionEntry, SessionMeta } from "../../src/domains/session/index.js";
+import { SessionLiveError } from "../../src/domains/session/live-owner.js";
 import { resolveSessionTarget, suggestSessionName } from "../../src/domains/session/names.js";
 import { cwdHash, sessionPaths } from "../../src/engine/session.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
@@ -290,6 +291,11 @@ test("a CLI fork names its child at creation, never writes the parent, and block
 		`${JSON.stringify({ schema: 1, id: parent.id, cwd: env.dir, cwdHash: cwdHash(env.dir), host: hostname(), pid: process.ppid, birth: null, startedAt: now, at: now, surface: "run", version: "0.0.0", user: "u" })}\n`,
 	);
 	assert.equal(sessionRemovalRefusal(parent.id)?.kind, "live");
+	// A resume refuses with the typed error whose C17 slug a run carries to its exit-2 cause (SPEC L3, 6.7).
+	assert.throws(
+		() => session.resume(parent.id),
+		(error: unknown) => error instanceof SessionLiveError && error.slug === "session_live",
+	);
 	assert.equal(renameSessionAtRest(parent.id, "gamma")?.pid, process.ppid);
 	// session compact refuses the held session before it boots anything (SPEC L3c).
 	const compactScript = `process.chdir(${JSON.stringify(env.dir)}); process.argv = [process.execPath, "clio-coder", "session", "compact", ${JSON.stringify(parent.id)}, "--json"]; await import(${JSON.stringify(join(process.cwd(), "src/cli/index.ts"))});`;
