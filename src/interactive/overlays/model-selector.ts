@@ -330,7 +330,10 @@ function resolveOverlayRuntimeTarget(input: {
 			capabilities: resolution.target.capabilities,
 			capabilityDecisions: resolution.target.capabilityDecisions,
 			thinking: resolution.target.modelRuntime.thinking.display,
-			thinkingNote: thinkingEffectNote(resolution.target.modelRuntime.thinking),
+			thinkingNote: thinkingEffectNote({
+				...resolution.target.modelRuntime.thinking,
+				model: resolution.target.modelRuntime.modelId,
+			}),
 			streaming: resolution.target.capabilityDecisions.streaming,
 		};
 	}

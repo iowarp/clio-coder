@@ -157,14 +157,15 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					? `active and saved for this project: ${swap}${timing}`
 					: `active this session: ${swap}${timing}`;
 		const down = deps.providers.list().find((status) => status.target.id === ref.target)?.health.status === "down";
-		const thinking = resolveModelRuntimeCapabilitiesForProviders(
+		const runtime = resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
 			ref.target,
 			ref.model,
 			deps.getSettings?.().chat?.thinkingLevel ?? "off",
-		)?.thinking;
+		);
+		const thinking = runtime?.thinking;
 		// The rail's words for the same fact: `thinking on (medium runs as on)` made the reader decode a mapping (TY05).
-		const note = thinking ? thinkingNoteWords(thinking) : null;
+		const note = thinking ? thinkingNoteWords({ ...thinking, model: runtime.modelId }) : null;
 		const facts = [
 			applied,
 			down ? "this route is down, so turns fail until it answers; /model switches" : null,

@@ -4,6 +4,7 @@ import { applyModelCapabilityPatch } from "../../src/domains/providers/model-cap
 import {
 	resolveModelRuntimeCapabilities,
 	resolveModelRuntimeCapabilitiesForModel,
+	thinkingEffectNote,
 } from "../../src/domains/providers/model-runtime-capabilities.js";
 import litellm, {
 	aggregateLiteLLMCapabilities,
@@ -12,6 +13,7 @@ import litellm, {
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
+import { thinkingNoteWords } from "../../src/interactive/thinking-note.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
@@ -55,6 +57,46 @@ test("Qwen3.8 offers vendor levels and preserves the released high alias without
 		strictEqual(resolved.thinking.effectiveLevel, expected);
 		strictEqual(resolved.request.reasoningEffort, expected === "off" ? undefined : expected);
 	}
+});
+
+test("round-up thinking notice explains high isn't offered and xhigh is used", () => {
+	const hit = kb.lookup("dynamo/qwen3.8-27b");
+	ok(hit);
+	const resolved = resolveModelRuntimeCapabilities({
+		runtimeId: "litellm",
+		modelId: "dynamo/qwen3.8-27b",
+		capabilities: { ...EMPTY_CAPABILITIES, ...hit.entry.capabilities },
+		kbHit: hit,
+		configuredThinkingLevel: "high",
+	});
+	const expected = "high isn't offered by dynamo/qwen3.8-27b; using xhigh";
+	strictEqual(thinkingEffectNote({ ...resolved.thinking, model: resolved.modelId }), expected);
+	strictEqual(thinkingNoteWords({ ...resolved.thinking, model: resolved.modelId }), expected);
+});
+
+test("unaffected thinking clamp notices keep their existing wording", () => {
+	const hit = kb.lookup("dynamo/qwen3.8-27b");
+	ok(hit);
+	const clampedDownMax = resolveModelRuntimeCapabilities({
+		runtimeId: "litellm",
+		modelId: "dynamo/qwen3.8-27b",
+		capabilities: { ...EMPTY_CAPABILITIES, ...hit.entry.capabilities },
+		kbHit: hit,
+		configuredThinkingLevel: "max",
+	});
+	strictEqual(thinkingEffectNote({ ...clampedDownMax.thinking, model: clampedDownMax.modelId }), "max runs as xhigh");
+	strictEqual(thinkingNoteWords({ ...clampedDownMax.thinking, model: clampedDownMax.modelId }), "max not offered");
+
+	const clampedDownHigh = {
+		mechanism: "effort-levels",
+		configuredLevel: "high" as const,
+		effectiveLevel: "medium" as const,
+		display: "medium",
+		supportedLevels: ["off", "low", "medium"] as const,
+		model: "sample/model",
+	};
+	strictEqual(thinkingEffectNote(clampedDownHigh), "high runs as medium");
+	strictEqual(thinkingNoteWords(clampedDownHigh), "high not offered");
 });
 
 test("actual gateway probe to engine stream disables reasoning while retaining gateway ownership", async () => {
