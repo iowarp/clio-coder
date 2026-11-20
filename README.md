@@ -374,7 +374,7 @@ you configure receive the requests sent to them. See
 | --- | --- | --- |
 | **Terminal** (primary) | `clio-coder` | Interactive coding, diffs, approvals, worker activity |
 | **Desktop** (alpha) | `clio-coder gui` | A visual workspace with usage, artifacts, evidence and sessions |
-| **Scripts and CI** | `clio-coder run "task"` | Unattended runs; `--json` streams JSONL |
+| **Scripts and CI** | `clio-coder run "task"` | Unattended runs; `--output-format stream-json` streams JSONL |
 | **Editors** | `clio-coder acp` | Agent Client Protocol clients |
 
 See [commands and modes](docs/guide/commands-and-modes.md),
@@ -502,7 +502,7 @@ text.
 | Flag | Effect |
 | --- | --- |
 | `--read-only` | Refuse writes and edits, run shell commands only in the read-only OS sandbox (refused where none is available), and delegate only to runtimes that enforce read-only. |
-| `--json` | Stream JSONL on stdout: a `session` header first, one `run_end` frame last, carrying `exitCode` and `outcome`. Read the result from `run_end`. |
+| `--output-format json\|stream-json` | `stream-json` streams JSONL on stdout: a `session` header first, one `run_end` envelope last, carrying `exitCode`, `outcome` and `result.text`; `json` writes the envelope alone. Read the result from `run_end`. |
 | `--timeout <seconds>` | Wall-clock limit for the run; exit 124 on expiry. |
 | `--max-cost-usd <N>` | Stop when priced spend reaches the cap; exit 4. |
 | `--target <id>`, `--model <id>` | One-run connection and model. |
