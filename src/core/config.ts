@@ -1022,7 +1022,7 @@ const EXCLUDE_LAST_TURNS_RETIRED =
 
 export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	identity: "it was accepted and ignored; no behavior is lost",
-	"background.thinkingLevel": "proactive memory always resolves thinking off",
+	"background.thinkingLevel": "proactive memory now follows context.memory.thinkingLevel, default off",
 	theme: "the only registered theme was not read by runtime rendering",
 	"compaction.excludeLastTurns": EXCLUDE_LAST_TURNS_RETIRED,
 	"delegation.agents[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
@@ -1747,7 +1747,15 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						else {
 							const path = "chat.steering.triage";
 							const target = settings.chat.steering.triage;
-							issues.unknownKeys(path, triage, ["enabled", "target", "model", "minQueued", "timeoutMs", "autoInterrupt"]);
+							issues.unknownKeys(path, triage, [
+								"enabled",
+								"target",
+								"model",
+								"thinkingLevel",
+								"minQueued",
+								"timeoutMs",
+								"autoInterrupt",
+							]);
 							for (const key of ["enabled", "autoInterrupt"] as const) {
 								if (!(key in triage)) continue;
 								const parsed = expectBoolean(issues, `${path}.${key}`, triage[key]);
@@ -1771,6 +1779,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							// A model without a target is the session target's own model choice, which the
 							// active runtime already made; it is dropped the way the memory block drops it.
 							if (!target.target) target.model = null;
+							if ("thinkingLevel" in triage) {
+								const parsed = expectEnum(issues, `${path}.thinkingLevel`, triage.thinkingLevel, THINKING_LEVELS);
+								if (parsed !== undefined) target.thinkingLevel = parsed;
+							}
 							for (const [key, min] of [
 								["minQueued", 1],
 								["timeoutMs", 1],
@@ -2238,6 +2250,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"observations",
 						"target",
 						"model",
+						"thinkingLevel",
 						"cadenceToolCalls",
 						"trajectorySteps",
 						"maxOutputTokens",
@@ -2276,6 +2289,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					else if (settings.context.memory.model === null)
 						settings.context.memory.model =
 							settings.targets.find((target) => target.id === settings.context.memory.target)?.defaultModel ?? null;
+					if ("thinkingLevel" in memory) {
+						const parsed = expectEnum(issues, "context.memory.thinkingLevel", memory.thinkingLevel, THINKING_LEVELS);
+						if (parsed !== undefined) settings.context.memory.thinkingLevel = parsed;
+					}
 					for (const [key, min] of [
 						["cadenceToolCalls", 2],
 						["trajectorySteps", 1],

@@ -487,6 +487,7 @@ const MENU_ROWS = new Set([
 	"chat.steering.triage.enabled",
 	"fleet.worktrees.root",
 	"context.memory.observations.enabled",
+	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
 	"context.semantic.model",
@@ -543,6 +544,8 @@ const CHOICES: Record<string, readonly string[]> = {
 	"safety.snapshots": ["auto", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
+	"chat.steering.triage.thinkingLevel": THINKING_LEVELS,
+	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -636,6 +639,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.observations.enabled": [
 		"Continuity preparation",
 		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Needs proactive memory on; off by default.",
+	],
+	"context.memory.thinkingLevel": [
+		"Memory thinking",
+		"How much the memory model reasons before it writes a memory step. Off, the default, asks for no reasoning; reasoning spends the memory output budget, and a model that cannot use the chosen level gets its nearest supported one, as in chat.",
 	],
 	"integrations.music.enabled": [
 		"Music pane",
@@ -764,6 +771,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"chat.steering.triage.model": [
 		"Steering triage model",
 		"Model the triage round asks on that connection. Empty uses the connection's default model.",
+	],
+	"chat.steering.triage.thinkingLevel": [
+		"Steering triage thinking",
+		"How much the triage model reasons before it labels the queue. Off, the default, asks for no reasoning; a model that cannot use the chosen level gets its nearest supported one, as in chat.",
 	],
 	"chat.steering.triage.minQueued": [
 		"Steering triage queue size",

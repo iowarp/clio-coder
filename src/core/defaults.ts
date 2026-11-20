@@ -579,6 +579,8 @@ export interface SteeringTriageSettings {
 	enabled: boolean;
 	target: string | null;
 	model: string | null;
+	/** Thinking level of the triage side call; `off` sends no reasoning request. */
+	thinkingLevel: ThinkingLevel;
 	/** Queue length that starts a triage round. */
 	minQueued: number;
 	timeoutMs: number;
@@ -611,6 +613,8 @@ export interface MemorySettings {
 	observations: { enabled: boolean };
 	target: string | null;
 	model: string | null;
+	/** Thinking level of the memory side call; `off` sends no reasoning request. */
+	thinkingLevel: ThinkingLevel;
 	cadenceToolCalls: number;
 	trajectorySteps: number;
 	maxOutputTokens: number;
@@ -810,6 +814,7 @@ export const DEFAULT_SETTINGS = {
 				enabled: false,
 				target: null as string | null,
 				model: null as string | null,
+				thinkingLevel: "off" as ThinkingLevel,
 				minQueued: 2,
 				timeoutMs: 8000,
 				autoInterrupt: true,
@@ -867,6 +872,7 @@ export const DEFAULT_SETTINGS = {
 			observations: { enabled: false },
 			target: null as string | null,
 			model: null as string | null,
+			thinkingLevel: "off" as ThinkingLevel,
 			cadenceToolCalls: 10,
 			trajectorySteps: 8,
 			maxOutputTokens: 2000,
@@ -1029,6 +1035,7 @@ chat:
       enabled: false
       target: null
       model: null
+      thinkingLevel: off
       minQueued: 2
       timeoutMs: 8000
       autoInterrupt: true
@@ -1095,6 +1102,7 @@ context:
       enabled: false
     target: null
     model: null
+    thinkingLevel: off
     cadenceToolCalls: 10
     trajectorySteps: 8
     maxOutputTokens: 2000

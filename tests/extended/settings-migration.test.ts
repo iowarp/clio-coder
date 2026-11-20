@@ -122,6 +122,27 @@ describe("settings and migration boundary", () => {
 		ok(invalid.issues.some((issue) => issue.path === "orchestrator.target"));
 		ok(invalid.issues.some((issue) => issue.path === "mystery"));
 		strictEqual(invalid.settings.chat.target, null, "retired paths never execute as aliases");
+
+		// cw-1: the triage and memory side calls take a thinking level from the chat level set, default off.
+		strictEqual(defaults.settings.chat.steering.triage.thinkingLevel, "off");
+		strictEqual(defaults.settings.context.memory.thinkingLevel, "off");
+		const sideLevels = validateSettings({
+			version: 2,
+			chat: { steering: { triage: { thinkingLevel: "high" } } },
+			context: { memory: { thinkingLevel: "low" } },
+		});
+		deepStrictEqual(sideLevels.issues, []);
+		strictEqual(sideLevels.settings.chat.steering.triage.thinkingLevel, "high");
+		strictEqual(sideLevels.settings.context.memory.thinkingLevel, "low");
+		const badLevels = validateSettings({
+			version: 2,
+			chat: { steering: { triage: { thinkingLevel: "loud" } } },
+			context: { memory: { thinkingLevel: true } },
+		});
+		ok(badLevels.issues.some((issue) => issue.path === "chat.steering.triage.thinkingLevel"));
+		ok(badLevels.issues.some((issue) => issue.path === "context.memory.thinkingLevel"));
+		strictEqual(badLevels.settings.chat.steering.triage.thinkingLevel, "off");
+		strictEqual(badLevels.settings.context.memory.thinkingLevel, "off");
 	});
 
 	it("validates LiteLLM request controls without admitting arbitrary target keys", () => {

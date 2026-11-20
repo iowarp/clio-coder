@@ -195,6 +195,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.steering.triage.enabled` | `false` | next turn |
 | `chat.steering.triage.target` | `null` | next turn |
 | `chat.steering.triage.model` | `null` | next turn |
+| `chat.steering.triage.thinkingLevel` | `off` | next turn |
 | `chat.steering.triage.minQueued` | `2` | next turn |
 | `chat.steering.triage.timeoutMs` | `8000` | next turn |
 | `chat.steering.triage.autoInterrupt` | `true` | next turn |
@@ -263,6 +264,7 @@ explains worker route selection.
 | `context.memory.enabled` | `true` | next turn |
 | `context.memory.target` | `null` | next session |
 | `context.memory.model` | `null` | next session |
+| `context.memory.thinkingLevel` | `off` | next turn |
 | `context.memory.cadenceToolCalls` | `10` | next turn |
 | `context.memory.trajectorySteps` | `8` | next turn |
 | `context.memory.maxOutputTokens` | `2000` | next turn |
@@ -697,7 +699,7 @@ for it (`src/engine/apis/openai-completions.ts`).
 
 ## Thinking levels for out-of-turn model calls
 
-CLIO Coder supplies a thinking choice for model calls outside the main conversation instead of inferring one from whether the model supports reasoning. Memory retention requests `off`, independently of `chat.thinkingLevel` (whose default is `low`). Compaction also requests thinking off through the simple stream path. These choices bound auxiliary work without changing the session's saved thinking level. A model may still produce reasoning despite an off request; memory keeps text blocks from the response and accounts for reported usage. See [ai.ts](../../src/engine/ai.ts), the [memory caller](../../src/entry/orchestrator.ts) and [compaction](../../src/domains/session/compaction/compact.ts).
+CLIO Coder supplies a thinking choice for model calls outside the main conversation instead of inferring one from whether the model supports reasoning. Memory retention requests `context.memory.thinkingLevel` and steering triage requests `chat.steering.triage.thinkingLevel`, both default `off` and independent of `chat.thinkingLevel` (whose default is `low`). Compaction also requests thinking off through the simple stream path. These choices bound auxiliary work without changing the session's saved thinking level. A model may still produce reasoning despite an off request; memory keeps text blocks from the response and accounts for reported usage. See [ai.ts](../../src/engine/ai.ts), the [memory caller](../../src/entry/orchestrator.ts) and [compaction](../../src/domains/session/compaction/compact.ts).
 
 ## Built-in runtimes
 

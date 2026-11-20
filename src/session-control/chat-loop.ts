@@ -73,6 +73,7 @@ import { ContinuityController } from "./continuity-controller.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { realpathSync } from "node:fs";
 import type { ClioSettings } from "../core/config.js";
+import type { ThinkingLevel } from "../core/defaults.js";
 import { formatFooterTokens } from "../core/display-units.js";
 import {
 	armedSkillSurface,
@@ -118,6 +119,7 @@ import {
 	acceptsImageInput,
 	modelCandidatesForStatus,
 	modelEndpointKey,
+	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
@@ -2804,6 +2806,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
 		freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
 		apiKey: string | undefined;
+		thinkingLevel: ThinkingLevel;
+	};
+
+	/**
+	 * The level the triage round asks for. Off is sent as off, exactly as before the setting existed; any other level
+	 * resolves through the route the way the chat route's level does, so a model without that level gets its nearest
+	 * supported one. A route that no longer resolves keeps the round at off.
+	 */
+	const triageThinkingLevel = (
+		level: ThinkingLevel,
+		targetId: string,
+		wireModelId: string,
+		model: EngineModel,
+	): ThinkingLevel => {
+		if (level === "off") return "off";
+		const resolved = resolveRuntimeTarget(deps.providers, {
+			targetId,
+			wireModelId,
+			requestedThinkingLevel: level,
+			requireTools: false,
+			requireStreaming: false,
+			requireOutputBudget: false,
+		});
+		if (!resolved.ok) return "off";
+		return refineRuntimeTargetWithModelHints(resolved.target, model, deps.providers.knowledgeBase).effectiveThinkingLevel;
 	};
 
 	/** The configured triage target, or the session's active runtime when none is named. */
@@ -2829,6 +2856,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				...pricingBasisFields(resolution),
 				apiKey: sideAuth.apiKey,
 				...sideAuth,
+				thinkingLevel: triageThinkingLevel(
+					triage.thinkingLevel,
+					runtime.targetId,
+					runtime.wireModelId,
+					runtime.agent.state.model,
+				),
 			};
 		}
 		const resolved = resolveRuntimeTarget(deps.providers, {
@@ -2842,6 +2875,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!resolved.ok) return null;
 		const route = resolved.target;
 		const kbHit = deps.providers.knowledgeBase?.lookup(route.wireModelId, route.runtime.id) ?? null;
+		const model = route.runtime.synthesizeModel(route.target, route.wireModelId, kbHit);
 		const sideAuth = await resolveSideCallAuth(
 			deps.providers.auth,
 			route.target,
@@ -2850,7 +2884,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			signal,
 		);
 		return {
-			model: route.runtime.synthesizeModel(route.target, route.wireModelId, kbHit),
+			model,
 			target: route.target,
 			targetId: route.targetId,
 			runtimeId: route.runtimeId,
@@ -2858,6 +2892,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...pricingBasisFields(route),
 			apiKey: sideAuth.apiKey,
 			...sideAuth,
+			thinkingLevel: triageThinkingLevel(triage.thinkingLevel, route.targetId, route.wireModelId, model),
 		};
 	};
 
@@ -2920,8 +2955,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						entries: asked,
 					}),
 					maxTokens: TRIAGE_MAX_TOKENS,
-					// A schema-bound classification; reasoning only spends the output budget.
-					thinkingLevel: "off",
+					// A schema-bound classification; reasoning only spends the output budget, so
+					// `chat.steering.triage.thinkingLevel` defaults to off.
+					thinkingLevel: resolved.thinkingLevel,
 					responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
 					runtimeId: resolved.runtimeId,
 					signal: controller.signal,

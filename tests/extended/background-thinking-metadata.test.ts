@@ -177,6 +177,26 @@ for (const ending of ["deadline", "cancelled"] as const) {
 	});
 }
 
+test("context.memory.thinkingLevel low reaches the memory request through the route's mapping (cw-1)", async () => {
+	const f = await setup();
+	try {
+		f.settings.context.memory.thinkingLevel = "low";
+		const route = createBackgroundMemoryModelClient(f.providers, f.settings, 1000, null);
+		ok(route);
+		await route.client.complete({
+			systemPrompt: "fixture",
+			userPrompt: "17 times 19" as MemoryRouteText,
+			maxTokens: 512,
+			signal: new AbortController().signal,
+		});
+		const completions = f.fixture.requests;
+		ok(completions.length > 0);
+		for (const request of completions) strictEqual(request.reasoning_effort, "low");
+	} finally {
+		await f.close();
+	}
+});
+
 test("successful unknown background metadata remains unknown and is not repeatedly probed", async () => {
 	const f = await setup("unknown");
 	try {
