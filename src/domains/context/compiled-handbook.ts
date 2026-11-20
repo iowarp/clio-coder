@@ -14,7 +14,7 @@
  * handbook's path, so a read of an omitted line resolves.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -262,6 +262,15 @@ function compileInWorker(root: string, refresh: Refresh): Promise<InputStamp[]> 
 	});
 }
 
+function workspaceGone(root: string): boolean {
+	try {
+		process.cwd();
+	} catch {
+		return true;
+	}
+	return !existsSync(root);
+}
+
 function startRefresh(root: string, refresh: Refresh): Promise<void> {
 	if (refresh.closed) return Promise.resolve();
 	const run = compileInWorker(root, refresh)
@@ -275,6 +284,8 @@ function startRefresh(root: string, refresh: Refresh): Promise<void> {
 				refresh.observed = null;
 				if (refresh.closed) return;
 				if (error instanceof CompileTimeout && !firstTimeoutFor(root, error.inputKey)) return;
+				// A removed workspace already has its own notice; the raw ENOENT here would only repeat it.
+				if (workspaceGone(root)) return;
 				writeDiagnostic(
 					`clio-coder: compiling the project handbook failed: ${error instanceof Error ? error.message : String(error)}`,
 				);
