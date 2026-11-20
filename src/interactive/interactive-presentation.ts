@@ -81,7 +81,12 @@ import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { ComposerKeyContext } from "./footer/key-hints.js";
 import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
-import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
+import {
+	createNotificationCenter,
+	type Notification,
+	residencyNoticeStands,
+	routeAppliedNoticeKey,
+} from "./footer/notifications.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
 import type { CompactionRailFacts } from "./footer/widgets.js";
 import {
@@ -598,6 +603,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	/** A notice about the session's route stops the moment the route moves on, or the fault it reported clears. */
 	const routeNoticeStands = (notice: Notification): boolean => {
+		const residency = residencyNoticeStands(notice, deps.getSettings?.().chat);
+		if (residency !== null) return residency;
 		if (!notice.key?.startsWith("route-applied:")) return true;
 		const route = deps.getSettings?.().chat;
 		if (notice.key !== routeAppliedNoticeKey(route?.target, route?.model)) return false;

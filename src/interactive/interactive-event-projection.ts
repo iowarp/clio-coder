@@ -1,6 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
-import { routingChangeNotices } from "../core/session-routing.js";
+import { ROUTE_RESIDENCY_NOTICE_PREFIX, routingChangeNotices } from "../core/session-routing.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	ConfigReloadFailedPayload,
@@ -167,6 +167,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					return;
 				}
 				if (event.surface === "transcript") {
+					// A residency notice is about the route on screen, so it goes where `/model` retires it, not into history.
+					if (event.key?.startsWith(ROUTE_RESIDENCY_NOTICE_PREFIX)) {
+						deps.notify(event.level, event.text.replace(/^\[CLIO Coder\] /u, ""), event.key);
+						return;
+					}
 					deps.applyChatEvent(
 						event.heldQueue !== undefined && deps.heldQueueNotice
 							? { ...event, text: deps.heldQueueNotice(event.heldQueue.count) }

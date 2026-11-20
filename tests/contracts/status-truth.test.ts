@@ -7,6 +7,7 @@ import {
 	type ModelAdmissionEvent,
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
+import { routeResidencyNoticeKey } from "../../src/core/session-routing.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { readTrailingWrittenCalls } from "../../src/core/tool-call-markup.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
@@ -50,6 +51,7 @@ import {
 	createNotificationCenter,
 	formatNotificationPanel,
 	type Notification,
+	residencyNoticeStands,
 	topNotification,
 } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
@@ -59,6 +61,7 @@ import {
 	idleReadinessPresentation,
 	shellSettledPresentation,
 } from "../../src/interactive/footer/widgets.js";
+import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
@@ -91,6 +94,7 @@ import {
 	workerActivityWords,
 	workerSilenceWords,
 } from "../../src/interactive/worker-activity.js";
+import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import {
 	classifyTurnEnding,
 	noteWrittenCalls,
@@ -2388,6 +2392,61 @@ test("an idle route a worker already got answers from reads ready, not `no reque
 		idleReadinessPresentation({ ...facts, notResident: true }, 120).label,
 		/is not loaded · loads on first request/u,
 	);
+});
+
+test("the boot residency notice names its route and leaves once /model moves the session to another model", () => {
+	const noop = (): void => undefined;
+	const route = { target: "router", model: "cold-a" };
+	const notices = createNotificationCenter({ stillTrue: (notice) => residencyNoticeStands(notice, route) ?? true });
+	const transcript: ChatLoopEvent[] = [];
+	const handlers: Array<(event: ChatLoopEvent) => void> = [];
+	const projection = createInteractiveEventProjection({
+		bus: createTelemetryHub(),
+		chat: {
+			onEvent: (next) => {
+				handlers.push(next);
+				return noop;
+			},
+			cancel: noop,
+		},
+		status: { subscribe: () => noop },
+		getTerminalColumns: () => 120,
+		applyChatEvent: (event) => transcript.push(event),
+		setFollowUpMessages: noop,
+		isAskUserWaiting: () => false,
+		closeAskUserSession: noop,
+		resetAskUserCancellation: noop,
+		recordToolStart: noop,
+		recordToolEnd: noop,
+		setLastTurnSummary: noop,
+		startTerminalProgress: noop,
+		stopTerminalProgress: noop,
+		refreshLiveWorkspaceGit: noop,
+		refreshFooter: noop,
+		requestRender: noop,
+		notify: (level, text, key) => notices.add({ level, text, ...(key ? { key } : {}) }),
+		dismissNotification: noop,
+		supersedeWorkNotifications: noop,
+		appendTranscriptNotice: noop,
+		refreshSettingsOverlay: noop,
+	});
+	const residency: ChatLoopEvent = {
+		type: "notice",
+		level: "info",
+		surface: "transcript",
+		text: "[CLIO Coder] cold-a is not resident on router; the first request loads it, which can take a minute.",
+		key: routeResidencyNoticeKey("router", "cold-a"),
+	};
+	for (const handler of handlers) handler(residency);
+	// Kept out of the transcript, where it would stay the last notice and name cold-a after the switch.
+	deepStrictEqual(transcript, []);
+	deepStrictEqual(
+		notices.list().map((notice) => notice.text),
+		["cold-a is not resident on router; the first request loads it, which can take a minute."],
+	);
+	route.model = "cold-b";
+	deepStrictEqual(notices.list(), []);
+	projection.dispose();
 });
 
 test("a settled shell line leads the idle rail in the card's words and keeps the route's blocker beside it", () => {

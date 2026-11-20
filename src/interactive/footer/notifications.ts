@@ -14,6 +14,7 @@
  * color lives in `theme/**`; every emitted line is width-clamped.
  */
 
+import { ROUTE_RESIDENCY_NOTICE_PREFIX, routeResidencyNoticeKey } from "../../core/session-routing.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
@@ -77,6 +78,20 @@ const NOTICE_READING_FLOOR_MS = 8_000;
 /** Key of the notice confirming one applied route, which says something only while that route is the session's. */
 export function routeAppliedNoticeKey(target: string | null | undefined, model: string | null | undefined): string {
 	return `route-applied:${target ?? ""}/${model ?? ""}`;
+}
+
+/**
+ * Whether a residency notice still names the session's route, or null for any other notice. It names one model on one
+ * target, so after `/model` moves the session it would describe a route nobody is on (FX-17).
+ */
+export function residencyNoticeStands(
+	notice: Pick<Notification, "key">,
+	route: { target?: string | null; model?: string | null } | undefined,
+): boolean | null {
+	if (!notice.key?.startsWith(ROUTE_RESIDENCY_NOTICE_PREFIX)) return null;
+	const target = route?.target;
+	const model = route?.model;
+	return Boolean(target && model) && notice.key === routeResidencyNoticeKey(target ?? "", model ?? "");
 }
 
 /**
