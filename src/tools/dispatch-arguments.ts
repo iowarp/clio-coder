@@ -236,6 +236,8 @@ function dispatchRequestFromArgs(
 	if (model) request.model = model;
 	const node = stringArg(args, "node");
 	if (node) request.node = node;
+	// Admission stamps the resolved tuple later, so this is the one place an unpinned request is visible.
+	if (!target && !model && !node) request.routeFree = true;
 	if (args.failover !== undefined || args.allowed_candidates !== undefined || args.allowedCandidates !== undefined) {
 		return { ok: false, message: "use routing.failover; model-authored candidate envelopes are not accepted" };
 	}

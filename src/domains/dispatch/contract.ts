@@ -201,6 +201,14 @@ export interface DispatchRequest extends JobSpec {
 	 * Never model-authored.
 	 */
 	mainGrantRoute?: { kind: "yield" } | { kind: "refused"; reason: string };
+	/**
+	 * The caller left the route to admission: the dispatch tool's arguments
+	 * named no target, model or node, and no plan or operator approval sealed
+	 * the resolved route. Set once by the argument parser; the dispatch tool
+	 * drops it under an authenticated approval, and requests built anywhere
+	 * else never carry it. Absent means pinned. Never model-authored.
+	 */
+	routeFree?: true;
 }
 
 /**

@@ -5,8 +5,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { recordFleetPreflight } from "../../src/domains/dispatch/fleet-preflight.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+import { approvedRouteCandidates } from "../../src/domains/dispatch/route-approval.js";
+import {
+	createRouteObserver,
+	type RouteObserver,
+	type RouteReadinessEvidence,
+} from "../../src/domains/dispatch/route-observer.js";
 import { defaultRoutingIntent } from "../../src/domains/dispatch/routing-intent.js";
+import { endpointIdentityHash } from "../../src/domains/dispatch/worker-protocol.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -24,6 +32,35 @@ const HTTP_503 = "HTTP 503 Service Unavailable";
 const OVERFLOW =
 	"[worker] provider error: exceed_context_size_error: request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it";
 
+/** Route evidence every candidate passes active readiness with, so the resolver can approve an envelope. */
+function readyRouteObserver(): RouteObserver {
+	const real = createRouteObserver({});
+	const evidence: RouteReadinessEvidence = {
+		observations: Array.from({ length: 40 }, () => ({
+			qualityLabel: "pass" as const,
+			reliability: "success" as const,
+			firstPass: true,
+			completedCostUsd: 0.01,
+			completedEndToEndMs: 1000,
+			cacheRead: null,
+			queueWaitMs: 0,
+		})),
+		readiness: {
+			hardConstraintValidity: 1,
+			integrityFailures: 0,
+			costUpperBoundUsd: 0.01,
+			factsFresh: true,
+			decisionP95Ms: 0,
+		},
+	};
+	return {
+		observe: (input) => real.observe(input),
+		readinessWindow: () => ({ forRoute: () => evidence }),
+		recordOutcome: (id, outcome) => real.recordOutcome(id, outcome),
+		summary: () => real.summary(),
+	};
+}
+
 /**
  * A bundle whose workers finish at once: `failure` (a 503 by default) on any
  * target in `failing`, success elsewhere. `spawned` lists the target each
@@ -40,6 +77,8 @@ async function retryFleet(
 		report?: object;
 		models?: ReadonlyArray<string>;
 		onSpawn?: (spec: WorkerSpec) => void;
+		/** Active routing for researchers at the balanced posture, with every route ready. */
+		adaptive?: boolean;
 	} = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -53,6 +92,37 @@ async function retryFleet(
 	settings.fleet.default.target = "default";
 	settings.fleet.default.model = "gpt-4o";
 	settings.fleet.retry.maxRetries = options.maxRetries ?? 1;
+	if (options.adaptive === true) {
+		settings.fleet.adaptiveRouting = { roles: ["researcher"], postures: ["balanced"], agentRoles: [] };
+		// Active routing admits only routes a fresh probe proved; one local fact serves every model of each target.
+		const probedAt = new Date().toISOString();
+		recordFleetPreflight([
+			{
+				nodeId: "local",
+				host: "localhost",
+				projectRoot: process.cwd(),
+				ok: true,
+				checkedAt: probedAt,
+				localVersion: "test",
+				remoteVersion: null,
+				detail: null,
+				checks: { reachable: true, clioPresent: true, versionMatch: true, pathParity: true, stateDirWritable: true },
+				targets: targetIds.map((targetId) => ({
+					nodeId: "local",
+					targetId,
+					reachable: "true" as const,
+					runtimeCompatible: "true" as const,
+					modelAvailable: "true" as const,
+					modelResident: "unknown" as const,
+					endpointIdentityHash: endpointIdentityHash(undefined),
+					wireModelId: null,
+					probedAt,
+					probeDurationMs: 1,
+				})),
+				resources: null,
+			},
+		]);
+	}
 	const context = dispatchStubContext({ settings });
 	const providers = context.getContract("providers");
 	for (const status of providers?.list() ?? []) {
@@ -63,6 +133,7 @@ async function retryFleet(
 	const spawned: string[] = [];
 	const bundle = makeDispatchBundle(context, {
 		heartbeatIntervalMs: 3_600_000,
+		...(options.adaptive === true ? { routeObserver: readyRouteObserver() } : {}),
 		spawnWorker: (spec) => {
 			spawned.push(spec.target.id);
 			options.onSpawn?.(spec);
@@ -186,8 +257,8 @@ describe("retry target selection", () => {
 		}
 	});
 
-	it("moves an unpinned obligation retry sealed at failover none to another model, past a refused one", async () => {
-		// Tool admission stamps the resolved route and seals failover none on every unpinned request.
+	it("moves a free obligation retry sealed at failover none to another model, past a refused one; a sealed route stays", async () => {
+		// Tool admission stamps the resolved route and seals failover none on every request; only `routeFree` says it moved.
 		const models: string[] = [];
 		const fleet = await retryFleet(["default"], new Set(), new Set(), {
 			models: ["gpt-4o-mini", "gpt-4.1"],
@@ -199,30 +270,73 @@ describe("retry target selection", () => {
 		try {
 			const scope = declaredScopeIntent({ readRoots: ["src/"] });
 			ok(scope.ok);
-			const settle = async (pins: { target?: string }) => {
+			const settle = async (pins: { target?: string }, free: boolean) => {
+				models.length = 0;
 				const first = await fleet.bundle.contract.dispatch({
 					...REQUEST,
 					cwd: scratch.dir,
 					intent: scope.intent,
 					target: "default",
 					model: "gpt-4o",
+					node: "local",
 					failover: "none",
 					routingIntent: defaultRoutingIntent(pins),
+					...(free ? { routeFree: true as const } : {}),
 				});
 				await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
 				return fleet.bundle.contract.assignments?.get(first.runId);
 			};
-			const pinned = await settle({ target: "default" });
+			const stays =
+				"obligation observed-evidence unmet, not retried because the route is explicitly pinned to default/gpt-4o";
+			const pinned = await settle({ target: "default" }, false);
 			deepStrictEqual(models, ["gpt-4o"], "an explicit pin never moves");
-			strictEqual(
-				pinned?.outcomeDetail,
-				"obligation observed-evidence unmet, not retried because the route is explicitly pinned to default/gpt-4o",
-			);
-			models.length = 0;
-			await settle({});
+			strictEqual(pinned?.outcomeDetail, stays);
+			// An approved Scout continuation: balanced posture, sealed tuple, failover none, no envelope.
+			const sealed = await settle({}, false);
+			deepStrictEqual(models, ["gpt-4o"], "a plan-sealed route never moves");
+			strictEqual(sealed?.outcomeDetail, stays);
+			await settle({}, true);
 			deepStrictEqual(models, ["gpt-4o", "gpt-4o-mini", "gpt-4.1"], "one retry, on the next other model");
 		} finally {
 			await fleet.bundle.extension.stop?.();
+		}
+		// An authenticated approved envelope: admission refuses the first other-model candidate, the next takes the retry.
+		const approvedModels: string[] = [];
+		let refused = "";
+		const approved = await retryFleet(["default"], new Set(), new Set(), {
+			models: ["gpt-4o-mini", "gpt-4.1"],
+			adaptive: true,
+			onSpawn: (spec) => {
+				approvedModels.push(spec.wireModelId);
+				if (spec.wireModelId === refused) throw new Error(`${refused} refused the launch`);
+			},
+		});
+		try {
+			const scope = declaredScopeIntent({ readRoots: ["src/"] });
+			ok(scope.ok);
+			const request: DispatchRequest = {
+				...REQUEST,
+				cwd: scratch.dir,
+				intent: scope.intent,
+				failover: "approved",
+				routingIntent: defaultRoutingIntent({}),
+			};
+			const approval = approved.bundle.contract.preview?.(request).routeApproval ?? null;
+			ok(approval !== null, "the resolver approves an active envelope");
+			const envelope = approvedRouteCandidates(approval);
+			const failedModel = envelope[0]?.model;
+			const others = [...new Set(envelope.map((candidate) => candidate.model))].filter((model) => model !== failedModel);
+			strictEqual(others.length, 2, "two other models in the envelope");
+			refused = others[0] as string;
+			const first = await approved.bundle.contract.dispatch({
+				...request,
+				routeApproval: approval,
+				allowedCandidates: envelope,
+			});
+			await approved.bundle.contract.assignments?.get(first.runId)?.terminal;
+			deepStrictEqual(approvedModels, [failedModel, ...others], "one retry, past the refused candidate");
+		} finally {
+			await approved.bundle.extension.stop?.();
 		}
 	});
 

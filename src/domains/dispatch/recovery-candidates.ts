@@ -50,23 +50,6 @@ export function effectiveFailoverMode(req: {
 	return req.node !== undefined || req.target !== undefined ? "none" : "automatic";
 }
 
-/**
- * Whether the request names its route itself. Tool admission stamps the
- * resolved target, model and node, and seals failover none, on every request,
- * so those fields alone cannot tell an explicit pin from a route admission
- * chose. A pin always carries the manual posture, which admission seals into
- * the routing intent; a request without one names its pins directly.
- */
-export function explicitRoutePin(req: {
-	routingIntent?: { posture: string };
-	node?: string;
-	target?: string;
-	model?: string;
-}): boolean {
-	if (req.routingIntent !== undefined) return req.routingIntent.posture === "manual";
-	return req.node !== undefined || req.target !== undefined || req.model !== undefined;
-}
-
 export function approvedEnvelopeRejection(approval: ApprovedAssignmentRoute, candidate: RouteCandidate): string | null {
 	try {
 		assertApprovedRecoveryCapability(approval, candidate);

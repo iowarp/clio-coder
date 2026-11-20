@@ -475,7 +475,12 @@ import {
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
-import { firstAvailableRouteCandidate, ROUTE_CANDIDATE_LIMIT, type RouteAvailability } from "./route-candidates.js";
+import {
+	firstAvailableRouteCandidate,
+	ROUTE_CANDIDATE_LIMIT,
+	type RouteAvailability,
+	routeBoundaryRejections,
+} from "./route-candidates.js";
 import {
 	fixedRouteDecision,
 	type RouteDecisionV1,
@@ -5439,35 +5444,61 @@ export function createDispatchBundle(
 						};
 					}
 				} else {
+					const approval = run.req.routeApproval;
 					const settings = getEffectiveSettings();
-					let selected: DispatchRequest | null = null;
+					const approvedEnvelope = retryReq.allowedCandidates as DispatchFailoverCandidate[];
+					/** The retry before any selection, so a later candidate starts from the same request. */
+					const unselected: DispatchRequest = { ...retryReq };
 					let lastError: unknown;
-					for (const candidate of candidates) {
-						const bounded = {
-							...retryReq,
-							agentId: candidate.agentId,
-							target: candidate.target,
-							model: candidate.model,
-							node: candidate.node,
-							allowedCandidates: [candidate],
-						};
-						try {
-							const active = resolveJointRoute(jointRouteInput(bounded, undefined, settings, "active").input).decision;
-							assertApprovedRecoveryCapability(run.req.routeApproval, active.selected);
-							selected = applyActiveRouteSelection(bounded, active);
-							retryReq.routeAttemptDecision = active;
-							break;
-						} catch (error) {
-							lastError = error;
+					/** Apply the first candidate from `start` the active resolver and the approval admit; its index, or null. */
+					const selectFrom = (start: number): number | null => {
+						for (let index = start; index < candidates.length; index += 1) {
+							const candidate = candidates[index] as DispatchFailoverCandidate;
+							const bounded = {
+								...unselected,
+								agentId: candidate.agentId,
+								target: candidate.target,
+								model: candidate.model,
+								node: candidate.node,
+								allowedCandidates: [candidate],
+							};
+							try {
+								const active = resolveJointRoute(jointRouteInput(bounded, undefined, settings, "active").input).decision;
+								assertApprovedRecoveryCapability(approval, active.selected);
+								const selected = applyActiveRouteSelection(bounded, active);
+								for (const key of Object.keys(retryReq)) {
+									if (!Object.hasOwn(unselected, key)) Reflect.deleteProperty(retryReq, key);
+								}
+								Object.assign(retryReq, unselected);
+								retryReq.routeAttemptDecision = active;
+								Object.assign(retryReq, selected);
+								retryReq.allowedCandidates = approvedEnvelope;
+								return index;
+							} catch (error) {
+								lastError = error;
+							}
 						}
-					}
-					if (selected === null) {
+						return null;
+					};
+					let selectedIndex = selectFrom(0);
+					if (selectedIndex === null) {
 						const detail = lastError instanceof Error ? lastError.message : String(lastError);
 						throw new Error(`dispatch: approved recovery has no active-eligible route (${detail})`);
 					}
-					const approvedEnvelope = retryReq.allowedCandidates as DispatchFailoverCandidate[];
-					Object.assign(retryReq, selected);
-					retryReq.allowedCandidates = approvedEnvelope;
+					if (otherModelFallThrough) {
+						// Admission refused the selected candidate: the next other-model
+						// one in the envelope, with its own active decision, once each.
+						nextRoute = () => {
+							selectedIndex = selectedIndex === null ? null : selectFrom(selectedIndex + 1);
+							if (selectedIndex === null || retryReq.target === undefined || retryReq.model === undefined) return null;
+							return {
+								target: retryReq.target,
+								model: retryReq.model,
+								agentId: retryReq.agentId,
+								...(retryReq.node !== undefined ? { node: retryReq.node } : {}),
+							};
+						};
+					}
 				}
 				delete retryReq.plannedNode;
 			} else {
@@ -6036,11 +6067,13 @@ export function createDispatchBundle(
 
 	/**
 	 * Ruling 5 retries an unmet obligation once, and only on another model:
-	 * the routes that retry may run on, in order, or why there is none. An
-	 * explicit pin never moves. Admission seals failover none on every
-	 * unpinned request, and that default still lets the one retry move to
-	 * the first eligible route with a different wire model on any target. An
-	 * approved plan moves only inside its envelope, in envelope order.
+	 * the routes that retry may run on, in order, or why there is none. A
+	 * route the caller pinned, or a plan or approval sealed, never moves.
+	 * Admission seals failover none on every request, so only `routeFree`,
+	 * recorded before admission stamped the tuple, lets that default move the
+	 * one retry to the first eligible route with a different wire model on any
+	 * target. An approved plan moves only inside its envelope, in envelope
+	 * order.
 	 */
 	function planObligationRetry(
 		run: ActiveRun,
@@ -6052,7 +6085,7 @@ export function createDispatchBundle(
 		});
 		const failedRoute = `${run.targetId}/${run.wireModelId}`;
 		const mode = failoverModeFor(run.req);
-		if (mode === "none" && recovery.explicitRoutePin(run.req)) {
+		if (mode === "none" && run.req.routeFree !== true) {
 			return unmet(`the route is explicitly pinned to ${failedRoute}`);
 		}
 		const node = run.node?.id ?? "local";
@@ -11334,7 +11367,18 @@ export function createDispatchBundle(
 			},
 			envelopeRejection: (candidate) => {
 				if (req.lineage === undefined || req.routeApproval === undefined) return null;
-				return recovery.approvedEnvelopeRejection(req.routeApproval, candidate);
+				// This verdict replaces the boundary one, so it keeps an attempt narrowed to part of the approval inside that part.
+				const narrowed = routeBoundaryRejections(
+					req,
+					{
+						agentId: candidate.agentId,
+						targetId: candidate.targetId,
+						modelId: candidate.modelId,
+						nodeId: candidate.nodeId,
+					},
+					false,
+				)["approved-envelope"];
+				return narrowed ?? recovery.approvedEnvelopeRejection(req.routeApproval, candidate);
 			},
 		});
 		return { input, resolution };
