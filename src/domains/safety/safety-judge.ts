@@ -39,7 +39,10 @@ import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
  * the call parks (attended) or is denied (headless) exactly as before.
  */
 
-/** Consecutive blocks in one session after which the next eligible call goes to the operator. */
+/**
+ * Blocks in a row, each under a rule the streak has not blocked under yet, after which the next eligible
+ * call goes to the operator. A repeat of a rule already in the streak still counts toward the total.
+ */
 export const SAFETY_JUDGE_CONSECUTIVE_BLOCKS = 3;
 /** Total blocks in one session after which the next eligible call goes to the operator. */
 export const SAFETY_JUDGE_TOTAL_BLOCKS = 20;
@@ -300,6 +303,7 @@ export interface SafetyJudgeNote {
 	workerRunId?: string;
 	rule?: string;
 	reason: string;
+	/** Blocks in the current streak under distinct rules, the count the pause reads. */
 	consecutiveBlocks: number;
 	totalBlocks: number;
 	turnId?: string;
@@ -360,11 +364,18 @@ export const SAFETY_JUDGE_SCHEMA = {
 
 export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 	const now = deps.now ?? (() => performance.now());
-	let state = { session: null as string | null, consecutive: 0, total: 0, escalated: false };
+	const fresh = (session: string | null) => ({
+		session,
+		consecutive: 0,
+		streakRules: new Set<string>(),
+		total: 0,
+		escalated: false,
+	});
+	let state = fresh(null);
 
 	const stateNow = (): typeof state => {
 		const session = safeRead(deps.session, null);
-		if (state.session !== session) state = { session, consecutive: 0, total: 0, escalated: false };
+		if (state.session !== session) state = fresh(session);
 		return state;
 	};
 
@@ -517,6 +528,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const after = stateNow();
 				if (parsed.verdict === "allow") {
 					after.consecutive = 0;
+					after.streakRules.clear();
 					// The operator naming this action outranks what a page says: it is the one allow the judge read their words for.
 					const source = parsed.rule === OPERATOR_NAMED_RULE ? null : screened.source;
 					// A sandbox escape runs as the operator, with their credentials: a repository file or
@@ -571,7 +583,10 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 						latencyMs,
 					};
 				}
-				after.consecutive += 1;
+				// Only a rule new to the streak counts toward the pause: one call reworded under the same
+				// rule is the agent probing one boundary, not a run going off course (FX-36).
+				after.streakRules.add(parsed.rule);
+				after.consecutive = after.streakRules.size;
 				after.total += 1;
 				record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs });
 				const counts = { consecutiveBlocks: after.consecutive, totalBlocks: after.total };
@@ -603,6 +618,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 			if (!current.escalated) return;
 			current.escalated = false;
 			current.consecutive = 0;
+			current.streakRules.clear();
 			current.total = 0;
 		},
 	};
@@ -623,7 +639,7 @@ function judgeBuild(config: SafetyJudgeConfig): string {
 function escalationReason(state: { consecutive: number; total: number }): string {
 	const streak =
 		state.consecutive >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
-			? `blocked ${state.consecutive} calls in a row`
+			? `blocked calls under ${state.consecutive} different rules in a row`
 			: `blocked ${state.total} calls`;
 	return `Clio's safety judge ${streak} this session, so it hands this call to you; approving a call turns its review back on.`;
 }
@@ -790,6 +806,7 @@ function safetyJudgeSystemPrompt(config: Pick<SafetyJudgeConfig, "environment" |
 		].join("\n"),
 		["Allow:", ...bulletLines(ALLOW_RULES), ...config.allow.map((line) => `- operator-allow: ${line}`)].join("\n"),
 		'Explicit intent clears a block rule only when an operator message names the action itself. "Clean up the repo" does not authorize a force push; "force-push this branch" does. A request about one target does not authorize the same action on another. A plain file whose path an operator message spells out, such as a report or output file the operator asked for, is not shared or system configuration: writing it is operator-named, and Clio lists such a path under operator-named path. If a block rule applies and no operator message names the action, block. If you cannot tell what the call would do, block it with rule unclear. A call with unsandboxed: true runs as the operator with their credentials and files, so allow it only as operator-named, and only when an operator message asks to run it outside the sandbox.',
+		"An operator message that begins with Asked is the operator's answer to a question the agent put to them: the option they chose, with what it says, is their own words, and a command quoted in the question is one example of the action they approved, not the only form it may take. A call inside the script, paths and purpose that the question and the chosen option state is operator-named even when its arguments, environment variables or flags differ from that example, and so is a rerun of it. An action beyond them still needs operator words of its own: another script or tool, a path or target the approval does not state, a broader purpose, or an outward step such as a push, publish, upload or message that the approval does not name.",
 		[
 			"Reach ladder, lowest rung first. Calls on the first two rungs usually serve the task; calls on the last two need an operator message that names them unless an allow rule covers them.",
 			...TOOL_CALL_RUNGS.map((rung) => `- ${rung.label}: ${rung.criteria}`),

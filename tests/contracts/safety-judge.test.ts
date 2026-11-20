@@ -389,9 +389,12 @@ test("operator-only asks bypass the judge", async () => {
 	);
 });
 
-test("three consecutive blocks hand the next call to the operator until an approval", async () => {
-	const { registry, parks, prompts, ran } = judgedRegistry(() => answer("block", "remote-code", "Not asked for."));
+test("blocks under three different rules in a row hand the next call to the operator until an approval", async () => {
+	const rules = ["remote-code", "publish", "unclear"];
+	let rule = "";
+	const { registry, parks, prompts, ran } = judgedRegistry(() => answer("block", rule, "Not asked for."));
 	for (const index of [1, 2, 3]) {
+		rule = rules[index - 1] ?? "";
 		const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command: `${UNRECOGNIZED} ${index}` } });
 		strictEqual(verdict.kind, "blocked");
 		if (index === 3 && verdict.kind === "blocked")
@@ -402,7 +405,10 @@ test("three consecutive blocks hand the next call to the operator until an appro
 	await new Promise((resolve) => setImmediate(resolve));
 	strictEqual(prompts.length, 3);
 	strictEqual(parks.length, 1);
-	match(parks[0]?.meta.gateReason ?? "", /blocked 3 calls in a row this session, so it hands this call to you/u);
+	match(
+		parks[0]?.meta.gateReason ?? "",
+		/blocked calls under 3 different rules in a row this session, so it hands this call to you/u,
+	);
 	await registry.resumeParkedCalls({
 		actionClass: "execute",
 		requestId: parks[0]?.meta.requestId ?? "",
@@ -413,6 +419,18 @@ test("three consecutive blocks hand the next call to the operator until an appro
 	// The operator's approval turned review back on.
 	await registry.invoke({ tool: ToolNames.Bash, args: { command: `${UNRECOGNIZED} 5` } });
 	strictEqual(prompts.length, 4);
+});
+
+// Variants of one call refused under one rule are one boundary probed, not a run gone off course (FX-36).
+test("blocks that repeat a rule already in the streak never pause review", async () => {
+	const { registry, parks, prompts } = judgedRegistry(() => answer("block", "unclear", "Not the approved command."));
+	for (const index of [1, 2, 3, 4]) {
+		const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command: `PROMPT=${index} ${UNRECOGNIZED}` } });
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind === "blocked") doesNotMatch(verdict.reason, /goes to the operator/u);
+	}
+	strictEqual(prompts.length, 4);
+	strictEqual(parks.length, 0);
 });
 
 test("the judge reads the operator's messages and the call, never assistant text or tool results", async () => {
@@ -564,11 +582,13 @@ test("the judge reads typed messages and ask_user answers in ledger order, so th
 		appendEntry: (input: unknown) => input,
 	} as unknown as SessionContract;
 	const prompts: string[] = [];
+	const systems: string[] = [];
 	const seat = createSafetyJudgeHost({
 		settings: () =>
 			({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "local", model: "m" } }) as ClioSettings,
 		complete: async (request) => {
 			prompts.push(request.user);
+			systems.push(request.system);
 			return { text: answer("allow", "operator-named", "Asked for.") };
 		},
 		session: () => session,
@@ -606,6 +626,46 @@ test("the judge reads typed messages and ask_user answers in ledger order, so th
 		prompts[1] ?? "",
 		/Message 2 of 2 \(newest\):\nAsked "Append with an unsandboxed shell command\?", the operator answered: No, leave it/u,
 	);
+
+	// An approval is a scope: the chosen option's own words reach the judge beside the question's command,
+	// a gateway call included, and the judge is told a variant inside them is operator-named (FX-36).
+	const asked = "Run the live check unsandboxed? Command: bash scripts/live/resume.sh";
+	const options = [
+		{
+			label: "Yes, run resume.sh unsandboxed",
+			description: "Runs scripts/live/resume.sh and its reruns under $TMPDIR/live",
+		},
+		{ label: "No", description: "Skip the live check" },
+	];
+	entries = [
+		entry("u1", null, "user", { text: "Prove it with the live resume check." }),
+		entry("c1", "u1", "tool_call", {
+			toolCallId: "k1",
+			name: ToolNames.Gateway,
+			args: { op: "call", capability: ToolNames.AskUser, args: { questions: [{ question: asked, options }] } },
+		}),
+		entry("r1", "c1", "tool_result", {
+			toolCallId: "k1",
+			toolName: ToolNames.Gateway,
+			isError: false,
+			result: {
+				details: {
+					capability: ToolNames.AskUser,
+					answers: [
+						{ question: asked, answer: "Yes, run resume.sh unsandboxed", options: ["Yes, run resume.sh unsandboxed"] },
+					],
+				},
+			},
+		}),
+	];
+	await review("r1");
+	match(
+		prompts[2] ?? "",
+		/the operator answered: Yes, run resume\.sh unsandboxed\nThe option "Yes, run resume\.sh unsandboxed" says: Runs scripts\/live\/resume\.sh and its reruns under \$TMPDIR\/live/u,
+	);
+	doesNotMatch(prompts[2] ?? "", /Skip the live check/u);
+	match(systems[2] ?? "", /a command quoted in the question is one example of the action they approved/u);
+	match(systems[2] ?? "", /an outward step such as a push, publish, upload or message that the approval does not name/u);
 });
 
 test("safety.judge parses from user settings and a project layer cannot set its rules", async (t) => {

@@ -41,7 +41,7 @@ export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
  * prompt, follow-up and observation, and a yolo continuation are skipped, and
  * injected reminders and expansions are stripped by `operatorTextOfUserPayload`.
  * And what the operator answered on an ask_user round, a gateway call or chain
- * step included (`operatorAnswersOfToolResult`). Assistant messages, thinking and
+ * step included, with what the options they chose say (`operatorAnswersOfToolResult`). Assistant messages, thinking and
  * every other tool result never reach the judge.
  *
  * `currentTurnId` is the turn the judged call serves, from the chat loop's
@@ -59,41 +59,83 @@ export function operatorMessagesForJudge(
 	const holds = (rows: ReadonlyArray<SessionEntry>) =>
 		findLastEntry(rows, (entry) => entry.turnId === currentTurnId) !== undefined;
 	if (currentTurnId !== undefined && !holds(path) && holds(entries)) path = activePath(entries, currentTurnId);
-	if (!Object.isFrozen(entries)) return operatorTextsOf(path);
+	if (!Object.isFrozen(entries)) return operatorTextsOf(path, new Map()).texts;
 	const prior = judgeFold;
-	let texts: string[];
-	if (prior?.path === path) texts = prior.texts;
-	else if (prior !== null && extendsSnapshot(prior.path, path))
-		texts = prior.texts.concat(operatorTextsOf(path.slice(prior.path.length)));
-	else texts = operatorTextsOf(path);
-	judgeFold = { path, texts };
-	return [...texts];
+	let fold: JudgeFold;
+	if (prior?.path === path) fold = prior;
+	else if (prior !== null && extendsSnapshot(prior.path, path)) {
+		const more = operatorTextsOf(path.slice(prior.path.length), new Map(prior.asked));
+		fold = { path, texts: prior.texts.concat(more.texts), asked: more.asked };
+	} else fold = { path, ...operatorTextsOf(path, new Map()) };
+	judgeFold = fold;
+	return [...fold.texts];
+}
+
+/** The questions each ask_user call put, by call id, so its answer reads with the option text the operator chose. */
+type AskedQuestions = Map<string, ReadonlyArray<unknown>>;
+
+interface JudgeFold {
+	path: ReadonlyArray<SessionEntry>;
+	texts: string[];
+	asked: AskedQuestions;
 }
 
 /**
  * The last fold, so a judged call on a path that only grew reads just the
- * appended entries. Each entry contributes on its own, so the fold of a path
- * is the fold of its prefix followed by the fold of the rest.
+ * appended entries. Each entry contributes on its own, given the questions
+ * asked before it, so the fold of a path is the fold of its prefix followed by
+ * the fold of the rest.
  */
-let judgeFold: { path: ReadonlyArray<SessionEntry>; texts: string[] } | null = null;
+let judgeFold: JudgeFold | null = null;
 
-function operatorTextsOf(path: ReadonlyArray<SessionEntry>): string[] {
+function operatorTextsOf(
+	path: ReadonlyArray<SessionEntry>,
+	asked: AskedQuestions,
+): { texts: string[]; asked: AskedQuestions } {
 	const texts: string[] = [];
 	for (const entry of expandChainMessages(path)) {
 		if (entry.kind !== "message") continue;
+		if (entry.role === "tool_call") {
+			rememberAskedQuestions(entry.payload, asked);
+			continue;
+		}
 		if (entry.role === "tool_result") {
-			texts.push(...operatorAnswersOfToolResult(entry.payload));
+			texts.push(...operatorAnswersOfToolResult(entry.payload, asked));
 			continue;
 		}
 		if (entry.role !== "user" || !isOperatorTypedUserPayload(entry.payload)) continue;
 		const text = operatorTextOfUserPayload(entry.payload);
 		if (text !== null && text.trim().length > 0) texts.push(text);
 	}
-	return texts;
+	return { texts, asked };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function rememberAskedQuestions(payload: unknown, asked: AskedQuestions): void {
+	if (!isRecord(payload) || typeof payload.toolCallId !== "string" || typeof payload.name !== "string") return;
+	const call = effectiveToolCall(payload.name, payload.args);
+	if (call.toolName === ToolNames.AskUser && Array.isArray(call.args?.questions))
+		asked.set(payload.toolCallId, call.args.questions);
+}
+
+/**
+ * What the options the operator chose say, as the call that asked put them. The
+ * operator read these words on the card, so an approval carries the script, paths
+ * and purpose its option states, not only the label (FX-36).
+ */
+function chosenOptionText(questions: ReadonlyArray<unknown> | undefined, question: string, chosen: unknown): string {
+	if (questions === undefined || !Array.isArray(chosen)) return "";
+	const asked = questions.find((entry) => isRecord(entry) && entry.question === question);
+	if (!isRecord(asked) || !Array.isArray(asked.options)) return "";
+	const said = chosen.flatMap((label) => {
+		const option = (asked.options as unknown[]).find((entry) => isRecord(entry) && entry.label === label);
+		if (!isRecord(option) || typeof option.description !== "string" || option.description.trim().length === 0) return [];
+		return [`The option "${String(label)}" says: ${option.description.trim()}`];
+	});
+	return said.length === 0 ? "" : `\n${said.join("\n")}`;
 }
 
 /**
@@ -101,17 +143,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * answered for an absent operator (#421), a cancelled round and an answer Clio
  * picked (`auto`) are no operator's word, as the registry's own reading holds.
  */
-function operatorAnswersOfToolResult(payload: unknown): string[] {
+function operatorAnswersOfToolResult(payload: unknown, asked: AskedQuestions): string[] {
 	if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.isError === true) return [];
 	const details = isRecord(payload.result) && isRecord(payload.result.details) ? payload.result.details : undefined;
 	if (details === undefined || effectiveToolCall(payload.toolName, undefined, details).toolName !== ToolNames.AskUser)
 		return [];
 	if (details.unattended !== undefined || details.cancelled === true || !Array.isArray(details.answers)) return [];
+	const questions = typeof payload.toolCallId === "string" ? asked.get(payload.toolCallId) : undefined;
 	return details.answers.flatMap((raw: unknown) => {
 		if (!isRecord(raw) || raw.auto === true) return [];
 		const { question, answer } = raw;
 		if (typeof question !== "string" || typeof answer !== "string" || answer.trim().length === 0) return [];
-		return [`Asked "${question}", the operator answered: ${answer}`];
+		return [`Asked "${question}", the operator answered: ${answer}${chosenOptionText(questions, question, raw.options)}`];
 	});
 }
 
