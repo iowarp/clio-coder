@@ -233,6 +233,22 @@ export function readRunEnds(stateDir = clioStateDir()): ReadonlyMap<string, numb
 	return ends;
 }
 
+/**
+ * When the runs that used each worker context seed ended, keyed by the seed's content hash: the latest end, or null
+ * while any of them has not ended. A seed no ledger run names is unknown. Throws like readRunEnds (FL-8).
+ */
+export function readContextSeedEnds(stateDir = clioStateDir()): ReadonlyMap<string, number | null> {
+	const ends = new Map<string, number | null>();
+	for (const run of readRuns(join(stateDir, "runs.json"))) {
+		const hash = run.workerContext?.contentHash;
+		if (typeof hash !== "string" || ends.get(hash) === null) continue;
+		const end = run.endedAt === null ? Number.NaN : Date.parse(run.endedAt);
+		const prior = ends.get(hash);
+		ends.set(hash, Number.isFinite(end) ? Math.max(end, prior ?? end) : null);
+	}
+	return ends;
+}
+
 function resolveMaxRuns(opt?: number | undefined): number {
 	if (opt !== undefined && opt > 0) return Math.floor(opt);
 	return resolveGuardrail("maxDispatchRuns");
