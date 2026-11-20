@@ -883,7 +883,7 @@ function mayRunUnnamedFile(command: string): boolean {
  * may run unnamed ({@link shellRunnableOutput}, {@link mayRunUnnamedFile}).
  */
 function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): boolean {
-	if (/\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(command)) return true;
+	if (mayRedefineHeredocCopier(command)) return true;
 	if (outputs.some(shellRunnableOutput) && mayRunUnnamedFile(command)) return true;
 	const text = command.toLowerCase();
 	const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
@@ -894,6 +894,11 @@ function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): 
 		if (count(text, name) > written) return true;
 	}
 	return false;
+}
+
+/** A function, alias or PATH change in the command, bodies removed, may make `cat` or `tee` something that runs its input. */
+function mayRedefineHeredocCopier(command: string): boolean {
+	return /\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(command);
 }
 
 /** More here-documents than this in one command are left in place. */
@@ -911,15 +916,16 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
 }
 
 /**
- * The command without its here-document bodies when every one is quoted data that `cat` or `tee` copies into a file no
- * later step may run, as {@link extractCommandPathWalks} reads it; otherwise the command as written. Such a body is never
- * commands, so its lines separate nothing (SF-5).
+ * The command without its here-document bodies when every one is quoted data that `cat` or `tee` copies into a file and
+ * nothing may redefine that copier; otherwise the command as written. Such a body is never this shell's command lines,
+ * so its lines separate nothing (SF-5), even when a later step runs the file it wrote (`cat > t.test.mjs <<'EOF' && node
+ * --test t.test.mjs`, SF-6): that step's status is its own, as for any file it runs.
  */
 export function withoutDataHeredocBodies(command: string): string {
 	const { text, dataOutputs } = removeHeredocBodies(command, false);
 	if (text === command || dataOutputs === null) return command;
 	if (scanShellLike(text).some((token) => token.operator && token.value === "<<")) return command;
-	return mayRunHeredocOutputs(text, dataOutputs) ? command : text;
+	return mayRedefineHeredocCopier(text) ? command : text;
 }
 
 /**
