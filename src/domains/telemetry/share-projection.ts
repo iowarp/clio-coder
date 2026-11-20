@@ -1060,13 +1060,12 @@ const REPORT_FIELDS: Readonly<Record<string, AnonKind>> = {
 };
 
 /**
- * Under `report` a record's context keeps the scope ids, which the archive names its scopes by, and the agent, which
- * is named by its scope; other ids go through `id`, so a provider's tool call id becomes anonymous. A System One agent
- * is named by its engine, a target name, so {@link projectSharedContext} makes it a `name` id (R2-safety-secrets-12).
+ * Under `report` session and process ids stay readable; run ids go through `id`, matching their archive scopes.
+ * {@link projectSharedContext} also projects agents named by a run and System One agents named by their engine.
  */
 const REPORT_CONTEXT = {
 	sessionId: "keep",
-	runId: "keep",
+	runId: "id",
 	processId: "keep",
 	turnId: "id",
 	batchId: "id",
@@ -1149,8 +1148,16 @@ export function projectSharedContext<C>(
 	tally?: ProjectionTally,
 ): C {
 	if (projection.context === undefined) return ctx;
-	const role = (ctx as { agent?: { role?: unknown } } | null)?.agent?.role;
+	const context = ctx as { runId?: string; agent?: { role?: string; id?: string } } | null;
+	const role = context?.agent?.role;
+	// Workers can also be the actor on another scope's approval record, with a different or absent ctx.runId.
+	const agentKind =
+		role === "system-one"
+			? "name"
+			: role === "worker" || (context?.runId !== undefined && context.agent?.id === context.runId)
+				? "id"
+				: null;
 	const table =
-		role === "system-one" ? { ...projection.context, agent: { role: "keep", id: "name" } as const } : projection.context;
+		agentKind === null ? projection.context : { ...projection.context, agent: { role: "keep", id: agentKind } as const };
 	return projectField(ctx, table, anonymize, tally) as C;
 }

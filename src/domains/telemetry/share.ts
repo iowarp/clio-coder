@@ -718,8 +718,10 @@ function filterScope(
 			: (JSON.parse(JSON.stringify(line), (_key, value: unknown) =>
 					typeof value === "string" ? (renamed.get(value) ?? value) : value,
 				) as SegmentHeader | TelemetryRecord);
+	// The seal, archive path and manifest must all use the same id as the projected records and links.
+	const id = profile === "report" && source.kind === "run" ? anonymize("id", source.id) : source.id;
 	const { journal, bundle, head } = sealSharedScope({
-		scope: { kind: source.kind, id: source.id },
+		scope: { kind: source.kind, id },
 		lines: kept.map(rewrite),
 		objects,
 		profile,
@@ -760,7 +762,7 @@ function filterScope(
 		}
 	return {
 		kind: source.kind,
-		id: source.id,
+		id,
 		profile,
 		...(source.snapshot ? { snapshotAt: source.sealedAt } : {}),
 		journal,
