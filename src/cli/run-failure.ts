@@ -71,6 +71,11 @@ const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
 	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
 	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
+	// SPEC 6.2, 6.3: the task envelope's refusals (src/cli/task-envelope.ts).
+	[/--task-file carries the task and its attachments/u, "task_file_conflict"],
+	[/^clio-coder run: task file key \S+ is also given as /u, "task_flag_conflict"],
+	[/^clio-coder run: task file carries .*pass --trust-task-file/u, "task_authority"],
+	[/^clio-coder run: task file output\.schema: /u, "schema_unsupported"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
 	// SPEC 6.8: a schema `--output-schema` cannot enforce, refused before any model call.
 	[/^clio-coder run: --output-schema: /u, "schema_unsupported"],

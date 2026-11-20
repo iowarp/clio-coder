@@ -81,6 +81,7 @@
 		"tests/fixtures/decision-cases/worker-prepare.json",
 		"tests/fixtures/decision-cases/tool-calls.json",
 		"models/**",
+		"schemas/*.json",
 		"library/**",
 		".claude-plugin/marketplace.json",
 		"docs/**/*.md",

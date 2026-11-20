@@ -1,0 +1,143 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:clio-coder:schema:help:1",
+	"title": "clio-coder help --json manifest",
+	"description": "One compact document: every canonical leaf path with its metadata, the root flags, the closed set of error slugs (C17) and the exit codes (6.5). An entry with source \"usage\" has positionals, flags and effects derived from its synopsis; source \"spec\" is curated. Source of truth: src/cli/help-command.ts and src/cli/specs/.",
+	"type": "object",
+	"required": ["version", "schema", "leaves", "rootFlags", "errorSlugs", "exitCodes", "schemas"],
+	"properties": {
+		"version": { "const": 1 },
+		"schema": { "const": "help" },
+		"leaves": { "type": "array", "items": { "$ref": "#/$defs/leaf" } },
+		"rootFlags": {
+			"type": "array",
+			"items": {
+				"allOf": [{ "$ref": "#/$defs/flag" }],
+				"properties": {
+					"placement": { "enum": ["root", "both"] },
+					"persistence": { "enum": ["ephemeral", "persisted"] },
+					"appliesTo": { "type": "array", "items": { "type": "string" } }
+				}
+			}
+		},
+		"errorSlugs": {
+			"type": "array",
+			"items": {
+				"enum": [
+					"usage",
+					"unknown_command",
+					"unknown_flag",
+					"flag_conflict",
+					"empty_task",
+					"task_file_conflict",
+					"task_flag_conflict",
+					"task_authority",
+					"schema_unsupported",
+					"not_found",
+					"ambiguous",
+					"confirmation_required",
+					"declined",
+					"session_live",
+					"session_has_children",
+					"not_configured",
+					"admission_refused",
+					"unsupported_on_route",
+					"busy",
+					"io"
+				]
+			}
+		},
+		"exitCodes": { "type": "object", "additionalProperties": { "type": "integer" } },
+		"schemas": { "type": "array", "items": { "type": "string" } }
+	},
+	"$defs": {
+		"flag": {
+			"type": "object",
+			"required": ["name", "value"],
+			"properties": {
+				"name": { "type": "string", "pattern": "^--?[a-z]" },
+				"aliases": { "type": "array", "items": { "type": "string" } },
+				"value": {
+					"oneOf": [
+						{ "enum": ["boolean", "string", "number", "duration", "path"] },
+						{ "type": "array", "items": { "type": "string" }, "description": "one of these values" }
+					]
+				},
+				"repeatable": { "type": "boolean" },
+				"placement": { "enum": ["leaf", "both", "root"] },
+				"appliesTo": {},
+				"conflicts": { "type": "array", "items": { "type": "string" } },
+				"deprecated": { "type": "string" }
+			}
+		},
+		"leaf": {
+			"type": "object",
+			"required": [
+				"path",
+				"aliases",
+				"hidden",
+				"kind",
+				"summary",
+				"positionals",
+				"stdin",
+				"flags",
+				"effects",
+				"outputs",
+				"exit",
+				"longRunning",
+				"successMeans",
+				"source"
+			],
+			"properties": {
+				"path": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+				"aliases": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+				"hidden": { "type": "boolean" },
+				"kind": { "enum": ["leaf", "group"] },
+				"defaultAction": { "type": "boolean", "description": "C2: a bare group that runs a read." },
+				"exempt": { "type": "string", "description": "C1: a private wire entry that need not answer --help." },
+				"summary": { "type": "string" },
+				"usage": { "type": "string" },
+				"positionals": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["name", "required", "variadic"],
+						"properties": {
+							"name": { "type": "string" },
+							"required": { "type": "boolean" },
+							"variadic": { "type": "boolean" }
+						}
+					}
+				},
+				"stdin": { "enum": ["none", "task", "secret", "data"] },
+				"flags": { "type": "array", "items": { "$ref": "#/$defs/flag" } },
+				"effects": {
+					"type": "array",
+					"items": { "enum": ["read", "write-local", "network", "model", "destructive"] }
+				},
+				"outputs": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["format"],
+						"properties": {
+							"format": { "enum": ["text", "json", "stream-json"] },
+							"schema": { "type": "string" }
+						}
+					}
+				},
+				"exit": {
+					"type": "object",
+					"required": ["codes"],
+					"properties": {
+						"codes": { "type": "array", "items": { "type": "integer" } },
+						"exitCodeMap": { "type": "object", "additionalProperties": { "type": "integer" } }
+					}
+				},
+				"longRunning": { "type": "boolean" },
+				"successMeans": { "enum": ["completed", "accepted", "allChildrenPassed"] },
+				"source": { "enum": ["spec", "usage"] }
+			}
+		}
+	}
+}

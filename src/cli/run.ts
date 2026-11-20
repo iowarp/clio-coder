@@ -44,7 +44,7 @@ import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
-import { parseRunCliArgs, type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
+import { type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
@@ -65,6 +65,7 @@ import {
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
 import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
+import { parseRunArgsWithTaskFile } from "./task-envelope.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 /**
@@ -239,7 +240,11 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		process.stderr.write(USAGE);
 		return 2;
 	}
-	const stdinContent = await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0, parsed.stdin === true);
+	const stdinContent =
+		// SPEC 6.2: a --task-file run never reads stdin for task text; the envelope carries the task.
+		parsed.taskFile !== undefined
+			? undefined
+			: await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0, parsed.stdin === true);
 	// Boot has not armed the termination coordinator yet, so without this listener
 	// SIGINT killed the process by default while a PDF extraction ran on.
 	const interrupt = new AbortController();
@@ -380,7 +385,7 @@ export async function runClioRun(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
-	const parsed = parseRunCliArgs(args);
+	const parsed = await parseRunArgsWithTaskFile(args);
 	const coordinator = getTerminationCoordinator();
 	handleRunStdoutErrors((code) => coordinator.shutdown(code));
 	// Nobody attends a headless run, so its commits are autonomous (integrations.git.commitAuthor).
@@ -577,7 +582,11 @@ async function executeRunCommand(
 				if (structured !== undefined && parsed.outputSchema !== undefined) {
 					const loaded = await structured.loadOutputSchema(parsed.outputSchema);
 					if (!loaded.ok) {
-						writeRunDiagnostic(`${structured.OUTPUT_SCHEMA_REFUSAL_PREFIX}${loaded.reason}\n`);
+						const prefix =
+							typeof parsed.outputSchema === "string"
+								? structured.OUTPUT_SCHEMA_REFUSAL_PREFIX
+								: `clio-coder run: task file ${parsed.outputSchema.label}: `;
+						writeRunDiagnostic(`${prefix}${loaded.reason}\n`);
 						return 2;
 					}
 					outputSchema = loaded.schema;

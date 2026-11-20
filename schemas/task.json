@@ -1,0 +1,127 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:clio-coder:schema:task:1",
+	"title": "clio-coder run task envelope",
+	"description": "`run --task-file <path|->`. Every key except schemaVersion and task is optional and mirrors one run flag; a key also given as a flag is exit 2 task_flag_conflict, an unknown key or another schemaVersion is exit 2. `verify`, `permissions.autonomy: \"yolo\"` and `cwd` widen what the host does and need --trust-task-file (else exit 2 task_authority). null is the same as absent. Source of truth: src/cli/task-envelope.ts.",
+	"type": "object",
+	"required": ["schemaVersion", "task"],
+	"additionalProperties": false,
+	"properties": {
+		"schemaVersion": { "const": 1 },
+		"task": { "type": "string", "minLength": 1, "description": "The task text; blank is exit 2 empty_task." },
+		"attachments": {
+			"type": ["array", "null"],
+			"description": "Each path is an @file attachment, resolved in the run directory.",
+			"items": {
+				"type": "object",
+				"required": ["path"],
+				"additionalProperties": false,
+				"properties": { "path": { "type": "string", "minLength": 1 } }
+			}
+		},
+		"cwd": { "type": ["string", "null"], "description": "--cwd; needs --trust-task-file." },
+		"route": {
+			"type": ["object", "null"],
+			"additionalProperties": false,
+			"properties": {
+				"target": { "type": ["string", "null"], "description": "--target" },
+				"model": { "type": ["string", "null"], "description": "--model" },
+				"thinking": { "type": ["string", "null"], "description": "--thinking" },
+				"sampling": {
+					"type": ["object", "null"],
+					"additionalProperties": false,
+					"properties": {
+						"temperature": { "type": ["number", "null"] },
+						"topP": { "type": ["number", "null"] },
+						"topK": { "type": ["number", "null"] },
+						"minP": { "type": ["number", "null"] },
+						"presencePenalty": { "type": ["number", "null"] },
+						"frequencyPenalty": { "type": ["number", "null"] },
+						"repeatPenalty": { "type": ["number", "null"] }
+					}
+				}
+			}
+		},
+		"session": {
+			"type": ["object", "null"],
+			"additionalProperties": false,
+			"properties": {
+				"resume": { "type": ["string", "null"], "description": "--resume" },
+				"continue": { "type": ["boolean", "null"], "description": "--continue" },
+				"fork": { "type": ["boolean", "null"], "description": "--fork" },
+				"name": { "type": ["string", "null"], "description": "--name" }
+			}
+		},
+		"permissions": {
+			"type": ["object", "null"],
+			"additionalProperties": false,
+			"properties": {
+				"autonomy": { "enum": ["default", "yolo", null], "description": "--autonomy; yolo needs --trust-task-file." },
+				"readOnly": { "type": ["boolean", "null"], "description": "--read-only" },
+				"allowTools": {
+					"type": ["array", "null"],
+					"items": { "type": "string" },
+					"description": "--allow-tools; [] is none"
+				},
+				"denyTools": { "type": ["array", "null"], "items": { "type": "string" }, "description": "--deny-tools" },
+				"delegateTools": {
+					"type": ["array", "null"],
+					"items": { "type": "string" },
+					"description": "--delegate-tools; [] is none"
+				},
+				"delegate": { "type": ["boolean", "null"], "description": "false is --no-delegate" },
+				"onPermission": { "enum": ["deny", "fail", null], "description": "--on-permission" },
+				"sandbox": { "enum": ["required", null], "description": "--sandbox required" }
+			}
+		},
+		"limits": {
+			"type": ["object", "null"],
+			"additionalProperties": false,
+			"properties": {
+				"timeout": { "type": ["string", "number", "null"], "description": "--timeout; a bare number is seconds" },
+				"maxCostUsd": { "type": ["number", "null"], "description": "--max-cost-usd" },
+				"maxRequests": { "type": ["integer", "null"], "description": "--max-requests" },
+				"maxToolCalls": { "type": ["integer", "null"], "description": "--max-tool-calls" },
+				"maxContextTokens": { "type": ["string", "number", "null"], "description": "--max-context-tokens" },
+				"requirePriced": { "type": ["boolean", "null"], "description": "--require-priced" }
+			}
+		},
+		"mode": { "enum": ["answer", "proposal", "change", null], "description": "--turn-mode" },
+		"verify": {
+			"type": ["array", "null"],
+			"description": "--verify, run by the host outside the agent's permissions and sandbox; needs --trust-task-file. Every check shares one timeout (--verify-timeout) in this release.",
+			"items": {
+				"type": "object",
+				"required": ["command"],
+				"additionalProperties": false,
+				"properties": {
+					"command": { "type": "string", "minLength": 1 },
+					"timeout": { "type": ["string", "number", "null"] }
+				}
+			}
+		},
+		"failOnVerify": { "type": ["boolean", "null"], "description": "--fail-on-verify" },
+		"failOnNoop": { "type": ["boolean", "null"], "description": "--fail-on-noop" },
+		"answers": {
+			"type": ["string", "null"],
+			"description": "--answers: the path of an answers file, resolved in the run directory. Inline answers are not read in this release."
+		},
+		"output": {
+			"type": ["object", "null"],
+			"additionalProperties": false,
+			"properties": {
+				"format": { "enum": ["text", "json", "stream-json", null], "description": "--output-format" },
+				"schema": {
+					"type": ["object", "null"],
+					"description": "--output-schema, inline: root type object, $ref only to #/$defs/, at most 64 KiB serialized; else exit 2 schema_unsupported."
+				},
+				"lastMessage": { "type": ["string", "null"], "description": "--output-last-message" }
+			}
+		},
+		"agent": { "type": ["string", "null"], "description": "--agent" },
+		"systemone": { "type": ["string", "null"], "description": "--systemone" },
+		"steerChannel": { "type": ["string", "null"], "description": "--steer-channel" },
+		"skills": { "type": ["array", "null"], "items": { "type": "string" }, "description": "--skill, in order" },
+		"noSkills": { "type": ["boolean", "null"], "description": "--no-skills" }
+	}
+}

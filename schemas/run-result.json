@@ -1,0 +1,214 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:clio-coder:schema:run-result:2",
+	"title": "clio-coder run result (schema v2)",
+	"description": "The one document `run --output-format json` prints, and the last line (`run_end`) of `run --output-format stream-json`. Source of truth: RunResultEnvelopeV2 in src/cli/modes/run-json-schema-v2.ts.",
+	"type": "object",
+	"required": [
+		"type",
+		"schemaVersion",
+		"mode",
+		"pid",
+		"cwd",
+		"clioCoderVersion",
+		"startedAt",
+		"endedAt",
+		"durationMs",
+		"exitCode",
+		"outcome",
+		"causes",
+		"result",
+		"verify",
+		"dispatch",
+		"timings"
+	],
+	"properties": {
+		"type": { "const": "run_end" },
+		"schemaVersion": { "const": 2 },
+		"mode": { "enum": ["main", "agent"] },
+		"runId": { "type": "string" },
+		"sessionId": { "type": "string" },
+		"parentSessionId": { "type": "string" },
+		"agentId": { "type": "string" },
+		"pid": { "type": "integer" },
+		"cwd": { "type": "string" },
+		"clioCoderVersion": { "type": "string" },
+		"startedAt": { "type": "string", "format": "date-time" },
+		"endedAt": { "type": "string", "format": "date-time" },
+		"durationMs": { "type": "number", "minimum": 0 },
+		"exitCode": { "type": "integer", "minimum": 0, "maximum": 255 },
+		"outcome": { "enum": ["succeeded", "failed", "canceled", "timed_out", "previewed", "displayed"] },
+		"outcomeDetail": { "$ref": "#/$defs/causeCode" },
+		"causes": {
+			"description": "Every fact about how the run ended, winner first; the winner sets exitCode.",
+			"type": "array",
+			"items": { "$ref": "#/$defs/cause" }
+		},
+		"result": {
+			"type": "object",
+			"required": ["text", "artifacts"],
+			"properties": {
+				"text": { "type": "string" },
+				"artifacts": { "type": "array", "items": { "type": "string" } },
+				"structured": { "type": "object", "description": "Present only with --output-schema or output.schema." },
+				"enforcedBy": { "enum": ["host", "host+provider"] }
+			}
+		},
+		"route": { "$ref": "#/$defs/route" },
+		"usage": {
+			"type": "object",
+			"description": "RunCallUsage folds (src/domains/dispatch/run-call-usage.ts): every quantity a FactSum, cost a PricingSum.",
+			"required": ["main"],
+			"properties": {
+				"main": { "type": "object" },
+				"children": { "type": "object" },
+				"side": { "type": "object" },
+				"total": { "type": "object" }
+			}
+		},
+		"tools": {
+			"type": "object",
+			"required": ["calls", "refused", "writes"],
+			"properties": {
+				"calls": { "type": "integer", "minimum": 0 },
+				"refused": { "type": "integer", "minimum": 0 },
+				"writes": { "type": "integer", "minimum": 0 }
+			}
+		},
+		"safety": {
+			"type": "object",
+			"required": ["decisions", "blockedAttempts"],
+			"properties": {
+				"decisions": {
+					"type": "object",
+					"required": ["allowed", "blocked", "guardBlocked", "permissionRequested"],
+					"properties": {
+						"allowed": { "type": "integer", "minimum": 0 },
+						"blocked": { "type": "integer", "minimum": 0 },
+						"guardBlocked": { "type": "integer", "minimum": 0 },
+						"permissionRequested": { "type": "integer", "minimum": 0 }
+					}
+				},
+				"blockedAttempts": { "type": "array" }
+			}
+		},
+		"verify": {
+			"type": "object",
+			"required": ["requested", "checks"],
+			"properties": {
+				"requested": { "type": "integer", "minimum": 0 },
+				"checks": { "type": "array", "items": { "$ref": "#/$defs/verifyCheck" } }
+			}
+		},
+		"dispatch": {
+			"type": "object",
+			"required": ["runs", "live", "undelivered"],
+			"properties": {
+				"runs": { "type": "array", "items": { "type": "object" } },
+				"live": { "type": "array", "items": { "type": "object" } },
+				"undelivered": { "type": "array", "items": { "type": "object" } }
+			}
+		},
+		"timings": {
+			"type": "object",
+			"properties": {
+				"sessionReadyMs": { "type": "number" },
+				"firstRequestMs": { "type": "number" },
+				"firstTokenMs": { "type": "number" }
+			}
+		},
+		"limits": {
+			"type": "object",
+			"required": ["requested", "enforced"],
+			"properties": {
+				"requested": {
+					"type": "object",
+					"properties": {
+						"maxCostUsd": { "type": "number" },
+						"maxRequests": { "type": "integer" },
+						"maxToolCalls": { "type": "integer" },
+						"timeoutSeconds": { "type": "number" },
+						"requirePriced": { "const": true }
+					}
+				},
+				"enforced": { "type": "array", "items": { "type": "string" } },
+				"cost": {
+					"type": "object",
+					"properties": {
+						"overshootPossible": { "const": true },
+						"unpricedCalls": { "type": "integer" },
+						"unpricedRoutes": { "type": "array", "items": { "type": "string" } }
+					}
+				}
+			}
+		},
+		"plan": { "type": "object", "description": "--dry-run only (outcome previewed): what the run would do." }
+	},
+	"$defs": {
+		"causeCode": {
+			"enum": [
+				"interrupted",
+				"deadline",
+				"reader_closed",
+				"flag_conflict",
+				"task_file_conflict",
+				"task_flag_conflict",
+				"task_authority",
+				"not_configured",
+				"schema_unsupported",
+				"session_live",
+				"not_started",
+				"unscripted",
+				"permission_required",
+				"judge_streak",
+				"session_cost_ceiling",
+				"max_cost_usd",
+				"autonomous_cap",
+				"max_requests",
+				"max_tool_calls",
+				"provider_error",
+				"no_answer",
+				"output_limit",
+				"schema_mismatch",
+				"verify_failed",
+				"quality_failed",
+				"verdict_failed",
+				"noop",
+				"limitation",
+				"dispatched_worker_failed",
+				"worker_failed",
+				"output_write_failed",
+				"run_failed"
+			]
+		},
+		"cause": {
+			"type": "object",
+			"required": ["code"],
+			"properties": {
+				"code": { "$ref": "#/$defs/causeCode" },
+				"message": { "type": "string" }
+			}
+		},
+		"route": {
+			"type": "object",
+			"properties": {
+				"target": { "type": "string" },
+				"model": { "type": "string" },
+				"thinking": { "type": "string" }
+			}
+		},
+		"verifyCheck": {
+			"type": "object",
+			"required": ["command", "status"],
+			"properties": {
+				"id": { "type": "string" },
+				"command": { "type": "string" },
+				"status": { "enum": ["passed", "failed", "timed_out", "skipped"] },
+				"reason": { "enum": ["interrupted", "deadline", "turn_failed"] },
+				"exitCode": { "type": "integer" },
+				"durationMs": { "type": "number" },
+				"ranAfterLastEdit": { "type": "boolean" }
+			}
+		}
+	}
+}

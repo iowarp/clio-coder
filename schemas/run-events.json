@@ -1,0 +1,53 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:clio-coder:schema:run-events:2",
+	"title": "clio-coder run event line (schema v2)",
+	"description": "One line of `run --output-format stream-json`: NDJSON, one compact object per line, each with a `type`. The first line is `session` for a main run, `steer` acknowledges a steer-channel line, and the last line is always `run_end` (schema run-result). Agent event frames between them keep their engine shape and are open objects.",
+	"type": "object",
+	"required": ["type"],
+	"properties": {
+		"type": { "type": "string" }
+	},
+	"oneOf": [
+		{ "$ref": "#/$defs/session" },
+		{ "$ref": "#/$defs/steer" },
+		{ "$ref": "#/$defs/runEnd" },
+		{ "$ref": "#/$defs/event" }
+	],
+	"$defs": {
+		"session": {
+			"type": "object",
+			"required": ["type"],
+			"properties": {
+				"type": { "const": "session" },
+				"schemaVersion": { "const": 2 }
+			}
+		},
+		"steer": {
+			"type": "object",
+			"required": ["type", "line", "status"],
+			"properties": {
+				"type": { "const": "steer" },
+				"line": { "type": "integer", "minimum": 1, "description": "1-based line index in the steer channel." },
+				"status": { "enum": ["accepted", "queued", "refused"] },
+				"reason": { "type": "string" }
+			}
+		},
+		"runEnd": {
+			"type": "object",
+			"required": ["type", "schemaVersion"],
+			"description": "The closing document; its full shape is `clio-coder schema run-result`.",
+			"properties": {
+				"type": { "const": "run_end" },
+				"schemaVersion": { "const": 2 }
+			}
+		},
+		"event": {
+			"type": "object",
+			"required": ["type"],
+			"properties": {
+				"type": { "not": { "enum": ["session", "steer", "run_end"] } }
+			}
+		}
+	}
+}

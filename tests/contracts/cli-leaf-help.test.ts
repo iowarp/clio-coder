@@ -53,6 +53,8 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs \| --build \| --json\]/ },
 	{ args: ["arena", "run", "--help"], usage: /clio-coder arena run --contender / },
 	{ args: ["research", "start", "--help"], usage: /clio-coder research start / },
+	{ args: ["help", "--help"], usage: /clio-coder help --json / },
+	{ args: ["schema", "--help"], usage: /clio-coder schema <name>/ },
 ];
 
 describe("leaf commands answer --help", { concurrency: 4 }, () => {
@@ -71,6 +73,27 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 		const forms = init.stdout.split("\n").filter((line) => line.startsWith("  clio-coder context init "));
 		match(forms.join("\n"), /--verify[\s\S]*--accept/);
 		for (const form of forms) ok(summary.stdout.includes(`${form}\n`), `context --help omits: ${form.trim()}`);
+	});
+	it("clio-coder help --json is one compact manifest that names the nested leaves, and schema prints each schema", async () => {
+		const manifest = await cli(["help", "--json"]);
+		equal(manifest.status, 0, manifest.stderr);
+		equal(manifest.stdout.trimEnd().split("\n").length, 1, "help --json printed more than one line");
+		const doc = JSON.parse(manifest.stdout) as { version: number; leaves: Array<{ path: string[] }> };
+		equal(doc.version, 1);
+		const paths = new Set(doc.leaves.map((leaf) => leaf.path.join(" ")));
+		for (const sentinel of [
+			"targets profile bind",
+			"context replay",
+			"fleet nodes tools install",
+			"telemetry share forget",
+		])
+			ok(paths.has(sentinel), `help --json omits ${sentinel}`);
+		for (const name of ["run-result", "run-events", "task", "help", "fleet-result"]) {
+			const schema = await cli(["schema", name]);
+			equal(schema.status, 0, schema.stderr);
+			match((JSON.parse(schema.stdout) as { $id: string }).$id, new RegExp(`^urn:clio-coder:schema:${name}:`));
+		}
+		equal((await cli(["schema", "nope"])).status, 1);
 	});
 });
 

@@ -105,11 +105,24 @@ export interface RunCliArgs {
 	outputFormat?: RunOutputFormat;
 	/** `-o/--output-last-message`: the file that receives the final answer when the run exits 0. */
 	outputLastMessage?: string;
-	/** `--output-schema <file.json>`: the JSON Schema the final answer must validate against (SPEC 6.8). */
-	outputSchema?: string;
+	/**
+	 * `--output-schema <file.json>`: the JSON Schema the final answer must validate against (SPEC 6.8), or the task
+	 * envelope's inline `output.schema` object, checked with the same refusals.
+	 */
+	outputSchema?: string | InlineOutputSchema;
+	/** `--task-file <path|->`: the task envelope (SPEC 6.3); `-` reads it from stdin. Set, the run never reads stdin for task text. */
+	taskFile?: string;
+	/** `--trust-task-file`: accept envelope keys that widen what the host does (`verify`, yolo, `cwd`). */
+	trustTaskFile?: boolean;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
+}
+
+/** A task envelope's `output.schema`: the object itself, and the dotted path that names it in diagnostics. */
+export interface InlineOutputSchema {
+	readonly inline: unknown;
+	readonly label: string;
 }
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
@@ -308,6 +321,21 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			const value = arg === "--output-schema" ? need(arg) : arg.slice("--output-schema=".length);
 			if (value !== null && value.length > 0) parsed.outputSchema = value;
 			else if (value !== null) parsed.diagnostics.push({ type: "error", message: "--output-schema requires a path" });
+			continue;
+		}
+		// `-` is a value here (the envelope from stdin), so this flag reads its value itself rather than through need().
+		if (arg === "--task-file" || arg?.startsWith("--task-file=")) {
+			const value = arg === "--task-file" ? argv[i + 1] : arg.slice("--task-file=".length);
+			if (arg === "--task-file" && value !== undefined && (value === "-" || !value.startsWith("-"))) i += 1;
+			if (value === undefined || value.length === 0 || (value !== "-" && value.startsWith("-")))
+				parsed.diagnostics.push({ type: "error", message: "--task-file requires a path, or - for stdin" });
+			else if (parsed.taskFile !== undefined)
+				parsed.diagnostics.push({ type: "error", message: "--task-file names one envelope; pass it once" });
+			else parsed.taskFile = value;
+			continue;
+		}
+		if (arg === "--trust-task-file") {
+			parsed.trustTaskFile = true;
 			continue;
 		}
 		if (arg === "--json-events") {
@@ -603,6 +631,23 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 	}
 
+	// SPEC 6.2: the envelope carries the task and its attachments, so argv may carry neither.
+	if (
+		parsed.taskFile !== undefined &&
+		(parsed.messages.length > 0 || parsed.fileArgs.length > 0 || parsed.stdin === true)
+	) {
+		parsed.diagnostics.push({
+			type: "error",
+			slug: "task_file_conflict",
+			message: "--task-file carries the task and its attachments; drop the task text, @file and - from the command line",
+		});
+	}
+	if (parsed.trustTaskFile === true && parsed.taskFile === undefined) {
+		parsed.diagnostics.push({ type: "error", message: "--trust-task-file applies only with --task-file" });
+	}
+	// With --task-file the cross-flag checks run once, on the command line merged with the envelope (task-envelope.ts),
+	// so a flag here and its partner in the envelope are judged together.
+	if (parsed.taskFile !== undefined) return parsed;
 	for (const message of runModeMatrixErrors(parsed)) parsed.diagnostics.push({ type: "error", message });
 	if (parsed.agentId !== undefined && parsed.autonomy !== undefined) {
 		parsed.diagnostics.push({
