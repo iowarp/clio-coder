@@ -5,6 +5,7 @@ import type { SurfaceOutcome, SurfaceSettled } from "../core/telemetry/schemas.j
 import { ToolNames } from "../core/tool-names.js";
 import { nextFiringId } from "../domains/middleware/fired-record.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../domains/middleware/index.js";
+import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { dispatchKeysFromArgs } from "../domains/turn-control/index.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -82,9 +83,10 @@ interface OpenFiring {
 
 const IDENTITY_LIMIT = 64;
 
-/** A call's identity for recovery: the tool as called and its arguments as sent. */
+/** A call's identity for recovery: the call it runs (a gateway call's capability) hashed as the loop guard hashes it. */
 function callIdentity(input: MiddlewareHookInput): string {
-	return `${input.toolName ?? ""}\u0000${JSON.stringify(input.toolArgs ?? {})}`;
+	const call = effectiveToolCall(input.toolName ?? "", input.toolArgs, input.toolResultDetails);
+	return hashToolCall(call.toolName, call.args ?? {});
 }
 
 /**
