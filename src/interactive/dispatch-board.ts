@@ -1776,7 +1776,6 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 	return `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(token, presentation.label)}`;
 }
 
-/** What a run is doing, or how it ended, in one clause the row may clip. `room` picks an approval wait's form. */
 /** Share of the worker's window its last reply occupied; warning tone from this share up (CLI-H3). */
 const CONTEXT_FILL_WARNING = 0.8;
 
@@ -1817,6 +1816,7 @@ function liveActivityCell(
 	return { text: task ?? "" };
 }
 
+/** What a run is doing, or how it ended, in one clause the row may clip. `room` picks an approval wait's form. */
 function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, room?: number): TableCell {
 	if (row.plan !== undefined) {
 		return { text: planProgressText(row.plan, true), ...(row.plan.state === "failed" ? { tone: "error" as const } : {}) };

@@ -1,9 +1,10 @@
 import { deepStrictEqual, equal, match, notEqual, ok, throws } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import {
 	createTelemetryForwarder,
 	readWorkerTelemetryFrame,
@@ -11,6 +12,7 @@ import {
 } from "../../src/core/telemetry/forwarder.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
+import type { ToolName } from "../../src/core/tool-names.js";
 import { resultContractRepairMessages } from "../../src/domains/agents/result-contract.js";
 import { parseWorkerContextPolicy } from "../../src/domains/context/worker/contract.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
@@ -667,32 +669,29 @@ test("a first splice with no usage anchor is fitted at the transport's own count
 	}
 });
 
-test("a worker re-recalling its evictions is told once to write or report, and exhaustion seals its narration and changes (CLI-H3)", {
-	timeout: 30_000,
-}, async () => {
-	const env = await isolateClioEnv("clio-coder-worker-thrash-");
+type FauxStep = {
+	call: { name: string; arguments: Record<string, unknown> } | null;
+	content?: string;
+	promptTokens: number;
+};
+
+/** One worker run against a faux provider that answers each request by the count of tool results it carries (CLI-H3). */
+async function runFauxWorker(
+	dir: string,
+	step: (done: number, requests: number) => FauxStep,
+	options: { agentId: string; task: string; allowedTools: ToolName[]; readOnly?: boolean; contextWindow?: number },
+): Promise<{ requests: string[]; events: unknown[]; exitCode: number }> {
 	const requests: string[] = [];
-	// One write, three reads, then recalls in rotation, as run 3oja1uegz9ti did.
 	const server = createServer(async (req, res) => {
 		const raw = await readRequestBody(req);
 		requests.push(raw);
 		const body = JSON.parse(raw) as { messages?: Array<{ role?: string }> };
 		const done = (body.messages ?? []).filter((message) => message.role === "tool").length;
-		const call =
-			done === 0
-				? { name: "write", arguments: { path: "out.txt", content: "first half\n" } }
-				: done <= 3
-					? { name: "read", arguments: { path: `${"abc"[done - 1]}.txt` } }
-					: requests.length < 40
-						? { name: "context", arguments: { scope: "recall", ref: `r${(done % 3) + 1}` } }
-						: null;
-		// After the third read the provider counts a near-full request, so the reads leave; past the fifth recall it counts
-		// one larger than the window, so the next request cannot fit.
-		const usage = { prompt_tokens: done >= 10 ? 60_000 : done === 3 ? 27_500 : 1000, completion_tokens: 20 };
+		const { call, content, promptTokens } = step(done, requests.length);
 		const frame = (data: unknown) => `data: ${JSON.stringify({ model: "fixture", ...(data as object) })}\n\n`;
 		const delta = call
 			? {
-					...(done >= 4 ? { content: `Checking r1 again (${done}).` } : {}),
+					...(content !== undefined ? { content } : {}),
 					tool_calls: [
 						{
 							index: 0,
@@ -702,7 +701,8 @@ test("a worker re-recalling its evictions is told once to write or report, and e
 						},
 					],
 				}
-			: { content: "Complete." };
+			: { content: content ?? "Complete." };
+		const usage = { prompt_tokens: promptTokens, completion_tokens: 20 };
 		res.setHeader("content-type", "text/event-stream");
 		res.end(
 			`${frame({ choices: [{ index: 0, delta, finish_reason: call ? "tool_calls" : "stop" }], usage })}data: [DONE]\n\n`,
@@ -711,31 +711,71 @@ test("a worker re-recalling its evictions is told once to write or report, and e
 	let worker: WorkerRunHandle | undefined;
 	const previousCwd = process.cwd();
 	try {
-		process.chdir(env.dir);
+		process.chdir(dir);
 		for (const name of ["a.txt", "b.txt", "c.txt"])
-			writeFileSync(join(env.dir, name), `${name} ${"pump output line of forty characters.\n".repeat(200)}`);
+			writeFileSync(join(dir, name), `${name} ${"pump output line of forty characters.\n".repeat(200)}`);
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 		const events: unknown[] = [];
 		worker = startWorkerRun(
 			{
-				agentId: "coder",
+				agentId: options.agentId,
 				systemPrompt: "Do the assignment.",
-				task: "Finish out.txt from a.txt, b.txt and c.txt.",
+				task: options.task,
 				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
 				runtime: litellm,
 				wireModelId: "fixture",
 				apiKey: "fixture",
-				modelCapabilities: { contextWindow: 32_768, maxTokens: 4096, tools: true },
-				allowedTools: ["write", "read", "context"],
-				writeRoots: [env.dir],
+				modelCapabilities: { contextWindow: options.contextWindow ?? 32_768, maxTokens: 4096, tools: true },
+				allowedTools: options.allowedTools,
+				...(options.readOnly === true ? { readOnly: true } : { writeRoots: [dir] }),
 				budget: { mode: "advisory", toolCalls: 60, readReserve: 0, synthesis: true, hardCap: 80 },
 				noSkills: true,
-				cwd: env.dir,
+				cwd: dir,
 			},
 			(event) => void events.push(event),
 		);
 		const outcome = await worker.promise;
-		notEqual(outcome.exitCode, 0);
+		return { requests, events, exitCode: outcome.exitCode };
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		await closeServer(server);
+		process.chdir(previousCwd);
+	}
+}
+
+test("a worker re-recalling its evictions is told once to write or report, and exhaustion seals its narration and changes (CLI-H3)", {
+	timeout: 30_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-thrash-");
+	try {
+		// One write, three reads, then recalls in rotation, as run 3oja1uegz9ti did. After the third read the provider counts
+		// a near-full request, so the reads leave; past the fifth recall it counts one larger than the window, so the next
+		// request cannot fit.
+		const { requests, events, exitCode } = await runFauxWorker(
+			env.dir,
+			(done, sent) => {
+				const call =
+					done === 0
+						? { name: "write", arguments: { path: "out.txt", content: "first half\n" } }
+						: done <= 3
+							? { name: "read", arguments: { path: `${"abc"[done - 1]}.txt` } }
+							: sent < 40
+								? { name: "context", arguments: { scope: "recall", ref: `r${(done % 3) + 1}` } }
+								: null;
+				return {
+					call,
+					...(call && done >= 4 ? { content: `Checking r1 again (${done}).` } : {}),
+					promptTokens: done >= 10 ? 60_000 : done === 3 ? 27_500 : 1000,
+				};
+			},
+			{
+				agentId: "coder",
+				task: "Finish out.txt from a.txt, b.txt and c.txt.",
+				allowedTools: ["write", "read", "context"],
+			},
+		);
+		notEqual(exitCode, 0);
 		const nudged = requests.filter((request) => request.includes("Host note:"));
 		ok(nudged.length > 0, "a request after the fifth recall carries the host turn");
 		equal(nudged.at(-1)?.split("Host note:").length, 2, "the host turn is injected once");
@@ -749,10 +789,56 @@ test("a worker re-recalling its evictions is told once to write or report, and e
 		equal(sealed?.state, "partial");
 		match(sealed?.text ?? "", /^Checking r\d again \(\d+\)\.$/);
 	} finally {
-		worker?.abort();
-		await worker?.promise;
-		await closeServer(server);
-		process.chdir(previousCwd);
+		env.restore();
+	}
+});
+
+test("a worker past 80% of its window with no change is told once to report, unless it already wrote (CLI-H3)", {
+	timeout: 30_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-headroom-");
+	try {
+		// The fold trigger sits above 80%, so an 82% request is admitted without a fold and reports no fold decision.
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.context.compaction.threshold = 0.95;
+		mkdirSync(join(env.dir, "config"), { recursive: true });
+		writeFileSync(join(env.dir, "config/settings.yaml"), JSON.stringify(settings));
+		// The output reserve holds 8,192 tokens, so on a 65,536 window the answer to the first read counts 53,000 and the
+		// request carrying that read passes 80% yet fits; later answers count 40,000.
+		const reads = (first: number) => (done: number) => ({
+			call: done < first + 3 ? { name: "read", arguments: { path: `${"abc"[done - first]}.txt` } } : null,
+			promptTokens: done === first ? 53_000 : 40_000,
+		});
+		const reviewer = await runFauxWorker(env.dir, reads(0), {
+			agentId: "reviewer",
+			task: "Review a.txt, b.txt and c.txt.",
+			allowedTools: ["read"],
+			readOnly: true,
+			contextWindow: 65_536,
+		});
+		const nudged = reviewer.requests.filter((request) => request.includes("Host note:"));
+		ok(nudged.length > 0, "a request after the 80% one carries the host turn");
+		equal(nudged.at(-1)?.split("Host note:").length, 2, "the host turn is injected once");
+		match(nudged.at(-1) ?? "", /passed 80% of the model window without a workspace change/);
+		match(nudged.at(-1) ?? "", /Stop gathering and return your report now/);
+		ok(!(nudged.at(-1) ?? "").includes("Write the change now"), "a read-only worker is not told to write");
+
+		const writer = await runFauxWorker(
+			env.dir,
+			(done) =>
+				done === 0
+					? { call: { name: "write", arguments: { path: "out.txt", content: "done\n" } }, promptTokens: 40_000 }
+					: reads(1)(done),
+			{
+				agentId: "coder",
+				task: "Write out.txt, then check a.txt, b.txt and c.txt.",
+				allowedTools: ["write", "read"],
+				contextWindow: 65_536,
+			},
+		);
+		ok(writer.requests.length > 2, "the writer reached requests past 80%");
+		ok(!writer.requests.some((request) => request.includes("Host note:")), "a worker that wrote gets no host turn");
+	} finally {
 		env.restore();
 	}
 });

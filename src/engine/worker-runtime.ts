@@ -1570,6 +1570,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				throw error;
 			}
+			// A request admitted without a fold reports no decision, so the thrash share reads the admitted count too.
+			if (window > 0 && contextGuard.inputTokens >= window * THRASH_CONTEXT_FRACTION) contextPressureCrossed = true;
 			// Stable sampling applies to every context-generation round, terminal
 			// repairs included. It merges over the caller's options so it beats quirk
 			// profiles and run overrides, which the adapters apply underneath.
