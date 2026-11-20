@@ -1,7 +1,8 @@
 import type { DelegationToolGovernance } from "../../core/defaults.js";
+import { type AntigravitySidebandSignal, readAntigravitySideband } from "./antigravity-sideband.js";
 import { AcpAuthRequiredError, AcpProtocolError } from "./errors.js";
 import { boundAcpSessionUpdate, routeNonJsonRpcStdout, type StdioTransportOptions } from "./transport.js";
-import type { AcpInitializeResponse, AcpPromptResponse, AcpRequestPermissionResponse } from "./types.js";
+import type { AcpInitializeResponse, AcpPromptResponse, AcpRequestPermissionResponse, AcpUsageLimit } from "./types.js";
 
 type Version = readonly [number, number, number];
 
@@ -39,6 +40,8 @@ const MAX_QUESTION_CHARS = 2_000;
 const MAX_CHOICES = 16;
 const MAX_CHOICE_CHARS = 200;
 const MAX_WARNING_CHARS = 1_000;
+/** Sideband pages read after one turn: 32 error rows each, far more than one turn records. */
+const MAX_SIDEBAND_PAGES = 4;
 
 /** The request that returns agy to `default`: the stable session mode, or a `mode` session config option. */
 export type AntigravityModeReset =
@@ -53,6 +56,14 @@ export interface AntigravityQuestion {
 	securityWarning?: string;
 	/** A delegation has no operator to choose, so the question is answered cancelled. */
 	answer: "cancelled";
+}
+
+/** What agy's own store says about the turn that just answered, beyond its ACP response. */
+export interface AntigravitySidebandOutcome {
+	/** The latest quota exhaustion recorded since the last read; the turn failed on it. */
+	usageLimit?: AcpUsageLimit;
+	/** Set once the session recorded an error that poisons it; it stays set for this session. */
+	nonResumable?: { reason: "INVALID_THINKING_SIGNATURE" };
 }
 
 export interface AntigravityShims {
@@ -87,6 +98,11 @@ export interface AntigravityShims {
 	question(params: unknown): AntigravityQuestion | null;
 	/** The answer to a question: no choice is made on the operator's behalf. */
 	questionResponse(): AcpRequestPermissionResponse;
+	/**
+	 * Error steps agy recorded in its own store since the last read, which its ACP answer never carried. Read once a
+	 * prompt has answered; a store that is absent, busy or unreadable reads as nothing new. Never throws.
+	 */
+	sideband(sessionId: string): AntigravitySidebandOutcome;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -199,17 +215,29 @@ function securityWarning(options: ReadonlyArray<unknown>): string | undefined {
 	return undefined;
 }
 
+/** A sideband quota signal as the typed usage limit a delegation result carries. */
+function usageLimitOf(signal: Extract<AntigravitySidebandSignal, { kind: "usage-limit" }>): AcpUsageLimit {
+	const { kind: _kind, idx: _idx, ...limit } = signal;
+	return limit;
+}
+
 /**
  * Antigravity CLI (`agy acp`) shims, applied only to that peer. `command` and `launchArgs` are the resolved launch
- * (profile `~` expanded), so the sign-in hint names the profile this run actually used.
+ * (profile `~` expanded), so the sign-in hint names the profile this run actually used; `profileDir` is that
+ * profile's directory, where agy keeps the per-session store the sideband reads.
  */
 export function createAntigravityShims(input: {
 	command: string;
 	launchArgs: ReadonlyArray<string>;
 	toolGovernance: DelegationToolGovernance;
+	profileDir?: string;
 }): AntigravityShims {
 	let appendsSystemPrompt = false;
 	let promptSteering = false;
+	// One cursor per session: every step a fresh session records is new to Clio.
+	let sidebandSession: string | null = null;
+	let sidebandCursor = -1;
+	let nonResumable: AntigravitySidebandOutcome["nonResumable"];
 	const profile = profileArgs(input.launchArgs);
 	const loginCommand = [input.command, "acp", ...profile, "--login"].map(shellWord).join(" ");
 	return {
@@ -317,5 +345,28 @@ export function createAntigravityShims(input: {
 			};
 		},
 		questionResponse: () => ({ outcome: { outcome: "cancelled" } }),
+		sideband(sessionId) {
+			if (input.profileDir === undefined) return {};
+			if (sessionId !== sidebandSession) {
+				sidebandSession = sessionId;
+				sidebandCursor = -1;
+				nonResumable = undefined;
+			}
+			let usageLimit: AcpUsageLimit | undefined;
+			for (let page = 0; page < MAX_SIDEBAND_PAGES; page++) {
+				const read = readAntigravitySideband({ profileDir: input.profileDir, sessionId, afterIdx: sidebandCursor });
+				for (const signal of read.signals) {
+					if (signal.kind === "usage-limit") usageLimit = usageLimitOf(signal);
+					else nonResumable = { reason: signal.reason };
+				}
+				// A cursor that did not move means nothing is left to read (or nothing could be).
+				if (read.cursor === sidebandCursor) break;
+				sidebandCursor = read.cursor;
+			}
+			return {
+				...(usageLimit !== undefined ? { usageLimit } : {}),
+				...(nonResumable !== undefined ? { nonResumable } : {}),
+			};
+		},
 	};
 }

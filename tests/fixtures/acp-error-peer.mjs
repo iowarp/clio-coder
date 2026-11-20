@@ -1,4 +1,6 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout } from "node:timers/promises";
 
@@ -96,9 +98,32 @@ function advertisesClientCapability(capabilities) {
  * tool-shaped ones (an execute command, a path or a URL under kind other or none) and questions whose locations are
  * null or empty. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer end_turn,
  * then a later update arrives, then the second steer fails. In `abort` mode a steer makes the turn answer end_turn and
- * is never answered itself. In `null` mode a steer is answered with a null result, then the turn with end_turn.
+ * is never answered itself. In `null` mode a steer is answered with a null result, then the turn with end_turn. In
+ * `sideband` mode the turn records a quota error and a thinking-signature error in agy's store under
+ * `$HOME/.gemini/antigravity-cli` (the 1.5.13 `steps` DDL), keeps the store open as agy does, and answers end_turn.
  */
-const agyState = { firstPrompt: undefined, steers: 0, answered: false };
+const agyState = { firstPrompt: undefined, steers: 0, answered: false, store: undefined };
+function recordAgyErrorSteps() {
+	const conversations = join(process.env.HOME, ".gemini", "antigravity-cli", "conversations");
+	mkdirSync(conversations, { recursive: true });
+	const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
+	const store = new DatabaseSync(join(conversations, "agy-session.db"));
+	store.exec("PRAGMA journal_mode = WAL");
+	store.exec(
+		"CREATE TABLE `steps` (`idx` integer,`step_type` integer NOT NULL DEFAULT 0,`status` integer NOT NULL DEFAULT 0,`has_subtrajectory` numeric NOT NULL DEFAULT false,`metadata` blob,`error_details` blob,`permissions` blob,`task_details` blob,`render_info` blob,`step_payload` blob,`step_format` integer NOT NULL DEFAULT 0,PRIMARY KEY (`idx`))",
+	);
+	const insert = store.prepare("INSERT INTO steps (idx, step_type, status, step_payload) VALUES (?, ?, 3, ?)");
+	insert.run(0, 14, Buffer.from("user input"));
+	insert.run(
+		1,
+		17,
+		Buffer.from(
+			'429 {"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"QUOTA_EXHAUSTED","metadata":{"model":"gemini-x-high","quotaResetDelay":"2h","quotaResetTimeStamp":"2026-11-21T01:00:00Z"}} {"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"7s"}',
+		),
+	);
+	insert.run(2, 17, Buffer.from("API error: INVALID_ARGUMENT (code 400): INVALID_THINKING_SIGNATURE"));
+	agyState.store = store;
+}
 function agyUpdate(text) {
 	send({
 		jsonrpc: "2.0",
@@ -199,6 +224,10 @@ function agy(request) {
 				],
 			},
 		});
+		if (scenario === "sideband") {
+			recordAgyErrorSteps();
+			send({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } });
+		}
 	} else if (request.method === "session/prompt" && scenario === "ok") {
 		agyState.steers += 1;
 		if (agyState.steers === 1) {

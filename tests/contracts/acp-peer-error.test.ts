@@ -257,13 +257,13 @@ interface AgyFrame {
 	result?: unknown;
 }
 
-test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, steering, sign-in", {
+test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, steering, sign-in, store sideband", {
 	skip: process.platform === "win32",
 }, async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
 	const cwd = process.cwd();
-	const launch = async (name: string, version: string, session: "ok" | "auth" | "abort" | "null") => {
+	const launch = async (name: string, version: string, session: "ok" | "auth" | "abort" | "null" | "sideband") => {
 		const dir = join(scratch, name);
 		await mkdir(dir);
 		const log = join(dir, "frames.jsonl");
@@ -410,6 +410,25 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 		const missing = await nulled.run.promise;
 		strictEqual(missing.stopReason, "error");
 		strictEqual(missing.failureMessage, "ACP prompt response missing stopReason");
+
+		// agy answers end_turn but recorded a quota error and a thinking-signature error in its store under the launch's
+		// profile (HOME/.gemini/antigravity-cli): the run fails with the typed usage limit and the session is marked spent.
+		const sideband = await (await launch("sideband", "1.5.13", "sideband")).run.promise;
+		const usageLimit = {
+			cause: "usage_limit_reached",
+			reason: "QUOTA_EXHAUSTED",
+			message: "Antigravity quota exhausted for gemini-x-high; resets at 2026-11-21T01:00:00.000Z",
+			model: "gemini-x-high",
+			resetAt: "2026-11-21T01:00:00.000Z",
+			resetDelayMs: 7_200_000,
+			retryAfterMs: 7_000,
+		};
+		deepStrictEqual(
+			{ stopReason: sideband.stopReason, exitCode: sideband.exitCode, failureMessage: sideband.failureMessage },
+			{ stopReason: "error", exitCode: 1, failureMessage: usageLimit.message },
+		);
+		deepStrictEqual(sideband.usageLimit, usageLimit);
+		deepStrictEqual(sideband.delegation.nonResumable, { reason: "INVALID_THINKING_SIGNATURE" });
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
 	}

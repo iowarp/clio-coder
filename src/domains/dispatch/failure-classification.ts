@@ -301,7 +301,8 @@ export function classifyFailure(
 	if (httpStatus !== null && httpStatus >= 500 && httpStatus < 600) return "target-transient";
 	const message = providerMessageText(result, providerError);
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(message)) return "target-auth";
-	if (/\b429\b|rate[ -]?limit|too many requests/.test(message)) return "target-rate-limit";
+	if (/\b429\b|rate[ -]?limit|too many requests|quota exhausted|usage limit reached/.test(message))
+		return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(message)) return "node-resource";
 	// Anthropic's overloaded_error is the provider's own load, not this node's capacity.
 	if (/overloaded_error/.test(message)) return "target-transient";
