@@ -144,6 +144,7 @@ import {
 	captureContextSnapshot,
 	ceilChars,
 	contextUsageSnapshot,
+	endpointDigest,
 	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
@@ -1444,8 +1445,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * The provider-measured anchor of this route under `observed`, or null. The live anchor counts when
 	 * `reconciledHistoryTokens` (route, prefix identity and digest) kept it and a call measured it: a figure carried
 	 * through an eviction or rehydrated from its record priced its tail at chars/4 and does not count (bt-47 D-A).
-	 * With no live anchor, as on a resumed session, the newest usable usage counts when the same model, provider and
-	 * API reported it; an eviction or masking since stamped it unusable.
+	 * With no live anchor, as on a resumed session, the newest usable usage counts when the same model, provider,
+	 * API and endpoint reported it; an eviction or masking since stamped it unusable.
 	 */
 	const measuredAnchor = (
 		agentRuntime: AgentRuntime,
@@ -1465,11 +1466,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (reconciledAnchor) return null;
 		const usage = latestUsableAssistantUsage(observed.messages);
 		const message = usage
-			? (observed.messages[usage.index] as { api?: unknown; provider?: unknown; model?: unknown })
+			? (observed.messages[usage.index] as { api?: unknown; provider?: unknown; model?: unknown; baseUrlDigest?: unknown })
 			: null;
 		const model = agentRuntime.agent.state.model;
 		if (!usage || !message || !model) return null;
 		if (message.api !== model.api || message.provider !== model.provider || message.model !== model.id) return null;
+		// A reply recorded with its endpoint counts only on that endpoint; one recorded before the stamp keeps the old rule.
+		if (message.baseUrlDigest !== undefined && message.baseUrlDigest !== endpointDigest(model.baseUrl)) return null;
 		// The usage already covers the system prompt and tools it was sent with; with no record of their size then, none counts as growth.
 		const statics = estimateAgentContextBreakdown({
 			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),

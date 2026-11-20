@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
 import { ceilChars } from "../../core/token-split.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
@@ -174,6 +175,15 @@ function usageTotalTokens(usage: unknown): number | null {
 
 function usageInvalidated(message: AgentMessage): boolean {
 	return (message as { contextUsageInvalidated?: unknown }).contextUsageInvalidated === true;
+}
+
+/**
+ * A short digest of the endpoint a reply came from. Persisted beside the reply's api, provider and model, it lets a
+ * resumed session tell another endpoint under the same model id apart without the session file holding the URL.
+ */
+export function endpointDigest(baseUrl: unknown): string | undefined {
+	if (typeof baseUrl !== "string" || baseUrl.length === 0) return undefined;
+	return createHash("sha256").update(baseUrl).digest("hex").slice(0, 12);
 }
 
 export function latestUsableAssistantUsage(
