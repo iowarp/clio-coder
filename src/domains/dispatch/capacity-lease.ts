@@ -96,12 +96,18 @@ function isLoopbackEndpoint(endpointKey: string): boolean {
 	return host === "localhost" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);
 }
 /**
- * On a shared state dir the node `local` is a different machine on every host,
- * so its slots count only where they were taken. A named node is the same
- * machine from everywhere, and so is a shared provider endpoint. A loopback
+ * On a shared state dir, the global dispatch cap is per host: a lease or held
+ * reservation counts toward this host's global cap only when this host took it,
+ * including leases targeting a named node. The node `local` is a different
+ * machine on every host, so its per-node slots also count only where they were
+ * taken. A named node is the same machine from everywhere, so its per-node cap
+ * counts across hosts, and so does a shared provider endpoint. A loopback
  * endpoint is the server on the machine that runs the worker: each host's own
  * for `local`, the node itself for a named node.
  */
+export function countsInGlobalCap(host: string | undefined): boolean {
+	return onThisHost(host);
+}
 export function countsOnThisNode(host: string | undefined, nodeId: string): boolean {
 	return nodeId !== LOCAL_NODE_ID || onThisHost(host);
 }
@@ -286,15 +292,18 @@ function heldReservationUsage(
 	global: number;
 	nodes: Record<string, number>;
 	endpoints: Record<string, number>;
-	/** Hosts other than this one whose held slots were counted. */
-	foreignHosts: Set<string>;
-	/** Whether this process owns any counted held slot. */
+	/** Foreign hosts holding counted reservation slots per node. */
+	foreignNodeHosts: Map<string, Set<string>>;
+	/** Foreign hosts holding counted reservation slots per endpoint. */
+	foreignEndpointHosts: Map<string, Set<string>>;
+	/** Whether this process owns any counted held global slot. */
 	ownHeld: boolean;
 } {
 	let global = 0;
 	const nodes: Record<string, number> = {};
 	const endpoints: Record<string, number> = {};
-	const foreignHosts = new Set<string>();
+	const foreignNodeHosts = new Map<string, Set<string>>();
+	const foreignEndpointHosts = new Map<string, Set<string>>();
 	let ownHeld = false;
 	for (const value of values) {
 		if (typeof value !== "object" || value === null)
@@ -312,7 +321,6 @@ function heldReservationUsage(
 		if (record.host !== undefined && typeof record.host !== "string")
 			throw new Error("dispatch capacity store has invalid reservation records");
 		const host = record.host;
-		let counted = false;
 		const byWave = new Map<number, number>();
 		const byNodeWave = new Map<string, Map<number, number>>();
 		const byEndpointWave = new Map<string, Map<number, number>>();
@@ -346,35 +354,50 @@ function heldReservationUsage(
 			// compete with this lease; other waves stay held in durable state and
 			// still count at their full peak against every other owner.
 			if (transferringWave !== undefined && wave !== transferringWave) continue;
-			if (countsOnThisNode(host, member.nodeId)) {
-				counted = true;
+			if (countsInGlobalCap(host)) {
 				byWave.set(wave, (byWave.get(wave) ?? 0) + 1);
+			}
+			if (countsOnThisNode(host, member.nodeId)) {
 				const nodeWaves = byNodeWave.get(member.nodeId) ?? new Map<number, number>();
 				nodeWaves.set(wave, (nodeWaves.get(wave) ?? 0) + 1);
 				byNodeWave.set(member.nodeId, nodeWaves);
 			}
 			if (typeof member.endpointKey === "string" && countsOnThisEndpoint(host, member.nodeId, member.endpointKey)) {
-				counted = true;
 				const endpointWaves = byEndpointWave.get(member.endpointKey) ?? new Map<number, number>();
 				endpointWaves.set(wave, (endpointWaves.get(wave) ?? 0) + 1);
 				byEndpointWave.set(member.endpointKey, endpointWaves);
 			}
 		}
 		global += Math.max(0, ...byWave.values());
-		for (const [id, waves] of byNodeWave) nodes[id] = (nodes[id] ?? 0) + Math.max(0, ...waves.values());
-		for (const [key, waves] of byEndpointWave) endpoints[key] = (endpoints[key] ?? 0) + Math.max(0, ...waves.values());
-		if (!counted) continue;
-		if (!onThisHost(host)) foreignHosts.add(host as string);
-		else if (record.ownerPid === process.pid) ownHeld = true;
+		for (const [id, waves] of byNodeWave) {
+			nodes[id] = (nodes[id] ?? 0) + Math.max(0, ...waves.values());
+			if (!onThisHost(host)) {
+				const hosts = foreignNodeHosts.get(id) ?? new Set<string>();
+				hosts.add(host as string);
+				foreignNodeHosts.set(id, hosts);
+			}
+		}
+		for (const [key, waves] of byEndpointWave) {
+			endpoints[key] = (endpoints[key] ?? 0) + Math.max(0, ...waves.values());
+			if (!onThisHost(host)) {
+				const hosts = foreignEndpointHosts.get(key) ?? new Set<string>();
+				hosts.add(host as string);
+				foreignEndpointHosts.set(key, hosts);
+			}
+		}
+		if (byWave.size > 0 && record.ownerPid === process.pid) ownHeld = true;
 	}
-	return { global, nodes, endpoints, foreignHosts, ownHeld };
+	return { global, nodes, endpoints, foreignNodeHosts, foreignEndpointHosts, ownHeld };
 }
 
 /**
  * Names the other hosts holding counted slots and the way to free a dead one's,
  * since this host cannot see whether those processes are alive.
  */
-function foreignHoldersNote(leases: ReadonlyArray<CapacityLease>, reservationHosts: ReadonlySet<string>): string {
+function foreignHoldersNote(
+	leases: ReadonlyArray<CapacityLease>,
+	reservationHosts: ReadonlySet<string> | undefined,
+): string {
 	const hosts = new Set(reservationHosts);
 	for (const lease of leases) if (!onThisHost(lease.host)) hosts.add(lease.host as string);
 	if (hosts.size === 0) return "";
@@ -451,25 +474,25 @@ function assertCapacity(
 	transferring?: { ownerId: string; memberId: string },
 ): void {
 	const held = heldReservationUsage(file.reservations, transferring);
-	const counted = file.leases.filter((lease) => countsOnThisNode(lease.host, lease.nodeId));
-	const globalUsed = counted.length + held.global;
+	const globalLeases = file.leases.filter((lease) => countsInGlobalCap(lease.host));
+	const globalUsed = globalLeases.length + held.global;
 	// The denial names the compliant next move, not just the gate. A model told
 	// only that it is full re-dispatches with a different agent; the work it is
 	// waiting on is already running under its own detached assignments.
 	if (globalUsed >= limits.global) {
-		const ownsSlots = held.ownHeld || counted.some((lease) => onThisHost(lease.host) && lease.ownerPid === process.pid);
+		const ownsSlots = held.ownHeld || globalLeases.some((lease) => lease.ownerPid === process.pid);
 		throw new Error(
-			`dispatch: admission denied: global capacity reached (${globalUsed}/${limits.global})${foreignHoldersNote(counted, held.foreignHosts)}.${ownsSlots ? " Collect the runs already in flight before dispatching more; re-dispatching with a different agent or options does not free a slot." : ""}`,
+			`dispatch: admission denied: global capacity reached (${globalUsed}/${limits.global}).${ownsSlots ? " Collect the runs already in flight before dispatching more; re-dispatching with a different agent or options does not free a slot." : ""}`,
 		);
 	}
 	const nodeLimit = limits.nodes[nodeId];
 	if (nodeLimit !== undefined) {
 		if (nodeLimit < 1) throw new Error(`dispatch: admission denied: node '${nodeId}' capacity unavailable`);
-		const onNode = counted.filter((lease) => lease.nodeId === nodeId);
+		const onNode = file.leases.filter((lease) => lease.nodeId === nodeId && countsOnThisNode(lease.host, lease.nodeId));
 		const used = onNode.length + (held.nodes[nodeId] ?? 0);
 		if (used >= nodeLimit)
 			throw new Error(
-				`dispatch: admission denied: node '${nodeId}' capacity reached (${used}/${nodeLimit})${foreignHoldersNote(onNode, held.foreignHosts)}`,
+				`dispatch: admission denied: node '${nodeId}' capacity reached (${used}/${nodeLimit})${foreignHoldersNote(onNode, held.foreignNodeHosts.get(nodeId))}`,
 			);
 	}
 	if (endpointKey !== undefined) {
@@ -486,7 +509,7 @@ function assertCapacity(
 			const used = holders.leases + holders.reservations + holders.foregroundStreams;
 			if (used >= endpointLimit)
 				throw new Error(
-					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}${foreignHoldersNote(onEndpoint, held.foreignHosts)}; ${endpointCapacityRemedy(endpointKey)}`,
+					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}${foreignHoldersNote(onEndpoint, held.foreignEndpointHosts.get(endpointKey))}; ${endpointCapacityRemedy(endpointKey)}`,
 				);
 		}
 	}
@@ -690,8 +713,8 @@ export function capacityLeaseUsageUnsafe(options?: {
 		]),
 	);
 	for (const lease of leases) {
+		if (countsInGlobalCap(lease.host)) global += 1;
 		if (countsOnThisNode(lease.host, lease.nodeId)) {
-			global += 1;
 			nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
 		}
 		if (lease.endpointKey !== undefined && countsOnThisEndpoint(lease.host, lease.nodeId, lease.endpointKey)) {
