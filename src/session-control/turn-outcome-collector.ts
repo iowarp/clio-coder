@@ -50,15 +50,11 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
 	/** These firings' effects never entered a request (a spent nudge, a released buffer, an ended turn). */
 	suppressFirings(firingIds: ReadonlyArray<string>): void;
 	/**
-	 * Settle a host surface that fires and settles in one step, such as steering triage, which acts on the queue rather
-	 * than through a request. Returns the firing id, or null with no ledger attached.
+	 * Settle one steering triage round of either route (memory design 4.5), which acts on the queue rather than through
+	 * a request: `acted` when a verdict's relabel or interrupt applied to the queued message `applied`, `expired` when
+	 * the queue moved on before it could. A round with no verdict, or no session, fired nothing.
 	 */
-	settleHostFiring(
-		sessionId: string,
-		surface: string,
-		outcome: SurfaceOutcome,
-		fact: SurfaceSettled["fact"],
-	): string | null;
+	settleTriage(sessionId: string | undefined, verdicts: ReadonlyArray<unknown>, applied: string | null): void;
 }
 
 type SettlementFact = SurfaceSettled["fact"];
@@ -316,21 +312,20 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				if (firing !== undefined && firing.admitted === null) settle(firing, "suppressed", { kind: "none" });
 			}
 		},
-		settleHostFiring(owner, surface, outcome, fact) {
-			if (hub === null) return null;
-			const firingId = nextFiringId(owner);
+		settleTriage(owner, verdicts, applied) {
+			if (hub === null || owner === undefined || verdicts.length === 0) return;
 			const firing: OpenFiring = {
-				firingId,
-				surface,
+				firingId: nextFiringId(owner),
+				surface: "triage",
 				kind: "nudge",
 				inRun: false,
 				sessionId: owner,
 				admittedIn: null,
 				admitted: null,
 			};
-			open.set(firingId, firing);
-			settle(firing, outcome, fact);
-			return firingId;
+			open.set(firing.firingId, firing);
+			if (applied === null) settle(firing, "expired", { kind: "none" });
+			else settle(firing, "acted", { kind: "receipt", ref: applied });
 		},
 		recordControl(record) {
 			userTurnId = record.turnId;

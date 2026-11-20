@@ -2977,24 +2977,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		};
 	};
 
-	/**
-	 * A verdict is the triage firing on either route: `acted` when its relabel or interrupt applied, `expired` when the
-	 * queue moved on before it could (memory design 4.5). A round with no verdict fired nothing.
-	 */
-	const settleTriage = (
-		sessionId: string | undefined,
-		verdicts: ReadonlyArray<TriageVerdict>,
-		applied: string | null,
-	) => {
-		if (verdicts.length === 0 || sessionId === undefined) return;
-		outcomeCollector.settleHostFiring(
-			sessionId,
-			"triage",
-			applied === null ? "expired" : "acted",
-			applied === null ? { kind: "none" } : { kind: "receipt", ref: applied },
-		);
-	};
-
 	const runTriage = async (): Promise<void> => {
 		if (triageInFlight || !state.streaming || !state.runtime) return;
 		const triage = deps.getSettings().chat.steering.triage;
@@ -3011,8 +2993,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
 				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
 				apply: (verdicts) =>
-					settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
-				expired: (verdicts) => settleTriage(sessionId, verdicts, null),
+					outcomeCollector.settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
+				expired: (verdicts) => outcomeCollector.settleTriage(sessionId, verdicts, null),
 				side: () => runSideTriage(asked),
 			});
 		} catch {
@@ -3076,10 +3058,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				asked.map((entry) => entry.id),
 			);
 			if (!triageSnapshotMatches(asked, queues.entries())) {
-				settleTriage(origin?.id, verdicts, null);
+				outcomeCollector.settleTriage(origin?.id, verdicts, null);
 				return;
 			}
-			settleTriage(origin?.id, verdicts, applyTriage(verdicts, triage.autoInterrupt));
+			outcomeCollector.settleTriage(origin?.id, verdicts, applyTriage(verdicts, triage.autoInterrupt));
 		} finally {
 			clearTimeout(deadline);
 		}
