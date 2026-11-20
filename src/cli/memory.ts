@@ -6,12 +6,13 @@ import {
 	approveMemoryRecord,
 	type ClearedMemoryRegressions,
 	canonicalMemoryRepositoryIdentity,
-	loadMemoryRecords,
+	loadMemoryStore,
 	type MemoryRecord,
 	type MemoryScopeSelection,
 	memoryAgentIdentity,
 	memoryRuntimeIdentity,
 	memoryStatus,
+	memoryStorePath,
 	parseTaskMemoryHandoffSnapshot,
 	proposeMemoryFromClaim,
 	proposeMemoryFromEvidence,
@@ -56,7 +57,9 @@ list --approved-by keeps the approved records one approver let into the prompt:
 guardian for lessons the memory gate approved automatically on execution
 evidence, operator for the ones a person approved (a record approved before
 approvals were stamped counts as the operator's, as the prompt reads it).
-The text listing notes on stderr how many records wait for review.
+The text listing notes on stderr how many records wait for review. Both listings
+note on stderr how many records the store set aside as invalid; --json also
+lists them under "invalid" with their issues. Listing never moves them.
 `;
 
 type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune";
@@ -284,13 +287,18 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 	const dataDir = clioDataDir();
 	try {
 		if (parsed.command === "list") {
-			const stored = await loadMemoryRecords(dataDir);
+			const { records: stored, invalid } = await loadMemoryStore(dataDir);
 			const { approvedBy } = parsed;
 			const records = approvedBy === undefined ? stored : stored.filter((record) => memoryApprover(record) === approvedBy);
 			const cleared = readClearedMemoryRegressions(dataDir);
+			// Records the validator set aside are absent from the listing; say so rather than look like data loss.
+			if (invalid.length > 0)
+				printNote(
+					`${invalid.length} memory record${invalid.length === 1 ? "" : "s"} set aside as invalid: ${memoryStorePath(dataDir)}: ${invalid[0]?.issues[0] ?? "invalid record"}`,
+				);
 			if (parsed.json)
 				process.stdout.write(
-					`${JSON.stringify({ records: records.map((record) => publicMemoryRecord(record, cleared)) })}\n`,
+					`${JSON.stringify({ records: records.map((record) => publicMemoryRecord(record, cleared)), invalid })}\n`,
 				);
 			else {
 				const pending = stored.filter((record) => memoryStatus(record) === "proposed").length;
