@@ -110,7 +110,6 @@ import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
-	type MiddlewareEffect,
 	type MiddlewareRegistrar,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
@@ -255,7 +254,7 @@ import {
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
-import { createTurnMiddleware } from "./turn-middleware.js";
+import { type AwaitedTurnStart, createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnPersistence } from "./turn-persistence.js";
@@ -1637,6 +1636,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFooterNotice,
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
+		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
 	});
 
 	try {
@@ -1871,6 +1871,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
+	/** Settles every firing that costs a round, against the requests and typed facts that follow it (memory design 4.1). */
+	const detachOutcomeLedger = deps.bus
+		? outcomeCollector.attachLedger(
+				deps.bus,
+				() => deps.session?.current()?.id,
+				() => middleware.heldFirings(),
+			)
+		: null;
 
 	/**
 	 * A recovery exchange is a durable insert (F13): the record holds the exact pair, stands for the stopped reply
@@ -2119,7 +2127,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		retrySettings,
 		sessionId: () => deps.session?.current()?.id,
 		sessionOrigin: () => deps.session?.current() ?? null,
-		onModelRequestSent: (call) => messagePath.requestSent(call),
+		onModelRequestSent: (call) => {
+			if (call !== null) messagePath.requestSent(call);
+			// Journaled or not, this request carried exactly what the middleware held for it, and admits only that.
+			outcomeCollector.requestSent(call?.callId ?? null, middleware.requestCarried());
+		},
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
 		requestCursor: () =>
 			requestCursorOf(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? null, {
@@ -2360,13 +2372,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
 		lastToolCall: TurnToolCall | null,
+		stoppedTurnId: string | null,
 	): Promise<void> => {
 		const counted = countsAgainstCap(stop);
 		const attempt = counted ? state.continuation.countYoloContinuation() : state.continuation.yoloContinuations;
 		const context = deps.session?.current()?.id;
 		deps.bus?.emit(
 			"turn.continued",
-			{ cause: stop.cause, attempt, cap: TURN_CONTINUATION_CAP, at: Date.now() },
+			{
+				cause: stop.cause,
+				attempt,
+				cap: TURN_CONTINUATION_CAP,
+				at: Date.now(),
+				// The turn it continues, so a continuation joins the stopped turn's own records (memory design 4.6).
+				...(stoppedTurnId !== null ? { continues: stoppedTurnId } : {}),
+			},
 			...(context === undefined ? [] : [ownerTelemetryContext({ sessionId: context })]),
 		);
 		if (stop.rolled !== true)
@@ -2987,6 +3007,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const asked: TriageEntry[] = queues.entries().map((entry) => ({ id: entry.id, text: entry.text, kind: entry.kind }));
 		if (asked.length < triageFloor(triage, deps.systemOne)) return;
 		triageInFlight = true;
+		const sessionId = deps.session?.current()?.id;
 		try {
 			await runTriageRound({
 				triage,
@@ -2995,7 +3016,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				task: () => deps.currentOperatorTask?.() ?? "",
 				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
 				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
-				apply: (verdicts) => applyTriage(verdicts, triage.autoInterrupt),
+				apply: (verdicts) =>
+					outcomeCollector.settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
+				expired: (verdicts) => outcomeCollector.settleTriage(sessionId, verdicts, null),
 				side: () => runSideTriage(asked),
 			});
 		} catch {
@@ -3059,15 +3082,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				asked.map((entry) => entry.id),
 			);
 			if (!triageSnapshotMatches(asked, queues.entries())) {
+				outcomeCollector.settleTriage(origin?.id, verdicts, null);
 				return;
 			}
-			applyTriage(verdicts, triage.autoInterrupt);
+			outcomeCollector.settleTriage(origin?.id, verdicts, applyTriage(verdicts, triage.autoInterrupt));
 		} finally {
 			clearTimeout(deadline);
 		}
 	};
 
-	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): void => {
+	/** Applies each verdict once; returns the first queued message it applied to, or null when none was left. */
+	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): string | null => {
+		let applied: string | null = null;
 		for (const verdict of verdicts) {
 			const entry = queues.entries().find((candidate) => candidate.id === verdict.id);
 			if (entry === undefined) continue;
@@ -3093,10 +3119,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// The interrupt path reports its own refusals; nothing else to do here.
 				});
 				// One interrupt per round: the rest of the queue is held for the new run.
-				return;
+				return applied ?? taken.id;
 			}
 			queues.relabel(entry.id, triageLabelsFor(verdict), triageKindFor(verdict));
+			applied ??= entry.id;
 		}
+		return applied;
 	};
 
 	const api: ChatLoop = {
@@ -3332,6 +3360,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					mono: submittedAt,
 				});
 			let turnLease: TelemetrySessionLease | undefined;
+			/**
+			 * What this submit holds for its requests (the taken buffer, an armed tool choice, a flushed continuation, the
+			 * awaited gate's effects); a return before a request carries them suppresses their firings.
+			 */
+			const turnHolds = middleware.beginTurnHolds();
 			try {
 				await sessionResetSettlement;
 				if (!admissionCurrent()) return;
@@ -3452,7 +3485,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// decides before the turn spends anything (an image sidecar call, turn
 				// control) or buffers a reminder, so a refused turn leaves nothing for the
 				// next prompt. Its effects apply after the synchronous turn_start phase.
-				let turnStartEffects: ReadonlyArray<MiddlewareEffect> = [];
+				let awaitedTurnStart: AwaitedTurnStart | undefined;
 				if (options.requestContinuation !== true) {
 					markPreparationStep("turn-start");
 					const gate = await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length, reservedUserTurnId);
@@ -3462,7 +3495,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						emitAdmissionNotice(gate.refusal, "turn-blocked", "warning");
 						return;
 					}
-					turnStartEffects = gate.effects;
+					awaitedTurnStart = gate;
 				}
 				const operatorText = text;
 				let sidecarObservation: string | null = null;
@@ -3646,7 +3679,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					pendingSkillRequests.length,
 					options.requestContinuation === true,
 					reservedUserTurnId,
-					turnStartEffects,
+					awaitedTurnStart,
 				);
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
@@ -4507,12 +4540,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						else if (continuation !== null) {
 							// Read before the resubmit appends anything: the stopped turn's own last call.
 							const lastToolCall = lastToolCallOf(evidence.messages());
-							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall);
+							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall, userTurnId);
 						}
 					}
 				}
 			} finally {
 				await turnLease?.release();
+				middleware.releaseTurnHolds(turnHolds);
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
@@ -4885,6 +4919,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
 			unsubscribeToolBudgetLock?.();
+			detachOutcomeLedger?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			keepalive.dispose();

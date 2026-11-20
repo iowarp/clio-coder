@@ -27,6 +27,7 @@ import {
 import { markHostAuthored } from "../core/message-accounting.js";
 import { EXPLORATION_TOOL_NAMES, READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
 import { systemReminderBlock, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
+import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	LoopBlockedDisposition,
@@ -174,6 +175,16 @@ const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
  * spellings of one inspection (an op alias, limit 20 or none) cannot dodge the
  * detector as ignored log fields once did (DF-4, DF-9).
  */
+/** The guard's events belong to the hook's own session or run, turn and tool call, whichever async context emits them. */
+function guardEventContext(input: MiddlewareHookInput) {
+	return ownerTelemetryContext({
+		sessionId: input.sessionId,
+		runId: input.runId,
+		turnId: input.turnId,
+		toolCallId: input.toolCallId,
+	});
+}
+
 function callIdentity(tool: string, args: Record<string, unknown> | undefined): string {
 	const git = tool === ToolNames.Git && args !== undefined ? gitCallIdentity(args) : null;
 	return hashToolCall(tool, git ?? args ?? {});
@@ -1463,7 +1474,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 		};
-		options.bus?.emit("safety.loop_blocked", payload);
+		options.bus?.emit("safety.loop_blocked", payload, guardEventContext(input));
 	};
 
 	const emitBudgetEvent = (
@@ -1486,7 +1497,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			...(bound?.stepTool !== undefined ? { stepTool: bound.stepTool } : {}),
 			...(bound?.rolled === true ? { rolled: true as const } : {}),
 		};
-		options.bus?.emit("safety.tool_budget_exceeded", payload);
+		options.bus?.emit("safety.tool_budget_exceeded", payload, guardEventContext(input));
 	};
 
 	/**
