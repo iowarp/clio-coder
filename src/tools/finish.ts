@@ -128,6 +128,33 @@ export function finishSiblingRefusal(
 	};
 }
 
+/** Nobody watches the turn: a headless run, a job, or a yolo continuation (fleet design 4.3, ruling 11). */
+function unattendedTurn(turn: { headless: boolean; origin: string | undefined }): boolean {
+	return turn.headless || turn.origin === "job" || turn.origin === "continuation";
+}
+
+/**
+ * On an attended turn `finish` closes the reply the operator reads, so a response that carries no assistant text is
+ * refused before it runs and declares nothing (FX-40). The check is typed: a non-empty text block in that response,
+ * never its wording. An unattended turn keeps a bare finish, which its pinned declaration round asks for.
+ */
+export function finishWithoutReplyRefusal(
+	toolCall: { name: string; arguments: unknown },
+	assistantMessage: { content: ReadonlyArray<{ type: string; text?: unknown }> },
+	turn: { headless: boolean; origin: string | undefined },
+): { block: true; reason: string } | undefined {
+	if (unattendedTurn(turn)) return undefined;
+	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== ToolNames.Finish) return undefined;
+	const replied = assistantMessage.content.some(
+		(block) => block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
+	);
+	if (replied) return undefined;
+	return {
+		block: true,
+		reason: "finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
+	};
+}
+
 /** The host's note on the one round an unattended turn spends to declare; it rides the request tail, never the prefix. */
 export const FINISH_DECLARATION_REMINDER =
 	"<system-reminder>Nobody is watching this turn and it ended without a completion declaration. Call finish now with the state the work is in (done, partly_done or not_done), its limitations and anything left unverified. Do not repeat your reply.</system-reminder>";
@@ -147,9 +174,8 @@ export function finishRoundDue(turn: {
 	endedOnTerminalTool: boolean;
 	finishAttached: boolean;
 }): boolean {
-	const unattended = turn.headless || turn.origin === "job" || turn.origin === "continuation";
 	return (
-		unattended &&
+		unattendedTurn(turn) &&
 		turn.calledWork &&
 		!turn.declared &&
 		!turn.spent &&

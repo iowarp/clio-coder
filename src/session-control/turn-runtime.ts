@@ -95,6 +95,7 @@ import {
 	FINISH_DECLARATION_REMINDER,
 	finishRoundDue,
 	finishSiblingRefusal,
+	finishWithoutReplyRefusal,
 } from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
@@ -1355,7 +1356,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				return capRefusal !== undefined ? { reason: capRefusal } : undefined;
 			},
 			beforeToolCall: async ({ assistantMessage, toolCall }) =>
-				selfCompactSiblingRefusal(toolCall, assistantMessage) ?? finishSiblingRefusal(toolCall, assistantMessage),
+				selfCompactSiblingRefusal(toolCall, assistantMessage) ??
+				finishSiblingRefusal(toolCall, assistantMessage) ??
+				finishWithoutReplyRefusal(toolCall, assistantMessage, {
+					headless: deps.headless === true,
+					origin: state.currentTurnOrigin?.origin,
+				}),
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
