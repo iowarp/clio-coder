@@ -657,8 +657,8 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 }
 
 /**
- * The error name of the post-tool guard's clean stops: one tool result alone still overflows after compaction, or the
- * compacted request with its tool results still does not fit the window. Pi keeps only the message, so the turn runtime reads the name off the throw to journal the harness's own cause.
+ * The error name of the post-tool guard's clean stops: one tool result alone still overflows after compaction, the
+ * compacted request with its tool results still does not fit the window, or the compaction a fit needed failed. Pi keeps only the message, so the turn runtime reads the name off the throw to journal the harness's own cause.
  */
 export const OVERSIZED_RESULT_STOP = "ClioOversizedResultStop";
 
@@ -4112,8 +4112,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					const aborted = signal?.aborted || (err instanceof Error && err.name === "AbortError");
 					const oversize = requireFit && !aborted ? overflowStop(agentRuntime) : null;
 					if (oversize !== null) throw oversizedResultStop(oversize);
-					if (requireFit || aborted)
-						throw new Error(`[CLIO Coder] post-tool context guard could not compact before continuation: ${reason}`);
+					if (requireFit || aborted) {
+						const stop = `[CLIO Coder] post-tool context guard could not compact before continuation: ${reason}`;
+						// The request needs a fit it cannot get: the harness's stop, not the route's (FX-22c). A cancel stays a plain error.
+						throw aborted ? new Error(stop) : oversizedResultStop(stop);
+					}
 					// Optional compaction: the request still fits, so the run goes on and the fit check below stays the stop.
 					deps.emitNotice(
 						`[CLIO Coder] automatic compaction failed: ${reason.replace(/[.\s]+$/u, "")}. This turn goes on without it.`,

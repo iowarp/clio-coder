@@ -7,6 +7,7 @@ import { withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-fail
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
+import { CONTEXT_OVERFLOW_STOP_NOTICE_KEY } from "../../src/session-control/chat-loop-messages.js";
 import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -266,6 +267,7 @@ async function writtenCallRun(
 	format?: "json",
 	override?: Record<string, unknown>,
 	output?: { path: string; cwd: string },
+	extra: { snapshot?: Partial<ChatLoopRunSnapshot>; after?: object[] } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
 	const reply = override ?? {
@@ -285,9 +287,10 @@ async function writtenCallRun(
 			handler({ type: "message_end", message: reply });
 			handler({ type: "turn_end", message: reply, toolResults: [] });
 			handler({ type: "agent_end", messages: [reply] });
+			for (const event of extra.after ?? []) handler(event);
 		},
 		whenSettled: async () => {},
-		lastRunSnapshot: () => null,
+		lastRunSnapshot: () => extra.snapshot ?? null,
 		isStreaming: () => false,
 	};
 	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
@@ -389,20 +392,41 @@ test("a provider error that ends the run is provider_error under v2 and unchange
 	strictEqual(envelope.causes?.[0]?.code, "provider_error", v2.stdout);
 	strictEqual(envelope.outcomeDetail, "provider_error");
 	match(envelope.causes?.[0]?.message ?? "", /429 Too Many Requests/u);
-	// The post-compaction context guard's stop is the harness's, not the provider's (FX-22): run_failed with its words.
+	// The context guard's stop is the window's, not the provider's (FX-22a): context_overflow with its words, and its
+	// stderr names no route. A provider failure keeps the route on stderr.
 	const stop = "[CLIO Coder] This turn stopped: after compaction about 61943 input tokens plus 12288 reserved";
 	const guard = {
 		...failed,
 		errorMessage: stop,
 		failure: { invoked: true, stage: "harness", httpStatus: null, errorClass: "oversized_tool_result", retryAttempts: 0 },
 	};
-	const guardV1 = await writtenCallRun(undefined, guard);
+	const route = { snapshot: { targetId: "copilot", runtimeId: "copilot" } };
+	match((await writtenCallRun(undefined, failed, undefined, route)).stderr, /target 'copilot' \(copilot\): /u);
+	const guardV1 = await writtenCallRun(undefined, guard, undefined, route);
 	strictEqual(guardV1.code, 1, guardV1.stderr);
 	match(guardV1.stderr, /This turn stopped: after compaction/u);
+	doesNotMatch(guardV1.stderr, /target 'copilot'/u);
 	const guardV2 = await writtenCallRun("json", guard);
 	strictEqual(guardV2.code, 1, guardV2.stderr);
 	const guardEnvelope = JSON.parse(guardV2.stdout.trim().split("\n").at(-1) ?? "{}") as typeof envelope;
-	strictEqual(guardEnvelope.causes?.[0]?.code, "run_failed", guardV2.stdout);
-	strictEqual(guardEnvelope.outcomeDetail, "run_failed");
+	strictEqual(guardEnvelope.causes?.[0]?.code, "context_overflow", guardV2.stdout);
+	strictEqual(guardEnvelope.outcomeDetail, "context_overflow");
 	strictEqual(guardEnvelope.causes?.[0]?.message, stop);
+	// Overflow recovery's keyed stop notice, not the refusal's words, makes the same cause; the route's refusal keeps its route.
+	const refused = { ...failed, errorMessage: "400 prompt is too long: 70000 tokens > 65536 maximum" };
+	const gaveUp = {
+		type: "notice",
+		level: "info",
+		surface: "transcript",
+		key: CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
+		text: "[CLIO Coder] context overflow persisted after compaction",
+	};
+	const recoveryV1 = await writtenCallRun(undefined, refused, undefined, { ...route, after: [gaveUp] });
+	strictEqual(recoveryV1.code, 1, recoveryV1.stderr);
+	match(recoveryV1.stderr, /target 'copilot'/u);
+	const recoveryV2 = await writtenCallRun("json", refused, undefined, { after: [gaveUp] });
+	strictEqual(recoveryV2.code, 1, recoveryV2.stderr);
+	const recoveryEnvelope = JSON.parse(recoveryV2.stdout.trim().split("\n").at(-1) ?? "{}") as typeof envelope;
+	strictEqual(recoveryEnvelope.causes?.[0]?.code, "context_overflow", recoveryV2.stdout);
+	match(recoveryEnvelope.causes?.[0]?.message ?? "", /prompt is too long/u);
 });

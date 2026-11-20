@@ -43,7 +43,8 @@
 					"admission_refused",
 					"unsupported_on_route",
 					"busy",
-					"io"
+					"io",
+					"context_overflow"
 				]
 			}
 		},
