@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { applyModelCapabilityPatch } from "../../src/domains/providers/model-capabilities.js";
 import {
 	resolveModelRuntimeCapabilities,
@@ -13,7 +14,12 @@ import litellm, {
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
+import {
+	createInteractiveSlashRuntime,
+	type InteractiveSlashRuntimeDeps,
+} from "../../src/interactive/interactive-slash-runtime.js";
 import { thinkingNoteWords } from "../../src/interactive/thinking-note.js";
+import { dispatchSlashCommand, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
@@ -97,6 +103,38 @@ test("unaffected thinking clamp notices keep their existing wording", () => {
 	};
 	strictEqual(thinkingEffectNote(clampedDownHigh), "high runs as medium");
 	strictEqual(thinkingNoteWords(clampedDownHigh), "high not offered");
+});
+
+test("/thinking resolves a typed level through the settings clamp and refuses only unknown words", () => {
+	const hit = kb.lookup("dynamo/qwen3.8-27b");
+	ok(hit);
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat = { ...settings.chat, target: "mini", model: "dynamo/qwen3.8-27b", thinkingLevel: "medium" };
+	const status = {
+		target: { id: "mini", runtime: "litellm", defaultModel: "dynamo/qwen3.8-27b" },
+		runtime: null,
+		capabilities: { ...EMPTY_CAPABILITIES, ...hit.entry.capabilities },
+	};
+	const runtime = createInteractiveSlashRuntime({
+		providers: { list: () => [status], knowledgeBase: kb },
+		chat: {},
+		getSettings: () => settings,
+		onSetThinkingLevel: (level: typeof settings.chat.thinkingLevel) => {
+			settings.chat.thinkingLevel = level;
+		},
+		refreshFooter() {},
+		requestRender() {},
+	} as unknown as InteractiveSlashRuntimeDeps);
+	const notices: string[] = [];
+	const ctx = { ...runtime.context, notice: (level: string, text: string) => notices.push(`${level}: ${text}`) };
+	for (const typed of ["high", "max", "bogus"]) dispatchSlashCommand(parseSlashCommand(`/thinking ${typed}`), ctx);
+	deepStrictEqual(notices, [
+		"success: thinking: xhigh (high isn't offered by dynamo/qwen3.8-27b; using xhigh)",
+		"success: thinking: xhigh (max not offered)",
+		'error: thinking level "bogus" is not available here; try off, low, medium, xhigh',
+	]);
+	// Stored as typed, like chat.thinkingLevel in settings.yaml; the clamp decides what runs.
+	strictEqual(settings.chat.thinkingLevel, "max");
 });
 
 test("actual gateway probe to engine stream disables reasoning while retaining gateway ownership", async () => {
