@@ -292,6 +292,14 @@ function gitConfigOnlyReads(words: ReadonlyArray<string>): boolean {
  * its options (Astra r2-4, SF-4).
  */
 function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
+	// `cd <one path>` reads nothing and writes nothing, so a cd-prefixed read stays a read (X1). Only the
+	// builtin counts: a bare `cd`, or one through `builtin` or `command`, with no leading assignment, since
+	// `./cd`, `env cd` or `sudo cd` runs a program, and no `$`, since an expansion such as `${X@P}` can run code.
+	const cd = input[0] === "cd" ? 1 : (input[0] === "builtin" || input[0] === "command") && input[1] === "cd" ? 2 : 0;
+	if (cd > 0) {
+		const operand = input[cd] ?? "-";
+		return input.length === cd + 1 && !operand.startsWith("-") && !operand.includes("$");
+	}
 	let words = input;
 	while (/^[A-Za-z_]\w*=/.test(words[0] ?? "")) words = words.slice(1);
 	for (let depth = 0; depth < 8; depth++) {
