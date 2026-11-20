@@ -313,3 +313,42 @@ it("steers an agy delegation through its own session/prompt and seals the steer'
 	);
 	ok(!frames.some((frame) => frame.method === "session/cancel"));
 });
+
+it("parks an agy question on the operator's ask surface and answers the picked optionId, else cancelled (row 228)", {
+	skip: process.platform === "win32",
+}, async () => {
+	const asked: Array<{ question: string; options?: Array<{ label: string }>; fixedChoices?: boolean }> = [];
+	const operatorAsk: NonNullable<DispatchBundleOptions["operatorAsk"]> = {
+		available: () => true,
+		ask: async (questions) => {
+			asked.push(...questions);
+			return { answers: [{ question: questions[0]?.question ?? "", answer: "topic", options: ["topic"] }] };
+		},
+	};
+	const answered = await agyDispatch("answered", { operatorAsk });
+	strictEqual(asked.length, 1);
+	ok(asked[0]?.question.includes("Which branch?") && asked[0].question.includes("pushes to main"), asked[0]?.question);
+	deepStrictEqual(asked[0]?.options, [{ label: "main" }, { label: "topic" }]);
+	strictEqual(asked[0]?.fixedChoices, true);
+	deepStrictEqual(answered.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+		outcome: { outcome: "selected", optionId: "topic" },
+	});
+	deepStrictEqual(answered.questions, [
+		{
+			questionId: "interaction_1",
+			question: "Which branch?",
+			choices: ["main", "topic"],
+			securityWarning: "pushes to main",
+			answer: "selected",
+			selected: "topic",
+		},
+	]);
+
+	// fleet.permissions.mode deny keeps the cancelled answer and never asks the operator.
+	const denied = await agyDispatch("denied", { operatorAsk }, "deny");
+	strictEqual(asked.length, 1);
+	deepStrictEqual(denied.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+		outcome: { outcome: "cancelled" },
+	});
+	strictEqual((denied.questions[0] as { answer?: string } | undefined)?.answer, "cancelled");
+});

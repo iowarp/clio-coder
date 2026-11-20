@@ -50,9 +50,9 @@ export interface AntigravityQuestion {
 	questionId: string;
 	question: string;
 	choices: string[];
+	/** The choices an operator may pick, each with the `optionId` agy takes back. */
+	options: Array<{ optionId: string; label: string }>;
 	securityWarning?: string;
-	/** A delegation has no operator to choose, so the question is answered cancelled. */
-	answer: "cancelled";
 }
 
 export interface AntigravityShims {
@@ -85,8 +85,8 @@ export interface AntigravityShims {
 	steersByPrompt(): boolean;
 	/** The question a `session/request_permission` carries, or null when it is a tool approval. */
 	question(params: unknown): AntigravityQuestion | null;
-	/** The answer to a question: no choice is made on the operator's behalf. */
-	questionResponse(): AcpRequestPermissionResponse;
+	/** The answer to a question: the operator's offered choice, else cancelled; no choice is made on their behalf. */
+	questionResponse(question: AntigravityQuestion, optionId: string | null): AcpRequestPermissionResponse;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -308,14 +308,27 @@ export function createAntigravityShims(input: {
 				.map((choice) => bounded(choice, MAX_CHOICE_CHARS));
 			const title = typeof toolCall.title === "string" ? toolCall.title : "";
 			const warning = securityWarning(options);
+			const offered = options
+				.slice(0, MAX_CHOICES)
+				.filter(
+					(option): option is Record<string, unknown> & { optionId: string } =>
+						isRecord(option) && typeof option.optionId === "string" && option.optionId.length > 0,
+				)
+				.map((option) => ({
+					optionId: option.optionId,
+					label: bounded(typeof option.name === "string" ? option.name : option.optionId, MAX_CHOICE_CHARS),
+				}));
 			return {
 				questionId: bounded(id, 128),
 				question: title.trim().length > 0 ? bounded(title, MAX_QUESTION_CHARS) : "(no question text)",
 				choices,
+				options: offered,
 				...(warning !== undefined ? { securityWarning: warning } : {}),
-				answer: "cancelled",
 			};
 		},
-		questionResponse: () => ({ outcome: { outcome: "cancelled" } }),
+		questionResponse: (question, optionId) =>
+			optionId !== null && question.options.some((option) => option.optionId === optionId)
+				? { outcome: { outcome: "selected", optionId } }
+				: { outcome: { outcome: "cancelled" } },
 	};
 }

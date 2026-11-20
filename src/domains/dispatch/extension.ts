@@ -117,6 +117,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
+	type AcpPeerQuestion,
 	DEFAULT_CANCEL_GRACE_MS,
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
@@ -733,6 +734,8 @@ interface ActiveRun {
 	sealing?: boolean;
 	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
 	stallTimeoutMs: number | null;
+	/** An ACP peer's question is parked on the operator, so its silence is not a stall. */
+	peerQuestionOpen?: () => boolean;
 	/** Internal logical assignment/retry lineage, independent of published host ancestry. */
 	lineage: RunLineage;
 	hostRun?: DispatchPreparationOptions["hostRun"];
@@ -5827,7 +5830,7 @@ export function createDispatchBundle(
 			if (run.runtimeKind === "acp-delegation") {
 				ledger.update(run.runId, { heartbeatAt: heartbeatIso(run.heartbeatAt) });
 				const stallMs = run.stallTimeoutMs;
-				if (stallMs === null || stallMs <= 0) continue;
+				if (stallMs === null || stallMs <= 0 || run.peerQuestionOpen?.() === true) continue;
 				if (tickMonotonic - heartbeatMonotonic <= stallMs) continue;
 				run.stallKilled = true;
 				run.heartbeatStatus = "dead";
@@ -7183,6 +7186,45 @@ export function createDispatchBundle(
 			}
 		}
 		let acp: AcpDelegationRunHandle;
+		// A peer's fixed-choice question (agy interaction_*) goes to a person through the operator's ask surface, the TUI
+		// card or an ACP client's interview, under the same gate as worker asks: nobody attached, contained yolo, or
+		// fleet.permissions.mode deny or fail answers it cancelled. Only the operator's own pick goes back.
+		let peerQuestionsOpen = 0;
+		const askPeerQuestion = async (question: AcpPeerQuestion, questionSignal: AbortSignal): Promise<string | null> => {
+			const operator = options?.operatorAsk;
+			if (operator === undefined || !operator.available()) return null;
+			const live = withLiveAutonomy(getEffectiveSettings());
+			if (operatorContainedYolo(live)) return null;
+			const mode = live?.fleet.permissions.mode;
+			if (mode === "deny" || mode === "fail") return null;
+			// Labels are what the card returns, so a repeated one is told apart by its optionId.
+			const byLabel = new Map<string, string>();
+			for (const option of question.options) {
+				const label = byLabel.has(option.label) ? `${option.label} (${option.optionId})` : option.label;
+				if (!byLabel.has(label)) byLabel.set(label, option.optionId);
+			}
+			const warning = question.securityWarning !== undefined ? `\n\nSecurity warning: ${question.securityWarning}` : "";
+			peerQuestionsOpen += 1;
+			try {
+				const result = await operator.ask(
+					[
+						{
+							question: `${req.agentId} asks: ${question.question}${warning}`,
+							header: "Delegated agent",
+							options: [...byLabel.keys()].map((label) => ({ label })),
+							fixedChoices: true,
+							operator_only: true,
+						},
+					],
+					{ signal: questionSignal },
+				);
+				const answer = result.answers[0];
+				if (result.cancelled === true || answer === undefined || answer.auto === true) return null;
+				return byLabel.get(answer.options?.[0] ?? answer.answer) ?? null;
+			} finally {
+				peerQuestionsOpen -= 1;
+			}
+		};
 		try {
 			let environment: Record<string, string> | undefined;
 			let credentialExpiresAt: number | undefined;
@@ -7221,6 +7263,7 @@ export function createDispatchBundle(
 				clientVersion: readClioVersion(),
 				now,
 				monotonicNow,
+				askPeerQuestion,
 			});
 		} catch (error) {
 			await closeRunJournal();
@@ -7571,6 +7614,7 @@ export function createDispatchBundle(
 			abortCause: null,
 			stallKilled: false,
 			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
+			peerQuestionOpen: () => peerQuestionsOpen > 0,
 			// ACP delegation is admitted as unpriced.
 			budgetExempt: true,
 			lineage,
@@ -12136,7 +12180,7 @@ export function createDispatchBundle(
 				if (run.runtimeKind === "acp-delegation") {
 					const stallMs = run.stallTimeoutMs;
 					if (stallMs !== null && stallMs > 0) {
-						heartbeat = tickMonotonic - heartbeatMonotonic > stallMs ? "dead" : "alive";
+						heartbeat = tickMonotonic - heartbeatMonotonic > stallMs && run.peerQuestionOpen?.() !== true ? "dead" : "alive";
 					}
 				} else {
 					heartbeat = classifyHeartbeat(heartbeatMonotonic, tickMonotonic, heartbeatSpec);

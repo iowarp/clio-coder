@@ -23,6 +23,7 @@ import { externalUsageFacts, reportedUsageSums } from "../external-call-telemetr
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import { isAntigravityAcp, prepareAntigravityLaunch } from "./antigravity-launch.js";
+import type { AntigravityQuestion, AntigravityShims } from "./antigravity-shims.js";
 import { createAntigravityShims } from "./antigravity-shims.js";
 import { withInstalledCodex } from "./codex-launch.js";
 import { AcpAuthRequiredError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
@@ -34,7 +35,13 @@ import {
 	createStdioTransport,
 	type StdioTransportOptions,
 } from "./transport.js";
-import type { AcpDelegationResult, AcpInitializeResponse, AcpPromptResponse, AcpUsageMeta } from "./types.js";
+import type {
+	AcpDelegationResult,
+	AcpInitializeResponse,
+	AcpPromptResponse,
+	AcpRequestPermissionResponse,
+	AcpUsageMeta,
+} from "./types.js";
 import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY, AcpUsageMetaSchema } from "./types.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
@@ -76,6 +83,19 @@ export interface AcpDelegationRunInput {
 	now?: () => number;
 	/** Monotonic clock for event-inactivity spans. */
 	monotonicNow?: () => number;
+	/**
+	 * Puts a peer's fixed-choice question to a live operator and resolves the `optionId` they picked, or null when no
+	 * operator may answer. Absent, or null, answers the question cancelled. The signal aborts when the run ends.
+	 */
+	askPeerQuestion?: (question: AcpPeerQuestion, signal: AbortSignal) => Promise<string | null>;
+}
+
+/** A fixed-choice question an ACP peer (agy `interaction_*`) asked, with the choices it takes back by `optionId`. */
+export interface AcpPeerQuestion {
+	questionId: string;
+	question: string;
+	options: ReadonlyArray<{ optionId: string; label: string }>;
+	securityWarning?: string;
 }
 
 export interface AcpDelegationRunHandle {
@@ -436,17 +456,53 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			} as ClioWorkerEvent),
 	});
 
+	// Questions parked on the operator; each is released (answered cancelled) when the run stops or ends.
+	const parkedQuestions = new Set<AbortController>();
+	const releaseParkedQuestions = (): void => {
+		for (const parked of parkedQuestions) parked.abort();
+	};
+	const answerPeerQuestion = async (
+		shims: AntigravityShims,
+		question: AntigravityQuestion,
+	): Promise<AcpRequestPermissionResponse> => {
+		let optionId: string | null = null;
+		const ask = input.askPeerQuestion;
+		if (ask !== undefined && question.options.length > 0 && !finished && !aborted) {
+			const parked = new AbortController();
+			parkedQuestions.add(parked);
+			try {
+				const { choices: _choices, ...asked } = question;
+				optionId = await ask(asked, parked.signal);
+			} catch {
+				optionId = null;
+			} finally {
+				parkedQuestions.delete(parked);
+			}
+			if (parked.signal.aborted) optionId = null;
+		}
+		const response = shims.questionResponse(question, optionId);
+		const picked = response.outcome.outcome === "selected" ? response.outcome.optionId : null;
+		const selected = question.options.find((option) => option.optionId === picked)?.label;
+		emit({
+			type: "clio_coder_peer_question",
+			payload: {
+				questionId: question.questionId,
+				question: question.question,
+				choices: question.choices,
+				...(question.securityWarning !== undefined ? { securityWarning: question.securityWarning } : {}),
+				...(selected !== undefined ? { answer: "selected" as const, selected } : { answer: "cancelled" as const }),
+			},
+		});
+		return response;
+	};
+
 	const unregisters = [
 		transport.onNotification("session/update", (params) => {
 			for (const event of mapper.mapUpdate(params)) emit(event);
 		}),
 		transport.onRequest("session/request_permission", (params) => {
 			const question = agy?.question(params) ?? null;
-			if (agy !== null && question !== null) {
-				const { answer, ...asked } = question;
-				emit({ type: "clio_coder_peer_question", payload: { ...asked, answer } });
-				return agy.questionResponse();
-			}
+			if (agy !== null && question !== null) return answerPeerQuestion(agy, question);
 			if (!telemetry) return mediator.handle(params);
 			const toolCall = isRecord(params) && isRecord(params.toolCall) ? params.toolCall : undefined;
 			return withTelemetryContext(
@@ -473,6 +529,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		if (finished) return;
 		aborted = true;
 		wakeOnAbort();
+		releaseParkedQuestions();
 		if (sessionId) {
 			try {
 				transport.notify("session/cancel", { sessionId });
@@ -761,6 +818,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 			};
 		} finally {
+			releaseParkedQuestions();
 			stopExpiryWatch();
 			unregisterAbortSignal();
 			for (const unregister of unregisters) unregister();
@@ -800,6 +858,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		if (finished) return;
 		aborted = true;
 		wakeOnAbort();
+		releaseParkedQuestions();
 		clearCancelTimer();
 		void beginForceTermination();
 	};

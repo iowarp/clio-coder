@@ -187,9 +187,9 @@ export interface ClioRepositoryInstructionsEvent {
 }
 
 /**
- * An ACP peer asked the user a fixed-choice question (not a tool approval). A delegation has no operator to
- * choose, so it was answered `cancelled`; the record keeps what was asked and any security warning the peer
- * attached to a choice.
+ * An ACP peer asked the user a fixed-choice question (not a tool approval). A live operator picks one of its choices
+ * (`selected`, the picked label); with no operator to choose it is answered `cancelled`. The record keeps what was
+ * asked and any security warning the peer attached to a choice.
  */
 export interface ClioPeerQuestionEvent {
 	type: "clio_coder_peer_question";
@@ -198,7 +198,8 @@ export interface ClioPeerQuestionEvent {
 		question: string;
 		choices: ReadonlyArray<string>;
 		securityWarning?: string;
-		answer: "cancelled";
+		answer: "cancelled" | "selected";
+		selected?: string;
 	};
 }
 
