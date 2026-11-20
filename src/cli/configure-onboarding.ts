@@ -1185,7 +1185,7 @@ const CREDENTIAL_VALUE_STEP: Step = {
 			initial: wantsEnv ? (answers.apiKeyEnv ?? runtime.credentialsEnvVar ?? "") : "",
 			hint: wantsEnv
 				? "Clio reads it every time it calls the provider, so the key never lands on disk"
-				: `stored at ${shortenPath(authStoragePath())}`,
+				: `stored at ${shortenPath(authStoragePath())} (${credentialFileProtection()}, not encrypted)`,
 			...(wantsEnv ? {} : { mask: true }),
 			validate: (value) =>
 				value.length === 0
