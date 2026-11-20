@@ -77,9 +77,47 @@ export function buildRunPlan(
 	};
 }
 
-/** Prints the plan: under `--output-format` the v2 envelope carries it as `plan`, else it is JSON on stdout. */
+/**
+ * `--require-priced` under `--dry-run` (CLI-P16): the refusal the real run's preflight would write, or undefined.
+ * Same reach as `runHeadlessMainAgent`: the main routes under `--no-delegate`, else the worker routes too.
+ */
+export async function dryRunPricingRefusal(
+	parsed: RunCliArgs,
+	settings: Readonly<ClioSettings>,
+): Promise<string | undefined> {
+	if (parsed.requirePriced !== true) return undefined;
+	const [{ loadDomains }, { ConfigDomainModule }, { ProvidersDomainModule }, { unpricedRunRoutes }] = await Promise.all([
+		import("../core/domain-loader.js"),
+		import("../domains/config/index.js"),
+		import("../domains/providers/index.js"),
+		import("../domains/providers/unpriced-routes.js"),
+	]);
+	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
+	try {
+		const delegating = parsed.constraints?.delegation !== "forbidden";
+		const unpriced = unpricedRunRoutes(settings, loaded.getContract("providers"), delegating ? "delegating" : "main");
+		if (unpriced.length === 0) return undefined;
+		return `clio-coder run: --require-priced: routes this run can reach have no known pricing: ${unpriced.join(", ")}; declare targets[].pricing for them${delegating ? " or add --no-delegate if only worker routes are listed" : ""}\n`;
+	} finally {
+		await loaded.stop();
+	}
+}
+
+/** SPEC 6.6 v2 row: an absent value is an absent key, so v2 never sends `null` for an optional field (CLI-P15). */
+function withoutNulls(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(withoutNulls);
+	if (value === null || typeof value !== "object") return value;
+	const kept: Record<string, unknown> = {};
+	for (const [key, field] of Object.entries(value)) if (field !== null) kept[key] = withoutNulls(field);
+	return kept;
+}
+
+/**
+ * Prints the plan: under `--output-format` the v2 envelope carries it as `plan` with absent values left out, else it
+ * is JSON on stdout as before.
+ */
 export function writeRunPlan(parsed: RunCliArgs, plan: RunPlan): number {
-	if (parsed.outputFormat !== undefined) noteRunPlan(plan);
+	if (parsed.outputFormat !== undefined) noteRunPlan(withoutNulls(plan) as object);
 	else process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
 	return 0;
 }

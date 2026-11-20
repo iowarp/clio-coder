@@ -400,6 +400,7 @@ export async function runClioRun(
 				...(parsed.agentId !== undefined ? { agentId: parsed.agentId } : {}),
 				verify: parsed.verify,
 				...(parsed.outputLastMessage !== undefined ? { outputLastMessage: parsed.outputLastMessage } : {}),
+				...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
 				limits: requestedRunLimits(parsed),
@@ -407,11 +408,19 @@ export async function runClioRun(
 			execute,
 		);
 	}
-	if (parsed.outputLastMessage !== undefined) {
-		writeRunDiagnostic("clio-coder run: --output-last-message needs --output-format json or stream-json\n");
+	if (parsed.outputLastMessage !== undefined && !parsed.json) {
+		// Text mode has no seam that hands its stdout answer to the -o writer yet (CLI-P14, OPEN).
+		writeRunDiagnostic("clio-coder run: --output-last-message needs --output-format json or stream-json, or --json\n");
 		return 2;
 	}
-	return withRunFailureReporting(parsed.json, execute, fullMainStream);
+	return withRunFailureReporting(
+		parsed.json,
+		execute,
+		fullMainStream,
+		parsed.outputLastMessage !== undefined
+			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
+			: undefined,
+	);
 }
 
 async function executeRunCommand(
@@ -598,8 +607,14 @@ async function executeRunCommand(
 					if (borrowed !== null) process.stderr.write(`clio-coder run: ${borrowed.notice}\n`);
 					// --dry-run (CLI-L4): resolve and print, before any session, model call or --verify command.
 					if (parsed.dryRun === true) {
-						const { buildRunPlan, writeRunPlan } = await import("./run-plan.js");
+						const { buildRunPlan, dryRunPricingRefusal, writeRunPlan } = await import("./run-plan.js");
 						const settings = borrowed?.settings ?? readSettings();
+						// CLI-P16: a run the require-priced preflight would refuse is refused here too, not previewed.
+						const pricing = await dryRunPricingRefusal(parsed, settings);
+						if (pricing !== undefined) {
+							writeRunDiagnostic(pricing);
+							return 2;
+						}
 						const plan = buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS);
 						// SPEC 6.8: the enforcement the run would use, before any spend.
 						const shown: typeof plan & { outputSchema?: { enforcedBy: "host" } } =

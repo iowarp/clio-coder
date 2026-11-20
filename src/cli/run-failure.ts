@@ -29,6 +29,7 @@ import {
 	verifyChecksV2,
 } from "./modes/run-json-schema-v2.js";
 import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js";
+import { steerChannelRefusal } from "./steer-channel.js";
 
 interface RunFailureState {
 	pending: boolean;
@@ -69,6 +70,20 @@ export function writeRunRefusal(text: string): void {
 
 /** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
+	// SPEC C17: an option `run` does not take, including a global or interactive-only flag written after `run`.
+	[/^clio-coder run: unknown option: /u, "unknown_flag"],
+	[
+		/^clio-coder run: \S+ (?:is a global option and must come before the subcommand|applies only to the interactive session)/u,
+		"unknown_flag",
+	],
+	// SPEC 6.2: no task text, from an empty pipe, a terminal with no task, or `-` on a terminal.
+	[/^clio-coder run: empty task/u, "empty_task"],
+	[/^clio-coder run: `-` reads the task from stdin, but stdin is a terminal/u, "empty_task"],
+	// SPEC 6.4 mode matrix: a main-only input given with --agent, or a dispatch-only flag without it.
+	[/^clio-coder run: .* (?:applies|apply) to the main agent/u, "flag_conflict"],
+	[/^clio-coder run: .* apply to the main-agent task/u, "flag_conflict"],
+	[/^clio-coder run: @\S+: image attachments go to the main agent, not --agent dispatch/u, "flag_conflict"],
+	[/^clio-coder run: fleet dispatch flags require --agent /u, "flag_conflict"],
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
 	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
 	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
@@ -77,6 +92,8 @@ const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/^clio-coder run: task file key \S+ is also given as /u, "task_flag_conflict"],
 	[/^clio-coder run: task file carries .*pass --trust-task-file/u, "task_authority"],
 	[/^clio-coder run: task file output\.schema: /u, "schema_unsupported"],
+	// SPEC 6.6: an envelope version this release does not read.
+	[/^clio-coder run: task file schemaVersion: /u, "schema_unsupported"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
 	// SPEC 6.8: a schema `--output-schema` cannot enforce, refused before any model call.
 	[/^clio-coder run: --output-schema: /u, "schema_unsupported"],
@@ -104,8 +121,33 @@ export async function withRunFailureReporting(
 	json: boolean,
 	run: () => Promise<number>,
 	fullMainStream = false,
+	output?: OutputLastMessageRequest,
 ): Promise<number> {
 	if (!json) return run();
+	// CLI-P14: `-o` beside --json keeps v2's semantics (SPEC 6.6) and leaves every v1 frame as it was written.
+	const execute =
+		output === undefined
+			? run
+			: async (): Promise<number> => {
+					const resolved = resolveOutputTarget(output);
+					if (!prepareOutputTarget(resolved)) return 2;
+					let text = "";
+					structuredNote = undefined;
+					setFrameProjector((frame) => {
+						const answer = turnAnswer(frame);
+						if (answer !== null) text = answer;
+						return frame;
+					});
+					let code: number;
+					try {
+						code = await run();
+					} finally {
+						setFrameProjector(null);
+					}
+					if (code !== 0 || writeOutputFile(resolved, `${structuredAnswerJson() ?? text}\n`)) return code;
+					writeRunDiagnostic(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
+					return 1;
+				};
 	const state: RunFailureState = { pending: true };
 	const startedAt = new Date().toISOString();
 	runEndWritten = false;
@@ -143,7 +185,7 @@ export async function withRunFailureReporting(
 	process.once("exit", onExit);
 	return runFailureState.run(state, async () => {
 		try {
-			const code = await run();
+			const code = await execute();
 			let wrote = false;
 			if (state.pending && code !== 0) {
 				state.pending = false;
@@ -172,6 +214,47 @@ export async function withRunFailureReporting(
 	});
 }
 
+/** `-o` as the caller gave it; the path resolves against the run directory (SPEC 6.2). */
+interface OutputLastMessageRequest {
+	path: string;
+	cwd?: string;
+}
+
+function resolveOutputTarget(request: OutputLastMessageRequest): string {
+	const base = request.cwd !== undefined ? path.resolve(request.cwd) : process.cwd();
+	return path.resolve(base, request.path);
+}
+
+/** SPEC 6.6: a stale `-o` file is removed at preflight; false (refusal written) when its directory does not exist. */
+function prepareOutputTarget(resolved: string): boolean {
+	if (!existsSync(path.dirname(resolved))) {
+		writeRunDiagnostic(`clio-coder run: --output-last-message directory does not exist: ${path.dirname(resolved)}\n`);
+		return false;
+	}
+	rmSync(resolved, { force: true });
+	return true;
+}
+
+/** `-o` is written once, by temp file and rename; false when the write failed, which leaves no file. */
+function writeOutputFile(resolved: string, bytes: string): boolean {
+	const temporary = `${resolved}.${process.pid}.tmp`;
+	try {
+		writeFileSync(temporary, bytes);
+		renameSync(temporary, resolved);
+		return true;
+	} catch {
+		rmSync(temporary, { force: true });
+		return false;
+	}
+}
+
+/** The answer a v1 `turn_end` frame carries: what text mode prints on stdout. */
+function turnAnswer(frame: RunJsonFrame): string | null {
+	if (frame.type !== "turn_end") return null;
+	const carried = (frame as { text?: unknown }).text;
+	return answerText(frame) ?? (typeof carried === "string" ? carried : null);
+}
+
 /** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */
 interface MainRunNoteV2 {
 	runId?: string;
@@ -194,6 +277,11 @@ interface StructuredNoteV2 {
 }
 
 let structuredNote: StructuredNoteV2 | undefined;
+
+/** The validated `--output-schema` JSON the run noted, which `-o` holds instead of the answer text (SPEC 6.8). */
+function structuredAnswerJson(): string | undefined {
+	return structuredNote?.json;
+}
 
 /** Hand the v2 writer the structured-output verdict (main or `--agent`); a no-op shape for runs without the flag. */
 export function noteStructuredV2(note: StructuredNoteV2): void {
@@ -295,6 +383,8 @@ export interface RunResultV2Request {
 	agentId?: string;
 	verify: ReadonlyArray<string>;
 	outputLastMessage?: string;
+	/** `--steer-channel`: refused before boot when it cannot be opened (SPEC 6.6). */
+	steerChannel?: string;
 	cwd?: string;
 	timeoutSeconds?: number;
 	/** The limits the run was given (SPEC 6.9); the envelope carries them as `limits` when any is set. */
@@ -315,6 +405,8 @@ interface SeenFrames {
 	/** Milliseconds from the run's start to the loop's first `agent_start` and first streamed delta, as written. */
 	firstRequestMs?: number;
 	firstTokenMs?: number;
+	/** The last assistant message ended in the provider's error (not a harness stop): SPEC 6.5 row 8 `provider_error`. */
+	providerError?: boolean;
 }
 
 const LIMIT_CODES: ReadonlyArray<RunCauseCode> = [
@@ -369,8 +461,7 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			return rewritten;
 		}
 		case "turn_end": {
-			const carried = (frame as { text?: unknown }).text;
-			const text = answerText(frame) ?? (typeof carried === "string" ? carried : null);
+			const text = turnAnswer(frame);
 			if (text !== null) seen.text = text;
 			break;
 		}
@@ -386,6 +477,12 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 		case "run_end":
 			seen.runEnd = frame as RunJsonRunEndFrame;
 			return null;
+		case "message_end": {
+			const message = (frame as { message?: { role?: string; stopReason?: unknown; harnessStopped?: unknown } }).message;
+			if (message?.role === "assistant")
+				seen.providerError = message.stopReason === "error" && message.harnessStopped !== true;
+			break;
+		}
 		case "result": {
 			const result = frame as RunJsonResultFrame;
 			seen.receipt = result.result;
@@ -461,6 +558,9 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 				return [{ code: "verdict_failed", failedChecks: seen.failedChecks ?? [], ...message }];
 			const work = WORK_CODES.find((entry) => entry === detail);
 			if (work !== undefined) return [{ code: work, ...message }];
+			// SPEC 6.5 row 8: the provider's error ended the run; a harness stop or admission refusal stays run_failed.
+			if (detail === undefined && request.mode === "main" && seen.providerError === true)
+				return [{ code: "provider_error", ...message }];
 			if (request.mode === "agent" && seen.receipt !== undefined)
 				return [{ code: "worker_failed", exitCode: 1, ...message }];
 			return [{ code: "run_failed", ...message }];
@@ -568,16 +668,10 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const writeOutputTarget = (code: number): RunExitFact[] => {
 		if (outputTarget === undefined || outputSettled || code !== 0) return [];
 		outputSettled = true;
-		const temporary = `${outputTarget}.${process.pid}.tmp`;
-		try {
-			// With --output-schema the file holds the validated JSON, the same bytes text mode prints (SPEC 6.8).
-			writeFileSync(temporary, `${structuredNote?.json ?? seen.text}\n`);
-			renameSync(temporary, outputTarget);
-			return [];
-		} catch {
-			rmSync(temporary, { force: true });
-			return [{ code: "output_write_failed", path: outputTarget }];
-		}
+		// With --output-schema the file holds the validated JSON, the same bytes text mode prints (SPEC 6.8).
+		return writeOutputFile(outputTarget, `${structuredNote?.json ?? seen.text}\n`)
+			? []
+			: [{ code: "output_write_failed", path: outputTarget }];
 	};
 	// A coordinated shutdown calls process.exit, which cannot await a flush or reach finish(): a successful run that
 	// ends that way still writes `-o` here, and a failed write still moves the exit code to the envelope's.
@@ -601,14 +695,21 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	};
 	return runFailureState.run(state, async () => {
 		if (request.outputLastMessage !== undefined) {
+			const resolved = resolveOutputTarget({
+				path: request.outputLastMessage,
+				...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+			});
+			if (!prepareOutputTarget(resolved)) return finish(2);
+			outputTarget = resolved;
+		}
+		if (request.steerChannel !== undefined) {
 			const base = request.cwd !== undefined ? path.resolve(request.cwd) : process.cwd();
-			const resolved = path.resolve(base, request.outputLastMessage);
-			if (!existsSync(path.dirname(resolved))) {
-				writeRunDiagnostic(`clio-coder run: --output-last-message directory does not exist: ${path.dirname(resolved)}\n`);
+			const channel = path.resolve(base, request.steerChannel);
+			const refusal = steerChannelRefusal(channel);
+			if (refusal !== undefined) {
+				writeRunDiagnostic(`clio-coder run: --steer-channel cannot be opened: ${channel}: ${refusal}\n`);
 				return finish(2);
 			}
-			rmSync(resolved, { force: true });
-			outputTarget = resolved;
 		}
 		setFrameProjector((frame) => projectV1Frame(frame, seen, request.format));
 		process.once("exit", onExit);

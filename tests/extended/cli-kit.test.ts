@@ -178,7 +178,18 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 			"session_live",
 		],
 		[["clio-coder run: failed to resume session 019a: session file is unreadable"], "not_started"],
-		[["clio-coder run: empty task"], "not_started"],
+		// CLI-P12: the C17 slugs a refusal before boot names.
+		[["clio-coder run: empty task"], "empty_task"],
+		[["clio-coder run: `-` reads the task from stdin, but stdin is a terminal"], "empty_task"],
+		[["clio-coder run: unknown option: --bogus"], "unknown_flag"],
+		[["clio-coder run: task file schemaVersion: this release reads version 1, got 2"], "schema_unsupported"],
+		[["clio-coder run: --systemone applies to the main agent, not --agent dispatch"], "flag_conflict"],
+		[
+			[
+				"clio-coder run: --turn-mode, --allow-tools, --deny-tools, --delegate-tools, and --no-delegate apply to the main-agent task",
+			],
+			"flag_conflict",
+		],
 	] as const)
 		equal(startRefusalCause(diagnostics).code, code, diagnostics[0]);
 });
@@ -205,6 +216,103 @@ test("a v2 envelope names the parent session of a forked run", async () => {
 		const envelope = JSON.parse(lines[lines.length - 1] ?? "{}") as { sessionId?: string; parentSessionId?: string };
 		equal(envelope.sessionId, "child-1");
 		equal(envelope.parentSessionId, "parent-1");
+	} finally {
+		env.restore();
+	}
+});
+
+test("a v2 run refuses a --steer-channel it cannot open with exit 2 before the run starts (CLI-P13)", async () => {
+	const env = await isolateClioEnv("cli-kit-steer-channel-");
+	try {
+		const script = `
+			const { withRunResultV2 } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			let ran = false;
+			const request = { format: "json", mode: "main", verify: [], cwd: ${JSON.stringify(env.dir)} };
+			const code = await withRunResultV2({ ...request, steerChannel: "no-such-channel" }, async () => { ran = true; return 0; });
+			const dir = await withRunResultV2({ ...request, steerChannel: "." }, async () => { ran = true; return 0; });
+			process.stderr.write("ran=" + ran + " codes=" + code + "," + dir + "\\n");
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		ok(child.stderr.includes("ran=false codes=2,2"), child.stderr);
+		ok(child.stderr.includes("--steer-channel cannot be opened: "), child.stderr);
+		const [missing, directory] = child.stdout
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { exitCode?: number; causes?: Array<{ code: string; message?: string }> });
+		equal(missing?.exitCode, 2);
+		equal(missing?.causes?.[0]?.code, "not_started");
+		ok(missing?.causes?.[0]?.message?.endsWith("no-such-channel: no such file or FIFO"), child.stdout);
+		ok(directory?.causes?.[0]?.message?.endsWith("not a FIFO or regular file"), child.stdout);
+	} finally {
+		env.restore();
+	}
+});
+
+test("-o beside v1 --json writes the answer on exit 0, removes a stale file otherwise, and leaves stdout as it was (CLI-P14)", async () => {
+	const env = await isolateClioEnv("cli-kit-v1-output-");
+	try {
+		const script = `
+			const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
+			const { withRunFailureReporting } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
+			const turn = { type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." };
+			const body = (code) => async () => { writeFrame(turn); return code; };
+			const output = { path: "out.txt", cwd: ${JSON.stringify(env.dir)} };
+			const file = ${JSON.stringify(join(env.dir, "out.txt"))};
+			await withRunFailureReporting(true, body(0), false);
+			process.stdout.write("--\\n");
+			const ok = await withRunFailureReporting(true, body(0), false, output);
+			const written = readFileSync(file, "utf8");
+			writeFileSync(file, "stale");
+			const failed = await withRunFailureReporting(true, body(1), false, output);
+			process.stderr.write(JSON.stringify({ ok, failed, written, left: existsSync(file) }) + "\\n");
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		const result = JSON.parse(child.stderr.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
+		deepStrictEqual(result, { ok: 0, failed: 1, written: "The answer.\n", left: false }, child.stderr);
+		const [plain, withOutput] = child.stdout.split("--\n");
+		equal(withOutput?.startsWith(plain ?? ""), true, child.stdout);
+		equal(
+			plain,
+			`${JSON.stringify({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." })}\n`,
+		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("the v2 dry-run plan leaves out an absent value instead of sending null (CLI-P15)", async () => {
+	const env = await isolateClioEnv("cli-kit-dry-run-plan-");
+	try {
+		const script = `
+			const { withRunResultV2 } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeRunPlan } = await import(${JSON.stringify(resolve("src/cli/run-plan.ts"))});
+			const plan = {
+				route: { target: "t", model: null, thinking: "off" },
+				sandbox: { mode: "auto", available: true, backend: "bwrap", reason: null },
+				limits: { timeoutSeconds: null, maxCostUsd: 1, requested: {}, enforced: ["maxCostUsd"] },
+				verify: [],
+			};
+			await withRunResultV2({ format: "json", mode: "main", verify: [] }, async () => writeRunPlan({ outputFormat: "json" }, plan));
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		const envelope = JSON.parse(child.stdout.trim().split("\n").at(-1) ?? "{}") as { outcome?: string; plan?: unknown };
+		equal(envelope.outcome, "previewed", child.stdout + child.stderr);
+		deepStrictEqual(envelope.plan, {
+			route: { target: "t", thinking: "off" },
+			sandbox: { mode: "auto", available: true, backend: "bwrap" },
+			limits: { maxCostUsd: 1, requested: {}, enforced: ["maxCostUsd"] },
+			verify: [],
+		});
 	} finally {
 		env.restore();
 	}
