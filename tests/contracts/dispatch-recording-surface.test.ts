@@ -1,4 +1,4 @@
-import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -193,12 +193,14 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 	await bundle.extension.start();
 	try {
 		const approvals: string[] = [];
+		const approvalTasks: unknown[] = [];
 		const tool = createDispatchTool({
 			dispatch: bundle.contract,
 			getAutonomy: () => "yolo",
 			getWorkspaceRoot: () => host,
-			approveExternalRead: async (root) => {
+			approveExternalRead: async (root, _options, task) => {
 				approvals.push(root);
+				approvalTasks.push(task);
 				return { requestId: "approval-1", requestedBy: "operator" };
 			},
 			getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
@@ -221,6 +223,11 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 		equal(result.kind, "ok", JSON.stringify(result));
 		const root = realpathSync(sibling);
 		deepStrictEqual(approvals, [root, root]);
+		// Each approval card names the dispatched task that reads the root, not the operator's prompt (CLI-P35).
+		deepStrictEqual(approvalTasks, [
+			{ text: "Inspect the sibling checkout.", position: 1, count: 2 },
+			{ text: "Inspect the sibling checkout again.", position: 2, count: 2 },
+		]);
 		const runs = result.details?.runs as Array<{ runId: string }>;
 		equal(runs.length, 2);
 		equal(new Set(runs.map((run) => run.runId)).size, 2);
@@ -250,6 +257,8 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 		const timedOut = await tool.run(timed);
 		equal(timedOut.kind, "error");
 		match(timedOut.kind === "error" ? timedOut.message : "", /detach cannot enforce timeout_ms/);
+		// The refused call carries no normalize notice promising an approval and a detached start (CLI-P34).
+		doesNotMatch(timedOut.kind === "error" ? timedOut.message : "", /dispatch normalize/);
 		deepStrictEqual(approvals, [root, root, root]);
 	} finally {
 		await bundle.extension.stop?.();

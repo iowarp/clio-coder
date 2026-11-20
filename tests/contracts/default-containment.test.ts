@@ -547,7 +547,15 @@ test("outside scratch roots, in a scratch repository's .git and on secret paths 
 test("at default the main session reads outside the workspace, and replacing an existing outside file asks", (t) => {
 	const cwd = workspace("clio-contained-outside-ws-");
 	// A tracked repository file: it exists, and it lies outside the workspace and every scratch root.
-	const outside = fileURLToPath(new URL("../../package.json", import.meta.url));
+	const outside = realpathSync(fileURLToPath(new URL("../../package.json", import.meta.url)));
+	// A checkout under a temp tree (release qualification runs one there) lies in a scratch root, where a write runs.
+	const holder = effectiveScratchRoots(DEFAULT_SETTINGS.safety.scratchRoots, cwd).find((root) =>
+		isSameOrDescendant(outside, root),
+	);
+	if (holder !== undefined) {
+		t.skip(`the checkout lies in scratch root ${holder}, so its package.json is no outside file`);
+		return;
+	}
 	// The typed tools resolve paths against the process cwd, which a session sets to its workspace.
 	const saved = process.cwd();
 	process.chdir(cwd);
