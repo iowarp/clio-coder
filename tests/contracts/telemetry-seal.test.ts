@@ -242,6 +242,16 @@ async function openedSession(home: string, id: string): Promise<void> {
 	ok(await journal.sealAndClose());
 }
 
+test("telemetry calls --session <id> --run <r> keeps the run filter (I-25)", async () => {
+	const home = await mkdtemp(join(tmpdir(), "telemetry-calls-run-"));
+	await openedSession(home, "ses_calls_run");
+	const result = readCli(home, ["calls", "--session", "ses_calls_run", "--run", "run_other", "--json"]);
+	strictEqual(result.status, 0, result.stderr);
+	const dto = JSON.parse(result.stdout) as { runId: string | null; calls: unknown[] };
+	strictEqual(dto.runId, "run_other");
+	deepStrictEqual(dto.calls, []);
+});
+
 test("telemetry read verbs take a unique session id prefix and refuse an ambiguous one (C13)", async () => {
 	const home = await mkdtemp(join(tmpdir(), "telemetry-prefix-"));
 	await openedSession(home, "ses_prefix_alpha");

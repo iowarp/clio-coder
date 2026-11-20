@@ -645,7 +645,7 @@ function callFilter(args: Args): CallFilter | string {
 		...(roles ? { roles } : {}),
 		...(dispositions ? { dispositions } : {}),
 		...(turns ? { turnIds: turns } : {}),
-		...(args.values.get("run") !== undefined && args.positional[0] !== undefined
+		...(args.values.get("run") !== undefined && (args.positional[0] ?? args.values.get("session")) !== undefined
 			? { runId: args.values.get("run") as string }
 			: {}),
 		...(from ? { from } : {}),
