@@ -25,32 +25,36 @@ import { createTurnMiddleware } from "../../src/session-control/turn-middleware.
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
 for (const [message, text, key, failedChecks] of [
-	[FINISH_CONTRACT_ADVISORY_MESSAGE, "Clio changed files but ran no check on them afterwards", "finish.unverified"],
+	[
+		FINISH_CONTRACT_ADVISORY_MESSAGE,
+		"CLIO Coder changed files but ran no check on them afterwards",
+		"finish.unverified",
+	],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast, lint. Run checks: run-acceptance.`,
-		"Clio changed files but ran no check on them afterwards; run verify unit.fast (or lint)",
+		"CLIO Coder changed files but ran no check on them afterwards; run verify unit.fast (or lint)",
 		"finish.unverified",
 	],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast. Ran after the edit: src/clean.py, run.sh.`,
-		"Clio changed files and ran src/clean.py and 1 more afterwards, but no recognized check covered the change; run verify unit.fast",
+		"CLIO Coder changed files and ran src/clean.py and 1 more afterwards, but no recognized check covered the change; run verify unit.fast",
 		"finish.unverified",
 	],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast. Ran after the edit: src/clean.py.`,
-		"Clio changed files and ran npx tsc --noEmit -p a.b after the edit; it failed; run verify unit.fast",
+		"CLIO Coder changed files and ran npx tsc --noEmit -p a.b after the edit; it failed; run verify unit.fast",
 		"finish.unverified",
 		["npx tsc --noEmit -p a.b"],
 	],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} The current task scope does not permit automatic validation recovery; report the change as unverified. This notice grants no additional authority.`,
-		`Clio changed files and ran pytest -k "a, b" and 1 more after the edit; they failed`,
+		`CLIO Coder changed files and ran pytest -k "a, b" and 1 more after the edit; they failed`,
 		"finish.unverified",
 		['pytest -k "a, b"', "npx tsc --noEmit"],
 	],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Run checks: run-acceptance.`,
-		"Clio changed files but ran no check on them afterwards; the run's --verify check (run-acceptance) still runs after the turn",
+		"CLIO Coder changed files but ran no check on them afterwards; the run's --verify check (run-acceptance) still runs after the turn",
 		"finish.unverified",
 	],
 	[

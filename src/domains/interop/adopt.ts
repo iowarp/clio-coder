@@ -227,7 +227,7 @@ export function prepareForeignPackage(
 		id: projection.id,
 		version: projection.version,
 		files: projection.files,
-		note: `${detection.format === "claude-code" ? "Claude Code" : "Codex"} plugin normalized to a portable Clio package; hooks, MCP, LSP, scripts and host settings are never activated.${
+		note: `${detection.format === "claude-code" ? "Claude Code" : "Codex"} plugin normalized to a portable CLIO Coder package; hooks, MCP, LSP, scripts and host settings are never activated.${
 			projection.notes.length ? ` ${projection.notes.join(" ")}` : ""
 		}`,
 		omitted: projection.omitted,
@@ -258,7 +258,7 @@ function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdo
 					: projectPrompt({ file: item.path, name: item.name });
 		if (item.kind === "agent")
 			note =
-				"Persona copied into a read-only Clio agent; host tools, permissions, model, hooks and skill bindings are omitted.";
+				"Persona copied into a read-only CLIO Coder agent; host tools, permissions, model, hooks and skill bindings are omitted.";
 		const files = { ...resource.files };
 		files["plugin.json"] = JSON.stringify(
 			{
@@ -513,14 +513,14 @@ function renderOutcomes(outcomes: ReadonlyArray<ForeignResourceOutcome> | undefi
 }
 export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 	return [
-		`Adopt resources from ${plan.host} into Clio (${plan.scope})?`,
+		`Adopt resources from ${plan.host} into CLIO Coder (${plan.scope})?`,
 		...plan.entries.flatMap((entry) => [
 			`${entry.action.toUpperCase()} ${entry.item.kind} ${entry.item.name} (${entry.item.scope})`,
 			`  Source: ${entry.item.path}`,
 			...(entry.destination ? [`  Destination: ${entry.destination}`, `  SHA-256: ${entry.digest}`] : []),
 			`  ${entry.reason}`,
 			...(entry.format && entry.format !== "portable"
-				? [`  Format: ${entry.format} (normalized to a portable Clio package)`]
+				? [`  Format: ${entry.format} (normalized to a portable CLIO Coder package)`]
 				: []),
 			...(entry.requirements?.length ? [`  Requires installed packages: ${entry.requirements.join(", ")}`] : []),
 			...renderOutcomes(entry.outcomes),

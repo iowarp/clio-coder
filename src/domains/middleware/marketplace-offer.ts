@@ -384,7 +384,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 	return {
 		id: MARKETPLACE_OFFER_REGISTRATION_ID,
 		description:
-			"offers an uninstalled marketplace skill via ask_user when the request names its domain and no installed skill serves it; consented installs run gated to Clio's own marketplace, declines are remembered",
+			"offers an uninstalled marketplace skill via ask_user when the request names its domain and no installed skill serves it; consented installs run gated to CLIO Coder's own marketplace, declines are remembered",
 		hooks: ["turn_start", "after_tool", "turn_end"],
 		evidence: "match:marketplace-capability@task",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {

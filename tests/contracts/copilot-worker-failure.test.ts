@@ -16,7 +16,7 @@ const evidence: RunTerminationEvidence = {
 describe("copilot worker failure", () => {
 	it("does not retry a Copilot worker that is not signed in", () => {
 		const stderrTail =
-			"[worker] agent ended with stopReason=error: GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry. Clio never signs in to Copilot itself.";
+			"[worker] agent ended with stopReason=error: GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry. CLIO Coder never signs in to Copilot itself.";
 		const failureClass = classifyFailure(evidence, { exitCode: 1, signal: null, stderrTail }, "failed", null);
 		strictEqual(decideRetry(failureClass, 0, 2).retry, false);
 	});

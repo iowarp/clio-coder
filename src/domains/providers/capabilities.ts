@@ -98,7 +98,7 @@ export function supportsAgentRoleTools(capabilities: Pick<CapabilityFlags, "tool
 }
 
 export const AGENT_ROLE_TOOLS_REQUIRED_REASON =
-	"reports no tool support; Clio drives every agent role through typed tools";
+	"reports no tool support; CLIO Coder drives every agent role through typed tools";
 
 function applyLayer(target: Record<string, unknown>, layer: Partial<CapabilityFlags> | null): void {
 	if (!layer) return;

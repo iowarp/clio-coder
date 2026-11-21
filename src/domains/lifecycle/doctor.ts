@@ -184,7 +184,7 @@ function privateRootFinding(name: string, path: string, tightened: ReadonlyArray
 		ok: true,
 		level: "warn",
 		name: `${name} mode`,
-		detail: `${path} is ${mode.toString(8)}: group or other users can enter it and read session transcripts (run \`clio-coder doctor --fix\`, or \`chmod 700\` it when the directory is not Clio's alone)`,
+		detail: `${path} is ${mode.toString(8)}: group or other users can enter it and read session transcripts (run \`clio-coder doctor --fix\`, or \`chmod 700\` it when the directory is not CLIO Coder's alone)`,
 	};
 }
 
@@ -1436,7 +1436,7 @@ export async function runDoctorModelChecks(
 				: ["aws-sdk", "vertex-adc", "claude-cli"].includes(runtime.auth)
 					? "credentials managed by the SDK or installed app; availability not checked"
 					: runtime.externalLogin
-						? `sign-in is the \`${runtime.externalLogin}\` the runtime reads; Clio stores no credential`
+						? `sign-in is the \`${runtime.externalLogin}\` the runtime reads; CLIO Coder stores no credential`
 						: "no credential required";
 			try {
 				const status = openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), {
@@ -1564,7 +1564,7 @@ export async function runDoctorModelChecks(
 						ok: true,
 						level: "info",
 						name: `model ${target.id}`,
-						detail: `${listed.length > 0 ? `${listed.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} found in ${source}; ` : ""}${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not listed in ${source}; ${runtime.displayName} serves models it does not list, so Clio sends ${missing.length === 1 ? "it" : "them"} as typed and the provider answers for ${missing.length === 1 ? "it" : "them"}. No repair proposed.`,
+						detail: `${listed.length > 0 ? `${listed.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} found in ${source}; ` : ""}${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not listed in ${source}; ${runtime.displayName} serves models it does not list, so CLIO Coder sends ${missing.length === 1 ? "it" : "them"} as typed and the provider answers for ${missing.length === 1 ? "it" : "them"}. No repair proposed.`,
 					},
 					...cache,
 				];

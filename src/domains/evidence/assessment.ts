@@ -199,7 +199,7 @@ function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[
 		add(
 			"warn",
 			"external-bypass",
-			"run used external peer permissions outside Clio policy; Clio safety blocks were not enforced",
+			"run used external peer permissions outside CLIO Coder policy; CLIO Coder safety blocks were not enforced",
 		);
 	const review = reviewFinding(trust.independentReview.state);
 	if (review !== null) out.push(review);

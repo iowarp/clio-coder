@@ -1999,7 +1999,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					? `the project's safety policy${policy.ruleId !== undefined ? ` rule ${policy.ruleId}` : ""} must change, which only the operator can do.`
 					: policy?.reasonCode.startsWith(YOLO_FLOOR_REASON_PREFIX) === true
 						? "nothing within this run; it is the yolo floor, which holds at every autonomy level."
-						: "nothing within this run; it is a hard block of Clio's safety net.";
+						: "nothing within this run; it is a hard block of CLIO Coder's safety net.";
 			return {
 				kind: "terminal",
 				verdict: withDenial(
@@ -3396,7 +3396,7 @@ function escapeScopeAllowedDecision(ask: SafetyDecision): SafetyDecision {
 }
 /** Why contained yolo refused an outward call the judge allowed under a rule other than operator-named. */
 function containedOutwardReason(rule: string): string {
-	return `Clio's safety judge allowed this outward call under rule ${rule}, but contained yolo publishes only what an operator message explicitly names.`;
+	return `CLIO Coder's safety judge allowed this outward call under rule ${rule}, but contained yolo publishes only what an operator message explicitly names.`;
 }
 const PARK_ABORT_REASON = "run aborted before the operator decided";
 /** Audit and event code of an identical repeat refused from the turn's denial memory. */

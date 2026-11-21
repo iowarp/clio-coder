@@ -39,13 +39,13 @@ export function liteLLMRouteFailureMessage(
 	if (!hasPartialResponse && isLiteLLMConnectionFailure(providerMessage)) return providerMessage;
 	const advice =
 		`LiteLLM route '${modelId}' on target '${targetId}' failed. ` +
-		"Clio did not substitute another model; select a different route with /model, then resend.";
+		"CLIO Coder did not substitute another model; select a different route with /model, then resend.";
 	return providerMessage.includes(advice) ? providerMessage : `${providerMessage}\n\n${advice}`;
 }
 
 // Sessions saved before the retry ladder could run on this path still carry the longer sentence.
 const ROUTE_FAILURE_TAIL =
-	/\n\n(?:LiteLLM route '([^'\n]*)' on target '([^'\n]*)' failed\. )Clio did not (?:retry or )?substitute another model; select a different route with \/model, then resend\.$/;
+	/\n\n(?:LiteLLM route '([^'\n]*)' on target '([^'\n]*)' failed\. )CLIO Coder did not (?:retry or )?substitute another model; select a different route with \/model, then resend\.$/;
 
 function jsonMessage(value: unknown): string | undefined {
 	if (typeof value === "string") return value.trim() || undefined;
@@ -77,7 +77,7 @@ export function headlessRouteFailureText(message: string): string | null {
 		}
 	}
 	return (
-		`${provider} (model '${tail[1]}' on target '${tail[2]}'; Clio did not substitute another model; ` +
+		`${provider} (model '${tail[1]}' on target '${tail[2]}'; CLIO Coder did not substitute another model; ` +
 		"run `clio-coder models` to list routes or pass a different --model)"
 	);
 }

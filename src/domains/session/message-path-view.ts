@@ -76,7 +76,7 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	loop_guard: "the worker loop guard ended the run",
 	oversized_tool_result: "its tool results did not fit the model's context after compaction",
 	shutdown: "CLIO Coder shut down",
-	internal: "Clio failed internally",
+	internal: "CLIO Coder failed internally",
 };
 
 const WAIT_WORDS: Record<Wait, string> = {
@@ -239,11 +239,11 @@ function foldOne(
 			} else if (isCancel(last.callFailure)) {
 				state = "stopped";
 				label = "Stopped";
-				summary = `It left on ${call}, and ${carriedOutcome(last)} before a reply. It stays in the conversation, so the next request Clio sends carries it.`;
+				summary = `It left on ${call}, and ${carriedOutcome(last)} before a reply. It stays in the conversation, so the next request CLIO Coder sends carries it.`;
 			} else {
 				state = "failed";
 				label = "Failed";
-				summary = `Not answered. It left on ${call}: ${carriedOutcome(last)}. It stays in the conversation, so the next request Clio sends carries it.`;
+				summary = `Not answered. It left on ${call}: ${carriedOutcome(last)}. It stays in the conversation, so the next request CLIO Coder sends carries it.`;
 			}
 			break;
 		}
@@ -253,7 +253,7 @@ function foldOne(
 			label = state === "lost" ? "Not sent" : "Held";
 			summary =
 				state === "lost"
-					? "It was held and is no longer in the queue. Clio has no record that it was sent."
+					? "It was held and is no longer in the queue. CLIO Coder has no record that it was sent."
 					: `Held and not sent, because ${last.why ? WAIT_WORDS[last.why] : "no slot is coming"}. It goes with your next prompt, or send it from the queue navigator.`;
 			break;
 		case "queued":
@@ -262,7 +262,7 @@ function foldOne(
 			label = state === "lost" ? "Not sent" : "Queued";
 			summary =
 				state === "lost"
-					? "It was queued and is no longer in the queue. Clio has no record that it was sent."
+					? "It was queued and is no longer in the queue. CLIO Coder has no record that it was sent."
 					: `Waiting in the queue ${lane === "follow-up" ? "for the end of the turn" : "for the next slot"}. No request has carried it yet.`;
 			break;
 		case "handed-over":

@@ -66,8 +66,8 @@ const FAKE_CURSOR_BLANK = renderFakeCursor(" ");
 const FAKE_CURSOR_START = FAKE_CURSOR_BLANK.slice(0, FAKE_CURSOR_BLANK.indexOf(" "));
 const EMPTY_PROMPT = `Ask CLIO Coder${GLYPH.ellipsis}  / for commands`;
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
-const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
-const COMPACTING_PROMPT = "Clio is compacting the session context";
+const PREPARING_PROMPT = "CLIO Coder has your prompt and is preparing the turn";
+const COMPACTING_PROMPT = "CLIO Coder is compacting the session context";
 /** Rows the suggestion detail panel may take: the breadcrumb and one description line. */
 const SUGGESTION_PANEL_ROWS = 2;
 /** Most list rows the suggestion popup shows at once; the count row pages the rest. */
@@ -649,7 +649,7 @@ export class ClioEditor extends Editor {
 			: mode === "STEER"
 				? theme.fg("draftState", mode)
 				: (mode === "FOLLOW-UP" || mode === "MESSAGE") && this.chrome.getDraftOperator?.(text) === "shell" && keptShell
-					? theme.fg("draftState", `SHELL ${GLYPH.dot} output kept from Clio`)
+					? theme.fg("draftState", `SHELL ${GLYPH.dot} output kept from CLIO Coder`)
 					: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
 						? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
 						: "";
@@ -1183,7 +1183,7 @@ export class ClioEditor extends Editor {
 			const addressed = mode === "CONFIRM" ? null : this.steerTarget(text);
 			const prompt = addressed
 				? !addressed.live
-					? `${addressed.agentId} ended. Esc returns this composer to Clio.`
+					? `${addressed.agentId} ended. Esc returns this composer to CLIO Coder.`
 					: addressed.queued
 						? `${addressed.agentId} is queued and can take a message once it starts.`
 						: `Message for ${addressed.agentId}${GLYPH.ellipsis}`

@@ -90,7 +90,7 @@ export async function prepareFleetNodeInstall(id: string): Promise<FleetNodeInst
 
 export function describeFleetNodeInstall(plan: FleetNodeInstallPlan): string {
 	return [
-		`Install client Clio ${plan.version} on ${plan.node.id} (${plan.node.host}).`,
+		`Install client CLIO Coder ${plan.version} on ${plan.node.id} (${plan.node.host}).`,
 		`Transfer ${(plan.bytes / 1024 / 1024).toFixed(1)} MiB; SHA-256 ${plan.sha256}.`,
 		`Create ~/${plan.remotePrefix} with the package, npm dependencies, private cache and temporary files.`,
 		"Use the node's existing Node >=22.19 and npm. Optional SDK dependencies are omitted.",

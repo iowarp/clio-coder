@@ -120,13 +120,13 @@ export interface SkillCatalogView {
 
 const LISTING_HEADER = "Available skills.";
 const SESSION_NOTE =
-	"These skills were explicitly supplied for this session. Preserve their source; session availability does not mean Clio installed or copied them.";
+	"These skills were explicitly supplied for this session. Preserve their source; session availability does not mean CLIO Coder installed or copied them.";
 const INTEROP_NOTE =
-	"Other-agent skill folders are discovery-only. Explicitly import into Clio before use; the trust-imports setting does not install or activate loose files.";
+	"Other-agent skill folders are discovery-only. Explicitly import into CLIO Coder before use; the trust-imports setting does not install or activate loose files.";
 const MARKETPLACE_HEADER = "Marketplace (additional skills available to install; /skill <name> offers to install):";
 const SESSION_HEADER = "Explicitly supplied session skills (not installed packages):";
-const EMPTY_WITH_MARKETPLACE = "No skills are available in Clio and no additional marketplace skills were found.";
-const EMPTY_WITHOUT_MARKETPLACE = "No skills are available in Clio.";
+const EMPTY_WITH_MARKETPLACE = "No skills are available in CLIO Coder and no additional marketplace skills were found.";
+const EMPTY_WITHOUT_MARKETPLACE = "No skills are available in CLIO Coder.";
 
 /** Marks a ready row whose content no longer matches the hash recorded for it. */
 const DRIFT_MARKER = " [drifted]";
@@ -315,7 +315,7 @@ function renderSections(rows: ReadonlyArray<SkillCatalogRow>, input: SkillCatalo
 	const marketplace = rows.filter((row) => row.kind === "marketplace");
 
 	const lines = [LISTING_HEADER, ""];
-	lines.push(`Ready skills in Clio (${ready.length}):`);
+	lines.push(`Ready skills in CLIO Coder (${ready.length}):`);
 	if (ready.length === 0) lines.push("- none");
 	for (const row of ready) lines.push(row.line);
 	if (session.length > 0) {

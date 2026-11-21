@@ -222,7 +222,7 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 							{
 								key: "x",
 								verb: "decline",
-								consequence: "records the decision; Clio proposes it again when its binary version or path changes",
+								consequence: "records the decision; CLIO Coder proposes it again when its binary version or path changes",
 							},
 						],
 						width,
@@ -245,7 +245,7 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 							{
 								label: "toolGovernance",
 								value:
-									"clio-coder-policy (Clio mediates permission requests the ACP peer reports; its own tools may not be fully visible)",
+									"clio-coder-policy (CLIO Coder mediates permission requests the ACP peer reports; its own tools may not be fully visible)",
 							},
 							...(proposal.needsNetworkInstall
 								? [
@@ -308,7 +308,7 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 							: [
 									theme.fg(
 										"annotation",
-										"No ACP recipe for this agent, so there is nothing to connect; the modes below are how Clio reaches it.",
+										"No ACP recipe for this agent, so there is nothing to connect; the modes below are how CLIO Coder reaches it.",
 									),
 								]),
 					...factRows(theme, modes(record.kind), width, FACT_OPTIONS),
@@ -364,7 +364,7 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 					titleRow(theme, interopAgentKind(agent.kind)?.label ?? agent.kind, width, { meta: "declined" }),
 					chipRow(theme, [statusChip(theme, "cancelled", `declined ${when}`.trim())], width),
 				],
-				rest: [theme.fg("annotation", "Clio proposes it again when its binary version or path changes.")],
+				rest: [theme.fg("annotation", "CLIO Coder proposes it again when its binary version or path changes.")],
 			})),
 		});
 	}

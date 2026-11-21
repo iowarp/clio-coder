@@ -600,7 +600,7 @@ export function expandPromptTemplateInput(
 		const message =
 			template.sourceInfo.scope === "package"
 				? `prompt template ${template.name} is imported but untrusted; review it and enable integrations.projectResources.trustProjectImports to use it`
-				: `prompt template ${template.name} is discovered from another agent; explicitly import it into Clio with interop adopt or library import before use. The trust setting does not import loose files`;
+				: `prompt template ${template.name} is discovered from another agent; explicitly import it into CLIO Coder with interop adopt or library import before use. The trust setting does not import loose files`;
 		return {
 			expanded: false,
 			text: input,

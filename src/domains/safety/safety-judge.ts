@@ -617,8 +617,8 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 							kind: "park",
 							cause: "unnamed-escape",
 							gateReason: citedOperator
-								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, and the operator approved no question that names leaving the sandbox, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
-								: `Clio's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
+								? "CLIO Coder's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, and the operator approved no question that names leaving the sandbox, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
+								: `CLIO Coder's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
 							build,
 							latencyMs,
 						};
@@ -702,13 +702,13 @@ function escalationReason(state: { consecutive: number; total: number }): string
 		state.consecutive >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
 			? `blocked calls under ${state.consecutive} different rules in a row`
 			: `blocked ${state.total} calls`;
-	return `Clio's safety judge ${streak} this session, so it hands this call to you; approving a call turns its review back on.`;
+	return `CLIO Coder's safety judge ${streak} this session, so it hands this call to you; approving a call turns its review back on.`;
 }
 
 function namedTargetReason(verdict: { rule: string; reason: string }, targets: ReadonlyArray<string>): string {
 	const named = boundedLine(redactSecretString(targets.join(", ")), REASON_MAX_CHARS);
 	const reason = redactSecretString(verdict.reason).replace(/[.\s]+$/u, "");
-	return `Clio's safety judge would block this sandbox escape (rule ${verdict.rule}): ${reason}. Your own words name its target ${named}, so this call needs your decision.`;
+	return `CLIO Coder's safety judge would block this sandbox escape (rule ${verdict.rule}): ${reason}. Your own words name its target ${named}, so this call needs your decision.`;
 }
 
 function noVerdictReason(cause: SafetyJudgeNoVerdictCause, detail?: string): string {
@@ -722,12 +722,12 @@ function noVerdictReason(cause: SafetyJudgeNoVerdictCause, detail?: string): str
 					: cause === "unparsable"
 						? "its answer could not be read"
 						: `its route failed${detail !== undefined ? ` (${detail})` : ""}`;
-	return `Clio's safety judge gave no verdict because ${why}, so this call needs your decision.`;
+	return `CLIO Coder's safety judge gave no verdict because ${why}, so this call needs your decision.`;
 }
 
 function screenedReason(source: string): string {
 	const named = boundedLine(redactSecretString(source), REASON_MAX_CHARS);
-	return `Clio's safety judge would allow this call, but System One reads a result from ${named} as directing an AI agent, so this call needs your decision.`;
+	return `CLIO Coder's safety judge would allow this call, but System One reads a result from ${named} as directing an AI agent, so this call needs your decision.`;
 }
 
 /** A refused bash call's compound shape, or null for any other call and a simple command. */
@@ -787,7 +787,7 @@ function safetyJudgeRefusal(
 	compound: RefusedCompound | null,
 ): string {
 	return [
-		`Clio's safety judge blocked this ${tool} call (rule ${verdict.rule}): ${verdict.reason}`,
+		`CLIO Coder's safety judge blocked this ${tool} call (rule ${verdict.rule}): ${verdict.reason}`,
 		"The judge reviewed this call against the operator's own messages and did not find this action authorized.",
 		compound === null
 			? "Do not retry this call or a reworded form of it. Take a route that stays inside the workspace and scratch roots, or record this open decision for your final reply and continue with the rest of the task."

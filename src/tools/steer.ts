@@ -55,7 +55,7 @@ function foreignRunError(
 	if (holder !== undefined && holder.pid !== process.pid) {
 		return {
 			kind: "error",
-			message: `steer: assignment '${runId}' is running in another Clio process (pid ${holder.pid}); steer or cancel it from that session`,
+			message: `steer: assignment '${runId}' is running in another CLIO Coder process (pid ${holder.pid}); steer or cancel it from that session`,
 		};
 	}
 	return null;

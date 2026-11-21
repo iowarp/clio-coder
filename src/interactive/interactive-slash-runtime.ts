@@ -934,7 +934,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					// A handoff note is assistant-authored prose that routinely carries
 					// fenced code, so this is reachable content, not a hypothetical.
 					const fence = "`".repeat(Math.max(3, longestBacktickRun(lines) + 1));
-					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", `${fence}text`];
+					const header = [
+						`# CLIO Coder session ${sessionId}`,
+						"",
+						`Exported ${exportedAt.toISOString()}`,
+						"",
+						`${fence}text`,
+					];
 					body = `${[...header, ...lines, fence, ""].join("\n")}`;
 				} else {
 					body = await renderSessionHtmlAsync({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines });

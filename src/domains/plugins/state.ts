@@ -477,7 +477,7 @@ function scopeEntries(scope: PluginScope, cwd: string, onlyId?: string): Install
 		if (!compatible)
 			diagnostics.push({
 				type: "error",
-				message: `plugin requires Clio ${range}`,
+				message: `plugin requires CLIO Coder ${range}`,
 				path: candidate.manifestPath ?? rootPath,
 			});
 		const valid =
@@ -633,7 +633,7 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 	const digest = candidate.contentDigest;
 	const range = manifest.clio.compatibility?.clio;
 	if (range && !evaluateClioCompatibility(range).satisfied)
-		return { diagnostics: [{ type: "error", message: `plugin requires Clio ${range}` }] };
+		return { diagnostics: [{ type: "error", message: `plugin requires CLIO Coder ${range}` }] };
 	if (
 		(options.expectedKind !== undefined && options.expectedKind !== (manifest.clio.kind ?? "plugin")) ||
 		(options.expectedDigest !== undefined && options.expectedDigest !== digest) ||

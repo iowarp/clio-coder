@@ -80,18 +80,18 @@ export function harmonyServerErrorMessage(modelId: string, providerMessage: stri
 	const detail = /HarmonyError[^"\n}]{0,160}/.exec(providerMessage)?.[0] ?? "HarmonyError";
 	const lowEffort =
 		effort === "low"
-			? " This request used low effort, and a deterministic failure at reasoning_effort low is a known vLLM defect; Clio keeps the effort as configured, so try another level."
+			? " This request used low effort, and a deterministic failure at reasoning_effort low is a known vLLM defect; CLIO Coder keeps the effort as configured, so try another level."
 			: "";
 	return (
 		`${HARMONY_ERROR_CODE}: the server-side Harmony parser rejected the response for '${modelId}' twice (${detail}). ` +
-		`Clio does not retry it further. For vLLM, serve gpt-oss with ${VLLM_GPT_OSS_SERVE_FLAGS} and check the server version.${lowEffort}`
+		`CLIO Coder does not retry it further. For vLLM, serve gpt-oss with ${VLLM_GPT_OSS_SERVE_FLAGS} and check the server version.${lowEffort}`
 	);
 }
 
 export function harmonyIncompleteMessage(modelId: string): string {
 	return (
 		`${HARMONY_INCOMPLETE_CODE}: '${modelId}' returned a Harmony stop with no answer and no tool call twice, ` +
-		"so the server-side Harmony parser likely ended in a non-terminal state (vllm#45736). Clio does not record it as an empty answer. " +
+		"so the server-side Harmony parser likely ended in a non-terminal state (vllm#45736). CLIO Coder does not record it as an empty answer. " +
 		`For vLLM, serve gpt-oss with ${VLLM_GPT_OSS_SERVE_FLAGS}.`
 	);
 }

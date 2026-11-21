@@ -155,7 +155,7 @@ export function operatorStatementHoldsSecret(text: string): boolean {
 }
 
 export const OPERATOR_SECRET_REFUSAL =
-	"Not remembered: that looks like a secret, and memory is plain text read into every later prompt. Keep a provider key in CLIO Coder's credential storage (`clio-coder auth login <target>`) and any other secret in an environment variable or your OS keychain, then tell Clio the variable's name instead.";
+	"Not remembered: that looks like a secret, and memory is plain text read into every later prompt. Keep a provider key in CLIO Coder's credential storage (`clio-coder auth login <target>`) and any other secret in an environment variable or your OS keychain, then tell CLIO Coder the variable's name instead.";
 
 function normalizeOperatorStatement(text: string): string {
 	return text

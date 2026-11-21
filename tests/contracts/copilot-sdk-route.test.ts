@@ -1585,7 +1585,7 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 	disposeCopilotConversations("side-session");
 	// Dispose rejects the parked handlers at once, then disconnects and removes the records asynchronously. Wait for
 	// those events, not for a fixed time a loaded host may not keep to; the bound only stops a real regression hanging.
-	const ended = () => fake().rejected.some((reason) => /Clio session ended/.test(reason));
+	const ended = () => fake().rejected.some((reason) => /CLIO Coder session ended/.test(reason));
 	ok(await eventually(ended, 60_000), "the parked handler was rejected");
 	ok(await eventually(() => fake().disconnected.includes(session.sessionId), 60_000), "the session was disconnected");
 	ok(await eventually(() => !existsSync(records), 60_000), "the session's records were removed");
@@ -1631,7 +1631,7 @@ test("sessionFs keeps session state in Clio's cache and serves the workspace rea
 		// ".." out of the state path is a workspace path, so it is refused too.
 		() => session.fs.writeFile(join(config.sessionStatePath, "a", "..", "..", "escape.txt"), "x"),
 	]) {
-		await rejects(write(), /Clio does not let the Copilot runtime change/);
+		await rejects(write(), /CLIO Coder does not let the Copilot runtime change/);
 	}
 	strictEqual(existsSync(join(process.cwd(), "copilot-wrote.txt")), false);
 	await session.fs.writeFile(join(config.sessionStatePath, "note.txt"), "state");
@@ -1715,7 +1715,7 @@ test("a lost runtime or a closed conversation settles the open step, and the cli
 	const closed = await settledWithinTurns(pending);
 	ok(closed !== "pending", "disposal settles the open step");
 	strictEqual(closed.stopReason, "error");
-	match(closed.errorMessage ?? "", /Clio session ended/);
+	match(closed.errorMessage ?? "", /CLIO Coder session ended/);
 
 	const clientsBefore = fake().instances.length;
 	const sendsBefore = fake().order.filter((entry) => entry.startsWith("send ")).length;

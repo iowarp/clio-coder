@@ -306,10 +306,10 @@ describe("skill tool surface lifetime", () => {
 		const result = await context.run({ scope: "skills" }, {});
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") throw new Error("inventory failed");
-		match(result.output, /Ready skills in Clio .*\n- local-review \(source: clio-coder/);
+		match(result.output, /Ready skills in CLIO Coder .*\n- local-review \(source: clio-coder/);
 		match(result.output, /Explicitly supplied session skills \(not installed packages\)/);
 		match(result.output, /peer-review \(source: codex; scope: user; file:/);
-		match(result.output, /session availability does not mean Clio installed or copied them/);
+		match(result.output, /session availability does not mean CLIO Coder installed or copied them/);
 		strictEqual(result.output.includes("Installed:"), false);
 	});
 

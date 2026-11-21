@@ -372,7 +372,7 @@ export async function withClioAnthropicBrowserLogin(
 	interaction: ProviderAuthInteraction,
 	login: (interaction: ProviderAuthInteraction) => Promise<OAuthCredentials>,
 ): Promise<OAuthCredentials> {
-	const takeover = new Error("browser login taken over by Clio");
+	const takeover = new Error("browser login taken over by CLIO Coder");
 	try {
 		return await login({
 			signal: interaction.signal,

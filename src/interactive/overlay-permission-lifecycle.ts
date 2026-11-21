@@ -401,7 +401,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		);
 		deps.appendNotice(
 			"warn",
-			`No answer within ${entry.seconds} s: Clio denied ${entry.tool}, which did not run, and the turn continued.`,
+			`No answer within ${entry.seconds} s: CLIO Coder denied ${entry.tool}, which did not run, and the turn continued.`,
 		);
 	};
 	const expireUnattended = (requestId: string): void => {

@@ -112,7 +112,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				if (plan.status === "unavailable") {
 					deps.notify(
 						"warning",
-						"Clio could not reach the release registry. Nothing changed; /upgrade can be retried later.",
+						"CLIO Coder could not reach the release registry. Nothing changed; /upgrade can be retried later.",
 						"lifecycle:upgrade-unavailable",
 					);
 					return;
@@ -187,7 +187,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 							`Upgrade CLIO Coder ${plan.current} → ${plan.available}? ` +
 							replacement +
 							"Settings, credentials, memory, evidence, and session history stay in their current directories. " +
-							"After replacement Clio runs pending lifecycle checks, then asks you to restart.",
+							"After replacement CLIO Coder runs pending lifecycle checks, then asks you to restart.",
 						options: [
 							{ label: UPGRADE_NOW, description: "Replace the package and run migrations plus doctor checks." },
 							{ label: NOT_NOW, description: "Keep working; leave the quiet footer reminder in place." },

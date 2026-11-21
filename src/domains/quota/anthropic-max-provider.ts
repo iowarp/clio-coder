@@ -108,13 +108,13 @@ export function createAnthropicMaxQuotaProvider(options: AnthropicMaxQuotaOption
 			if (streamed !== null) return streamed;
 			const credentials = await readCredentials();
 			if (credentials === null) {
-				return snapshot("no_credentials", "Clio holds no Anthropic OAuth credential");
+				return snapshot("no_credentials", "CLIO Coder holds no Anthropic OAuth credential");
 			}
 			if (credentials.expiresAtMs !== null && credentials.expiresAtMs <= now().getTime()) {
 				return snapshot(
 					"expired",
 					credentials.hasRefreshToken
-						? "Clio's Anthropic token expired; the next turn refreshes it"
+						? "CLIO Coder's Anthropic token expired; the next turn refreshes it"
 						: "Run clio-coder auth login anthropic-max again",
 				);
 			}

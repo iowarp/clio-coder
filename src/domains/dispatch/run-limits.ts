@@ -29,7 +29,7 @@ const NO_RUN_TIMER = "the run has no wall-clock bound unless timeout_ms is set";
 export function planCardLimits(input: PlanCardLimitsInput): string {
 	const tools =
 		input.budget.enforcement.classification === "external-one-shot"
-			? "one launch whose tool calls Clio cannot count, so no tool ceiling applies"
+			? "one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies"
 			: budgetLimitWords(input.budget);
 	if (input.priced) {
 		return `cost ${renderUsdEstimate(input.costUpperBoundUsd)} per model call at a ${input.outputBoundTokens}-token output bound; ${tools}`;

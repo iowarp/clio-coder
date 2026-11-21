@@ -1,7 +1,7 @@
 import { buildProjectTrustCard, type ProjectTrustCardModel, trustProjectCard } from "../cli/project-trust-card.js";
 
 export const PROJECT_CONFIG_INACTIVE = "Project configuration not active · /trust";
-export const PROJECT_CONFIG_PENDING_RESTART = "Project configuration trusted · restart Clio to apply it";
+export const PROJECT_CONFIG_PENDING_RESTART = "Project configuration trusted · restart CLIO Coder to apply it";
 
 export interface ProjectTrustSessionDeps {
 	cwd: () => string;

@@ -26,7 +26,7 @@ export function prepareFleetToolInstall(id: string, tool: FleetTool): FleetToolI
 	const node = fleetNode(id);
 	const entry = node.clioCoderEntry ?? "clio-coder worker";
 	if (!/\sworker\s*$/.test(entry))
-		throw new Error("remote tool installation requires a configured Clio worker entry ending in worker");
+		throw new Error("remote tool installation requires a configured CLIO Coder worker entry ending in worker");
 	const cli = entry.replace(/\sworker\s*$/, "");
 	return {
 		node: structuredClone(node),
@@ -39,16 +39,16 @@ export function prepareFleetToolInstall(id: string, tool: FleetTool): FleetToolI
 export function describeFleetToolInstall(plan: FleetToolInstallPlan): string {
 	if (plan.tool !== "asciinema")
 		return [
-			`Install the remote Clio client's pinned ${plan.tool === "copilot-sdk" ? "GitHub Copilot SDK" : "Claude SDK"} component on ${plan.node.id} (${plan.node.host}).`,
-			"Remote Clio must match this client's release; it installs the exact SDK version it pins with the node's npm.",
-			"Uses the node user's Clio data/components directory and private cache temporary directory; no sudo or services.",
+			`Install the remote CLIO Coder client's pinned ${plan.tool === "copilot-sdk" ? "GitHub Copilot SDK" : "Claude SDK"} component on ${plan.node.id} (${plan.node.host}).`,
+			"Remote CLIO Coder must match this client's release; it installs the exact SDK version it pins with the node's npm.",
+			"Uses the node user's CLIO Coder data/components directory and private cache temporary directory; no sudo or services.",
 			"Workers on this node that use the matching runtime need it; setup omits it.",
 			plan.command,
 		].join("\n");
 	return [
-		`Install the remote Clio client's pinned asciinema on ${plan.node.id} (${plan.node.host}).`,
-		"Remote Clio must match this client's release; its registry verifies the upstream asset and document checksums.",
-		"Uses the node user's Clio data/tools directory and private cache temporary directory; no sudo or services.",
+		`Install the remote CLIO Coder client's pinned asciinema on ${plan.node.id} (${plan.node.host}).`,
+		"Remote CLIO Coder must match this client's release; its registry verifies the upstream asset and document checksums.",
+		"Uses the node user's CLIO Coder data/tools directory and private cache temporary directory; no sudo or services.",
 		"asciinema is a separate GPL-3.0-or-later program; upstream LICENSE, README and exact release source accompany the install.",
 		"Native worker recording uses an orchestrator side-channel and does not require this program on the node.",
 		plan.command,
@@ -69,7 +69,7 @@ export async function executeFleetToolInstall(plan: FleetToolInstallPlan): Promi
 			.split("\n")
 			.some((line) => line.match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/u)?.[0] === readClioVersion())
 	)
-		throw new Error("remote Clio version must match this client before tool provisioning");
+		throw new Error("remote CLIO Coder version must match this client before tool provisioning");
 	const result = await runCommandVector("ssh", buildSshArgs(current.node, current.command), {
 		// An SDK component is an npm install of up to about 180 MB, which the remote client bounds at 10 minutes.
 		timeoutMs: plan.tool === "asciinema" ? 300_000 : 11 * 60_000,

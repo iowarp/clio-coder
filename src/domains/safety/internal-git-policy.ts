@@ -222,25 +222,25 @@ function noticeFor(record: Omit<InternalGitDriftRecord, "message" | "announce">,
 		record.changes.length > NOTICE_MAX_CHANGES ? `; and ${record.changes.length - NOTICE_MAX_CHANGES} more` : "";
 	const changed = `${named.join("; ")}${more}`;
 	if (record.outcome === "yolo")
-		return `[safety] Clio ran ${record.operation} under yolo with changed git hooks or config: ${changed}.`;
+		return `[safety] CLIO Coder ran ${record.operation} under yolo with changed git hooks or config: ${changed}.`;
 	if (record.changes.length === 0 && record.unneutralized.includes(UNLISTED_GIT_CONFIG_KEY)) {
 		const ran =
 			record.outcome === "skipped"
 				? `does not run its own status and diff probes in ${record.repository}`
 				: `ran ${record.operation} with hooks off`;
-		return `[safety] Clio ${ran}, because git cannot list the repository's git config within its time and size bounds, so a filter driver or hook it sets could run unseen. This lasts until the config lists again.`;
+		return `[safety] CLIO Coder ${ran}, because git cannot list the repository's git config within its time and size bounds, so a filter driver or hook it sets could run unseen. This lasts until the config lists again.`;
 	}
 	if (record.outcome === "skipped" && record.changes.length === 0)
-		return `[safety] Clio does not run its own status and diff probes in ${record.repository}, because the repository's own config sets a filter driver or git-lfs extension command whose key cannot be overridden from the command line: ${record.unneutralized.join(", ")}. They resume once it is removed or renamed.`;
+		return `[safety] CLIO Coder does not run its own status and diff probes in ${record.repository}, because the repository's own config sets a filter driver or git-lfs extension command whose key cannot be overridden from the command line: ${record.unneutralized.join(", ")}. They resume once it is removed or renamed.`;
 	if (record.outcome === "skipped")
-		return `[safety] Clio stopped running its own status and diff probes in ${record.repository}, because executable git config changed during this session and cannot be overridden from the command line: ${changed}. They resume once the change is reverted or you approve it on the agent's next git command.`;
+		return `[safety] CLIO Coder stopped running its own status and diff probes in ${record.repository}, because executable git config changed during this session and cannot be overridden from the command line: ${changed}. They resume once the change is reverted or you approve it on the agent's next git command.`;
 	if (record.outcome === "overridden")
-		return `[safety] Clio's own status and diff probes in ${record.repository} now override executable git config that changed during this session: ${changed}.`;
+		return `[safety] CLIO Coder's own status and diff probes in ${record.repository} now override executable git config that changed during this session: ${changed}.`;
 	const kept =
 		record.unneutralized.length > 0
 			? ` These keys could not be overridden and still apply: ${record.unneutralized.join(", ")}.`
 			: "";
-	return `[safety] Clio ran ${record.operation} with hooks off and changed git config overridden, because these changed during this session: ${changed}.${kept} Review them; the agent's next git command outside the sandbox asks you first.`;
+	return `[safety] CLIO Coder ran ${record.operation} with hooks off and changed git config overridden, because these changed during this session: ${changed}.${kept} Review them; the agent's next git command outside the sandbox asks you first.`;
 }
 
 /** Impure: the policy, holding the session guard and the guards it makes for outside repositories. */

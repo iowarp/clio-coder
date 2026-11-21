@@ -68,14 +68,14 @@ function renderSkillsListBeforeChange(
 ): string {
 	if (skills.length === 0 && marketplace.length === 0 && packages.length === 0) {
 		return marketplaceOffered
-			? "No skills are available in Clio and no additional marketplace skills were found."
-			: "No skills are available in Clio.";
+			? "No skills are available in CLIO Coder and no additional marketplace skills were found."
+			: "No skills are available in CLIO Coder.";
 	}
 	const lines = ["Available skills.", ""];
 
 	const native = skills.filter((s) => s.source === "clio-coder" || s.source === "plugin");
 	const discovered = skills.filter((s) => s.source !== "clio-coder" && s.source !== "plugin");
-	lines.push(`Ready skills in Clio (${native.length}):`);
+	lines.push(`Ready skills in CLIO Coder (${native.length}):`);
 	if (native.length === 0) lines.push("- none");
 	for (const s of native) {
 		lines.push(`- ${s.name} (source: ${s.source}; scope: ${s.scope}): ${s.description}`);
@@ -86,7 +86,7 @@ function renderSkillsListBeforeChange(
 			lines.push(`- ${s.name} (source: ${s.source}; scope: ${s.scope}; file: ${s.filePath}): ${s.description}`);
 		}
 		lines.push(
-			"These skills were explicitly supplied for this session. Preserve their source; session availability does not mean Clio installed or copied them.",
+			"These skills were explicitly supplied for this session. Preserve their source; session availability does not mean CLIO Coder installed or copied them.",
 		);
 	}
 
@@ -99,7 +99,7 @@ function renderSkillsListBeforeChange(
 	}
 	lines.push(
 		"",
-		"Other-agent skill folders are discovery-only. Explicitly import into Clio before use; the trust-imports setting does not install or activate loose files.",
+		"Other-agent skill folders are discovery-only. Explicitly import into CLIO Coder before use; the trust-imports setting does not install or activate loose files.",
 	);
 
 	if (marketplace.length > 0) {
@@ -414,7 +414,7 @@ describe("contracts/skills catalog view drift visibility", () => {
 		ok(view.text.includes("Marked [drifted]: ship no longer matches"), "the footer names it");
 		deepStrictEqual(view.driftedNames, ["ship"]);
 		// Visibility only: still listed, still in the ready section, still present.
-		ok(view.text.includes("Ready skills in Clio (5):"), "the drifted skill still counts as ready");
+		ok(view.text.includes("Ready skills in CLIO Coder (5):"), "the drifted skill still counts as ready");
 		strictEqual(view.rows.filter((row) => row.name === "ship").length, 1);
 	});
 

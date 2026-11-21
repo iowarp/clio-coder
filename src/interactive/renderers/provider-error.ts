@@ -79,7 +79,7 @@ export function presentProviderError(value: string, options: { remedyStated?: bo
 	// window, so a long diagnostic is matched on its bounded tail instead.
 	const beyondScan = value.length > SCAN_LIMIT;
 	const routeParts = (beyondScan ? providerErrorEvidence(value.slice(-ROUTE_ADVICE_TAIL)) : available).match(
-		/\n\n((LiteLLM route [^\n]+ failed\.) Clio did not (?:retry or )?(substitute another model); (select a different route with \/model, then resend\.))$/,
+		/\n\n((LiteLLM route [^\n]+ failed\.) CLIO Coder did not (?:retry or )?(substitute another model); (select a different route with \/model, then resend\.))$/,
 	);
 	const routeAdvice = routeParts?.[1];
 	const sample =
@@ -147,7 +147,7 @@ export function presentProviderError(value: string, options: { remedyStated?: bo
 		const policy = routeParts?.[3];
 		const remedy = routeParts?.[4];
 		// A saved failure may claim no retry that the ladder since made untrue, so the policy is restated rather than replayed.
-		const advice = identity && policy && remedy ? `${remedy} Clio did not ${policy}. ${identity}` : routeAdvice;
+		const advice = identity && policy && remedy ? `${remedy} CLIO Coder did not ${policy}. ${identity}` : routeAdvice;
 		summary = `${prefix}${summary.length > 60 ? " ..." : ""}; ${advice}`;
 	}
 	const shortened = summary.length > DISPLAY_LIMIT || value.length > SCAN_LIMIT || summary !== sample.trim();
@@ -248,7 +248,7 @@ function admissionRailCause(reason: string | undefined, errorClass: string): Pro
 		return { text: `server holds ${slots} and none can be unloaded`, short: "no free model slot" };
 	}
 	if (errorClass === "timeout") return { text: "timed out before it was sent", short: "timed out" };
-	return { text: "Clio did not send it", short: "not sent" };
+	return { text: "CLIO Coder did not send it", short: "not sent" };
 }
 
 export function providerFailureRailFacts(

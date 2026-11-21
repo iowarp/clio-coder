@@ -902,7 +902,7 @@ type ExternalAgent = ClioSettings["integrations"]["externalAgents"]["entries"][n
 type FleetNodeConfig = ClioSettings["fleet"]["nodes"][number];
 
 const EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED =
-	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds Clio's own ACP server";
+	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds CLIO Coder's own ACP server";
 const EXTERNAL_AGENT_LABELS_RETIRED = "nothing read or displayed external agent labels";
 const EXCLUDE_LAST_TURNS_RETIRED =
 	"only the temporary legacy mask used it; context.workingSet.protectLastTurns remains";
@@ -934,7 +934,7 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"turnControl.interpretation": "no harness workflow reads the request before a turn any more",
 	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
 	"interface.panes.enabled":
-		"Clio always opens its own private pane host when the terminal allows it; --with-panes joins an existing host instead",
+		"CLIO Coder always opens its own private pane host when the terminal allows it; --with-panes joins an existing host instead",
 	"systemOne.engines.*.mode": "every llm engine reads as one batch request",
 } as const);
 
@@ -2260,7 +2260,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 										? "no target with this id"
 										: LIVE_CHECK_LOGIN_RUNTIMES.has(target.runtime)
 											? null
-											: `runtime ${target.runtime} has no login file Clio can reveal (only ${[...LIVE_CHECK_LOGIN_RUNTIMES].join(", ")})`;
+											: `runtime ${target.runtime} has no login file CLIO Coder can reveal (only ${[...LIVE_CHECK_LOGIN_RUNTIMES].join(", ")})`;
 								if (problem !== null) issues.add("safety.liveCheckTargets", `${id}: ${problem}`);
 								return problem === null;
 							}),

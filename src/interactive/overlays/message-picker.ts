@@ -102,7 +102,7 @@ function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): ChoiceItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
 		label: row.asked ? `after “${row.asked.replaceAll("**", "")}”` : row.preview.replaceAll("**", ""),
-		...(row.asked ? { description: `Clio: ${row.preview.replaceAll("**", "")}` } : {}),
+		...(row.asked ? { description: `CLIO Coder: ${row.preview.replaceAll("**", "")}` } : {}),
 		meta: formatTimestampForRow(row.at),
 	}));
 }

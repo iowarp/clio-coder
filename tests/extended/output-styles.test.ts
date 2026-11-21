@@ -492,7 +492,7 @@ test("/view titles each act with what its row states and ages it from when it ha
 		.inspectionArtifacts()
 		.map((artifact) => [artifact.title, Math.round((clock - artifact.timestamp) / 1_000)] as const);
 	deepStrictEqual(titles, [
-		["$ Clio ran `npm test` · exit 1", 190],
+		["$ CLIO Coder ran `npm test` · exit 1", 190],
 		["± edited src/net/retry.js · +1 -1", 125],
 		["i interrupt refused: queued", 60],
 	]);
@@ -567,12 +567,12 @@ test("/view renders a transcript block at the preview's width, rail and hanging 
 	view.render(40);
 	await new Promise((resolve) => setImmediate(resolve));
 	const rows = view.render(40).map(stripTerminalSequences);
-	match(rows.join("\n"), /Preview · 1\/1[\s\S]*\$ Clio ran `node scripts\/check\.js/u);
+	match(rows.join("\n"), /Preview · 1\/1[\s\S]*\$ CLIO Coder ran `node scripts\/check\.js/u);
 	const body = rows
 		.slice(rows.findIndex((row) => row.startsWith("transcript ·")) + 1)
 		.filter((row) => row.trim().length > 0);
 	ok(body.length > 4, rows.join("\n"));
-	match(body[0] ?? "", /^\$ Clio ran/u);
+	match(body[0] ?? "", /^\$ CLIO Coder ran/u);
 	// Every wrapped row stays in the content column under its rail, as the transcript renders it.
 	for (const row of body.slice(1)) ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}`);
 	ok(
@@ -624,9 +624,9 @@ test("a shell row names the model that asked for it only when the turn had more 
 	} as never);
 	const one = panel.render(120).map(stripTerminalSequences).join("\n");
 	match(one, /Reply from/u, one);
-	match(one, /\$ Clio ran `npm test`/u, one);
+	match(one, /\$ CLIO Coder ran `npm test`/u, one);
 	doesNotMatch(one, /requested by/u, "the Reply from row already names the only model in the turn");
 	reply("model-b");
 	const failover = panel.render(120).map(stripTerminalSequences).join("\n");
-	match(failover, /\$ Clio ran `npm test` \(requested by [^)]*model-a[^)]*\)/iu, failover);
+	match(failover, /\$ CLIO Coder ran `npm test` \(requested by [^)]*model-a[^)]*\)/iu, failover);
 });

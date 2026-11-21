@@ -303,11 +303,11 @@ class Conversation {
 			this.delivered.delete(toolCallId);
 			return Promise.resolve(ready);
 		}
-		if (this.disposed) return Promise.reject(new Error("Clio's Copilot conversation was closed"));
+		if (this.disposed) return Promise.reject(new Error("CLIO Coder's Copilot conversation was closed"));
 		return new Promise<ToolResultObject>((resolve, reject) => {
 			const retire = () => {
 				this.parked.delete(toolCallId);
-				reject(new Error("Copilot retired this tool call before Clio returned its result"));
+				reject(new Error("Copilot retired this tool call before CLIO Coder returned its result"));
 			};
 			if (signal?.aborted) {
 				retire();
@@ -466,7 +466,7 @@ function openSpare(base: Parameters<typeof openConversationHeld>[0], announce: (
 	})();
 }
 
-function remove(conversation: Conversation, reason = "Clio closed this Copilot conversation"): void {
+function remove(conversation: Conversation, reason = "CLIO Coder closed this Copilot conversation"): void {
 	const index = conversations.indexOf(conversation);
 	if (index >= 0) conversations.splice(index, 1);
 	void conversation.dispose(reason);
@@ -571,7 +571,7 @@ function forgetStored(record: CopilotConversationRecord): void {
 export function disposeCopilotConversations(sessionId: string): void {
 	for (const conversation of [...conversations]) {
 		if (conversation.key === sessionId)
-			remove(conversation, "The Clio session ended; its Copilot conversation was closed");
+			remove(conversation, "The CLIO Coder session ended; its Copilot conversation was closed");
 	}
 }
 
@@ -1158,7 +1158,7 @@ function declareTools(conversationRef: () => Conversation | null, tools: Readonl
 		defer: "never" as const,
 		handler: (_args: unknown, invocation: { toolCallId: string; signal?: AbortSignal }) => {
 			const conversation = conversationRef();
-			if (!conversation) return Promise.reject(new Error("Clio's Copilot conversation is not available"));
+			if (!conversation) return Promise.reject(new Error("CLIO Coder's Copilot conversation is not available"));
 			return conversation.park(invocation.toolCallId, invocation.signal);
 		},
 	}));
@@ -1449,7 +1449,7 @@ async function runStep(
 			open.pendingToolCallIds.length > 0 &&
 			open.pendingToolCallIds.every((id) => settledCalls.has(id)),
 	))
-		remove(stale, "Clio's transcript moved past the calls this Copilot run waited on; its conversation was closed");
+		remove(stale, "CLIO Coder's transcript moved past the calls this Copilot run waited on; its conversation was closed");
 	const reused = conversation !== null;
 	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
 	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);
@@ -1527,7 +1527,7 @@ async function runStep(
 				// Copilot answers a call to a tool it was never given ("does not exist") and its run goes on without
 				// Clio, while Clio's loop may still run that name (a gateway capability called directly). The two
 				// transcripts have diverged, so delivering Clio's result would leave both sides waiting on each other.
-				remove(active, "Copilot answered a tool call it was not given; the next call reseeds from Clio's transcript");
+				remove(active, "Copilot answered a tool call it was not given; the next call reseeds from CLIO Coder's transcript");
 				return;
 			}
 			if (stop === "toolUse" || stop === "stop") {

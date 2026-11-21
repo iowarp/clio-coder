@@ -178,12 +178,12 @@ describe("claude-sdk: Clio context, artifact and verify tools", () => {
 				requestOrigin: "user",
 			} as const;
 			await rejects(bundle.contract.dispatch(scout), (error: Error) => {
-				match(error.message, /reserved for Clio internal orchestration; .*'coder' with --read-only$/);
+				match(error.message, /reserved for CLIO Coder internal orchestration; .*'coder' with --read-only$/);
 				return true;
 			});
 			// Denying context leaves coder short of a required tool on this route.
 			await rejects(bundle.contract.dispatch({ ...scout, denyTools: [ToolNames.Context] }), (error: Error) => {
-				match(error.message, /reserved for Clio internal orchestration$/);
+				match(error.message, /reserved for CLIO Coder internal orchestration$/);
 				return true;
 			});
 			strictEqual(specs.length, 0);
@@ -234,7 +234,7 @@ describe("claude-sdk: Clio context, artifact and verify tools", () => {
 						requestOrigin: "user",
 					}),
 					(error: Error) => {
-						match(error.message, /reserved for Clio internal orchestration$/);
+						match(error.message, /reserved for CLIO Coder internal orchestration$/);
 						return true;
 					},
 				);

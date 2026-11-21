@@ -253,9 +253,9 @@ function validationFailureOf(
 				(check.notRun !== undefined && check.notRun !== "nothing-changed" && check.notRun !== "no-tests"),
 		);
 		if (failed.length > 0)
-			return `Clio's own check failed: ${failed.map((check) => (check.notRun !== undefined ? `${check.check} did not run: ${hostCheckNotRunNote(check.notRun)}` : `${check.check} exited ${check.exitCode ?? "without a code"}`)).join(", ")}`;
+			return `CLIO Coder's own check failed: ${failed.map((check) => (check.notRun !== undefined ? `${check.check} did not run: ${hostCheckNotRunNote(check.notRun)}` : `${check.check} exited ${check.exitCode ?? "without a code"}`)).join(", ")}`;
 		const reason = result?.hostVerification?.reason;
-		return reason ? `Clio's own check failed: ${firstSentence(reason)}` : "Clio's own check failed";
+		return reason ? `CLIO Coder's own check failed: ${firstSentence(reason)}` : "CLIO Coder's own check failed";
 	}
 	const typed = settled.quality?.typedValidations ?? [];
 	const commands = typed
