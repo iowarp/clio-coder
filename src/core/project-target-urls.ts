@@ -21,6 +21,11 @@ export function isProjectKeyVariableName(name: string): boolean {
 	return /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name);
 }
 
+/** The one sentence every surface prints for a target whose key variable is unset: run, the TUI and doctor. */
+export function unsetKeyVariableSentence(targetId: string, variable: string): string {
+	return `target ${targetId} reads its key from $${variable}, which is not set in this shell.`;
+}
+
 export function isLoopbackUrl(url: string): boolean {
 	let host: string;
 	try {

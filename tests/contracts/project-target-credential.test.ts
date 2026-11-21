@@ -200,3 +200,48 @@ test("a trusted project's chat target URL never receives the environment API key
 	strictEqual(run.code, 1, run.stdout + run.stderr);
 	match(run.stdout + run.stderr, /does not send your stored or environment openai credential to a URL a project chose/);
 });
+
+test("a trusted project target whose named key is unset is refused before any request, in run and doctor", {
+	timeout: 60_000,
+}, async (t) => {
+	const home = await isolateClioEnv("clio-project-named-key-unset-");
+	t.after(() => home.restore());
+	const requests: string[] = [];
+	const server = createServer((request, response) => {
+		requests.push(`${request.method} ${request.url}`);
+		request.resume();
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify({ object: "list", data: [{ id: "mock-model", object: "model" }] }));
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => closeServer(server));
+	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+	const workspace = join(home.dir, "workspace");
+	mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+	writeFileSync(
+		join(workspace, ".clio-coder", "settings.yaml"),
+		`targets:\n  - id: team\n    runtime: openai-compat\n    url: ${url}\n    defaultModel: mock-model\n    auth: { apiKeyEnvVar: TEAM_KEY }\nchat:\n  target: team\n  model: mock-model\n`,
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test", NO_COLOR: "1" };
+	delete env.TEAM_KEY;
+	const named = /target team reads its key from \$TEAM_KEY, which is not set/;
+
+	const run = await runCli(["--no-context-files", "--no-skills", "run", "--no-delegate", "say hi"], {
+		env,
+		cwd: workspace,
+	});
+	const runText = run.stdout + run.stderr;
+	strictEqual(requests.length, 0, `requests reached the project URL: ${requests.join(", ")}`);
+	strictEqual(run.code, 1, runText);
+	match(runText, named);
+	ok(!runText.includes("auth login"), runText);
+
+	const doctor = await runCli(["doctor"], { env, cwd: workspace });
+	const row = (doctor.stdout + doctor.stderr).split("\n").find((line) => /\bconnection team\b/.test(line));
+	strictEqual(requests.length, 0, `doctor reached the project URL: ${requests.join(", ")}`);
+	ok(row, doctor.stdout + doctor.stderr);
+	match(row, named);
+});

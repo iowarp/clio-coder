@@ -1,5 +1,9 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { projectChosenTargetUrl, projectTargetKeyVariable } from "../../../core/project-target-urls.js";
+import {
+	projectChosenTargetUrl,
+	projectTargetKeyVariable,
+	unsetKeyVariableSentence,
+} from "../../../core/project-target-urls.js";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
 import { telemetryHub } from "../../../core/telemetry/hub.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
@@ -304,8 +308,12 @@ function targetEnvApiKey(envVar: string | undefined): { envVar: string; apiKey: 
 	return apiKey ? { envVar, apiKey } : null;
 }
 
-/** A project-chosen URL's credential: the variable the trusted project named, from this shell, or nothing. */
-function projectKeyResolution(providerId: string, envVar: string): AuthResolution {
+/**
+ * A project-chosen URL's credential: the variable the trusted project named, from this shell. Unset, it is a
+ * refusal naming the variable, so no request goes to that URL and no other remedy (a stored key, a sign-in) is
+ * offered: nothing else is ever sent there.
+ */
+function projectKeyResolution(providerId: string, envVar: string, targetId: string): AuthResolution {
 	const env = targetEnvApiKey(envVar);
 	return env
 		? {
@@ -316,7 +324,14 @@ function projectKeyResolution(providerId: string, envVar: string): AuthResolutio
 				detail: envVar,
 				apiKey: env.apiKey,
 			}
-		: { providerId, available: false, credentialType: null, source: "none", detail: `${envVar} is not set` };
+		: {
+				providerId,
+				available: false,
+				credentialType: null,
+				source: "none",
+				detail: unsetKeyVariableSentence(targetId, envVar),
+				refused: true,
+			};
 }
 
 /**
@@ -667,7 +682,11 @@ export class AuthStorage {
 	private refusedFor(target: AuthTarget): AuthStatus | null {
 		if (target.targetId && this.runtimeOverrides.has(target.targetId)) return null;
 		if (target.projectKeyEnvVar) {
-			const { apiKey: _key, ...status } = projectKeyResolution(target.providerId, target.projectKeyEnvVar);
+			const { apiKey: _key, ...status } = projectKeyResolution(
+				target.providerId,
+				target.projectKeyEnvVar,
+				target.targetId ?? target.providerId,
+			);
 			return status;
 		}
 		if (!target.credentialRefusal) return null;
@@ -1061,7 +1080,9 @@ export class AuthStorage {
 		opts?: { includeFallback?: boolean; signal?: AbortSignal; rejectedApiKey?: string; refresh?: false },
 	): Promise<AuthResolution> {
 		if (target.projectKeyEnvVar && !(target.targetId && this.runtimeOverrides.has(target.targetId))) {
-			return remembered(projectKeyResolution(target.providerId, target.projectKeyEnvVar));
+			return remembered(
+				projectKeyResolution(target.providerId, target.projectKeyEnvVar, target.targetId ?? target.providerId),
+			);
 		}
 		const refused = this.refusedFor(target);
 		if (refused) return refused;

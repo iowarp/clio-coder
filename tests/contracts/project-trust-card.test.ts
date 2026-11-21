@@ -150,7 +150,7 @@ test("a project target names its key variable: the card says it sends $NAME to t
 			["targets[0].auth.apiKeyRef", "targets[0].auth.headers"],
 		);
 		deepStrictEqual(projectConnectionNeeds(workspace, trusted.settings), [
-			"team reads its key from TEAM_KEY, which is not set in this shell.",
+			"target team reads its key from $TEAM_KEY, which is not set in this shell.",
 		]);
 		process.env.TEAM_KEY = "team-secret";
 		deepStrictEqual(projectConnectionNeeds(workspace, readStrictLayeredSettings(workspace).settings), []);
