@@ -17,6 +17,12 @@ import { bareSkillIdentity, bareSkillManifest } from "../resources/skills/bare-s
 import { normalizedSkillHash } from "../resources/skills/content-hash.js";
 import { loadSkills } from "../resources/skills/loader.js";
 import { detectForeignPlugin, type ForeignResourceOutcome, projectForeignPlugin } from "./foreign.js";
+import {
+	applyHookAdoption,
+	hookDestinationConflict,
+	mapForeignHooks,
+	type PortedHookDeclaration,
+} from "./hooks-adopt.js";
 import { installInteropPackage } from "./install.js";
 import { applyInstructionsAdoption, planInstructionsAdoption } from "./instructions-adopt.js";
 import { inventoryText } from "./inventory.js";
@@ -24,17 +30,18 @@ import { type AdoptedMcpServer, applyMcpAdoption, mapForeignMcpServer, mcpDestin
 import { digest, projectAgent, projectPrompt, projectSkill, prose, safeName, tree } from "./projection.js";
 import type { InteropAgentId, InteropInventory, InteropInventoryItem } from "./types.js";
 
-export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin" | "mcp" | "instructions";
+export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin" | "mcp" | "hook" | "instructions";
 export const ADOPTION_KINDS: ReadonlyArray<AdoptionKind> = [
 	"skill",
 	"agent",
 	"prompt",
 	"plugin",
 	"mcp",
+	"hook",
 	"instructions",
 ];
 /** Kinds that install as library packages; the rest write a Clio config file. */
-type PackageAdoptionKind = Exclude<AdoptionKind, "mcp" | "instructions">;
+type PackageAdoptionKind = Exclude<AdoptionKind, "mcp" | "hook" | "instructions">;
 /** Whether an inventory kind has an adoption path; the rest are listed with the reason they are not migrated. */
 export function isAdoptableKind(kind: string): kind is AdoptionKind {
 	return (ADOPTION_KINDS as ReadonlyArray<string>).includes(kind);
@@ -58,6 +65,8 @@ export interface InteropAdoptionEntry {
 	files?: Readonly<Record<string, string>>;
 	/** The reviewed MCP server; its env values are never serialized or printed, only its keys. */
 	server?: AdoptedMcpServer;
+	/** The reviewed Clio hook declarations a foreign event ports to. */
+	hooks?: PortedHookDeclaration[];
 }
 export interface InteropAdoptionPlan {
 	host: InteropAgentId;
@@ -386,15 +395,8 @@ export function unmetRequirements(
 	return [...problems];
 }
 
-/**
- * Why a resource Clio inventories is not migrated. One seam per kind whose
- * migration waits on a product decision, so the ruling replaces a function
- * and not the planner: hooks need a hook contract Clio does not have yet
- * (stdin payload, blocking exit code).
- */
+/** Why a resource Clio inventories has no adoption path. */
 function unportedReason(item: InteropInventoryItem): string {
-	if (item.kind === "hook")
-		return "Not migrated: Clio command hooks get no stdin payload, cannot block on an exit code and stop at 5 s; port this hook by hand into .clio-coder/hooks.yaml.";
 	return `Not adoptable: ${item.kind} is executable configuration or unsupported presentation data.`;
 }
 
@@ -476,6 +478,40 @@ export function planInteropAdoption(input: {
 		}
 		if (input.kind && item.kind !== input.kind) {
 			skip(`Excluded by --kind ${input.kind}.`);
+			continue;
+		}
+		if (item.kind === "hook") {
+			if (item.plugin) {
+				skip("Declared by a plugin; plugin hooks are never activated by adoption.");
+				continue;
+			}
+			const mapping = mapForeignHooks(item, input.host, cwd);
+			if (!mapping.ok) {
+				skip(mapping.reason);
+				continue;
+			}
+			const key = `hook:${mapping.destination}:${item.name}`;
+			const conflict = planned.has(key)
+				? `Hook ids for ${item.name} are already planned from another source.`
+				: hookDestinationConflict(mapping.hooks, mapping.destination);
+			if (conflict !== null) {
+				skip(conflict);
+				continue;
+			}
+			planned.add(key);
+			plan.entries.push({
+				item,
+				action: "install",
+				id: `hook:${item.name}`,
+				destination: mapping.destination,
+				digest: mapping.digest,
+				hooks: mapping.hooks,
+				reason:
+					item.scope === "project"
+						? "Ported into the project hooks file; it runs only after `clio-coder config trust hooks` approves the changed file."
+						: "Ported into your Clio hooks file: the same shell command, the event as JSON on stdin, exit 2 blocks.",
+				...(mapping.notes.length ? { unsupported: mapping.notes } : {}),
+			});
 			continue;
 		}
 		if (item.kind === "instructions") {
@@ -614,6 +650,10 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			`${entry.action.toUpperCase()} ${entry.item.kind} ${entry.item.name} (${entry.item.scope})`,
 			`  Source: ${entry.item.path}`,
 			...(entry.destination ? [`  Destination: ${entry.destination}`, `  SHA-256: ${entry.digest}`] : []),
+			...(entry.hooks ?? []).map(
+				(hook) =>
+					`  Hook ${hook.id}: ${String(hook.on)}${Array.isArray(hook.tools) ? ` [${hook.tools.join(", ")}]` : ""}${hook.once ? " once per session" : ""} runs ${hook.argv.slice(2).join(" ")}`,
+			),
 			// The approval covers exactly this text, so all of it is shown.
 			...(entry.item.kind === "instructions" && entry.files
 				? Object.values(entry.files).flatMap((text) => text.split("\n").map((line) => `  | ${line}`))
@@ -668,6 +708,16 @@ export function applyInteropAdoption(
 	}
 	for (const entry of plan.entries) {
 		if (entry.action !== "install" || !entry.id) continue;
+		if (entry.item.kind === "hook") {
+			try {
+				const written = entry.digest ? applyHookAdoption(entry.item, plan.host, plan.cwd, entry.digest) : undefined;
+				if (written?.ok) result.installed.push(entry.id);
+				else result.diagnostics.push(`${entry.item.name}: ${written?.reason ?? "no reviewed digest"}`);
+			} catch (error) {
+				result.diagnostics.push(`${entry.item.name}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			continue;
+		}
 		if (entry.item.kind === "instructions") {
 			try {
 				const written = entry.digest ? applyInstructionsAdoption(entry.item, plan.host, entry.digest) : undefined;

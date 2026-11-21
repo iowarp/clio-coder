@@ -31,6 +31,7 @@ import {
 	type MiddlewareEffect,
 	type MiddlewareEffectKind,
 	type MiddlewareHook,
+	type MiddlewareHookInput,
 	type MiddlewareReminderSeverity,
 } from "./types.js";
 import { validateMiddlewareEffect } from "./validate.js";
@@ -52,15 +53,17 @@ const USER_HOOK_APPLIED_EFFECTS: Readonly<Record<MiddlewareHook, ReadonlyArray<M
 	on_compaction: [],
 };
 
-function producedEffectKind(spec: NormalizedUserHookSpec): MiddlewareEffectKind {
+/** The effect a hook's output produces; null for a command whose output is discarded. Exit 2 is per event and always applies. */
+function producedEffectKind(spec: NormalizedUserHookSpec): MiddlewareEffectKind | null {
 	if (spec.kind === "prompt") return "inject_reminder";
 	if (spec.kind === "effect") return spec.effect.kind;
+	if (spec.as === "none") return null;
 	return spec.as === "reminder" ? "inject_reminder" : "annotate_tool_result";
 }
 
 function applicabilityIssue(on: MiddlewareHook, spec: NormalizedUserHookSpec): string | null {
 	const kind = producedEffectKind(spec);
-	if (USER_HOOK_APPLIED_EFFECTS[on].includes(kind)) return null;
+	if (kind === null || USER_HOOK_APPLIED_EFFECTS[on].includes(kind)) return null;
 	const events = MIDDLEWARE_HOOKS.filter((hook) => USER_HOOK_APPLIED_EFFECTS[hook].includes(kind));
 	return `${on} cannot apply ${kind}; use ${events.length > 0 ? events.join(", ") : "no event"} for this hook`;
 }
@@ -83,6 +86,10 @@ export const USER_HOOK_COMMAND_TIMEOUT_MAX_MS = 5_000;
 export const USER_HOOK_COMMAND_OUTPUT_MAX_CHARS = 4_000;
 /** Cap on a prompt hook's injected message, in characters. */
 export const USER_HOOK_PROMPT_MAX_CHARS = 2_000;
+/** Cap on the JSON payload a command hook reads on stdin; a larger tool result is left out and flagged. */
+const USER_HOOK_PAYLOAD_MAX_BYTES = 256 * 1024;
+/** The exit status by which a command hook blocks what its event can block. */
+export const USER_HOOK_BLOCK_EXIT_CODE = 2;
 
 /**
  * Provenance of an installed package that supplied hook declarations, as the
@@ -133,8 +140,12 @@ export interface NormalizedCommandHook {
 	argv: string[];
 	cwd?: string;
 	timeoutMs: number;
-	/** Effect kind that carries the bounded command output. */
-	as: "annotate" | "reminder";
+	/** Effect kind that carries the bounded output of a run that did not block; `none` discards it. */
+	as: "annotate" | "reminder" | "none";
+	/** `hook_event_name` in the stdin payload; the Clio event when unset. */
+	eventName?: string;
+	/** Clio tool name to the name the payload's `tool_name` carries, for scripts written against another agent. */
+	toolNameMap?: Record<string, string>;
 }
 
 export interface NormalizedPromptHook {
@@ -157,6 +168,8 @@ export interface NormalizedUserHook {
 	on: MiddlewareHook;
 	tools?: string[];
 	enabled: boolean;
+	/** `session`: a turn_start hook that runs on the first turn of each session only. */
+	once?: "session";
 	spec: NormalizedUserHookSpec;
 }
 
@@ -237,11 +250,26 @@ function normalizeCommandSpec(
 		);
 	}
 	if (raw.as !== undefined) {
-		if (raw.as !== "annotate" && raw.as !== "reminder") {
-			issues.push('command.as must be "annotate" or "reminder"');
+		if (raw.as !== "annotate" && raw.as !== "reminder" && raw.as !== "none") {
+			issues.push('command.as must be "annotate", "reminder" or "none"');
 			return null;
 		}
 		spec.as = raw.as;
+	}
+	if (raw.eventName !== undefined) {
+		if (typeof raw.eventName !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(raw.eventName)) {
+			issues.push("command.eventName must be an identifier of at most 64 characters");
+			return null;
+		}
+		spec.eventName = raw.eventName;
+	}
+	if (raw.toolNameMap !== undefined) {
+		const map = raw.toolNameMap;
+		if (!isRecord(map) || !Object.values(map).every((value) => typeof value === "string" && value.length > 0)) {
+			issues.push("command.toolNameMap must map tool names to non-empty strings");
+			return null;
+		}
+		spec.toolNameMap = { ...(map as Record<string, string>) };
 	}
 	return spec;
 }
@@ -304,6 +332,12 @@ export function normalizeUserHook(
 		if (typeof raw.enabled !== "boolean") issues.push("enabled must be a boolean");
 		else enabled = raw.enabled;
 	}
+	let once: "session" | undefined;
+	if (raw.once !== undefined) {
+		if (raw.once !== "session") issues.push('once must be "session"');
+		else if (raw.on !== "turn_start") issues.push("once applies to turn_start hooks only");
+		else once = "session";
+	}
 	let spec: NormalizedUserHookSpec | null = null;
 	if (raw.kind === "command") spec = normalizeCommandSpec(raw, options, issues);
 	else if (raw.kind === "prompt") spec = normalizePromptSpec(raw, issues);
@@ -316,11 +350,12 @@ export function normalizeUserHook(
 	const on = raw.on as MiddlewareHook;
 	const inapplicable = applicabilityIssue(on, spec);
 	if (inapplicable !== null) return { issues: [inapplicable] };
-	const hash = stableHash({ on, tools: tools ?? null, spec });
+	const hash = stableHash({ on, tools: tools ?? null, spec, ...(once ? { once } : {}) });
 	const id =
 		typeof raw.id === "string" && raw.id.length > 0 ? raw.id : `${source.sourceId ?? source.origin}.${spec.kind}.${hash}`;
 	const hook: NormalizedUserHook = { id, source, hash, on, enabled, spec };
 	if (tools !== undefined) hook.tools = tools;
+	if (once !== undefined) hook.once = once;
 	return { hook, issues };
 }
 
@@ -441,7 +476,7 @@ export interface UserHookCommandResult {
 
 export type UserHookCommandRunner = (
 	argv: string[],
-	options: { cwd?: string; timeoutMs: number },
+	options: { cwd?: string; timeoutMs: number /** JSON event payload written to the command's stdin. */; input?: string },
 ) => UserHookCommandResult;
 
 export interface UserHookRegistrationDeps {
@@ -498,30 +533,41 @@ export function userHookToRegistration(
 		...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
 		...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 	});
+	const sessionsRun = new Set<string>();
+	const run = (input: MiddlewareHookInput): MiddlewareEffect[] => {
+		if (!hook.enabled) return [];
+		if (hook.once === "session") {
+			const session = input.sessionId ?? "";
+			if (sessionsRun.has(session)) return [];
+			sessionsRun.add(session);
+		}
+		try {
+			if (deps.isTrusted?.() === false) {
+				deps.recordReceipt({ ...baseReceipt(input), outcome: "skipped" });
+				return [];
+			}
+			return evaluateHook(hook, deps, baseReceipt(input), input);
+		} catch (err) {
+			try {
+				deps.recordReceipt({ ...baseReceipt(input), outcome: "failed" });
+			} catch {
+				// The receipt sink may be what threw; the runtime still reports the error.
+			}
+			// The middleware runtime isolates the throw and reports its message as hook_failed, so the turn continues.
+			throw err;
+		}
+	};
+	// A turn_start command can refuse its turn with exit 2, and only the awaited turn_start phase gates a turn
+	// (turn-middleware awaitTurnStart), so such a hook runs there and not in the synchronous phase.
+	const gatesTurn = hook.spec.kind === "command" && hook.on === "turn_start";
 	const registration: MiddlewareHookRegistration = {
 		id: hook.id,
 		description: `${hook.spec.kind} hook from ${hook.source.origin} (${hook.source.sourcePath})`,
 		hooks: [hook.on],
 		// The operator declared the trigger; the class names its kind, point and layer (#431).
 		evidence: `${hook.spec.kind}-hook:${hook.on}@${hook.source.origin.replace(".", "-")}`,
-		evaluate: (input) => {
-			if (!hook.enabled) return [];
-			try {
-				if (deps.isTrusted?.() === false) {
-					deps.recordReceipt({ ...baseReceipt(input), outcome: "skipped" });
-					return [];
-				}
-				return evaluateHook(hook, deps, baseReceipt(input));
-			} catch (err) {
-				try {
-					deps.recordReceipt({ ...baseReceipt(input), outcome: "failed" });
-				} catch {
-					// The receipt sink may be what threw; the runtime still reports the error.
-				}
-				// The middleware runtime isolates the throw and reports its message as hook_failed, so the turn continues.
-				throw err;
-			}
-		},
+		evaluate: (input) => (gatesTurn ? [] : run(input)),
+		...(gatesTurn ? { awaited: true as const, evaluateAsync: async (input: MiddlewareHookInput) => run(input) } : {}),
 	};
 	// A command's first run is its costly one (a cold spawn), not in-process warmup.
 	if (hook.spec.kind === "command") registration.spawnsProcess = true;
@@ -541,10 +587,49 @@ function receiptExtension(source: UserHookExtensionSource): HookReceiptExtension
 	};
 }
 
+/**
+ * The event a command hook reads as one JSON object on stdin, in the field
+ * names coding-agent hook scripts already parse. Tool arguments and results
+ * are Clio's own shapes; a result that would push the payload past its cap is
+ * left out and flagged.
+ */
+function hookPayload(hook: NormalizedUserHook, spec: NormalizedCommandHook, input: MiddlewareHookInput): string {
+	const toolName = input.toolName === undefined ? undefined : (spec.toolNameMap?.[input.toolName] ?? input.toolName);
+	const payload: Record<string, unknown> = {
+		hook_event_name: spec.eventName ?? hook.on,
+		...(input.sessionId !== undefined ? { session_id: input.sessionId } : {}),
+		...(input.turnId !== undefined ? { turn_id: input.turnId } : {}),
+		...(input.runId !== undefined ? { run_id: input.runId } : {}),
+		cwd: spec.cwd ?? process.cwd(),
+		...(toolName !== undefined ? { tool_name: toolName } : {}),
+		...(input.toolArgs !== undefined ? { tool_input: input.toolArgs } : {}),
+		...(input.toolResultDetails !== undefined ? { tool_response: input.toolResultDetails } : {}),
+		...(hook.on === "turn_start" && input.text !== undefined ? { prompt: input.text } : {}),
+		...(hook.on === "turn_end" && input.text !== undefined ? { last_assistant_message: input.text } : {}),
+	};
+	let text = JSON.stringify(payload);
+	if (Buffer.byteLength(text) > USER_HOOK_PAYLOAD_MAX_BYTES && payload.tool_response !== undefined) {
+		delete payload.tool_response;
+		payload.tool_response_omitted = true;
+		text = JSON.stringify(payload);
+	}
+	return text;
+}
+
+/** What exit 2 does at each event: refuse the call or the turn, tell the model, or keep the turn going. */
+function blockEffect(on: MiddlewareHook, message: string): MiddlewareEffect | undefined {
+	if (on === "before_tool" || on === "turn_start")
+		return { kind: "block_tool", reason: message, severity: "hard-block" };
+	if (on === "after_tool") return { kind: "annotate_tool_result", message, severity: "warn" };
+	if (on === "turn_end") return { kind: "request_continuation", message, note: "a hook asked to continue" };
+	return undefined;
+}
+
 function evaluateHook(
 	hook: NormalizedUserHook,
 	deps: UserHookRegistrationDeps,
 	base: Omit<HookReceipt, "outcome">,
+	input: MiddlewareHookInput,
 ): MiddlewareEffect[] {
 	if (hook.spec.kind === "prompt") {
 		const effect = reminderEffect(hook.spec.message, hook.spec.severity);
@@ -559,6 +644,7 @@ function evaluateHook(
 	const result = deps.runCommand(hook.spec.argv, {
 		timeoutMs: hook.spec.timeoutMs,
 		...(hook.spec.cwd !== undefined ? { cwd: hook.spec.cwd } : {}),
+		input: hookPayload(hook, hook.spec, input),
 	});
 	// The run blocks the event loop, and a before_tool or after_tool run is billed to the tool's own duration.
 	const timing = { durationMs: Math.round(performance.now() - startedAt), timeoutMs: hook.spec.timeoutMs };
@@ -574,7 +660,19 @@ function evaluateHook(
 		return [];
 	}
 	const outcome: UserHookOutcome = result.code === 0 ? "command-ok" : "command-failed";
-	const effect = output.length === 0 ? undefined : commandEffect(hook.spec, output);
+	// Exit 2 blocks: its standard error (else its output) is the reason the model or the operator reads.
+	const effect =
+		result.code === USER_HOOK_BLOCK_EXIT_CODE
+			? blockEffect(
+					hook.on,
+					((result.stderr || result.stdout).trim() || `blocked by hook ${hook.id}`).slice(
+						0,
+						USER_HOOK_COMMAND_OUTPUT_MAX_CHARS,
+					),
+				)
+			: output.length === 0 || hook.spec.as === "none"
+				? undefined
+				: commandEffect(hook.spec, output);
 	deps.recordReceipt({
 		...base,
 		outcome,

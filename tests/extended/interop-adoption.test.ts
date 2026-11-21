@@ -15,6 +15,8 @@ import { detectInteropAgents } from "../../src/domains/interop/detect.js";
 import { discoverInteropInventory } from "../../src/domains/interop/inventory.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
 import type { InteropAgentId, InteropInventory } from "../../src/domains/interop/types.js";
+import { loadUserHooks } from "../../src/domains/middleware/hooks.js";
+import { readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import {
 	clearPluginSnapshots,
 	disablePlugin,
@@ -297,7 +299,18 @@ describe("interop discovery and adoption", () => {
 				},
 			}),
 		);
-		file(".claude/settings.json", JSON.stringify({ hooks: { PreToolUse: [{ command: "do-not-run" }] } }));
+		file(
+			".claude/settings.json",
+			JSON.stringify({
+				hooks: {
+					PreToolUse: [
+						{ matcher: "Bash", hooks: [{ type: "command", command: "guard.sh", timeout: 3 }] },
+						{ matcher: "Edit.*", hooks: [{ type: "command", command: "never-ported" }] },
+					],
+					Notification: [{ hooks: [{ type: "command", command: "notify" }] }],
+				},
+			}),
+		);
 		file(".claude/CLAUDE.md", "Prefer small diffs.\n");
 		file(".codex/config.toml", '[mcp_servers.docs]\ncommand = "uvx"\nargs = ["docs-mcp"]\n');
 		const plan = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
@@ -307,12 +320,15 @@ describe("interop discovery and adoption", () => {
 		strictEqual(entry("mcp", "Files")?.id, "files");
 		ok(entry("mcp", "remote")?.reason.includes("stdio servers only"));
 		ok(entry("mcp", "expand")?.reason.includes("expands environment variables"));
-		ok(entry("hook", "PreToolUse")?.reason.startsWith("Not migrated"));
+		const pre = entry("hook", "PreToolUse");
+		strictEqual(pre?.action, "install", pre?.reason);
+		ok(pre?.unsupported?.some((note) => note.includes("is a pattern")));
+		ok(entry("hook", "Notification")?.reason.includes("no hook point for Notification"));
 		strictEqual(entry("instructions", "CLAUDE.md")?.action, "install");
 		ok(renderInteropAdoptionPlan(plan).includes("  | Prefer small diffs."));
 		ok(!renderInteropAdoptionPlan(plan).includes("never-show-this"));
 		deepStrictEqual(applyInteropAdoption(plan, true), {
-			installed: ["mcp:files", "instructions:CLAUDE.md"],
+			installed: ["mcp:files", "instructions:CLAUDE.md", "hook:PreToolUse"],
 			diagnostics: [],
 		});
 		const context = renderPromptContext(cwd).text;
@@ -337,6 +353,27 @@ describe("interop discovery and adoption", () => {
 		ok(again.entries.find((item) => item.item.name === "CLAUDE.md")?.reason.startsWith("Already adopted"));
 		const handbook = readFileSync(path.join(clioConfigDir(), "CLIO-CODER.md"), "utf8");
 		ok(handbook.includes("Prefer small diffs.") && handbook.includes("<!-- clio-coder:end claude-code CLAUDE.md -->"));
+		const hooks = loadUserHooks(readHookSources({ cwd }).batches, { workspaceRoot: cwd });
+		deepStrictEqual(
+			hooks.hooks.map((hook) => [hook.id, hook.source.origin, hook.on, hook.tools, hook.spec]),
+			[
+				[
+					"claude-code-pre-tool-use-0-0",
+					"user",
+					"before_tool",
+					["bash"],
+					{
+						kind: "command",
+						argv: ["/bin/sh", "-c", "guard.sh"],
+						cwd,
+						timeoutMs: 3000,
+						as: "none",
+						eventName: "PreToolUse",
+						toolNameMap: { bash: "Bash" },
+					},
+				],
+			],
+		);
 	});
 	it("requires approval, keeps origins and pins, skips duplicates and does not change the source", () => {
 		const source = file(".claude/skills/example/SKILL.md", skill);
