@@ -453,7 +453,7 @@ import {
 	mergeCardCauseNote,
 } from "./merge-card.js";
 import {
-	compromisedCause,
+	compromisedReason,
 	mergeGateVerdict,
 	mergeWithheldDetail,
 	partialResultDetail,
@@ -10429,7 +10429,6 @@ export function createDispatchBundle(
 					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
 					toolLaneObserved: gradeContract.toolLaneObserved,
-					readOnly: lifecycle.readOnly,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
@@ -10620,8 +10619,10 @@ export function createDispatchBundle(
 				const failedChecks = assuranceQuality.typedValidations
 					.filter((fact) => !fact.passed)
 					.map((fact) => fact.sourceId.replace(/^[\w-]+:/u, ""));
-				const compromise = compromisedCause(appliedResultContract, finalText, failedChecks);
-				const assuranceFact = { value: assurance, cause: compromise.reason, ownFailure: compromise.ownFailure };
+				const assuranceFact = {
+					value: assurance,
+					cause: compromisedReason(appliedResultContract, finalText, failedChecks),
+				};
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
 				// check the merge used to rest on the exit status alone, and a Git

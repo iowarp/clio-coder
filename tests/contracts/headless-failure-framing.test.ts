@@ -858,57 +858,75 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 	strictEqual(envelope.result?.text, "", v2.stdout);
 });
 
-test("run --agent coder whose own check failed: the envelope, its dispatch.runs and the exit code agree with the one grade (M9)", async (t) => {
+test("run --agent coder whose own check failed, or who claimed a check it never ran: the envelope, its dispatch.runs, the card, the rule and the exit code agree with the one grade (M9)", async (t) => {
 	const env = await isolateClioEnv("headless-agent-compromised-");
 	t.after(() => env.restore());
-	// Wave-42 m9-1: the worker's own validation failed and no host check ran.
 	const root = join(env.dir, "project");
 	mkdirSync(root, { recursive: true });
 	writeFileSync(join(root, "input.txt"), "changed\n");
-	const { receipt } = await settleStubBuilder({
-		cwd: root,
-		report: {
-			completion: { state: "done", limitations: [], unverified: [] },
-			mutatedPaths: ["input.txt"],
-			validations: [{ name: "python3 extra.py", passed: false, evidence: "exit 1" }],
-		},
-	});
-	const cause = /^assurance compromised: the worker's own report lists a failing validation \(python3 extra\.py\)/u;
-	strictEqual(receipt.outcome, "failed");
-	strictEqual(receipt.outcomeCode, "assurance_compromised");
-	match(receipt.outcomeDetail ?? "", cause);
-	const exit = await mapExitCode(receipt);
-	strictEqual(exit, 1);
-	const stdout: string[] = [];
-	const write = process.stdout.write;
-	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
-		stdout.push(String(chunk));
-		for (const argument of rest) if (typeof argument === "function") argument();
-		return true;
-	}) as typeof process.stdout.write;
-	let code: number;
-	try {
-		code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
-			writeFrame({ type: "result", result: receipt } as never);
-			noteAgentRunCompletion(agentRunCompletion(receipt));
-			return exit;
+	for (const [validation, cause] of [
+		// Wave-42 m9-1: the worker's own validation failed and no host check ran.
+		[
+			{ name: "python3 extra.py", passed: false, evidence: "exit 1" },
+			/^assurance compromised: the worker's own report lists a failing validation \(python3 extra\.py\)/u,
+		],
+		// A command claimed as passed that the run never executed is ungrounded, and that compromises a builder too.
+		[
+			{ name: "npm test", passed: true, evidence: "12 passing" },
+			/^assurance compromised: its result is not trusted: a validation it claims was never observed or failed; unverifiable validation: this run claimed "npm test" passed and executed no command at all/u,
+		],
+	] as const) {
+		const { receipt } = await settleStubBuilder({
+			cwd: root,
+			report: {
+				completion: { state: "done", limitations: [], unverified: [] },
+				mutatedPaths: ["input.txt"],
+				validations: [validation],
+			},
 		});
-	} finally {
-		process.stdout.write = write;
+		strictEqual(receipt.outcome, "failed", validation.name);
+		strictEqual(receipt.outcomeCode, "assurance_compromised");
+		strictEqual(receipt.verdict?.assurance, "compromised");
+		deepStrictEqual(
+			receipt.verdict?.rules.find((entry) => entry.id === "assurance"),
+			{ id: "assurance", layer: "V4", status: "fail", code: "assurance_compromised" },
+		);
+		match(receipt.outcomeDetail ?? "", cause);
+		const summary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId };
+		match(formatDispatchOutput("single", [{ receipt, summary }], 16_384), new RegExp(cause.source.slice(1), "u"));
+		const exit = await mapExitCode(receipt);
+		strictEqual(exit, 1);
+		const stdout: string[] = [];
+		const write = process.stdout.write;
+		process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+			stdout.push(String(chunk));
+			for (const argument of rest) if (typeof argument === "function") argument();
+			return true;
+		}) as typeof process.stdout.write;
+		let code: number;
+		try {
+			code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
+				writeFrame({ type: "result", result: receipt } as never);
+				noteAgentRunCompletion(agentRunCompletion(receipt));
+				return exit;
+			});
+		} finally {
+			process.stdout.write = write;
+		}
+		strictEqual(code, 1);
+		const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}") as {
+			exitCode?: number;
+			outcome?: string;
+			causes?: Array<{ code?: string; exitCode?: number; message?: string }>;
+			dispatch?: { runs?: Array<{ outcome?: string; outcomeCode?: string; exitCode?: number; outcomeDetail?: string }> };
+		};
+		strictEqual(end.exitCode, 1);
+		strictEqual(end.outcome, "failed");
+		strictEqual(end.causes?.[0]?.code, "worker_failed");
+		match(end.causes?.[0]?.message ?? "", cause);
+		strictEqual(end.dispatch?.runs?.[0]?.outcome, "failed");
+		strictEqual(end.dispatch?.runs?.[0]?.outcomeCode, "assurance_compromised");
+		strictEqual(end.dispatch?.runs?.[0]?.exitCode, 1);
+		match(end.dispatch?.runs?.[0]?.outcomeDetail ?? "", cause);
 	}
-	strictEqual(code, 1);
-	const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}") as {
-		exitCode?: number;
-		outcome?: string;
-		causes?: Array<{ code?: string; exitCode?: number; message?: string }>;
-		dispatch?: { runs?: Array<{ outcome?: string; outcomeCode?: string; exitCode?: number; outcomeDetail?: string }> };
-	};
-	strictEqual(end.exitCode, 1);
-	strictEqual(end.outcome, "failed");
-	strictEqual(end.causes?.[0]?.code, "worker_failed");
-	match(end.causes?.[0]?.message ?? "", cause);
-	strictEqual(end.dispatch?.runs?.[0]?.outcome, "failed");
-	strictEqual(end.dispatch?.runs?.[0]?.outcomeCode, "assurance_compromised");
-	strictEqual(end.dispatch?.runs?.[0]?.exitCode, 1);
-	match(end.dispatch?.runs?.[0]?.outcomeDetail ?? "", cause);
 });

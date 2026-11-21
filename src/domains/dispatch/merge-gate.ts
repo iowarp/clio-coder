@@ -65,19 +65,14 @@ export interface MergeGateInput {
 /**
  * Why a compromised result is not trusted, in the words every surface shows: the merge gate's withheld reason and
  * the grader's `assurance` rule both read it, so the card, the receipt and the envelope name one cause.
- * `ownFailure`: the run itself produced the failure (its report lists a failing validation, or a check it executed
- * failed on its final tree), as opposed to a claim nothing observed.
  */
-export function compromisedCause(
+export function compromisedReason(
 	contract: ResultContract | null,
 	output: string | null,
 	failedChecks: ReadonlyArray<string> = [],
-): { reason: string; ownFailure: boolean } {
-	const verdict = compromisedVerdict(contract, output, failedChecks);
-	return { reason: verdict.reason, ownFailure: verdict.appliesWhen !== UNBACKED_APPLIES_WHEN };
+): string {
+	return compromisedVerdict(contract, output, failedChecks).reason;
 }
-
-const UNBACKED_APPLIES_WHEN = "once a check backs the change";
 
 function compromisedVerdict(
 	contract: ResultContract | null,
@@ -99,7 +94,7 @@ function compromisedVerdict(
 		};
 	return {
 		reason: "its result is not trusted: a validation it claims was never observed or failed",
-		appliesWhen: UNBACKED_APPLIES_WHEN,
+		appliesWhen: "once a check backs the change",
 	};
 }
 

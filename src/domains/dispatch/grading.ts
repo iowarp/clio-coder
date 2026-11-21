@@ -69,10 +69,9 @@ export interface GradeFacts {
 	removedTests?: ReadonlyArray<string>;
 	/**
 	 * The run's assurance (4.8) and, when compromised, the evidence that lowered it; undefined until it was derived.
-	 * `ownFailure`: the run's own report or its own executed check failed; a claim nothing observed lowers assurance
-	 * without failing the run. `operatorAccepted`: the operator merged the branch from the merge card anyway (V6).
+	 * `operatorAccepted`: the operator merged the branch from the merge card anyway (V6).
 	 */
-	assurance?: { value: RunAssurance; cause: string; ownFailure: boolean; operatorAccepted?: boolean };
+	assurance?: { value: RunAssurance; cause: string; operatorAccepted?: boolean };
 	/** V6: why landing the run's work failed or was withheld; undefined until it was attempted. */
 	landing?: { failure: { code: RunOutcomeCode | null; detail: string } | null };
 }
@@ -442,10 +441,8 @@ const RULES: ReadonlyArray<GradeRule> = [
 		},
 	},
 	{
-		// A participant's own report can lower assurance and never raise it (4.8). A builder whose own report lists a
-		// failing validation, or whose own executed check failed on its final tree, is not delivered. A claim nothing
-		// observed keeps assurance compromised on the receipt and in the merge gate without failing the run. A checker's
-		// or reviewer's fail verdict is its deliverable, so it is exempt.
+		// A participant's own report can lower assurance and never raise it (4.8). A builder's change resting on a
+		// compromised result is not delivered; a checker's or reviewer's fail verdict is its deliverable, so it is exempt.
 		id: "assurance",
 		layer: "V4",
 		when: "succeeded",
@@ -453,7 +450,7 @@ const RULES: ReadonlyArray<GradeRule> = [
 		check: (facts) => {
 			const assurance = facts.assurance;
 			if (assurance === undefined) return NOT_APPLICABLE;
-			if (assurance.value !== "compromised" || !assurance.ownFailure || assurance.operatorAccepted === true) return PASS;
+			if (assurance.value !== "compromised" || assurance.operatorAccepted === true) return PASS;
 			return { status: "fail", code: "assurance_compromised", detail: `assurance compromised: ${assurance.cause}` };
 		},
 	},
