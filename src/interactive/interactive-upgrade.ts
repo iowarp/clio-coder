@@ -1,6 +1,7 @@
 import { resolveClioDirs } from "../core/xdg.js";
 import { inspectInstallation } from "../domains/lifecycle/install-method.js";
 import { describeTracking } from "../domains/lifecycle/install-plan.js";
+import { APPLY_MIGRATIONS_COMMAND } from "../domains/lifecycle/migrations/registry-ids.js";
 import {
 	type DeferredUpgrade,
 	planSelfUpgrade,
@@ -88,7 +89,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				if (plan.status === "manual") {
 					const postInstall =
 						plan.installation.kind === "pnpm" || plan.installation.kind === "bun"
-							? "\nThen run: clio-coder upgrade --post-install"
+							? `\nThen run: ${APPLY_MIGRATIONS_COMMAND}`
 							: "";
 					const lead =
 						plan.installation.kind === "source"
@@ -99,7 +100,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					// One transcript row per line: a row holds a single line, and the source
 					// install's command is three, so one row joins `cd` and `git` into one.
 					for (const line of plan.command.split("\n")) deps.record?.("info", line);
-					if (postInstall) deps.record?.("info", "clio-coder upgrade --post-install");
+					if (postInstall) deps.record?.("info", APPLY_MIGRATIONS_COMMAND);
 					return;
 				}
 				if (plan.status === "pinned") {

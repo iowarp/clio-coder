@@ -51,9 +51,18 @@ export function legacyMigrationManifestPath(stateDir: string): string {
 }
 
 /**
+ * The one command that applies pending migrations, named by every surface that
+ * advises one. It runs them with the active binary on a checkout and on every
+ * installed build. Bare `clio-coder upgrade` is not it: on a package-manager
+ * install it refuses without migrating, and on an npm or installer build it
+ * first installs any newer release (M-34).
+ */
+export const APPLY_MIGRATIONS_COMMAND = "clio-coder upgrade --post-install";
+
+/**
  * What to tell an operator whose settings.yaml fails on a key or value the
- * unrecorded `2026-11-21-retired-settings` migration rewrites: `clio-coder
- * upgrade` applies it. The caller decides whether an issue is one; no other
+ * unrecorded `2026-11-21-retired-settings` migration rewrites:
+ * {@link APPLY_MIGRATIONS_COMMAND} applies it. The caller decides whether an issue is one; no other
  * migration repairs a validation failure, so none is advised for one. A home
  * upgraded by a package manager, or a settings file provisioned with no
  * manifest, reaches the strict reader without that run. This only names the
@@ -75,5 +84,5 @@ export function pendingMigrationAdvice(): string | null {
 	const recorded = new Set(applied);
 	const pending = REGISTERED_MIGRATION_IDS.filter((id) => !recorded.has(id));
 	if (!pending.includes("2026-11-21-retired-settings")) return null;
-	return "run `clio-coder upgrade`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings";
+	return `run \`${APPLY_MIGRATIONS_COMMAND}\`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings`;
 }
