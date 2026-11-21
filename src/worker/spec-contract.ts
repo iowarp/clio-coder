@@ -220,10 +220,6 @@ interface WorkerSpecFields {
 	 * accepted for an id whose role the sender did not resolve.
 	 */
 	protectedModels?: ReadonlyArray<string | ProtectedModelRef>;
-	noSkills?: boolean;
-	skillPaths?: ReadonlyArray<string>;
-	/** Skill names the agent recipe binds to this run; context(scope=skills) admits exactly these. */
-	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 	/** Effective commit-attribution setting inherited from the dispatching session. */
 	gitCommitAttribution?: boolean;
@@ -243,17 +239,8 @@ interface WorkerSpecFields {
 	 */
 	toolProfile?: ToolProfileName;
 	/**
-	 * Non-stall posture for permission-requiring tool calls. "deny" converts
-	 * the call into a structured tool denial and the run continues; "fail"
-	 * aborts the run, which then exits with WORKER_EXIT_PERMISSION_REQUIRED;
-	 * "escalate" parks the call, emits clio_coder_permission_escalated, and waits for
-	 * an operator permission_decision on stdin (falling back to the configured
-	 * deny/fail on timeout). Default "deny".
-	 */
-	onPermission?: "deny" | "fail" | "escalate";
-	/**
 	 * The host's immutable permit for this attempt: hard ceiling and standing
-	 * allowance. `onPermission` and the envelope must agree with it.
+	 * allowance. The envelope wraps it and must agree with it.
 	 */
 	permit: WorkerPermit;
 	/**
@@ -264,7 +251,7 @@ interface WorkerSpecFields {
 	 */
 	taskWorktree?: WorkerTaskWorktree;
 	/**
-	 * Escalation bounds, honored only when onPermission="escalate". A parked
+	 * Escalation bounds, honored only when the envelope routes asks to a decision. A parked
 	 * call that receives no operator decision within timeoutMs applies fallback.
 	 * Defaults: 120000 ms, "deny".
 	 */
@@ -629,6 +616,41 @@ function validateCapabilityPatch(value: unknown, source: string): void {
 }
 
 const ENVELOPE_ROLES = ["explorer", "builder", "checker", "reviewer", "judge", "seat"] as const;
+const ENVELOPE_SKILL_DISCOVERY = ["off", "bound-only", "ranked"] as const;
+const ENVELOPE_SHELLS = ["none", "sandboxed", "host"] as const;
+const ENVELOPE_CHECKS = ["none", "declared", "any"] as const;
+const ENVELOPE_ASKS = ["deny", "fail", "main", "operator", "judge"] as const;
+const ENVELOPE_SANDBOX_BACKENDS = ["bwrap", "seatbelt", "none"] as const;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/** The non-stall posture the envelope's approval block runs as: a decision route parks, deny and fail do not. */
+export function envelopePermissionMode(
+	approval: Pick<WorkerEnvelope["approval"], "asks">,
+): "deny" | "fail" | "escalate" {
+	return approval.asks === "deny" || approval.asks === "fail" ? approval.asks : "escalate";
+}
+
+/** The permit allowance view the envelope's approval block names: route, who decides, and the operator's yolo. */
+export function envelopeAllowance(approval: WorkerEnvelope["approval"]): {
+	asks: "deny" | "fail" | "main";
+	approvalAuthority: "main" | "operator";
+	executeAutonomy?: "yolo";
+} {
+	const asks = approval.asks === "deny" || approval.asks === "fail" ? approval.asks : "main";
+	return {
+		asks,
+		approvalAuthority: approval.asks === "main" || approval.asks === "judge" ? "main" : "operator",
+		...(approval.autonomy === "yolo" ? { executeAutonomy: "yolo" as const } : {}),
+	};
+}
+
+function readNonEmptyStrings(value: unknown, source: string): string[] {
+	const entries = readStringArray(value, source);
+	for (const entry of entries) {
+		if (entry.trim().length === 0) throw new Error(`${source} entries must be non-empty strings`);
+	}
+	return entries;
+}
 const ENVELOPE_WRITE_MODES = ["none", "roots", "worktree", "workspace"] as const;
 const ENVELOPE_WITHHELD_REASONS = [
 	"role",
@@ -647,7 +669,22 @@ function validateWorkerEnvelope(value: unknown): void {
 	const envelope = readRecord(value, "WorkerSpec.envelope");
 	exactKeys(
 		envelope,
-		["version", "role", "tools", "write", "sandbox", "withheld", "permitDigest", "digest"],
+		[
+			"version",
+			"role",
+			"tools",
+			"skills",
+			"read",
+			"write",
+			"exec",
+			"network",
+			"approval",
+			"sandbox",
+			"withheld",
+			"staticHead",
+			"permitDigest",
+			"digest",
+		],
 		"WorkerSpec.envelope",
 	);
 	if (envelope.version !== 1) throw new Error("WorkerSpec.envelope.version must be 1");
@@ -672,10 +709,41 @@ function validateWorkerEnvelope(value: unknown): void {
 		throw new Error("WorkerSpec.envelope.write.roots must be non-empty for mode roots");
 	if (typeof write.commandsBounded !== "boolean")
 		throw new Error("WorkerSpec.envelope.write.commandsBounded must be a boolean");
+	const skills = readRecord(envelope.skills, "WorkerSpec.envelope.skills");
+	exactKeys(skills, ["bound", "paths", "discovery"], "WorkerSpec.envelope.skills");
+	const bound = readNonEmptyStrings(skills.bound, "WorkerSpec.envelope.skills.bound");
+	const skillPaths = readNonEmptyStrings(skills.paths, "WorkerSpec.envelope.skills.paths");
+	const discovery = readEnum(skills.discovery, "WorkerSpec.envelope.skills.discovery", ENVELOPE_SKILL_DISCOVERY);
+	if ((discovery === "bound-only") !== bound.length > 0)
+		throw new Error("WorkerSpec.envelope.skills binds skills exactly when discovery is bound-only");
+	if (discovery === "off" && skillPaths.length > 0)
+		throw new Error("WorkerSpec.envelope.skills.paths must be empty when discovery is off");
+	const read = readRecord(envelope.read, "WorkerSpec.envelope.read");
+	exactKeys(read, ["roots", "outside"], "WorkerSpec.envelope.read");
+	readNonEmptyStrings(read.roots, "WorkerSpec.envelope.read.roots");
+	readNonEmptyStrings(read.outside, "WorkerSpec.envelope.read.outside");
+	const exec = readRecord(envelope.exec, "WorkerSpec.envelope.exec");
+	exactKeys(exec, ["shell", "checks"], "WorkerSpec.envelope.exec");
+	readEnum(exec.shell, "WorkerSpec.envelope.exec.shell", ENVELOPE_SHELLS);
+	readEnum(exec.checks, "WorkerSpec.envelope.exec.checks", ENVELOPE_CHECKS);
+	const network = readRecord(envelope.network, "WorkerSpec.envelope.network");
+	exactKeys(network, ["shell", "tools", "mcp"], "WorkerSpec.envelope.network");
+	if (typeof network.shell !== "boolean") throw new Error("WorkerSpec.envelope.network.shell must be a boolean");
+	readNonEmptyStrings(network.tools, "WorkerSpec.envelope.network.tools");
+	readNonEmptyStrings(network.mcp, "WorkerSpec.envelope.network.mcp");
+	const approval = readRecord(envelope.approval, "WorkerSpec.envelope.approval");
+	exactKeys(approval, ["autonomy", "asks"], "WorkerSpec.envelope.approval");
+	readEnum(approval.autonomy, "WorkerSpec.envelope.approval.autonomy", ["default", "yolo"] as const);
+	readEnum(approval.asks, "WorkerSpec.envelope.approval.asks", ENVELOPE_ASKS);
 	const sandbox = readRecord(envelope.sandbox, "WorkerSpec.envelope.sandbox");
-	exactKeys(sandbox, ["confinesWrites"], "WorkerSpec.envelope.sandbox");
+	exactKeys(sandbox, ["backend", "confinesWrites"], "WorkerSpec.envelope.sandbox");
+	readEnum(sandbox.backend, "WorkerSpec.envelope.sandbox.backend", ENVELOPE_SANDBOX_BACKENDS);
 	if (typeof sandbox.confinesWrites !== "boolean")
 		throw new Error("WorkerSpec.envelope.sandbox.confinesWrites must be a boolean");
+	if (sandbox.confinesWrites && sandbox.backend !== "bwrap")
+		throw new Error("WorkerSpec.envelope.sandbox.confinesWrites needs the bwrap backend");
+	if (!SHA256_HEX.test(readString(envelope.staticHead, "WorkerSpec.envelope.staticHead")))
+		throw new Error("WorkerSpec.envelope.staticHead must be a sha256 hex digest");
 	if (!Array.isArray(envelope.withheld)) throw new Error("WorkerSpec.envelope.withheld must be an array");
 	for (const [index, raw] of envelope.withheld.entries()) {
 		const source = `WorkerSpec.envelope.withheld[${index}]`;
@@ -686,8 +754,7 @@ function validateWorkerEnvelope(value: unknown): void {
 		readOptionalString(entry, "remedy", source);
 	}
 	const permitDigest = readString(envelope.permitDigest, "WorkerSpec.envelope.permitDigest");
-	if (!/^[0-9a-f]{64}$/.test(permitDigest))
-		throw new Error("WorkerSpec.envelope.permitDigest must be a sha256 hex digest");
+	if (!SHA256_HEX.test(permitDigest)) throw new Error("WorkerSpec.envelope.permitDigest must be a sha256 hex digest");
 	const { digest, ...body } = envelope;
 	if (workerEnvelopeDigest(body) !== digest) throw new Error("WorkerSpec.envelope.digest does not match the envelope");
 }
@@ -961,18 +1028,22 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 		"main",
 		"operator",
 	] as const);
-	const expectedMode = asks === "main" ? "escalate" : asks;
-	if ((spec.onPermission ?? "deny") !== expectedMode) {
-		throw new Error(
-			`WorkerSpec.onPermission ${String(spec.onPermission ?? "deny")} disagrees with the permit allowance (expected ${expectedMode})`,
-		);
+	const envelope = spec.envelope as WorkerEnvelope;
+	// The envelope's approval block is the worker's one reading of the allowance; it must say what the permit says.
+	const approval = envelopeAllowance(envelope.approval);
+	if (
+		approval.asks !== asks ||
+		approval.approvalAuthority !== authority ||
+		approval.executeAutonomy !== (allowance.executeAutonomy as "yolo" | undefined)
+	) {
+		throw new Error("WorkerSpec.envelope approval disagrees with the permit allowance");
 	}
 	// Escalate parks a call until a decision arrives. Dispatch admission refuses
 	// it for a runtime that cannot park; a document built outside admission must
 	// not run under it either, because that runtime would quietly deny instead.
-	if (expectedMode === "escalate" && enforcement.grantPauseResume !== true) {
+	if (envelopePermissionMode(envelope.approval) === "escalate" && enforcement.grantPauseResume !== true) {
 		throw new Error(
-			"WorkerSpec.onPermission escalate needs a runtime that can park a call for a decision, but permit.ceiling.enforcement.grantPauseResume is false",
+			"WorkerSpec.envelope routes asks to a decision, but permit.ceiling.enforcement.grantPauseResume is false, so the runtime cannot park a call",
 		);
 	}
 	// A main-authority permit parks asks only for a decision bound to this attempt.
@@ -982,7 +1053,6 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	}
 	// The envelope wraps this permit: the same write scope and no tool past its ceiling, or the document was edited
 	// after admission.
-	const envelope = spec.envelope as WorkerEnvelope;
 	if (envelope.permitDigest !== digest) throw new Error("WorkerSpec.envelope wraps another permit");
 	if ((envelope.write.mode === "none") !== ceiling.readOnly) {
 		throw new Error("WorkerSpec.envelope write mode disagrees with the permit ceiling");
@@ -994,6 +1064,14 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	const outside = [...envelope.tools.direct, ...envelope.tools.gateway].filter((tool) => !ceilingTools.has(tool));
 	if (outside.length > 0) {
 		throw new Error(`WorkerSpec.envelope tools exceed the permit ceiling: ${outside.join(", ")}`);
+	}
+	// Network grants reach only servers the permit attested with one.
+	const mcp = (ceiling.mcp as { tools?: ReadonlyArray<{ serverId: string; network?: true }> } | undefined)?.tools ?? [];
+	const granted = envelope.network.mcp.filter(
+		(server) => !mcp.some((entry) => entry.serverId === server && entry.network),
+	);
+	if (granted.length > 0) {
+		throw new Error(`WorkerSpec.envelope grants network to MCP servers the permit did not: ${granted.join(", ")}`);
 	}
 	// Admission and the receipt name the permit by this digest. Recomputing it
 	// here keeps a permit edited after sealing from running under authority no
@@ -1227,17 +1305,19 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (spec.flowPolicy !== undefined) validateWorkerFlowPolicy(spec.flowPolicy);
 	if (spec.protectedArtifactState !== undefined) validateProtectedArtifactState(spec.protectedArtifactState);
 	if (spec.flowRestrictions !== undefined) validateFlowRestrictions(spec.flowRestrictions);
-	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {
-		throw new Error("WorkerSpec.noSkills must be a boolean");
-	}
 	if (spec.turnConstraints !== undefined) snapshotTurnConstraints(spec.turnConstraints as TurnConstraints);
-	if (spec.skillPaths !== undefined) {
-		readStringArray(spec.skillPaths, "WorkerSpec.skillPaths");
-	}
-	if (spec.agentSkills !== undefined) {
-		for (const name of readStringArray(spec.agentSkills, "WorkerSpec.agentSkills")) {
-			if (name.trim().length === 0) throw new Error("WorkerSpec.agentSkills entries must be non-empty strings");
-		}
+	// Fields the envelope now carries; a document that still sends them was built for another shape.
+	for (const key of [
+		"noSkills",
+		"skillPaths",
+		"agentSkills",
+		"onPermission",
+		"allowedTools",
+		"readOnly",
+		"writeRoots",
+	]) {
+		if (spec[key] !== undefined)
+			throw new Error(`WorkerSpec.${key} is not part of spec version ${WORKER_SPEC_VERSION}; the envelope carries it`);
 	}
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
@@ -1254,14 +1334,6 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalEnum(spec, "toolProfile", "WorkerSpec", TOOL_PROFILE_NAMES);
 	readOptionalEnum(spec, "product", "WorkerSpec", WORKER_PRODUCTS);
 	readOptionalEnum(spec, "role", "WorkerSpec", WORKER_RUN_ROLES);
-	if (
-		spec.onPermission !== undefined &&
-		spec.onPermission !== "deny" &&
-		spec.onPermission !== "fail" &&
-		spec.onPermission !== "escalate"
-	) {
-		throw new Error('WorkerSpec.onPermission must be "deny", "fail", or "escalate"');
-	}
 	if (spec.escalation !== undefined) {
 		const escalation = readRecord(spec.escalation, "WorkerSpec.escalation");
 		const timeoutMs = escalation.timeoutMs;
@@ -1322,7 +1394,17 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 		if (grant.dispatchRunId !== undefined) readString(grant.dispatchRunId, "WorkerSpec.storeGrant.dispatchRunId");
 	}
-	if (spec.sandbox !== undefined) validateWorkerSandbox(spec.sandbox);
+	if (spec.sandbox !== undefined) {
+		validateWorkerSandbox(spec.sandbox);
+		// The sandbox policy is built from the envelope; one that disagrees was edited after admission.
+		const sandbox = spec.sandbox as { network?: unknown; readableRoots?: ReadonlyArray<string> };
+		const envelope = spec.envelope as WorkerEnvelope;
+		if (sandbox.network !== envelope.network.shell)
+			throw new Error("WorkerSpec.sandbox.network disagrees with the envelope's network.shell");
+		const unreadable = envelope.read.outside.filter((root) => !(sandbox.readableRoots ?? []).includes(root));
+		if (unreadable.length > 0)
+			throw new Error(`WorkerSpec.sandbox cannot read the envelope's outside roots: ${unreadable.join(", ")}`);
+	}
 	return spec as unknown as WorkerSpec;
 }
 

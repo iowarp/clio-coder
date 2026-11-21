@@ -345,9 +345,9 @@ it("names the deny permit a judge-mode dispatch runs with when no safety judge i
 	settings.fleet.permissions.mode = "judge";
 	settings.safety.judge.enabled = true;
 	const notices: Array<{ code: string; message: string }> = [];
-	const permissions: Array<WorkerSpec["onPermission"]> = [];
+	const permissions: Array<WorkerSpec["envelope"]["approval"]["asks"]> = [];
 	const spawnWorker = (spec: WorkerSpec): never => {
-		permissions.push(spec.onPermission);
+		permissions.push(spec.envelope.approval.asks);
 		throw new Error("fixture: admitted");
 	};
 	const dispatchOnce = async (options: Parameters<typeof makeDispatchBundle>[1]) => {

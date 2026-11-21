@@ -389,19 +389,44 @@
 					"digest": "<volatile>",
 					"permitDigest": "<sha256>",
 					"role": "explorer",
+					"skills": {
+						"bound": [],
+						"discovery": "ranked"
+					},
+					"read": {
+						"roots": [],
+						"outside": []
+					},
 					"write": {
 						"mode": "none",
 						"roots": [],
 						"commandsBounded": false
 					},
-					"confinesWrites": true,
+					"exec": {
+						"shell": "none",
+						"checks": "none"
+					},
+					"network": {
+						"shell": false,
+						"tools": [],
+						"mcp": []
+					},
+					"approval": {
+						"autonomy": "default",
+						"asks": "deny"
+					},
+					"sandbox": {
+						"backend": "bwrap",
+						"confinesWrites": true
+					},
 					"withheld": [
 						{
 							"capability": "asks:judge",
 							"reason": "judge-unseated",
 							"remedy": "this process seats no safety judge for worker asks (`run --agent` and the fleet CLI have no main session); the safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on"
 						}
-					]
+					],
+					"staticHead": "<sha256>"
 				},
 				"toolTelemetry": {
 					"coverage": "complete",

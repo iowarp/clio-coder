@@ -753,13 +753,19 @@ export interface RunResultSafetySummary {
 		digest: string;
 		permitDigest: string;
 		role: import("./obligation.js").RunRole;
+		skills: { bound: ReadonlyArray<string>; discovery: import("./envelope.js").EnvelopeSkillDiscovery };
+		read: { roots: ReadonlyArray<string>; outside: ReadonlyArray<string> };
 		write: {
 			mode: import("./envelope.js").EnvelopeWriteMode;
 			roots: ReadonlyArray<string>;
 			commandsBounded: boolean;
 		};
-		confinesWrites: boolean;
+		exec: { shell: import("./envelope.js").EnvelopeShell; checks: import("./envelope.js").EnvelopeChecks };
+		network: { shell: boolean; tools: ReadonlyArray<string>; mcp: ReadonlyArray<string> };
+		approval: import("./envelope.js").EnvelopeApproval;
+		sandbox: { backend: import("./envelope.js").EnvelopeSandboxBackend; confinesWrites: boolean };
 		withheld: ReadonlyArray<import("./envelope.js").WithheldCapability>;
+		staticHead: string;
 	};
 	/**
 	 * The immutable permit a native, SDK or subprocess worker ran under. An ACP

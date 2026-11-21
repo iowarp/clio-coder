@@ -707,6 +707,37 @@ export function workerEnvelopeDigest(body: unknown): string {
 	return sha256Hex(`clio-coder.workerEnvelope:${canonicalJson(body)}`);
 }
 
+/** What a worker's static request head is made of: everything a provider sees before the first dynamic message. */
+export interface WorkerStaticHeadInput {
+	/** The runtime id, which fixes the wire API. */
+	api: string;
+	/** The target the route resolved, which fixes the provider endpoint. */
+	provider: string;
+	model: string;
+	thinking: string | null;
+	systemPrompt: string;
+	/** Sorted capability names and the digest of their parameter schemas. */
+	tools: { names: ReadonlyArray<string>; schemas: string };
+}
+
+/**
+ * The envelope's `staticHead` (DESIGN 4.4): sha256 over api, provider, model, thinking, system prompt and tool
+ * declarations. The host seals it; the worker recomputes it from its own spec and refuses a mismatch, so a cache key
+ * built on it names the head the worker really sends.
+ */
+export function workerStaticHead(input: WorkerStaticHeadInput): string {
+	return sha256Hex(
+		`clio-coder.workerStaticHead:${canonicalJson({
+			api: input.api,
+			provider: input.provider,
+			model: input.model,
+			thinking: input.thinking,
+			systemPrompt: sha256Hex(input.systemPrompt),
+			tools: { names: [...input.tools.names].sort(), schemas: input.tools.schemas },
+		})}`,
+	);
+}
+
 /**
  * The one signature of a tool surface by name: sha256 over the JSON array of its sorted names. Receipts, route
  * history and plan approvals store this digest, so the worker's announce carries the same one rather than a second

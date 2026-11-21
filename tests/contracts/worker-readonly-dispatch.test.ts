@@ -10,7 +10,12 @@ import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { workerEnvelopeDigest, workerPermitDigest } from "../../src/worker/protocol.js";
-import { parseWorkerSpec, WORKER_SPEC_HOOKLESS_VERSION, type WorkerSpec } from "../../src/worker/spec-contract.js";
+import {
+	envelopePermissionMode,
+	parseWorkerSpec,
+	WORKER_SPEC_HOOKLESS_VERSION,
+	type WorkerSpec,
+} from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -302,15 +307,18 @@ test("a worker refuses a permit or tool surface edited after the host sealed it"
 
 test("escalate is refused, never downgraded, where the runtime cannot park a call", async () => {
 	const parked = await sealedCoderSpec("clio-permit-escalate-");
-	parked.onPermission = "escalate";
 	parked.permit.allowance = { ...parked.permit.allowance, asks: "main", approvalAuthority: "operator" };
 	parked.permit.digest = workerPermitDigest(parked.permit);
+	parked.envelope = { ...parked.envelope, approval: { ...parked.envelope.approval, asks: "operator" } };
 	resealEnvelope(parked);
-	strictEqual(parseWorkerSpec(structuredClone(parked)).onPermission, "escalate");
+	strictEqual(envelopePermissionMode(parseWorkerSpec(structuredClone(parked)).envelope.approval), "escalate");
 	parked.permit.ceiling.enforcement = { ...parked.permit.ceiling.enforcement, grantPauseResume: false };
 	parked.permit.digest = workerPermitDigest(parked.permit);
 	resealEnvelope(parked);
-	throws(() => parseWorkerSpec(parked), /escalate needs a runtime that can park a call/u);
+	throws(
+		() => parseWorkerSpec(parked),
+		/routes asks to a decision, but permit\.ceiling\.enforcement\.grantPauseResume is false/u,
+	);
 	throws(
 		() => startClaudeSdkWorkerRun({ onPermission: "escalate" } as unknown as WorkerRunInput, () => {}),
 		/escalate is unsupported on the Claude SDK runtime/u,

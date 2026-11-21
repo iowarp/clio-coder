@@ -1,8 +1,9 @@
 /**
  * The capability envelope of one dispatched run (DESIGN 4.4, slice M7).
  *
- * One pure resolution decides what a run may touch: its tool list, its write mode and roots, and every capability a
- * layer took away. Dispatch admission, the plan preview, the worker spec, the worker's prompt, the attestation and the
+ * One pure resolution decides what a run may touch: its tools, bound skills, read and write scope, command and
+ * check reach, network, approval route, sandbox facts, static request head, and every capability a layer took
+ * away. Dispatch admission, the plan preview, the worker spec, the worker's prompt, the attestation and the
  * receipt all read the envelope this module produces, so no later stage narrows tools or re-derives read-only on its
  * own. Layers only subtract, in a fixed order, and each subtraction a caller could act on is a `withheld` entry:
  *
@@ -26,11 +27,11 @@ import {
 	ToolNames,
 } from "../../core/tool-names.js";
 import { directSurfaceNames, withGatewayForCapabilities } from "../../tools/surface.js";
-import { workerEnvelopeDigest } from "../../worker/protocol.js";
+import { type WorkerStaticHeadInput, workerEnvelopeDigest, workerStaticHead } from "../../worker/protocol.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import { classify } from "../safety/action-classifier.js";
 import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
-import type { WorkerMcpAttestation } from "../safety/worker-permit.js";
+import type { WorkerMcpAttestation, WorkerPermitAllowance } from "../safety/worker-permit.js";
 import type { GateTopologyRole } from "./execution-role.js";
 import { type RunRole, resolveRunRole } from "./obligation.js";
 
@@ -56,6 +57,33 @@ export const WITHHELD_REASONS = [
 ] as const;
 export type WithheldReason = (typeof WITHHELD_REASONS)[number];
 
+/** How a run finds skills: none, only the recipe's bound ones, or the ranked catalog. */
+export const ENVELOPE_SKILL_DISCOVERY = ["off", "bound-only", "ranked"] as const;
+export type EnvelopeSkillDiscovery = (typeof ENVELOPE_SKILL_DISCOVERY)[number];
+
+/** Where the run's commands execute: no shell tool, under the OS sandbox, or directly on the host. */
+export const ENVELOPE_SHELLS = ["none", "sandboxed", "host"] as const;
+export type EnvelopeShell = (typeof ENVELOPE_SHELLS)[number];
+
+/** Which checks the run may run through verify: none, the declared task gates and checks, or any. */
+export const ENVELOPE_CHECKS = ["none", "declared", "any"] as const;
+export type EnvelopeChecks = (typeof ENVELOPE_CHECKS)[number];
+
+/**
+ * Who answers an approval-required call. `main` is the main agent with main authority, `operator` the main route
+ * decided by a person, `judge` the main session's safety judge with main authority.
+ */
+export const ENVELOPE_ASKS = ["deny", "fail", "main", "operator", "judge"] as const;
+export type EnvelopeAsks = (typeof ENVELOPE_ASKS)[number];
+
+export const ENVELOPE_SANDBOX_BACKENDS = ["bwrap", "seatbelt", "none"] as const;
+export type EnvelopeSandboxBackend = (typeof ENVELOPE_SANDBOX_BACKENDS)[number];
+
+export interface EnvelopeApproval {
+	autonomy: "default" | "yolo";
+	asks: EnvelopeAsks;
+}
+
 /** One capability a layer took from the run, why, and what would keep it. */
 export interface WithheldCapability {
 	capability: string;
@@ -68,6 +96,10 @@ export interface WorkerEnvelope {
 	role: RunRole;
 	/** Final tool surface, placement included: `direct` carries schemas, `gateway` is reached through `gateway`. */
 	tools: { direct: ReadonlyArray<string>; gateway: ReadonlyArray<string> };
+	/** Skill names the recipe binds, the skill files the run may load, and how it discovers others. */
+	skills: { bound: ReadonlyArray<string>; paths: ReadonlyArray<string>; discovery: EnvelopeSkillDiscovery };
+	/** Declared read roots inside the workspace, and the outside roots admission approved. */
+	read: { roots: ReadonlyArray<string>; outside: ReadonlyArray<string> };
 	write: {
 		mode: EnvelopeWriteMode;
 		/** Canonical absolute write boundaries; exact files lack a trailing slash, subtrees keep one. */
@@ -79,9 +111,15 @@ export interface WorkerEnvelope {
 		 */
 		commandsBounded: boolean;
 	};
-	/** Host fact of the placement that runs the worker, computed once by the host (M6, M7). */
-	sandbox: { confinesWrites: boolean };
+	exec: { shell: EnvelopeShell; checks: EnvelopeChecks };
+	/** Whether the run's commands (shell and checks) reach the network, its network tools, and MCP servers granted it. */
+	network: { shell: boolean; tools: ReadonlyArray<string>; mcp: ReadonlyArray<string> };
+	approval: EnvelopeApproval;
+	/** Host facts of the placement that runs the worker, computed once by the host (M6, M7). */
+	sandbox: { backend: EnvelopeSandboxBackend; confinesWrites: boolean };
 	withheld: ReadonlyArray<WithheldCapability>;
+	/** `workerStaticHead` of the request head the worker sends; empty until the host compiles the prompt. */
+	staticHead: string;
 	/** The permit this envelope wraps; the worker refuses a spec whose permit has another digest. */
 	permitDigest: string;
 	/** sha256 over the canonical envelope without this field. */
@@ -208,8 +246,33 @@ export interface EnvelopeInput {
 	mcp?: WorkerMcpAttestation;
 	/** Approval subtractions the permit resolution already made (judge with no judge seated, main with no route). */
 	approvalWithheld?: ReadonlyArray<WithheldCapability>;
+	skills: {
+		/** Skill names the recipe binds. */
+		names: ReadonlyArray<string>;
+		/** Skill files the request and recipe name. */
+		paths: ReadonlyArray<string>;
+		/** The request turned skills off. */
+		disabled: boolean;
+		/** Whether the canonical context tool is attached for this final tool list on this runtime. */
+		contextAttached: (tools: ReadonlyArray<ToolName>) => boolean;
+	};
+	read: { roots: ReadonlyArray<string>; outside: ReadonlyArray<string> };
+	/** Facts of the OS sandbox the placement runs the worker's commands under. */
+	sandbox: {
+		backend: EnvelopeSandboxBackend;
+		/** The worker's own commands run under an OS sandbox policy. */
+		applies: boolean;
+		/** `safety.sandboxNetwork`: the operator opened the sandbox's network. */
+		networkSetting: boolean;
+		/** The run's contract forbids network for its commands (a Hoare proof). */
+		networkOff: boolean;
+	};
+	approval: EnvelopeApproval;
 	permitDigest: string;
 }
+
+const NETWORK_TOOLS: ReadonlySet<string> = new Set([ToolNames.WebFetch, ToolNames.WebRead]);
+const SHELL_TOOLS: ReadonlySet<string> = new Set([ToolNames.Bash, ToolNames.RunScript]);
 
 const UNCONFINED_REMEDY =
 	"enable safety.sandbox (auto or required) with a usable bubblewrap backend, run in a git checkout so the run gets its own worktree, or omit write roots";
@@ -278,12 +341,77 @@ export function resolveWorkerEnvelope(input: EnvelopeInput): WorkerEnvelope {
 		version: WORKER_ENVELOPE_VERSION,
 		role: input.role,
 		tools: { direct: direct.sort(), gateway: gateway.sort() },
+		skills: resolveSkills(input.skills, surface),
+		read: { roots: sortedUnique(input.read.roots), outside: sortedUnique(input.read.outside) },
 		write: { mode: input.write.mode, roots: [...input.write.roots], commandsBounded },
-		sandbox: { confinesWrites: input.host.confinesWrites },
+		...resolveExecAndNetwork(input, surface),
+		approval: { ...input.approval },
+		sandbox: { backend: input.sandbox.backend, confinesWrites: input.host.confinesWrites },
 		withheld,
+		staticHead: "",
 		permitDigest: input.permitDigest,
 	} satisfies Omit<WorkerEnvelope, "digest">;
 	return Object.freeze({ ...body, digest: workerEnvelopeDigest(body) });
+}
+
+function sortedUnique(values: ReadonlyArray<string>): string[] {
+	return [...new Set(values)].sort();
+}
+
+function resolveSkills(skills: EnvelopeInput["skills"], surface: ReadonlyArray<ToolName>): WorkerEnvelope["skills"] {
+	// Skills reach a run only through the canonical context tool its runtime attaches.
+	if (skills.disabled || !skills.contextAttached(surface)) return { bound: [], paths: [], discovery: "off" };
+	const bound = sortedUnique(skills.names.map((name) => name.trim()).filter((name) => name.length > 0));
+	return { bound, paths: sortedUnique(skills.paths), discovery: bound.length > 0 ? "bound-only" : "ranked" };
+}
+
+function resolveExecAndNetwork(
+	input: EnvelopeInput,
+	surface: ReadonlyArray<ToolName>,
+): Pick<WorkerEnvelope, "exec" | "network"> {
+	const hasShell = surface.some((tool) => SHELL_TOOLS.has(tool));
+	const shell: EnvelopeShell = !hasShell ? "none" : input.sandbox.applies ? "sandboxed" : "host";
+	const checks: EnvelopeChecks = !surface.includes(ToolNames.Verify)
+		? "none"
+		: input.role === "checker" || input.role === "reviewer"
+			? "declared"
+			: "any";
+	const networkTools = surface.filter((tool) => NETWORK_TOOLS.has(tool));
+	// Sandboxed commands follow the retrieval grant: a run trusted with web_fetch or web_read already has egress, so an
+	// isolated shell would protect nothing while breaking package installs. Unsandboxed commands have the host's network.
+	const commands = hasShell || surface.includes(ToolNames.Verify);
+	const shellNetwork = input.sandbox.applies
+		? !input.sandbox.networkOff && (input.sandbox.networkSetting || networkTools.length > 0)
+		: commands;
+	const mcp = sortedUnique(
+		(input.mcp?.tools ?? [])
+			.filter((entry) => entry.network === true && surface.includes(`mcp_${entry.serverId}__${entry.tool}` as ToolName))
+			.map((entry) => entry.serverId),
+	);
+	return { exec: { shell, checks }, network: { shell: shellNetwork, tools: networkTools, mcp } };
+}
+
+/** The envelope's approval block from the permit's allowance; `judgeRouted` when the safety judge decides main asks. */
+export function envelopeApproval(
+	allowance: Pick<WorkerPermitAllowance, "asks" | "approvalAuthority" | "executeAutonomy">,
+	judgeRouted: boolean,
+): EnvelopeApproval {
+	const asks: EnvelopeAsks =
+		allowance.asks !== "main"
+			? allowance.asks
+			: allowance.approvalAuthority === "operator"
+				? "operator"
+				: judgeRouted
+					? "judge"
+					: "main";
+	return { autonomy: allowance.executeAutonomy === "yolo" ? "yolo" : "default", asks };
+}
+
+/** The envelope sealed again with the static head of the request the worker will send. */
+export function withStaticHead(envelope: WorkerEnvelope, head: WorkerStaticHeadInput): WorkerEnvelope {
+	const { digest: _old, ...body } = envelope;
+	const next = { ...body, staticHead: workerStaticHead(head) };
+	return Object.freeze({ ...next, digest: workerEnvelopeDigest(next) });
 }
 
 function commandEscapesRoots(tool: string, mcp: WorkerMcpAttestation | undefined, harness: boolean): boolean {
@@ -303,11 +431,18 @@ export function waivedRequirements(envelope: Pick<WorkerEnvelope, "role" | "with
 	);
 }
 
-/** The envelope with the permit it wraps swapped, sealed again (a permit re-resolved without yolo, for one). */
-export function envelopeForPermit(envelope: WorkerEnvelope, permitDigest: string): WorkerEnvelope {
-	if (envelope.permitDigest === permitDigest) return envelope;
+/**
+ * The envelope with the permit it wraps swapped, sealed again. Only the operator's yolo may leave a permit after
+ * admission (a dispatcher that left yolo while its attempt waited), so the approval block follows that one field.
+ */
+export function envelopeForPermit(
+	envelope: WorkerEnvelope,
+	permit: { digest: string; allowance: Pick<WorkerPermitAllowance, "executeAutonomy"> },
+): WorkerEnvelope {
+	if (envelope.permitDigest === permit.digest) return envelope;
 	const { digest: _old, ...body } = envelope;
-	const next = { ...body, permitDigest };
+	const autonomy: EnvelopeApproval["autonomy"] = permit.allowance.executeAutonomy === "yolo" ? "yolo" : "default";
+	const next = { ...body, approval: { ...body.approval, autonomy }, permitDigest: permit.digest };
 	return Object.freeze({ ...next, digest: workerEnvelopeDigest(next) });
 }
 

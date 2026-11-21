@@ -1271,7 +1271,7 @@ describe("dispatch admission boundary", () => {
 			strictEqual(envelope.budget?.enforcement.perTool, "unobserved-not-enforced");
 			const spec = declared.specs[0];
 			ok(spec);
-			strictEqual(spec.agentSkills, undefined);
+			strictEqual(spec.envelope.skills.discovery, "off");
 			ok(!spec.systemPrompt.includes("# Agent-Bound Skills"), "no bound-skill block without an attached context tool");
 		} finally {
 			await declared.bundle.extension.stop?.();

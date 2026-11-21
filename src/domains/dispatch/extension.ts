@@ -20,6 +20,7 @@ import {
 	WORKER_PERMISSION_HOLD_VERSION,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	type WorkerPermissionHoldFrame,
+	workerStaticHead,
 } from "../../worker/protocol.js";
 import {
 	type AcceptedWorkerSlates,
@@ -125,7 +126,7 @@ import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../..
 import { engineRetryDelayMs } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
-import { INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
+import { attestedToolSchemaSignature, INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import {
@@ -176,6 +177,7 @@ import {
 	type WorkerBudget,
 	type WorkerGrantBinding,
 	type WorkerPromptMessage,
+	workerSpecToolNames,
 	workerSpecVersionFor,
 } from "../../worker/spec-contract.js";
 import type { WorkerDecisionBinding } from "../../worker/stdin-demux.js";
@@ -352,6 +354,8 @@ import type {
 	WorkerGrantView,
 } from "./contract.js";
 import {
+	type EnvelopeInput,
+	envelopeApproval,
 	envelopeForPermit,
 	envelopeRole,
 	envelopeToolNames,
@@ -363,6 +367,7 @@ import {
 	type WorkerEnvelope,
 	waivedRequirements,
 	withheldLines,
+	withStaticHead,
 	writeModeLine,
 } from "./envelope.js";
 import {
@@ -2716,7 +2721,7 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	return [];
 }
 
-type WorkerPermissionMode = NonNullable<WorkerSpec["onPermission"]>;
+type WorkerPermissionMode = ReturnType<typeof workerPermissionModeForPermit>;
 
 /** Only the roots merge back from a rooted run's own worktree (ruling 3). */
 function lifecycleMergeRoots(envelope: WorkerEnvelope): { mergeRoots?: ReadonlyArray<string> } {
@@ -2751,16 +2756,18 @@ function writeModeInput(input: {
 	placement: () => RunNodeIdentity;
 }): Parameters<typeof resolveWriteMode>[0] {
 	const { req } = input;
+	const hoare = isHoareResultContract(dispatchResultContract(req, input.recipe));
 	const writeNone = requestedWriteNone({
 		readOnly: req.readOnly,
 		capabilityClass: input.spec.capabilityClass,
-		hoareContract: isHoareResultContract(dispatchResultContract(req, input.recipe)),
+		hoareContract: hoare,
 	});
 	return {
 		writeNone,
 		roots: writeNone ? [] : input.pathScope.writeBoundaries,
 		worktree: req.taskWorktree !== undefined || req.worktree === true,
-		confinesWrites: osSandboxConfinesWrites(input.target.runtime.kind, input.settings, input.placement),
+		confinesWrites: placementSandboxFacts(input.target.runtime.kind, input.settings, input.placement, hoare)
+			.confinesWrites,
 		gitCheckout: gitCheckoutRoot(resolvePath(req.cwd ?? process.cwd())) !== null,
 		scopeEnforcement: runtimeEnforcement(input.target.runtime).scopeEnforcement,
 	};
@@ -2791,7 +2798,13 @@ function resolveDispatchEnvelopeStage(input: {
 	const mode = resolveWriteMode(facts);
 	const cwd = req.cwd ?? process.cwd();
 	const ownLoop = runtimeAttachesGateway(target.runtime);
-	const envelopeInput: Omit<Parameters<typeof resolveWorkerEnvelope>[0], "permitDigest"> = {
+	const { confinesWrites: _confines, ...sandbox } = placementSandboxFacts(
+		target.runtime.kind,
+		input.settings,
+		input.placement,
+		isHoareResultContract(dispatchResultContract(req, recipe)),
+	);
+	const envelopeInput: Omit<EnvelopeInput, "permitDigest" | "approval"> = {
 		role,
 		recipeTools: (recipe.tools ?? []) as ReadonlyArray<ToolName>,
 		profiledTools: admission.allowedTools,
@@ -2815,8 +2828,21 @@ function resolveDispatchEnvelopeStage(input: {
 					: new Set<string>(),
 		},
 		...(admission.mcp !== undefined ? { mcp: admission.mcp } : {}),
+		skills: {
+			names: recipe.skills ?? [],
+			paths: [...(req.skillPaths ?? []), ...(recipe.boundSkillPaths ?? [])],
+			disabled: req.noSkills === true,
+			contextAttached: (tools) => canonicalContextAttached(target.runtime, tools),
+		},
+		read: { roots: pathScope.workingContextPaths, outside: req.extraReadRoots ?? [] },
+		sandbox,
 	};
-	const draft = resolveWorkerEnvelope({ ...envelopeInput, permitDigest: "" });
+	// The draft settles the tool list the permit is resolved over; its approval block is replaced below.
+	const draft = resolveWorkerEnvelope({
+		...envelopeInput,
+		approval: { autonomy: "default", asks: "deny" },
+		permitDigest: "",
+	});
 	const tools = envelopeToolNames(draft);
 	const readOnly = mode === "none";
 	const { permit, narrowedToDeny } = resolveDispatchPermit(
@@ -2852,7 +2878,12 @@ function resolveDispatchEnvelopeStage(input: {
 				]
 			: []),
 	];
-	const envelope = resolveWorkerEnvelope({ ...envelopeInput, approvalWithheld, permitDigest: permit.digest });
+	const envelope = resolveWorkerEnvelope({
+		...envelopeInput,
+		approvalWithheld,
+		approval: envelopeApproval(permit.allowance, judgeRoutedPermit(permit, settings)),
+		permitDigest: permit.digest,
+	});
 	return { envelope, tools, permit, readOnly, judgeWithheld };
 }
 
@@ -3016,13 +3047,19 @@ function receiptEnvelopeSummary(
 		digest: envelope.digest,
 		permitDigest: envelope.permitDigest,
 		role: envelope.role,
+		skills: { bound: [...envelope.skills.bound], discovery: envelope.skills.discovery },
+		read: { roots: [...envelope.read.roots], outside: [...envelope.read.outside] },
 		write: {
 			mode: envelope.write.mode,
 			roots: [...envelope.write.roots],
 			commandsBounded: envelope.write.commandsBounded,
 		},
-		confinesWrites: envelope.sandbox.confinesWrites,
+		exec: { ...envelope.exec },
+		network: { shell: envelope.network.shell, tools: [...envelope.network.tools], mcp: [...envelope.network.mcp] },
+		approval: { ...envelope.approval },
+		sandbox: { ...envelope.sandbox },
 		withheld: envelope.withheld.map((entry) => ({ ...entry })),
+		staticHead: envelope.staticHead,
 	};
 }
 
@@ -3535,8 +3572,7 @@ function workerSandboxFor(input: {
 	runtimeKind: RuntimeDescriptor["kind"];
 	req: DispatchRequest;
 	pathScope: DispatchPathScope;
-	readOnly: boolean;
-	allowedTools: ReadonlyArray<ToolName>;
+	envelope: Pick<WorkerEnvelope, "write" | "network" | "read" | "sandbox">;
 	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined;
 }): { applies: boolean; spec: WorkerSandboxSpec | undefined } {
 	const hoare = isHoareResultContract(input.resultContract);
@@ -3552,16 +3588,15 @@ function workerSandboxFor(input: {
 			: [];
 	const spec = resolveWorkerSandboxSpec({
 		mode,
-		readOnly: hoare || input.readOnly,
+		readOnly: hoare || input.envelope.write.mode === "none",
 		cwd: input.req.cwd ?? process.cwd(),
 		writeBoundaries: input.pathScope.writeBoundaries,
 		...(input.req.taskWorktree !== undefined
 			? { taskWorktree: { path: input.req.taskWorktree.path, branch: input.req.taskWorktree.branch } }
 			: {}),
-		allowedTools: input.allowedTools,
-		networkSetting: !hoare && input.settings?.safety.sandboxNetwork === true,
-		// Dispatch-granted read roots ride with the dependency roots: readable, never writable.
-		dependencyRoots: [...dependencyRoots, ...(input.req.extraReadRoots ?? [])],
+		network: input.envelope.network.shell,
+		// The envelope's approved outside read roots ride with the dependency roots: readable, never writable.
+		dependencyRoots: [...dependencyRoots, ...input.envelope.read.outside],
 		...(input.settings !== undefined && !hoare
 			? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
 			: {}),
@@ -3570,9 +3605,7 @@ function workerSandboxFor(input: {
 			? { gitHooksDirs: gitHookDirectories(input.req.taskWorktree?.path ?? input.req.cwd ?? process.cwd()).directories }
 			: {}),
 	});
-	// Only a worker that runs on this host shares this probe's answer; a fleet
-	// node probes its own backend.
-	const local = (input.settings?.fleet.nodes?.length ?? 0) === 0;
+	// The envelope names a backend only for a worker this host runs; a fleet node probes its own.
 	return {
 		applies: true,
 		spec:
@@ -3581,34 +3614,54 @@ function workerSandboxFor(input: {
 				: {
 						...spec,
 						...(hoare ? { network: false } : {}),
-						...(local && sandboxAvailability().available ? { backendExpected: true } : {}),
+						...(input.envelope.sandbox.backend !== "none" ? { backendExpected: true } : {}),
 					},
 	};
 }
 
 /**
- * True when the local OS sandbox confines every command this worker runs to
- * its write roots: a native worker placed on this host, the sandbox not turned
- * off, and bubblewrap usable here. Write-root
- * confinement then need not refuse shell, verify and run_script by name, so a
- * writer given file write roots can still run the project's tests. The worker
- * derives the same answer from its WorkerSpec (engine/worker-runtime.ts).
+ * The OS sandbox facts of the placement that runs the worker, probed once on this host and sealed into the envelope
+ * (M6, M7); nothing else decides them. Only the native HTTP runtime executes Clio's command tools in the worker
+ * process. Only a worker this host runs shares this probe's backend, and a placement the preview cannot settle has
+ * none. Bubblewrap bound to the roots confines every command, so a writer with file roots keeps its check tools.
  */
-function osSandboxConfinesWrites(
+function placementSandboxFacts(
 	runtimeKind: RuntimeDescriptor["kind"],
 	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
 	placement: () => RunNodeIdentity,
-): boolean {
-	if (runtimeKind !== "http") return false;
-	if ((settings?.safety.sandbox ?? "auto") === "off") return false;
-	const availability = sandboxAvailability();
-	if (!availability.available || availability.backend !== "bwrap") return false;
-	// This probe answers only for a worker this host runs; a placement the preview cannot settle confines nothing (M6).
+	hoare: boolean,
+): EnvelopeInput["sandbox"] & { confinesWrites: boolean } {
+	const mode = hoare ? "required" : (settings?.safety.sandbox ?? "auto");
+	const applies = runtimeKind === "http" && mode !== "off";
+	let local = false;
 	try {
-		return placement().kind === "local";
+		local = placement().kind === "local";
 	} catch {
-		return false;
+		local = false;
 	}
+	const availability = sandboxAvailability();
+	const backend =
+		applies && local && availability.available && availability.backend !== null ? availability.backend : "none";
+	return {
+		backend,
+		applies,
+		networkSetting: !hoare && settings?.safety.sandboxNetwork === true,
+		networkOff: hoare,
+		confinesWrites: backend === "bwrap",
+	};
+}
+
+/** The static head the worker recomputes from its spec; the envelope seals it once the prompt is compiled. */
+function envelopeStaticHeadInput(target: ResolvedTarget, systemPrompt: string, envelope: WorkerEnvelope) {
+	const names = envelopeToolNames(envelope);
+	return {
+		api: target.runtime.id,
+		provider: target.target.id,
+		model: target.wireModelId,
+		thinking: target.thinkingLevel ?? null,
+		systemPrompt,
+		tools: { names, schemas: attestedToolSchemaSignature(names) },
+	};
 }
 
 /** The sandbox sentence for the worker's safety line, probed on this host. */
@@ -3781,7 +3834,6 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.authProfile) spec.authProfile = input.authProfile;
 	if (input.credentialExpiresAt !== undefined) spec.credentialExpiresAt = input.credentialExpiresAt;
-	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
 	const inherited = input.req.turnConstraints === undefined ? {} : workerTurnConstraints(input.req.turnConstraints);
 	spec.turnConstraints = {
 		...inherited,
@@ -3805,16 +3857,6 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		}));
 	// Only a hooked spec needs version 9, so a node one release behind still serves the rest.
 	spec.specVersion = workerSpecVersionFor(spec);
-	const skillPaths = [...(input.req.skillPaths ?? []), ...(input.recipe?.boundSkillPaths ?? [])];
-	if (skillPaths.length > 0) spec.skillPaths = [...new Set(skillPaths)];
-	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
-	if (
-		input.req.noSkills !== true &&
-		recipeSkills.length > 0 &&
-		canonicalContextAttached(input.target.runtime, input.admission.allowedTools)
-	) {
-		spec.agentSkills = [...new Set(recipeSkills)];
-	}
 	if (input.req.trustProjectCompatRoots !== undefined) {
 		spec.trustProjectCompatRoots = input.req.trustProjectCompatRoots;
 	} else if (settings) {
@@ -3833,8 +3875,9 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// when the recipe declares no asks route and its ceiling when it does: a
 	// recipe can narrow asks to deny or fail but cannot route them to main
 	// under a deny or fail mode.
-	spec.onPermission = workerPermissionModeForPermit(input.permit.allowance);
-	if (spec.onPermission === "escalate") {
+	// The worker reads its route from the envelope's approval block, which the permit's allowance sealed.
+	const onPermission = workerPermissionModeForPermit(input.permit.allowance);
+	if (onPermission === "escalate") {
 		const escalation = settings?.fleet.permissions.escalation;
 		// A main-authority permit parks asks for the main agent's grant broker
 		// (Phase D). The main agent can grant at yolo; below yolo only an
@@ -3871,9 +3914,22 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 			}
 		}
 	}
-	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
+	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, onPermission);
 	if (input.envelope.permitDigest !== input.permit.digest) {
 		throw new Error("dispatch: the worker envelope wraps another permit than the one the spec carries");
+	}
+	if (
+		input.envelope.staticHead !==
+		workerStaticHead({
+			api: spec.runtimeId,
+			provider: spec.target.id,
+			model: spec.wireModelId,
+			thinking: spec.thinkingLevel ?? null,
+			systemPrompt: spec.systemPrompt,
+			tools: { names: workerSpecToolNames(spec), schemas: attestedToolSchemaSignature(workerSpecToolNames(spec)) },
+		})
+	) {
+		throw new Error("dispatch: the worker envelope's static head does not describe the spec it is sealed into");
 	}
 	if (input.req.storeTags !== undefined && input.req.storeTags.length > 0 && !readOnly) {
 		spec.storeGrant = {
@@ -3887,8 +3943,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		runtimeKind: input.target.runtime.kind,
 		req: input.req,
 		pathScope: input.pathScope,
-		readOnly,
-		allowedTools: input.admission.allowedTools,
+		envelope: input.envelope,
 		settings,
 	}).spec;
 	if (sandbox !== undefined) spec.sandbox = sandbox;
@@ -6370,7 +6425,7 @@ export function createDispatchBundle(
 	function announceMcpSandboxNoNetwork(
 		req: DispatchRequest,
 		pathScope: DispatchPathScope,
-		readOnly: boolean,
+		envelope: WorkerEnvelope,
 		effectiveTools: ReadonlyArray<ToolName>,
 		target: ResolvedTarget,
 		settings: EffectiveSettings,
@@ -6386,8 +6441,7 @@ export function createDispatchBundle(
 			runtimeKind: target.runtime.kind,
 			req,
 			pathScope,
-			readOnly,
-			allowedTools: effectiveTools,
+			envelope,
 			settings,
 		}).spec;
 		if (sandbox === undefined) return;
@@ -6611,7 +6665,7 @@ export function createDispatchBundle(
 		announceMcpSandboxNoNetwork(
 			req,
 			pathScope,
-			readOnly,
+			envelope,
 			effectiveTools,
 			target,
 			settings,
@@ -6744,8 +6798,7 @@ export function createDispatchBundle(
 				runtimeKind: target.runtime.kind,
 				req,
 				pathScope,
-				readOnly,
-				allowedTools: effectiveTools,
+				envelope,
 				settings,
 			}),
 			onPermission: workerPermissionMode,
@@ -6848,7 +6901,8 @@ export function createDispatchBundle(
 			personaOverride,
 			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
-			envelope,
+			// Sealed over the compiled prompt, so the worker can prove the head it sends is the one admitted (DESIGN 4.4).
+			envelope: withStaticHead(envelope, envelopeStaticHeadInput(target, systemPrompt, envelope)),
 			...(peerStale !== null ? { peerStale } : {}),
 			...(peer?.overlay !== undefined
 				? {
@@ -8484,7 +8538,7 @@ export function createDispatchBundle(
 							? { authProfile: launchAuthProfile }
 							: {}),
 						...(launchCredential?.expiresAt !== undefined ? { credentialExpiresAt: launchCredential.expiresAt } : {}),
-						envelope: envelopeForPermit(lifecycle.envelope, lifecycle.permit.digest),
+						envelope: envelopeForPermit(lifecycle.envelope, lifecycle.permit),
 						...(lifecycle.projectContext?.peerInstructions?.delivery === "single-source"
 							? { skipRepositoryInstructions: true }
 							: {}),
@@ -9946,7 +10000,7 @@ export function createDispatchBundle(
 					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
 					...(req.externalReadApproval !== undefined ? { externalReadApproval: { ...req.externalReadApproval } } : {}),
 					permit: receiptPermitSummary(lifecycle.permit, lifecycle.admission.mcpNetworkWithheld),
-					envelope: receiptEnvelopeSummary(envelopeForPermit(lifecycle.envelope, lifecycle.permit.digest)),
+					envelope: receiptEnvelopeSummary(envelopeForPermit(lifecycle.envelope, lifecycle.permit)),
 					toolTelemetry: {
 						coverage: toolTelemetryCoverage,
 						ingestionErrors: telemetryIngestionErrors,
