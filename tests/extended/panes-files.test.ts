@@ -644,6 +644,9 @@ describe("contracts/files pane session transport", () => {
 		ok(enter.startsWith("plugin clio-enter -- '") && enter.endsWith("'"), enter);
 		const pick = enter.slice("plugin clio-enter -- '".length, -1).replaceAll(`'\\''`, "'");
 		strictEqual(`shell -- ${pick}`, run("<C-y>"));
+		// A command typed at Yazi's ; or : prompt cannot write into the event stream on Yazi's stdout (f-r3-files-enter).
+		strictEqual(run(";"), "shell --interactive -- exec >/dev/null 2>&1;");
+		strictEqual(run(":"), "shell --block --interactive -- exec >/dev/tty 2>&1;");
 	});
 
 	it("keeps Yazi's open on Enter in the one-shot chooser, which carries no pick token, so a file reaches the chooser file", async () => {

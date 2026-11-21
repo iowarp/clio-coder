@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { devRootsHeldByOthers } from "../../core/dev-roots.js";
 import { canonicalizeExistingPath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
@@ -119,5 +119,16 @@ export function foreignDevRootReason(candidates: ReadonlyArray<MutationCandidate
 }
 
 function expandHome(value: string): string {
-	return value === "~" ? homedir() : value.startsWith("~/") ? path.join(homedir(), value.slice(2)) : value;
+	if (value === "~" || value.startsWith("~/")) return path.join(homedir(), value.slice(1));
+	// `~name` for the running account is its passwd home, whatever HOME holds.
+	let account: { username: string; homedir: string } | null = null;
+	try {
+		account = userInfo();
+	} catch {
+		return value;
+	}
+	const prefix = `~${account.username}`;
+	return value === prefix || value.startsWith(`${prefix}/`)
+		? path.join(account.homedir, value.slice(prefix.length))
+		: value;
 }

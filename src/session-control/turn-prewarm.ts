@@ -234,6 +234,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		if (
 			runtimeId === undefined ||
 			(deps.providers.getRuntime(runtimeId)?.tier !== "local-native" &&
+				runtimeId !== "openai-codex" &&
 				!(runtimeId === "litellm" && targetId && deps.providers.getTarget(targetId)?.cache?.deployment))
 		)
 			return "tier";
@@ -299,6 +300,8 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			return { ran: false, reason: "superseded" };
 		if (
 			deps.providers.getRuntime(runtime.runtimeId)?.tier !== "local-native" &&
+			// OI-7: Codex warms with generate:false, which writes the prefix and produces nothing.
+			!(runtime.runtimeId === "openai-codex" && deployment.backend === "openai-codex") &&
 			!(
 				runtime.runtimeId === "litellm" &&
 				deployment.backend === "lmstudio" &&
@@ -307,7 +310,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		) {
 			// Off on every other tier regardless of the setting. A cloud provider
 			// caches by exact prefix on its own schedule and bills the request; a
-			// pre-warm there is spend without a latency win.
+			// one-token pre-warm there is spend without a latency win.
 			return { ran: false, reason: "tier" };
 		}
 

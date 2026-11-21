@@ -344,11 +344,20 @@ function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
 	return new Promise<NodeJS.ProcessEnv | null>((resolve) => {
 		let stdout = "";
 		let settled = false;
-		const child = spawn(LOGIN_ENV_SHELL, LOGIN_ENV_ARGS, { env: buildToolEnv(), stdio: ["ignore", "pipe", "ignore"] });
+		// The login profile is the operator's code: it runs in its own session, away from the TUI's terminal (M-12).
+		const child = spawn(LOGIN_ENV_SHELL, LOGIN_ENV_ARGS, {
+			env: buildToolEnv(),
+			stdio: ["ignore", "pipe", "ignore"],
+			detached: true,
+		});
 		// A piped stdio stream is a socket, which can be unref'd like the child.
 		const pipe = child.stdout as Socket | null;
 		const killOnExit = (): void => {
-			child.kill("SIGKILL");
+			try {
+				if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+			} catch {
+				child.kill("SIGKILL");
+			}
 		};
 		const finish = (value: NodeJS.ProcessEnv | null): void => {
 			if (settled) return;
@@ -359,7 +368,7 @@ function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
 			resolve(value);
 		};
 		const timer = setTimeout(() => {
-			child.kill("SIGKILL");
+			killOnExit();
 			finish(null);
 		}, LOGIN_ENV_CAPTURE_TIMEOUT_MS);
 		timer.unref();

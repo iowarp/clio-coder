@@ -7,7 +7,6 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
-import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
 import { REGISTERED_MIGRATION_IDS } from "../../src/domains/lifecycle/migrations/registry-ids.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -247,19 +246,6 @@ test("doctor --fix removes a retired settings key, an older memory store's unrea
 	ok(!again.some((row) => ["settings.yaml retired keys", "memory store", "retired state"].includes(row.name)));
 });
 
-test("the v1 migration drops the retired per-agent keys and records why", () => {
-	const result = migrateSettingsV1Document({
-		version: 1,
-		delegation: { agents: [{ id: "peer", command: "peer", permissionTimeoutMs: 5000, labels: { team: "a" } }] },
-	});
-	const entries = (result.document.integrations as { externalAgents: { entries: Array<Record<string, unknown>> } })
-		.externalAgents.entries;
-	strictEqual(Object.hasOwn(entries[0] ?? {}, "permissionTimeoutMs"), false);
-	strictEqual(Object.hasOwn(entries[0] ?? {}, "labels"), false);
-	ok(result.dropped.some((line) => line.startsWith("integrations.externalAgents.entries[0].permissionTimeoutMs:")));
-	ok(result.dropped.some((line) => line.startsWith("integrations.externalAgents.entries[0].labels:")));
-});
-
 // A name in SETTINGS_FIELD_NAMES is shared verbatim by telemetry share, so a name no schema
 // carries any more would let an operator's dictionary key of that spelling go out unanonymized.
 test("every settings field name is still a key some settings schema reads", () => {
@@ -272,7 +258,7 @@ test("every settings field name is still a key some settings schema reads", () =
 		}
 	};
 	walk(DEFAULT_SETTINGS);
-	const schemaSources = ["src/core/config.ts", "src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts"].map(
+	const schemaSources = ["src/core/config.ts", "src/domains/lifecycle/migrations/2026-11-21-retired-settings.ts"].map(
 		(path) => readFileSync(path, "utf8"),
 	);
 	const stale = SETTINGS_FIELD_NAMES.filter(

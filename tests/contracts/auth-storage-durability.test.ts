@@ -9,9 +9,9 @@
  * 211 bytes to 112 with only the new entry left.
  */
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { applyOwnerOnlyAcl } from "../../src/core/owner-only-acl.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
@@ -201,21 +201,38 @@ describe("contracts/auth storage durability", () => {
 		ok(!readFileSync(path, "utf8").includes("sk-not-a-real-key-two"), "the removed credential is gone");
 	});
 
-	it("makes the file owner-only with icacls after a write on win32 and runs nothing on POSIX (FX-24)", () => {
+	it("makes the directory then the file owner-only with icacls on win32 and runs nothing on POSIX (FX-24)", () => {
 		const calls: Array<[string, string[]]> = [];
+		const saves: string[] = [];
 		const exec = (program: string, args: readonly string[]): string => {
-			calls.push([win32.basename(program), [...args]]);
+			const save = args[1] === "/save" ? args[2] : undefined;
+			if (save !== undefined) {
+				saves.push(save);
+				const dacl = "D:PAI(A;;FA;;;SY)(A;;FA;;;S-1-5-21-1-2-3-1001)";
+				writeFileSync(save, Buffer.from(`credentials.yaml\r\n${dacl}\r\n`, "utf16le"));
+			}
+			calls.push([win32.basename(program), save === undefined ? [...args] : [args[0] ?? "", "/save", "<save>"]]);
 			return program.endsWith("whoami.exe") ? '"ZBOOK\\akougk","S-1-5-21-1-2-3-1001"\r\n' : "";
 		};
 		new AuthStorage(new FileAuthStorageBackend(path, { platform: "win32", exec })).setApiKey(
 			"openai",
 			"sk-not-a-real-key",
 		);
+		const dir = dirname(path);
+		const whoami: [string, string[]] = ["whoami.exe", ["/user", "/fo", "csv", "/nh"]];
+		// The directory's grants are inheritable, so the write's temp file is owner-only from its creation.
 		deepStrictEqual(calls, [
-			["whoami.exe", ["/user", "/fo", "csv", "/nh"]],
+			whoami,
+			["icacls.exe", [dir, "/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"]],
+			["icacls.exe", [dir, "/save", "<save>"]],
+			whoami,
 			["icacls.exe", [path, "/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:F", "*S-1-5-18:F"]],
-			["icacls.exe", [path]],
+			["icacls.exe", [path, "/save", "<save>"]],
 		]);
+		ok(
+			saves.every((save) => !existsSync(dirname(save))),
+			"each saved DACL's scratch directory is removed",
+		);
 
 		calls.length = 0;
 		new AuthStorage(new FileAuthStorageBackend(path, { platform: "linux", exec })).setApiKey(
@@ -226,35 +243,34 @@ describe("contracts/auth storage durability", () => {
 		strictEqual(statSync(path).mode & 0o777, 0o600);
 	});
 
-	it("removes the explicit grants /grant:r leaves and fails when one survives (FX-29)", () => {
+	it("removes the explicit grants /grant:r leaves, by SID, and fails when one survives (FX-29)", () => {
 		const file = "C:\\clio-acl\\config\\credentials.yaml";
-		const names: Record<string, string> = {
-			"*S-1-5-21-1-2-3-1001": "ZBOOK\\akougk",
-			"*S-1-5-18": "NT AUTHORITY\\SYSTEM",
-		};
-		// icacls as Windows applies it: /grant:r replaces only the grants it names.
+		const aliases: Record<string, string> = { BU: "S-1-5-32-545", WD: "S-1-1-0" };
+		const sidOf = (token: string): string => aliases[token] ?? token;
+		// icacls as Windows applies it: /grant:r replaces only the grants it names, and /save writes SDDL in UTF-16LE.
 		const fakeIcacls = (removeWorks: boolean) => {
 			let aces = [
-				["BUILTIN\\Users", "(I)(RX)"],
-				["ZBOOK\\akougk", "(I)(F)"],
-				["BUILTIN\\Users", "(R)"],
-				["S-1-5-21-9-9-9-1234", "(M)"],
-				["Everyone", "(DENY)(W)"],
+				{ type: "A", flags: "ID", sid: "BU" },
+				{ type: "A", flags: "ID", sid: "S-1-5-21-1-2-3-1001" },
+				{ type: "A", flags: "", sid: "BU" },
+				{ type: "A", flags: "", sid: "S-1-5-21-9-9-9-1234" },
+				{ type: "D", flags: "", sid: "WD" },
 			];
 			const calls: string[][] = [];
 			const exec = (program: string, args: readonly string[]): string => {
 				if (program.endsWith("whoami.exe")) return '"ZBOOK\\akougk","S-1-5-21-1-2-3-1001"\r\n';
-				calls.push(args.slice(1));
 				const [, op, ...rest] = args;
-				if (op === undefined)
-					return `${file} ${aces.map(([who, rights]) => `${who}:${rights}`).join(`\r\n${" ".repeat(file.length + 1)}`)}\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`;
-				if (op === "/inheritance:r") {
-					const granted = rest.slice(1).map((grant) => names[grant.slice(0, grant.lastIndexOf(":"))] ?? grant);
-					aces = aces.filter(([who, rights]) => !rights?.includes("(I)") && !granted.includes(who ?? ""));
-					aces.push(...granted.map((who) => [who, "(F)"]));
+				calls.push(op === "/save" ? [op, "<save>"] : args.slice(1));
+				if (op === "/save" && rest[0] !== undefined) {
+					const dacl = `D:PAI${aces.map((ace) => `(${ace.type};${ace.flags};FA;;;${ace.sid})`).join("")}`;
+					writeFileSync(rest[0], Buffer.from(`credentials.yaml\r\n${dacl}\r\n`, "utf16le"));
+				} else if (op === "/inheritance:r") {
+					const granted = rest.slice(1).map((grant) => grant.slice(1, grant.lastIndexOf(":")));
+					aces = aces.filter((ace) => ace.flags !== "ID" && !granted.includes(sidOf(ace.sid)));
+					aces.push(...granted.map((sid) => ({ type: "A", flags: "", sid })));
 				} else if (op === "/remove:g" && removeWorks) {
 					const gone = rest[0]?.replace(/^\*/u, "");
-					aces = aces.filter(([who, rights]) => who !== gone || rights?.includes("(DENY)"));
+					aces = aces.filter((ace) => sidOf(ace.sid) !== gone || ace.type === "D");
 				}
 				return "processed file\r\n";
 			};
@@ -265,10 +281,10 @@ describe("contracts/auth storage durability", () => {
 		strictEqual(applyOwnerOnlyAcl(file, { platform: "win32", exec: icacls.exec }), null);
 		deepStrictEqual(icacls.calls, [
 			["/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:F", "*S-1-5-18:F"],
-			[],
-			["/remove:g", "BUILTIN\\Users"],
+			["/save", "<save>"],
+			["/remove:g", "*S-1-5-32-545"],
 			["/remove:g", "*S-1-5-21-9-9-9-1234"],
-			[],
+			["/save", "<save>"],
 		]);
 
 		const stuck = fakeIcacls(false);

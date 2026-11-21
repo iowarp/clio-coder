@@ -420,6 +420,53 @@ function evictFor(key: string): void {
 		remove(victim);
 }
 
+/** The configurations whose spare is opening, so overlapping side calls open one. */
+const sparesOpening = new Set<string>();
+
+/**
+ * PV-2 pooled side session. A side call runs without a Clio session (the `default` key) and almost never extends an
+ * earlier conversation, so each one opened a Copilot session before it could send. Measured on the Copilot seat
+ * (gpt-6-luna, 2026-11-21): the open took 270 ms on the runtime's first call and about 30 ms after it, against 0.9 to
+ * 1.4 s from send to the first text. Once a side call holds a session it seeded, one empty spare of the same
+ * configuration opens in the background; the next side call of that configuration finds it in `plan` as an idle
+ * conversation with nothing synced and sends everything there. The spare is an ordinary conversation, so eviction,
+ * a lost runtime and exit cleanup treat it like any other; opening one bills nothing.
+ */
+function openSpare(base: Parameters<typeof openConversationHeld>[0], announce: () => Promise<boolean>): void {
+	const systemHash = hash(base.systemPrompt);
+	const toolsHash = toolsSignature(base.tools);
+	const signature = [base.key, base.model.id, systemHash, toolsHash, base.reasoningEffort ?? "", base.contextTier].join(
+		"\n",
+	);
+	if (sparesOpening.has(signature)) return;
+	const ready = conversations.some(
+		(open) =>
+			open.key === base.key &&
+			!open.busy &&
+			!open.disposed &&
+			open.state === "idle" &&
+			open.synced.length === 0 &&
+			open.systemHash === systemHash &&
+			open.toolsHash === toolsHash &&
+			open.model === base.model.id,
+	);
+	if (ready) return;
+	sparesOpening.add(signature);
+	void (async () => {
+		try {
+			// The step that asked for it records the spare's creation, so the provider dump still shows every session.
+			if (!(await announce())) return;
+			const spare = await openConversation(base, undefined);
+			evictFor(base.key);
+			conversations.push(spare);
+		} catch {
+			// A spare only saves the next side call its open; that call opens its own.
+		} finally {
+			sparesOpening.delete(signature);
+		}
+	})();
+}
+
 function remove(conversation: Conversation, reason = "Clio closed this Copilot conversation"): void {
 	const index = conversations.indexOf(conversation);
 	if (index >= 0) conversations.splice(index, 1);
@@ -1407,8 +1454,9 @@ async function runStep(
 	const reused = conversation !== null;
 	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
 	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);
-	// Whether the session already holds the transcript up to `fresh`, so only what follows is sent.
-	let continued = reused;
+	// Whether the session already holds the transcript up to `fresh`, so only what follows is sent. A pooled spare
+	// holds nothing: it is reused, but everything goes.
+	let continued = reused && (conversation?.synced.length ?? 0) > 0;
 	// Everything after what the session has seen, in order, host framing (reminder-only messages) included:
 	// framing carries no transcript identity, but each request's own framing still reaches the model.
 	const syncedCount = conversation?.synced.length ?? stored?.synced.length ?? 0;
@@ -1416,11 +1464,11 @@ async function runStep(
 	const fresh = lastSeen ? core.slice(core.indexOf(lastSeen) + 1) : core;
 
 	let bound = false;
+	const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
+	const session = { model: model.id, systemMessage: systemPrompt, tools, reasoningEffort, contextTier };
 	try {
 		if (!conversation) {
 			evictFor(key);
-			const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
-			const session = { model: model.id, systemMessage: systemPrompt, tools, reasoningEffort, contextTier };
 			let opened: Conversation | null = null;
 			if (stored) {
 				if (!(await request({ request: "resumeSession", sessionId: stored.sessionId, ...session }))) return;
@@ -1451,6 +1499,9 @@ async function runStep(
 		}
 		const active = conversation;
 		active.busy = true;
+		// A side call that seeded its session (a new one or a spare) leaves a spare for the next one (PV-2).
+		if (key === "default" && !continued)
+			openSpare(base, () => request({ request: "createSession", spare: true, ...session }));
 		active.lastUsed = Date.now();
 		active.activeStep = step;
 		bound = true;

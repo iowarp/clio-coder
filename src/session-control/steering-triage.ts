@@ -16,7 +16,7 @@
  * so the typed picks and the side-model round read the same labels.
  */
 
-import type { SteeringTriageSettings } from "../core/defaults.js";
+import type { SteeringTriageSettings, ThinkingLevel } from "../core/defaults.js";
 import type { SteerRelation, SteerUrgency } from "../core/steering-vocabulary.js";
 import { STEER_RELATIONS, STEER_URGENCIES } from "../core/steering-vocabulary.js";
 import type { SystemOne } from "../domains/system-one/index.js";
@@ -28,7 +28,22 @@ import type { QueuedChatMessage, QueuedMessageKind } from "./turn-queues.js";
 export type TriageSystemOne = Pick<SystemOne, "bound" | "ask">;
 
 export const TRIAGE_SCHEMA_NAME = "clio_coder_steering_triage";
-export const TRIAGE_MAX_TOKENS = 600;
+/** Output tokens the verdict JSON itself needs. */
+const TRIAGE_MAX_TOKENS = 600;
+/** Reasoning room a non-off triage level adds on top of the verdict's, so thinking cannot spend the answer. */
+const TRIAGE_REASONING_TOKENS: Readonly<Record<Exclude<ThinkingLevel, "off">, number>> = {
+	minimal: 1024,
+	low: 2048,
+	medium: 8192,
+	high: 16384,
+	xhigh: 32768,
+	max: 32768,
+};
+
+/** The output cap of a triage round at `level`: the verdict's room, plus reasoning room when thinking is on. */
+export function triageMaxTokens(level: ThinkingLevel): number {
+	return level === "off" ? TRIAGE_MAX_TOKENS : TRIAGE_MAX_TOKENS + TRIAGE_REASONING_TOKENS[level];
+}
 /** A `stop` below this confidence is marked, never acted on. */
 export const TRIAGE_STOP_MIN_CONFIDENCE = 0.8;
 /** A `stop` older than this when the verdict lands is stale: the operator has had time to press the key themselves. */

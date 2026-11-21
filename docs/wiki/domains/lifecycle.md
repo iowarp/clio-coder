@@ -5,7 +5,6 @@ sources:
   - "src/domains/lifecycle/migrations/index.ts"
   - "src/domains/lifecycle/migrations/registry-ids.ts"
   - "src/domains/lifecycle/boot-migrations.ts"
-  - "src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts"
   - "src/domains/lifecycle/install-method.ts"
   - "src/domains/lifecycle/update-check.ts"
   - "src/domains/lifecycle/doctor.ts"
@@ -29,8 +28,7 @@ tests:
 invariants:
   - "A migration id recorded in the applied manifest is not run again by runPending for that state tree. Each id is written to the manifest after its up() returns, so an earlier success survives a later failure."
   - "A manifest that is over 1 MiB, not a JSON object, has a key other than applied, has a non-array or empty-id applied list, or has duplicate ids is refused: runPending throws before any up() runs and the file is not replaced."
-  - "A settings v1 document whose v1 keys collide with their v2 destinations is refused with SettingsV2CollisionError, and the settings.yaml file and its .v1.bak backup are not written."
-  - "The settings v2 migration returns without rewriting when settings.yaml already parses to version 2, and a second run on a migrated file leaves the bytes unchanged."
+  - "A version-1 settings.yaml is not read or converted: validateSettings refuses any version other than 2, and no migration rewrites it."
 validate:
   - "pnpm run test:file -- tests/extended/settings-migration.test.ts"
   - "pnpm run test:file -- tests/contracts/lifecycle-safety.test.ts"
@@ -139,53 +137,15 @@ invokes `applyPendingMigrationsAtBoot()` with no argument, and
 `upgrade` command in `src/cli/upgrade.ts` calls `deps.runPending(stateDir)`
 directly at line 829 of that file.
 
-## Settings v1 to v2 migration
+## Version-1 settings
 
-`src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts` is the first
-registered migration. Its id is `SETTINGS_V2_MIGRATION_ID`, `2026-09-01-settings-v2`.
-The exported `migrateSettingsV1Document(raw)` is a pure transform. It rejects a
-non-map root and any `version` other than 1 or absent, then clones the
-document and moves keys with a table of `[from, to, valueTransform]` entries
-using the dot-path helpers `getPath`, `setPath`, and `deletePath`. It also
-drops a fixed set of keys (`identity`, `background.thinkingLevel`, `theme`,
-`compaction.excludeLastTurns`, and the remaining `panes` tree), and calls
-`migrateFleetNodeAliases` and `dropRetiredExternalAgentKeys`.
-
-If any move's destination already exists, `move` records a collision and
-leaves the source in place. After all moves, a non-empty `collisions` list
-causes `SettingsV2CollisionError` to be thrown, with a message stating the
-original `settings.yaml` was left untouched. Otherwise the function sets
-`version` to 2 and runs `validateSettings` from `src/core/config.ts`; any
-validation issue throws `SettingsValidationError`.
-
-The migration's `up` method runs inside `withSettingsLock`. It returns when the
-file is absent, and returns without writing when the parsed document already
-has `version: 2`. Otherwise it writes the transformed YAML through
-`safeResourceWrite` with a `.v1.bak` backup at `${path}.v1.bak`, then writes a
-JSON report named `<migration id>.json` under `migration-reports/` in the state
-directory. A parse failure throws before any write.
-
-Focused tests in `tests/extended/settings-migration.test.ts`:
-
-- `migrates v1 atomically, keeps the original backup, and is idempotent` writes
-  a v1 file with `orchestrator`, `workers.default`, and `targets`, runs
-  `settingsV2.up`, and asserts the `.v1.bak` equals the original text,
-  `version` is 2, `chat` equals `{ target: "local", model: "qwen" }`, and
-  `fleet.default` carries the moved `thinkingLevel`. A second `up` call leaves
-  the file bytes unchanged.
-- `carries only explicit v1 pane choices into v2` asserts that a v1
-  `panes.enabled: auto` and `panes.yazi.enabled: true` migrate to
-  `interface.panes` with `enabled` `auto` and `files.enabled` true, while an
-  absent layout defaults to `off`.
-- `refuses a v1/v2 collision without replacing or backing up the file` writes
-  `orchestrator: { target: old }` alongside `chat: { target: new }`, expects
-  `settingsV2.up` to reject with `SettingsV2CollisionError`, and asserts the
-  file is unchanged and no `.v1.bak` exists.
-
-Two other focused tests call `migrateSettingsV1Document` directly rather than
-`up`: `tests/contracts/retired-settings-keys.test.ts` and
-`tests/contracts/autonomy-settings.test.ts`. Their assertions were not read
-for this page.
+There is no version-1 settings reader. `validateSettings` in `src/core/config.ts`
+refuses any `version` other than 2 and says to move `settings.yaml` aside, after
+which the next run writes a version-2 file with the defaults. The v1 to v2
+rewrite (`2026-09-01-settings-v2`) and the v1 pane-key cleanup
+(`2026-09-01-retire-panes-knobs`) were removed; their ids are listed in
+`RETIRED_MIGRATION_IDS` in `registry-ids.ts`, so a manifest that recorded them
+is read as known, not as evidence of a newer release.
 
 ## Install-method detection
 
@@ -270,8 +230,8 @@ not described here.
 `src/domains/lifecycle/doctor.ts` builds the `lifecycle migrations` finding at
 about line 666. It calls `readMigrationManifestResult(dirs.state)`, lists the
 registered ids with `listMigrations()`, and treats ids as satisfied without a
-manifest record when the current settings are valid and the id is one of
-`2026-09-01-settings-v2` or `2026-09-01-retire-panes-knobs`. The finding is
+manifest record when the current settings are valid and the id is
+`2026-11-21-retired-settings`. The finding is
 `ok` with a warning level only when there is a problem-free manifest and at
 least one pending id. Its detail shows the problem text on a refused manifest,
 the count of unrecorded-but-satisfied ids, or the pending ids with the

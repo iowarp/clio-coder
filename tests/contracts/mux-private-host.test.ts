@@ -1031,7 +1031,7 @@ describe("host identity and exit markers", () => {
 			/exit code 1:\n {2}\[clio-coder:domain\] load failed: dispatch: .*\n {2}error: /u,
 		);
 		match(workspaceExitNotice(1, undefined), /exit code 1\. .*clio-coder --with-panes/u);
-		equal(workspaceExitNotice(143, undefined), "Clio workspace ended with exit code 143.\n");
+		equal(workspaceExitNotice(143, undefined), "CLIO Coder workspace ended with exit code 143.\n");
 		markWorkspaceExit(env, 0);
 		equal(readWorkspaceExitResult(marker)?.failure, undefined);
 	});
@@ -1062,14 +1062,14 @@ describe("launcher eligibility", () => {
 		const guest = { mode: "guest", reason: "guest mode on /home/me/.config/herdr/herdr.sock" };
 		const nested = panesModeFinding(operatorHerdr, guest);
 		equal(nested.level, "ok");
-		match(nested.detail, /^nested; bare `clio-coder` opens Clio's private pane host inside this herdr pane/);
+		match(nested.detail, /^nested; bare `clio-coder` opens CLIO Coder's private pane host inside this herdr pane/);
 		match(nested.detail, /`clio-coder --with-panes` joins this herdr as a guest/);
 		// An unreachable outside herdr does not stop the nested host, so it is not a warning.
 		equal(panesModeFinding(operatorHerdr, { mode: "none", reason: "no socket answered" }).level, "ok");
 		const own = panesModeFinding({ HERDR_ENV: "1", HERDR_SOCKET_PATH: `/run/u/clio-coder/${SESSION}.sock` }, guest);
-		match(own.detail, /^guest; bare `clio-coder` stays in this pane \(already inside Clio's pane host\)/);
+		match(own.detail, /^guest; bare `clio-coder` stays in this pane \(already inside CLIO Coder's pane host\)/);
 		const outside = panesModeFinding({ TERM: "xterm-256color" }, null);
-		match(outside.detail, /^Clio's private pane host opens with bare `clio-coder`/);
+		match(outside.detail, /^CLIO Coder's private pane host opens with bare `clio-coder`/);
 		match(
 			panesModeFinding({ TMUX: "/x/tmux" }, null).detail,
 			/^plain; bare `clio-coder` stays in this terminal \(already inside a terminal multiplexer \(TMUX\)\)/,
@@ -1120,7 +1120,7 @@ describe("doctor's panes binary row", () => {
 		writeFileSync(vendored, "");
 		const present = await row();
 		equal(present?.level, "ok");
-		equal(present?.detail, `pane host ${pin.version} (Clio's pinned copy) at ${vendored}`);
+		equal(present?.detail, `pane host ${pin.version} (CLIO Coder's pinned copy) at ${vendored}`);
 	});
 });
 
