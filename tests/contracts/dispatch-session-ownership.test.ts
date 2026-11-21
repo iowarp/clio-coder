@@ -295,8 +295,11 @@ describe("dispatch session ownership", () => {
 		settings.fleet.permissions.mode = "main";
 		const context = dispatchStubContext({ settings });
 		let plainAsked = false;
+		const forwarded: Array<{ requestId: unknown; sessionId: unknown }> = [];
 		context.bus.subscribe("approval.requested", (payload) => {
 			if (payload.requestId === "ask-p") plainAsked = true;
+			if (payload.escalation === true && payload.requestId !== "ask-p")
+				forwarded.push({ requestId: payload.requestId, sessionId: payload.sessionId });
 		});
 		const effect = grantEffectDescriptor("bash", { command: "touch out.txt" });
 		const sent: unknown[] = [];
@@ -308,6 +311,8 @@ describe("dispatch session ownership", () => {
 		const bundle = makeDispatchBundle(context, {
 			getSessionId: () => session.id,
 			getSessionParentId: () => session.parent,
+			// An attended TUI: the main agent's approval below yolo goes to the operator's card.
+			workerPermissionResponder: true,
 			spawnWorker: (spec, opts) => {
 				const grant = spec.escalation?.grant;
 				return {
@@ -399,6 +404,26 @@ describe("dispatch session ownership", () => {
 			session = { id: "session-f", parent: "session-p" };
 			contract.resolveWorkerPermission?.(handle.runId, "ask-p", "approve");
 			deepStrictEqual(sent, [{ type: "permission_decision", requestId: "ask-p", decision: "approve" }]);
+			// Answering the adopted brokered ask is the ask's, not steering the run (live wave 32): the fork's agent
+			// approves through steer, and below yolo that puts the card in front of the fork's operator.
+			const grantId = contract.grants?.list({ sessionId: "session-f", pendingOnly: true })[0]?.requestId ?? "";
+			const approving = callAs(contract, "session-f", ToolNames.Steer, {
+				run_id: brokered.runId,
+				action: "approve",
+				request_id: grantId,
+			});
+			for (let i = 0; i < 200 && forwarded.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+			deepStrictEqual(forwarded, [{ requestId: grantId, sessionId: "session-f" }], "the fork's card opens");
+			strictEqual(contract.workerPermissionRefusal?.(brokered.runId, grantId), null);
+			contract.resolveWorkerPermission?.(brokered.runId, grantId, "approve");
+			match(okResult(await approving).output, new RegExp(`^the operator approved request ${grantId}`));
+			match(
+				errorMessage(
+					await callAs(contract, "session-f", ToolNames.Steer, { run_id: brokered.runId, action: "guide", message: "x" }),
+				),
+				/belongs to session session-p, which this session was forked from;/,
+				"answering the ask does not let the fork steer the run",
+			);
 			match(
 				errorMessage(await callAs(contract, "session-f", ToolNames.Steer, { run_id: handle.runId, action: "cancel" })),
 				/belongs to session session-p, which this session was forked from;/,

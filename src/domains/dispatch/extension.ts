@@ -4545,6 +4545,8 @@ export function createDispatchBundle(
 	const dropAdoptedAsks = (runId: string): void => {
 		for (const [requestId, adopted] of adoptedAsks) if (adopted.runId === runId) adoptedAsks.delete(requestId);
 	};
+	const heldAskRefusal = (holder: string, runId: string): string =>
+		`the ask is held by session ${holder} (run '${runId}'); only that session can answer it. /resume ${holder} to answer it`;
 	/** Sessions a fork parked, whose brokered asks wait for the fork's open to adopt or revoke them. */
 	const forkParkedSessionIds: Array<string | null> = [];
 	/** The current session adopts every brokered ask an ancestor left pending, so its main agent and card see them. */
@@ -12573,8 +12575,15 @@ export function createDispatchBundle(
 	async function decideGrantRecordAsMain(
 		input: Parameters<NonNullable<DispatchContract["grants"]>["decideAsMain"]>[0],
 	): Promise<MainGrantOutcome> {
-		const record = grantBroker.get(input.requestId);
-		if (record === null) return { ok: false, message: `unknown permission request '${input.requestId}'` };
+		const found = grantBroker.get(input.requestId);
+		if (found === null) return { ok: false, message: `unknown permission request '${input.requestId}'` };
+		// Answering is the ask's, not the run's: a fork answers the ask it adopted from its parked parent (bt-11).
+		const holder =
+			found.state === "pending" && found.ownerSessionId !== input.sessionId
+				? foreignAskOwner(found.runId, input.requestId)
+				: null;
+		if (holder !== null) return { ok: false, message: heldAskRefusal(holder, found.runId) };
+		const record = grantBroker.get(input.requestId) ?? found;
 		const base = { sessionId: input.sessionId, runId: input.runId };
 		const failed = (reason: string, view?: GrantRecord): MainGrantOutcome => ({
 			ok: false,
@@ -12941,8 +12950,7 @@ export function createDispatchBundle(
 		},
 		workerPermissionRefusal(runId, requestId) {
 			const holder = foreignAskOwner(runId, requestId);
-			if (holder === null) return null;
-			return `the ask is held by session ${holder} (run '${runId}'); only that session can answer it. /resume ${holder} to answer it`;
+			return holder === null ? null : heldAskRefusal(holder, runId);
 		},
 		resolveWorkerPermission(runId, requestId, decision) {
 			const refusal = contract.workerPermissionRefusal?.(runId, requestId) ?? null;
