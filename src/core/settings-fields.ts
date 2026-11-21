@@ -218,6 +218,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"runtimePlugins",
 	"safety",
 	"sandbox",
+	"sandboxCacheMaxGiB",
 	"sandboxNetwork",
 	"sandboxPassEnv",
 	"sandboxUnixSockets",

@@ -1,5 +1,14 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { readSettings } from "../core/config.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import {
+	measureSandboxCache,
+	pruneSandboxCache,
+	type SandboxCachePruneResult,
+	sandboxCacheCapBytes,
+	sandboxCacheDir,
+} from "../core/sandbox/sandbox-cache.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { inactiveInstallerRecord, inspectInstallation } from "../domains/lifecycle/install-method.js";
@@ -77,6 +86,82 @@ export function installRootFinding(installation = inspectInstallation()): Doctor
 		level: "warn",
 		name: "install root",
 		detail: `${size}; this binary does not run from it, so nothing updates or prunes it. \`clio-coder uninstall --inactive\` removes only it`,
+	};
+}
+
+export interface SandboxCacheFindingOptions {
+	/** `doctor --fix`: prune to the cap now, whatever day it is. */
+	fix?: boolean;
+	/** `safety.sandboxCacheMaxGiB`; read from settings when absent. */
+	capGiB?: number;
+	cacheDir?: string;
+}
+
+function configuredCapGiB(): number {
+	try {
+		return readSettings().safety.sandboxCacheMaxGiB;
+	} catch {
+		// The settings row reports an unreadable file; the default cap still describes what startup prunes to.
+		return DEFAULT_SETTINGS.safety.sandboxCacheMaxGiB;
+	}
+}
+
+function pruneOutcome(result: SandboxCachePruneResult): string {
+	const failed = result.failed.length > 0 ? `; could not remove ${result.failed.map((f) => f.name).join(", ")}` : "";
+	switch (result.skipped) {
+		case "in-use":
+			return `; not pruned: ${result.liveLeases} running ${result.liveLeases === 1 ? "process" : "processes"} may use it, rerun doctor --fix after they exit${failed}`;
+		case "leases-unreadable":
+			return `; not pruned: its leases under sandbox-cache-leases could not be read${failed}`;
+		case "busy":
+			return `; not pruned: another process is pruning it${failed}`;
+		case "stopped":
+		case null:
+			break;
+	}
+	if (result.removed.length === 0) return failed;
+	const freed = result.removed.reduce((sum, entry) => sum + entry.bytes, 0);
+	return `; pruned ${result.removed.map((entry) => entry.name).join(", ")} (${formatBytes(freed)})${failed}`;
+}
+
+/**
+ * The sandbox cache against `safety.sandboxCacheMaxGiB`: a warning when it is over, and under `--fix` a prune of the
+ * least recently used tool directories, which skips while a running process holds a lease on the cache.
+ */
+export async function sandboxCacheFinding(options: SandboxCacheFindingOptions = {}): Promise<DoctorFinding> {
+	const cacheDir = options.cacheDir ?? sandboxCacheDir();
+	const capGiB = options.capGiB ?? configuredCapGiB();
+	const capBytes = sandboxCacheCapBytes(capGiB);
+	const name = "sandbox cache";
+	let bytes: number;
+	let outcome = "";
+	try {
+		if (options.fix === true && capBytes > 0) {
+			const result = await pruneSandboxCache({ capBytes, cacheDir });
+			if (result.afterBytes === null) return { ok: true, name, detail: `${cacheDir} not created yet` };
+			bytes = result.afterBytes;
+			outcome = pruneOutcome(result);
+		} else {
+			const measured = await measureSandboxCache(cacheDir);
+			if (measured === null) return { ok: true, name, detail: `${cacheDir} not created yet` };
+			bytes = measured.bytes;
+		}
+	} catch (error) {
+		return {
+			ok: false,
+			name,
+			detail: `${cacheDir} could not be measured: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+	if (capBytes === 0)
+		return { ok: true, name, detail: `${formatBytes(bytes)} at ${cacheDir}; no cap (safety.sandboxCacheMaxGiB is 0)` };
+	const size = `${formatBytes(bytes)} of the ${capGiB} GiB cap at ${cacheDir}`;
+	if (bytes <= capBytes) return { ok: true, name, detail: `${size}${outcome}` };
+	return {
+		ok: true,
+		level: "warn",
+		name,
+		detail: `${size}, over the cap${outcome || "; doctor --fix removes the least recently used tool directories until it fits, and startup does once a day"}`,
 	};
 }
 
