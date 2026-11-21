@@ -50,21 +50,22 @@ function createDraftStore() {
 }
 
 /** Safe control text stays in memory across sidebar switches, isolated to its client and workspace. */
-export function settingsDraftStore(client: Client, workspaceId: string) {
+/** Drafts are kept per scope; the empty key is the user layer with no workspace open. */
+export function settingsDraftStore(client: Client, workspaceId: string | null) {
 	let workspaces = clients.get(client);
 	if (!workspaces) {
 		workspaces = new Map();
 		clients.set(client, workspaces);
 	}
-	let drafts = workspaces.get(workspaceId);
+	let drafts = workspaces.get(workspaceId ?? "");
 	if (!drafts) {
 		drafts = createDraftStore();
-		workspaces.set(workspaceId, drafts);
+		workspaces.set(workspaceId ?? "", drafts);
 	}
 	return drafts;
 }
 
-export function useSettingsDrafts(client: Client, workspaceId: string) {
+export function useSettingsDrafts(client: Client, workspaceId: string | null) {
 	const store = useMemo(() => settingsDraftStore(client, workspaceId), [client, workspaceId]);
 	return [
 		useSyncExternalStore(store.subscribe, store.read, store.read),

@@ -25,7 +25,7 @@ const sources = new WeakMap<ConversationEntry, { turn: ChatTurn; row: Turn | und
 const searchText = new WeakMap<ConversationEntry, readonly string[]>();
 
 export function conversationEntry(turn: ChatTurn, row: Turn | undefined, index: number): ConversationEntry {
-	const request = requestView(turn);
+	const request = requestView(turn, row);
 	const entry: ConversationEntry = {
 		id: turn.turnId,
 		number: index + 1,

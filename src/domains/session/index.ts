@@ -106,7 +106,8 @@ export type {
 export { isSessionEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.js";
 export type { HeadlessCompactionOutcome, HeadlessCompactionRequest } from "./headless-compact.js";
 export { runHeadlessCompaction } from "./headless-compact.js";
-export { liveSessionOwner, SessionLiveError } from "./live-owner.js";
+export { liveSessionView } from "./heartbeat.js";
+export { liveSessionOwner, SessionLiveError, sessionLiveOwner } from "./live-owner.js";
 export { SessionManifest } from "./manifest.js";
 export { observationCheckpoint, observationSourceUnits } from "./memory-source.js";
 export { type MessageProjection, projectMessage } from "./message-projection.js";
@@ -140,7 +141,9 @@ export {
 	runTelemetryDirectoryExists,
 	runTelemetryWrittenMs,
 } from "./telemetry-source.js";
+export { renderTranscriptMarkdown } from "./transcript-export.js";
 export { filterEntriesToActivePath } from "./tree/active-path.js";
+export { readTreeBundle } from "./tree/manager.js";
 // The tree/ module is a domain-internal building block. Only the
 // overlay-facing types surface here; callers that need deeper helpers import
 // from the concrete submodules directly (session domain only).

@@ -5,6 +5,7 @@ import { clioStateDir, resolveClioDirs } from "../../core/xdg.js";
 import type { MigrationReport } from "./migrations/index.js";
 import { MIGRATION_NOTICES_FILE, readMigrationNotices } from "./migrations/notices.js";
 import {
+	APPLY_MIGRATIONS_COMMAND,
 	legacyMigrationManifestPath,
 	migrationManifestPath,
 	REGISTERED_MIGRATION_IDS,
@@ -105,7 +106,7 @@ export async function applyPendingMigrationsAtBoot(
 		}
 	} catch (error) {
 		notices.push(
-			`Pending migrations did not run (${error instanceof Error ? error.message : String(error)}). Run: clio-coder upgrade --post-install`,
+			`Pending migrations did not run (${error instanceof Error ? error.message : String(error)}). Run: ${APPLY_MIGRATIONS_COMMAND}`,
 		);
 	}
 }
