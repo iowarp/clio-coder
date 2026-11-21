@@ -521,7 +521,9 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 		// The worker keeps working and the host's 85% handback asks for the report; a quit cue made coders stop at 13 s.
 		const wallLine = wallClockMessage(120_000);
 		match(wallLine, /Keep working/u);
-		match(wallLine, /At 85% the host withdraws your tools and asks for your report/u);
+		// M-37: the line names no moment tools go away; told "at 85% the host withdraws your tools", a coder quit at 25 s.
+		ok(!/withdraw|85%|tool window/u.test(wallLine), wallLine);
+		match(wallLine, /the host asks for your report in its own message/u);
 		ok(!/stops as timed out/u.test(wallLine), wallLine);
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {

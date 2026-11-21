@@ -38,6 +38,26 @@ function trimString(value: unknown): string | null {
 	return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * A reason that says the run's tools are gone. Once the host withdraws a worker's tools every call is blocked, so a
+ * limitation or finish call that runs proves its tools are open and such a reason is false: a luna coder quit at 25 s
+ * of a 2 min run reporting "the tool window closed" with no handback fired (M-37).
+ */
+const TOOLS_GONE_CLAIMS: ReadonlyArray<RegExp> = [
+	/\btool[- ]window\b/iu,
+	/\b(?:my|the|your|its|all)\s+tools\s+(?:(?:were|are|have|had|has)\s+(?:been\s+)?|got\s+)?(?:closed|withdrawn|removed|revoked|taken away|cut off|locked|gone|disabled)\b/iu,
+	/\btool access\s+(?:(?:was|is|has|had)\s+(?:been\s+)?)?(?:closed|ended|withdrawn|removed|revoked|cut off|gone)\b/iu,
+	/\b(?:withdrew|withdrawn|revoked|removed|lost)\s+(?:my|the|your|its|all)\s+(?:tools|tool access)\b/iu,
+];
+
+export function claimsToolsGone(text: string): boolean {
+	return TOOLS_GONE_CLAIMS.some((pattern) => pattern.test(text));
+}
+
+/** The typed refusal of a tools-gone reason, for the limitation and finish tools. */
+export const TOOLS_OPEN_REFUSAL =
+	"refused (tools_open): the reason says the run's tools are gone, but this call ran, so its tools are open and nothing was recorded. Keep working on the task with your tools; when it is time to hand back, the host asks for your report in its own message.";
+
 function normalizePaths(value: unknown): string[] | null {
 	if (value === undefined || value === null) return [];
 	if (!Array.isArray(value)) return null;
@@ -87,6 +107,9 @@ export const limitationTool: ToolSpec = {
 	async run(args): Promise<ToolResult> {
 		const scope = trimString(args.scope);
 		if (scope === null) return { kind: "error", message: "limitation: scope is required" };
+		if (claimsToolsGone(scope)) {
+			return { kind: "error", message: `limitation: ${TOOLS_OPEN_REFUSAL}`, details: { refusal: "tools_open" } };
+		}
 		if (!isLimitationReason(args.reason)) {
 			return { kind: "error", message: `limitation: reason must be one of ${LIMITATION_REASONS.join(", ")}` };
 		}
