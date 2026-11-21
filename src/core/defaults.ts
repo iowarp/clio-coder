@@ -240,8 +240,9 @@ export interface WorkingSetSettings {
  * then so the slot's prefix cache already holds it when the real turn arrives.
  *
  * The boolean is the master switch. The feature is off on every tier but
- *     `local-native` whatever this says, and off for workers and headless runs,
- *     because it buys latency for an operator watching a local server.
+ *     `local-native` and the `openai-codex` runtime (a `generate: false` warm)
+ *     whatever this says, and off for workers and headless runs, because it buys
+ *     latency for an operator watching the session.
  */
 export interface PanesSettings {
 	/** Which terminal run states raise a pane-host toast. */
