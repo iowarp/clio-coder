@@ -34,6 +34,7 @@ import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type { AbortReason, DispatchContract, DispatchRequest, WorkerGrantView } from "../domains/dispatch/contract.js";
 import type { WithheldCapability } from "../domains/dispatch/envelope.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
+import { buildEvidencePacket, type EvidencePacket, packetProvenance } from "../domains/dispatch/evidence-packet.js";
 import { compileExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import {
 	councilJudgeAgentId,
@@ -59,6 +60,7 @@ import {
 	reviewerInspectionOf,
 	stagePendingGateDecision,
 	stagePendingGateOutput,
+	verdictCitesDetail,
 } from "../domains/dispatch/gate-decisions.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
@@ -96,10 +98,11 @@ import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import type { SettledRunRecord } from "../domains/telemetry/index.js";
 import { readVerifiedRun } from "../domains/telemetry/index.js";
-import { renderCompeteJudgeTask } from "./compete-judge-task.js";
+import { buildCompeteJudgePacket, renderCompeteJudgeTask } from "./compete-judge-task.js";
 import {
 	type CandidateWorktree,
 	type CompeteGroupOwnership,
+	candidateDiff,
 	candidateDiffStat,
 	candidateVerification,
 	claimCompeteGroup,
@@ -138,7 +141,7 @@ import type {
 import { grantRequestLines } from "./grant-request-text.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
-import { leftUncommittedReport } from "./task-worktree.js";
+import { builderChangeDiff, leftUncommittedReport } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	checksAreReviewJudgments,
@@ -1215,6 +1218,22 @@ function competeCorrelation(
 
 type ReviewGateSettings = DispatchReviewSettings;
 
+/**
+ * The reviewer's evidence packet (M10): the builder's handback, its change as the host recorded it (see
+ * {@link builderChangeDiff}), and its host checks.
+ */
+function builderEvidencePacket(deps: DispatchToolDeps, builder: CompletedRun): EvidencePacket {
+	const receipt = builder.receipt;
+	const attribution = deps.dispatch.observedRunWriteAttribution?.(receipt.runId) ?? null;
+	const diff = builderChangeDiff({
+		cwd: receipt.cwd,
+		worktree: receipt.worktree,
+		checkoutChanges: receipt.checkoutChanges,
+		recorded: attribution?.complete === true ? attribution.recorded : null,
+	});
+	return buildEvidencePacket([1], [{ ordinal: 1, receipt, resultPath: runResultPath(receipt), diff }]);
+}
+
 const REVIEW_SINGLE_TASK_MESSAGE =
 	"dispatch: review supports exactly one task; run the fan-out without review, then dispatch one integration task with review to gate the combined result";
 /** A compete judge's intent declares no check of its own; a compete with no check keeps its intent object as is. */
@@ -1365,15 +1384,38 @@ async function runReviewGated(
 					needsDecision: `builder run ${builder.receipt.runId} ended ${pipelineFailureReason(builder.receipt)} in cycle ${cycle}`,
 				};
 			}
+			const packet = builderEvidencePacket(deps, builder);
 			const reviewerRequest: DispatchRequest = {
 				agentId: reviewDeciderAgentId(review.reviewer, (id) => deps.getAgentSpecs().some((spec) => spec.id === id)),
 				...(base.budget === undefined ? {} : { budget: base.budget }),
 				...(base.record === undefined ? {} : { record: base.record }),
 				executionRole: "reviewer",
-				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent),
+				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent, packet),
 				systemPrompt: REVIEWER_GATE_PROMPT,
 				readOnly: true,
-				gate: { role: "reviewer", group, cycle, subjects: [subjectRef(builder.receipt)] },
+				// The packet names the builder's run result by its absolute state-dir path, and a request with no intent infers
+				// its scope from the task text, which refuses an absolute token (legacy_scope_path_absolute). The reviewer takes
+				// the read-only builder scope a compete judge takes (M1).
+				intent: judgeIntent(
+					narrowDispatchIntentToReadOnly(
+						base.intent ?? {
+							version: 2,
+							readRoots: [],
+							writeRoots: [],
+							relevantPaths: [],
+							pathProvenance: [],
+							expectedOutputs: [],
+							verification: [],
+						},
+					),
+				),
+				gate: {
+					role: "reviewer",
+					group,
+					cycle,
+					subjects: [subjectRef(builder.receipt)],
+					packet: packetProvenance(packet),
+				},
 				pipelineInput: {
 					fromRunId: builder.receipt.runId,
 					position: cycle,
@@ -1398,6 +1440,10 @@ async function runReviewGated(
 				),
 			);
 			if (isPipelineStepFailure(reviewer.receipt)) {
+				// A verdict citing none of its evidence packet is not a verdict (M10): the gate says why it is exhausted.
+				const uncited = reviewerInspectionOf(reviewer.receipt).obligationUnmet
+					? (reviewer.receipt.outcomeDetail ?? "obligation cited-evidence unmet")
+					: null;
 				await recordDecision(
 					{
 						group,
@@ -1407,7 +1453,7 @@ async function runReviewGated(
 						subjects: [subjectRef(builder.receipt)],
 						decider: subjectRef(reviewer.receipt),
 						correlation: gateCorrelationOf(builder.receipt, reviewer.receipt),
-						detail: `reviewer ended ${pipelineFailureReason(reviewer.receipt)}`,
+						detail: uncited ?? `reviewer ended ${pipelineFailureReason(reviewer.receipt)}`,
 					},
 					reviewer.pendingGate,
 				);
@@ -1416,7 +1462,10 @@ async function runReviewGated(
 					decisions,
 					verdict: null,
 					cycles: cycle,
-					needsDecision: `reviewer run ${reviewer.receipt.runId} ended ${pipelineFailureReason(reviewer.receipt)} in cycle ${cycle}`,
+					needsDecision:
+						uncited !== null
+							? `review gate exhausted in cycle ${cycle}: reviewer run ${reviewer.receipt.runId} ${uncited}`
+							: `reviewer run ${reviewer.receipt.runId} ended ${pipelineFailureReason(reviewer.receipt)} in cycle ${cycle}`,
 				};
 			}
 			const decided = decideReviewGate({
@@ -1504,7 +1553,11 @@ function recoveredCorrelation(
 }
 
 function settlePendingCompeteResource(handle: PendingGateDecisionHandle, draft: GateDecisionDraft): void {
-	if (draft.topology !== "compete" || (draft.outcome !== "winner" && draft.outcome !== "no-winner")) return;
+	if (
+		draft.topology !== "compete" ||
+		(draft.outcome !== "winner" && draft.outcome !== "no-winner" && draft.outcome !== "exhausted")
+	)
+		return;
 	const root = handle.record.resourceRoot ?? process.cwd();
 	settleRecoveredCompeteDecision(root, draft.group, draft.outcome === "winner" ? (draft.winner?.index ?? null) : null);
 }
@@ -1618,13 +1671,16 @@ async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void>
 					subject: pickedSubject,
 					branch: pickedBranch,
 				},
+				...(judged?.ok === true ? { detail: verdictCitesDetail(judged.result.checks) } : {}),
 			};
 		} else {
+			// A judge that left its cited-evidence obligation unmet exhausts the gate; the operator decides (M10).
+			const exhausted = isPipelineStepFailure(deciderReceipt) && deciderReceipt.inspection?.obligationUnmet === true;
 			draft = {
 				group: record.group,
 				topology: "compete",
 				cycle: record.cycle,
-				outcome: "no-winner",
+				outcome: exhausted ? "exhausted" : "no-winner",
 				subjects: record.subjects,
 				decider,
 				correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
@@ -1984,6 +2040,14 @@ async function runCompete(
 				}
 				return candidateDiffStat(root, worktree.branch);
 			});
+			const candidateEvidence = candidateRuns.map((run, index) => {
+				const worktree = worktrees[index];
+				return {
+					receipt: run.receipt,
+					resultPath: runResultPath(run.receipt),
+					diff: worktree === undefined ? null : candidateDiff(root, worktree.branch),
+				};
+			});
 			if (candidateRuns.every((run) => isPipelineStepFailure(run.receipt))) {
 				await recordDecision({
 					group,
@@ -2004,7 +2068,7 @@ async function runCompete(
 					base.task,
 					worktrees,
 					stats,
-					candidateRuns.map((run) => ({ receipt: run.receipt, resultPath: runResultPath(run.receipt) })),
+					candidateEvidence,
 					competePresentationOrder(group, worktrees.length),
 				),
 				// Candidate prose and receipt locators are evidence, not inferred authority.
@@ -2032,6 +2096,7 @@ async function runCompete(
 					group,
 					cycle: 1,
 					subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
+					packet: packetProvenance(buildCompeteJudgePacket(worktrees, candidateEvidence)),
 				},
 				...(compete.judge?.model !== undefined ? { model: compete.judge.model } : {}),
 				...(compete.judge?.target !== undefined ? { target: compete.judge.target } : {}),
@@ -2061,17 +2126,29 @@ async function runCompete(
 			const judgeSummary = judgeRun.summary;
 			// Every judged outcome names the same subjects, decider, and correlation;
 			// only the reason the gate produced no applicable winner differs.
-			const noWinner = (detail: string): GateDecisionDraft => ({
+			const noWinner = (detail: string, outcome: "no-winner" | "exhausted" = "no-winner"): GateDecisionDraft => ({
 				group,
 				topology: "compete",
 				cycle: 1,
-				outcome: "no-winner",
+				outcome,
 				subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
 				decider: subjectRef(judgeReceipt),
 				correlation: competeCorrelation(candidateRuns, judgeReceipt),
 				detail,
 			});
 			if (isPipelineStepFailure(judgeReceipt)) {
+				// A verdict citing none of its evidence packet is not a verdict: the gate is exhausted (M10).
+				if (reviewerInspectionOf(judgeReceipt).obligationUnmet) {
+					const reason = judgeReceipt.outcomeDetail ?? "obligation cited-evidence unmet";
+					await recordDecision(noWinner(reason, "exhausted"), judgeRun.pendingGate);
+					return {
+						runs,
+						decisions,
+						group,
+						winner: null,
+						needsDecision: `compete gate exhausted: judge run ${judgeReceipt.runId} ${reason}; candidate worktrees were cleaned, their run records remain; the operator decides`,
+					};
+				}
 				await recordDecision(noWinner(`judge ended ${pipelineFailureReason(judgeReceipt)}`), judgeRun.pendingGate);
 				return {
 					runs,
@@ -2134,6 +2211,7 @@ async function runCompete(
 					decider: subjectRef(judgeReceipt),
 					correlation: competeCorrelation(candidateRuns, judgeReceipt),
 					winner: winnerRef,
+					detail: verdictCitesDetail(judged.result.checks),
 				},
 				judgeRun.pendingGate,
 			);

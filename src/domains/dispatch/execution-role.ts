@@ -201,8 +201,12 @@ export function councilJudgeAgentId(requested: string | undefined, seated: strin
  * member, whose ballot arrives as the topology's override.
  */
 function gateVerdictContract(gate: DispatchResultContractRequest["gate"]): ResultContract | undefined {
-	if (gate?.role === "reviewer") return { kind: "review-verdict" };
-	if (gate?.role === "judge") return { kind: "judge-verdict", candidates: Math.max(1, gate.subjects?.length ?? 1) };
+	// The packet's ids ride the contract so the shape, the bound schema and the repair round all name them (M10).
+	const ids = gate?.packet?.ids;
+	const packet = ids !== undefined && ids.length > 0 ? { packet: [...ids] } : {};
+	if (gate?.role === "reviewer") return { kind: "review-verdict", ...packet };
+	if (gate?.role === "judge")
+		return { kind: "judge-verdict", candidates: Math.max(1, gate.subjects?.length ?? 1), ...packet };
 	if (gate?.role === "synthesis") return { kind: "judge-verdict" };
 	return undefined;
 }
@@ -229,7 +233,13 @@ export interface DispatchResultSummaryAllowance {
 /** The request fields the applied result contract is resolved from. */
 export interface DispatchResultContractRequest {
 	agentId: string;
-	gate?: { role?: GateTopologyRole; subjects?: ReadonlyArray<unknown> } | undefined;
+	gate?:
+		| {
+				role?: GateTopologyRole;
+				subjects?: ReadonlyArray<unknown>;
+				packet?: { ids: ReadonlyArray<string> } | undefined;
+		  }
+		| undefined;
 	resultContractOverride?: ResultContract;
 	resultSummary?: DispatchResultSummaryAllowance;
 }

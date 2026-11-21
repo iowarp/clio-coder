@@ -272,6 +272,16 @@ export interface RunGateProvenance {
 	verdict?: "pass" | "fail" | "revise";
 	/** Compete-only worktree route, sealed into the run receipt with the gate. */
 	worktree?: RunGateWorktreeProvenance;
+	/** A reviewer's or judge's evidence packet (M10): the ids its verdict may cite and the digest of what they named. */
+	packet?: RunGatePacket;
+}
+
+/** The evidence packet a gate decider received, as its provenance seals it. Host-authored, never model-authored. */
+export interface RunGatePacket {
+	ids: string[];
+	digest: string;
+	/** Host check ids the packet records as verified; absent when none is. Only these ground a command-shaped claim. */
+	verified?: string[];
 }
 
 export interface RunCouncilProvenance {
@@ -1198,6 +1208,9 @@ export interface RunResult {
 	worktree?: {
 		path: string;
 		branch: string;
+		/** The checkout the task worktree was cut from, and the commit it was cut at; a reviewer's packet diffs base..commit. */
+		root?: string;
+		base?: string;
 		diffHash: string | null;
 		changedPaths?: string[];
 		snapshot?: "working-tree" | "unavailable";

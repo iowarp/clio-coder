@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { CompletionDeclaration } from "../../core/completion.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
@@ -137,11 +138,13 @@ import type {
 	RunJsonVerifyResult,
 } from "./run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./run-json-schema.js";
+import { verifyNotImplicated } from "./run-json-schema-v2.js";
 import {
 	acceptanceHostVerification,
 	formatHeadlessVerifyResult,
 	type HeadlessVerifyOptions,
 	runHeadlessVerifyChecks,
+	verifyBaseOf,
 } from "./run-verify.js";
 
 export interface HeadlessSamplingOverrides {
@@ -209,7 +212,7 @@ export interface HeadlessMainAgentOptions {
 	 */
 	deadline?: HeadlessRunDeadline;
 	/** `clio-coder run --verify`: acceptance checks the run itself runs once the turn settled. */
-	verify?: HeadlessVerifyOptions;
+	verify?: Omit<HeadlessVerifyOptions, "base" | "scratchDir">;
 	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr). */
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** `safety.scratchRoots`: a check logged under one changes no tree (x5-4). */
@@ -1293,6 +1296,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (options.costCap !== undefined) noteMainRunV2({ unpricedRoutes: options.costCap.unpricedRoutes });
 	const mode = options.mode ?? "text";
 	const startedAt = new Date().toISOString();
+	// CLI-4: the commit the run starts from is the base a failing `--verify` check is replayed on.
+	const verifyBase = options.verify !== undefined ? verifyBaseOf(process.cwd()) : null;
 	let result: HeadlessMainAgentResult = {
 		outputExhausted: false,
 		text: "",
@@ -1763,20 +1768,23 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let verify: RunJsonVerifyResult[] | null = null;
 	if (options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null) {
 		const onForceExit = termination.onForceExit?.bind(termination);
-		verifyRun = runHeadlessVerifyChecks(options.verify, {
-			onDrain: (hook, drainOptions) => {
-				termination.onDrain(hook, drainOptions);
-				// That drain has stopped the check in flight, so the frame lists the checks that finished, before
-				// run_end (CLI-P8). A drain past its budget leaves the frame out rather than the run_end.
-				termination.onDrain(async () => {
-					const stopped = new Promise<null>((resolve) => setImmediate(() => resolve(null)));
-					const finished = await Promise.race([(verifyRun ?? stopped).catch(() => null), stopped]);
-					writeVerifyFrame(finished);
-					await sealInterruptedRun(finished);
-				});
+		verifyRun = runHeadlessVerifyChecks(
+			{ ...options.verify, base: verifyBase, scratchDir: join(clioStateDir(), "scratch", runId) },
+			{
+				onDrain: (hook, drainOptions) => {
+					termination.onDrain(hook, drainOptions);
+					// That drain has stopped the check in flight, so the frame lists the checks that finished, before
+					// run_end (CLI-P8). A drain past its budget leaves the frame out rather than the run_end.
+					termination.onDrain(async () => {
+						const stopped = new Promise<null>((resolve) => setImmediate(() => resolve(null)));
+						const finished = await Promise.race([(verifyRun ?? stopped).catch(() => null), stopped]);
+						writeVerifyFrame(finished);
+						await sealInterruptedRun(finished);
+					});
+				},
+				...(onForceExit !== undefined ? { onForceExit } : {}),
 			},
-			...(onForceExit !== undefined ? { onForceExit } : {}),
-		});
+		);
 		verify = await verifyRun;
 	}
 	// The turn, any repair turn and the checks have settled. Nothing between here and the seal yields to a
@@ -1938,8 +1946,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			};
 			stderrMessage = failureMessage;
 		}
-		if (terminal.exitCode === 0 && options.failOnVerify === true && verify?.some((check) => !check.passed)) {
-			const failed = verify.filter((check) => !check.passed).map((check) => check.command);
+		if (
+			terminal.exitCode === 0 &&
+			options.failOnVerify === true &&
+			verify?.some((check) => !check.passed && !verifyNotImplicated(check))
+		) {
+			// CLI-4: a failure the run's base has too is not the run's; it reads not_implicated and fails nothing.
+			const failed = verify.filter((check) => !check.passed && !verifyNotImplicated(check)).map((check) => check.command);
 			const failureMessage = `clio-coder run: --fail-on-verify: ${failed.length} check(s) did not pass: ${failed.join("; ")}`;
 			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "verify_failed" };
 			stderrMessage = failureMessage;

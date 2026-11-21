@@ -38,6 +38,7 @@ import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
 import { dropHostTerminalEnv, TOOL_SESSION_SPAWN } from "../core/tool-env-controls.js";
 import type { DispatchRequest, ResolvedVerificationCheck } from "../domains/dispatch/contract.js";
+import type { MeasuredDiff } from "../domains/dispatch/evidence-packet.js";
 import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "../domains/dispatch/workspace-checkpoint.js";
 import {
@@ -53,6 +54,7 @@ import {
 	isCanonicalWorktreePathInside,
 	mergeWorktreeBranch,
 	protectedPathsChangedByWorktreeBranch,
+	worktreeBranchDiff,
 	worktreeBranchDiffStat,
 } from "./task-worktree.js";
 
@@ -592,6 +594,11 @@ export function commitCandidateWork(
 /** One-line stat summary of what a candidate branch changed relative to HEAD. */
 export function candidateDiffStat(root: string, branch: string): string {
 	return worktreeBranchDiffStat(root, branch);
+}
+
+/** A candidate branch's change against HEAD as the judge's evidence packet carries it (M10); null when unmeasured. */
+export function candidateDiff(root: string, branch: string): MeasuredDiff | null {
+	return worktreeBranchDiff(root, branch);
 }
 
 /** The given absolute paths under `root` that git ignores there; exit 1 means none is. */

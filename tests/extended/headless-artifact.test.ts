@@ -382,6 +382,9 @@ for (const scenario of [
 					},
 					whenSettled: async () => {},
 				};
+				// The settlement runs outside any checkout, so a failing acceptance check has no base to replay on (CLI-4).
+				const previousCwd = process.cwd();
+				process.chdir(scratch.dir);
 				const code = await runHeadlessMainAgent(chat as ChatLoop, {
 					prompt: "fixture report",
 					mode: mode === "text" ? "text" : "json",
@@ -395,7 +398,7 @@ for (const scenario of [
 								},
 							}
 						: {}),
-				});
+				}).finally(() => process.chdir(previousCwd));
 				if (shuttingDown) await drain?.();
 				if (mode !== "text") {
 					const frames = stdout

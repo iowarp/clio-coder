@@ -1488,6 +1488,8 @@ export const RunResultObjectSchema = Type.Object(
 				{
 					path: Type.String(),
 					branch: Type.String(),
+					root: Type.Optional(Type.String()),
+					base: Type.Optional(Type.String()),
 					diffHash: nullable(Type.String()),
 					changedPaths: Type.Optional(Type.Array(Type.String())),
 					commit: Type.Optional(Type.String()),

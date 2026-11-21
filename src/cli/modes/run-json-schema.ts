@@ -244,6 +244,12 @@ export interface RunJsonVerifyResult {
 	timedOut: boolean;
 	/** The agent itself ran this check after its last edit, so the finish gate counted it. */
 	ranAfterLastEdit: boolean;
+	/**
+	 * CLI-4: a failing check replayed on the commit the run started from, through dispatch's base comparison. `failed`
+	 * with no reason means the base fails the same way, so the failure is not the run's (not_implicated). Absent when the
+	 * check passed.
+	 */
+	base?: { status: "passed" | "failed" | "not_compared"; base?: string; exitCode?: number; reason?: string };
 }
 
 /** The `run --verify` results a full JSON stream ends with. */
