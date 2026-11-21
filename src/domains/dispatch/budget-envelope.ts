@@ -311,6 +311,16 @@ export function formatBudgetPolicy(envelope: RunToolBudgetEnvelope): string {
 	const range = policy.exact
 		? `exact ${policy.default.toolCalls}/${policy.default.readReserve}`
 		: `default ${policy.default.toolCalls}/${policy.default.readReserve}, max ${policy.maximum.toolCalls}/${policy.maximum.readReserve}`;
+	// Native read-only research enforces its own synthesis allowance, not the authored phase: the record names both (C-27).
+	const allowance = envelope.reasons.some((reason) => reason.code === "read-only-research-synthesis")
+		? envelope.effective
+		: undefined;
+	if (allowance !== undefined && allowance.toolCalls !== policy.default.toolCalls) {
+		const authored = policy.exact
+			? `recipe default ${policy.default.toolCalls}/${policy.default.readReserve}`
+			: `recipe ${range}`;
+		return `${policy.recipeId} ${authored}; read-only research allowance ${allowance.toolCalls}/${allowance.readReserve}, synthesis=${policy.default.synthesis ? "on" : "off"}`;
+	}
 	return `${policy.recipeId} ${range}, synthesis=${policy.default.synthesis ? "on" : "off"}`;
 }
 

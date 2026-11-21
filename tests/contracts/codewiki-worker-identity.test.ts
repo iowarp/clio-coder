@@ -5,6 +5,7 @@
  * layer, for a transient snapshot and for one read from disk.
  */
 import { notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -57,4 +58,38 @@ it("read-only navigation keeps the object it holds when the tree is unchanged", 
 	const stale = await loadCodewikiForTool(cwd);
 	ok(stale.ok);
 	ok(stale.codewiki.symbols.some((symbol) => symbol.name === "two"));
+});
+
+it("concurrent code_nav loads for one workspace share one reconciliation worker", async () => {
+	// Parallel code_nav calls each started a 1 GiB-heap worker over the same tree.
+	const cwd = isolated.dir;
+	writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+	let workers = 0;
+	const count = (): void => {
+		workers += 1;
+	};
+	subscribe("worker_threads", count);
+	try {
+		const loads = await Promise.all([loadCodewikiForTool(cwd), loadCodewikiForTool(cwd), loadCodewikiForTool(cwd)]);
+		strictEqual(workers, 1);
+		const [first, ...rest] = loads;
+		ok(first?.ok);
+		for (const load of rest) strictEqual(load.ok && load.codewiki, first.codewiki);
+	} finally {
+		unsubscribe("worker_threads", count);
+	}
+});
+
+it("a load behind a queued writer reconciles from the artifact that writer committed", async () => {
+	// Inputs read before the writer committed were cached under the replaced identity, so the next call missed.
+	const cwd = isolated.dir;
+	writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+	const write = coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" }));
+	const load = loadCodewikiForTool(cwd);
+	ok(await write);
+	const behind = await load;
+	ok(behind.ok);
+	const next = await loadCodewikiForTool(cwd);
+	ok(next.ok);
+	strictEqual(next.codewiki, behind.codewiki);
 });

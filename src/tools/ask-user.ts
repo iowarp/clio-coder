@@ -1150,7 +1150,12 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			hydratePolicy(policy, options);
 			// A cold complete records no decision and its "act on the answers"
 			// reply reads as approval; models used it to announce results (FW-2).
+			// A continuation of the prompt that closed an interview is not cold: a
+			// budget roll or yolo continuation starts a fresh turn policy, and its
+			// complete answers already_complete with that interview's decisions (C-25).
 			if (call.action === "complete" && policy.rounds.length === 0) {
+				const closed = turnPolicy?.closedEarlier;
+				if (closed?.status === "complete") return okInterviewResult(closed, "already_complete");
 				return {
 					kind: "error",
 					message:

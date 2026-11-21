@@ -303,6 +303,28 @@ export function redactTelemetryValue<T>(value: T, tally: RedactionTally, secretM
 	}) as T;
 }
 
+/**
+ * A stored `run-result` as readers use it (C-28). A version 2 record keeps a structured answer once, as its data, and
+ * regains `text` here as the data's canonical JSON, reading as version 1; anything else, version 1 records included,
+ * reads as it was written. A malformed version 2 record is returned unchanged for the schema check to refuse.
+ * Writers still store version 1 so binaries without this reader keep reading the shared state root.
+ */
+export function readStoredRunResult(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const record = value as { version?: unknown; output?: unknown };
+	if (record.version !== 2 || record.output === null || typeof record.output !== "object") return value;
+	const output = record.output as { text?: unknown; structured?: unknown };
+	const structured = output.structured;
+	if (output.text !== undefined || structured === null || typeof structured !== "object") return value;
+	const data = (structured as { data?: unknown }).data;
+	if (data === null || typeof data !== "object" || Array.isArray(data)) return value;
+	try {
+		return { ...record, version: 1, output: { ...output, text: canonicalJson(data) } };
+	} catch {
+		return value;
+	}
+}
+
 /** The redacted canonical bytes an object stores and the reference they hash to; no I/O. */
 function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRef; bytes: string } {
 	if (!storedSubjects.has(subject)) throw new Error("telemetry object subject is not enabled for capture");
@@ -382,7 +404,7 @@ export async function readTelemetryObject(scopeDirectory: string, ref: ObjectRef
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
 	const value: unknown = JSON.parse(bytes);
 	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");
-	return { kind: "resolved", value };
+	return { kind: "resolved", value: ref.subject === "run-result" ? readStoredRunResult(value) : value };
 }
 
 /** Synchronous cold resume uses the same verified preimages as asynchronous surfaces (#434). */
@@ -407,8 +429,9 @@ export function readTelemetryObjectSync(scopeDirectory: string, ref: ObjectRef):
 		throw error;
 	}
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
-	const value: unknown = JSON.parse(bytes);
-	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");
+	const parsed: unknown = JSON.parse(bytes);
+	if (canonicalJson(parsed) !== bytes) throw new Error("telemetry object is not canonical JSON");
+	const value = ref.subject === "run-result" ? readStoredRunResult(parsed) : parsed;
 	const schema = contentSchemas[ref.subject as StoredSubject];
 	if (schema && !Value.Check(schema, value)) throw new Error("invalid telemetry object shape");
 	return { kind: "resolved", value };

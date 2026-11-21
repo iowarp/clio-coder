@@ -1,8 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { type TurnConstraints, templateToolConstraints } from "../../src/core/turn-constraints.js";
 import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
+import { EVIDENCE_CLASS } from "../../src/domains/middleware/fired-record.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import { createMarketplaceOfferRegistration } from "../../src/domains/middleware/marketplace-offer.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
@@ -175,6 +177,42 @@ describe("reminders gate on the turn's callable tools", () => {
 		deepStrictEqual(survey(SCOPED, threeAreas).flat(), []);
 		deepStrictEqual(survey(surface(ToolNames.Dispatch), ["src", "tests"]).flat(), []);
 		deepStrictEqual(survey(surface(ToolNames.Dispatch), threeAreas, true).flat(), []);
+	});
+
+	it("scout nudge skips implementation turns and dot directories, and every built-in evidence class is recordable (C-21)", async () => {
+		const start = () => {
+			const registration = createScoutNudgeRegistration({ workspaceRoot: () => process.cwd() });
+			registration.evaluate({
+				hook: "turn_start",
+				metadata: { userTurnId: "u1", activeCapabilityNames: surface(ToolNames.Dispatch, ToolNames.Read) },
+			});
+			return registration;
+		};
+		const call = (rule: ReturnType<typeof start>, toolName: string, path: string) =>
+			rule.evaluate({ hook: "after_tool", turnId: "u1", toolName, toolArgs: { path }, metadata: { resultKind: "ok" } });
+		const survey = (rule: ReturnType<typeof start>, areas: ReadonlyArray<string>) =>
+			Array.from({ length: 12 }, (_, index) => call(rule, ToolNames.Read, `${areas[index % 3]}/f-${index}.ts`)).flat();
+		// A turn that already edited the workspace is implementing, not surveying.
+		const editing = start();
+		deepStrictEqual(call(editing, ToolNames.Edit, "src/f-0.ts"), []);
+		deepStrictEqual(survey(editing, ["src", "tests", "docs"]), []);
+		// Dot directories such as .clio-coder/ are not areas: these reads span one.
+		deepStrictEqual(survey(start(), [".clio-coder", ".github", "src"]), []);
+		// Every evidence class a built-in rule declares survives the middleware.fired record.
+		ok(EVIDENCE_CLASS.test(start().evidence ?? ""));
+		const src = new URL("../../src/", import.meta.url);
+		const declared: string[] = [];
+		for (const entry of await readdir(src, { recursive: true })) {
+			if (!entry.endsWith(".ts")) continue;
+			const text = await readFile(new URL(entry, src), "utf8");
+			for (const hit of text.matchAll(/(?:evidence: |evidence\?\.\(|_EVIDENCE = )"([a-z][^"\s]*:[^"\s]*)"/gu))
+				if (hit[1] !== undefined) declared.push(hit[1]);
+		}
+		ok(declared.length > 20);
+		deepStrictEqual(
+			declared.filter((evidence) => !EVIDENCE_CLASS.test(evidence)),
+			[],
+		);
 	});
 
 	it("read streak asks for a decision at 25 and 40, names only callable tools, and resets only on progress", () => {

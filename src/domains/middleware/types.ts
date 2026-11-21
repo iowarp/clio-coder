@@ -231,9 +231,12 @@ export interface MiddlewareFiredRule {
 	effects: ReadonlyArray<MiddlewareEffect["kind"]>;
 	/** What the rule says triggered it, as `matcher:subject@scope`. */
 	evidence?: string;
+	/** The registration declares that every firing of it settles, whatever its effects (exploration design 3.4). */
+	settles?: true;
 	/**
-	 * Set by the fired record when one of its effects settles ({@link SETTLING_EFFECT_KINDS}): the id its firing row
-	 * and its one `surface.settled` carry. Bookkeeping only; nothing reads it for a verdict (memory design 4.1).
+	 * Set by the fired record when one of its effects settles ({@link SETTLING_EFFECT_KINDS}) or the rule declares
+	 * `settles`: the id its firing row and its one `surface.settled` carry. Bookkeeping only; nothing reads it for a
+	 * verdict (memory design 4.1).
 	 */
 	firingId?: string;
 }

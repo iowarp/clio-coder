@@ -1,11 +1,21 @@
 import { join } from "node:path";
-import { listStateDirectorySync, withinStateRoot } from "../core/state-boundary.js";
+import { listStateDirectorySync, statStatePathSync, withinStateRoot } from "../core/state-boundary.js";
 import type { TelemetryRecord } from "../core/telemetry/envelope.js";
 import { renderCountSum } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
-import { readCallJournalSync } from "../domains/telemetry/call-journal.js";
-import { telemetrySessionDirectory, telemetrySessionsDirectory } from "../domains/telemetry/paths.js";
-import { foldSideSurfaces, type SideSurfacesFold, type SurfaceLedgerRow } from "../domains/telemetry/read-model.js";
+import { readCallJournal } from "../domains/telemetry/call-journal.js";
+import {
+	telemetryRunDirectory,
+	telemetryRunsDirectory,
+	telemetrySessionDirectory,
+	telemetrySessionsDirectory,
+} from "../domains/telemetry/paths.js";
+import {
+	foldSideSurfaces,
+	SIDE_SURFACE_RECORD_KINDS,
+	type SideSurfacesFold,
+	type SurfaceLedgerRow,
+} from "../domains/telemetry/read-model.js";
 import { formatColumns } from "./argv.js";
 import { writeCliFailure } from "./kit/json-out.js";
 import { resolveSessionSelector } from "./telemetry-target.js";
@@ -18,11 +28,13 @@ many calls left them unknown, and its summed service time. A surface whose calls
 never reached a model prints unexercised, never a pass. Below it, every
 middleware rule and host surface that fired: firings, those that settle, how
 many a request carried, and the outcomes they settled with (acted, recovered,
-ignored, moot, suppressed, exhausted, expired and the rest). A rule that only
-reminds or notifies is count only; a firing drawn inside a worker run is shown
-as in workers, no ledger, since only a session settles its firings. Without
---session it folds every session journal in the state directory. It reads
-structure only, never content. --json emits the fold verbatim.
+ignored, moot, suppressed, exhausted, expired and the rest). A rule whose
+firings do not settle is count only; a firing drawn inside a worker run that its
+run did not settle is shown as in workers, no ledger. With --session it folds
+that session's journal and the run journals it links; without, every session
+and run journal in the state directory, so a headless run --agent worker's
+firings count under its run. A run journal that cannot be read is skipped and
+counted. It reads structure only, never content. --json emits the fold verbatim.
 `;
 
 function outcomesCell(row: SurfaceLedgerRow): string {
@@ -67,19 +79,75 @@ function renderSurfaces(fold: SideSurfacesFold, scope: string): string {
 	return `${scope}\n\n${side}\n${residual.length > 0 ? `${residual.join("\n")}\n` : ""}\n${ledger}\n`;
 }
 
-/** Every record of a session's journal, or of every session journal when none is named. */
-function readRecords(stateDir: string, sessionId: string | null): TelemetryRecord[] {
-	const directories =
-		sessionId !== null
-			? [telemetrySessionDirectory(stateDir, sessionId)]
-			: listStateDirectorySync(stateDir, telemetrySessionsDirectory(stateDir))
-					.map((name) => join(telemetrySessionsDirectory(stateDir), name))
-					.filter((directory) => withinStateRoot(stateDir, directory))
-					.sort();
-	return directories.flatMap((directory) => readCallJournalSync(directory).records.map(({ record }) => record));
+/** The scope directories beneath one telemetry root, sorted; a stray file is no scope, and a missing root holds none. */
+function scopeDirectories(stateDir: string, root: string): string[] {
+	let names: string[];
+	try {
+		names = listStateDirectorySync(stateDir, root);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+	return names
+		.map((name) => join(root, name))
+		.filter(
+			(directory) =>
+				withinStateRoot(stateDir, directory) && statStatePathSync(stateDir, directory)?.isDirectory() === true,
+		)
+		.sort();
 }
 
-export function runTelemetrySurfaces(argv: ReadonlyArray<string>): number {
+/** What the fold reads, plus the links `--session` follows to its runs. */
+const WANTED: readonly string[] = [...SIDE_SURFACE_RECORD_KINDS, "run.linked"];
+
+/** The surfaces fold over a scope, with how many run journals could not be read and were left out. */
+export interface SurfacesReport {
+	scope: string;
+	unreadableRuns: number;
+	fold: SideSurfacesFold;
+}
+
+/**
+ * Fold a session's journal and the runs it links, or every session and run journal when none is named. A run's records
+ * live only in its own journal (the session holds its `run.linked`), so each firing is read once and keys as
+ * `run:<runId>` whether a session dispatched the run or a headless `run --agent` owned it. Each journal is read
+ * filtered to the kinds the fold uses, one scope at a time, and a run journal that cannot be read is skipped and
+ * counted, as the session telemetry source does, instead of failing the whole fold.
+ */
+export async function loadSurfacesReport(stateDir: string, sessionId: string | null): Promise<SurfacesReport> {
+	const records: TelemetryRecord[] = [];
+	let unreadableRuns = 0;
+	const read = async (directory: string): Promise<void> => {
+		for (const { record } of (await readCallJournal(directory, WANTED)).records) records.push(record);
+	};
+	const readRun = async (directory: () => string): Promise<void> => {
+		try {
+			const path = directory();
+			if (!withinStateRoot(stateDir, path)) throw new Error("run journal outside the state root");
+			await read(path);
+		} catch {
+			unreadableRuns += 1;
+		}
+	};
+	if (sessionId === null) {
+		for (const directory of scopeDirectories(stateDir, telemetrySessionsDirectory(stateDir))) await read(directory);
+		for (const directory of scopeDirectories(stateDir, telemetryRunsDirectory(stateDir))) await readRun(() => directory);
+	} else {
+		await read(telemetrySessionDirectory(stateDir, sessionId));
+		const runs = new Set<string>();
+		for (const record of records)
+			if (record.k === "run.linked" || record.k === "call.linked") runs.add(record.data.runId);
+		for (const runId of runs) await readRun(() => telemetryRunDirectory(stateDir, runId));
+	}
+	return {
+		scope:
+			sessionId !== null ? `session ${sessionId} and the runs it links` : `every session and run journal in ${stateDir}`,
+		unreadableRuns,
+		fold: foldSideSurfaces(records),
+	};
+}
+
+export async function runTelemetrySurfaces(argv: ReadonlyArray<string>): Promise<number> {
 	let session: string | undefined;
 	let json = false;
 	for (let index = 0; index < argv.length; index += 1) {
@@ -111,17 +179,18 @@ export function runTelemetrySurfaces(argv: ReadonlyArray<string>): number {
 			return fail(selected.miss.startsWith("no session") ? "not_found" : "ambiguous", selected.miss);
 		sessionId = selected.id;
 	}
-	let records: TelemetryRecord[];
+	let report: SurfacesReport;
 	try {
-		records = readRecords(stateDir, sessionId);
+		report = await loadSurfacesReport(stateDir, sessionId);
 	} catch (error) {
-		if (sessionId === null && (error as NodeJS.ErrnoException).code === "ENOENT") records = [];
-		else return fail("io", `cannot read telemetry: ${error instanceof Error ? error.message : String(error)}`);
+		return fail("io", `cannot read telemetry: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	const fold = foldSideSurfaces(records);
-	const scope = sessionId !== null ? `session ${sessionId}` : `every session journal in ${stateDir}`;
+	const { scope, unreadableRuns, fold } = report;
+	const skipped = unreadableRuns > 0 ? `\n${unreadableRuns} unreadable run journal(s) skipped` : "";
 	process.stdout.write(
-		json ? `${JSON.stringify({ scope, ...fold }, null, 2)}\n` : renderSurfaces(fold, `${scope} · structure only`),
+		json
+			? `${JSON.stringify({ scope, unreadableRuns, ...fold }, null, 2)}\n`
+			: renderSurfaces(fold, `${scope} · structure only${skipped}`),
 	);
 	return 0;
 }

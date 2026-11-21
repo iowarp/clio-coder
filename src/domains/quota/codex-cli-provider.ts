@@ -19,6 +19,7 @@ import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../c
 import type { CodexAccountToken } from "./codex-usage.js";
 import { fetchCodexUsage, isRecord } from "./codex-usage.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
+import { credentialFingerprint } from "./types.js";
 
 export const CODEX_CLI_QUOTA_PROVIDER_ID = "codex-cli";
 
@@ -97,6 +98,11 @@ export function createCodexCliQuotaProvider(options: CodexCliQuotaOptions = {}):
 	return {
 		id: CODEX_CLI_QUOTA_PROVIDER_ID,
 		displayName: DISPLAY_NAME,
+
+		async credentialScope(): Promise<string | null> {
+			const credentials = await readCredentials();
+			return credentials === null ? null : credentialFingerprint(CODEX_CLI_QUOTA_PROVIDER_ID, credentials.accessToken);
+		},
 
 		async detect(): Promise<boolean> {
 			return (await readCredentials()) !== null;

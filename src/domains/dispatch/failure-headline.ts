@@ -42,6 +42,10 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	merge_withheld: "merge withheld",
 	worker_removed_tests: "removed tests",
 	information_flow_blocked: "route not allowed for this data",
+	acp_auth_required: "agent needs sign-in",
+	acp_model_unavailable: "agent does not offer that model",
+	acp_thinking_unavailable: "agent does not offer that thinking level",
+	acp_transport_error: "lost the connection to the agent",
 	spawn_failed: "could not start",
 	denied_by_policy: "denied by policy",
 	stalled: "stopped responding",
@@ -154,7 +158,7 @@ function plainFailure(body: string): string | null {
 export function workerFailureHeadline(detail: string | null | undefined): string | null {
 	const text = (detail ?? "").replace(/\s+/gu, " ").trim();
 	if (text.length === 0) return null;
-	const exit = /^(?:exit=\d+ )?(exit code \d+);? ?/u.exec(text);
+	const exit = /^(?:exit=\d+ )?(exit code \d+)(?: \(stopReason=[^)]*\))?;? ?/u.exec(text);
 	const body = (exit === null ? text : text.slice(exit[0].length)).replace(/^permission_required; /u, "");
 	if (body.length === 0) return exit === null ? null : "the worker stopped with an error before it gave an answer";
 	const plain = plainFailure(body);
