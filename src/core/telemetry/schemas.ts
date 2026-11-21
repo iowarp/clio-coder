@@ -1524,6 +1524,7 @@ export const RunResultObjectSchema = Type.Object(
 					branch: Type.String(),
 					diffHash: nullable(Type.String()),
 					changedPaths: Type.Optional(Type.Array(Type.String())),
+					deletedPaths: Type.Optional(Type.Array(Type.String())),
 					commit: Type.Optional(Type.String()),
 					reason: Type.Optional(Type.String()),
 					detail: Type.Optional(Type.String()),

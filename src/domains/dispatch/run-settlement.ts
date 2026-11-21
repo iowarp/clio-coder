@@ -284,7 +284,6 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 	};
 }
 
-/** Blocked attempts as the sealed record keeps them: by tool, class and rule, never the reason prose. */
 /** The sealed envelope as run.settled records it (M-18): the receipt's own summary, copied. */
 function settledEnvelope(
 	envelope: NonNullable<NonNullable<RunResultDraft["safety"]>["envelope"]>,
@@ -310,6 +309,7 @@ function settledEnvelope(
 	};
 }
 
+/** Blocked attempts as the sealed record keeps them: by tool, class and rule, never the reason prose. */
 function settledBlockedAttempts(attempts: ReadonlyArray<SafetyBlockedAttempt>): RunSettled["blockedAttempts"] {
 	return attempts.slice(0, 64).map((attempt) => ({
 		tool: attempt.tool,
@@ -493,6 +493,7 @@ export function settleFinishedRun(
 						branch: receipt.worktree.branch,
 						diffHash: receipt.worktree.diffHash,
 						...(receipt.worktree.changedPaths !== undefined ? { changedPaths: [...receipt.worktree.changedPaths] } : {}),
+						...(receipt.worktree.deletedPaths !== undefined ? { deletedPaths: [...receipt.worktree.deletedPaths] } : {}),
 						...(receipt.worktree.commit !== undefined ? { commit: receipt.worktree.commit } : {}),
 						...(receipt.worktree.reason !== undefined ? { reason: receipt.worktree.reason } : {}),
 						...(receipt.worktree.detail !== undefined ? { detail: receipt.worktree.detail } : {}),

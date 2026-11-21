@@ -126,7 +126,8 @@ describe("dispatch host validation action", () => {
 			path: gone,
 			branch: "clio-coder/task/run-merged",
 			diffHash: "hash",
-			changedPaths: ["a.js"],
+			changedPaths: ["a.js", "c.js"],
+			deletedPaths: ["c.js"],
 			commit: "96abc3e",
 			apply: "merge",
 			applied: true,
@@ -137,7 +138,7 @@ describe("dispatch host validation action", () => {
 			writeRoots: [],
 			relevantPaths: [],
 			pathProvenance: [],
-			expectedOutputs: ["a.js", "b.js"],
+			expectedOutputs: ["a.js", "b.js", "c.js"],
 			verification: [],
 		};
 		const receipt = finishRunResult(draft, envelope, {
@@ -151,7 +152,11 @@ describe("dispatch host validation action", () => {
 			integrity: { state: "verified" as const, by: "producer" as const },
 			summary: { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId },
 		};
-		match(formatDispatchOutput("parallel", [run], 16_384), /^expected_outputs run-merged: not written \["b\.js"\];/m);
+		// a.js landed; b.js was never written; the merge deleted c.js, so it is not written either.
+		match(
+			formatDispatchOutput("parallel", [run], 16_384),
+			/^expected_outputs run-merged: not written \["b\.js","c\.js"\];/m,
+		);
 	});
 
 	it("leads an ungrounded worker return with the next host check sequence", () => {

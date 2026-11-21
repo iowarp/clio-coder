@@ -979,8 +979,11 @@ function readCachedSegment(path: string, files: Map<string, CachedSegment>, seen
 	return state;
 }
 
-/** Session switches already read their ledger synchronously; take the journal snapshot in that same cold path (#434). */
-export function readCallJournalSync(directory: string): CallJournalRead {
+/**
+ * Session switches already read their ledger synchronously; take the journal snapshot in that same cold path (#434).
+ * `wanted` filters as `readCallJournal`'s does; a filtered read bypasses the fold cache, whose segments hold every kind.
+ */
+export function readCallJournalSync(directory: string, wanted?: readonly string[]): CallJournalRead {
 	const names = () => telemetryJournalFiles(readdirSync(directory));
 	for (let retry = 0; retry < 3; retry += 1) {
 		const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
@@ -989,10 +992,22 @@ export function readCallJournalSync(directory: string): CallJournalRead {
 			files = names();
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-				journalCache.delete(directory);
+				if (wanted === undefined) journalCache.delete(directory);
 				return result;
 			}
 			throw error;
+		}
+		if (wanted !== undefined) {
+			try {
+				for (const file of files) {
+					const bytes = readRegularFileFromSync(join(directory, file), () => 0).bytes;
+					appendScannedSegment(result, scanTelemetrySegment(bytes, wanted));
+				}
+				if ([...files].sort().join("\n") === [...names()].sort().join("\n")) return result;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+			continue;
 		}
 		const cached = journalCache.get(directory) ?? new Map<string, CachedSegment>();
 		const seen = new Map<string, CachedSegment>();

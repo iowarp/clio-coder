@@ -9445,7 +9445,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_0820f241"
+															"$ref": "#/components/schemas/Union_1602bb64"
 														}
 													}
 												},
@@ -20999,7 +20999,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_0820f241"
+															"$ref": "#/components/schemas/Union_1602bb64"
 														}
 													}
 												},
@@ -29179,11 +29179,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_branch_changedAfterCommit_changedPaths_0361270e": {
+			"Object_branch_changedAfterCommit_changedPaths_93dbdf0d": {
 				"type": "object",
 				"required": ["path", "branch", "diffHash"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_f6d59a1a"
+					"$ref": "#/components/schemas/Shape_220348ab"
 				},
 				"additionalProperties": false
 			},
@@ -29884,7 +29884,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checkoutChanges_failureMessage_hostVerification_d652cd6d": {
+			"Object_checkoutChanges_failureMessage_hostVerification_f9fc7200": {
 				"type": "object",
 				"required": [
 					"version",
@@ -29896,7 +29896,7 @@
 					"hostVerification"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_44086953"
+					"$ref": "#/components/schemas/Shape_a4215cc6"
 				},
 				"additionalProperties": false
 			},
@@ -32532,11 +32532,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_state_value_206a1d47": {
+			"Object_state_value_9864f2f0": {
 				"type": "object",
 				"required": ["state", "value"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_7a22c61f"
+					"$ref": "#/components/schemas/Shape_7fb55bb8"
 				},
 				"additionalProperties": false
 			},
@@ -32714,7 +32714,7 @@
 						"$ref": "#/components/schemas/Union_4dc8870f"
 					},
 					"result": {
-						"$ref": "#/components/schemas/Union_0820f241"
+						"$ref": "#/components/schemas/Union_1602bb64"
 					},
 					"assessment": {
 						"anyOf": [
@@ -33883,6 +33883,51 @@
 					"enum": ["response-headers", "stream-event", "poll"]
 				}
 			},
+			"Shape_220348ab": {
+				"path": {
+					"type": "string"
+				},
+				"branch": {
+					"type": "string"
+				},
+				"diffHash": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"changedPaths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"deletedPaths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"commit": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string"
+				},
+				"detail": {
+					"type": "string"
+				},
+				"leftUncommitted": {
+					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				},
+				"changedAfterCommit": {
+					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				}
+			},
 			"Shape_233bb951": {
 				"type": {
 					"type": "string",
@@ -34195,44 +34240,6 @@
 				},
 				"display": {
 					"type": "string"
-				}
-			},
-			"Shape_44086953": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"output": {
-					"$ref": "#/components/schemas/Union_9db58400"
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_4df9aa34"
-				},
-				"checkoutChanges": {
-					"$ref": "#/components/schemas/Union_6397a89f"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_75ddb38c"
 				}
 			},
 			"Shape_47a6ba75": {
@@ -35317,15 +35324,6 @@
 					"$ref": "#/components/schemas/Problem"
 				}
 			},
-			"Shape_7a22c61f": {
-				"state": {
-					"type": "string",
-					"const": "resolved"
-				},
-				"value": {
-					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_d652cd6d"
-				}
-			},
 			"Shape_7c21800d": {
 				"id": {
 					"type": "string",
@@ -35350,6 +35348,15 @@
 							"type": "null"
 						}
 					]
+				}
+			},
+			"Shape_7fb55bb8": {
+				"state": {
+					"type": "string",
+					"const": "resolved"
+				},
+				"value": {
+					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_f9fc7200"
 				}
 			},
 			"Shape_80c709dd": {
@@ -35735,6 +35742,44 @@
 				},
 				"replayMismatch": {
 					"$ref": "#/components/schemas/Object_breaks_firstDivergentSection_rePrefilled_6557f020"
+				}
+			},
+			"Shape_a4215cc6": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"output": {
+					"$ref": "#/components/schemas/Union_9db58400"
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_b6f78647"
+				},
+				"checkoutChanges": {
+					"$ref": "#/components/schemas/Union_6397a89f"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_75ddb38c"
 				}
 			},
 			"Shape_a7a7e801": {
@@ -37104,45 +37149,6 @@
 					]
 				}
 			},
-			"Shape_f6d59a1a": {
-				"path": {
-					"type": "string"
-				},
-				"branch": {
-					"type": "string"
-				},
-				"diffHash": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"changedPaths": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"commit": {
-					"type": "string"
-				},
-				"reason": {
-					"type": "string"
-				},
-				"detail": {
-					"type": "string"
-				},
-				"leftUncommitted": {
-					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
-				},
-				"changedAfterCommit": {
-					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
-				}
-			},
 			"Shape_f7ed5f9c": {
 				"id": {
 					"type": "string",
@@ -38225,19 +38231,6 @@
 					}
 				]
 			},
-			"Union_0820f241": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_state_value_206a1d47"
-					},
-					{
-						"$ref": "#/components/schemas/Object_state_d674a4a9"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_0870035b": {
 				"anyOf": [
 					{
@@ -38345,6 +38338,19 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_session_worker_7edfbeff"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_1602bb64": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_state_value_9864f2f0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_state_d674a4a9"
 					},
 					{
 						"type": "null"
@@ -38897,16 +38903,6 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Union_0ee6ba7d"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_4df9aa34": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_branch_changedAfterCommit_changedPaths_0361270e"
 					},
 					{
 						"type": "null"
@@ -40008,6 +40004,16 @@
 					{
 						"type": "string",
 						"const": "recalled"
+					}
+				]
+			},
+			"Union_b6f78647": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_branch_changedAfterCommit_changedPaths_93dbdf0d"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},

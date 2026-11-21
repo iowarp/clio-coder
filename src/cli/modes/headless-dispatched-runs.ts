@@ -155,7 +155,7 @@ export function settledRunEnvelopes(runIds: ReadonlyArray<string>, stateDir: str
 	const envelopes = new Map<string, SettledRunEnvelope>();
 	for (const runId of runIds) {
 		try {
-			const read = readCallJournalSync(telemetryRunDirectory(stateDir, runId));
+			const read = readCallJournalSync(telemetryRunDirectory(stateDir, runId), ["run.settled"]);
 			for (const { record } of read.records) {
 				if (record.k === "run.settled" && record.data.envelope !== undefined) envelopes.set(runId, record.data.envelope);
 			}

@@ -93,6 +93,8 @@ export interface TaskWorktreeReceipt {
 	/** Null when no trustworthy diff exists: an unreadable snapshot, or a worktree whose HEAD moved. */
 	diffHash: string | null;
 	changedPaths?: string[];
+	/** The paths among `changedPaths` the task commit deleted; absent when it deleted none. */
+	deletedPaths?: string[];
 	/** Absent means the diff is committed on the task branch. */
 	snapshot?: "working-tree" | "unavailable";
 	/** The task commit pinned at snapshot time; application merges this id, never the mutable branch name (F5). */
@@ -1233,13 +1235,16 @@ export function taskWorktreeBaseDiff(worktree: TaskWorktree): string | null {
 }
 
 function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWorktreeApply): TaskWorktreeReceipt {
+	const range = `${worktree.base}..${commit}`;
+	const deletedPaths = nullDelimitedPaths(
+		gitBytes(worktree.root, ["diff", "--name-only", "-z", "--diff-filter=D", range]),
+	);
 	return {
 		path: worktree.path,
 		branch: worktree.branch,
 		diffHash: taskWorktreeDiffHash(worktree, commit),
-		changedPaths: nullDelimitedPaths(
-			gitBytes(worktree.root, ["diff", "--name-only", "-z", `${worktree.base}..${commit}`]),
-		),
+		changedPaths: nullDelimitedPaths(gitBytes(worktree.root, ["diff", "--name-only", "-z", range])),
+		...(deletedPaths.length > 0 ? { deletedPaths } : {}),
 		commit,
 		apply,
 		applied: false,

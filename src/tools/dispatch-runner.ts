@@ -586,13 +586,16 @@ function operatorUnavailableLine(receipt: RunResult): string | null {
  * Declared expected outputs absent on disk once the run settled. A worker whose contract puts its document elsewhere
  * (an architect plan under .clio-coder/artifacts) names the path it wrote in its answer, and the caller moves the file
  * where the task wanted it instead of searching for it (row 295). A merged task worktree is removed after merge-back,
- * so the paths its merge changed count as written (M-17).
+ * so the paths its merge added or modified count as written; a path it deleted does not (M-17).
  */
 function unwrittenExpectedOutputsLine(receipt: RunResult): string | null {
 	const outputs = receipt.intent?.expectedOutputs ?? [];
 	const roots = [receipt.worktree?.path, receipt.reproducibility?.cwd].filter((root) => root !== undefined);
 	if (outputs.length === 0 || roots.length === 0) return null;
-	const merged = new Set(receipt.worktree?.applied === true ? (receipt.worktree.changedPaths ?? []) : []);
+	const deleted = new Set(receipt.worktree?.deletedPaths ?? []);
+	const merged = new Set(
+		receipt.worktree?.applied === true ? (receipt.worktree.changedPaths ?? []).filter((path) => !deleted.has(path)) : [],
+	);
 	const missing = outputs.filter(
 		(output) => !merged.has(output) && !roots.some((root) => existsSync(resolvePath(root, output))),
 	);
