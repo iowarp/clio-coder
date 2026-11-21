@@ -616,6 +616,13 @@ export interface MemorySurfaceSettings {
 	 */
 	observe: "off" | "on";
 	/**
+	 * Which channels deliver kept lessons. `section` is the `# Memory` section alone; `decision`, the default, adds
+	 * reminders at decision points (a failed call, a verification gap, a touched file, the turn's task); `broadcast`
+	 * adds the first-change broadcast to `decision`, off by default as a policy choice; `off` delivers nothing from the
+	 * store, and `memory_recall` still reaches every layer.
+	 */
+	delivery: MemoryDeliveryMode;
+	/**
 	 * In-session correction after repeated failures. `rules` (the default) keeps the repeated-failure annotation and
 	 * turn-end reminder and makes no model call; `model` adds the model step on `tool_error_streak` and `loop_signal`.
 	 * Rules by default as a policy choice: 111 lane model calls produced no reminder.
@@ -628,6 +635,8 @@ export interface MemorySurfaceSettings {
 	 */
 	bank: "rules" | "model";
 }
+
+export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
 
 export interface MemorySettings {
 	enabled: boolean;
@@ -902,7 +911,7 @@ export const DEFAULT_SETTINGS = {
 		memory: {
 			enabled: true,
 			sideShare: 0.15,
-			surfaces: { observe: "off", correct: "rules", bank: "rules" },
+			surfaces: { observe: "off", delivery: "decision", correct: "rules", bank: "rules" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1135,6 +1144,7 @@ context:
     sideShare: 0.15
     surfaces:
       observe: off
+      delivery: decision
       correct: rules
       bank: rules
     target: null
