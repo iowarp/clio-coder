@@ -91,19 +91,38 @@ No root and no account. The first launch connects a model.
 
 ### How it compares
 
-Claude Code, Codex and OpenCode are capable coding agents, and CLIO Coder can
-dispatch work to each of them. Choose CLIO Coder when you need one or more of
-these, and check any tool you compare against the same list:
+Claude Code, Codex and OpenCode are capable coding agents, and CLIO Coder
+dispatches work to each of them. Here is what to ask of any coding agent, and
+what CLIO Coder answers:
 
-| Question to ask of a coding agent | CLIO Coder |
-| --- | --- |
-| Does it run on the model I already have, including a local one? | Local servers, lab gateways, cloud APIs and subscriptions, switched with `/model`. |
-| Can a script read the result without parsing prose? | One versioned JSON result with typed causes, and a printed JSON Schema. |
-| Does it say when the work is not finished? | The agent's declared state and the host's assessment are both sealed, with the facts behind a lowered claim. |
-| Which rules still apply with approvals off? | The sandbox, snapshots, protected paths and operator-only changes all stay. |
-| What is a stored memory based on? | A command that succeeded or a file that was read, demonstrated again before it is kept. |
-| Can I verify a run afterwards, on another machine? | Every run seals a record that `clio-coder telemetry verify` rechecks. |
-| Does it check numerical results, not only tests? | Tolerance comparisons, seeded repeats and reproductions from pinned inputs. |
+- **Will it run on the model I have?** `clio-coder configure` connects a local
+  server, a lab gateway, a cloud key or a subscription, and `/model` switches
+  mid-session. A 32K local model and a frontier API get the same tools,
+  rules and checks.
+- **Can my script read the result?**
+  `clio-coder run --output-format json "<task>" | jq '.outcome, .causes'`
+  prints `succeeded` and an empty list, or `failed` and codes such as
+  `verify_failed` or `max_cost_usd`. `clio-coder schema run-result` prints
+  the JSON Schema.
+- **Will it tell me when the work is not finished?**
+  `clio-coder run --exit-code --verify "npm test" --fail-on-verify "<task>"`
+  exits 1 when the agent declared partly done, when CLIO Coder lowered a
+  "done" that left unvalidated changes, or when the check failed.
+- **What can it do with approvals off?** Under `--autonomy yolo`, commands
+  still run in the OS sandbox, `/rewind` still restores your files, and an
+  attempt to change project trust, settings or CLIO Coder's own state is
+  refused with a message to ask you.
+- **What is its memory made of?** Every note is tied to a command that
+  succeeded or a file that was read. `clio-coder memory list --approved-by operator`
+  lists what you approved, and a lesson whose command no longer resolves is
+  withheld with a notice.
+- **Can I check a run later, somewhere else?**
+  `clio-coder evidence inspect <runId>` shows what a worker ran, changed and
+  verified, and `clio-coder telemetry verify` rechecks the sealed record on
+  another machine.
+- **Does it check numbers, not only tests?** A quality policy can require a
+  comparison within a tolerance, a seeded repeat or a reproduction from
+  pinned inputs, and `clio-coder claims` lists what agreed and what did not.
 
 ## Built for science and HPC
 
