@@ -244,18 +244,16 @@ it("bootstrap navigation cannot bypass the exploration budget as an orientation 
 	assert.deepEqual(resolveDeliveryTools(recipe.tools, recipe.product), []);
 });
 
-it("enforces the bootstrap exploration allowance instead of the general scout allowance", () => {
+it("plans bootstrap with its own advisory estimate under the run ceiling", () => {
 	const envelope = resolveToolBudgetEnvelope({
 		recipeId: "context-bootstrap",
-		policy: { toolCalls: 40, readReserve: 8, synthesis: true },
-		request: { toolCalls: 8, readReserve: 3 },
+		policy: { toolCalls: 40, synthesis: true },
+		request: { toolCalls: 8 },
 		hardCap: 150,
-		hasReadTool: true,
 		retry: false,
 		revision: false,
-		nativeReadOnlyResearch: true,
 	});
-	assert.equal(envelope.effective.mode, "enforced");
+	assert.equal(envelope.effective.mode, "advisory");
 	assert.equal(envelope.effective.toolCalls, 8);
 });
 

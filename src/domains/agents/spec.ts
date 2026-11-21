@@ -63,6 +63,32 @@ export type AgentProduct = "orientation";
 
 const AGENT_PRODUCTS: ReadonlyArray<AgentProduct> = ["orientation"];
 
+/**
+ * What a recipe declares about how the host treats its runs, so no code outside this domain asks which recipe a run
+ * is (fleet M12). Closed for the same reason as {@link AgentProduct}: a misspelled trait is a parse error.
+ *
+ * - `context-generator`: internal runs generate project context (the handbook, wiki pages). They report through the
+ *   context rail rather than a worker card, and their repository-wide read scope is expected, not a diagnostic.
+ * - `peer-tool-loop`: on a subprocess peer runtime the peer's own tool loop stands in for the declared required
+ *   tools, which Clio cannot observe there. Write roots and protected artifacts keep their own gates.
+ * - `inline-deliverable`: a terminal mutation report may deliver its answer in the summary rather than in files, so
+ *   the parent is told to check the summary against the request.
+ */
+export type AgentTrait = "context-generator" | "peer-tool-loop" | "inline-deliverable";
+
+const AGENT_TRAITS: ReadonlyArray<AgentTrait> = ["context-generator", "peer-tool-loop", "inline-deliverable"];
+
+/** Handbook sections a worker of this recipe receives beyond the ones its capability class implies. */
+export type AgentHandbookAudience = "write" | "verify" | "docs" | "git" | "orchestrator";
+
+const AGENT_HANDBOOK_AUDIENCES: ReadonlyArray<AgentHandbookAudience> = [
+	"write",
+	"verify",
+	"docs",
+	"git",
+	"orchestrator",
+];
+
 const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
 	"explore",
 	"plan",
@@ -130,6 +156,8 @@ export interface AgentSpec {
 	skills: ReadonlyArray<string>;
 	resultContract: ResultContract;
 	product?: AgentProduct;
+	traits?: ReadonlyArray<AgentTrait>;
+	handbook?: ReadonlyArray<AgentHandbookAudience>;
 	permissions?: WorkerPermissionDeclaration;
 	budget: AgentBudget;
 	body: string;
@@ -161,6 +189,30 @@ export function isAgentProjectContextTier(value: unknown): value is AgentProject
 
 export function isAgentProduct(value: unknown): value is AgentProduct {
 	return includes(AGENT_PRODUCTS, value);
+}
+
+export function isAgentTrait(value: unknown): value is AgentTrait {
+	return includes(AGENT_TRAITS, value);
+}
+
+export function isAgentHandbookAudience(value: unknown): value is AgentHandbookAudience {
+	return includes(AGENT_HANDBOOK_AUDIENCES, value);
+}
+
+/** Whether a recipe declares `trait`; the one way code outside this domain tells recipes apart. */
+export function agentHasTrait(
+	spec: { traits?: ReadonlyArray<AgentTrait> } | null | undefined,
+	trait: AgentTrait,
+): boolean {
+	return spec?.traits?.includes(trait) === true;
+}
+
+/**
+ * A read-only explorer: the only recipe kind an outside read root admits, and the one whose job is navigation, so it
+ * is never steered away from `code_nav`. Declared by `category: explore` on a `read-only` recipe.
+ */
+export function isReadOnlyExplorer(spec: Pick<AgentSpec, "category" | "capabilityClass"> | null | undefined): boolean {
+	return spec?.category === "explore" && spec.capabilityClass === "read-only";
 }
 
 function normalizeTools(recipe: AgentRecipe): ReadonlyArray<ToolName> {
@@ -270,6 +322,8 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		skills: recipe.skills,
 		resultContract: recipe.resultContract,
 		...(recipe.product !== undefined ? { product: recipe.product } : {}),
+		...(recipe.traits !== undefined ? { traits: recipe.traits } : {}),
+		...(recipe.handbook !== undefined ? { handbook: recipe.handbook } : {}),
 		...(recipe.permissions !== undefined ? { permissions: recipe.permissions } : {}),
 		budget: recipe.budget,
 		body: recipe.body,

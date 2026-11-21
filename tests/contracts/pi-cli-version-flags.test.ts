@@ -70,7 +70,7 @@ function input(root: string, patch: Partial<WorkerRunInput> = {}): WorkerRunInpu
 		runtime: piCliRuntime,
 		wireModelId: "llamacpp/qwen",
 		allowedTools: [],
-		budget: { toolCalls: 20, readReserve: 0, synthesis: true, hardCap: 50 },
+		budget: { toolCalls: 20, synthesis: true, hardCap: 50 },
 		autonomy: "default",
 		cwd: root,
 		...patch,

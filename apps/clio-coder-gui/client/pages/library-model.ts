@@ -53,7 +53,6 @@ export function agentCard(agent: Agent): AgentCard {
 			fact("Capability", capability === null ? null : humanizeKey(capability)),
 			fact("Project context", tier === null ? null : humanizeKey(tier)),
 			fact("Tool-call budget", budgetRange(number(budget.toolCalls), number(maximum.toolCalls))),
-			fact("Read reserve", budgetRange(number(budget.readReserve), number(maximum.readReserve))),
 		],
 		skills: agent.skills,
 		tools: agent.tools,

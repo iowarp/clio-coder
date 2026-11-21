@@ -83,7 +83,7 @@ function input(root: string, runtime: WorkerRunInput["runtime"], patch: Partial<
 		runtime,
 		wireModelId: runtime.knownModels?.[0] ?? "default",
 		allowedTools: [],
-		budget: { toolCalls: 20, readReserve: 0, synthesis: true, hardCap: 50 },
+		budget: { toolCalls: 20, synthesis: true, hardCap: 50 },
 		autonomy: "default",
 		cwd: root,
 		...patch,

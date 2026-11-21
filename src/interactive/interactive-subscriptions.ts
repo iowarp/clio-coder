@@ -9,6 +9,7 @@ import { NEVER_STARTED_WORDS, plainOutcomeLabel, workerFailureHeadline } from ".
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import {
+	type AgentTraitLookup,
 	createWorkerStream,
 	isContextOperationRun,
 	type WorkerEntryState,
@@ -34,6 +35,8 @@ const FAILED_RUN_NOTICE_HOLD_MS = 400;
 
 export interface InteractiveSubscriptionsDeps {
 	bus: TelemetryHub;
+	/** Recipe traits; context-generator runs report through the context rail, not as helpers. */
+	agentTraits?: AgentTraitLookup;
 	getSessionId?: () => string | null;
 	contextResult?: (operation: ContextOperation) => void;
 	refreshFooter: () => void;
@@ -91,7 +94,10 @@ export interface InteractiveSubscriptions {
  * once per frame without repeating the projection's footer reads (#428).
  */
 export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDeps): InteractiveSubscriptions {
-	const workers = createWorkerStream({ readResult: deps.readWorkerRunResult ?? readWorkerRunResultFacts });
+	const workers = createWorkerStream({
+		readResult: deps.readWorkerRunResult ?? readWorkerRunResultFacts,
+		...(deps.agentTraits !== undefined ? { agentTraits: deps.agentTraits } : {}),
+	});
 	/**
 	 * One notice per assignment, not per run. A failed attempt's warning never
 	 * expires and outranks a success, so keyed by run it stayed on the footer
@@ -106,7 +112,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		payload: DispatchRunIdentity & { assignmentId?: string; attempt?: number; lineage?: { attempt: number } },
 		status: "working" | "completed" | "failed",
 	): void => {
-		if (isContextOperationRun(payload)) return;
+		if (isContextOperationRun(payload, deps.agentTraits)) return;
 		const attempt = payload.lineage?.attempt ?? payload.attempt ?? 0;
 		// A council member answers the operator's own /council question, so it is never a background helper even though
 		// Clio dispatched it on the operator's behalf.
@@ -223,7 +229,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		};
 	const routeMoveNotice = (payload: DispatchStartedPayload): void => {
 		const move = payload.routeMove;
-		if (move === undefined || isContextOperationRun(payload)) return;
+		if (move === undefined || isContextOperationRun(payload, deps.agentTraits)) return;
 		// The target says where a run went; the model only tells a move inside one target apart.
 		const sameTarget = move.fromTargetId === payload.targetId;
 		const from = sameTarget ? `${move.fromTargetId}/${move.fromModelId}` : move.fromTargetId;

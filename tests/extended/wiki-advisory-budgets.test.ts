@@ -27,9 +27,8 @@ it("caps the dedicated repair recipe at ten calls without a revision allowance",
 	const envelope = resolveToolBudgetEnvelope({
 		recipeId: recipe.id,
 		policy,
-		request: { toolCalls: 10, readReserve: 4 },
+		request: { toolCalls: 10 },
 		hardCap: 120,
-		hasReadTool: true,
 		retry: false,
 		revision: false,
 	});

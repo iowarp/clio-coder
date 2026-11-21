@@ -205,7 +205,7 @@ test("real worker preserves the length-limited thought through contract repair a
 				thinkingLevel: "xhigh",
 				modelCapabilities: { contextWindow: 131072, maxTokens: 131072, tools: true, reasoning: true },
 				allowedTools: [],
-				budget: { mode: "advisory", toolCalls: 40, readReserve: 0, synthesis: true, hardCap: 60 },
+				budget: { mode: "advisory", toolCalls: 40, synthesis: true, hardCap: 60 },
 				resultContract: { kind: "artifact-report" },
 				product: "orientation",
 				noSkills: true,

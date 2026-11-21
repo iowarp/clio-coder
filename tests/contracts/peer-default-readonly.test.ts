@@ -27,7 +27,7 @@ function input(readOnly: boolean): WorkerRunInput {
 		runtime: { id: "codex-cli" } as WorkerRunInput["runtime"],
 		wireModelId: "",
 		allowedTools: [],
-		budget: { toolCalls: 10, readReserve: 0, synthesis: true, hardCap: 20 },
+		budget: { toolCalls: 10, synthesis: true, hardCap: 20 },
 		autonomy: "yolo",
 		readOnly,
 		cwd: process.cwd(),

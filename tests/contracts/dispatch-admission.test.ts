@@ -315,7 +315,7 @@ describe("dispatch admission boundary", () => {
 				const prepared = tool.prepareAdmissionArguments?.({
 					agent: "coder",
 					mode: "sequential",
-					budget: { toolCalls: 1000, readReserve: 0 },
+					budget: { toolCalls: 1000 },
 					tasks: [{ task: "Rename the helper." }, { task: "Update its callers." }],
 					...extra,
 				});
@@ -1372,7 +1372,7 @@ describe("dispatch admission boundary", () => {
 		const undeclared = spawn(undeclaredRuntime);
 		await undeclared.bundle.extension.start();
 		try {
-			const run = await undeclared.bundle.contract.dispatch({ ...request, budget: { toolCalls: 1000, readReserve: 10 } });
+			const run = await undeclared.bundle.contract.dispatch({ ...request, budget: { toolCalls: 1000 } });
 			await run.finalPromise;
 			strictEqual(undeclared.spawned(), 1);
 			strictEqual(undeclared.specs[0]?.budget.mode, "advisory");

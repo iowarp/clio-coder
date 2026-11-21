@@ -11,7 +11,7 @@ category: plan
 capabilityClass: read-only
 latencyClass: deep
 projectContextTier: none
-budget: {toolCalls: 14, readReserve: 3, synthesis: true}
+budget: {toolCalls: 14, synthesis: true}
 resultContract: {kind: oracle-report}
 tags: [advice, consistency, decisions, challenge]
 ---

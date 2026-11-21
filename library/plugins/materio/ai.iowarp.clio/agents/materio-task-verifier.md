@@ -9,7 +9,7 @@ category: quality
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 48, readReserve: 8, synthesis: true}
+budget: {toolCalls: 48, synthesis: true}
 resultContract: {kind: mutation-report}
 tags: [materio, materials-science, verification]
 ---

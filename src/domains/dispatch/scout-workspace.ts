@@ -144,7 +144,7 @@ export function scoutReadWorkspace(input: {
 	const outsideCwd = relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
 	if (absolute.length === 0 && !outsideCwd) return { ok: true, cwd: requested, intent: raw };
 	const refuse = (reason: string, message: string) => ({ ok: false as const, reason, message: `${reason}: ${message}` });
-	if (!input.readOnlyScout || input.agentId !== "scout") {
+	if (!input.readOnlyScout) {
 		if (!outsideCwd && record(raw)) return grantedReadRoots(raw, absolute, requested, workspace, refuse);
 		return refuse(
 			"intent_path_absolute",

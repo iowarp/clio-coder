@@ -136,7 +136,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 				tags: ["delegation", "acp"],
 				skills: [],
 				resultContract: { kind: "external-delegation" } as const,
-				budget: { toolCalls: 1, readReserve: 0, synthesis: false },
+				budget: { toolCalls: 1, synthesis: false },
 				body: "External ACP delegation.",
 			}));
 			return [...specs, ...delegationSpecs];
@@ -164,7 +164,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					tags: ["delegation", "acp"],
 					skills: [],
 					resultContract: { kind: "external-delegation" } as const,
-					budget: { toolCalls: 1, readReserve: 0, synthesis: false },
+					budget: { toolCalls: 1, synthesis: false },
 					body: "External ACP delegation.",
 				};
 			}

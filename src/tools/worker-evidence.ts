@@ -8,6 +8,7 @@ import {
 	resultContractAuthorship,
 	type StructuredHelperResult,
 } from "../domains/agents/result-contract.js";
+import type { AgentTrait } from "../domains/agents/spec.js";
 import { sealedAnswerBudgetBytes } from "../domains/dispatch/handback.js";
 import { hostCheckBaseNote, hostCheckNotRunNote } from "../domains/dispatch/host-verification-note.js";
 import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
@@ -363,7 +364,11 @@ function settledHash(run: FinishedRun, field: string): string | undefined {
  * by the process that settled it, or read back under a seal that verifies. Briefing and project context stay
  * separate, and neither line includes prompt prose.
  */
-export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): string[] {
+export function runEvidenceLabels(
+	run: FinishedRun,
+	integrity: RunIntegrity,
+	agentTraits?: (agentId: string) => ReadonlyArray<AgentTrait>,
+): string[] {
 	const status = finishedRunTrustStatus(run, integrity);
 	const canonical = canonicalTrustLabels(status);
 	if (integrity.state !== "verified")
@@ -389,7 +394,7 @@ export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): st
 	return [
 		...canonical,
 		`run_integrity=verified/${integrity.by}`,
-		...documenterDeliveryLabels(run),
+		...inlineDeliverableLabels(run, agentTraits?.(run.facts.agentId).includes("inline-deliverable") === true),
 		`evidence_verification=${facts.verification.state}/${facts.verification.basis}`,
 		`host_verification=${host?.status ?? "not_requested"}`,
 		...(checks.length > 0
@@ -449,10 +454,13 @@ export function compactEvidenceLabels(labels: ReadonlyArray<string>): string[] {
 	return labels.filter((label) => !DIAGNOSTIC_LABEL_PREFIXES.some((prefix) => label.startsWith(prefix)));
 }
 
-/** Delivery guidance uses only an authenticated, terminal mutation report. */
-function documenterDeliveryLabels(run: FinishedRun): string[] {
+/**
+ * Delivery guidance for a recipe declaring `inline-deliverable` (the Documenter), whose answer may be its summary;
+ * it uses only an authenticated, terminal mutation report.
+ */
+function inlineDeliverableLabels(run: FinishedRun, inlineDeliverable: boolean): string[] {
 	if (
-		run.facts.agentId !== "documenter" ||
+		!inlineDeliverable ||
 		!run.facts.quality?.resultContract?.sourceId.startsWith("agent-result-contract:mutation-report:")
 	)
 		return [];

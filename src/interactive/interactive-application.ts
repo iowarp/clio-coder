@@ -2083,6 +2083,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		agentTraits: (agentId) => deps.agents?.getSpec(agentId)?.traits ?? [],
 		supersedeNotices: (scope) => notifications.supersede(scope),
 		dismissNotice: (key) => {
 			notifications.dismiss(key);

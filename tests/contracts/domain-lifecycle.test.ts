@@ -11,7 +11,7 @@ import {
 	resolveShutdownHookBudgetMs,
 	ShutdownBudgetExceeded,
 } from "../../src/core/termination.js";
-import { checkDomainContractAccess } from "../boundaries/check-boundaries.js";
+import { checkDomainContractAccess, checkRecipeIdBranches } from "../boundaries/check-boundaries.js";
 
 /** These fixtures name their own domains, so they type the loader by their own map. */
 type FixtureMap = Record<string, Record<string, unknown>>;
@@ -305,4 +305,16 @@ test("rule17 keeps owner capabilities with the owning composition and contract t
 	deepStrictEqual(checkDomainContractAccess("src/interactive/interactive-presentation.ts", binder), []);
 	strictEqual(checkDomainContractAccess("src/cli/run.ts", 'loaded.getContract<ConfigContract>("config");').length, 1);
 	deepStrictEqual(checkDomainContractAccess("src/cli/run.ts", 'loaded.getContract("config");'), []);
+});
+
+test("rule18 refuses a recipe-id branch outside the agents domain and keeps it inside", () => {
+	const planted = 'export function f(agentId: string) { return agentId === "scout"; }\n';
+	deepStrictEqual(checkRecipeIdBranches("src/tools/profiles.ts", planted).length, 1);
+	strictEqual(
+		checkRecipeIdBranches("src/x.ts", 'switch (spec.id) { case "coder": break; }\n["oracle"].includes(req.agentId);\n')
+			.length,
+		2,
+	);
+	deepStrictEqual(checkRecipeIdBranches("src/domains/agents/spec.ts", planted), []);
+	deepStrictEqual(checkRecipeIdBranches("src/x.ts", 'agentId === "auto"; role === "reviewer";\n'), []);
 });

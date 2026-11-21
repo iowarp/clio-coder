@@ -140,17 +140,17 @@ describe("compact coordinator dispatch contract", () => {
 			members,
 			review: { max_cycles: 2 },
 			candidates: 3,
-			budget: { toolCalls: 12, readReserve: 2 },
+			budget: { toolCalls: 12 },
 			routing: { maxCostUsd: 1 },
 		};
 		const encoded = Object.fromEntries(
 			Object.entries(advanced).map(([k, v]) => [k, k === "mode" ? v : JSON.stringify(v)]),
 		);
-		const decoded = restore({ task: "x", ...encoded, tasks: [{ task: "y", budget: '{"toolCalls":5,"readReserve":0}' }] });
+		const decoded = restore({ task: "x", ...encoded, tasks: [{ task: "y", budget: '{"toolCalls":5}' }] });
 		deepStrictEqual(decoded, {
 			task: "x",
 			...advanced,
-			tasks: [{ task: "y", budget: { toolCalls: 5, readReserve: 0 } }],
+			tasks: [{ task: "y", budget: { toolCalls: 5 } }],
 		});
 		ok(Value.Check(canonical, decoded));
 		deepStrictEqual(restore({ task: "x", review: "true" }).review, true);

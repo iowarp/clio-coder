@@ -1200,6 +1200,85 @@ const CONTINUATION_FIELDS = new Set([
 	"turnStop",
 ]);
 
+/**
+ * Built-in recipe ids, read from the shipped recipe files: rule18 forbids branching on one outside the agents domain.
+ */
+const BUILTIN_RECIPE_IDS: ReadonlySet<string> = new Set(
+	readdirSync(new URL("../../src/domains/agents/builtins/", import.meta.url))
+		.filter((name) => name.endsWith(".md"))
+		.map((name) => name.slice(0, -".md".length)),
+);
+const RECIPE_ID_OWNER = "src/domains/agents/";
+
+/** An expression that holds a recipe id: `agentId`, `x.recipeId`, `baselineAgentId`, `spec.id`, `agent`. */
+function holdsRecipeId(node: ts.Expression): boolean {
+	while (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node) || ts.isAsExpression(node))
+		node = node.expression;
+	const named = (name: string): boolean => /(agentId|recipeId)$/iu.test(name) || name === "agent" || name === "recipe";
+	if (ts.isIdentifier(node)) return named(node.text);
+	if (!ts.isPropertyAccessExpression(node)) return false;
+	if (named(node.name.text)) return true;
+	if (node.name.text !== "id") return false;
+	const owner = node.expression;
+	const ownerName = ts.isIdentifier(owner) ? owner.text : ts.isPropertyAccessExpression(owner) ? owner.name.text : "";
+	return /(spec|recipe|agent)$/iu.test(ownerName);
+}
+
+/**
+ * Rule 18 (fleet M12): outside `src/domains/agents/` no code branches on a built-in recipe id. A comparison, a
+ * `switch` case or a literal list membership test against one is a recipe-id branch; say what differs with the role,
+ * the envelope, or a recipe frontmatter field (`category`, `product`, `traits`, `handbook`, the result contract).
+ */
+export function checkRecipeIdBranches(file: string, source: string): string[] {
+	if (!file.startsWith("src/") || file.startsWith(RECIPE_ID_OWNER)) return [];
+	const tree = parseTree(file, source);
+	const violations: string[] = [];
+	const line = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+	const recipeLiteral = (node: ts.Node): string | undefined =>
+		ts.isStringLiteralLike(node) && BUILTIN_RECIPE_IDS.has(node.text) ? node.text : undefined;
+	const report = (node: ts.Node, id: string): void => {
+		violations.push(
+			`rule18: ${file}:${line(node)} branches on recipe id "${id}"; outside ${RECIPE_ID_OWNER} decide by the role, the envelope, or a recipe frontmatter field`,
+		);
+	};
+	const EQUALITY = new Set([
+		ts.SyntaxKind.EqualsEqualsEqualsToken,
+		ts.SyntaxKind.ExclamationEqualsEqualsToken,
+		ts.SyntaxKind.EqualsEqualsToken,
+		ts.SyntaxKind.ExclamationEqualsToken,
+	]);
+	const visit = (node: ts.Node): void => {
+		if (ts.isBinaryExpression(node) && EQUALITY.has(node.operatorToken.kind)) {
+			const id = recipeLiteral(node.right) ?? recipeLiteral(node.left);
+			const other = recipeLiteral(node.right) !== undefined ? node.left : node.right;
+			if (id !== undefined && holdsRecipeId(other)) report(node, id);
+		}
+		if (ts.isSwitchStatement(node) && holdsRecipeId(node.expression)) {
+			for (const clause of node.caseBlock.clauses) {
+				const id = ts.isCaseClause(clause) ? recipeLiteral(clause.expression) : undefined;
+				if (id !== undefined) report(clause, id);
+			}
+		}
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			(node.expression.name.text === "includes" || node.expression.name.text === "has") &&
+			node.arguments[0] !== undefined &&
+			holdsRecipeId(node.arguments[0])
+		) {
+			let list: ts.Expression = node.expression.expression;
+			if (ts.isNewExpression(list) && list.arguments?.[0] !== undefined) list = list.arguments[0];
+			const id = ts.isArrayLiteralExpression(list)
+				? list.elements.map((element) => recipeLiteral(element)).find((entry) => entry !== undefined)
+				: undefined;
+			if (id !== undefined) report(node, id);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /** Rule 16: turn modules take their declared state view, and only ContinuationState writes continuation state. */
 export function checkTurnStateOwnership(file: string, source: string): string[] {
 	if (!file.startsWith("src/") || file === TURN_STATE_OWNER) return [];
@@ -1322,6 +1401,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		violations.push(...checkTelemetryWrites(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkLedgerUsageKeys(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkTurnStateOwnership(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
+		violations.push(...checkRecipeIdBranches(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(
 			...checkSurfaceTotals(path.relative(projectRoot, filePath).split(path.sep).join("/"), source, usedSurfaceExemptions),
 		);

@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative } from "node:path";
 import { relativePathEscapes } from "../../core/path-containment.js";
-import type { AgentCapabilityClass } from "../agents/spec.js";
+import type { AgentCapabilityClass, AgentHandbookAudience } from "../agents/spec.js";
 import { demoteHandbookHeadings } from "./clio-md.js";
 import { type ProjectRule, selectActiveRules } from "./project-rules.js";
 
@@ -232,22 +232,12 @@ export function compileHandbook(source: string, path: string): CompiledHandbook 
 	return { path, title, identity: identityLines.join(" "), units };
 }
 
-/** Which handbook audiences a fleet worker serves, by recipe id first, then capability class. */
+/** Which handbook audiences a fleet worker serves: the recipe's `handbook` declaration, else its capability class. */
 export function workerHandbookAudience(
-	agentId: string | null | undefined,
+	declared: ReadonlyArray<AgentHandbookAudience> | null | undefined,
 	capabilityClass: AgentCapabilityClass | null | undefined,
 ): HandbookAudience[] {
-	switch (agentId) {
-		case "git-master":
-			return ["git", "write"];
-		case "documenter":
-		case "wiki-writer":
-			return ["docs", "write"];
-		case "tester":
-		case "verifier":
-		case "debugger":
-			return ["verify", "write"];
-	}
+	if (declared !== null && declared !== undefined && declared.length > 0) return [...declared];
 	switch (capabilityClass) {
 		case "verification":
 			return ["verify"];

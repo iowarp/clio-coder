@@ -23,7 +23,7 @@ function frontmatter(extra: Record<string, unknown>, capabilityClass = "workspac
 		capabilityClass,
 		latencyClass: "balanced",
 		projectContextTier: "none",
-		budget: { toolCalls: 10, readReserve: 1, synthesis: false },
+		budget: { toolCalls: 10, synthesis: false },
 		resultContract: { kind: "mutation-report" },
 		tags: [],
 		...extra,

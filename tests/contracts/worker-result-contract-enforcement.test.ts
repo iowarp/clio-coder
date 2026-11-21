@@ -81,7 +81,6 @@ async function runReviewer(
 				budget: {
 					mode: bounds.mode,
 					toolCalls: bounds.toolCalls,
-					readReserve: 0,
 					synthesis: true,
 					hardCap: bounds.hardCap,
 				},

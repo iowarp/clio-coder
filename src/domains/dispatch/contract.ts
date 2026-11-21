@@ -8,7 +8,7 @@ import type { NumericTolerance } from "../../tools/verify/numeric.js";
 import type { PerfBudgetSpec } from "../../tools/verify/perf.js";
 import type { DeclaredReproduce } from "../../tools/verify/reproduce.js";
 import type { ResultContract } from "../agents/result-contract.js";
-import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
+import type { AgentAutomationAuthority, AgentSpec, AgentTrait } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ApprovalAuthority } from "../safety/admission.js";
@@ -461,6 +461,8 @@ export interface RouteBreakerView {
 export interface DispatchContract {
 	/** True when the domain event pump publishes DispatchProgress itself. */
 	readonly publishesProgress?: boolean;
+	/** The traits a recipe declares, so readers of a run never branch on its recipe id; empty when unknown. */
+	agentTraits?(agentId: string): ReadonlyArray<AgentTrait>;
 	/**
 	 * Settles once restart recovery (abandoned compete workers, task worktrees,
 	 * the ledger scan) has finished, starting it if boot has not yet. Gate and

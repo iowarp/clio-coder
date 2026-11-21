@@ -11,7 +11,7 @@ category: quality
 capabilityClass: verification
 latencyClass: deep
 projectContextTier: bounded
-budget: {toolCalls: 48, readReserve: 8, synthesis: true}
+budget: {toolCalls: 48, synthesis: true}
 resultContract: {kind: verifier-report, assurance: argued}
 tags: [verification, hoare-logic, formal-methods, correctness]
 ---

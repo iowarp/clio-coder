@@ -11,7 +11,7 @@ category: research
 capabilityClass: read-only
 latencyClass: deep
 projectContextTier: none
-budget: {toolCalls: 20, readReserve: 3, synthesis: true}
+budget: {toolCalls: 20, synthesis: true}
 resultContract: {kind: world-knowledge-report}
 tags: [open-world, ecosystem, current-context, second-opinion]
 ---

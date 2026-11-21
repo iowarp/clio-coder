@@ -5,6 +5,7 @@ import { clioStateDir } from "../core/xdg.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { ANSWER_BUDGET_BYTES } from "../domains/dispatch/handback.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RUN_VERIFICATION } from "../domains/dispatch/run-findings.js";
@@ -121,7 +122,7 @@ interface CollectedRunRow extends CollectRow {
 	evidence: DurableRunEvidence;
 }
 
-function collectRunLine(row: CollectedRunRow): string[] {
+function collectRunLine(row: CollectedRunRow, dispatch: DispatchContract): string[] {
 	// The answer budget sealed at dispatch, the number the sync result showed and the worker was told (M3).
 	const answerBytes = row.evidence.run !== null ? runAnswerBudgetBytes(row.evidence.run) : ANSWER_BUDGET_BYTES;
 	// The route warnings the dispatch result printed, read back from the sealed record (FL-6).
@@ -145,7 +146,11 @@ function collectRunLine(row: CollectedRunRow): string[] {
 		);
 	}
 	if (row.evidence.run !== null) {
-		lines.push(...runEvidenceLabels(row.evidence.run, row.evidence.integrity).map((label) => `  ${label}`));
+		lines.push(
+			...runEvidenceLabels(row.evidence.run, row.evidence.integrity, dispatch.agentTraits?.bind(dispatch)).map(
+				(label) => `  ${label}`,
+			),
+		);
 	} else {
 		const reason = row.evidence.integrity.state === "verified" ? "no settled record" : row.evidence.integrity.reason;
 		lines.push(
@@ -335,7 +340,7 @@ export async function collectRuns(
 				failedAttempts.filter((entry) => entry.recoveredBy === row.runId),
 			),
 		),
-		...collectedRows.flatMap((row) => collectRunLine(row)),
+		...collectedRows.flatMap((row) => collectRunLine(row, deps.dispatch)),
 		...(board !== null ? ["", board] : []),
 		...(batchId.length > 0 && !collected
 			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]

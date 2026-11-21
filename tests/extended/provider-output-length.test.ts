@@ -209,7 +209,7 @@ for (const abortRecovery of [false, true]) {
 					thinkingLevel: "medium",
 					modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
 					allowedTools: [ToolNames.Write],
-					budget: { mode: "advisory", toolCalls: 40, readReserve: 0, synthesis: true, hardCap: 60 },
+					budget: { mode: "advisory", toolCalls: 40, synthesis: true, hardCap: 60 },
 					resultContract: { kind: "artifact-report" },
 					product: "orientation",
 					noSkills: true,

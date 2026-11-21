@@ -692,18 +692,6 @@ function disallowedToolsText(deliveryTools: ReadonlyArray<string>): string {
 	return excluded.join(", ");
 }
 
-function workerLiveReadReserveDirective(remaining: number, deliveryTools: ReadonlyArray<string>): string {
-	const admitted = deliveryTools.length > 0 ? `read and ${deliveryTools.join("/")}` : "the read tool";
-	const finish =
-		deliveryTools.length > 0
-			? `Finish the work: re-read what you will cite and write it with ${deliveryTools.join(" or ")}.`
-			: "Read a specific live file needed for the handoff.";
-	return (
-		`worker live-read reserve: broad orientation is complete and ${remaining} ${remaining === 1 ? "call remains" : "calls remain"}. ` +
-		`Only ${admitted} ${deliveryTools.length > 0 ? "are" : "is"} admitted now. ${finish} Do not substitute ${disallowedToolsText(deliveryTools)}.`
-	);
-}
-
 /**
  * Directive for a delivery-capable agent that has spent its declared soft
  * budget. Discovery is over for the rest of the run; delivery continues under
@@ -895,13 +883,6 @@ export interface CreateLoopGuardRegistrationOptions {
 	 */
 	toolCallSoftLimit?: number;
 	/**
-	 * Worker only: tail of {@link toolCallSoftLimit} reserved for live source
-	 * reads. Once the pre-reserve allowance is consumed, discovery attempts are
-	 * blocked without spending the read allowance and the next provider round
-	 * can be forced to `read` through {@link onSoftReadReserve}.
-	 */
-	toolCallSoftReadReserve?: number;
-	/**
 	 * Worker only: tools that carry this agent's deliverable rather than its
 	 * exploration, admitted inside a reserve window alongside `read`. The
 	 * reserve exists to end broad discovery, not to stop an agent from
@@ -956,8 +937,6 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * this callback; callers must not stop the active call from this hook.
 	 */
 	onSoftLimitFinalCallAdmitted?: (toolCallId: string | undefined) => void;
-	/** Invoked once when the soft-limit live-read reserve opens. */
-	onSoftReadReserve?: () => void;
 	now?: () => number;
 }
 
@@ -973,7 +952,7 @@ export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 	/** The turn's parent-workspace mutation epoch, which the registry's denial memory keys on. */
 	mutationEpoch(turnId: string): number;
 	/** One-way worker phase growth admitted before launch for a result-contract revision. */
-	extendWorkerToolCallPhase(phase: { toolCalls: number; readReserve: number }): boolean;
+	extendWorkerToolCallPhase(phase: { toolCalls: number }): boolean;
 }
 
 export function createLoopGuardRegistration(options: CreateLoopGuardRegistrationOptions): LoopGuardRegistration {
@@ -989,13 +968,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			? options.toolCallSoftLimit
 			: undefined;
 	const synthesisLockout = options.turnSynthesisLockout === true;
-	let softReadReserve = options.toolCallSoftReadReserve ?? 0;
-	let softReadReserveThreshold =
-		softLimit !== undefined && softReadReserve > 0 && softLimit > softReadReserve ? softLimit - softReadReserve : null;
 	const deliveryTools = [...new Set(options.deliveryTools ?? [])];
 	const reserveAdmits = (tool: string | undefined): boolean => isReserveAdmittedTool(tool, deliveryTools);
 	let softAdmittedCount = 0;
-	let softReadReserveEntered = false;
 	/**
 	 * Per-round non-compliance inside a reserve window. A reserve block is
 	 * steering rather than a runaway signal, so it never spends the lifetime
@@ -1167,12 +1142,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		{ tool: string; resultFingerprint: string; argumentFingerprints: Set<string>; warned: boolean }
 	>();
 	let count = 0;
-
-	const enterSoftReadReserve = (): void => {
-		if (softReadReserveEntered) return;
-		softReadReserveEntered = true;
-		options.onSoftReadReserve?.();
-	};
 
 	const bumpBoundedCounter = (store: Map<string, number>, key: string, limit = LOOP_GUARD_TURN_LIMIT): number => {
 		if (!store.has(key)) {
@@ -2064,20 +2033,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				capLockout !== null ||
 				softLimit === undefined ||
 				!Number.isSafeInteger(phase.toolCalls) ||
-				!Number.isSafeInteger(phase.readReserve) ||
 				phase.toolCalls <= 0 ||
-				phase.readReserve < 0 ||
-				phase.readReserve >= phase.toolCalls ||
 				(cap !== undefined && phase.toolCalls > cap) ||
-				phase.toolCalls < softLimit ||
-				(phase.toolCalls === softLimit && phase.readReserve <= softReadReserve)
+				phase.toolCalls <= softLimit
 			) {
 				return false;
 			}
 			softLimit = phase.toolCalls;
-			softReadReserve = phase.readReserve;
-			softReadReserveThreshold = softReadReserve > 0 && softLimit > softReadReserve ? softLimit - softReadReserve : null;
-			softReadReserveEntered = false;
 			softLockout = null;
 			reserveDenials = { denials: 0 };
 			return true;
@@ -2214,14 +2176,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						message: `Advisory tool estimate reached (${count} calls). Reassess remaining work and finish the assignment; tools remain available${options.toolCallCeiling !== undefined ? ` until the hard ceiling of ${options.toolCallCeiling} calls` : ""}. Explicit task requirements still apply.`,
 						severity: "warn",
 					});
-				}
-				if (
-					softReadReserveEntered &&
-					softLockout === null &&
-					deliveryTools.length === 0 &&
-					input.toolName === ToolNames.Read
-				) {
-					effects.push({ kind: "require_tool", toolName: ToolNames.Read });
 				}
 				// One-shot reserve directive: the first executed call inside the
 				// reserve window carries the steering annotation, so the model is
@@ -2382,9 +2336,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						options.onSynthesisLockout?.();
 						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
 					}
-					const inReserve = softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold;
-					if (spentSoftLimit || inReserve) {
-						enterSoftReadReserve();
+					if (spentSoftLimit) {
 						if (!reserveAdmits(input.toolName)) {
 							// A model that keeps calling discovery tools inside the reserve
 							// is not going to finish; after a bounded number of model rounds
@@ -2401,9 +2353,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 							return [
 								{
 									kind: "block_tool",
-									reason: spentSoftLimit
-										? workerDeliveryOnlyDirective(softLimit, deliveryTools)
-										: workerLiveReadReserveDirective(softLimit - softAdmittedCount, deliveryTools),
+									reason: workerDeliveryOnlyDirective(softLimit, deliveryTools),
 									severity: "hard-block",
 								},
 							];
@@ -2447,7 +2397,6 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				reserveDenials = { denials: 0 };
 				if (softLimit !== undefined && !rejudge && !chainWrapper) {
 					softAdmittedCount += 1;
-					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
 					if (softAdmittedCount >= softLimit) {
 						// Arming the lockout here is what actually ends the work phase: the
 						// softLockout branch above refuses every later call. A delivery-

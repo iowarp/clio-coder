@@ -113,12 +113,11 @@ A native worker reserves room for its reply the same way main-session admission
 does, so a `fork` worker on the same model and context window as a parent turn
 that fitted is admitted instead of failing with `worker_context_exhausted`.
 
-Recipes declare a default `budget: {toolCalls, readReserve, synthesis}` and may
-add `maximum: {toolCalls, readReserve}` inside it. A dispatch call may send
-`budget: {toolCalls, readReserve, retryRevision?}`. Every phase needs positive
-integers with `0 <= readReserve < toolCalls`. `retryRevision` has the same two
-fields and states the estimate that a later automatic retry, bounded
-result-contract revision or review revision may use; neither field may be smaller
+Recipes declare a default `budget: {toolCalls, synthesis}` and may
+add `maximum: {toolCalls}` inside it. A dispatch call may send
+`budget: {toolCalls, retryRevision?}`. Every phase needs a positive
+integer `toolCalls`. `retryRevision` has the same field and states the estimate that a later automatic retry, bounded
+result-contract revision or review revision may use; it may not be smaller
 than the requested phase. Admission never refuses a
 request for exceeding the recipe maximum or the operator cap. It resolves one
 immutable envelope from the recipe policy, the request, the effective worker
@@ -127,8 +126,8 @@ run ledger row and in the run's `run.settled`. `monitor`, `fleet status` and the
 recipe policy, the requested envelope, the effective envelope and the clamp or
 escalation reason ([budget-envelope.ts](../../src/domains/dispatch/budget-envelope.ts)).
 
-The envelope runs in one of two modes; [built-in-agents.md](built-in-agents.md) describes the recipe side.
-In the default advisory mode, `toolCalls` is an estimate. At that count the worker gets
+The envelope is advisory for every recipe; [built-in-agents.md](built-in-agents.md) describes the recipe side.
+`toolCalls` is an estimate. At that count the worker gets
 one reminder that tools stay available until a hard ceiling. The ceiling is the recipe's
 `maximum.toolCalls` when it declares one, else `fleet.limits.toolCallsPerRun` (default 300),
 and never above `fleet.limits.toolCallsPerRun`; it is raised to the admitted estimate (or
@@ -137,12 +136,7 @@ revision estimate) when that is larger. Admission holds an estimate above
 larger `budget.toolCalls` can lift the ceiling above a recipe's maximum but never above the
 cap. Native workers stop at the ceiling. The Claude SDK
 runtime mediates each call and, once the ceiling is reached, denies every further tool
-call ([sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts)). In enforced mode, which
-covers native read-only `scout`, `provenance` and `context-bootstrap` runs whose recipe has
-`synthesis: true`, the tool phase ends after 36 observed calls, or
-`fleet.limits.toolCallsPerRun` when lower, and a text-only synthesis round follows;
-`context-bootstrap` uses its own `toolCalls`. The final `readReserve` calls of an
-enforced phase admit `read` and the recipe's delivery tools.
+call ([sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts)).
 
 Reaching the advisory ceiling ends tool use on a native worker. A worker with delivery
 tools (`write` and `edit`) fails with `worker_tool_call_cap_exhausted`; a reporting
