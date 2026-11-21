@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { AgentEvent, AgentMessage } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
+import { mapAcpToolCall } from "./tool-mediator.js";
 import type { AcpPromptResponse, AcpSessionUpdateParams, AcpToolCallUpdate } from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,7 +39,23 @@ function errorMessageForStopReason(reason: string): string | undefined {
 	return undefined;
 }
 
+export interface AcpEventMapperOptions {
+	/** The run's workspace, against which a peer's relative tool targets resolve; defaults to this process's cwd. */
+	cwd?: string;
+	/** A peer shim's rewrite of its own tool shape into one the mediator maps, the same one its approvals take. */
+	normalizeToolCall?: (toolCall: AcpToolCallUpdate) => AcpToolCallUpdate;
+}
+
+function hasToolInput(toolCall: AcpToolCallUpdate): boolean {
+	return (
+		(isRecord(toolCall.rawInput) && Object.keys(toolCall.rawInput).length > 0) ||
+		(Array.isArray(toolCall.locations) && toolCall.locations.length > 0)
+	);
+}
+
 export class AcpEventMapper {
+	constructor(private readonly options: AcpEventMapperOptions = {}) {}
+
 	private messageStarted = false;
 	private assistantText = "";
 	private assistantThinking = "";
@@ -46,6 +63,10 @@ export class AcpEventMapper {
 	private readonly toolStarts = new Map<string, number>();
 	/** ACP updates may omit kind after the first frame; titles can change. */
 	private readonly toolKinds = new Map<string, string>();
+	/** Each open call's frames merged so far, since a peer may send its input only on a later update. */
+	private readonly toolCalls = new Map<string, AcpToolCallUpdate>();
+	/** The Clio tool name each call's `tool_execution_start` carried, which its end repeats. */
+	private readonly executionNames = new Map<string, string>();
 
 	/** Some ACP bridges stream a provider error as text, then report `end_turn`. */
 	reportedFailure(): string | null {
@@ -127,7 +148,6 @@ export class AcpEventMapper {
 
 	private mapToolUpdate(update: AcpToolCallUpdate): Array<AgentEvent | ClioWorkerEvent> {
 		const toolCallId = update.toolCallId ?? update.title ?? `acp-tool-${this.toolStarts.size + 1}`;
-		const title = update.title ?? update.kind ?? "ACP tool";
 		if (!this.toolKinds.has(toolCallId)) this.toolKinds.set(toolCallId, update.kind ?? "other");
 		const tool = this.toolKinds.get(toolCallId) ?? "other";
 		const status = update.status ?? "pending";
@@ -150,14 +170,25 @@ export class AcpEventMapper {
 					...(action !== null ? { action } : {}),
 				},
 			});
+		}
+		const settling = status === "completed" || status === "failed" || status === "cancelled";
+		const merged = this.mergeToolCall(toolCallId, update);
+		// The execution events feed the finish contract and run effects, which judge Clio tools, so they carry the
+		// mapped Clio call (edit and its path, bash and its command), never the peer's display title or raw input.
+		// They wait for the call's input, which a peer may send only on a later frame (C-15).
+		if (this.toolStarts.has(toolCallId) && !this.executionNames.has(toolCallId) && (settling || hasToolInput(merged))) {
+			const normalized = this.options.normalizeToolCall?.(merged) ?? merged;
+			const mapped = mapAcpToolCall(normalized, this.options.cwd ?? process.cwd());
+			const toolName = mapped.known ? mapped.tool : "unknown";
+			this.executionNames.set(toolCallId, toolName);
 			out.push({
 				type: "tool_execution_start",
 				toolCallId,
-				toolName: title,
-				args: update.rawInput ?? {},
+				toolName,
+				args: mapped.known ? mapped.args : {},
 			} as unknown as AgentEvent);
 		}
-		if (status === "completed" || status === "failed" || status === "cancelled") {
+		if (settling) {
 			const startedAtClock = this.toolStarts.get(toolCallId) ?? performance.now();
 			this.toolStarts.delete(toolCallId);
 			const isError = status !== "completed";
@@ -177,12 +208,27 @@ export class AcpEventMapper {
 			out.push({
 				type: "tool_execution_end",
 				toolCallId,
-				toolName: title,
+				toolName: this.executionNames.get(toolCallId) ?? "unknown",
 				result,
 				isError,
 			} as unknown as AgentEvent);
 			this.toolKinds.delete(toolCallId);
+			this.toolCalls.delete(toolCallId);
+			this.executionNames.delete(toolCallId);
 		}
 		return out;
+	}
+
+	/** The call's frames so far: the first kind stands, and a later title, input or locations replaces an earlier one. */
+	private mergeToolCall(toolCallId: string, update: AcpToolCallUpdate): AcpToolCallUpdate {
+		const prior = this.toolCalls.get(toolCallId) ?? {};
+		const merged: AcpToolCallUpdate = { ...prior, toolCallId };
+		const kind = prior.kind ?? update.kind;
+		if (kind !== undefined) merged.kind = kind;
+		if (update.title !== undefined) merged.title = update.title;
+		if (isRecord(update.rawInput)) merged.rawInput = update.rawInput;
+		if (Array.isArray(update.locations)) merged.locations = update.locations;
+		this.toolCalls.set(toolCallId, merged);
+		return merged;
 	}
 }

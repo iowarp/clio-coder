@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS, type WorkerPermissionMode } from "../../src/core/defaults.js";
+import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
 import type { DispatchBundleOptions } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -71,6 +73,68 @@ it("records ACP tool kinds, completed spans, mutations, and only mediated safety
 		deepStrictEqual(receipt.safety?.toolTelemetry?.unfinished, []);
 		strictEqual(receipt.toolActivity?.mutatingSucceeded, true);
 		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 });
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
+// An agy-shaped edit: its title is display prose and its target rides `locations`, so only the mapped Clio call
+// (edit, the absolute path) lets the finish contract see the mutation (C-15).
+const EDIT_PEER = `
+const send = (message) => process.stdout.write(JSON.stringify({jsonrpc: "2.0", ...message}) + "\\n");
+let cwd = "";
+require("node:readline").createInterface({input: process.stdin}).on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.method === "initialize") send({id: request.id, result: {protocolVersion: 1}});
+  if (request.method === "session/new") { cwd = request.params.cwd; send({id: request.id, result: {sessionId: "edit-fixture"}}); }
+  if (request.method === "session/prompt") {
+    const update = (fields) => send({method: "session/update", params: {sessionId: "edit-fixture", update: fields}});
+    update({sessionUpdate: "tool_call", toolCallId: "e1", kind: "edit", title: "Updating the sum helper", status: "in_progress",
+      locations: [{path: cwd + "/lib/math.js"}], rawInput: {TargetFile: cwd + "/lib/math.js", ReplacementContent: "x"}});
+    update({sessionUpdate: "tool_call_update", toolCallId: "e1", status: "completed"});
+    update({sessionUpdate: "agent_message_chunk", content: {type: "text", text: "Edited lib/math.js."}});
+    send({id: request.id, result: {stopReason: "end_turn"}});
+  }
+});
+`;
+
+it("hands the finish contract the mapped Clio tool and path of an ACP edit, not the peer's title (C-15)", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	settings.integrations.externalAgents.entries = [
+		{ id: "edit-fixture", command: process.execPath, args: ["-e", EDIT_PEER], toolGovernance: "clio-coder-policy" },
+	];
+	const cwd = join(process.env.CLIO_CODER_HOME ?? "", "edit-project");
+	mkdirSync(join(cwd, "lib"), { recursive: true });
+	writeFileSync(join(cwd, "lib/math.js"), "export const sum = 1;\n");
+	const base = dispatchStubContext({ settings });
+	const baseSafety = base.getContract("safety");
+	ok(baseSafety);
+	const audits: Array<{ mutatedPaths: ReadonlyArray<string> }> = [];
+	const safety: SafetyContract = {
+		...baseSafety,
+		decisions: { ...baseSafety.decisions, recordCompletionContract: (input) => audits.push(input) },
+	};
+	const bundle = makeDispatchBundle({
+		bus: base.bus,
+		getContract<N extends DomainName>(name: N): DomainContractMap[N] | undefined {
+			return name === "safety" ? (safety as DomainContractMap[N]) : base.getContract(name);
+		},
+	});
+	await bundle.extension.start();
+	try {
+		const run = await bundle.contract.dispatch({
+			agentId: "edit-fixture",
+			task: "Edit the sum helper.",
+			cwd,
+			executionRole: "builder",
+			requestOrigin: "internal",
+		});
+		await run.finalPromise;
+		deepStrictEqual(
+			audits.map((audit) => audit.mutatedPaths),
+			[[join(cwd, "lib/math.js")]],
+		);
 	} finally {
 		await bundle.extension.stop?.();
 	}

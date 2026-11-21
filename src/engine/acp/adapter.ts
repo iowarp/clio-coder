@@ -41,6 +41,7 @@ import type {
 	AcpInitializeResponse,
 	AcpPromptResponse,
 	AcpRequestPermissionResponse,
+	AcpToolCallUpdate,
 	AcpUsageMeta,
 } from "./types.js";
 import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY, AcpUsageMetaSchema } from "./types.js";
@@ -297,7 +298,14 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		monotonic: heartbeatMonotonicAnchor,
 	};
 	const queue = new AsyncEventQueue<AcpRunEvent>();
-	const mapper = new AcpEventMapper();
+	// Tool frames map to Clio calls as approvals do, through agy's shim when the peer is agy (C-15).
+	const mapper = new AcpEventMapper({
+		cwd: input.cwd,
+		normalizeToolCall: (toolCall) => {
+			const request = agy?.toolRequest({ toolCall });
+			return isRecord(request) && isRecord(request.toolCall) ? (request.toolCall as AcpToolCallUpdate) : toolCall;
+		},
+	});
 	const transportOptions: StdioTransportOptions = { cwd: input.agent.cwd ?? input.cwd };
 	if (input.environment) transportOptions.env = input.environment;
 	if (input.agent.env !== undefined) {
