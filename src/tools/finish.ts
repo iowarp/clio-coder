@@ -1,4 +1,11 @@
 import { Type } from "typebox";
+import {
+	COMPLETION_LIMITATION_REASONS,
+	COMPLETION_STATES,
+	type CompletionDeclaration,
+	type CompletionState,
+	parseCompletionDeclaration,
+} from "../core/completion.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { CompletionFact } from "../domains/middleware/index.js";
 import { StringEnum } from "../engine/ai.js";
@@ -12,44 +19,6 @@ import { effectiveToolCall } from "./surface.js";
  * never read from the reply text. The tool is pure: the tool_call and tool_result pair in the session ledger is its
  * whole effect.
  */
-
-export const COMPLETION_STATES = ["done", "partly_done", "not_done"] as const;
-export type CompletionState = (typeof COMPLETION_STATES)[number];
-
-export const COMPLETION_LIMITATION_REASONS = [
-	"blocked_by_policy",
-	"missing_access",
-	"needs_decision",
-	"out_of_scope",
-	"out_of_budget",
-	"not_reproducible",
-	"tool_unavailable",
-	"other",
-] as const;
-type CompletionLimitationReason = (typeof COMPLETION_LIMITATION_REASONS)[number];
-
-export interface CompletionDeclaration {
-	state: CompletionState;
-	limitations: Array<{ what: string; why: CompletionLimitationReason }>;
-	unverified: string[];
-	remaining?: string[];
-}
-
-function isMember<T extends string>(list: ReadonlyArray<T>, value: unknown): value is T {
-	return typeof value === "string" && (list as ReadonlyArray<string>).includes(value);
-}
-
-function strings(value: unknown): string[] | null {
-	if (value === undefined || value === null) return [];
-	if (!Array.isArray(value)) return null;
-	const out: string[] = [];
-	for (const item of value) {
-		if (typeof item !== "string") return null;
-		const trimmed = item.trim();
-		if (trimmed.length > 0 && !out.includes(trimmed)) out.push(trimmed);
-	}
-	return out;
-}
 
 /**
  * How a turn ended as the host seals it (fleet design 4.3): the claim as given beside the host's assessment.
@@ -91,22 +60,8 @@ export function sealCompletion(
 
 /** The declaration in a `finish` call's arguments or result details, or null when it is not one. */
 function parseCompletion(value: unknown): CompletionDeclaration | null {
-	if (typeof value !== "object" || value === null) return null;
-	const record = value as Record<string, unknown>;
-	if (!isMember(COMPLETION_STATES, record.state)) return null;
-	const raw = record.limitations ?? [];
-	if (!Array.isArray(raw)) return null;
-	const limitations: CompletionDeclaration["limitations"] = [];
-	for (const item of raw) {
-		const entry = item as { what?: unknown; why?: unknown } | null;
-		const what = typeof entry?.what === "string" ? entry.what.trim() : "";
-		if (what.length === 0 || !isMember(COMPLETION_LIMITATION_REASONS, entry?.why)) return null;
-		limitations.push({ what, why: entry.why });
-	}
-	const unverified = strings(record.unverified);
-	const remaining = strings(record.remaining);
-	if (unverified === null || remaining === null) return null;
-	return { state: record.state, limitations, unverified, ...(remaining.length > 0 ? { remaining } : {}) };
+	const parsed = parseCompletionDeclaration(value, { closed: false });
+	return parsed.ok ? parsed.completion : null;
 }
 
 /** The declaration a settled tool result carries, read from its details; null for any other result. */
@@ -271,7 +226,12 @@ function normalizeLimitations(value: unknown): unknown {
 	if (!Array.isArray(value)) return value;
 	return value.map((item) => {
 		const entry = item as { what?: unknown; why?: unknown } | null;
-		if (entry === null || typeof entry !== "object" || isMember(COMPLETION_LIMITATION_REASONS, entry.why)) return item;
+		if (
+			entry === null ||
+			typeof entry !== "object" ||
+			(COMPLETION_LIMITATION_REASONS as ReadonlyArray<unknown>).includes(entry.why)
+		)
+			return item;
 		const why = typeof entry.why === "string" ? entry.why.trim() : "";
 		const what = typeof entry.what === "string" ? entry.what.trim() : "";
 		return { ...entry, what: why.length > 0 && what.length > 0 ? `${what} (${why})` : what || why, why: "other" };

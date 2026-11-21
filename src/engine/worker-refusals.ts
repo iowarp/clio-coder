@@ -6,14 +6,6 @@ import type { SafetyDecision } from "../domains/safety/contract.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { WORKER_REFUSAL_LIMIT_PREFIX } from "../worker/spec-contract.js";
 
-/**
- * Execute refusals a non-interactive worker absorbs before its run ends. The
- * model reads each refusal as a tool result and may take another route; a
- * model that keeps proposing commands nobody can approve is stuck, and the
- * limit turns that loop into a typed permission_required outcome.
- */
-export const WORKER_REFUSAL_LIMIT = 3;
-
 const REFUSED_COMMAND_MAX_CHARS = 200;
 
 export interface WorkerRefusal {

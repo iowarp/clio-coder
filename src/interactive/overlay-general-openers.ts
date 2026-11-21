@@ -10,8 +10,8 @@ import {
 	agentRoleFactsResolver,
 	compileFleetRunPreview,
 	executeFleetRun,
-	FleetWorkspaceBusyError,
 	fleetRouteResolver,
+	WriterSetBusyError,
 } from "../domains/dispatch/index.js";
 import type { MemoryRecord } from "../domains/memory/index.js";
 import {
@@ -891,7 +891,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					deps.notify("info", `plan ${preview.name}: cancelled before every step settled`, "fleet-run:settled");
 					return;
 				}
-				if (error instanceof FleetWorkspaceBusyError) {
+				if (error instanceof WriterSetBusyError) {
 					deps.notify("warning", `plan ${preview.name}: ${error.message}`, "fleet-run:refused");
 					return;
 				}

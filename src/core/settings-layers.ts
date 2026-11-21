@@ -349,6 +349,7 @@ const PROJECT_LIMIT_KEYS: ReadonlyArray<{
 	{ block: "safety", key: "autonomousTokens", zeroIsOff: true },
 	{ block: "safety", key: "bashIdleSeconds", zeroIsOff: true },
 	{ block: "fleet", key: "toolCallsPerRun", zeroIsOff: false },
+	{ block: "fleet", key: "runTimeoutMs", zeroIsOff: false },
 	{ block: "fleet", key: "internalRunTimeoutMs", zeroIsOff: false },
 ];
 const AUTONOMOUS_CAP_KEYS: ReadonlySet<string> = new Set([

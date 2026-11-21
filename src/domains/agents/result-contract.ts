@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { stripAuthoredTrailers } from "../../core/commit-message.js";
+import { type CompletionDeclaration, parseCompletionDeclaration } from "../../core/completion.js";
 import {
 	type HoareAssurance,
 	type HoareObligation,
@@ -27,6 +28,12 @@ export type ResultContract =
 	 * a review judges a subject, it does not mechanize proofs.
 	 */
 	| { kind: "review-verdict" }
+	/**
+	 * A judge's verdict (fleet design 4.8, M9): the gate's own answer, so V2 conformance applies to judges as it does
+	 * to reviewers. With `candidates` it is a compete judge's `{winner, checks}`, the winner one of that many subjects;
+	 * without, a council synthesis's `{verdict, text}`. Only the coordinator assigns it, never a recipe.
+	 */
+	| { kind: "judge-verdict"; candidates?: number }
 	| { kind: "council-report" }
 	/**
 	 * One council member's ballot under `synthesis: "vote"`.
@@ -78,6 +85,12 @@ export type ResultContract =
 	| { kind: "oracle-report" }
 	| { kind: "external-delegation" }
 	/**
+	 * A non-builder's prose answer: any final text is the result, and nothing in it is validated (fleet design 4.8,
+	 * M9). Fleet proposals, a non-builder gate author and imported read-only recipes hand back text; they borrowed
+	 * `artifact-report` until that became a builder report with a required typed completion.
+	 */
+	| { kind: "text-report" }
+	/**
 	 * The run's postcondition is the artifact it left on disk, so its terminal
 	 * text carries no claim to validate. A caller may bind a workspace-relative
 	 * path to check readability and nonempty content during terminal repair.
@@ -127,6 +140,42 @@ export interface StructuredHelperResult {
 	data: Record<string, unknown>;
 }
 
+/** The generation schema of a builder report's completion declaration; `parseCompletionDeclaration` decides. */
+const COMPLETION_SCHEMA: Record<string, unknown> = {
+	type: "object",
+	properties: {
+		state: { type: "string", enum: ["done", "partly_done", "not_done"] },
+		limitations: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					what: { type: "string", minLength: 1 },
+					why: {
+						type: "string",
+						enum: [
+							"blocked_by_policy",
+							"missing_access",
+							"needs_decision",
+							"out_of_scope",
+							"out_of_budget",
+							"not_reproducible",
+							"tool_unavailable",
+							"other",
+						],
+					},
+				},
+				required: ["what", "why"],
+				additionalProperties: false,
+			},
+		},
+		unverified: { type: "array", items: { type: "string", minLength: 1 } },
+		remaining: { type: "array", items: { type: "string", minLength: 1 } },
+	},
+	required: ["state", "limitations", "unverified"],
+	additionalProperties: false,
+};
+
 /** Generation schemas guide serialization; the semantic validators below remain authoritative. */
 export function internalHelperResultSchema(contract: ResultContract): Record<string, unknown> | null {
 	const text = { type: "string", minLength: 1 };
@@ -152,8 +201,9 @@ export function internalHelperResultSchema(contract: ResultContract): Record<str
 					declaredChecks: strings,
 					summary: { type: ["string", "null"] },
 					commitMessage: { type: ["string", "null"] },
+					completion: COMPLETION_SCHEMA,
 				}),
-				required: ["mutatedPaths", "validations"],
+				required: ["mutatedPaths", "validations", "completion"],
 			};
 		case "scout-report":
 			return object({
@@ -2027,6 +2077,94 @@ function mutationValidationsReason(): string {
  * pass. A self-reported failure still seals `fail`: an agent reporting against
  * its own interest is the one claim here that needs no corroboration.
  */
+/** Why a builder report's required `completion` field is missing or malformed, or null when it declares (DESIGN 4.3). */
+function completionFieldReason(label: string, value: Record<string, unknown>): string | null {
+	if (value.completion === undefined)
+		return `${label} must carry completion: {"state":"done|partly_done|not_done","limitations":[{"what":"...","why":"..."}],"unverified":["..."]}`;
+	const parsed = parseCompletionDeclaration(value.completion);
+	return parsed.ok ? null : `${label} ${parsed.reason}`;
+}
+
+/** The report kinds a builder hands back, each of which must declare its completion (DESIGN 4.3). */
+function isBuilderReportKind(kind: string | null | undefined): boolean {
+	return kind === "mutation-report" || kind === "artifact-report";
+}
+
+/**
+ * The completion a builder report declares, or null when the contract is not a builder report or the output does not
+ * carry a valid declaration. The grader reads this typed field and never the report's prose.
+ */
+export function builderReportCompletion(
+	contract: ResultContract | null,
+	output: string | null,
+): CompletionDeclaration | null {
+	if (contract === null || !isBuilderReportKind(contract.kind)) return null;
+	const parsed = parseJson(output);
+	if (!parsed.ok) return null;
+	const completion = parseCompletionDeclaration(parsed.value.completion);
+	return completion.ok ? completion.completion : null;
+}
+
+/** A judge's answer: a compete winner with typed checks, or a council synthesis's verdict and text. */
+function validateJudgeVerdict(
+	contract: Extract<ResultContract, { kind: "judge-verdict" }>,
+	output: string | null,
+): ResultContractValidation {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return failure(contract, "unmeasured", `Judge verdict payload failed: ${parsed.reason}`);
+	const value = parsed.value;
+	if (contract.candidates === undefined) {
+		const unexpected = unexpectedResultKeyReason("Synthesis verdict", value, ["verdict", "text"]);
+		if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+		if (!string(value.verdict) || !string(value.text))
+			return failure(contract, "unmeasured", 'Synthesis verdict needs a non-empty "verdict" and a non-empty "text"');
+		return success(contract, "unmeasured", value);
+	}
+	const unexpected = unexpectedResultKeyReason("Judge verdict", value, ["winner", "checks"]);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	const winner = value.winner;
+	if (typeof winner !== "number" || !Number.isSafeInteger(winner) || winner < 1 || winner > contract.candidates)
+		return failure(contract, "unmeasured", `Judge verdict winner must be an integer 1..${contract.candidates}`);
+	const checks = parseChecks(value.checks);
+	if (checks === null || checks.length === 0)
+		return failure(
+			contract,
+			"unmeasured",
+			'Judge verdict "checks" must be a non-empty array of {name, passed, evidence}',
+		);
+	return success(contract, "unmeasured", value);
+}
+
+function validateArtifactReport(
+	contract: Extract<ResultContract, { kind: "artifact-report" }>,
+	input: ResultContractValidationInput,
+): ResultContractValidation {
+	const parsed = parseJson(input.output);
+	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	const unexpected = unexpectedResultKeyReason("Artifact result", parsed.value, ["completion", "summary"]);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	const completion = completionFieldReason("Artifact result", parsed.value);
+	if (completion !== null) return failure(contract, "unmeasured", completion);
+	const summary = parsed.value.summary;
+	if (summary !== undefined && summary !== null && typeof summary !== "string")
+		return failure(contract, "unmeasured", "Artifact result summary must be a string when present");
+	if (contract.path !== undefined) {
+		const content = input.filesystem.readFile(path.resolve(input.cwd, contract.path));
+		if (content === null) {
+			return failure(
+				contract,
+				"unmeasured",
+				`Required artifact is missing or unreadable: ${JSON.stringify(contract.path)}`,
+			);
+		}
+		if (content.trim().length === 0) {
+			return failure(contract, "unmeasured", `Required artifact is empty: ${JSON.stringify(contract.path)}`);
+		}
+	}
+	// A preexisting seed can satisfy the path check; correctness and freshness remain the caller's responsibility.
+	return success(contract, "unmeasured", { artifact: true });
+}
+
 function validateMutation(contract: ResultContract, input: ResultContractValidationInput): ResultContractValidation {
 	// A clipped result is incomplete whatever its head happens to parse as; the
 	// bound is named so the repair is about length, not JSON.
@@ -2048,8 +2186,11 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 		"declaredChecks",
 		"commitMessage",
 		"summary",
+		"completion",
 	]);
 	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	const completion = completionFieldReason("Mutation result", value);
+	if (completion !== null) return failure(contract, "unmeasured", completion);
 	if (!Array.isArray(value.mutatedPaths) || value.mutatedPaths.some((entry) => !string(entry))) {
 		return failure(contract, "unmeasured", "Mutation result mutatedPaths must be an array of non-empty path strings");
 	}
@@ -2187,6 +2328,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			if (input.outputTruncated)
 				return failure(input.contract, "fail", "Verifier report was truncated; shorten the report");
 			return validateVerifier(input.contract, input.output, true, input.observedRunEffects?.proofs);
+		case "judge-verdict":
+			return validateJudgeVerdict(input.contract, input.output);
 		case "review-verdict":
 			if (input.outputTruncated)
 				return failure(input.contract, "fail", "Review verdict was truncated; shorten the report");
@@ -2223,24 +2366,10 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateOracle(input.contract, input.output);
 		case "external-delegation":
 			return success(input.contract, "unmeasured", { external: true });
-		case "artifact-report": {
-			if (input.contract.path !== undefined) {
-				const content = input.filesystem.readFile(path.resolve(input.cwd, input.contract.path));
-				if (content === null) {
-					return failure(
-						input.contract,
-						"unmeasured",
-						`Required artifact is missing or unreadable: ${JSON.stringify(input.contract.path)}`,
-					);
-				}
-				if (content.trim().length === 0) {
-					return failure(input.contract, "unmeasured", `Required artifact is empty: ${JSON.stringify(input.contract.path)}`);
-				}
-			}
-			// A preexisting seed can satisfy this check; correctness and freshness
-			// remain the caller's responsibility. Unbound reports retain any text.
-			return success(input.contract, "unmeasured", { artifact: true });
-		}
+		case "text-report":
+			return success(input.contract, "unmeasured", { text: true });
+		case "artifact-report":
+			return validateArtifactReport(input.contract, input);
 		case "context-handbook":
 			return validateContextHandbook(input.contract, input.output);
 		case "code-report":
@@ -2315,6 +2444,10 @@ export function resultContractShape(contract: ResultContract): string {
 			return 'one of {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]} or {"verdict":"fail","checks":[{"name":"npm run typecheck","passed":false,"evidence":"exit 1"}]}; verdict legal values are pass | fail and checks[].passed legal values are true | false';
 		case "review-verdict":
 			return 'one of {"verdict":"pass","checks":[{"name":"...","passed":true,"evidence":"what you inspected and observed"}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed"}]}; the verdict must agree with every check';
+		case "judge-verdict":
+			return contract.candidates === undefined
+				? '{"verdict":"the conclusion","text":"the supported synthesis"}'
+				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on"}]}; winner is an integer 1..${contract.candidates}`;
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "council-ballot":
@@ -2328,7 +2461,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "world-knowledge-report":
 			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
-			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. Mark a deliberate run before the change, such as a red test-first baseline, with "baseline":true; quality judges only the checks run after the change. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
+			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional","completion":{"state":"done|partly_done|not_done","limitations":[{"what":"...","why":"blocked_by_policy|missing_access|needs_decision|out_of_scope|out_of_budget|not_reproducible|tool_unavailable|other"}],"unverified":["claims made without a check behind them"],"remaining":["optional, for partly_done"]}}. completion is required: done when the assignment is finished, including a finding that nothing needed to change; partly_done or not_done with each limitation that stopped you. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. Mark a deliberate run before the change, such as a red test-first baseline, with "baseline":true; quality judges only the checks run after the change. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "delegation-plan":
@@ -2336,11 +2469,10 @@ export function resultContractShape(contract: ResultContract): string {
 		case "oracle-report":
 			return '{"verdict":"one line","challenge":"the strongest objection you can mount","changesMyMind":"the evidence that would reverse the verdict","citedDecisions":["decision key or task id you relied on"]}';
 		case "external-delegation":
+		case "text-report":
 			return "any final text";
 		case "artifact-report":
-			return contract.path === undefined
-				? "any final text; the artifact you wrote at the location the task named is the result"
-				: `any final text; the required artifact at ${JSON.stringify(contract.path)} must be readable and non-empty on disk`;
+			return `{"summary":"optional: what the artifact holds","completion":{"state":"done|partly_done|not_done","limitations":[{"what":"...","why":"blocked_by_policy|missing_access|needs_decision|out_of_scope|out_of_budget|not_reproducible|tool_unavailable|other"}],"unverified":["claims made without a check behind them"],"remaining":["optional, for partly_done"]}}; the artifact you wrote ${contract.path === undefined ? "at the location the task named" : `at ${JSON.stringify(contract.path)}, readable and non-empty on disk,`} is the result, and completion declares whether it is finished`;
 		case "context-handbook":
 			return '{"projectName":"string","identity":"one sentence","conventions":[],"invariants":[],"sections":[{"title":"Architecture","body":"markdown that cites `real/path.ts` tokens"}]}';
 		case "code-report":
@@ -2359,9 +2491,11 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 	switch (contract.kind) {
 		case "architect-plan":
 		case "external-delegation":
-		case "artifact-report":
+		case "text-report":
 		case "code-report":
 			return null;
+		case "artifact-report":
+			return '{"summary":"...","completion":{"state":"done|partly_done|not_done","limitations":[],"unverified":[]}}';
 		case "scout-report":
 			return '{"findings":[{"claim":"...","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]}';
 		case "verifier-report":
@@ -2375,7 +2509,7 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 		case "research-report":
 			return '{"source":"local|external","findings":[{"claim":"...","evidence":"..."}]}';
 		case "mutation-report":
-			return '{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}],"summary":"..."}';
+			return '{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}],"summary":"...","completion":{"state":"done|partly_done|not_done","limitations":[],"unverified":[]}}';
 		case "council-ballot":
 			return councilBallotShape(contract.options);
 		default:
@@ -2532,6 +2666,7 @@ const RECIPE_DECLARABLE_KINDS = [
 	"oracle-report",
 	"external-delegation",
 	"artifact-report",
+	"text-report",
 	"context-handbook",
 	"delegation-plan",
 ] as const;
@@ -2542,7 +2677,7 @@ const RECIPE_DECLARABLE_KINDS = [
  * vote member's slot, so it arrives as a `resultContractOverride` on the
  * request and never out of frontmatter.
  */
-const COORDINATOR_AUTHORED_KINDS = ["council-ballot"] as const;
+const COORDINATOR_AUTHORED_KINDS = ["council-ballot", "judge-verdict"] as const;
 
 function parseContract(
 	value: unknown,
@@ -2612,6 +2747,16 @@ function parseContract(
 			throw new Error(`agent recipe: ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+	if (record.kind === "judge-verdict" && kinds.includes(record.kind)) {
+		const candidates = record.candidates;
+		if (
+			!only("kind", "candidates") ||
+			(candidates !== undefined &&
+				(typeof candidates !== "number" || !Number.isSafeInteger(candidates) || candidates < 1 || candidates > 64))
+		)
+			throw new Error(`agent recipe: ${sourcePath}: judge-verdict accepts only kind and candidates (1..64)`);
+		return { kind: "judge-verdict", ...(candidates !== undefined ? { candidates } : {}) };
+	}
 	if (record.kind === "verifier-report" && kinds.includes(record.kind)) {
 		if (!only("kind", "assurance") || (record.assurance !== undefined && !isHoareAssurance(record.assurance)))
 			throw new Error(
@@ -2622,7 +2767,9 @@ function parseContract(
 	if (!kinds.includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);
 	}
-	return { kind: record.kind as Exclude<ResultContract["kind"], "architect-plan" | "mutation-report"> };
+	return {
+		kind: record.kind as Exclude<ResultContract["kind"], "architect-plan" | "mutation-report" | "judge-verdict">,
+	};
 }
 
 /** Strict frontmatter parser for the one recipe result-contract schema. */

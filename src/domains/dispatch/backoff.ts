@@ -7,12 +7,14 @@ export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefin
 		code === "worker_tool_call_cap_exhausted" ||
 		code === "worker_context_exhausted" ||
 		code === "worker_turn_timeout" ||
+		code === "worker_run_timeout" ||
 		code === "worker_output_cap_exhausted" ||
 		code === "loop_guard_tools_disabled_exhausted" ||
 		code === "exploration_stalled" ||
 		code === "result_contract_exhausted" ||
 		code === "host_verification_rejected" ||
-		code === "worker_no_work" ||
+		code === "obligation_unmet" ||
+		code === "worker_not_done" ||
 		code === "worker_partial_work" ||
 		code === "worker_mutation_blocked" ||
 		code === "merge_withheld" ||

@@ -172,6 +172,7 @@ import {
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
+	WORKER_REFUSAL_LIMIT,
 	WORKER_REFUSAL_LIMIT_PREFIX,
 	WORKER_SPEC_HOOKLESS_VERSION,
 	type WorkerBudget,
@@ -184,9 +185,11 @@ import type { WorkerDecisionBinding } from "../../worker/stdin-demux.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import {
+	builderReportCompletion,
 	INTERNAL_HELPER_RESULT_KINDS,
 	isHoareResultContract,
 	mutationReportFailures,
+	parseVerifierResult,
 	type ResultContract,
 	resultContractAuthorship,
 	validateRecipeResult,
@@ -340,7 +343,6 @@ import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFrom
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
-import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	AbortReason,
 	DispatchAdmissionObserver,
@@ -404,6 +406,7 @@ import {
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
+import { type GradeContract, type GradeFacts, type GradeVerdict, grade, type RunVerdict } from "./grading.js";
 import {
 	effectiveWorkerPermissionMode,
 	evaluateJudgedGrant,
@@ -464,7 +467,6 @@ import {
 	runStatusForOutcome,
 } from "./outcome.js";
 import { dispatchOwnership, sessionAncestorIds } from "./ownership.js";
-import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
@@ -526,8 +528,8 @@ import {
 	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
-import { planCardLimits } from "./run-limits.js";
-import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
+import { planCardLimits, resolveRunLimits, resolveRunWall, runWallCapMs, wallClockMessage } from "./run-limits.js";
+import { finishRunResult, receiptAssurance, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
 	fleetRootTelemetryContext,
@@ -541,11 +543,10 @@ import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.j
 import {
 	blockedStateChangingCalls,
 	blockedWriteAttempts,
-	blockedWriteDetail,
 	countToolCalls,
 	executedCalls,
 	hasPotentiallyMutatingAttempt,
-	readScopedNoToolsReason,
+	observationCalls,
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
@@ -554,8 +555,6 @@ import {
 	snapshotUnfinishedTools,
 	summarizeToolActivity,
 	type ToolFinishPayload,
-	workerNoWorkDetail,
-	workerPartialWorkDetail,
 	zeroSuccessfulToolNote,
 } from "./tool-stats.js";
 import {
@@ -645,6 +644,7 @@ import {
 	writeRootRequestDetail,
 	writeRootRequestFromEntries,
 } from "./write-root-requests.js";
+import { canonicalWriteRoots, joinWriterSet, type WriterSetLease } from "./writer-set.js";
 
 /**
  * What a running worker has spent, as its own call telemetry folds it. Absent until the first frame reaches the
@@ -1475,6 +1475,8 @@ function reportDispatchDiagnostic(scope: string, error: unknown): void {
 const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	// The same restricted context meets the same target on every attempt.
 	"information_flow_blocked",
+	// The wall clock moved the run to handback; whatever it hit after that, it seals timed_out (fleet M8).
+	"worker_run_timeout",
 	"worker_context_exhausted",
 	"worker_turn_timeout",
 	"worker_output_cap_exhausted",
@@ -1483,11 +1485,14 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
-	"worker_no_work",
+	"obligation_unmet",
 	"worker_final_output_missing",
 ];
 
-const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker loop ended without a sealed final assistant output";
+/** A builder that changed nothing and either left its obligation unmet or declared it unfinished keeps an idle tree. */
+function idleBuilderOutcome(code: RunOutcomeCode | null): boolean {
+	return code === "obligation_unmet" || code === "worker_not_done";
+}
 
 function hasDurableFinalOutput(output: RunResultOutput | undefined): boolean {
 	return output?.state === "final" && output.text.trim().length > 0;
@@ -2137,6 +2142,8 @@ export interface WorkerDynamicContext {
 	ledgerAssignments?: ReadonlyArray<LedgerAssignment>;
 	/** The run's answer budget; the worker is told it so it writes to fit (M3). */
 	answerBudgetBytes?: number;
+	/** The run's wall clock; the worker is told it so it reports before the wall (M8). */
+	wallClockMs?: number;
 	/** Selects the handbook audience with the capability class; never tier policy. */
 	capabilityClass?: AgentCapabilityClass | null;
 	/** Recipe id, which names the handbook audience for built-in roles. */
@@ -2356,6 +2363,10 @@ export function buildDynamicPromptMessages(
 	if (dynamicContext.answerBudgetBytes !== undefined) {
 		const body = answerBudgetMessage(dynamicContext.answerBudgetBytes);
 		messages.push({ id: "dispatch-answer-budget", body, contentHash: sha256(body) });
+	}
+	if (dynamicContext.wallClockMs !== undefined) {
+		const body = wallClockMessage(dynamicContext.wallClockMs);
+		messages.push({ id: "dispatch-wall-clock", body, contentHash: sha256(body) });
 	}
 	if (req.briefing !== undefined) {
 		const body = [
@@ -3723,6 +3734,26 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	);
 	const settings = input.settings ?? config?.get();
 	const readOnly = input.envelope.write.mode === "none";
+	// DESIGN 4.5: what stops this run, sealed once. Dispatch stamped the wall clock; a direct builder resolves it here.
+	const limitSettings = settings ?? DEFAULT_SETTINGS;
+	const wall =
+		input.req.runWallMs !== undefined && input.req.assignmentDeadlineAt !== undefined
+			? { wallMs: input.req.runWallMs, deadlineAt: input.req.assignmentDeadlineAt }
+			: resolveRunWall({
+					capMs: runWallCapMs(limitSettings.fleet.limits, input.req.requestOrigin),
+					...(input.recipe?.budget?.timeoutMs !== undefined ? { recipeMs: input.recipe.budget.timeoutMs } : {}),
+					startedAt: Date.now(),
+					...(input.req.assignmentDeadlineAt !== undefined ? { deadlineAt: input.req.assignmentDeadlineAt } : {}),
+				});
+	const limits = resolveRunLimits({
+		role: input.role,
+		wallMs: wall.wallMs,
+		deadlineAt: wall.deadlineAt,
+		responseSeconds: limitSettings.safety.limits.workerResponseSeconds,
+		toolCeiling: input.budget.ceiling ?? input.budget.hardCap,
+		maxRetries: limitSettings.fleet.retry.maxRetries,
+		refusals: WORKER_REFUSAL_LIMIT,
+	});
 	const spec: WorkerSpec = {
 		...(input.req.runIdHint
 			? {
@@ -3754,6 +3785,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		envelope: input.envelope,
 		...(input.req.ledger !== undefined ? { ledger: input.req.ledger } : {}),
 		budget: input.budget,
+		limits,
 		middlewareSnapshot: input.middlewareSnapshot,
 		permit: input.permit,
 		...(input.flowPolicy !== undefined ? { flowPolicy: structuredClone(input.flowPolicy) } : {}),
@@ -6077,10 +6109,13 @@ export function createDispatchBundle(
 		}
 	}
 
-	/** Explicit deadlines outlive queue admission and use the ordinary truthful abort path. */
-	function watchAssignmentDeadline(run: ActiveRun, callerDeadlineAt?: number): void {
+	/**
+	 * Every run's deadline (its wall clock, or an earlier one the call set) outlives queue admission and the caller, so a
+	 * detached run is stopped too; it seals timed_out through the ordinary abort path (DESIGN 4.5).
+	 */
+	function watchAssignmentDeadline(run: ActiveRun): void {
 		const deadlineAt = run.req.assignmentDeadlineAt;
-		if (deadlineAt === undefined || (callerDeadlineAt !== undefined && deadlineAt >= callerDeadlineAt)) return;
+		if (deadlineAt === undefined) return;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let settled = false;
 		const check = (): void => {
@@ -6821,6 +6856,7 @@ export function createDispatchBundle(
 		const dynamicContext: WorkerDynamicContext = {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
 			answerBudgetBytes,
+			...(req.runWallMs !== undefined ? { wallClockMs: req.runWallMs } : {}),
 			capabilityClass: spec.capabilityClass,
 			agentId: recipe.id,
 			workingContextPaths: pathScope.workingContextPaths,
@@ -7266,7 +7302,6 @@ export function createDispatchBundle(
 		routeDecision: RouteDecisionV1,
 		probeClaims: ProbeClaim[],
 		observer?: DispatchAdmissionObserver,
-		callerDeadlineAt?: number,
 		hostRun?: DispatchPreparationOptions["hostRun"],
 		signal?: AbortSignal,
 	): Promise<{
@@ -8053,18 +8088,16 @@ export function createDispatchBundle(
 					stopReason: result.stopReason ?? null,
 				};
 				const { outcome, detail } = resolveRunOutcome(evidence);
-				let finalOutcome = outcome;
-				let finalDetail = detail;
 				// A failure the adapter typed (sign-in, an unoffered model or thinking level, a broken channel) settles
 				// under its own code, with the adapter's words beside the generic exit detail (C-16).
-				if (outcome === "failed" && result.failureCode !== undefined) {
-					outcomeCode = result.failureCode;
-					if (result.failureMessage !== undefined)
-						finalDetail = boundedExternalDiagnostic(
-							detail !== null ? `${detail}; ${result.failureMessage}` : result.failureMessage,
-							MAX_ACP_FAILURE_DETAIL_BYTES,
-						);
-				}
+				const adapterCode = outcome === "failed" ? (result.failureCode ?? null) : null;
+				const terminationDetail =
+					adapterCode !== null && result.failureMessage !== undefined
+						? boundedExternalDiagnostic(
+								detail !== null ? `${detail}; ${result.failureMessage}` : result.failureMessage,
+								MAX_ACP_FAILURE_DETAIL_BYTES,
+							)
+						: detail;
 				// Same high-rigor completion gate as native dispatch: an external
 				// agent is a guest inside Clio's policy model, not an exemption.
 				const finishContract = assessDispatchFinishContract({
@@ -8075,35 +8108,44 @@ export function createDispatchBundle(
 					assistantText: finishContractAssistantText,
 					assistantTurnId: finishContractAssistantTurnId,
 				});
-				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
-					evidence.qualityGateFailure = true;
-					finalOutcome = "failed";
-					finalDetail = "high-rigor finish gate: unvalidated mutation";
-					failureMessage = finalDetail;
-				}
-				// Same all-writes-refused rule as native dispatch, judged from the
-				// ACP tool kinds Clio observed and admitted. ACP delegation carries
-				// no recipe capability class, so any run not pinned read-only is an
-				// edit assignment here.
-				if (finalOutcome === "succeeded" && outcomeCode === null && req.readOnly !== true) {
-					const blockedWrites = blockedWriteAttempts(toolStats, acpToolActionClass);
-					if (blockedWrites !== null) {
-						finalOutcome = "failed";
-						outcomeCode = "worker_mutation_blocked";
-						finalDetail = blockedWriteDetail(blockedWrites);
-						failureMessage = finalDetail;
-					}
-				}
+				// The same grader as native dispatch (DESIGN 4.8). Clio did not see the peer's tool lane, so its activity
+				// is unobserved and an obligation it would need reads unknown, never unmet. The all-writes-refused rule is
+				// judged from the ACP tool kinds Clio observed and admitted; any run not pinned read-only is a builder.
+				const acpRole = req.readOnly === true ? "explorer" : "builder";
+				const gradeContract: GradeContract = {
+					role: acpRole,
+					obligation: resolveObligation(acpRole, null, req.intent?.readRoots ?? []),
+					contractKind: null,
+					toolLaneObserved: false,
+				};
 				const capturedOutput = outputCapture.snapshot();
 				// Closed before the receipt snapshot, so a late acknowledgement cannot race the sealed facts.
 				steeringProvenanceClosed = true;
 				const steering = steeringProvenance.map((entry) => ({ ...entry }));
-				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
-					finalOutcome = "failed";
-					outcomeCode = "worker_final_output_missing";
-					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
-					failureMessage = finalDetail;
-				}
+				const gradeFacts: GradeFacts = {
+					termination: { outcome, detail: terminationDetail },
+					workerCode: { code: adapterCode },
+					finishGateEngaged: finishContract?.rigor === "high" && finishContract.assessment.kind === "engage",
+					blockedWrites: blockedWriteAttempts(toolStats, acpToolActionClass),
+					handback: { finalOutput: hasDurableFinalOutput(capturedOutput), resultContract: null },
+					work: {
+						activity: null,
+						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
+						blockedStateChanging: 0,
+						escalations: { denied: 0, timedOut: 0 },
+						recordedLimitations: [],
+						writeRootRequest: null,
+						completion: null,
+						ungroundedChecks: [],
+						reviewVerdict: null,
+					},
+				};
+				let graded = grade(gradeContract, gradeFacts);
+				if (graded.qualityGateFailure) evidence.qualityGateFailure = true;
+				let finalOutcome = graded.outcome;
+				let finalDetail = graded.detail;
+				outcomeCode = graded.outcomeCode;
+				if (graded.messageChanged && graded.detail !== null) failureMessage = graded.detail;
 				let worktreeReceipt: RunResultDraft["worktree"];
 				let accounted: TaskWorktreePreview | undefined;
 				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
@@ -8118,11 +8160,17 @@ export function createDispatchBundle(
 							accounted = entry;
 						},
 					});
-					if (worktreeReceipt.reason !== undefined) {
-						finalOutcome = "failed";
-						finalDetail = worktreeReceipt.detail ?? worktreeReceipt.reason;
-						failureMessage = finalDetail;
-					}
+					gradeFacts.landing = {
+						failure:
+							worktreeReceipt.reason === undefined
+								? null
+								: { code: null, detail: worktreeReceipt.detail ?? worktreeReceipt.reason },
+					};
+					graded = grade(gradeContract, gradeFacts);
+					finalOutcome = graded.outcome;
+					finalDetail = graded.detail;
+					outcomeCode = graded.outcomeCode;
+					if (graded.messageChanged && graded.detail !== null) failureMessage = graded.detail;
 				}
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
 					worktreeReceipt = snapshotUnappliedTaskWorktree(req.taskWorktree, req.apply ?? "merge");
@@ -8150,6 +8198,12 @@ export function createDispatchBundle(
 					capturedOutput,
 					steering,
 				);
+				receiptDraft.verdict = {
+					version: 1,
+					obligation: gradeContract.obligation,
+					rules: graded.rules,
+					assurance: receiptAssurance(receiptDraft),
+				};
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
@@ -8228,7 +8282,7 @@ export function createDispatchBundle(
 		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
-		watchAssignmentDeadline(activeRun, callerDeadlineAt);
+		watchAssignmentDeadline(activeRun);
 		// The handle goes out once the running row is durable, as it did with the
 		// sync writer: a sibling session's steer reads ownership from runs.json,
 		// and without the row it fell through to the assignment and let a foreign
@@ -8366,7 +8420,6 @@ export function createDispatchBundle(
 				routeObservation.decision,
 				probeClaims,
 				observer,
-				preparation?.deadlineAt,
 				hostRun,
 				preparation?.signal,
 			);
@@ -8973,7 +9026,13 @@ export function createDispatchBundle(
 			throw error;
 		}
 		if (!heldFollower) timing.workerSpawnedAt = new Date(now()).toISOString();
-		const abort = () => worker.abort();
+		// The wall clock and a call's timeout_ms can both stop a run; its worker is stopped once (fleet M8).
+		let workerAborted = false;
+		const abort = (): void => {
+			if (workerAborted) return;
+			workerAborted = true;
+			worker.abort();
+		};
 		const sendToWorker = worker.send?.bind(worker);
 		answerHook = sendToWorker;
 		const steeringProvenance: RunSteeringProvenance[] = [];
@@ -10185,10 +10244,10 @@ export function createDispatchBundle(
 					stopReason: null,
 				};
 				const { outcome, detail } = resolveRunOutcome(evidence);
-				let finalOutcome = outcome;
-				let finalDetail = detail;
+				// The process's end, then one grader over what the host observed (DESIGN 4.8, fleet M9).
+				let terminationDetail = detail;
 				if (detail === "permission_required" && permissionDenialDetail !== null) {
-					finalDetail = `${detail}; ${permissionDenialDetail}`;
+					terminationDetail = `${detail}; ${permissionDenialDetail}`;
 					failureMessage = permissionDenialDetail;
 				}
 				// The stream drained above, so this is the run's whole write record.
@@ -10205,7 +10264,8 @@ export function createDispatchBundle(
 					"complete"
 						? observedRunEffects.mutatedPaths
 						: null;
-				if (remoteReturn && finalOutcome === "succeeded") {
+				let changeReturnFailure: string | null = null;
+				if (remoteReturn && outcome === "succeeded") {
 					try {
 						remoteImport = await importFleetChanges(
 							remoteReturn,
@@ -10218,9 +10278,7 @@ export function createDispatchBundle(
 							}),
 						);
 					} catch (error) {
-						finalOutcome = "failed";
-						finalDetail = `SSH change return failed: ${error instanceof Error ? error.message : String(error)}. Remote ${placed.id} branch ${remoteReturn.worktree.branch} at ${remoteReturn.worktree.path} is preserved.`;
-						failureMessage = finalDetail;
+						changeReturnFailure = `SSH change return failed: ${error instanceof Error ? error.message : String(error)}. Remote ${placed.id} branch ${remoteReturn.worktree.branch} at ${remoteReturn.worktree.path} is preserved.`;
 					}
 				}
 				const finishContract = assessDispatchFinishContract({
@@ -10231,154 +10289,71 @@ export function createDispatchBundle(
 					assistantText: finishContractAssistantText,
 					assistantTurnId: finishContractAssistantTurnId,
 				});
-				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
-					evidence.qualityGateFailure = true;
-					finalOutcome = "failed";
-					finalDetail = "high-rigor finish gate: unvalidated mutation";
-					failureMessage = finalDetail;
-				}
 				const resolvedOutcomeCode = resolveTrustedOutcomeCodes(trustedOutcomeCodes);
-				outcomeCode =
-					finalOutcome === "canceled" && resolvedOutcomeCode.code === "worker_final_output_missing"
-						? null
-						: resolvedOutcomeCode.code;
+				// Words appended to the graded detail: they inform the operator and decide nothing.
+				const detailNotes: string[] = [];
 				if (resolvedOutcomeCode.conflict !== null) {
 					reportDispatchDiagnostic(`run ${envelope.id}`, new Error(resolvedOutcomeCode.conflict));
-					finalDetail = [finalDetail, resolvedOutcomeCode.conflict].filter(Boolean).join("; ");
+					detailNotes.push(resolvedOutcomeCode.conflict);
 				}
 				// The exit code alone says a contract ran out of repairs, not why.
 				// The worker's own reason is what separates a model that cannot
 				// meet a grounding rule from a prompt that asks for the impossible.
-				const outcomeCodeDetail = outcomeCode === null ? undefined : trustedOutcomeDetails.get(outcomeCode);
-				if (outcomeCodeDetail !== undefined && finalOutcome === "failed") {
-					finalDetail = [finalDetail, outcomeCodeDetail].filter(Boolean).join("; ");
-					failureMessage = finalDetail;
-				}
-				if (outcomeCode !== null && finalOutcome === "succeeded") {
-					finalOutcome = "failed";
-					finalDetail = [finalDetail, `deterministic worker failure: ${outcomeCode}`].filter(Boolean).join("; ");
-					failureMessage = finalDetail;
-				}
+				const workerCodeDetail =
+					resolvedOutcomeCode.code === null ? undefined : trustedOutcomeDetails.get(resolvedOutcomeCode.code);
 				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
+				const classifyTool = (tool: string): ActionClass => safety.classify({ tool }).actionClass;
+				const mutatedPathCount = finishContract?.assessment.mutatedPaths.length ?? null;
 				// DESIGN 4.8: what the result must rest on, from the run's role. A gate's read roots are what it may read.
-				const runObligation = resolveObligation(
-					lifecycle.runRole,
-					appliedResultContract?.kind ?? null,
-					req.intent?.readRoots ?? [],
-				);
+				const gradeContract: GradeContract = {
+					role: lifecycle.runRole,
+					obligation: resolveObligation(lifecycle.runRole, appliedResultContract?.kind ?? null, req.intent?.readRoots ?? []),
+					contractKind: appliedResultContract?.kind ?? null,
+					toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
+				};
+				const gradeFacts: GradeFacts = {
+					termination: { outcome, detail: terminationDetail },
+					changeReturnFailure,
+					workerCode: {
+						code: resolvedOutcomeCode.code,
+						...(workerCodeDetail !== undefined ? { detail: workerCodeDetail } : {}),
+					},
+					finishGateEngaged: finishContract?.rigor === "high" && finishContract.assessment.kind === "engage",
+					blockedWrites: blockedWriteAttempts(toolStats, classifyTool, mutatedPathCount),
+				};
+				let graded = grade(gradeContract, gradeFacts);
+				const applyGrade = (next: GradeVerdict): void => {
+					graded = next;
+					finalOutcome = next.outcome;
+					outcomeCode = next.outcomeCode;
+					finalDetail = next.detail;
+					if (next.messageChanged && next.detail !== null) failureMessage = next.detail;
+				};
+				let finalOutcome: RunOutcome = graded.outcome;
+				let finalDetail: string | null = graded.detail;
+				applyGrade(graded);
 				// A write worker that stopped to ask for wider write roots changed
 				// nothing; whether the assignment continues is the request's decision.
-				if (
-					finalOutcome === "succeeded" &&
-					outcomeCode === null &&
-					lifecycle.capabilityClass === "workspace-edit" &&
-					!lifecycle.readOnly &&
-					finishContract?.assessment.mutatedPaths.length === 0
-				) {
-					const asked = writeRootRequestFromEntries(finishContractEntries);
-					if (asked !== null) {
-						const resolution = resolveWriteRootRequest(req, asked);
-						const routable = resolution.ok && req.mainGrantRoute?.kind === "yield" && typeof req.ownerSessionId === "string";
-						if (resolution.ok && routable) writeRootPark.stage(envelope.id, resolution.request);
-						finalOutcome = "failed";
-						outcomeCode = "worker_no_work";
-						finalDetail = writeRootRequestDetail(asked, resolution, routable);
-						failureMessage = finalDetail;
-					}
-				}
-				// The finish contract reads a turn whose writes were all refused as
-				// "no mutation" and passes it. For an edit worker that is the whole
-				// assignment failing, and rerunning under the same policy is refused
-				// the same way, so it carries a deterministic code.
-				if (finalOutcome === "succeeded" && outcomeCode === null && lifecycle.capabilityClass === "workspace-edit") {
-					const blockedWrites = blockedWriteAttempts(
-						toolStats,
-						(tool) => safety.classify({ tool }).actionClass,
-						finishContract?.assessment.mutatedPaths.length ?? null,
-					);
-					if (blockedWrites !== null) {
-						finalOutcome = "failed";
-						outcomeCode = "worker_mutation_blocked";
-						finalDetail = blockedWriteDetail(blockedWrites);
-						failureMessage = finalDetail;
-					}
-				}
-				// A clean exit is not a done assignment: an edit worker that ran no tool,
-				// or recorded a limitation and changed nothing, sealed "succeeded" and
-				// rendered "execution ok" over an unchanged tree.
-				if (
-					finalOutcome === "succeeded" &&
-					outcomeCode === null &&
-					lifecycle.capabilityClass === "workspace-edit" &&
-					!lifecycle.readOnly
-				) {
-					const noWork = workerNoWorkDetail({
-						activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
-						toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
-						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
-						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
-						escalationsDenied: escalationCounts.denied,
-						...(escalationDeniedBy !== undefined ? { escalationDeniedBy } : {}),
-						escalationsTimedOut: escalationCounts.timedOut,
-						blockedStateChanging: blockedStateChangingCalls(toolStats, (tool) => safety.classify({ tool }).actionClass),
-						finalText: finishContractAssistantText,
-						limitationDetail:
-							finishContract?.assessment.evidence
-								.filter((item) => item.kind === "limitation")
-								.map((item) => item.summary)
-								.join("; ") ?? "",
-					});
-					if (noWork !== null) {
-						finalOutcome = "failed";
-						outcomeCode = "worker_no_work";
-						finalDetail = noWork;
-						failureMessage = noWork;
-					} else {
-						const partialWork = workerPartialWorkDetail({
-							activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
-							mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
-							finalText: finishContractAssistantText,
-						});
-						if (partialWork !== null) {
-							finalOutcome = "failed";
-							outcomeCode = "worker_partial_work";
-							finalDetail = partialWork;
-							failureMessage = partialWork;
-						}
-					}
-				}
-				// Ruling 5: a builder that ran no tool over an unchanged tree left its obligation unmet, whichever side sealed it.
-				// A declared request for wider write roots is the "declared" half of change-or-declared, so it meets it.
-				if (
-					outcomeCode === "worker_no_work" &&
-					runObligation === "change-or-declared" &&
-					lifecycle.runtimeKind !== "subprocess" &&
-					finishContract?.assessment.mutatedPaths.length === 0 &&
-					// A notice the spent observation pool returned in a call's place ran no tool (C-17).
-					executedCalls(summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass)) === 0 &&
-					writeRootRequestFromEntries(finishContractEntries) === null
-				) {
-					evidence.obligationUnmet = runObligation;
+				let writeRootRequest: string | null = null;
+				const askedWriteRoots =
+					finalOutcome === "succeeded" && gradeContract.role === "builder" && mutatedPathCount === 0
+						? writeRootRequestFromEntries(finishContractEntries)
+						: null;
+				if (askedWriteRoots !== null) {
+					const resolution = resolveWriteRootRequest(req, askedWriteRoots);
+					const routable = resolution.ok && req.mainGrantRoute?.kind === "yield" && typeof req.ownerSessionId === "string";
+					if (resolution.ok && routable) writeRootPark.stage(envelope.id, resolution.request);
+					writeRootRequest = writeRootRequestDetail(askedWriteRoots, resolution, routable);
 				}
 				// Close steering provenance before taking receipt snapshots. A late
 				// acknowledgement after the bounded drain cannot race the sealed facts.
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
-				// #425: a cut-off loop never reached contract repair, even if its process exited zero.
-				if (
-					finalOutcome === "succeeded" &&
-					!hasDurableFinalOutput(capturedOutput) &&
-					appliedResultContract?.kind !== "architect-plan"
-				) {
-					finalOutcome = "failed";
-					outcomeCode = "worker_final_output_missing";
-					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
-					failureMessage = finalDetail;
-				}
+				const finalText = capturedOutput?.state === "final" ? capturedOutput.text : null;
 				const resultContract = validateRecipeResult({
 					contract: appliedResultContract,
 					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode, refusalLimit === "reported"),
-					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+					output: finalText,
 					outputTruncated: capturedOutput?.truncated === true,
 					cwd: lifecycle.cwd,
 					networkAllowed:
@@ -10388,13 +10363,6 @@ export function createDispatchBundle(
 					filesystem: nodeResultContractFilesystem(),
 				});
 				const resultValidation = resultContract?.applicable === true ? resultContract.validation : null;
-				if (finalOutcome === "succeeded" && resultValidation?.conformance === "fail") {
-					finalOutcome = "failed";
-					// #425: only the worker's repair loop can attest that repair rounds were exhausted.
-					outcomeCode = "result_contract_invalid";
-					finalDetail = `result contract failed: ${resultValidation.reason ?? "invalid result"}`;
-					failureMessage = finalDetail;
-				}
 				// Same grounding E7 applied to mutatedPaths, one field over. The
 				// typed validators derive quality from the report's own words: the
 				// verifier's from its verdict alone, the mutation report's from
@@ -10403,7 +10371,7 @@ export function createDispatchBundle(
 				// unmeasured and says which claim it was.
 				const validationGrounding = groundClaimedValidations({
 					contractKind: appliedResultContract?.kind ?? null,
-					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+					output: finalText,
 					// The wider set, matching the wider vocabulary the claim side reads
 					// under. A run that verified with `git diff` or `npx vitest` did
 					// check something, and calling that claim ungrounded is the same
@@ -10419,6 +10387,50 @@ export function createDispatchBundle(
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
+				const activity = summarizeToolActivity(toolStats, classifyTool);
+				const recordedLimitations =
+					(toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0
+						? (finishContract?.assessment.evidence
+								.filter((item) => item.kind === "limitation")
+								.map((item) => item.summary.trim())
+								.filter((summary) => summary.length > 0) ?? ["a limitation was recorded"])
+						: [];
+				gradeFacts.handback = {
+					finalOutput: hasDurableFinalOutput(capturedOutput),
+					resultContract:
+						resultContract === null
+							? null
+							: resultValidation === null
+								? { conformance: "not-reached", reason: null }
+								: { conformance: resultValidation.conformance, reason: resultValidation.reason ?? null },
+				};
+				gradeFacts.work = {
+					activity:
+						lifecycle.runtimeKind === "subprocess"
+							? null
+							: {
+									executed: executedCalls(activity),
+									observations: observationCalls(toolStats, classifyTool),
+									mutatingSucceeded: activity.mutatingSucceeded,
+									storeWritten: activity.storeWritten === true,
+								},
+					mutatedPathCount,
+					blockedStateChanging: blockedStateChangingCalls(toolStats, classifyTool),
+					escalations: {
+						denied: escalationCounts.denied,
+						...(escalationDeniedBy !== undefined ? { deniedBy: escalationDeniedBy } : {}),
+						timedOut: escalationCounts.timedOut,
+					},
+					recordedLimitations: recordedLimitations.length > 0 ? recordedLimitations : [],
+					writeRootRequest,
+					completion: builderReportCompletion(appliedResultContract, finalText),
+					// A claim is unmet evidence only when no checking call ran at all; a name that matched no command lowers quality.
+					ungroundedChecks:
+						validationGrounding !== null && invalidatesQuality(validationGrounding) ? validationGrounding.ungrounded : [],
+					reviewVerdict:
+						appliedResultContract?.kind === "review-verdict" ? (parseVerifierResult(finalText)?.verdict ?? null) : null,
+				};
+				applyGrade(grade(gradeContract, gradeFacts));
 				let sealedResultContractFact: RunResultContractFact | null =
 					resultContract === null
 						? null
@@ -10427,34 +10439,11 @@ export function createDispatchBundle(
 								resultContract.fact.quality === "pass"
 							? { ...resultContract.fact, quality: "unmeasured" }
 							: resultContract.fact;
-				// FX-19: a run owing observed evidence that read nothing grades fail and seals failed, so retry and summaries count it.
-				const noToolsReason =
-					finalOutcome === "succeeded"
-						? readScopedNoToolsReason({
-								activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
-								obligation: runObligation,
-								toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
-							})
-						: null;
-				if (noToolsReason !== null) {
-					if (sealedResultContractFact !== null) sealedResultContractFact = { ...sealedResultContractFact, quality: "fail" };
-					evidence.qualityGateFailure = true;
-					evidence.obligationUnmet = runObligation;
-					finalOutcome = "failed";
-					finalDetail = noToolsReason;
-					failureMessage = noToolsReason;
-				}
-				if (validationGrounding !== null && validationGrounding.ungrounded.length > 0) {
-					finalDetail = [finalDetail, describeUngroundedValidations(validationGrounding)].filter(Boolean).join("; ");
-				}
-				const hasTerminalArtifact =
-					appliedResultContract?.kind === "architect-plan" && resultValidation?.conformance === "pass";
-				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput) && !hasTerminalArtifact) {
-					finalOutcome = "failed";
-					outcomeCode = "worker_final_output_missing";
-					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
-					failureMessage = finalDetail;
-				}
+				// FX-19: a run owing evidence it did not gather grades fail, so retry and summaries count it.
+				if (graded.qualityFail && sealedResultContractFact !== null)
+					sealedResultContractFact = { ...sealedResultContractFact, quality: "fail" };
+				if (validationGrounding !== null && validationGrounding.ungrounded.length > 0)
+					detailNotes.push(describeUngroundedValidations(validationGrounding));
 				const hostVerificationSandboxPolicy =
 					(req.resolvedVerification?.length ?? 0) > 0
 						? hostVerificationSandbox(lifecycle.settings, req.taskWorktree ?? req.candidateWorktree ?? lifecycle.cwd)
@@ -10524,34 +10513,57 @@ export function createDispatchBundle(
 					refusalLimit !== null && checkoutBaseline !== null && checkoutAfter !== null
 						? addedUntrackedPaths(checkoutBaseline, checkoutAfter)
 						: [];
-				if (strayFiles.length > 0) {
-					const listed = `${strayFiles.slice(0, 5).join(", ")}${strayFiles.length > 5 ? `, and ${strayFiles.length - 5} more` : ""}`;
-					const note = `untracked files this run left in the checkout: ${listed}`;
-					finalDetail = [finalDetail, note].filter(Boolean).join("; ");
-					failureMessage = [failureMessage, note].filter(Boolean).join("; ");
-				}
+				const strayNote =
+					strayFiles.length > 0
+						? `untracked files this run left in the checkout: ${strayFiles.slice(0, 5).join(", ")}${strayFiles.length > 5 ? `, and ${strayFiles.length - 5} more` : ""}`
+						: null;
 				const hostRejection = hostVerificationRejection(hostVerification);
 				const workerSucceeded = finalOutcome === "succeeded";
-				if (hostRejection !== null && workerSucceeded) {
-					finalOutcome = "failed";
-					outcomeCode = hostRejection.outcomeCode;
-					finalDetail = hostRejection.detail;
-					failureMessage = finalDetail;
-				}
+				gradeFacts.host = {
+					rejection: hostRejection === null ? null : { code: hostRejection.outcomeCode, detail: hostRejection.detail },
+				};
+				applyGrade(grade(gradeContract, gradeFacts));
 				// A run in the current tree has no merge to withhold, so a change that
 				// deletes existing test cases fails the run instead; the edits stay for
 				// the operator to judge (flywheel F-D1). A task that asks for the removal is exempt.
 				if (checkoutBefore !== null && finalOutcome === "succeeded" && !taskRequestsTestRemoval(req.task)) {
-					const removed = removedTestCases(
+					gradeFacts.removedTests = removedTestCases(
 						await changedCheckoutDiff(checkoutBefore, checkoutAfter, (path) => isTestFilePath(path) || path.endsWith(".rs")),
 					);
-					if (removed.length > 0) {
-						finalOutcome = "failed";
-						outcomeCode = "worker_removed_tests";
-						finalDetail = `the change removes existing test cases (${removed.slice(0, 2).join("; ")}${removed.length > 2 ? `; and ${removed.length - 2} more` : ""}); fix the source or restore them`;
-						failureMessage = finalDetail;
-					}
+					applyGrade(grade(gradeContract, gradeFacts));
 				}
+				if (strayNote !== null) {
+					detailNotes.push(strayNote);
+					failureMessage = [failureMessage, strayNote].filter(Boolean).join("; ");
+				}
+				// The detail the operator reads so far: the graded words, then the notes beside them.
+				const notedDetail = (): string | null => [finalDetail, ...detailNotes].filter(Boolean).join("; ") || null;
+				// Assurance is the one value the merge gate, the exit code and a parent's finish contract read (4.8).
+				const assuranceQuality = {
+					typedValidations: [
+						...typedValidationFactsFromVerifyCalls(
+							snapshotToolStats(toolStats),
+							verifyCalls.calls,
+							runEffects.checkFreshness(),
+						),
+						...typedValidationFactsFromObservedEffects(observedRunEffects),
+					],
+					resultContract: sealedResultContractFact,
+				};
+				const assuranceVerification = deriveRunVerification(
+					{ toolStats: snapshotToolStats(toolStats), typedValidations: assuranceQuality.typedValidations },
+					{ capabilityClass: lifecycle.capabilityClass, checkFreshness: runEffects.checkFreshness() },
+				);
+				const assurance = receiptAssurance({
+					quality: assuranceQuality,
+					validationGrounding:
+						validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
+					...(hostVerification !== undefined ? { hostVerification } : {}),
+					verification:
+						hostVerification === undefined
+							? assuranceVerification
+							: verificationWithHostVerdict(assuranceVerification, hostVerification),
+				});
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
 				// check the merge used to rest on the exit status alone, and a Git
@@ -10567,17 +10579,14 @@ export function createDispatchBundle(
 					finalOutcome === "succeeded" &&
 					taskWorktreeHoldsWork(req.taskWorktree)
 						? {
-								quality: sealedResultContractFact?.quality,
-								hostStatus: hostVerification?.status,
+								assurance,
 								contract: appliedResultContract,
-								output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+								output: finalText,
 								branch: req.taskWorktree.branch,
-								task: req.task,
-								executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
-								...(observedRunEffects.executedShellCommands !== undefined
-									? { executedShellCommands: observedRunEffects.executedShellCommands }
-									: {}),
-								removedTests: removedTestCases(taskWorktreeBaseDiff(req.taskWorktree) ?? ""),
+								// Removal the task asked for is what was asked (flywheel F-D1).
+								removedTests: taskRequestsTestRemoval(req.task)
+									? []
+									: removedTestCases(taskWorktreeBaseDiff(req.taskWorktree) ?? ""),
 							}
 						: null;
 				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);
@@ -10604,6 +10613,9 @@ export function createDispatchBundle(
 				// look for it. A discard that removed the worktree but not the branch
 				// releases the claim too: nothing of Clio's is left to guard.
 				let claimReleased = false;
+				// Why landing the run's work failed or was held (V6); the grader seals it beside every other rule.
+				let landingFailure: { code: RunOutcomeCode | null; detail: string } | null = null;
+				const landingAttempted = req.taskWorktree !== undefined;
 				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial)) {
 					const authorship =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
@@ -10629,23 +10641,26 @@ export function createDispatchBundle(
 					});
 					worktreeReceipt = withStrayWrites(worktreeReceipt, req.taskWorktree, observedRunEffects.mutatedPaths);
 					if (worktreeReceipt.reason !== undefined) {
-						finalOutcome = "failed";
-						finalDetail =
-							hostRejectedMerge || cappedPartial
-								? [finalDetail, worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
-								: (worktreeReceipt.detail ?? worktreeReceipt.reason);
-						failureMessage = finalDetail;
+						landingFailure = {
+							code: null,
+							detail:
+								hostRejectedMerge || cappedPartial
+									? [notedDetail(), worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
+									: (worktreeReceipt.detail ?? worktreeReceipt.reason),
+						};
 					} else if (cappedPartial) {
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
-							finalDetail = [finalDetail, partialResultDetail(req.taskWorktree.branch)].filter(Boolean).join("; ");
-							failureMessage = finalDetail;
+							detailNotes.push(partialResultDetail(req.taskWorktree.branch));
+							failureMessage = notedDetail() ?? failureMessage;
 						}
 					} else if (hostRejectedMerge) {
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
-							finalDetail = `${finalDetail}; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`clio-coder fleet land ${req.taskWorktree.branch}\` applies it if you accept the failed check`;
-							failureMessage = finalDetail;
+							detailNotes.push(
+								`its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`clio-coder fleet land ${req.taskWorktree.branch}\` applies it if you accept the failed check`,
+							);
+							failureMessage = notedDetail() ?? failureMessage;
 						}
 					} else if (mergeWithheld) {
 						// An attached operator may overrule the gate for this one branch. The
@@ -10719,10 +10734,10 @@ export function createDispatchBundle(
 								reason: "protected_state_unavailable",
 								detail: `operator merge refused: ${reason}`,
 							};
-							finalOutcome = "failed";
-							outcomeCode = "merge_withheld";
-							finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${reason}`;
-							failureMessage = finalDetail;
+							landingFailure = {
+								code: "merge_withheld",
+								detail: `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${reason}`,
+							};
 						} else if (card?.choice === "merge" && mergeProtectedPaths !== null) {
 							const landed = applyTaskWorktree({
 								worktree: req.taskWorktree,
@@ -10738,20 +10753,18 @@ export function createDispatchBundle(
 								// The branch is still withheld, so it keeps the withheld outcome
 								// and the operator's Merge is the thing that was refused.
 								worktreeReceipt = { ...landed, detail: `operator merge refused: ${landed.detail ?? landed.reason}` };
-								finalOutcome = "failed";
-								outcomeCode = "merge_withheld";
 								// Not the withheld detail: its `clio-coder fleet land` command would land work
 								// nobody previewed.
-								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${landed.detail ?? landed.reason} Branch ${req.taskWorktree.branch} or its worktree changed after the preview, so inspect it before merging.`;
-								failureMessage = finalDetail;
+								landingFailure = {
+									code: "merge_withheld",
+									detail: `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${landed.detail ?? landed.reason} Branch ${req.taskWorktree.branch} or its worktree changed after the preview, so inspect it before merging.`,
+								};
 							} else if (landed.reason !== undefined) {
 								worktreeReceipt = {
 									...landed,
 									detail: `operator merge: ${landed.detail ?? landed.reason}`,
 								};
-								finalOutcome = "failed";
-								finalDetail = landed.detail ?? landed.reason;
-								failureMessage = finalDetail;
+								landingFailure = { code: null, detail: landed.detail ?? landed.reason };
 							} else {
 								worktreeReceipt = {
 									...landed,
@@ -10776,18 +10789,16 @@ export function createDispatchBundle(
 							}
 						}
 						if (card?.choice !== "merge") {
-							finalOutcome = "failed";
-							outcomeCode = "merge_withheld";
-							finalDetail = withheldDetail ?? finalDetail;
+							let withheld = withheldDetail ?? notedDetail() ?? "merge withheld";
 							if (worktreeDiscarded) {
-								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; the operator discarded branch ${req.taskWorktree.branch} and its worktree`;
+								withheld = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; the operator discarded branch ${req.taskWorktree.branch} and its worktree`;
 								worktreeReceipt = {
 									...worktreeReceipt,
 									reason: "operator_discarded",
 									detail: "operator discard: deleted the branch and its worktree on the merge card",
 								};
 							} else if (branchKept) {
-								finalDetail = `${finalDetail}; the operator discarded the worktree but deleting branch ${req.taskWorktree.branch} failed, so the branch remains and \`git branch -D ${req.taskWorktree.branch}\` finishes the discard`;
+								withheld = `${withheld}; the operator discarded the worktree but deleting branch ${req.taskWorktree.branch} failed, so the branch remains and \`git branch -D ${req.taskWorktree.branch}\` finishes the discard`;
 								worktreeReceipt = {
 									...worktreeReceipt,
 									detail: `operator discard: removed the worktree, but deleting branch ${req.taskWorktree.branch} failed; the branch is preserved`,
@@ -10795,7 +10806,7 @@ export function createDispatchBundle(
 							} else if (discardChanged !== null) {
 								// Not the withheld detail: its `clio-coder fleet land` command would land work
 								// nobody previewed.
-								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator discard refused: ${discardChanged}. Branch ${req.taskWorktree.branch} and its worktree are preserved; inspect them before merging or discarding.`;
+								withheld = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator discard refused: ${discardChanged}. Branch ${req.taskWorktree.branch} and its worktree are preserved; inspect them before merging or discarding.`;
 								worktreeReceipt = {
 									...worktreeReceipt,
 									detail: `operator keep: discard refused because the worktree changed after the preview (${discardChanged}); branch and worktree preserved`,
@@ -10806,10 +10817,18 @@ export function createDispatchBundle(
 									detail: `operator keep: ${discardFailed ? "the discard failed; branch and worktree preserved" : `${mergeCardCauseNote(card.cause)}; branch preserved`}`,
 								};
 							}
-							failureMessage = finalDetail;
+							landingFailure = { code: "merge_withheld", detail: withheld };
 						}
 					}
 				}
+				// The landing is the last rule: its words already carry the notes made before it.
+				const preLandingDetail = notedDetail();
+				if (landingAttempted) {
+					gradeFacts.landing = { failure: landingFailure };
+					applyGrade(grade(gradeContract, gradeFacts));
+				}
+				finalDetail = landingFailure !== null ? finalDetail : preLandingDetail;
+				if (landingFailure !== null) failureMessage = finalDetail ?? failureMessage;
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
 					worktreeReceipt = snapshotUnappliedTaskWorktree(req.taskWorktree, req.apply ?? "merge");
 					// An already failed run whose HEAD also moved says so, so the
@@ -10819,6 +10838,14 @@ export function createDispatchBundle(
 						failureMessage = finalDetail;
 					}
 				}
+				if (graded.qualityGateFailure) evidence.qualityGateFailure = true;
+				if (graded.retryObligation !== null) evidence.obligationUnmet = graded.retryObligation;
+				const runVerdict: RunVerdict = {
+					version: 1,
+					obligation: gradeContract.obligation,
+					rules: graded.rules,
+					assurance,
+				};
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode, providerErrorMessage);
 				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode, providerErrorMessage);
@@ -10847,6 +10874,7 @@ export function createDispatchBundle(
 					sealedResultContractFact,
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
+				receiptDraft.verdict = runVerdict;
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
@@ -11057,7 +11085,7 @@ export function createDispatchBundle(
 						if (
 							!(
 								(finalOutcome === "canceled" ||
-									(outcomeCode === "worker_no_work" &&
+									(idleBuilderOutcome(outcomeCode) &&
 										evidence.obligationUnmet === undefined &&
 										!writeRootPark.isStaged(envelope.id))) &&
 								discardIdleTaskWorktree(req.taskWorktree)
@@ -11101,7 +11129,7 @@ export function createDispatchBundle(
 				// The idle tree kept above goes once no retry will run in it.
 				if (
 					!continues &&
-					outcomeCode === "worker_no_work" &&
+					idleBuilderOutcome(outcomeCode) &&
 					evidence.obligationUnmet !== undefined &&
 					req.taskWorktree !== undefined &&
 					worktreeReceipt?.applied !== true &&
@@ -11134,7 +11162,7 @@ export function createDispatchBundle(
 
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
-		watchAssignmentDeadline(activeRun, preparation?.deadlineAt);
+		watchAssignmentDeadline(activeRun);
 		// Same as the ACP path: return the handle once the running row is durable (#428).
 		await runningRowPersisted;
 
@@ -11227,15 +11255,25 @@ export function createDispatchBundle(
 		// join the original writer group through lineage.rootRunId (#434).
 		if (placedInOwnWorktree(req)) req = { ...req, worktree: true };
 		if (req.runIdHint === undefined && req.worktree !== true) req = { ...req, runIdHint: newRunId() };
-		let prepared =
-			preparation?.deadlineAt === undefined
-				? req
-				: {
-						...req,
-						assignmentDeadlineAt: Math.min(req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY, preparation.deadlineAt),
-					};
+		// DESIGN 4.5: every run has a wall clock from this call, so time queued for a slot counts; a retry keeps its root's.
+		const wallRecipe = agents.get(req.agentId);
+		const recipeWallMs = wallRecipe === null ? undefined : normalizeAgentSpec(wallRecipe).budget?.timeoutMs;
+		const wallClock = resolveRunWall({
+			capMs: runWallCapMs((getEffectiveSettings() ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
+			...(recipeWallMs !== undefined ? { recipeMs: recipeWallMs } : {}),
+			startedAt: now(),
+			deadlineAt: Math.min(
+				req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY,
+				preparation?.deadlineAt ?? Number.POSITIVE_INFINITY,
+			),
+		});
+		let prepared: DispatchRequest = {
+			...req,
+			assignmentDeadlineAt: wallClock.deadlineAt,
+			runWallMs: req.runWallMs ?? wallClock.wallMs,
+		};
 		let createdWorktree: DispatchRequest["taskWorktree"];
-		let writerLease: CheckoutWriterLease | undefined;
+		let writerLease: WriterSetLease | undefined;
 		const writerRecipe = agents.get(req.agentId);
 		if (writerRecipe !== null && normalizeAgentSpec(writerRecipe).capabilityClass === "workspace-edit") {
 			const checkout = req.taskWorktree?.root ?? gitCheckoutRoot(req.cwd ?? process.cwd());
@@ -11243,9 +11281,16 @@ export function createDispatchBundle(
 				const roots = canonicalWriteRoots(req);
 				const runId = req.runIdHint ?? req.lineage?.rootRunId;
 				try {
-					writerLease = acquireCheckoutWriterLease({
+					// A writer that would overlap a live set queues behind it until its run's deadline (DESIGN 4.5).
+					writerLease = await joinWriterSet({
 						checkout,
-						...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
+						deadlineAt: wallClock.deadlineAt,
+						...(preparation?.signal !== undefined ? { signal: preparation.signal } : {}),
+						onQueued: (waitingOn) =>
+							reportDispatchDiagnostic(
+								`writer set for ${req.agentId}`,
+								new Error(`queued behind ${waitingOn}; it starts when that settles`),
+							),
 						// A read-only run writes nothing, so it carries no holder: the envelope's one definition of read-only.
 						...(requestedWriteNone({
 							readOnly: req.readOnly,
@@ -11254,7 +11299,7 @@ export function createDispatchBundle(
 						})
 							? {}
 							: {
-									holder: {
+									member: {
 										// One dispatch call's requests, and their retries, share a group.
 										group: req.parentToolCallId ?? req.lineage?.rootRunId ?? req.runIdHint ?? newRunId(),
 										roots: roots.length > 0 ? roots : null,
@@ -11635,6 +11680,11 @@ export function createDispatchBundle(
 				budget,
 				nativeWorker: target.runtime.kind === "http",
 				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
+				wallMs: resolveRunWall({
+					capMs: runWallCapMs((settings ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
+					...(agentSpec.budget?.timeoutMs !== undefined ? { recipeMs: agentSpec.budget.timeoutMs } : {}),
+					startedAt: 0,
+				}).wallMs,
 			}),
 			writes: writeModeLine(stage.envelope.write),
 			...(stage.envelope.withheld.length > 0 ? { withheld: withheldLines(stage.envelope.withheld) } : {}),

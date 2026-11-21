@@ -202,7 +202,7 @@ writeFileSync(join(process.cwd(), "peer-argv.json"), JSON.stringify(process.argv
 for (const event of [
   { type: "thread.started", thread_id: "fixture-thread" },
   { type: "turn.started" },
-  { type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ mutatedPaths: [], validations: [{ name: "read fixture", passed: true, evidence: "PONG" }], summary: "PONG" }) } },
+  { type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [{ name: "read fixture", passed: true, evidence: "PONG" }], summary: "PONG" }) } },
   { type: "turn.completed", usage: { input_tokens: 2, output_tokens: 1 } }
 ]) process.stdout.write(JSON.stringify(event) + "\\n");
 `,

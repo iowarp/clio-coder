@@ -221,7 +221,7 @@ function observationTurnBudgetLimit(options?: ToolInvokeOptions): {
 	template?: string;
 	boundNote?: string;
 } {
-	const operator = operatorObservationLimit(options);
+	const operator = options?.observationRunPool?.limitBytes ?? operatorObservationLimit(options);
 	const budget = options?.turnConstraints?.budget;
 	const templateBytes = budget?.observationBytes;
 	if (templateBytes === undefined) return { limitBytes: operator };
@@ -245,7 +245,29 @@ function observationTurnBudgetLimit(options?: ToolInvokeOptions): {
 	};
 }
 
+/** Bytes a token of tool output takes, at the four characters a token the context estimate assumes. */
+const OBSERVATION_BYTES_PER_TOKEN = 4;
+
+/**
+ * A dispatched worker's observation pool (DESIGN 4.5): what its work share of the usable window holds, in bytes, and
+ * a cap on one result at what that share has left after the context the run already holds.
+ */
+export function runObservationPool(input: { usableTokens: number; workShare: number; inputTokens: number }): {
+	limitBytes: number;
+	resultCapBytes: number;
+} {
+	const shareTokens = Math.max(0, input.usableTokens * input.workShare);
+	const leftTokens = Math.max(0, shareTokens - input.inputTokens);
+	return {
+		limitBytes: Math.max(MIN_BUDGET_SLICE_BYTES, Math.floor(shareTokens * OBSERVATION_BYTES_PER_TOKEN)),
+		resultCapBytes: Math.max(MIN_BUDGET_SLICE_BYTES, Math.floor(leftTokens * OBSERVATION_BYTES_PER_TOKEN)),
+	};
+}
+
 function budgetKey(options: ToolInvokeOptions | undefined): string | null {
+	// A worker has no turn: its pool lives as long as its run (DESIGN 4.5).
+	const runId = options?.runId?.trim();
+	if (options?.observationRunPool !== undefined && runId) return `run:${runId}`;
 	const turnId = options?.turnId?.trim();
 	if (!turnId) return null;
 	const sessionId = options?.sessionId?.trim() || "no-session";
@@ -347,8 +369,10 @@ export function reserveObservation(
 	options?: ToolInvokeOptions,
 	requestedBytes?: number,
 ): ObservationReservation {
-	const askBytes =
+	const asked =
 		requestedBytes !== undefined && requestedBytes > 0 ? Math.min(selfCapBytes, requestedBytes) : selfCapBytes;
+	// A worker's one result never exceeds what its work share has left (DESIGN 4.5).
+	const askBytes = Math.min(asked, options?.observationRunPool?.resultCapBytes ?? asked);
 	const key = budgetKey(options);
 	const { limitBytes, template, boundNote } = observationTurnBudgetLimit(options);
 	const bound = {
@@ -642,15 +666,18 @@ export function observationBudgetExhausted(input: {
 				unit: "call" as const,
 			};
 	const { streak, batchRefusals } = counted;
+	// A worker's pool is its run's, so no later turn refills it (DESIGN 4.5).
+	const scope = reservation.key?.startsWith("run:") === true ? "this run" : "this turn";
 	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN || batchRefusals > MAX_EXHAUSTED_NOTICES_PER_BATCH) {
 		const which =
 			streak > MAX_EXHAUSTED_NOTICES_PER_TURN
 				? `This is the ${streak}th ${counted.unit} to hit it`
 				: `This tool batch sent ${batchRefusals} calls into it`;
+		const until = scope === "this run" ? "for the rest of this run" : "until the next turn";
 		const message =
-			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
-			`${which}, so no observation tool can return content until the ` +
-			`next turn. Do not retry this call and do not substitute another one. Re-plan with what you ` +
+			`observation budget exhausted for ${scope} before ${tool} ${subject}: ${spent}. ` +
+			`${which}, so no observation tool can return content ${until}. ` +
+			`Do not retry this call and do not substitute another one. Re-plan with what you ` +
 			`already have: say what you found, name what is still unread, and propose the next step.`;
 		recordSpentBytes(reservation, byteLength(message));
 		return { kind: "error", message };
@@ -658,7 +685,7 @@ export function observationBudgetExhausted(input: {
 	const message = rolled
 		? `observation budget for this turn is spent before ${tool} ${subject} (${spent}), so this call did not run. ` +
 			`The turn continues automatically after this batch with a fresh budget; make this call again there.`
-		: `observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ${hint}`;
+		: `observation budget exhausted for ${scope} before ${tool} ${subject}: ${spent}. ${hint}`;
 	const output =
 		input.format === "json"
 			? JSON.stringify({ status: "unavailable", reason: "observation-budget-exhausted", message })

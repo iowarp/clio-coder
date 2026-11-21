@@ -15,6 +15,7 @@ const SOURCE = "coords = [0, 1, 3]\n";
 const EXPLANATION =
 	"grid.py:1 defines coords = [0, 1, 3], so the spacing is three explicit coordinates. The type conversion, differentiator selection and coefficient code are absent from this fixture, so none is cited. No files changed.";
 const REPORT = JSON.stringify({
+	completion: { state: "done", limitations: [], unverified: [] },
 	mutatedPaths: [],
 	validations: [
 		{ name: "read grid.py", passed: true, evidence: "grid.py:1 defines coords = [0, 1, 3]; no command ran." },

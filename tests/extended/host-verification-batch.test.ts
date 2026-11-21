@@ -228,16 +228,15 @@ describe("host verification judgment identity", () => {
 			strictEqual(host?.checks[0]?.exitCode, 0);
 			strictEqual(host?.checks[0]?.memo, false, "a run that judged nothing is never reused as a pass");
 			match(host?.checks[0]?.outputTail ?? "", /not run: no tests collected \(exit 5\)/u);
-			// The merge gate reads only the host status first: a run that judged nothing must not land as host-verified.
+			// A run that judged nothing never reads as host-verified: its failed quality leaves it compromised and held.
 			match(
 				mergeWithheldDetail({
-					quality: "fail",
-					hostStatus: host?.status,
+					assurance: "compromised",
 					contract: null,
 					output: null,
 					branch: "clio-coder/task/no-tests",
 				}) ?? "",
-				/merge withheld: the worker's own report lists a failing validation/u,
+				/merge withheld: its result is not trusted/u,
 			);
 		}
 		strictEqual(runCount(scratch), 2);

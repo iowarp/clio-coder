@@ -56,6 +56,7 @@ const EXPLANATION = [
 
 const report = (summary: string, extra: Record<string, unknown> = {}) =>
 	JSON.stringify({
+		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [],
 		validations: [{ name: "source read", passed: true, evidence: "Read only the four requested files; no tests ran." }],
 		summary,
@@ -169,13 +170,13 @@ it("resolves one applied contract from recipe default, task override, and topolo
 		() => dispatchResultContract({ agentId: "scout", resultSummary: { maxBytes: 20_000, scope: "task" } }, scoutRecipe),
 		/result_summary_max_bytes applies only to a mutation-report result contract; agent 'scout' declares scout-report/u,
 	);
-	// Topology-owned contracts ignore it: a gate role has none, a coordinator override keeps its kind.
-	strictEqual(
+	// Topology-owned contracts ignore it: a judge gate takes the coordinator's judge-verdict, an override keeps its kind.
+	deepStrictEqual(
 		dispatchResultContract(
 			{ agentId: "coder", gate: { role: "judge" }, resultSummary: { maxBytes: 1, scope: "task" } },
 			coderRecipe,
 		),
-		undefined,
+		{ kind: "judge-verdict", candidates: 1 },
 	);
 	deepStrictEqual(
 		dispatchResultContract(
