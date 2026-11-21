@@ -1559,7 +1559,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Each round sends through engineStreamSimple, whose guard sees the evicted request.
 		delegateGuardsToolArguments: true,
 		streamFn: (currentModel, transcript, streamOptions) => {
-			if (resultContractRepairsQueued > resultContractRepairsStarted) resultContractRepairsStarted += 1;
+			if (resultContractRepairsQueued > resultContractRepairsStarted) {
+				resultContractRepairsStarted += 1;
+				emit({ type: "clio_coder_result_contract_repair", payload: { started: resultContractRepairsStarted } });
+			}
 			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
 			const anthropicCompat =
@@ -3036,6 +3039,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.telemetryContext ? withTelemetryContext(input.telemetryContext, work) : work();
 	const promise = runScoped(async (): Promise<WorkerRunResult> => {
 		try {
+			emit({ type: "clio_coder_result_contract_repair", payload: { started: 0 } });
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();

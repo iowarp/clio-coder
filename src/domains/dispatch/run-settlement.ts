@@ -75,7 +75,12 @@ function diagnostic(value: string | null | undefined): string | null {
 	return redacted.length <= DIAGNOSTIC_CHARS ? redacted : `${redacted.slice(0, DIAGNOSTIC_CHARS - 1)}…`;
 }
 
-function repairRounds(terminal: ResolvedTerminalReason | undefined): RunSettled["repairRounds"] {
+/**
+ * The worker's own count of the repair rounds it started, 0 included (C-28). Without its report the host knows only
+ * that an exhausted contract spent every round; it never infers zero (#425).
+ */
+function repairRounds(terminal: ResolvedTerminalReason | undefined, reported?: number): RunSettled["repairRounds"] {
+	if (reported !== undefined) return { kind: "measured", value: reported, source: "local-count" };
 	return terminal?.terminalReason === "contract_exhausted_after_repair"
 		? { kind: "measured", value: RESULT_CONTRACT_REPAIR_LIMIT, source: "local-count" }
 		: { kind: "unknown", reason: "not-observed" };
@@ -305,6 +310,8 @@ export function settleFinishedRun(
 		 * `permissionRequestedAttempts`. Without it the list is counted, which falls short past the limit (SC-2).
 		 */
 		askedByTool?: ReadonlyMap<string, number>;
+		/** Repair rounds the run's own worker reported starting; absent when no report arrived. */
+		repairRounds?: number;
 	},
 ): RunSettlement {
 	const usage = input.usage ?? unobservedRunUsageFacts();
@@ -340,7 +347,7 @@ export function settleFinishedRun(
 			processExitCode: input.processExitCode,
 			...(input.terminal.boundKind ? { boundKind: input.terminal.boundKind } : {}),
 			...(input.stepPipeline ? { stepPipeline: { ...input.stepPipeline } } : {}),
-			repairRounds: repairRounds(input.terminal),
+			repairRounds: repairRounds(input.terminal, input.repairRounds),
 			frameType: input.frameType,
 			...usage,
 			toolCalls: receipt.toolCalls,
@@ -623,6 +630,7 @@ export function finishRunResult(
 		usage: RunUsageFacts | undefined;
 		stepPipeline?: RunSettled["stepPipeline"];
 		askedByTool?: ReadonlyMap<string, number>;
+		repairRounds?: number;
 	},
 ): FinishedRunResult {
 	if (draft.routingIntent === undefined) throw new Error(`run ${draft.runId} has no routing intent`);

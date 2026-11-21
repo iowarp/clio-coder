@@ -1261,6 +1261,14 @@ test("a host-written repair exchange journals no call attempt of its own (C-28)"
 			"each sent request is its call's first attempt, with no phantom attempt for the repair exchange",
 		);
 		equal(settled.length, 2);
+		// The worker reports its own repair count: 0 as it starts, then the one round it started (C-28).
+		const reported = events.filter(
+			(event) => (event as { type?: unknown }).type === "clio_coder_result_contract_repair",
+		) as Array<{ payload: { started: number } }>;
+		deepStrictEqual(
+			reported.map((event) => event.payload.started),
+			[0, 1],
+		);
 	} finally {
 		process.chdir(previousCwd);
 		worker?.abort();
