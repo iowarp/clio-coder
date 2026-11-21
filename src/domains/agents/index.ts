@@ -64,6 +64,7 @@ export type {
 export { parseAgentBudget } from "./recipe.js";
 export { parseAgentRecipeSchema } from "./recipe-schema.js";
 export type { AgentRecipeDiagnostic } from "./registry.js";
+export { discoverAgentRecipes } from "./registry.js";
 export type {
 	CouncilReport,
 	CouncilReportMember,

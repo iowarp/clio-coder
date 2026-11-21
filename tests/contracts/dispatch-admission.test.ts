@@ -6,7 +6,6 @@ import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainName } from "../../src/core/domain-loader.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
@@ -30,6 +29,7 @@ import {
 	readCapacityStateUnsafe,
 	releaseMainCacheLanes,
 } from "../../src/domains/dispatch/capacity-lease.js";
+import type { AgentRoleFacts } from "../../src/domains/dispatch/execution-role.js";
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
@@ -987,6 +987,7 @@ describe("dispatch admission boundary", () => {
 			const parsed = dispatchRequestsFromArgs(args, {
 				auto,
 				resolveIntent,
+				resolveFacts: (id) => (specs.find((spec) => spec.id === id) as AgentRoleFacts | undefined) ?? null,
 				workspaceRoot: process.cwd(),
 				operatorNamedChecks: () => named,
 			});
@@ -1030,7 +1031,9 @@ describe("dispatch admission boundary", () => {
 			tasks: [{ agent: "coder", task: "Update src", intent: { relevant_paths: ["src/"] } }],
 		});
 		strictEqual(inherited.requests[0]?.readOnly, true);
-		// Row 146: builders with nothing declared run as inspection (explorer role) in a parallel batch.
+		// Row 146: builders with nothing declared run as inspection (explorer role) in a parallel batch. A debugger is a
+		// checker, not a builder (DESIGN 4.2): the rule leaves it as admitted, and like a verifier it runs checks in the
+		// tree, so beside an unscoped writer it is one.
 		const builders = normalized({
 			mode: "parallel",
 			tasks: [
@@ -1043,15 +1046,23 @@ describe("dispatch admission boundary", () => {
 			builders.requests.map((request) => [request.readOnly === true, request.executionRole]),
 			[
 				[true, "explorer"],
-				[true, "explorer"],
+				[false, "checker"],
 				[false, "builder"],
 			],
 		);
-		strictEqual(writerSetConflict(builders.requests, specs), null);
+		match(writerSetConflict(builders.requests, specs) ?? "", /writer_set_conflict: debugger and coder/u);
+		strictEqual(
+			writerSetConflict(
+				builders.requests.filter((request) => request.agentId !== "debugger"),
+				specs,
+			),
+			null,
+		);
 		match(
 			builders.notices.join("\n"),
-			/task 2 \(debugger\) runs read-only as an explorer: a builder in a parallel batch with no intent\.write_roots/u,
+			/task 1 \(coder\) runs read-only as an explorer: a builder in a parallel batch with no intent\.write_roots/u,
 		);
+		ok(!builders.notices.join("\n").includes("debugger"));
 		// One unscoped coder beside a scout is no writer conflict, and still runs as inspection (DESIGN 4.7).
 		const beside = normalized({
 			mode: "parallel",

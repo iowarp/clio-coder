@@ -30,6 +30,7 @@ import {
 	DEFAULT_SETTINGS,
 	normalizeExitSummaryStyle,
 	normalizeOutputStyle,
+	RETIRED_ROUTING_ROLE_NAMES,
 	SETTINGS_FILE_MODE,
 	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
@@ -445,6 +446,16 @@ const RETIRED_AUTONOMY_VALUES: Readonly<Record<string, AutonomyLevel>> = Object.
 const RETIRED_LIFECYCLE_VALUES = Object.freeze({ "clio-managed": "clio-coder-managed" } as const);
 
 const RETIRED_TOOL_GOVERNANCE_VALUES = Object.freeze({ "clio-policy": "clio-coder-policy" } as const);
+
+/**
+ * The advice a retired fleet role name carries: the names that now cover its runs. It is not a repair a scalar splice
+ * can make (one name may become two pairs), so `doctor --fix` rewrites it through its own role repair.
+ */
+function retiredRoleAdvice(value: unknown): string {
+	if (typeof value !== "string" || !Object.hasOwn(RETIRED_ROUTING_ROLE_NAMES, value)) return "";
+	const names = RETIRED_ROUTING_ROLE_NAMES[value] ?? [];
+	return `; the retired role "${value}" is now ${names.map((name) => `"${name}"`).join(" or ")} (run \`clio-coder doctor --fix\` to rewrite it)`;
+}
 
 function expectStringArray(issues: Issues, path: string, value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) {
@@ -1856,7 +1867,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					const allowedSet = new Set<string>(allowed);
 					for (const value of parsed)
 						if (!allowedSet.has(value))
-							issues.add(`fleet.adaptiveRouting.${key}`, `unsupported ${key === "roles" ? "role" : "posture"} '${value}'`);
+							issues.add(
+								`fleet.adaptiveRouting.${key}`,
+								`unsupported ${key === "roles" ? "role" : "posture"} '${value}'${key === "roles" ? retiredRoleAdvice(value) : ""}`,
+							);
 					if (parsed.every((value) => allowedSet.has(value))) settings.fleet.adaptiveRouting[key] = parsed as never;
 				}
 				if ("agentRoles" in adaptive) {
@@ -1872,12 +1886,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							}
 							issues.unknownKeys(path, value, ["agentId", "executionRole"]);
 							const agentId = expectString(issues, `${path}.agentId`, value.agentId);
-							const executionRole = expectEnum(
-								issues,
-								`${path}.executionRole`,
-								value.executionRole,
-								ACTIVE_AGENT_AUTOMATION_ROLES,
-							);
+							const retiredRole = retiredRoleAdvice(value.executionRole);
+							if (retiredRole !== "")
+								issues.add(
+									`${path}.executionRole`,
+									`expected one of ${ACTIVE_AGENT_AUTOMATION_ROLES.join(" | ")}, got ${describe(value.executionRole)}${retiredRole}`,
+								);
+							const executionRole =
+								retiredRole !== ""
+									? undefined
+									: expectEnum(issues, `${path}.executionRole`, value.executionRole, ACTIVE_AGENT_AUTOMATION_ROLES);
 							if (agentId === "auto")
 								issues.add(`${path}.agentId`, "'auto' is reserved for coordinator-owned agent selection");
 							if (agentId === undefined || agentId === "auto" || executionRole === undefined) continue;

@@ -11,7 +11,6 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import { deriveExecutionRole } from "../../src/domains/dispatch/execution-role.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { readRunFeed } from "../../src/domains/dispatch/run-feed.js";
@@ -291,16 +290,6 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			// A run writes run.settled at version 2, its role in the fleet vocabulary only (M12).
 			equal(settled.kv, 2);
 			equal(settled.data.executionRole, "explorer");
-			deepStrictEqual(
-				(
-					[
-						{ gateRole: "member", capabilityClass: "read-only", resultContractKind: null },
-						{ capabilityClass: "read-only", resultContractKind: "scout-report" },
-						{ capabilityClass: "verification", resultContractKind: "verifier-report" },
-					] as const
-				).map((facts) => deriveExecutionRole({ attempt: 0, ...facts })),
-				["seat", "explorer", "checker"],
-			);
 			equal(settled.data.terminalReason, receipt.terminalReason);
 			deepStrictEqual(settled.data.callIds, receipt.callIds);
 			deepStrictEqual(receipt.callIds, [journal.records[1]?.record.ctx.callId]);
@@ -345,6 +334,79 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			else process.env.PATH = originalPath;
 		}
 	}
+});
+
+/** Dispatch each case with a stale caller role and assert the role the host journals, routes and receipts. */
+async function assertRunRoles(
+	cases: ReadonlyArray<{ agentId: string; readOnly?: true; expected: string }>,
+): Promise<void> {
+	const envelopeRoles = new Map<string, string>();
+	const spawnWorker = (spec: WorkerSpec) => ({
+		pid: null,
+		heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+		abort() {},
+		promise: Promise.resolve({ exitCode: 0, signal: null }),
+		events: (async function* () {
+			const runId = spec.telemetryContext?.runId;
+			ok(runId);
+			envelopeRoles.set(runId, spec.envelope.role);
+			yield {
+				type: "message_end",
+				message: { role: "assistant", stopReason: "stop", usage: { input: 1, output: 1 }, content: "done" },
+			};
+			yield { type: "agent_end" };
+		})(),
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker, journalRunEvents: false });
+	await bundle.extension.start();
+	try {
+		for (const { expected, ...request } of cases) {
+			// The caller's stale role is ignored: the host resolves the role from the request as admitted.
+			const handle = await bundle.contract.dispatch({
+				...request,
+				executionRole: "builder",
+				task: "Report what you find.",
+				cwd: env.dir,
+				requestOrigin: "internal",
+			});
+			const receipt = await handle.finalPromise;
+			const label = `${request.agentId}${request.readOnly ? " (no writes)" : ""}`;
+			equal(envelopeRoles.get(handle.runId), expected, `${label}: envelope role`);
+			equal(receipt.executionRole, expected, `${label}: receipt role equals envelope.role`);
+			const journal = await readCallJournal(telemetryRunDirectory(clioStateDir(), handle.runId));
+			const settled = journal.records.find(({ record }) => record.k === "run.settled")?.record;
+			ok(settled?.k === "run.settled", label);
+			equal(settled.data.executionRole, expected, `${label}: journaled role equals envelope.role`);
+			// The executed route tuple route history folds is the same population.
+			equal(settled.data.routeDecision?.executed.executionRole, expected, `${label}: route tuple`);
+		}
+	} finally {
+		await bundle.extension.stop?.();
+	}
+}
+
+it("a debugger journals, routes and receipts the checker role its envelope runs under (DESIGN 4.2)", async () => {
+	await assertRunRoles([{ agentId: "debugger", expected: "checker" }]);
+});
+
+it("a coder asked to write nothing journals, routes and receipts the explorer role (DESIGN 4.2)", async () => {
+	await assertRunRoles([{ agentId: "coder", readOnly: true, expected: "explorer" }]);
+});
+
+it("every builtin recipe's journaled role equals its envelope role (DESIGN 4.2)", async () => {
+	await assertRunRoles([
+		{ agentId: "coder", expected: "builder" },
+		{ agentId: "documenter", expected: "builder" },
+		{ agentId: "scout", expected: "explorer" },
+		{ agentId: "oracle", expected: "explorer" },
+		{ agentId: "provenance", expected: "explorer" },
+		{ agentId: "verifier", expected: "checker" },
+		{ agentId: "reviewer", expected: "checker" },
+		{ agentId: "debugger", expected: "checker" },
+		{ agentId: "tester", readOnly: true, expected: "explorer" },
+	]);
 });
 
 it("a worker killed mid-call keeps the calls it settled and settles its open attempt as sent (#434)", async () => {

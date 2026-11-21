@@ -8,6 +8,7 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
+import { withRunRole } from "../domains/dispatch/execution-role.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -159,24 +160,26 @@ export function prepareScoutContinuation(input: {
 						requiredCapabilities: [...sourceIntent.requiredCapabilities],
 						failover: "approved",
 					};
-		const request: DispatchRequest = {
-			agentId: input.source.run.facts.agentId,
-			executionRole: "explorer",
-			task: subtask.task,
-			cwd: input.source.envelope.cwd,
-			requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",
-			...(input.authorization === "harness-read-only" ? { readOnly: true } : {}),
-			...(harnessIntent?.ok ? { intent: harnessIntent.intent } : {}),
-			routingIntent,
-			failover: "approved",
-			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
-				? {
-						target: input.source.run.facts.route.targetId,
-						model: input.source.run.facts.route.wireModelId,
-						node: input.source.run.facts.node?.id ?? "local",
-					}
-				: {}),
-		};
+		const request: DispatchRequest = withRunRole(
+			{
+				agentId: input.source.run.facts.agentId,
+				task: subtask.task,
+				cwd: input.source.envelope.cwd,
+				requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",
+				...(input.authorization === "harness-read-only" ? { readOnly: true } : {}),
+				...(harnessIntent?.ok ? { intent: harnessIntent.intent } : {}),
+				routingIntent,
+				failover: "approved",
+				...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
+					? {
+							target: input.source.run.facts.route.targetId,
+							model: input.source.run.facts.route.wireModelId,
+							node: input.source.run.facts.node?.id ?? "local",
+						}
+					: {}),
+			},
+			() => input.source.spec,
+		);
 		proposals.push({
 			...input.planAgentSelection({
 				request,

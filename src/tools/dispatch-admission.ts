@@ -9,7 +9,13 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { councilJudgeAgentId, gateDeciderAgentId, reviewDeciderAgentId } from "../domains/dispatch/execution-role.js";
+import {
+	agentRoleFactsResolver,
+	councilJudgeAgentId,
+	gateDeciderAgentId,
+	reviewDeciderAgentId,
+	withRunRole,
+} from "../domains/dispatch/execution-role.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
 	COUNCIL_MAX_MEMBERS,
@@ -369,6 +375,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 	};
 
+	const roleFacts =
+		deps.getAgentRoleFacts ?? agentRoleFactsResolver((id) => deps.getAgentSpecs().find((spec) => spec.id === id) ?? null);
 	const parseRequests = (args: Record<string, unknown>) => {
 		// A task cwd cannot supply its own approval boundary; only the host chooses the workspace (#433).
 		const sessionWorkspace = deps.getWorkspaceRoot?.() ?? deps.dispatch.owner?.().cwd ?? process.cwd();
@@ -385,7 +393,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				return operatorNamedChecks(turnText, ids);
 			},
 			isReadOnlyScout: (id) => isReadOnlyExplorer(deps.getAgentSpecs().find((spec) => spec.id === id)),
-			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
+			resolveFacts: roleFacts,
 			hasAgent: (id) => deps.getAgentSpecs().some((spec) => spec.id === id),
 			writesArtifact: (id) =>
 				deps.getAgentSpecs().some((spec) => spec.id === id && spec.capabilityClass === "artifact-write"),
@@ -918,7 +926,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					const subject = { runId: `plan-builder-${cycle}`, digest: null };
 					tasks.push(
 						resolveTask(
-							{ ...base, executionRole: "builder", gate: { role: "builder", group: "plan-preview", cycle } },
+							withRunRole({ ...base, gate: { role: "builder", group: "plan-preview", cycle } }, roleFacts),
 							"builder",
 							cycle,
 						),
@@ -956,7 +964,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					subjects.push({ runId: `plan-candidate-${candidate}`, digest: null });
 					tasks.push(
 						resolveTask(
-							{ ...base, executionRole: "builder", gate: { role: "candidate", group: "plan-preview", cycle: candidate } },
+							withRunRole({ ...base, gate: { role: "candidate", group: "plan-preview", cycle: candidate } }, roleFacts),
 							"candidate",
 							candidate,
 						),

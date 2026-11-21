@@ -72,7 +72,7 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 			{ id: "context-bootstrap", capabilityClass: "read-only", audience: "internal" },
 		],
 		getAgentRoleFacts: (id: string) =>
-			id === "verifier" ? { capabilityClass: "verification", resultContractKind: "verifier-report" } : null,
+			id === "verifier" ? { capabilityClass: "verification", resultContract: { kind: "verifier-report" } } : null,
 	} as unknown as DispatchToolDeps);
 	const prepare = (tasks: unknown[], extra = {}) =>
 		admission.prepareAdmissionArguments({ mode: "parallel", tasks, ...extra })[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT];

@@ -21,7 +21,7 @@ import {
 import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
-import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { requestRunRole } from "../domains/dispatch/execution-role.js";
 import {
 	plainOutcomeLabel,
 	STALLED_RUN_HEADLINE,
@@ -639,10 +639,7 @@ export async function handleRun(
 		{
 			agentId,
 			task,
-			executionRole: requestExecutionRole({
-				agentId,
-				...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
-			}),
+			executionRole: requestRunRole({ agentId, ...(options.readOnly ? { readOnly: true } : {}) }, deps.getAgentRoleFacts),
 			requestOrigin: "user",
 			...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
@@ -729,7 +726,7 @@ async function handleDelegate(
 		{
 			agentId,
 			delegationAgentId: agentId,
-			executionRole: "builder",
+			executionRole: requestRunRole({ agentId, ...(options.readOnly ? { readOnly: true } : {}) }),
 			requestOrigin: "user",
 			task,
 			...(options.readOnly ? { readOnly: true } : {}),
@@ -780,10 +777,7 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		agentId: ORACLE_AGENT_ID,
 		task: ORACLE_TASK,
 		briefing: digest.text,
-		executionRole: requestExecutionRole({
-			agentId: ORACLE_AGENT_ID,
-			...(ctx.getAgentRoleFacts ? { resolveFacts: ctx.getAgentRoleFacts } : {}),
-		}),
+		executionRole: requestRunRole({ agentId: ORACLE_AGENT_ID, readOnly: true }, ctx.getAgentRoleFacts),
 		requestOrigin: "internal",
 		readOnly: true,
 		...(crossLineage ? { target: crossLineage.target, model: crossLineage.model } : {}),

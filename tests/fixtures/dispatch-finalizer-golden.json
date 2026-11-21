@@ -1982,7 +1982,7 @@
 			"runId": "<run>",
 			"cwd": "<home>/project",
 			"agentId": "golden-peer",
-			"executionRole": "explorer",
+			"executionRole": "builder",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
 			"answerBudgetBytes": 12000,
@@ -2464,7 +2464,7 @@
 				"selected": {
 					"agentId": "golden-peer",
 					"specFingerprint": "acp:unobservable",
-					"executionRole": "explorer",
+					"executionRole": "builder",
 					"targetId": "delegation:golden-peer",
 					"modelId": "golden-peer",
 					"runtimeId": "acp",
@@ -2481,7 +2481,7 @@
 						"candidate": {
 							"agentId": "golden-peer",
 							"specFingerprint": "acp:unobservable",
-							"executionRole": "explorer",
+							"executionRole": "builder",
 							"targetId": "delegation:golden-peer",
 							"modelId": "golden-peer",
 							"runtimeId": "acp",
@@ -2535,7 +2535,7 @@
 						{
 							"agentId": "golden-peer",
 							"specFingerprint": "acp:unobservable",
-							"executionRole": "explorer",
+							"executionRole": "builder",
 							"authority": "internal",
 							"rejections": [],
 							"coldPrior": {
@@ -2553,7 +2553,7 @@
 						{
 							"agentId": "golden-peer",
 							"specFingerprint": "acp:unobservable",
-							"executionRole": "explorer",
+							"executionRole": "builder",
 							"ready": false,
 							"candidateCount": 1,
 							"readyCandidateCount": 0,
@@ -2562,7 +2562,7 @@
 									"candidate": {
 										"agentId": "golden-peer",
 										"specFingerprint": "acp:unobservable",
-										"executionRole": "explorer",
+										"executionRole": "builder",
 										"targetId": "delegation:golden-peer",
 										"modelId": "golden-peer",
 										"runtimeId": "acp",
@@ -2593,7 +2593,7 @@
 				"executedRoute": {
 					"agentId": "golden-peer",
 					"specFingerprint": "acp:unobservable",
-					"executionRole": "explorer",
+					"executionRole": "builder",
 					"targetId": "delegation:golden-peer",
 					"modelId": "golden-peer",
 					"runtimeId": "acp",
@@ -2610,7 +2610,7 @@
 			"version": 1,
 			"id": "<run>",
 			"agentId": "golden-peer",
-			"executionRole": "explorer",
+			"executionRole": "builder",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
 			"projection": {
@@ -3194,7 +3194,7 @@
 			"version": 1,
 			"id": "<run>",
 			"agentId": "golden-peer",
-			"executionRole": "explorer",
+			"executionRole": "builder",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
 			"projection": {

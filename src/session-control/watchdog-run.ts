@@ -12,7 +12,7 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { parseVerifierResult } from "../domains/agents/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { type AgentRoleFactsResolver, requestRunRole } from "../domains/dispatch/execution-role.js";
 import { WATCHDOG_TASK, type WatchdogTrigger, watchdogBriefing } from "../domains/middleware/index.js";
 import { watchdogBlockersNotice } from "./watchdog-notice.js";
 
@@ -43,10 +43,7 @@ export async function runWatchdogReview(trigger: WatchdogTrigger, deps: Watchdog
 		agentId: WATCHDOG_AGENT_ID,
 		task: WATCHDOG_TASK,
 		briefing: watchdogBriefing(trigger),
-		executionRole: requestExecutionRole({
-			agentId: WATCHDOG_AGENT_ID,
-			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
-		}),
+		executionRole: requestRunRole({ agentId: WATCHDOG_AGENT_ID, readOnly: true }, deps.getAgentRoleFacts),
 		requestOrigin: "internal",
 		// Narrowed below whatever the session holds. A reviewer that could write
 		// would be a second builder nobody admitted.

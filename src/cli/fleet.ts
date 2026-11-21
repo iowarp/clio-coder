@@ -46,7 +46,7 @@ import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispa
 import {
 	agentRoleFactsResolver,
 	gateAuthorContractKind,
-	requestExecutionRole,
+	requestRunRole,
 	withAttemptRole,
 } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
@@ -498,11 +498,14 @@ async function runFleetTracked(
 				if (spec === null || spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
 					throw new Error(`fleet step '${context.stepId}' has no automatable agent authority`);
 				}
-				const requestRole = requestExecutionRole({
-					agentId: context.agentId,
-					resolveFacts: roleFacts,
-					...(context.gateRole !== undefined ? { gateRole: context.gateRole } : {}),
-				});
+				const requestRole = requestRunRole(
+					{
+						agentId: context.agentId,
+						readOnly: context.scope === "readonly",
+						...(context.gateRole !== undefined ? { gate: { role: context.gateRole } } : {}),
+					},
+					roleFacts,
+				);
 				return {
 					requestedAuthority: spec.capabilityClass,
 					approvedAuthority: spec.capabilityClass,

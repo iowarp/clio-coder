@@ -9,23 +9,26 @@
  * typed part of the request, the envelope, the receipt, the route candidate, and
  * the route-history key rather than something inferred at scoring time.
  *
- * This module is pure. It owns the role vocabulary, the derivation rules, the
- * gate decider defaults, and the correlation/independence policy. No I/O, no
- * clock, no engine state.
+ * This module is pure. It owns the role vocabulary, the request-time role
+ * resolution (one rule, `resolveRunRole`, plus recovery for a later attempt),
+ * the gate decider defaults, and the correlation/independence policy. No I/O,
+ * no clock, no engine state.
  */
 
 import { EXECUTION_ROLE_VOCABULARY } from "../../core/telemetry/run-vocabulary.js";
 import { dispatchJobRecipe } from "../agents/dispatch-jobs.js";
-import { type ResultContract, withResultSummaryAllowance } from "../agents/result-contract.js";
+import { isHoareResultContract, type ResultContract, withResultSummaryAllowance } from "../agents/result-contract.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
+import type { DispatchRequest } from "./contract.js";
+import { type RunRole, requestedWriteNone, resolveRunRole } from "./obligation.js";
 
 /**
  * The one execution-role union.
  *
  * The names are the fleet role vocabulary (DESIGN 4.2, M12). `builder` produces
  * the work under review. `reviewer` and `judge` are gate deciders. `explorer`
- * is read-only reconnaissance and `seat` a council member. `checker` is a
- * direct typed-validation run outside a gate. `recovery` is any attempt after
+ * is a run that writes nothing outside a gate and `seat` a council member.
+ * `checker` is a verification-class recipe outside a gate. `recovery` is any attempt after
  * the first: a retry is not an independent observation of the route, so it
  * never trains ordinary builder quality. Runs journaled before M12 recorded
  * `researcher` and `verifier`; those records read as recorded and nothing
@@ -47,100 +50,112 @@ export function isExecutionRole(value: unknown): value is ExecutionRole {
  */
 export type GateTopologyRole = "builder" | "reviewer" | "candidate" | "judge" | "member" | "synthesis";
 
-/**
- * Facts the role is derived from. `capabilityClass` and `resultContractKind`
- * both come from the strict recipe schema, so a role can never be read
- * off free-form prose or a display-only field.
- */
-export interface ExecutionRoleInput {
-	/** Zero-based lineage attempt; anything past the first is recovery work. */
-	attempt: number;
-	/** Review/compete topology position, which overrides the recipe default. */
-	gateRole?: GateTopologyRole;
-	capabilityClass: AgentCapabilityClass;
-	/** Declared typed postcondition, or null for a recipe that declares none. */
-	resultContractKind: ResultContract["kind"] | null;
+/** The strict recipe facts a request's role is resolved from, and nothing else. */
+export interface AgentRoleFacts {
+	capabilityClass: AgentCapabilityClass | string;
+	resultContract: ResultContract;
 }
-
-/**
- * Derive the one role this run's statistics belong to.
- *
- * Order matters and encodes the policy:
- *
- *   1. A retry or failover attempt is recovery evidence regardless of what it
- *      was originally doing. Recovery runs start from a poisoned context, so
- *      folding them back into the builder population would understate a route
- *      that only ever fails on the first try.
- *   2. Topology overrides the recipe. A Coder placed in the reviewer slot is
- *      reviewer evidence, and a compete candidate is a builder no matter which
- *      candidate ordinal it holds.
- *   3. Outside a gate, the recipe's own typed contract decides. A declared
- *      `verifier-report` or `review-verdict` is the only contract that makes
- *      a direct run a checker; a Debugger's `debugger-report` deliberately does not, because
- *      the result schema distinguishes diagnosis from a gate verdict.
- *   4. A read-only recipe with no verifier contract is reconnaissance.
- */
-export function deriveExecutionRole(input: ExecutionRoleInput): ExecutionRole {
-	if (input.attempt > 0) return "recovery";
-	if (input.gateRole === "reviewer") return "reviewer";
-	if (input.gateRole === "judge") return "judge";
-	if (input.gateRole === "synthesis") return "judge";
-	if (input.gateRole === "member") return "seat";
-	if (input.gateRole === "builder" || input.gateRole === "candidate") return "builder";
-	if (input.resultContractKind === "verifier-report" || input.resultContractKind === "review-verdict") return "checker";
-	if (input.capabilityClass === "read-only") return "explorer";
-	return "builder";
-}
-
-/** The strict recipe facts a request needs to derive its role, and nothing else. */
-export type AgentRoleFacts = Pick<ExecutionRoleInput, "capabilityClass" | "resultContractKind">;
 
 /** Resolves the strict recipe facts for an agent id, or null when it is unknown. */
 export type AgentRoleFactsResolver = (agentId: string) => AgentRoleFacts | null;
 
-/** Project an agent spec lookup into the two fields role derivation reads. */
+/** Project an agent spec lookup into the two fields role resolution reads. */
 export function agentRoleFactsResolver(
 	getSpec: (agentId: string) => { capabilityClass: AgentCapabilityClass; resultContract: ResultContract } | null,
 ): AgentRoleFactsResolver {
 	return (agentId) => {
 		const spec = getSpec(agentId);
-		return spec === null ? null : { capabilityClass: spec.capabilityClass, resultContractKind: spec.resultContract.kind };
+		return spec === null ? null : { capabilityClass: spec.capabilityClass, resultContract: spec.resultContract };
 	};
 }
 
-/**
- * Derive the role for one request at construction time.
- *
- * A gate position alone determines the role, so a topology never needs the
- * recipe. Outside a gate, an unresolvable agent falls back to `builder`: that is
- * the population with no special standing, so an unknown recipe can never claim
- * checker or explorer evidence it has not proven. Admission still rejects the
- * unknown agent on its own terms.
- */
-export function requestExecutionRole(input: {
+/** The request fields a run's role is resolved from: its seat, its gate position, its write scope and its contract. */
+export interface RunRoleRequest {
 	agentId: string;
-	gateRole?: GateTopologyRole;
-	resolveFacts?: AgentRoleFactsResolver;
-}): ExecutionRole {
-	const facts = input.resolveFacts?.(input.agentId) ?? null;
-	return deriveExecutionRole({
-		attempt: 0,
-		...(input.gateRole !== undefined ? { gateRole: input.gateRole } : {}),
-		capabilityClass: facts?.capabilityClass ?? "workspace-edit",
-		resultContractKind: facts?.resultContractKind ?? null,
-	});
+	gate?: { role?: GateTopologyRole } | undefined;
+	readOnly?: boolean | undefined;
+	resultContractOverride?: ResultContract | undefined;
 }
 
 /**
- * Apply the recovery rule to an already-derived request role.
+ * The role a request's first attempt runs under (DESIGN 4.2): `resolveRunRole` over the request's gate position, its
+ * recipe's class and whether it may write, the same facts the run's envelope is built from, so the role a run is
+ * journaled, routed and receipted under is always its `envelope.role`. Write scope is part of the request: a caller
+ * constructs the request whole (readOnly, gate, contract override) before resolving its role. An unknown agent has no
+ * class, so it can never claim checker evidence; admission rejects it on its own terms.
+ */
+export function requestRunRole(req: RunRoleRequest, resolveFacts?: AgentRoleFactsResolver): RunRole {
+	const facts = resolveFacts?.(req.agentId) ?? null;
+	const capabilityClass = facts?.capabilityClass ?? null;
+	// Without a result summary allowance the contract resolution cannot throw.
+	const contract = dispatchResultContract(
+		{
+			agentId: req.agentId,
+			...(req.gate !== undefined ? { gate: req.gate } : {}),
+			...(req.resultContractOverride !== undefined ? { resultContractOverride: req.resultContractOverride } : {}),
+		},
+		facts,
+	);
+	return resolveRunRole({
+		gateRole: req.gate?.role,
+		capabilityClass,
+		readOnly: requestedWriteNone({
+			readOnly: req.readOnly,
+			capabilityClass,
+			hoareContract: isHoareResultContract(contract),
+		}),
+	});
+}
+
+/** The request with the role `requestRunRole` resolves for it, for a construction site that builds the request whole. */
+export function withRunRole(
+	req: Omit<DispatchRequest, "executionRole"> & { executionRole?: ExecutionRole },
+	resolveFacts?: AgentRoleFactsResolver,
+): DispatchRequest {
+	return { ...req, executionRole: requestRunRole(req, resolveFacts) };
+}
+
+/**
+ * Apply the recovery rule to a request's role.
  *
- * The request carries the role its first attempt would run under; only the
- * dispatch lifecycle knows which attempt actually launched. Keeping the rule
- * here means the lifecycle transports the role rather than re-deriving it, so
- * there is exactly one definition of what counts as recovery.
+ * The request carries the role its first attempt runs under; only the dispatch lifecycle knows which attempt actually
+ * launched. A retry or failover attempt is recovery evidence whatever it was doing: it starts from a poisoned context,
+ * so folding it into its first attempt's population would understate a route that only ever fails on the first try.
  */
 export function withAttemptRole(requestRole: ExecutionRole, attempt: number): ExecutionRole {
 	return attempt > 0 ? "recovery" : requestRole;
+}
+
+const UNGATED_ROLES: ReadonlyArray<ExecutionRole> = ["builder", "explorer", "checker"];
+const GATE_POSITIONS: ReadonlySet<GateTopologyRole> = new Set(["reviewer", "judge", "synthesis", "member"]);
+
+/**
+ * Every population an agent's first attempt can run under outside a gate, by `requestRunRole`: with its write scope and
+ * asked to write nothing. Null for an agent the resolver does not know. A record naming another population for this
+ * agent outside a gate (a ledger row, a `fleet.adaptiveRouting.agentRoles` pair) describes runs the rule no longer
+ * produces: a Debugger is a checker, never a builder (row 352).
+ */
+export function agentRunRoles(agentId: string, resolveFacts: AgentRoleFactsResolver): ExecutionRole[] | null {
+	if (resolveFacts(agentId) === null) return null;
+	return [...new Set([false, true].map((readOnly) => requestRunRole({ agentId, readOnly }, resolveFacts)))];
+}
+
+/**
+ * Whether a recorded run's role is one the rule can assign it (row 352). A name outside the current vocabulary
+ * (`researcher`, `verifier`) never is; a gate position fixes its role; otherwise the role is one of the agent's
+ * populations by `agentRunRoles`, or any ungated role when its recipe is unknown here. Recovery is any agent's.
+ */
+export function recordedRoleIsCurrent(
+	run: { agentId: string; executionRole: unknown; gate?: { role?: GateTopologyRole } | undefined },
+	resolveFacts?: AgentRoleFactsResolver,
+): boolean {
+	if (!isExecutionRole(run.executionRole)) return false;
+	if (run.executionRole === "recovery") return true;
+	const gateRole = run.gate?.role;
+	if (gateRole !== undefined && GATE_POSITIONS.has(gateRole))
+		return run.executionRole === resolveRunRole({ gateRole, capabilityClass: null, readOnly: true });
+	const roles = resolveFacts === undefined ? null : agentRunRoles(run.agentId, resolveFacts);
+	return (roles ?? UNGATED_ROLES).includes(run.executionRole);
 }
 
 /**

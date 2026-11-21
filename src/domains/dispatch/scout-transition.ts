@@ -3,7 +3,7 @@
 import type { ScoutResult } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import { compileExecutionPlan, type ExecutionPlan } from "./execution-plan.js";
-import { deriveExecutionRole } from "./execution-role.js";
+import { requestRunRole } from "./execution-role.js";
 
 export type TrustedTransitionAuthorityBasis =
 	| "existing-plan"
@@ -94,11 +94,7 @@ export function compileScoutTransition(input: {
 		return {
 			id: subtask.id,
 			agentId: binding.spec.id,
-			executionRole: deriveExecutionRole({
-				attempt: 0,
-				capabilityClass: binding.spec.capabilityClass,
-				resultContractKind: binding.spec.resultContract.kind,
-			}),
+			executionRole: requestRunRole({ agentId: binding.spec.id }, () => binding.spec),
 			scope: scopeFor(subtask.requestedAuthority),
 			expectedResultContract: subtask.expectedResultContract,
 			requestedAuthority: subtask.requestedAuthority,

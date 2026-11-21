@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parse as parseYaml } from "yaml";
 
 import { readSettings, SettingsValidationError, validateSettingsFile } from "../../src/core/config.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
@@ -147,4 +148,96 @@ test("doctor warns about coerced booleans and --fix rewrites only those values",
 		false,
 	);
 	deepStrictEqual(validateSettingsFile().coercions, []);
+});
+
+// Fleet M12 renamed the worker roles and row 352 moved populations between them, with no migration: a retired role
+// name in settings stops the loader and the refusal names what to write instead.
+test("a retired fleet role name is refused with its new names", async (t) => {
+	const home = await isolateClioEnv("clio-retired-roles-");
+	t.after(() => home.restore());
+	const file = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	const cases = [
+		{
+			yaml: "version: 2\nfleet:\n  adaptiveRouting:\n    roles: [researcher]\n",
+			path: "fleet.adaptiveRouting.roles",
+			names: /"researcher" is now "explorer" or "seat"/u,
+		},
+		{
+			yaml:
+				"version: 2\nfleet:\n  adaptiveRouting:\n    agentRoles:\n      - { agentId: verifier, executionRole: verifier }\n",
+			path: "fleet.adaptiveRouting.agentRoles[0].executionRole",
+			names: /"verifier" is now "checker"/u,
+		},
+	];
+	for (const { yaml, path, names } of cases) {
+		writeFileSync(file, yaml);
+		throws(
+			() => readSettings(),
+			(error: unknown) => {
+				ok(error instanceof SettingsValidationError, String(error));
+				const hits = error.issues.filter((issue) => issue.path === path);
+				strictEqual(hits.length, 1, `${path}: ${JSON.stringify(error.issues)}`);
+				match(hits[0]?.message ?? "", names);
+				match(hits[0]?.message ?? "", /doctor --fix/u);
+				return true;
+			},
+		);
+	}
+});
+
+test("doctor --fix rewrites retired role names and pairs whose agent's population moved", async (t) => {
+	const home = await isolateClioEnv("clio-retired-roles-fix-");
+	t.after(() => home.restore());
+	const file = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	const before = [
+		"version: 2",
+		"# my routing",
+		"fleet:",
+		"  adaptiveRouting:",
+		"    roles: [researcher, judge]",
+		"    agentRoles:",
+		"      - { agentId: scout, executionRole: researcher }",
+		"      - { agentId: verifier, executionRole: verifier }",
+		"      - { agentId: debugger, executionRole: builder }",
+		"      - { agentId: coder, executionRole: builder }",
+		"",
+	].join("\n");
+	writeFileSync(file, before);
+
+	// Recipe discovery reads settings, so while the names still fail to load only they are judged.
+	const warned = runDoctor().find((row) => row.name === "settings.yaml roles");
+	match(warned?.detail ?? "", /scout\/researcher -> scout\/explorer, scout\/seat.*doctor --fix/u);
+	strictEqual(readFileSync(file, "utf8"), before, "doctor without --fix is read-only");
+
+	const rows = runDoctor({ fix: true });
+	const text = readFileSync(file, "utf8");
+	ok(text.includes("# my routing"));
+	deepStrictEqual(parseYaml(text).fleet.adaptiveRouting, {
+		roles: ["explorer", "seat", "judge"],
+		agentRoles: [
+			{ agentId: "scout", executionRole: "explorer" },
+			{ agentId: "scout", executionRole: "seat" },
+			{ agentId: "verifier", executionRole: "checker" },
+			{ agentId: "debugger", executionRole: "checker" },
+			{ agentId: "coder", executionRole: "builder" },
+		],
+	});
+	deepStrictEqual(validateSettingsFile().issues, []);
+	match(rows.find((row) => row.name === "settings.yaml roles")?.detail ?? "", /^rewrote /u);
+	strictEqual(rows.find((row) => row.name === "settings.yaml")?.ok, true);
+
+	// A pair valid by name whose agent's runs moved loads, activates nothing, and is named until --fix rewrites it.
+	const moved =
+		"version: 2\nfleet:\n  adaptiveRouting:\n    agentRoles:\n      - { agentId: debugger, executionRole: builder }\n";
+	writeFileSync(file, moved);
+	const named = runDoctor().find((row) => row.name === "settings.yaml roles");
+	strictEqual(named?.level, "warn");
+	match(named?.detail ?? "", /debugger\/builder -> debugger\/checker.*doctor --fix/u);
+	strictEqual(readFileSync(file, "utf8"), moved);
+	runDoctor({ fix: true });
+	deepStrictEqual(parseYaml(readFileSync(file, "utf8")).fleet.adaptiveRouting.agentRoles, [
+		{ agentId: "debugger", executionRole: "checker" },
+	]);
 });

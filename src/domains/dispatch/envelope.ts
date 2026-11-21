@@ -34,8 +34,7 @@ import { roleExcludes, roleHeldTools, roleRemedy, toolActionClass } from "../age
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import { toolEscapesWriteRoots } from "../safety/policy-engine.js";
 import type { WorkerMcpAttestation, WorkerPermitAllowance } from "../safety/worker-permit.js";
-import type { GateTopologyRole } from "./execution-role.js";
-import { type RunRole, resolveRunRole } from "./obligation.js";
+import type { RunRole } from "./obligation.js";
 
 export const WORKER_ENVELOPE_VERSION = 1;
 
@@ -131,31 +130,6 @@ export interface WorkerEnvelope {
 /** The capability names of an envelope, sorted: what the worker registers, attests and is told. */
 export function envelopeToolNames(envelope: Pick<WorkerEnvelope, "tools">): ToolName[] {
 	return [...envelope.tools.direct, ...envelope.tools.gateway].sort() as ToolName[];
-}
-
-/**
- * Whether the request asks the run to change nothing: the caller or the turn said read-only, the recipe's class is
- * read-only, or its contract is a Hoare proof. The only place this is derived; everything later reads the envelope.
- */
-export function requestedWriteNone(input: {
-	readOnly: boolean | undefined;
-	capabilityClass: AgentCapabilityClass | string | null | undefined;
-	hoareContract: boolean;
-}): boolean {
-	return input.readOnly === true || input.capabilityClass === "read-only" || input.hoareContract;
-}
-
-/** The run's role from its gate position, recipe class and requested write scope (DESIGN 4.2). */
-export function envelopeRole(input: {
-	gateRole?: GateTopologyRole | undefined;
-	capabilityClass: AgentCapabilityClass | string | null;
-	writeNone: boolean;
-}): RunRole {
-	return resolveRunRole({
-		gateRole: input.gateRole,
-		capabilityClass: input.capabilityClass,
-		readOnly: input.writeNone,
-	});
 }
 
 /**

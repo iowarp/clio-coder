@@ -37,11 +37,14 @@ import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js
 import { buildEvidencePacket, type EvidencePacket, packetProvenance } from "../domains/dispatch/evidence-packet.js";
 import { compileExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import {
+	type AgentRoleFactsResolver,
+	agentRoleFactsResolver,
 	councilJudgeAgentId,
 	gateDeciderAgentId,
 	gateRouteCorrelation,
 	type RouteCorrelationFacts,
 	reviewDeciderAgentId,
+	withRunRole,
 } from "../domains/dispatch/execution-role.js";
 import {
 	decideReviewGate,
@@ -181,6 +184,15 @@ interface BackgroundSwitch {
 	/** Resolves when the operator fires the control; never rejects. */
 	readonly requested: Promise<void>;
 	fire(): void;
+}
+
+/** The recipe facts a gate builder's role is resolved from (DESIGN 4.2). */
+function dispatchRoleFacts(
+	deps: Pick<DispatchToolDeps, "getAgentSpecs" | "getAgentRoleFacts">,
+): AgentRoleFactsResolver {
+	return (
+		deps.getAgentRoleFacts ?? agentRoleFactsResolver((id) => deps.getAgentSpecs().find((spec) => spec.id === id) ?? null)
+	);
 }
 
 function createBackgroundSwitch(): BackgroundSwitch {
@@ -1361,14 +1373,16 @@ async function runReviewGated(
 				cycle,
 				...(findings !== null ? { subjects: [subjectRef(findings.reviewer.receipt)], verdict: "revise" } : {}),
 			};
-			const builderRequest: DispatchRequest = {
-				...base,
-				executionRole: "builder",
-				gate: builderGate,
-				...(findings !== null
-					? { pipelineInput: { fromRunId: findings.reviewer.receipt.runId, position: cycle, text: findings.text } }
-					: {}),
-			};
+			const builderRequest: DispatchRequest = withRunRole(
+				{
+					...base,
+					gate: builderGate,
+					...(findings !== null
+						? { pipelineInput: { fromRunId: findings.reviewer.receipt.runId, position: cycle, text: findings.text } }
+						: {}),
+				},
+				dispatchRoleFacts(deps),
+			);
 			const builder = await runOne(
 				withResolvedPlanTaskPin(
 					builderRequest,
@@ -1984,19 +1998,21 @@ async function runCompete(
 			// They move after the plan pin, which reseals the checks admission resolved in the checkout.
 			const candidateRequests = worktrees.map((worktree) => {
 				const pinned = withResolvedPlanTaskPin(
-					{
-						...base,
-						executionRole: "builder",
-						cwd: worktree.path,
-						protectedArtifactRemap: { sourceRoot: root, workerRoot: worktree.path },
-						gate: {
-							role: "candidate",
-							group,
-							cycle: worktree.index,
-							...(worktree.provenance ? { worktree: worktree.provenance } : {}),
+					withRunRole(
+						{
+							...base,
+							cwd: worktree.path,
+							protectedArtifactRemap: { sourceRoot: root, workerRoot: worktree.path },
+							gate: {
+								role: "candidate",
+								group,
+								cycle: worktree.index,
+								...(worktree.provenance ? { worktree: worktree.provenance } : {}),
+							},
+							competeStance: competeStanceFor(group, worktree.index),
 						},
-						competeStance: competeStanceFor(group, worktree.index),
-					},
+						dispatchRoleFacts(deps),
+					),
 					compete.resolvedTasks?.find((task) => task.role === "candidate" && task.position === worktree.index),
 				);
 				const checks = pinned.resolvedVerification ?? [];

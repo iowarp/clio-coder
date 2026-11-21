@@ -792,7 +792,7 @@ async function runDispatch(
 	const { audienceRefusalStandIn } = await import("../domains/agents/spec.js");
 	const { ConfigDomainModule } = await import("../domains/config/index.js");
 	const { createContextDomainModule } = await import("../domains/context/runtime.js");
-	const { agentRoleFactsResolver, requestExecutionRole } = await import("../domains/dispatch/execution-role.js");
+	const { agentRoleFactsResolver, withRunRole } = await import("../domains/dispatch/execution-role.js");
 	const { createDispatchDomainModule } = await import("../domains/dispatch/index.js");
 	const { configureRunEventJournal } = await import("../domains/dispatch/run-event-journal.js");
 	const { WORKER_PROCESS_CLEANUP_BOUND_MS } = await import("../domains/dispatch/worker-spawn.js");
@@ -912,16 +912,10 @@ async function runDispatch(
 	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
 
 	const runAgents = loaded.getContract("agents");
-	const dispatchReq: DispatchRequest = {
-		agentId: parsed.agentId,
-		executionRole: requestExecutionRole({
-			agentId: parsed.agentId,
-			...(runAgents ? { resolveFacts: agentRoleFactsResolver((id: string) => runAgents.getSpec(id)) } : {}),
-		}),
-		task,
-		requestOrigin: "user",
-	};
-	if (parsed.readOnly) dispatchReq.readOnly = true;
+	const dispatchReq: DispatchRequest = withRunRole(
+		{ agentId: parsed.agentId, task, requestOrigin: "user", ...(parsed.readOnly ? { readOnly: true } : {}) },
+		runAgents ? agentRoleFactsResolver((id: string) => runAgents.getSpec(id)) : undefined,
+	);
 	if (parsed.record === true) dispatchReq.record = true;
 	if (parsed.agentProfile) dispatchReq.workerProfile = parsed.agentProfile;
 	if (parsed.agentRuntime) dispatchReq.workerRuntime = parsed.agentRuntime;

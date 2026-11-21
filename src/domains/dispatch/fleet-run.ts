@@ -66,7 +66,7 @@ import {
 	executionPlanWaves,
 	spliceExecutionPlan,
 } from "./execution-plan.js";
-import { gateAuthorContractKind, gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
+import { gateAuthorContractKind, gateRouteCorrelation, requestRunRole, withRunRole } from "./execution-role.js";
 import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
 import { changedCheckFiles, deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
@@ -847,21 +847,23 @@ async function runFleetHoldingWorkspace(
 							let memberId = `proposal:${step.id}:${index}`;
 							while (memberIds.has(memberId)) memberId = `proposal:${memberId}`;
 							memberIds.add(memberId);
-							const request: DispatchRequest = {
-								agentId,
-								executionRole: "explorer",
-								task: step.task,
-								cwd: workspaceRoot,
-								requestOrigin: "user",
-								...(decisionRefs.length > 0 ? { decisionRefs } : {}),
-								readOnly: true,
-								lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
-								// A proposal is an explorer's prose, not a builder report.
-								resultContractOverride: { kind: "text-report" },
-								...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
-								...(step.target !== undefined ? { target: step.target } : {}),
-								...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
-							};
+							const request: DispatchRequest = withRunRole(
+								{
+									agentId,
+									task: step.task,
+									cwd: workspaceRoot,
+									requestOrigin: "user",
+									...(decisionRefs.length > 0 ? { decisionRefs } : {}),
+									readOnly: true,
+									lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+									// A proposal is an explorer's prose, not a builder report.
+									resultContractOverride: { kind: "text-report" },
+									...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
+									...(step.target !== undefined ? { target: step.target } : {}),
+									...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+								},
+								(id) => agents.getSpec(id),
+							);
 							const resolution = dispatch.preview?.(request);
 							if (!resolution) throw new Error(`fleet preflight cannot resolve proposal '${memberId}'`);
 							members.push({ memberId, request });
@@ -1447,18 +1449,8 @@ async function runFleetHoldingWorkspace(
 						approvedAuthority: spec.capabilityClass,
 						expectedResultContract: spec.resultContract.kind,
 						resultContract: spec.resultContract,
-						executionRole: requestExecutionRole({
-							agentId: task.agent,
-							resolveFacts: (id) => {
-								const candidate = agents.getSpec(id);
-								return candidate === null
-									? null
-									: {
-											capabilityClass: candidate.capabilityClass,
-											resultContractKind: candidate.resultContract.kind,
-										};
-							},
-						}),
+						// The spliced step runs read-only when it declares no writes (its plan scope), so its role says so.
+						executionRole: requestRunRole({ agentId: task.agent, readOnly: task.writes.length === 0 }, () => spec),
 					};
 				});
 				livePlan = spliceExecutionPlan(currentPlan, step.id, tasks);

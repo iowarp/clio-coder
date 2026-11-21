@@ -542,6 +542,16 @@ export type ActiveRoutingPosture = (typeof ACTIVE_ROUTING_POSTURES)[number];
 export const ACTIVE_AGENT_AUTOMATION_ROLES = ["builder", "explorer", "seat", "checker", "reviewer", "judge"] as const;
 export type ActiveAgentAutomationRole = (typeof ACTIVE_AGENT_AUTOMATION_ROLES)[number];
 
+/**
+ * Role names fleet M12 retired, with the names that cover the runs each one named: `researcher` was read-only
+ * reconnaissance and a council member alike. Settings that still name one fail validation, and `doctor --fix`
+ * rewrites them; nothing reads them as an alias.
+ */
+export const RETIRED_ROUTING_ROLE_NAMES: Readonly<Record<string, ReadonlyArray<ActiveRoutingRole>>> = Object.freeze({
+	researcher: Object.freeze(["explorer", "seat"] as const),
+	verifier: Object.freeze(["checker"] as const),
+});
+
 export interface ActiveAgentRole {
 	agentId: string;
 	executionRole: ActiveAgentAutomationRole;

@@ -11,7 +11,7 @@ import { discoverAgentRecipes } from "../domains/agents/registry.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import { isShadowAgent, normalizeAgentSpec, userOriginAudienceRefusal } from "../domains/agents/spec.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { gateAuthorContractKind, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
+import { gateAuthorContractKind, requestRunRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 
 export interface PlaybookPreflightResult {
@@ -130,20 +130,14 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 				throw new Error(`playbook step '${context.stepId}' has no automatable agent authority`);
 			}
 			resolved.add(spec.id);
-			const role = requestExecutionRole({
-				agentId: spec.id,
-				resolveFacts: (id) => {
-					const found = byId.get(id);
-					return found === undefined
-						? null
-						: {
-								category: found.category,
-								capabilityClass: found.capabilityClass,
-								resultContractKind: found.resultContract.kind,
-							};
+			const role = requestRunRole(
+				{
+					agentId: spec.id,
+					readOnly: context.scope === "readonly",
+					...(context.gateRole === undefined ? {} : { gate: { role: context.gateRole } }),
 				},
-				...(context.gateRole === undefined ? {} : { gateRole: context.gateRole }),
-			});
+				(id) => byId.get(id) ?? null,
+			);
 			return {
 				requestedAuthority: spec.capabilityClass,
 				approvedAuthority: spec.capabilityClass,
