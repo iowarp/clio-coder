@@ -411,7 +411,7 @@ import {
 	judgeWithheldCause,
 } from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
-import { answerBudgetMessage, sealedAnswerBudgetBytes } from "./handback.js";
+import { answerBudgetMessage, sealedAnswerBudgetBytes, wallHandbackOutcomeDetail } from "./handback.js";
 import {
 	classifyHeartbeat,
 	DEFAULT_HEARTBEAT_SPEC,
@@ -1523,6 +1523,9 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 	const code = OUTCOME_CODE_SPECIFICITY.find((candidate) => codes.has(candidate)) ?? null;
 	if (codes.size <= 1) return { code, conflict: null };
 	if ([...codes].every((candidate) => LOOP_DEGENERATION_CODES.has(candidate))) return { code, conflict: null };
+	// A run the wall clock moved to handback that then ends without an answer is one story, told at settle (fleet M8).
+	if (code === "worker_run_timeout" && codes.size === 2 && codes.has("worker_final_output_missing"))
+		return { code, conflict: null };
 	return {
 		code,
 		conflict: `conflicting trusted outcome codes: ${[...codes].sort().join(", ")}`,
@@ -10287,11 +10290,21 @@ export function createDispatchBundle(
 				// The worker's own reason is what separates a model that cannot
 				// meet a grounding rule from a prompt that asks for the impossible.
 				const outcomeCodeDetail = outcomeCode === null ? undefined : trustedOutcomeDetails.get(outcomeCode);
-				// DESIGN 4.5 (fleet M8): a run its wall clock moved to handback seals timed_out with the report it wrote.
-				if (outcomeCode === "worker_run_timeout" && (finalOutcome === "succeeded" || finalOutcome === "failed")) {
-					finalOutcome = "timed_out";
-					finalDetail = outcomeCodeDetail ?? "worker_run_timeout: the run reached its wall clock";
-					failureMessage = finalDetail;
+				// DESIGN 4.5 (fleet M8): a run its wall clock moved to handback seals timed_out, and the host, not the
+				// worker's line written at the handback, says whether a report came back.
+				if (outcomeCode === "worker_run_timeout") {
+					const handback = wallHandbackOutcomeDetail({
+						reported: hasDurableFinalOutput(outputCapture.snapshot()),
+						unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+						signal: result.signal ?? null,
+					});
+					if (finalOutcome === "succeeded" || finalOutcome === "failed") {
+						finalOutcome = "timed_out";
+						finalDetail = handback;
+						failureMessage = finalDetail;
+					} else if (finalOutcome === "timed_out") {
+						finalDetail = [handback, finalDetail].filter(Boolean).join("; ");
+					}
 				}
 				if (outcomeCodeDetail !== undefined && finalOutcome === "failed") {
 					finalDetail = [finalDetail, outcomeCodeDetail].filter(Boolean).join("; ");
