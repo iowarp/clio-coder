@@ -148,33 +148,61 @@ function unattendedTurn(turn: {
  * refused before it runs and declares nothing (FX-40). The refusal runs before the registry, where no loop guard or
  * turn budget sees it, so it happens at most once per user turn: a later bare finish in that turn runs, and its
  * declaration records the missing reply as a limitation. The check is typed: a non-empty text block in that response,
- * never its wording. An unattended turn keeps a bare finish, which its pinned declaration round asks for.
+ * never its wording. A headless main run is held to the same rule over its whole user turn (CLI-P49): its first bare
+ * finish is refused only when no response since the prompt carried text, so the pinned declaration round after a
+ * written reply still declares. Any other unattended turn (a job, a continuation nobody watches) keeps a bare finish.
  */
 export function bareFinishVerdict(
 	toolCall: { name: string; arguments: unknown },
 	assistantMessage: { content: ReadonlyArray<{ type: string; text?: unknown }> },
-	turn: { headless: boolean; origin: string | undefined; promptOrigin?: string | null; refusedThisTurn: boolean },
+	turn: {
+		headless: boolean;
+		origin: string | undefined;
+		promptOrigin?: string | null;
+		refusedThisTurn: boolean;
+		repliedThisTurn?: boolean;
+	},
 ): "refuse" | "admit" | null {
-	if (unattendedTurn(turn)) return null;
+	if (turn.headless) {
+		if (turn.repliedThisTurn === true) return null;
+	} else if (unattendedTurn(turn)) return null;
 	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== ToolNames.Finish) return null;
-	const replied = assistantMessage.content.some(
-		(block) => block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
-	);
-	if (replied) return null;
+	if (hasReplyText(assistantMessage)) return null;
 	return turn.refusedThisTurn ? "admit" : "refuse";
+}
+
+/** Whether an assistant response carries a non-empty text block: the typed reply fact, never its wording. */
+export function hasReplyText(message: { content?: unknown }): boolean {
+	return (
+		Array.isArray(message.content) &&
+		message.content.some(
+			(block: { type?: unknown; text?: unknown } | null) =>
+				block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
+		)
+	);
 }
 
 export const FINISH_WITHOUT_REPLY_REFUSAL =
 	"finish did not run: this response has no reply text. Write your reply to the user as text first; then, in that same response, call finish as the only tool call.";
 
-/** The declaration of a bare finish admitted after its turn's one refusal, with the missing reply on record (FX-40). */
-export function withoutReplyLimitation(completion: CompletionDeclaration): CompletionDeclaration {
-	return {
+/**
+ * The declaration of a bare finish admitted after its turn's one refusal, with the missing reply on record (FX-40). A
+ * headless run has no operator to read anything else (CLI-P49), so its claim drops from done to partly_done and the
+ * reply is listed unverified.
+ */
+export function withoutReplyLimitation(completion: CompletionDeclaration, headless = false): CompletionDeclaration {
+	const limited: CompletionDeclaration = {
 		...completion,
 		limitations: [
 			...completion.limitations,
 			{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
 		],
+	};
+	if (!headless) return limited;
+	return {
+		...limited,
+		state: completion.state === "done" ? "partly_done" : completion.state,
+		unverified: [...completion.unverified, "no reply text: the run wrote no answer for the request"],
 	};
 }
 
@@ -192,10 +220,11 @@ function declarationText(completion: CompletionDeclaration): string {
  */
 export function withoutReplyResult(
 	result: unknown,
+	headless = false,
 ): { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> } | undefined {
 	const completion = completionOfToolResult(ToolNames.Finish, result);
 	if (completion === null) return undefined;
-	const amended = withoutReplyLimitation(completion);
+	const amended = withoutReplyLimitation(completion, headless);
 	const details = (result as { details?: Record<string, unknown> }).details;
 	return { content: [{ type: "text", text: declarationText(amended) }], details: { ...details, completion: amended } };
 }

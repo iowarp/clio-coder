@@ -97,6 +97,7 @@ import {
 	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
+	hasReplyText,
 	withoutReplyResult,
 } from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
@@ -1387,6 +1388,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					origin: state.currentTurnOrigin?.origin,
 					promptOrigin: state.promptOrigin,
 					refusedThisTurn: state.finishReplyRefused,
+					repliedThisTurn: state.turnReplied,
 				});
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
 				if (verdict !== "refuse") return undefined;
@@ -1399,7 +1401,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// session ledger keeps and the turn's declaration is read from.
 			afterToolCall: async ({ toolCall, result, isError }) => {
 				const bare = bareFinishCalls.delete(toolCall.id);
-				return bare && !isError ? withoutReplyResult(result) : undefined;
+				return bare && !isError ? withoutReplyResult(result, deps.headless === true) : undefined;
 			},
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
@@ -2005,6 +2007,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			lastActivityAt = eventClock;
 			let enrichedEvent = event;
 			if (event.type === "message_end" && event.message.role === "assistant") {
+				if (hasReplyText(event.message)) state.turnReplied = true;
 				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
 				const cutOff = outputLimitCutOffToolCallIds(event.message);
 				for (const id of cutOff) cutOffToolCalls.add(id);

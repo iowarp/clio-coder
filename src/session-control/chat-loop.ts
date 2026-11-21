@@ -3620,6 +3620,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
+					state.turnReplied = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
 					if (options.machineTurn === undefined) headlessObservation?.reset(options.hostRun?.runId);
 				}

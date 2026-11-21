@@ -339,6 +339,11 @@ export interface ChatTurnState {
 	 * the prompt keeps it, and an operator message handed into the run resets it.
 	 */
 	finishReplyRefused: boolean;
+	/**
+	 * An assistant text block settled since the operator's prompt (CLI-P49): a headless run whose turn wrote none has its
+	 * first bare `finish` refused. Reset with `finishReplyRefused`; a yolo continuation of the prompt keeps it.
+	 */
+	turnReplied: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
@@ -401,6 +406,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "turnCalledWork"
 	| "finishRoundSpent"
 	| "finishReplyRefused"
+	| "turnReplied"
 >;
 
 /** turn-middleware: reads the turn's facts for its hooks; a hard block sets the tool-prose abort reason. */
@@ -440,6 +446,7 @@ export type TurnPersistenceState = TurnStateView<
 	| "activeUserTurnId"
 	| "currentTurnOrigin"
 	| "finishReplyRefused"
+	| "turnReplied"
 	| "interruptedAssistantMessage"
 	| "interruptedCall"
 	| "lastTurnId"
@@ -517,6 +524,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnCalledWork: false,
 		finishRoundSpent: false,
 		finishReplyRefused: false,
+		turnReplied: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		currentTurnOrigin: null,
