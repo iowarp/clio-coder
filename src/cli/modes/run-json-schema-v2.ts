@@ -22,7 +22,9 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
  * session is open in another process) and `io` (a path the run needs cannot be opened) are the pre-work refusals with a
  * narrower name of their own. `context_overflow` is a run the context window ended: the post-tool guard or overflow
  * recovery could not make the request fit. `exploration_stalled` is an unattended run the read-streak decision gate
- * ended: it kept reading after every note and two refused rounds.
+ * ended: it kept reading after every note and two refused rounds. `no_reply_text` is a main run that `finish` ended
+ * with no reply text after its one refusal of a bare finish (CLI-P49): its completion is `partly_done` and there is no
+ * answer.
  */
 const CAUSE_ORDER = [
 	"interrupted",
@@ -50,6 +52,7 @@ const CAUSE_ORDER = [
 	"provider_error",
 	"context_overflow",
 	"no_answer",
+	"no_reply_text",
 	"exploration_stalled",
 	"output_limit",
 	"schema_mismatch",

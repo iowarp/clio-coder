@@ -1882,6 +1882,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
+	} else if (result.terminatedByFinish && printedAnswer(result).length === 0) {
+		// M-6: the bare-finish refusal is one-shot, so the second bare finish settles the run partly_done with no reply
+		// text (CLI-P49). The typed fact is an empty answer under a finish, never the prompt's wording: there is nothing
+		// for the caller to read, so the run did not succeed.
+		const failureMessage =
+			"clio-coder run: the agent declared completion through finish without writing a reply, so there is no answer to print";
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "no_reply_text" };
+		stderrMessage = failureMessage;
 	} else {
 		// A normal provider stop does not erase an explicit limitation or a
 		// block with no applied change. Judge settled tool outcomes, not prose
