@@ -2,6 +2,9 @@ import { sleep } from "../../core/timers.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { isTerminalRunEnvelope, type RunEnvelope, type RunOutcome } from "../../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { readCallJournalSync } from "../../domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
+import type { SettledRunEnvelope } from "./run-json-schema-v2.js";
 
 const SETTLE_POLL_MS = 500;
 
@@ -140,6 +143,27 @@ export function describeRuns(runs: ReadonlyArray<RunEnvelope>): string {
 			return `${run.id} (${run.agentId}${outcome ? `, ${outcome}` : ""})${detail}`;
 		})
 		.join(", ");
+}
+
+/**
+ * The sealed envelope (staticHead included) each run's journal settled with, by run id (M-18), so `run
+ * --output-format json` names what a dispatched run was allowed. A run whose journal holds no envelope, or cannot be
+ * read, is left out rather than guessed. The read is synchronous: the caller runs it between the turn and the v2
+ * envelope, where a yielded tick lets other writers into stdout ahead of the envelope.
+ */
+export function settledRunEnvelopes(runIds: ReadonlyArray<string>, stateDir: string): Map<string, SettledRunEnvelope> {
+	const envelopes = new Map<string, SettledRunEnvelope>();
+	for (const runId of runIds) {
+		try {
+			const read = readCallJournalSync(telemetryRunDirectory(stateDir, runId));
+			for (const { record } of read.records) {
+				if (record.k === "run.settled" && record.data.envelope !== undefined) envelopes.set(runId, record.data.envelope);
+			}
+		} catch {
+			// An unreadable journal leaves the run without an envelope in the report; the run's own outcome stands.
+		}
+	}
+	return envelopes;
 }
 
 export function projectDispatchedRunOutcome(run: RunEnvelope) {

@@ -1,12 +1,20 @@
 import { deepStrictEqual, doesNotMatch, match } from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	describeRuns,
 	projectDispatchedRunOutcome,
 	settleDispatchedRuns,
+	settledRunEnvelopes,
 } from "../../src/cli/modes/headless-dispatched-runs.js";
 import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
-import type { RunEnvelope, RunOutcome } from "../../src/domains/dispatch/types.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
+import type { RunEnvelope, RunOutcome, RunResultDraft } from "../../src/domains/dispatch/types.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 const ROOT = "root-run";
 
@@ -159,4 +167,46 @@ it("carries a bounded structured reason for the JSON settlement", () => {
 		outcomeCode: "obligation_unmet",
 		outcomeDetail: "worker executed no tools",
 	});
+});
+
+it("reads a dispatched run's sealed envelope and staticHead back from its run journal's run.settled (M-18)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "clio-coder-settled-envelope-"));
+	const row = fixtureEnvelope("run-enveloped");
+	const draft = fixtureReceiptDraft(row);
+	const envelope: NonNullable<NonNullable<RunResultDraft["safety"]>["envelope"]> = {
+		version: 1,
+		digest: "a".repeat(64),
+		permitDigest: "b".repeat(64),
+		role: "builder",
+		skills: { bound: ["tdd"], discovery: "bound-only" },
+		read: { roots: ["src/"], outside: [] },
+		write: { mode: "worktree", roots: ["/work/src/"], commandsBounded: true },
+		exec: { shell: "sandboxed", checks: "declared" },
+		network: { shell: false, tools: [], mcp: [] },
+		approval: { autonomy: "yolo", asks: "judge" },
+		sandbox: { backend: "none", confinesWrites: false },
+		withheld: [{ capability: "web_fetch", reason: "no-network", remedy: "grant network" }],
+		staticHead: "c".repeat(64),
+	};
+	draft.safety = { blockedAttempts: [], envelope } as unknown as NonNullable<RunResultDraft["safety"]>;
+	const { settlement } = finishRunResult(draft, row, {
+		terminal: { terminalReason: "completed" },
+		processExitCode: 0,
+		frameType: null,
+		usage: undefined,
+	});
+	const journal = await openRunTelemetry(
+		{ sessionId: null, runId: row.id, agent: { role: "worker", id: row.id } },
+		telemetryRunDirectory(stateDir, row.id),
+	);
+	try {
+		await journal.settle(settlement);
+		await journal.close();
+		const read = settledRunEnvelopes([row.id, "run-without-journal"], stateDir);
+		deepStrictEqual([...read.keys()], [row.id]);
+		deepStrictEqual(read.get(row.id), envelope);
+	} finally {
+		if (!journal.closed) await journal.close();
+		await rm(stateDir, { recursive: true, force: true });
+	}
 });

@@ -982,6 +982,8 @@ const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null
 /** Diagnostic text a finished run states about itself, clipped and redacted where it is built (#434). */
 const diagnostic = Type.String({ maxLength: 1024 });
 const digest = Type.String({ minLength: 1, maxLength: 256 });
+/** An envelope digest or static head; a head is empty until the host compiles the worker's prompt. */
+const envelopeDigest = Type.String({ maxLength: 256 });
 /** One R7-labelled hash a finished run carries, named by the field it was computed for (`run-hashes.ts`, #434). */
 export const RunHashSchema = Type.Object(
 	{
@@ -1315,6 +1317,47 @@ export const RunSettledSchema = Type.Object(
 						{ maxItems: 32 },
 					),
 					assurance: vocabulary(RUN_ASSURANCES),
+				},
+				closed,
+			),
+		),
+		/**
+		 * The capability envelope the run ran under (fleet M7) as its receipt sealed it, `staticHead` included, so an audit
+		 * reads what a run was allowed after the fact (M-18). Absent for a run with no envelope and in older journals.
+		 */
+		envelope: Type.Optional(
+			Type.Object(
+				{
+					version: count,
+					digest: envelopeDigest,
+					permitDigest: envelopeDigest,
+					role: ExistingId,
+					skills: Type.Object({ bound: Type.Array(ExistingId, { maxItems: 1024 }), discovery: ExistingId }, closed),
+					read: Type.Object(
+						{ roots: Type.Array(text, { maxItems: 1024 }), outside: Type.Array(text, { maxItems: 1024 }) },
+						closed,
+					),
+					write: Type.Object(
+						{ mode: ExistingId, roots: Type.Array(text, { maxItems: 1024 }), commandsBounded: Type.Boolean() },
+						closed,
+					),
+					exec: Type.Object({ shell: ExistingId, checks: ExistingId }, closed),
+					network: Type.Object(
+						{
+							shell: Type.Boolean(),
+							tools: Type.Array(ExistingId, { maxItems: 1024 }),
+							mcp: Type.Array(ExistingId, { maxItems: 1024 }),
+						},
+						closed,
+					),
+					approval: Type.Object({ autonomy: ExistingId, asks: ExistingId }, closed),
+					sandbox: Type.Object({ backend: ExistingId, confinesWrites: Type.Boolean() }, closed),
+					withheld: Type.Array(
+						Type.Object({ capability: ExistingId, reason: ExistingId, remedy: Type.Optional(text) }, closed),
+						{ maxItems: 1024 },
+					),
+					/** Empty when the host never compiled the worker's prompt. */
+					staticHead: envelopeDigest,
 				},
 				closed,
 			),
