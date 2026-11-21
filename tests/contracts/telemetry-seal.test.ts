@@ -397,6 +397,61 @@ test("telemetry calls --session <id> --run <r> keeps the run filter (I-25)", asy
 	deepStrictEqual(dto.calls, []);
 });
 
+test("telemetry calls shows each call's seat billing in --json and the table (M-36)", async () => {
+	const home = await mkdtemp(join(tmpdir(), "telemetry-calls-billing-"));
+	const id = "ses_calls_billing";
+	const [started, settled] = telemetryCall(id, { role: "memory", at: "2026-01-01T00:00:00.000Z" });
+	if (settled?.k !== "call.settled" || started === undefined) throw new Error("fixture call missing");
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const seat = {
+		provider: "github-copilot" as const,
+		premiumRequests: measured(0.33),
+		nanoAiu: measured(5000),
+		modelCalls: { kind: "measured" as const, value: 1, source: "local-count" as const },
+	};
+	const records = [
+		started,
+		{ ...settled, data: { ...settled.data, billing: seat } },
+		...telemetryCall(id, { at: "2026-01-01T00:01:00.000Z" }),
+	];
+	const journal = await openCallJournal({
+		directory: telemetrySessionDirectory(join(home, "state"), id),
+		context: settled.ctx,
+		writer: { clioCoderVersion: "0.0.0-test", piVersion: "test" },
+	});
+	for (const record of records)
+		journal.enqueue({
+			kind: record.k,
+			data: record.data,
+			ctx: record.ctx,
+			wallMs: Date.parse(record.t),
+			mono: record.mono,
+			recordId: record.id,
+		} as Parameters<typeof journal.enqueue>[0]);
+	ok(await journal.sealAndClose());
+	const json = readCli(home, ["calls", id, "--json"]);
+	strictEqual(json.status, 0, json.stderr);
+	const calls = (JSON.parse(json.stdout) as { calls: Array<{ billing: unknown }> }).calls;
+	deepStrictEqual(
+		calls.map((call) => call.billing),
+		[
+			{
+				provider: "github-copilot",
+				premiumRequests: { fact: seat.premiumRequests, display: "0.33" },
+				nanoAiu: { fact: seat.nanoAiu, display: "5,000" },
+				modelCalls: { fact: seat.modelCalls, display: "1" },
+			},
+			null,
+		],
+	);
+	const table = readCli(home, ["calls", id]);
+	strictEqual(table.status, 0, table.stderr);
+	const [header, seated, metered] = table.stdout.trimEnd().split("\n");
+	ok(header?.includes("billing"), table.stdout);
+	ok(seated?.includes("0.33 premium, 5,000 nAIU"), table.stdout);
+	ok(metered !== undefined && / n\/a(\s|$)/.test(metered), table.stdout);
+});
+
 test("telemetry read verbs take a unique session id prefix and refuse an ambiguous one (C13)", async () => {
 	const home = await mkdtemp(join(tmpdir(), "telemetry-prefix-"));
 	await openedSession(home, "ses_prefix_alpha");

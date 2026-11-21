@@ -52,10 +52,12 @@ export interface RequestView {
 
 /**
  * The request card. A replayed turn keeps a card even with no user item, because the alternative is
- * a response with no question above it, which reads as the model having spoken unprompted.
+ * a response with no question above it, which reads as the model having spoken unprompted. A replayed
+ * turn whose ledger dated its request is the operator's own request, shown as asked: only an undated
+ * one is an earlier record.
  */
-export function requestView(turn: ChatTurn): RequestView {
-	const replay = turn.origin === "replay";
+export function requestView(turn: ChatTurn, row?: Pick<Turn, "startedAt">): RequestView {
+	const replay = turn.origin === "replay" && !row?.startedAt;
 	const heading = replay ? "Earlier request" : "You";
 	if (turn.request === null) {
 		// A live turn always writes its user item first, so an absent request here is history.
@@ -67,9 +69,9 @@ export function requestView(turn: ChatTurn): RequestView {
 }
 
 /** The accessible name of the whole turn, so a screen reader can skip between exchanges. */
-export function turnAriaLabel(turn: ChatTurn): string {
-	const request = requestView(turn);
-	if (request.missing) return turn.origin === "replay" ? "Earlier turn" : "Turn";
+export function turnAriaLabel(turn: ChatTurn, row?: Pick<Turn, "startedAt">): string {
+	const request = requestView(turn, row);
+	if (request.missing) return request.replay ? "Earlier turn" : "Turn";
 	return `Request: ${request.text.slice(0, 80)}`;
 }
 

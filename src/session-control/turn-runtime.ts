@@ -115,12 +115,14 @@ import {
 	extractText,
 	extractThinking,
 	fallbackIdentityPrompt,
+	HOST_STATUS_NOTICE_KEY,
 	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
 	noAnswerReprompt,
 	noteWrittenCalls,
 	rebaseToolMarkupReprompt,
 	sumRunUsage,
+	THINKING_CLAMP_NOTICE_KEY,
 	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
 	toolCallLabel,
@@ -567,6 +569,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				key,
 			);
 		}
+		// An unverified context window is a fact about the route, not a fault, so it travels as host status.
+		const routeStatus = new Set(
+			resolved.diagnostics.filter((entry) => entry.code === "context-window-unverified").map((entry) => entry.message),
+		);
 		// The TUI's thinking indicator owns coercion facts; other surfaces retain their notice.
 		for (const message of runtimeResolutionWarningsBesideThinkingNotice(
 			resolved.diagnostics.filter((entry) => entry.code !== "chat-template-kwargs-undeliverable"),
@@ -575,7 +581,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const key = `${targetId}|${wireModelId}|${message}`;
 			if (announcedResolutionWarnings.has(key)) continue;
 			announcedResolutionWarnings.add(key);
-			deps.emitNotice(`[CLIO Coder] ${message}`);
+			deps.emitNotice(`[CLIO Coder] ${message}`, "info", routeStatus.has(message) ? HOST_STATUS_NOTICE_KEY : undefined);
 		}
 		return {
 			target: resolved.target.target,
@@ -675,7 +681,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		if (!notice) return;
 		if (announcedColdModels.has(notice.key)) return;
 		announcedColdModels.add(notice.key);
-		deps.emitNotice(notice.message);
+		deps.emitNotice(notice.message, "info", HOST_STATUS_NOTICE_KEY);
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): EngineModel => {
@@ -755,7 +761,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const key = `${resolution.wireModelId}|${resolution.requestedThinkingLevel}`;
 		if (announcedThinkingNotices.has(key)) return;
 		announcedThinkingNotices.add(key);
-		deps.emitNotice(notice);
+		deps.emitNotice(notice, "info", THINKING_CLAMP_NOTICE_KEY);
 	};
 
 	// A target id/model names the selection, not its current URL, auth, pricing
@@ -2235,7 +2241,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					gatewayRouting !== null &&
 					((gatewayRouting.attemptedFallbacks ?? 0) > 0 || (gatewayRouting.attemptedRetries ?? 0) > 0)
 				) {
-					deps.emitNotice(`[CLIO Coder] ${gatewayRoutingObservationLabel(gatewayRouting)}`);
+					deps.emitNotice(`[CLIO Coder] ${gatewayRoutingObservationLabel(gatewayRouting)}`, "info", HOST_STATUS_NOTICE_KEY);
 				}
 				// The estimate goes to the call's settlement, where the read model folds it; it never rides on the message,
 				// so no reader sums it beside the provider's usage (#423, #430, #434).

@@ -493,7 +493,6 @@ import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
-	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
 	planQueueSlot,
@@ -504,6 +503,7 @@ import {
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
 import {
@@ -557,7 +557,10 @@ import {
 	countToolCalls,
 	executedCalls,
 	hasPotentiallyMutatingAttempt,
+	type InFlightCall,
 	observationCalls,
+	recordCallFinish,
+	recordCallStart,
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
@@ -9120,6 +9123,10 @@ export function createDispatchBundle(
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
+		// The calls in flight by id, and the ones the host saw running when its abort started: the abort finishes them
+		// before the seal, so the stop detail reads this snapshot (M-37).
+		const inFlightCalls = new Map<string, InFlightCall>();
+		let callsAtAbort: InFlightCall[] | null = null;
 		let toolTelemetryIngestionErrors = 0;
 		const upstreamResponses: RunResultUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
@@ -9270,6 +9277,7 @@ export function createDispatchBundle(
 					usage?: unknown;
 					tool?: string;
 					toolCallId?: string;
+					action?: unknown;
 					sequence?: number;
 					outcomeCode?: unknown;
 					detail?: unknown;
@@ -9302,6 +9310,7 @@ export function createDispatchBundle(
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+				recordCallStart(inFlightCalls, event.payload);
 				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
 				else startsCarryIds = false;
 			}
@@ -9644,6 +9653,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
+				recordCallFinish(inFlightCalls, event.payload);
 				const tool = pendingCapabilities.get(event.payload.toolCallId ?? "") ?? event.payload.tool;
 				pendingCapabilities.delete(event.payload.toolCallId ?? "");
 				if (tool === ToolNames.Gateway && event.payload.toolCallId)
@@ -9935,7 +9945,10 @@ export function createDispatchBundle(
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
 			req,
-			abort,
+			abort: () => {
+				callsAtAbort ??= [...inFlightCalls.values()];
+				abort();
+			},
 			kill: abort,
 			...(steer ? { steer } : {}),
 			...(resolvePermission ? { resolvePermission } : {}),
@@ -10325,7 +10338,9 @@ export function createDispatchBundle(
 						? wallHandbackOutcomeDetail({
 								reported: hasDurableFinalOutput(outputCapture.snapshot()),
 								unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+								runningAtStop: callsAtAbort,
 								hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+								hostSignals: result.hostSignals ?? [],
 								exitCode: result.exitCode ?? null,
 								signal: result.signal ?? null,
 							})
@@ -12377,8 +12392,9 @@ export function createDispatchBundle(
 				}),
 			);
 			// No in-memory executor survives a process restart, so every active
-			// side-store lease from an earlier bundle is orphaned and must expire.
-			cleanupDispatchReservations({ startup: true, nowMs: now() });
+			// side-store lease from an earlier bundle is orphaned and must expire. Boot never waits on the admission lock
+			// for it (M-35): a held lock leaves the sweep to the first plan admission.
+			sweepDispatchReservationsAtStartup(now());
 			const runLedger = openLedger({
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");

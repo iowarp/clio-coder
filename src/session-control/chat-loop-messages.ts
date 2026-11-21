@@ -334,6 +334,19 @@ export type TurnEnding =
 	| { kind: "quiet"; toolsRan: number }
 	| { kind: "call_not_run"; toolsRan: number; writtenTools: ReadonlyArray<string> };
 
+/**
+ * The notice key of the line saying the requested thinking level cannot apply as-is on this route. It is host
+ * information about the route, not reply text, so a protocol surface routes it off the reply by this tag.
+ */
+export const THINKING_CLAMP_NOTICE_KEY = "runtime.thinking-clamp";
+
+/**
+ * The notice key of an informational host status line: what the route, the model's residency, the loaded skill
+ * surface, the image sidecar or the prompt's project instructions are doing. It reports, asks nothing of the operator
+ * and names no failure, so a protocol surface routes it off the reply by this tag.
+ */
+export const HOST_STATUS_NOTICE_KEY = "host.status";
+
 /** The notice key the status surface reads as the one re-prompt for a written-out tool call starting. */
 export const TOOL_MARKUP_REPROMPT_NOTICE_KEY = "turn.tool-markup-reprompt";
 export const TOOL_MARKUP_REPROMPT_NOTICE =

@@ -207,6 +207,12 @@ export function sessionRoutes(
 			return opened;
 		}),
 	);
+	register(app, hub, routes.storedTranscript, ({ params }) => sessions.transcript(params.id, params.sessionId));
+	register(app, hub, routes.takeOverSession, ({ params }, context) =>
+		commands.run(`session.take-over:${params.sessionId}`, idempotencyKey(context), params, () =>
+			sessions.takeOver(params.id, params.sessionId),
+		),
+	);
 	register(app, hub, routes.loadSession, ({ params, body }, context) =>
 		commands.run(`session.load:${params.id}`, idempotencyKey(context), body, async () => {
 			const loaded = await sessions.load(body.workspaceId, params.id);
@@ -223,6 +229,7 @@ export function sessionRoutes(
 		await snapshotHold?.();
 		return snapshot;
 	});
+	register(app, hub, routes.sessionPresence, ({ params }) => ({ open: supervisor.knows(params.id) }));
 	register(app, hub, routes.turn, ({ params, body }, context) =>
 		commands.run(`turn:${params.id}`, idempotencyKey(context), body, async () =>
 			supervisor.startTurn(params.id, body.text, body.images, body.files),

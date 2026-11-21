@@ -9,18 +9,27 @@ import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-erro
 import { createAdmissionQueue } from "./admission-queue.js";
 import {
 	acquireCapacityLeaseUnsafe,
+	admissionLockRefusal,
 	type CapacityLease,
 	type CapacityLimits,
 	capacityLeaseUsageUnsafe,
 	capacityStateLockPath,
 	describeEndpointCapacityHolders,
 	type EndpointCapacityHolders,
+	readCapacityStateUnsafe,
 	releaseCapacityLease,
 	releaseCapacityLeaseAsync,
 	renameCapacityLeaseAssignment,
 	renewCapacityLeasesUnsafe,
+	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
-import { refreshReservationsForLeasesUnsafe, transferDispatchReservationToLeaseUnsafe } from "./reservation-store.js";
+import { LEASE_HEARTBEAT_MS } from "./lease-clock.js";
+import {
+	ownsActiveReservations,
+	refreshOwnedReservationsUnsafe,
+	refreshReservationsForLeasesUnsafe,
+	transferDispatchReservationToLeaseUnsafe,
+} from "./reservation-store.js";
 
 /**
  * Dispatch admission gate. Given a worker's requested scope and the
@@ -468,8 +477,9 @@ export function createCapacityAdmissionController(options: {
 	/** The lock itself could not be taken; fail the candidates a pass would have tried. */
 	const failCandidates = (error: unknown): void => {
 		// Each candidate used to take the lock in turn and fail the same way, one
-		// acquisition budget apiece; fail the same candidates once.
-		const failure = error instanceof Error ? error : new Error(String(error));
+		// acquisition budget apiece; fail the same candidates once. A lock wait that ran out is the typed busy refusal.
+		const refusal = admissionLockRefusal(error);
+		const failure = refusal instanceof Error ? refusal : new Error(String(refusal));
 		queue.admitNext(now(), (request) => {
 			queue.fail(request.requestId, failure);
 			return false;
@@ -546,13 +556,25 @@ export function createCapacityAdmissionController(options: {
 		const owned = [...leases.keys()].filter((leaseId) => !lost.has(leaseId));
 		if (owned.length === 0) {
 			renewalFault = null;
+			// A plan between members holds no lease here, and another host judges it by its expiry alone. A failed
+			// refresh is retried at the next tick, well inside the plan's TTL, so it refuses nothing.
+			if (ownsActiveReservations())
+				heartbeatRun = transact(() => {
+					const state = readCapacityStateUnsafe();
+					if (refreshOwnedReservationsUnsafe(state, now())) writeCapacityStateUnsafe(state);
+				})
+					.catch(() => {})
+					.finally(() => {
+						heartbeatRun = null;
+					});
 			return;
 		}
 		heartbeatRun = transact(() => {
 			const renewedAt = now();
-			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, renewedAt, undefined, (file, renewedLeases) =>
-				refreshReservationsForLeasesUnsafe(file, renewedLeases, renewedAt),
-			);
+			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, renewedAt, undefined, (file, renewedLeases) => {
+				refreshReservationsForLeasesUnsafe(file, renewedLeases, renewedAt);
+				refreshOwnedReservationsUnsafe(file, renewedAt);
+			});
 			// Applied under the lock: a lease released before this section is gone
 			// from both maps, and one released after it must not be resurrected.
 			for (const lease of renewed) if (leases.has(lease.leaseId)) leases.set(lease.leaseId, lease);
@@ -591,7 +613,7 @@ export function createCapacityAdmissionController(options: {
 				heartbeatRun = null;
 			});
 	};
-	const heartbeatTimer = setInterval(heartbeat, options.heartbeatMs ?? 10_000);
+	const heartbeatTimer = setInterval(heartbeat, options.heartbeatMs ?? LEASE_HEARTBEAT_MS);
 	heartbeatTimer.unref();
 	const controller: CapacityAdmissionController = {
 		async admit(input) {

@@ -11,6 +11,10 @@ import { AcpProtocolError } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
 import { seedHistory } from "./harness/history-fixture.js";
 
+const { QueryClient } = await import("@tanstack/react-query");
+const { ApiProblem } = await import("../client/api/client.js");
+const { sessionQuery } = await import("../client/api/session-query.js");
+
 test("ACP problems explain missing credentials and failed turns without forwarding upstream prose", () => {
 	const failure = (code: unknown, reason?: unknown) =>
 		acpProblem(
@@ -425,4 +429,90 @@ test("a request carries images to the agent as ACP image blocks, within the one-
 	assert.equal(tooMany.status, 422);
 	const other = await h.post(`/api/sessions/${session.id}/steer`, { text: "x".repeat(70 * 1024) }, "big-steer");
 	assert.equal(other.status, 422, "every other route keeps its 64 KiB body limit");
+});
+
+test("a saved task another process holds names its holder, keeps its history readable and is never loaded here (#439)", {
+	timeout: 30000,
+}, async (t) => {
+	const h = await harness({});
+	t.after(h.close);
+	await mkdir(join(h.home.path, "field-notes"));
+	const project = await realpath(join(h.home.path, "field-notes"));
+	await seedHistory(h.home.path, project);
+	const ledger = join(h.home.path, "state", "sessions"),
+		[bucket = ""] = await readdir(ledger),
+		metaPath = join(ledger, bucket, "seeded-3", "meta.json");
+	const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+	// A holder on another node: its pid cannot be probed from here, so the stamped owner alone names it.
+	await writeFile(metaPath, JSON.stringify({ ...meta, owner: { host: "far-node", pid: 4242, birth: null } }));
+	const workspace = await json(await h.post("/api/workspaces", { path: project }), routes.openWorkspace.response);
+	const held = async () =>
+		(await json(await h.request(`/api/workspaces/${workspace.id}/sessions`), routes.sessionHistory.response)).find(
+			(row) => row.id === "seeded-3",
+		)?.liveElsewhere;
+	const unregistered = await held();
+	assert.equal(unregistered?.host, "far-node");
+	assert.equal(unregistered?.pid, 4242);
+	assert.equal(unregistered?.surface, "process");
+	// No live record means no heartbeat to ask through, so Take over is refused rather than guessed.
+	assert.equal(unregistered?.canTakeOver, false);
+	// Opening it asks whether this server holds it, and that answer is never a 404 in the browser console.
+	const presence = await h.request("/api/sessions/seeded-3/presence");
+	assert.equal(presence.status, 200, await presence.clone().text());
+	assert.deepEqual(await json(presence, routes.sessionPresence.response), { open: false });
+	const asked: string[] = [];
+	const client = {
+		call: async (route: { path: string }, input: { params: Record<string, string> }) => {
+			const path = route.path.replace(/:(\w+)/gu, (_, name: string) => input.params[name] ?? "");
+			asked.push(path);
+			const response = await h.request(path);
+			if (!response.ok) throw new ApiProblem(await response.json());
+			return response.json();
+		},
+	} as unknown as Parameters<typeof sessionQuery>[0];
+	const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	t.after(() => queries.clear());
+	const opened = await queries.fetchQuery(sessionQuery(client, "seeded-3")).then(
+		() => null,
+		(error: unknown) => error,
+	);
+	assert.ok(opened instanceof ApiProblem, String(opened));
+	assert.equal(opened.problem.code, "not_found");
+	assert.deepEqual(asked, ["/api/sessions/seeded-3/presence"]);
+	const loaded = await h.post("/api/sessions/seeded-3/load", { workspaceId: workspace.id });
+	assert.equal(loaded.status, 409, await loaded.clone().text());
+	assert.deepEqual(await h.files.read("children"), []);
+	const refused = await h.post(`/api/workspaces/${workspace.id}/sessions/seeded-3/take-over`, {});
+	assert.equal(refused.status, 409, await refused.clone().text());
+	const transcript = await json(
+		await h.request(`/api/workspaces/${workspace.id}/sessions/seeded-3/transcript`),
+		routes.storedTranscript.response,
+	);
+	assert.match(transcript.markdown, /Draft the methods section figures/);
+	assert.equal(transcript.truncated, false);
+	// A fresh heartbeat from the holder's terminal makes it a terminal holder that Take over can ask to end.
+	const startedAt = new Date(Date.now() - 600_000).toISOString();
+	await mkdir(join(h.home.path, "state", "live"), { recursive: true });
+	await writeFile(
+		join(h.home.path, "state", "live", "seeded-3.json"),
+		JSON.stringify({
+			schema: 1,
+			id: "seeded-3",
+			cwd: project,
+			cwdHash: bucket,
+			host: "far-node",
+			pid: 4242,
+			birth: null,
+			startedAt,
+			at: new Date().toISOString(),
+			surface: "tui",
+			version: "0",
+			user: "field",
+		}),
+	);
+	const registered = await held();
+	assert.equal(registered?.surface, "terminal");
+	assert.equal(registered?.since, startedAt);
+	assert.equal(registered?.stale, false);
+	assert.equal(registered?.canTakeOver, true);
 });

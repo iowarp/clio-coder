@@ -7,6 +7,12 @@ import {
 	listSessionsForCwd,
 	listSessionWorkspaces,
 } from "../../../../../src/domains/session/history.js";
+import {
+	liveSessionView,
+	readTreeBundle,
+	renderTranscriptMarkdown,
+	sessionLiveOwner,
+} from "../../../../../src/domains/session/index.js";
 import { AppProblem } from "../../services/problem.js";
 
 /** Fails closed when session storage links outside the state directory; false when there is no ledger yet. */
@@ -52,7 +58,17 @@ type HistoryRow = {
 	firstMessagePreview?: string;
 	messageCount?: number;
 	lastActivityAt: string;
+	liveElsewhere?: LiveElsewhereRow;
 };
+type LiveElsewhereRow = {
+	surface: "terminal" | "headless" | "app" | "process";
+	since: string;
+	host: string;
+	pid: number;
+	stale: boolean;
+	canTakeOver: boolean;
+};
+const SURFACES = { tui: "terminal", run: "headless", acp: "app" } as const;
 // The engine's wire bounds (src/engine/acp/server.ts ACP_MAX_SESSION_ID_BYTES and ACP_MAX_LABEL_BYTES,
 // src/engine/acp/types.ts ACP_MAX_TARGET_ID_BYTES and ACP_MAX_MODEL_ID_BYTES); adapters cannot import either module.
 const MAX_SESSION_ID_BYTES = 128,
@@ -112,9 +128,28 @@ const iso = (value: unknown) => {
 };
 const count = (value: unknown) =>
 	typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+/**
+ * The process that holds this session open, when it is another one: its live record names the surface and when it
+ * opened. This app's own engine children are live too; the server, which knows their pids, drops those.
+ */
+function liveElsewhere(meta: StoredSession): LiveElsewhereRow | undefined {
+	const owner = sessionLiveOwner(meta);
+	if (owner === null) return undefined;
+	const view = liveSessionView(meta.id);
+	const record = view?.record;
+	return {
+		surface: record ? SURFACES[record.surface] : "process",
+		since: iso(record?.startedAt ?? meta.lastActivityAt ?? meta.createdAt),
+		host: storedString(owner.host, 255),
+		pid: owner.pid,
+		stale: view?.stale ?? false,
+		canTakeOver: view !== null,
+	};
+}
 function historyRow(meta: StoredSession): HistoryRow {
 	const label = storedString(meta.name, MAX_LABEL_BYTES).trim();
 	const messageCount = count(meta.messageCount);
+	const live = liveElsewhere(meta);
 	return {
 		id: meta.id,
 		createdAt: iso(meta.createdAt),
@@ -127,6 +162,7 @@ function historyRow(meta: StoredSession): HistoryRow {
 			: {}),
 		...(messageCount !== undefined ? { messageCount } : {}),
 		lastActivityAt: iso(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt),
+		...(live ? { liveElsewhere: live } : {}),
 	};
 }
 /**
@@ -161,6 +197,33 @@ export function listSessionHistory(cwd: string): HistoryRow[] {
 		if (rows.length === HISTORY_LIMIT) break;
 	}
 	return rows;
+}
+const TRANSCRIPT_LIMIT = 1_048_576;
+/**
+ * A saved session's history as the terminal's `/export` Markdown, read from the ledger in this thread, so a
+ * session another process holds open can be read without loading it. Only a session this workspace's ledger
+ * lists is read; a long transcript keeps its latest part, cut at a line.
+ */
+export function readStoredTranscript(cwd: string, id: string) {
+	if (!listSessionHistory(cwd).some((row) => row.id === id))
+		throw new AppProblem("not_found", "Session was not found in this workspace's ledger.");
+	let rendered: { text: string; turns: number };
+	try {
+		const bundle = readTreeBundle(id);
+		rendered = renderTranscriptMarkdown({
+			sessionId: id,
+			exportedAt: new Date().toISOString(),
+			entries: bundle.entries,
+			leafTurnId: bundle.meta.pinnedLeafTurnId ?? null,
+		});
+	} catch {
+		throw unreadable();
+	}
+	const bytes = Buffer.from(rendered.text, "utf8");
+	if (bytes.length <= TRANSCRIPT_LIMIT) return { markdown: rendered.text, turns: rendered.turns, truncated: false };
+	const tail = bytes.subarray(bytes.length - TRANSCRIPT_LIMIT + 1024).toString("utf8");
+	const markdown = tail.slice(tail.indexOf("\n") + 1);
+	return { markdown, turns: rendered.turns, truncated: true };
 }
 /**
  * Ends a session ledger record the caller has proven abandoned, only while the dead child `pid` is still its

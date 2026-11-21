@@ -539,6 +539,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		...keep("trigger", "attempted", "outcome", "writerPid", "updatedAtBefore", "updatedAtAfter", "durationMs"),
 		provider: "runtime",
 	},
+	"cache.lane_fell_back": keep("reason", "timeoutMs", "lane"),
 	"message.stepped": {
 		...keep("step", "submittedAt", "by", "chars", "lane", "changedBy", "why", "slot", "reason", "attempt"),
 		messageId: "id",

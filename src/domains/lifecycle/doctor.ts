@@ -67,6 +67,7 @@ import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { describeTracking } from "./install-plan.js";
 import { listMigrations, projectPendingSettings, readMigrationManifestResult } from "./migrations/index.js";
+import { APPLY_MIGRATIONS_COMMAND } from "./migrations/registry-ids.js";
 import { nativeAutoUpdatePolicy } from "./native-update.js";
 import { readStateInfoResult } from "./state.js";
 import { deferredResultPath, readDeferredWait, readLastBackgroundUpdate } from "./update-check.js";
@@ -908,7 +909,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				? unrecordedMigrations.length > 0
 					? `${availableMigrations.length} registered; current settings already satisfy ${unrecordedMigrations.length} unrecorded migrations`
 					: `${availableMigrations.length} registered, all recorded`
-				: `${pendingMigrations.length} pending: ${pendingMigrations.join(", ")} (run \`clio-coder upgrade --post-install\`)`),
+				: `${pendingMigrations.length} pending: ${pendingMigrations.join(", ")} (run \`${APPLY_MIGRATIONS_COMMAND}\`)`),
 	});
 
 	const sessionStore = sessionStoreFinding(dirs.state, state !== null);
@@ -1934,6 +1935,6 @@ function settingsAfterPendingMigrations(file: string, stateDir: string): DoctorF
 		ok: true,
 		level: "warn",
 		name: "settings.yaml",
-		detail: `fails as written; pending migration${pending.length === 1 ? "" : "s"} ${pending.join(", ")} rewrite${pending.length === 1 ? "s" : ""} it into a valid file: run \`clio-coder upgrade\``,
+		detail: `fails as written; pending migration${pending.length === 1 ? "" : "s"} ${pending.join(", ")} rewrite${pending.length === 1 ? "s" : ""} it into a valid file: run \`${APPLY_MIGRATIONS_COMMAND}\``,
 	};
 }

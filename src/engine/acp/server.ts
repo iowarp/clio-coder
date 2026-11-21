@@ -127,6 +127,8 @@ import type { ApprovalRequestView, MutationFacts } from "../../session-control/a
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import {
 	classifyTurnEnding,
+	HOST_STATUS_NOTICE_KEY,
+	THINKING_CLAMP_NOTICE_KEY,
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
@@ -216,6 +218,7 @@ import {
 } from "./live-telemetry.js";
 import type { AcpAutonomyPosture, AcpReadoutsSession } from "./readouts.js";
 import { createAcpReadoutsEmitter } from "./readouts.js";
+import { createAcpRuntimeNoticeRelay } from "./runtime-notice.js";
 import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
@@ -924,11 +927,19 @@ const ACP_VISIBLE_ADMISSION_REASONS = new Set(["handoff-skill-refused"]);
 const ACP_ADMISSION_FALLBACK_REASON = "admission-failed";
 
 /**
- * Context engine status lines (working set, the compaction row, the no-gain line) report Clio's own housekeeping, so
- * they are not reply text. Their producer tags them with `CONTEXT_STATUS_NOTICE_KEY`; the wording is free to change.
+ * Host information lines are not reply text: context engine status (working set, the compaction row, the no-gain line)
+ * reports Clio's own housekeeping, the thinking clamp line says the route cannot apply the requested level, and host
+ * status lines report the route, model residency, skill surface, image sidecar and project instructions. Their
+ * producers tag them by key; the wording is free to change. Warnings, errors and untagged lines stay reply text.
  */
-function isContextStatusNotice(level: unknown, noticeKey: unknown): boolean {
-	return level === "info" && noticeKey === CONTEXT_STATUS_NOTICE_KEY;
+const ACP_HOST_INFO_NOTICE_KEYS: ReadonlySet<unknown> = new Set([
+	CONTEXT_STATUS_NOTICE_KEY,
+	THINKING_CLAMP_NOTICE_KEY,
+	HOST_STATUS_NOTICE_KEY,
+]);
+
+function isHostInfoNotice(level: unknown, noticeKey: unknown): boolean {
+	return level === "info" && ACP_HOST_INFO_NOTICE_KEYS.has(noticeKey);
 }
 
 function admissionReason(raw: string): string {
@@ -1566,6 +1577,30 @@ function toolLocations(toolName: string | undefined, args: unknown, cwd: string)
 	return [{ path: boundString(resolvePath(cwd, redactUrlCredentials(path)), ACP_MAX_LOCATION_PATH_BYTES) }];
 }
 
+/**
+ * The title, kind and locations a client renders for one call, read through the
+ * capability a gateway call reaches. The live start and the replayed one both
+ * present a call through this, so a reloaded card matches the live one.
+ */
+function toolCallPresentation(
+	toolName: string | undefined,
+	args: unknown,
+	cwd: string,
+): Pick<AcpToolCallSnapshot, "title" | "kind" | "locations"> {
+	const call = toolName === undefined ? undefined : effectiveToolCall(toolName, args);
+	const chainSteps = toolName === undefined ? [] : gatewayChainPlan(toolName, args);
+	const capability =
+		chainSteps.length > 0
+			? `gateway chain(${chainSteps.map((step) => step.capability).join(", ")})`
+			: (call?.toolName ?? toolName);
+	const locations = toolLocations(capability, call?.viaGateway ? call.args : args, cwd);
+	return {
+		...(locations !== null ? { locations } : {}),
+		title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
+		kind: toolKind(chainSteps.length > 0 ? toolName : capability),
+	};
+}
+
 function utf8Bytes(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
@@ -2107,9 +2142,9 @@ function handleChatEvent(
 			typeof event.text === "string" &&
 			event.text.length > 0
 		) {
-			// A context status line crosses the way startup notices do, so a client that ignores `_meta` shows a reply
+			// A host information line crosses the way startup notices do, so a client that ignores `_meta` shows a reply
 			// carrying only the model's text.
-			if (isContextStatusNotice(event.level, event.key)) {
+			if (isHostInfoNotice(event.level, event.key)) {
 				const notice = { level: "info", text: safeStoredString(event.text, ACP_MAX_CHUNK_BYTES) };
 				sendUpdate(transport, sessionId, active, {
 					sessionUpdate: "session_info_update",
@@ -2157,21 +2192,12 @@ function handleChatEvent(
 		active.lastEmittedToolCallId = toolCallId;
 		// Clients render kind, title and locations per capability, and the
 		// coordinator reaches most capabilities through gateway op=call.
-		const call = toolName === undefined ? undefined : effectiveToolCall(toolName, event.args);
-		const chainSteps = toolName === undefined ? [] : gatewayChainPlan(toolName, event.args);
-		const capability =
-			chainSteps.length > 0
-				? `gateway chain(${chainSteps.map((step) => step.capability).join(", ")})`
-				: (call?.toolName ?? toolName);
-		const locations = toolLocations(capability, call?.viaGateway ? call.args : event.args, cwd);
 		// Built once and kept: the permission request for this call must send the
 		// same objects rather than recompute them from a copy of the arguments that
 		// may since have been normalized.
 		const snapshot: AcpToolCallSnapshot = {
 			rawInput: boundRawRecord(event.args),
-			...(locations !== null ? { locations } : {}),
-			title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
-			kind: toolKind(chainSteps.length > 0 ? toolName : capability),
+			...toolCallPresentation(toolName, event.args, cwd),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
 		sendUpdate(transport, sessionId, active, {
@@ -2537,6 +2563,9 @@ interface AcpReplayTurn {
 	target?: string;
 	/** An assistant message of this turn sent text, so the next one opens on a blank line as live does. */
 	sentAssistantText?: boolean;
+	/** The ledger's time for the request that opened the turn, and for the turn's newest entry. */
+	startedAt?: string;
+	finishedAt?: string;
 }
 
 interface PreparedAcpReplay {
@@ -2639,6 +2668,7 @@ function prepareAcpReplay(
 	entries: ReadonlyArray<SessionEntry>,
 	leafTurnId: string | null,
 	sessionId: string,
+	cwd: string,
 	createdTarget: string | null = null,
 ): PreparedAcpReplay {
 	const branch = filterEntriesToActivePath(entries, leafTurnId ?? undefined);
@@ -2648,8 +2678,12 @@ function prepareAcpReplay(
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
 	const cutOffToolCalls = new Set<string>();
+	// Each replayed call's presentation, which its terminal update repeats as the live one does.
+	const presented = new Map<string, ReturnType<typeof toolCallPresentation>>();
 	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
+		// Only an entry of the open turn moves its finish; a later request, shell line, run or compaction does not.
+		const stamp = Number.isFinite(Date.parse(entry.timestamp)) ? entry.timestamp : undefined;
 		if (entry.kind === "workerRun") {
 			runs.push({ runId: entry.runId, agentId: entry.agentId });
 			continue;
@@ -2694,13 +2728,17 @@ function prepareAcpReplay(
 			if (entry.customType === "turnOutcome" && current !== null) {
 				const outcome = payloadRecord(entry.data);
 				if (outcome?.version === 1 && outcome.turnId === current.userTurnId) {
+					if (stamp !== undefined) current.finishedAt = stamp;
 					if (typeof outcome.stopReason === "string") current.stopReason = mapAcpStopReason(outcome.stopReason);
 					if (payloadRecord(outcome.operator)?.canceled === true) current.stopReason = "cancelled";
 				}
 				continue;
 			}
 			if (entry.customType === IN_RUN_CONTINUATION_ENTRY) {
-				if (current !== null) current.stopReason = "error";
+				if (current !== null) {
+					current.stopReason = "error";
+					if (stamp !== undefined) current.finishedAt = stamp;
+				}
 				continue;
 			}
 			// A ceiling stop says why the turn after it waited or ended (#424).
@@ -2718,6 +2756,7 @@ function prepareAcpReplay(
 				if (current !== null) {
 					current.userTurnId = entry.turnId;
 					current.stopReason = "error";
+					if (stamp !== undefined) current.finishedAt = stamp;
 				}
 				continue;
 			}
@@ -2727,12 +2766,18 @@ function prepareAcpReplay(
 			if (current !== null && (payload?.queued === "steer" || payload?.queued === "follow-up")) {
 				current.userTurnId = entry.turnId;
 				current.stopReason = "error";
+				if (stamp !== undefined) current.finishedAt = stamp;
 				replayMessageChunks(current.frames, "user_message_chunk", replayTextBlocks(entry).text);
 				continue;
 			}
 			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
 			// A crash can leave the request without a terminal assistant or turnOutcome.
-			current = { frames: [], userTurnId: entry.turnId, stopReason: "error" };
+			current = {
+				frames: [],
+				userTurnId: entry.turnId,
+				stopReason: "error",
+				...(stamp !== undefined ? { startedAt: stamp, finishedAt: stamp } : {}),
+			};
 			turns.push(current);
 			const operatorText =
 				typeof payload?.operatorText === "string" ? [payload.operatorText] : replayTextBlocks(entry).text;
@@ -2740,6 +2785,7 @@ function prepareAcpReplay(
 			continue;
 		}
 		if (current === null) continue;
+		if (stamp !== undefined) current.finishedAt = stamp;
 		if (entry.role === "assistant") {
 			// The ledger keeps a cut-off call's error result; the reply before it names the calls that never ran.
 			for (const id of outputLimitCutOffToolCallIds(payload)) cutOffToolCalls.add(id);
@@ -2764,15 +2810,18 @@ function prepareAcpReplay(
 			const toolCallId = startToolCallId(ids, call.engineId);
 			ids.openToolCalls.add(toolCallId);
 			ids.lastEmittedToolCallId = toolCallId;
+			const presentation = toolCallPresentation(call.name, call.args, cwd);
+			presented.set(toolCallId, presentation);
 			current.frames.push({
 				update: {
 					sessionUpdate: "tool_call",
 					toolCallId,
 					name: call.name,
-					title: call.name,
-					kind: toolKind(call.name),
+					title: presentation.title,
+					kind: presentation.kind,
 					status: "in_progress" satisfies AcpToolCallStatus,
 					rawInput: boundRawRecord(call.args),
+					...(presentation.locations !== undefined ? { locations: presentation.locations } : {}),
 				},
 			});
 			continue;
@@ -2790,12 +2839,13 @@ function prepareAcpReplay(
 			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
 			const content = toolResultContent(output, payload?.result);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
+			const started = presented.get(toolCallId);
 			current.frames.push({
 				update: {
 					sessionUpdate: "tool_call_update",
 					toolCallId,
-					title: name,
-					kind: toolKind(name),
+					title: started?.title ?? name,
+					kind: started?.kind ?? toolKind(name),
 					status: (failed ? "failed" : "completed") satisfies AcpToolCallStatus,
 					...(content.length > 0 ? { content } : {}),
 					rawOutput: boundRawRecord({
@@ -2824,6 +2874,8 @@ function prepareAcpReplay(
 				[ACP_REPLAY_META_KEY]: {
 					turn: index + 1,
 					...(turn.stopReason !== undefined ? { stopReason: turn.stopReason } : {}),
+					...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
+					...(turn.startedAt !== undefined && turn.finishedAt !== undefined ? { finishedAt: turn.finishedAt } : {}),
 				},
 				...(turn.model !== undefined || turn.target !== undefined ? { [ACP_TURN_META_KEY]: route } : {}),
 				...frame.meta,
@@ -4897,10 +4949,23 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	});
 
 	const unsubscribeEvents: Array<() => void> = [];
+	// Runtime notices cross as session metadata like startup hints, never on stderr, which a client keeps only as a crash tail.
+	const runtimeNotices = createAcpRuntimeNoticeRelay((sessionId, notice) =>
+		options.transport.notify("session/update", {
+			sessionId,
+			update: {
+				sessionUpdate: "session_info_update",
+				_meta: { [ACP_NOTICE_META_KEY]: { ...notice, text: safeStoredString(notice.text, ACP_MAX_CHUNK_BYTES) } },
+			},
+		}),
+	);
 	if (options.bus !== undefined) {
 		const bus = options.bus;
 		unsubscribeEvents.push(
 			bus.subscribe("context.pruned", () => telemetry.contextFolded()),
+			bus.subscribe("runtime.notice_raised", (payload) =>
+				runtimeNotices.raise(payload, handshake.initialized ? (activeSessionId ?? boundSessionId) : null),
+			),
 			bus.subscribe("session.eggs_changed", (payload) => {
 				const sessionId = activeSessionId ?? boundSessionId;
 				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;
@@ -5806,6 +5871,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						entries,
 						leafTurnId,
 						id,
+						canonicalCwd,
 						options.session?.history().find((meta) => meta.id === id)?.target ?? null,
 					)
 				: undefined,
@@ -5920,6 +5986,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					options.readSessionEntries(session.id),
 					options.session.leafId(session.id),
 					session.id,
+					canonicalCwd,
 					workspaceMeta(session.id).target,
 				);
 			} catch (error) {
@@ -5985,7 +6052,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			try {
 				entries = options.readSessionEntries(id);
 				const leaf = options.session.leafId(id);
-				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, stored.target) : undefined;
+				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, canonicalCwd, stored.target) : undefined;
 			} catch (error) {
 				throw loadFailure(error);
 			}
@@ -6001,7 +6068,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					},
 					id,
 				);
-				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id, stored.target) : undefined;
+				replay = replayToClient
+					? prepareAcpReplay(restored.entries, restored.leafTurnId, id, canonicalCwd, stored.target)
+					: undefined;
 			} catch (error) {
 				await options.mcpCapabilities?.detachClientServers();
 				// The session never loaded: nothing was bound or appended, so there is no boundary to checkpoint.
@@ -6506,7 +6575,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				turnId,
 			);
 			forkLeaf = restored.leafTurnId;
-			if (replayToClient) replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
+			if (replayToClient)
+				replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, canonicalCwd, meta.target);
 		} catch (error) {
 			options.diagnostics?.(`fork replay failed: ${acpErrorMessage(error)}`);
 			resetForSession(forkLeaf, []);
@@ -8315,6 +8385,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					});
 				}
 			}
+			runtimeNotices.flush(session.id);
 			const trimmed = text.trim();
 			const commandMatch = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/u.exec(trimmed);
 			const command = commandMatch?.[1];

@@ -195,6 +195,7 @@ import { declaredCheckIds } from "../tools/verify/resolve.js";
 import {
 	backendCacheVerdict,
 	extractUserText,
+	HOST_STATUS_NOTICE_KEY,
 	recordValue,
 	runtimeSupportsTools,
 	sumRunUsage,
@@ -2872,7 +2873,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// would report `cancelled` over a changed context and leave the runtime replaying the old history (J2-F04).
 		if (result === null || result.summary.length === 0) summarySignal?.throwIfAborted();
 		if (result?.providerFallbackReason)
-			deps.emitNotice(`Native compaction used CLIO Coder's portable path: ${result.providerFallbackReason}.`);
+			deps.emitNotice(
+				`Native compaction used CLIO Coder's portable path: ${result.providerFallbackReason}.`,
+				"info",
+				HOST_STATUS_NOTICE_KEY,
+			);
 		if (result?.noGain) {
 			lastCompactionNoGain = true;
 			// Remembered even when eviction acted in this pass: the summary request
@@ -3991,7 +3996,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					if (announcedProjectPreloadSession === "" && sessionId) announcedProjectPreloadSession = sessionId;
 					if (announcedProjectPreloadSession !== sessionId) {
 						announcedProjectPreloadSession = sessionId;
-						deps.emitNotice(`Project instructions: ${preload.label}`);
+						deps.emitNotice(`Project instructions: ${preload.label}`, "info", HOST_STATUS_NOTICE_KEY);
 					}
 				}
 
