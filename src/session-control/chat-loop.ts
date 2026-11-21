@@ -2066,6 +2066,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * continuation follows crosses its per-turn call or observation budget, read and cleared as the turn settles.
 	 */
 	let budgetRoll: "calls" | "observation" | null = null;
+	/** The interview this operator prompt closed, carried into its continuations so a complete there is already_complete (C-25). */
+	let promptInterview: AskUserToolPolicy | undefined;
 	const requestBudgetRoll = (budget: "calls" | "observation"): void => {
 		if (budgetRoll !== null || !state.streaming) return;
 		budgetRoll = budget;
@@ -3696,6 +3698,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.currentTurnConstraints,
 				);
 				if (askUserPolicy) askUserPolicy.planOnly = isPlanOnlyRequest(text);
+				if (options.yoloContinuation !== true && options.requestContinuation !== true) promptInterview = undefined;
+				else if (askUserPolicy && promptInterview) askUserPolicy.closedEarlier = promptInterview;
 				// turn_start: the prompt is accepted; registrations may inject
 				// context for this request. Accumulated reminders (turn_end
 				// advisories from the previous turn plus anything turn_start just
@@ -4330,6 +4334,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								`decision-ledger:${askUserPolicy.id}`,
 							);
 						}
+						if (askUserPolicy.status === "complete" && askUserPolicy.rounds.length > 0) promptInterview = askUserPolicy;
 					}
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;

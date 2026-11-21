@@ -691,6 +691,10 @@ describe("ask_user tool", () => {
 			},
 		} as unknown as SessionContract;
 		let finalized: AskUserToolPolicy | undefined;
+		// Later turns call complete: a yolo continuation of the prompt that closed the
+		// interview gets already_complete, a fresh operator prompt is still refused (C-25).
+		let prompts = 0;
+		const completes: string[] = [];
 		const loop = createChatLoop({
 			getSettings: () => settings,
 			getAutonomy: () => "default",
@@ -701,7 +705,7 @@ describe("ask_user tool", () => {
 			readSessionEntries: () => entries,
 			toolRegistry: registry,
 			onAskUserFinalized: (policy) => {
-				finalized = policy;
+				finalized ??= policy;
 			},
 			createAgent: ((agentOptions: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 				let listener: (event: AgentEvent) => unknown = () => {};
@@ -718,6 +722,16 @@ describe("ask_user tool", () => {
 							await listener({ type: "agent_start" } as AgentEvent);
 							const askTool = state.tools?.find((tool) => tool.name === ToolNames.AskUser);
 							if (!askTool) throw new Error("ask_user tool missing from agent state");
+							prompts += 1;
+							if (prompts > 1) {
+								try {
+									completes.push(JSON.stringify(await askTool.execute(`call-${prompts}`, { action: "complete" })));
+								} catch (error) {
+									completes.push(String(error));
+								}
+								await listener({ type: "agent_end", messages: [...state.messages] } as AgentEvent);
+								return;
+							}
 							const askMsg = {
 								role: "assistant",
 								content: [
@@ -755,9 +769,15 @@ describe("ask_user tool", () => {
 		});
 		try {
 			await loop.submit("Design the cache key.");
+			await loop.submit("[CLIO Coder] The previous turn stopped: it rolled over.", { yoloContinuation: true });
+			await loop.submit("Now write the summary.");
 		} finally {
 			loop.dispose();
 		}
+		strictEqual(completes.length, 2, JSON.stringify(completes));
+		match(completes[0] ?? "", /already_complete/u);
+		match(completes[0] ?? "", /Node id/u);
+		match(completes[1] ?? "", /none was asked/u);
 		ok(finalized, "onAskUserFinalized ran");
 		strictEqual(finalized.status, "complete");
 		strictEqual(finalized.summary, undefined, "closed implicitly, not by turn_finished fallback");

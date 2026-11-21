@@ -801,6 +801,8 @@ export interface AskUserToolPolicy {
 	planOnly?: boolean;
 	/** A plan card was answered with anything but keeping the plan: work or a revision follows and may still need the operator. */
 	asksAfterClose?: boolean;
+	/** The interview the same operator prompt closed before this continuation turn began (C-25). */
+	closedEarlier?: AskUserToolPolicy;
 	id: string;
 	status: AskUserInterviewStatus;
 	startedAt: string;
