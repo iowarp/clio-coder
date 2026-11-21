@@ -219,7 +219,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	const credentialsPath = join(dirs.config, "credentials.yaml");
 	const presenter = createLifecyclePresenter({ json: args.json });
 
-	presenter.header("Reset Clio Coder", "reset");
+	presenter.header("Reset CLIO Coder", "reset");
 
 	// Determine scopes to clear
 	const resetData = args.all || args.data;
@@ -354,7 +354,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		presenter.warn("Background service state cannot be safely reset by this build.");
 		presenter.commandAdvice(GUI_UNINSTALL_ADVICE.lead, GUI_UNINSTALL_ADVICE.command);
 		if (!args.dryRun) {
-			presenter.fail("Reset stopped; Clio state was preserved.");
+			presenter.fail("Reset stopped; CLIO Coder state was preserved.");
 			presenter.finish();
 			return 1;
 		}
@@ -407,7 +407,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 			for (const item of web?.items ?? []) presenter.completedStep(`Removed ${item.label}`);
 		} catch (error) {
 			presenter.fail(
-				error instanceof Error ? error.message : "Could not stop background services; Clio state was preserved.",
+				error instanceof Error ? error.message : "Could not stop background services; CLIO Coder state was preserved.",
 			);
 			presenter.finish();
 			return 1;
@@ -441,7 +441,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 			failures.push({
 				label: entry.label,
 				path: entry.path,
-				reason: `kept: not a Clio-only directory (${notClio}); remove Clio's files inside it by hand`,
+				reason: `kept: not a CLIO Coder-only directory (${notClio}); remove CLIO Coder's files inside it by hand`,
 			});
 			continue;
 		}

@@ -482,6 +482,20 @@ test("config get, set and unset save one setting per scope, refuse bad input unw
 		strictEqual(config("set", "interface.exitSummary", "auto").status, 0);
 		const pinned = JSON.parse(config("get", "interface.exitSummary", "--scope", "user", "--json").stdout);
 		deepStrictEqual([pinned.value, pinned.source], ["auto", "user"]);
+		// A user file that fails validation is refused whole, so get names it instead of reading defaults (FX-47).
+		const valid = readFileSync(settingsPath(), "utf8");
+		writeFileSync(settingsPath(), `${valid}safety:\n  validationWrappers: [7]\n`);
+		for (const scope of ["effective", "user"]) {
+			const refused = config("get", "safety.validationWrappers", "--scope", scope);
+			strictEqual(refused.status, 1, scope);
+			strictEqual(refused.stdout, "", scope);
+			match(
+				refused.stderr,
+				/settings\.yaml failed validation, so CLIO Coder reads none of it: safety\.validationWrappers/u,
+				scope,
+			);
+		}
+		writeFileSync(settingsPath(), valid);
 
 		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "interface:\n  demo: true\n");
 		const untrusted = config("set", "interface.exitSummary", "brief", "--scope", "project");

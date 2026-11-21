@@ -4,7 +4,6 @@ import { routingChangeNotices } from "../core/session-routing.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	ConfigReloadFailedPayload,
-	ContextWarningPayload,
 	LoopBlockedPayload,
 	RuntimeNoticePayload,
 	ToolBudgetExceededPayload,
@@ -285,15 +284,6 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.dismissNotification(CACHE_REUSE_NOTICE_KEY);
 			}
 			if (event.type === "agent_end") deps.refreshLiveWorkspaceGit(true);
-			deps.refreshFooter();
-			deps.requestRender();
-		}),
-		deps.bus.subscribe("context.warning_raised", (payload) => {
-			const event = payload as ContextWarningPayload | null | undefined;
-			if (event && typeof event === "object" && "warning" in event) {
-				if (event.warning !== null) deps.notify("warning", event.warning, "context-low-warning", 0);
-				else deps.dismissNotification("context-low-warning");
-			}
 			deps.refreshFooter();
 			deps.requestRender();
 		}),

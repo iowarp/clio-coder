@@ -19,10 +19,10 @@ export async function stopLegacyDocsBeforeRemoval(): Promise<void> {
 		try {
 			record = JSON.parse(readFileSync(path, "utf8"));
 		} catch {
-			throw new Error("The legacy documentation process record cannot be checked. Clio state was preserved.");
+			throw new Error("The legacy documentation process record cannot be checked. CLIO Coder state was preserved.");
 		}
 		if (record.v !== 1 || typeof record.pid !== "number" || !Number.isSafeInteger(record.pid) || record.pid <= 0)
-			throw new Error("The legacy documentation process record is invalid. Clio state was preserved.");
+			throw new Error("The legacy documentation process record is invalid. CLIO Coder state was preserved.");
 		const pid = record.pid;
 		if (!processAlive(pid)) {
 			rmSync(path, { force: true });
@@ -30,7 +30,7 @@ export async function stopLegacyDocsBeforeRemoval(): Promise<void> {
 		}
 		if (!legacyDocsBirthVerified(pid, record.birth))
 			throw new Error(
-				"The legacy documentation process ownership cannot be verified. Clio state was preserved; close it and retry.",
+				"The legacy documentation process ownership cannot be verified. CLIO Coder state was preserved; close it and retry.",
 			);
 		try {
 			process.kill(pid, "SIGTERM");
@@ -40,7 +40,9 @@ export async function stopLegacyDocsBeforeRemoval(): Promise<void> {
 		const deadline = Date.now() + 5000;
 		while (processAlive(pid) && Date.now() < deadline) await sleep(50);
 		if (processAlive(pid))
-			throw new Error("The legacy documentation process did not stop. Clio state was preserved; close it and retry.");
+			throw new Error(
+				"The legacy documentation process did not stop. CLIO Coder state was preserved; close it and retry.",
+			);
 		rmSync(path, { force: true });
 	});
 }

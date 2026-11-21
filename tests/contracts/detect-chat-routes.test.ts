@@ -77,8 +77,8 @@ export class CopilotClient {
 			"settings (mine)",
 			"ANTHROPIC_API_KEY",
 			"OPENAI_API_KEY",
-			"Clio stored API key (openai)",
-			"Clio stored login (openai-codex)",
+			"CLIO Coder stored API key (openai)",
+			"CLIO Coder stored login (openai-codex)",
 			"http://127.0.0.1:1234",
 		],
 	);
@@ -92,7 +92,7 @@ export class CopilotClient {
 		candidates.map((candidate) => [candidate.source, candidate.label]),
 		[
 			["configured-target", "settings (mine)"],
-			["stored-login", "Clio stored login (openai-codex)"],
+			["stored-login", "CLIO Coder stored login (openai-codex)"],
 			["env-key", "ANTHROPIC_API_KEY"],
 			["local-server", "http://127.0.0.1:1234"],
 		],

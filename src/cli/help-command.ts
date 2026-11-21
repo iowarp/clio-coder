@@ -248,24 +248,62 @@ function exitFor(key: string): ManifestLeaf["exit"] {
 /**
  * Synopsis tokens. A space-free `a|b` word run stays one token, so a value set after a flag (`--method browser|device`)
  * reaches the flag as its choices; a `|` with spaces around it, or before a flag (`[--json|--text]`), stays its own
- * token and separates alternatives as before. An inline `=value` stops at a closing bracket.
+ * token and separates alternatives as before. `(` and `)` group alternatives that share what follows them
+ * (`(--session | --verify) <id|path>`). An inline `=value` stops at a closing bracket.
  */
 const TOKEN =
-	/\[|\]|\||--[a-z][a-z0-9-]*(?:=[^\s\]]+)?|<[^>]+>(?:\.\.\.)?|\.\.\.|[^\s[\]|]+(?:\|[^\s[\]|-][^\s[\]|]*)*/gu;
+	/\[|\]|\(|\)|\||--[a-z][a-z0-9-]*(?:=[^\s\]]+)?|<[^>]+>(?:\.\.\.)?|\.\.\.|[^\s[\]|()]+(?:\|[^\s[\]|()-][^\s[\]|()]*)*/gu;
 /** A value set word: `a|b|c`, each choice a plain word such as `user-managed`. */
 const VALUE_SET = /^[A-Za-z0-9][A-Za-z0-9-]*(?:\|[A-Za-z0-9][A-Za-z0-9-]*)+$/u;
+/** A metavariable spelled in capitals, such as `SHA256` or `N`. */
+const CAPS_VALUE = /^[A-Z][A-Z0-9_]*$/u;
 
-/** Positionals and flags read from a synopsis such as `store put <tag> <file> [--blob <name>] [--json]`. */
+function synopsisValue(valueText: string): ManifestValue {
+	const bare = valueText.replace(/^<|>(?:\.\.\.)?$/gu, "");
+	return bare.includes("|") ? bare.split("|") : "string";
+}
+
+/**
+ * Positionals and flags read from a synopsis such as `store put <tag> <file> [--blob <name>] [--json]`. A `( a | b )`
+ * group's flags conflict with each other and take the value that follows the group; a positional on either side of
+ * a top-level ` | ` is one alternative, so it is not required (`<session> | --run <run-id>`).
+ */
 function fromUsage(usage: string, pathLength: number): { positionals: ManifestPositional[]; flags: ManifestFlag[] } {
 	const tokens = usage.split(/\s+/u).slice(pathLength).join(" ").match(TOKEN) ?? [];
 	const positionals: ManifestPositional[] = [];
 	const flags = new Map<string, ManifestFlag>();
+	const groups: Array<{ names: string[]; alternatives: boolean }> = [];
 	let depth = 0;
 	for (let i = 0; i < tokens.length; i += 1) {
 		const token = tokens[i] ?? "";
 		if (token === "[") depth += 1;
 		else if (token === "]") depth = Math.max(0, depth - 1);
-		else if (token === "...") {
+		else if (token === "(") groups.push({ names: [], alternatives: false });
+		else if (token === ")") {
+			const group = groups.pop();
+			if (group === undefined) continue;
+			const next = tokens[i + 1];
+			const shared = next?.startsWith("<") ? synopsisValue(next) : undefined;
+			if (shared !== undefined) i += 1;
+			for (const name of group.names) {
+				const flag = flags.get(name);
+				if (flag === undefined) continue;
+				const conflicts = group.alternatives ? group.names.filter((other) => other !== name) : [];
+				flags.set(name, {
+					...flag,
+					...(shared !== undefined && flag.value === "boolean" ? { value: shared } : {}),
+					...(conflicts.length > 0 ? { conflicts } : {}),
+				});
+			}
+			groups.at(-1)?.names.push(...group.names);
+		} else if (token === "|") {
+			const group = groups.at(-1);
+			if (group !== undefined) group.alternatives = true;
+			else if (depth === 0 && tokens[i - 1]?.startsWith("<")) {
+				const last = positionals.at(-1);
+				if (last !== undefined) last.required = false;
+			}
+		} else if (token === "...") {
 			const last = positionals.at(-1);
 			if (last !== undefined) last.variadic = true;
 		} else if (/^--?[a-z]/u.test(token)) {
@@ -274,17 +312,17 @@ function fromUsage(usage: string, pathLength: number): { positionals: ManifestPo
 			const next = tokens[i + 1];
 			const valueText =
 				inline ??
-				(next !== undefined && (next.startsWith("<") || VALUE_SET.test(next) || /^[A-Z]+$/u.test(next)) ? next : undefined);
+				(next !== undefined && (next.startsWith("<") || VALUE_SET.test(next) || CAPS_VALUE.test(next)) ? next : undefined);
 			if (valueText !== undefined) {
 				if (inline === undefined) i += 1;
-				const bare = valueText.replace(/^<|>(?:\.\.\.)?$/gu, "");
-				value = bare.includes("|") ? bare.split("|") : "string";
+				value = synopsisValue(valueText);
 			}
 			if (!flags.has(name)) flags.set(name, { name, value });
+			groups.at(-1)?.names.push(name);
 		} else if (token.startsWith("<")) {
 			positionals.push({
 				name: token.replace(/^<|>(?:\.\.\.)?$/gu, ""),
-				required: depth === 0,
+				required: depth === 0 && !(groups.length === 0 && tokens[i - 1] === "|"),
 				variadic: token.endsWith("..."),
 			});
 		}

@@ -5,7 +5,7 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 /** Fresh observations, not a persisted cache handle or permission to administer a server. */
 export interface CacheDeploymentObservation {
 	observedAt: number;
-	backend: "llamacpp" | "vllm" | "lmstudio" | "unknown";
+	backend: "llamacpp" | "vllm" | "lmstudio" | "openai-codex" | "unknown";
 	model: string;
 	build: string | null;
 	/** Absent server epoch stays unknown; Clio never invents one from a build number. */
@@ -56,6 +56,10 @@ export async function observeCacheDeployment(
 		administration: "unsupported",
 		reason: "deployment-unbound",
 	};
+	// The Codex backend warms a request without generating (`generate: false`), so its warm is bounded by the
+	// protocol itself and needs no deployment binding; the next real request reads the prefix it wrote (OI-7).
+	if (target.runtime === "openai-codex")
+		return { ...observation, backend: "openai-codex", warm: "bounded", reason: "codex-generate-false" };
 	if (!binding) return observation;
 	try {
 		const control = new URL(binding.controlUrl);
