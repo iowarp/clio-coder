@@ -11,6 +11,7 @@ import { classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { COUNCIL_VOTER_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
 import { answerBudgetForBatch } from "../domains/dispatch/handback.js";
 import type { DispatchIntent } from "../domains/dispatch/intent.js";
 import {
@@ -32,6 +33,16 @@ import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
  * about; `researcher` keeps only read under it.
  */
 export const COUNCIL_DEFAULT_AGENT_ID = "scout";
+
+/**
+ * The persona a vote member runs under. A seat on the council default recipe
+ * votes under the coordinator's bounded voter prompt rather than the scout's
+ * findings persona, whose terminal shape contradicts the ballot (FL-23); a
+ * seat on any other recipe keeps that recipe's body.
+ */
+export function councilVoterPersona(agentId: string): { systemPrompt?: string } {
+	return agentId === COUNCIL_DEFAULT_AGENT_ID ? { systemPrompt: COUNCIL_VOTER_PROMPT } : {};
+}
 
 /** Last-resort baseline when the job's recipe is not installed. */
 const JOB_BASELINE_FALLBACK_AGENT_ID = "scout";
@@ -240,6 +251,8 @@ function dispatchRequestFromArgs(
 	if (target) request.target = target;
 	const model = stringArg(args, "model");
 	if (model) request.model = model;
+	const continueRun = stringArg(args, "continue_run");
+	if (continueRun) request.continueRunId = continueRun;
 	const node = stringArg(args, "node");
 	if (node) request.node = node;
 	// Admission stamps the resolved tuple later, so this is the one place an unpinned request is visible.

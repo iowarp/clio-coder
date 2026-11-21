@@ -16,7 +16,7 @@ import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { resolvedDispatchPlanFromArgs } from "../../src/tools/dispatch-plan.js";
 import { CODE_NAV_TASK_STEERING, codeNavTaskSteering } from "../../src/tools/profiles.js";
-import { parseWorkerSpec, WORKER_SPEC_VERSION_SKEW } from "../../src/worker/spec-contract.js";
+import { parseWorkerSpec, WORKER_SPEC_VERSION_SKEW, workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
@@ -105,7 +105,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 					}),
 				/telemetryContext/,
 			);
-			const input = { ...spec, runtime: litellm, cwd: env.dir };
+			const input = { ...spec, allowedTools: workerSpecToolNames(spec), runtime: litellm, cwd: env.dir };
 			// Test the production context path independently of the recipe's report schema.
 			delete input.resultContract;
 			delete input.helperResult;

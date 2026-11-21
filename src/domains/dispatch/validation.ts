@@ -83,6 +83,8 @@ export interface JobSpec {
 	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
+	/** An earlier settled ACP delegation of the same agent whose peer session this run continues. */
+	continueRunId?: string;
 	/** Invocation phase and optional preauthorized retry or revision ceiling. */
 	budget?: DispatchBudgetRequest;
 	/**
@@ -199,6 +201,7 @@ const KNOWN_KEYS = new Set([
 	"target",
 	"model",
 	"thinkingLevel",
+	"continueRunId",
 	"budget",
 	"node",
 	"routingIntent",
@@ -412,6 +415,12 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("thinkingLevel" in spec && spec.thinkingLevel !== undefined) {
 		if (typeof spec.thinkingLevel !== "string" || !VALID_THINKING.has(spec.thinkingLevel)) {
 			errors.push("thinkingLevel must be one of: off|minimal|low|medium|high|xhigh");
+		}
+	}
+
+	if ("continueRunId" in spec && spec.continueRunId !== undefined) {
+		if (typeof spec.continueRunId !== "string" || spec.continueRunId.trim().length === 0) {
+			errors.push("continueRunId must be a non-empty run id");
 		}
 	}
 
@@ -629,6 +638,7 @@ export function validateJobSpec(spec: unknown): Validated {
 		out.reroutes = spec.reroutes.map((hop) => ({ ...hop }));
 	}
 	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;
+	if (typeof spec.continueRunId === "string") out.continueRunId = spec.continueRunId.trim();
 	if (budget !== undefined) out.budget = budget;
 	if (Array.isArray(spec.requiredCapabilities)) {
 		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));

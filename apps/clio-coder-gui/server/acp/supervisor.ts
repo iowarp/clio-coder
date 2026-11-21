@@ -1347,7 +1347,8 @@ export class Supervisor {
 	): Promise<Static<S>> {
 		const raw = await this.active(id).client.request(method, params, timeoutMs),
 			value = Value.Clean(schema, raw);
-		if (!Value.Check(schema, value)) throw new AppProblem("upstream_acp", "Clio returned an invalid control response.");
+		if (!Value.Check(schema, value))
+			throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid control response.");
 		return value;
 	}
 	settings(id: string, patch?: SafeSettingsPatch) {
@@ -1387,13 +1388,14 @@ export class Supervisor {
 		if (!client.capabilities.targets?.list)
 			throw new AppProblem("unsupported", "This CLIO Coder build does not expose target inventory.");
 		const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
-		if (!Value.Check(AcpTargetList, raw)) throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
+		if (!Value.Check(AcpTargetList, raw))
+			throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target list.");
 		const projected = Value.Clean(SessionTargets, {
 			targets: raw.targets,
 			truncated: record(raw._meta)[ACP_TRUNCATED_META_KEY] === true,
 		});
 		if (!Value.Check(SessionTargets, projected))
-			throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
+			throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target list.");
 		return projected;
 	}
 	probe(id: string, targetId: string) {
@@ -1497,11 +1499,11 @@ export class Supervisor {
 				if (entry.turnId !== turnId) return;
 				const outcome = Value.Clean(ShellOutcome, structuredClone(raw));
 				if (!Value.Check(ShellOutcome, outcome))
-					throw new AppProblem("upstream_acp", "Clio returned an invalid shell result.");
+					throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid shell result.");
 				const note = outcome.timedOut
 					? `The line was stopped at its ${Math.round(shell.timeoutMs / 1000)} s limit.`
 					: outcome.unlabeled
-						? "The output was kept out of Clio's context because its information-flow label could not be recorded."
+						? "The output was kept out of CLIO Coder's context because its information-flow label could not be recorded."
 						: null;
 				if (note !== null)
 					this.publish({
@@ -1887,7 +1889,7 @@ export class Supervisor {
 			if (raw.status === "committed") await this.settleMove(entry, id, raw);
 			const value = Value.Clean(HandoffCommitted, raw);
 			if (!Value.Check(HandoffCommitted, value))
-				throw new AppProblem("upstream_acp", "Clio returned an invalid handoff result.");
+				throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid handoff result.");
 			return value;
 		} finally {
 			delete entry.rebase;

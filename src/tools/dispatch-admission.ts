@@ -33,6 +33,7 @@ import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { planCardLimitsUnderTimeout } from "../domains/dispatch/run-limits.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import {
+	councilVoterPersona,
 	dispatchRequestsFromArgs,
 	maxOutputBytesArg,
 	prepareDispatchArguments,
@@ -590,6 +591,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			routeApproval: resolution.routeApproval,
 			...(resolution.checkedAtRun !== undefined ? { checkedAtRun: [...resolution.checkedAtRun] } : {}),
 			...(resolution.limits !== undefined ? { limits: resolution.limits } : {}),
+			...(resolution.writes !== undefined ? { writes: resolution.writes } : {}),
+			...(resolution.withheld !== undefined ? { withheld: [...resolution.withheld] } : {}),
 			agentSelection: request.agentSelection === undefined ? null : structuredClone(request.agentSelection),
 			stepId: null,
 			dependencies: [],
@@ -992,6 +995,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										task: renderCouncilVoteMemberTask(base.task),
 										resultContractOverride: councilBallotContract(base.task),
+										...councilVoterPersona(member.agent ?? base.agentId),
 									}
 								: {}),
 							target: member.target,

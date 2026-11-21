@@ -253,9 +253,10 @@ it("persists and replays machine origin after the real engine injects a busy fol
 		strictEqual(faux.state.callCount, 2, "Pi consumed the follow-up in the active run");
 		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
 		const users = entries().filter((entry) => entry.kind === "message" && entry.role === "user");
+		// The follow-up Pi drained into the active run names its queue, so an ACP replay keeps it in that run's turn.
 		deepStrictEqual(
 			users.map((entry) => (entry as { payload: { text: string; origin?: string } }).payload),
-			[{ text: "operator turn" }, { text, origin }],
+			[{ text: "operator turn" }, { text, origin, queued: "follow-up" }],
 		);
 		const panel = createChatPanel({ getOutputStyle: () => "detailed" });
 		rehydrateChatPanelFromTurns(panel, entries());

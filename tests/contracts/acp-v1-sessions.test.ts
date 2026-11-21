@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { test } from "node:test";
+import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -14,11 +16,20 @@ import type { SessionContract, SessionMeta } from "../../src/domains/session/con
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { IN_RUN_CONTINUATION_ENTRY } from "../../src/domains/session/entries.js";
 import { acpUsageSums } from "../../src/engine/acp/adapter.js";
+import { commandResultLines } from "../../src/engine/acp/command-result.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
+import {
+	ACP_UPSTREAM_V1,
+	ACP_V1_TOOL_CALL_STATUSES,
+	AcpV1InitializeResponseSchema,
+	AcpV1LoadSessionResponseSchema,
+	AcpV1NewSessionResponseSchema,
+	AcpV1ResumeSessionResponseSchema,
+} from "../../src/engine/acp/upstream-schema.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
 import { stdioPeer } from "../harness/acp-fake-transport.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -465,6 +476,28 @@ test("ACP resume restores without replay, while mode and config controls share t
 	}
 });
 
+test("ACP initialize, session/new, session/load and session/resume answer as the pinned upstream v1 schema says", async () => {
+	const conforms = (schema: TSchema, value: unknown, method: string): void => {
+		const first = Value.Errors(schema, value)[0];
+		ok(first === undefined, `${method} (${ACP_UPSTREAM_V1.tag}): ${first?.instancePath} ${first?.message}`);
+	};
+	// One session per server process, so each way of opening one gets its own.
+	for (const method of ["session/new", "session/resume", "session/load"] as const) {
+		const peer = fixture();
+		try {
+			conforms(AcpV1InitializeResponseSchema, await peer.call("initialize", { protocolVersion: 1 }), "initialize");
+			const reopen = { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] };
+			if (method === "session/new")
+				conforms(AcpV1NewSessionResponseSchema, await peer.call(method, { cwd: peer.cwd, mcpServers: [] }), method);
+			else if (method === "session/resume")
+				conforms(AcpV1ResumeSessionResponseSchema, await peer.call(method, reopen), method);
+			else conforms(AcpV1LoadSessionResponseSchema, await peer.call(method, reopen), method);
+		} finally {
+			await peer.stop();
+		}
+	}
+});
+
 test("ACP close cancels and waits for an active prompt", async () => {
 	const peer = fixture();
 	try {
@@ -475,12 +508,45 @@ test("ACP close cancels and waits for an active prompt", async () => {
 			prompt: [{ type: "text", text: "Hello" }],
 		});
 		await Promise.resolve();
+		peer.emit({ type: "tool_execution_start", toolCallId: "open-1", toolName: "read", args: { path: "README.md" } });
 		await rejects(peer.call("session/set_mode", { sessionId: opened.sessionId, modeId: "yolo" }), /active prompt/u);
 		deepStrictEqual(await peer.call("session/close", { sessionId: opened.sessionId }), {});
 		strictEqual(peer.cancelled, true);
 		strictEqual(((await prompt) as { stopReason: string }).stopReason, "cancelled");
+		// The call the close cut off settles with a status ACP v1 has: failed, the cancel named in its content.
+		const swept = peer.updates
+			.map((params) => params.update as { sessionUpdate?: string; status?: string; content?: unknown })
+			.filter((update) => update.sessionUpdate === "tool_call_update" && update.status !== "in_progress");
+		strictEqual(swept.length, 1);
+		ok((ACP_V1_TOOL_CALL_STATUSES as readonly string[]).includes(swept[0]?.status ?? ""), swept[0]?.status);
+		strictEqual(swept[0]?.status, "failed");
+		ok(JSON.stringify(swept[0]?.content).includes("cancelled"), JSON.stringify(swept[0]?.content));
 		const closed = peer.history.find((meta) => meta.id === opened.sessionId);
 		strictEqual(closed?.lastCheckpointReason, "close", "the close is checkpointed before the session is released");
+	} finally {
+		await peer.stop();
+	}
+});
+
+test("ACP load sent while a close is still in flight waits for the close instead of refusing a second session", async () => {
+	const peer = fixture();
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/resume", { sessionId: "session-4", cwd: peer.cwd, mcpServers: [] });
+		const prompt = peer.call("session/prompt", { sessionId: "session-4", prompt: [{ type: "text", text: "Hello" }] });
+		await Promise.resolve();
+		// The client sends its next open without awaiting the close, which waits for the cancelled prompt to settle.
+		const closing = peer.call("session/close", { sessionId: "session-4" });
+		const loaded = (await peer.call("session/load", { sessionId: "session-5", cwd: peer.cwd, mcpServers: [] })) as {
+			_meta: Record<string, { sessionId?: string }>;
+		};
+		deepStrictEqual(await closing, {});
+		strictEqual(((await prompt) as { stopReason: string }).stopReason, "cancelled");
+		ok(
+			Object.values(loaded._meta).some((meta) => meta?.sessionId === "session-5"),
+			"the load bound the session it named",
+		);
+		strictEqual(peer.session.current()?.id, "session-5");
 	} finally {
 		await peer.stop();
 	}
@@ -596,8 +662,61 @@ test("ACP replay parts one message's text blocks on a blank line, as the live st
 	}
 });
 
+test("ACP resume and load of the session the process already hosts serve it, and refuse a reopen under an active prompt", async () => {
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const peer = fixture([
+		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "status?" },
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "a1",
+			parentTurnId: "u1",
+			timestamp,
+			payload: { content: [{ type: "text", text: "All green." }], stopReason: "stop" },
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const reopen = { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] };
+		await peer.call("session/resume", reopen);
+		const replayed = () =>
+			peer.updates.filter(
+				(params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk",
+			).length;
+		// A second resume of the hosted session answers its state, with no replay and no chat reset.
+		const resumed = (await peer.call("session/resume", reopen)) as { modes: { currentModeId: string } };
+		strictEqual(resumed.modes.currentModeId, "default");
+		strictEqual(peer.resets, 1);
+		strictEqual(replayed(), 0);
+		// A load of it replays the branch before answering.
+		await peer.call("session/load", reopen);
+		strictEqual(replayed(), 1);
+		strictEqual(peer.resets, 1);
+		await rejects(
+			peer.call("session/resume", {
+				...reopen,
+				mcpServers: [{ name: "fixture", command: process.execPath, args: [], env: [] }],
+			}),
+			/client MCP servers it was opened with/u,
+		);
+		const prompt = peer.call("session/prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "Hi" }] });
+		await Promise.resolve();
+		await rejects(peer.call("session/load", reopen), (err: AcpRequestError) => err.detail.code === "prompt_active");
+		// Another session is still refused while this one is open.
+		await rejects(
+			peer.call("session/load", { ...reopen, sessionId: "session-2" }),
+			(err: AcpRequestError) => err.detail.code === "session_limit",
+		);
+		await peer.call("session/close", { sessionId: "session-1" });
+		await prompt;
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP replay parts two assistant messages of one turn on one blank line, as the live stream does", async () => {
 	// bt-session-res J9: live sent "files.\n\nDone:", replay sent "files." and "Done:" with nothing between them.
+	// ACP-5: a steer the run drained stays inside the prompt it answered, live and on replay, and the run's outcome names it.
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const message = (turnId: string, parentTurnId: string, payload: unknown): SessionEntry => ({
 		kind: "message",
@@ -611,13 +730,29 @@ test("ACP replay parts two assistant messages of one turn on one blank line, as 
 		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "list files" },
 		message("a1", "u1", { content: [{ type: "text", text: "Plan: read the files." }], stopReason: "toolUse" }),
 		message("a2", "a1", { content: [{ type: "thinking", thinking: "no text here" }], stopReason: "toolUse" }),
-		message("a3", "a2", {
+		{
+			kind: "message",
+			role: "user",
+			turnId: "s1",
+			parentTurnId: "a2",
+			timestamp,
+			payload: { text: "count them too", queued: "steer" },
+		},
+		message("a3", "s1", {
 			content: [
 				{ type: "text", text: "Done:" },
 				{ type: "text", text: "two files." },
 			],
 			stopReason: "stop",
 		}),
+		{
+			kind: "custom",
+			customType: "turnOutcome",
+			turnId: "o1",
+			parentTurnId: "a3",
+			timestamp,
+			data: { version: 1, turnId: "s1", stopReason: "length" },
+		} as SessionEntry,
 		{ kind: "message", role: "user", turnId: "u2", parentTurnId: "a3", timestamp, payload: "again" },
 		message("a4", "u2", { content: [{ type: "text", text: "Same." }], stopReason: "stop" }),
 	]);
@@ -625,14 +760,24 @@ test("ACP replay parts two assistant messages of one turn on one blank line, as 
 		await peer.call("initialize", { protocolVersion: 1 });
 		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
 		const byTurn = new Map<number, string>();
+		const userByTurn = new Map<number, string[]>();
+		const stopByTurn = new Map<number, string | undefined>();
 		for (const params of peer.updates) {
 			const update = params.update as { sessionUpdate?: string; content?: { text: string } };
+			const replay = (params._meta as Record<string, { turn?: number; stopReason?: string }> | undefined)?.[
+				"clio-coder/replay"
+			];
+			const turn = replay?.turn ?? 0;
+			stopByTurn.set(turn, replay?.stopReason);
+			if (update.sessionUpdate === "user_message_chunk")
+				userByTurn.set(turn, [...(userByTurn.get(turn) ?? []), update.content?.text ?? ""]);
 			if (update.sessionUpdate !== "agent_message_chunk") continue;
-			const turn = (params._meta as Record<string, { turn?: number }> | undefined)?.["clio-coder/replay"]?.turn ?? 0;
 			byTurn.set(turn, (byTurn.get(turn) ?? "") + (update.content?.text ?? ""));
 		}
 		// One separator between messages, the block separator unchanged, and none carried into the next turn.
 		deepStrictEqual([...byTurn.values()], ["Plan: read the files.\n\nDone:\n\ntwo files.", "Same."]);
+		deepStrictEqual([...userByTurn.values()], [["list files", "count them too"], ["again"]]);
+		deepStrictEqual([...stopByTurn.values()], ["max_tokens", "end_turn"]);
 	} finally {
 		await peer.stop();
 	}
@@ -1331,8 +1476,10 @@ test("ACP advertises only slash commands executable from a prompt", async () => 
 
 test("a slash command's failure line crosses a prompt once, as reply text, not again as its result", async () => {
 	// bt-session-res J10: `/context compact` failed and the line went out as a notice chunk and again as the result.
+	// ACP-5: a line past the result's line bound is cut there, so the cut form must still match the whole notice line.
 	const failure =
 		"[/context compact] failed; context unchanged at 9.6K tokens. The summary call failed: Connection error.: bad port. /context compact tries again; /model picks another route to summarize on.";
+	const detail = `provider said: ${"upstream refused the request; ".repeat(60).trimEnd()}`;
 	let emit: (event: unknown) => void = () => {};
 	const commands: AcpCommandControl = {
 		catalog: () => ({
@@ -1341,8 +1488,11 @@ test("a slash command's failure line crosses a prompt once, as reply text, not a
 		}),
 		invoke: () => {
 			// The host hears the chat loop's notice and answers with it, as the orchestrator's runCompact does.
-			emit({ type: "notice", surface: "transcript", level: "error", text: failure });
-			return { level: "error", lines: [failure, "Run /doctor if it keeps failing."] };
+			emit({ type: "notice", surface: "transcript", level: "error", text: `${failure}\n${detail}` });
+			return {
+				level: "error",
+				lines: [...commandResultLines(`${failure}\n${detail}`), "Run /doctor if it keeps failing."],
+			};
 		},
 		injectsUserTurn: () => false,
 		capability: {},
@@ -1361,6 +1511,9 @@ test("a slash command's failure line crosses a prompt once, as reply text, not a
 			.map((params) => (params.update as { content: { text: string } }).content.text)
 			.join("");
 		strictEqual(reply.split(failure).length - 1, 1, reply);
+		ok(Buffer.byteLength(detail) > 1024);
+		strictEqual(reply.split(detail).length - 1, 1, reply);
+		ok(!reply.includes("…[truncated]"), reply);
 		// A result line no notice carried still answers.
 		ok(reply.includes("Run /doctor if it keeps failing."), reply);
 	} finally {

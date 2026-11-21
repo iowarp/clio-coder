@@ -11,9 +11,9 @@
  * projects such a context to the same element vocabulary as `wireElements`.
  *
  * The chat harness drives an in-process chat loop over a real session bundle against the capture server, across route
- * facts (tier, caching, known or unknown window, image input). Subprocess surfaces (headless, ACP, worker) reach the
- * same server through `seedOpenAICompatToolOrchestrator(configDir, server.url)`: the server routes on the path suffix.
- * `tappedCli` runs the built CLI with the session capture installed in that process.
+ * facts (tier, caching, known or unknown window, image input). Subprocess surfaces (headless, ACP, and the workers they
+ * spawn) reach the same server through `seedOpenAICompatToolOrchestrator(configDir, server.url)`: the server routes on
+ * the path suffix. `tappedCli` runs the built CLI, and every worker it spawns, with the session capture installed.
  */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -222,6 +222,12 @@ export async function startCaptureServer(script: CaptureScript): Promise<Capture
 	const requests: CapturedRequest[] = [];
 	const server: Server = createServer(async (req, res) => {
 		const path = (req.url ?? "/").split("?")[0] ?? "/";
+		// A dispatched worker's route is health-probed through the model list before it is admitted.
+		if (req.method === "GET" && path.endsWith("/models")) {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ object: "list", data: [{ id: "mock-model", object: "model" }] }));
+			return;
+		}
 		const family = familyFor(path);
 		if (req.method !== "POST" || !family) {
 			res.writeHead(404, { "content-type": "application/json" });
@@ -380,19 +386,30 @@ export function contextElements(context: Context): string[] {
 const ROOT = new URL("../..", import.meta.url);
 /** The call in the built bundle's dispatch that hands a context to the registered provider, where `tapEngineApi` taps. */
 const DISPATCH_SEAM = "resolved(model.api).streamSimple(model,normalizeContext(context),";
+const WORKER_ENTRY_SUFFIX = "/dist/worker/entry.js";
+
+/** Where `tappedCli(file)` records the contexts of the native workers the CLI spawns. */
+export function tappedWorkerFile(file: string): string {
+	return `${file}.worker`;
+}
 
 /**
- * Session capture in the built CLI as a subprocess (`clio-coder run`, `clio-coder acp`). The bundle inlines Pi and the
- * engine registry, so no import can reach them; a preload's load hook rewrites the one dispatch call above to pass the
- * context through a recorder that appends it to `file`, one JSON line per request in send order. A bundle without that
- * call text throws at load, so a moved seam fails the case instead of capturing nothing.
+ * Session capture in the built CLI as a subprocess (`clio-coder run`, `clio-coder acp`) and in every native worker it
+ * spawns. The bundle inlines Pi and the engine registry, so no import can reach them; a preload's load hook rewrites the
+ * one dispatch call above to pass the context through a recorder that appends it, one JSON line per request in send
+ * order, to `file` in the CLI process and to `tappedWorkerFile(file)` in a worker. The CLI takes the preload as an
+ * `--import`; a worker is spawned with no exec arguments, so the CLI's copy hands it on through `NODE_OPTIONS`. A bundle
+ * without that call text throws at load, so a moved seam fails the case instead of capturing nothing.
  */
 export function tappedCli(file: string): { node: string[]; cli: string } {
 	const preload = `
 import { appendFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 const seam = ${JSON.stringify(DISPATCH_SEAM)};
-globalThis.__clioSessionCapture = (context) => (appendFileSync(${JSON.stringify(file)}, JSON.stringify(context) + "\\n"), context);
+const worker = (process.argv[1] ?? "").endsWith(${JSON.stringify(WORKER_ENTRY_SUFFIX)});
+const out = worker ? ${JSON.stringify(tappedWorkerFile(file))} : ${JSON.stringify(file)};
+if (!worker) process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, "--import=" + import.meta.url].filter(Boolean).join(" ");
+globalThis.__clioSessionCapture = (context) => (appendFileSync(out, JSON.stringify(context) + "\\n"), context);
 registerHooks({
 	load(url, context, nextLoad) {
 		const loaded = nextLoad(url, context);

@@ -317,7 +317,8 @@ describe("compaction working-set provider boundary", () => {
 			getSettings: () => ({ chat: {} }) as ClioSettings,
 			middlewareToolChoice: { reset: () => {} } as unknown as MiddlewareToolChoiceControl,
 			consumePersistedEcho: (text) => text === "Continue.",
-			removeQueuedMirrorEntry: () => {},
+			// The steer the run drained names its queue on the row, so a replay keeps it inside that run's turn (ACP-5).
+			removeQueuedMirrorEntry: (text) => (text === "Review the screenshot." ? { kind: "steer" } : undefined),
 			promptCachePayloadForAssistant: () => ({}),
 		});
 		persistence.appendQueuedUserTurn({ role: "user", content: "Continue.", timestamp: Date.now() } as AgentMessage);
@@ -331,6 +332,10 @@ describe("compaction working-set provider boundary", () => {
 			JSON.stringify(state.runtime?.agent.state.messages),
 			/Active user instructions \(verbatim\):\\nFix the seed/,
 		);
+		deepStrictEqual((ledger.at(-1) as { payload?: unknown } | undefined)?.payload, {
+			text: "Review the screenshot.",
+			queued: "steer",
+		});
 	});
 
 	it("does not treat middleware continuation rows as operator requests", async () => {

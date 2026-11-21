@@ -708,6 +708,61 @@ function emptyUsage(): AssistantMessage["usage"] {
 	};
 }
 
+/**
+ * The first length-delimited field `field` of a protobuf message, or undefined. Only the wire types a signature
+ * header uses are walked; anything else ends the search.
+ */
+function protoField(bytes: Uint8Array, field: number): Uint8Array | undefined {
+	let at = 0;
+	const varint = (): number | undefined => {
+		let value = 0;
+		for (let shift = 0; shift < 35 && at < bytes.length; shift += 7) {
+			const byte = bytes[at++] as number;
+			value += (byte & 0x7f) * 2 ** shift;
+			if ((byte & 0x80) === 0) return value;
+		}
+		return undefined;
+	};
+	while (at < bytes.length) {
+		const tag = varint();
+		if (tag === undefined) return undefined;
+		const wire = tag % 8;
+		if (wire === 0) {
+			if (varint() === undefined) return undefined;
+		} else if (wire === 1) at += 8;
+		else if (wire === 5) at += 4;
+		else if (wire === 2) {
+			const length = varint();
+			if (length === undefined || at + length > bytes.length) return undefined;
+			if (Math.floor(tag / 8) === field) return bytes.subarray(at, at + length);
+			at += length;
+		} else return undefined;
+	}
+	return undefined;
+}
+
+/**
+ * The prose of a message's narration blocks, in order. An Anthropic thinking block's signature carries its kind
+ * at fields 2, 1, 8 (`thinking` or `narration`), which is how Claude Code itself tells narration from thinking.
+ */
+function narrationOf(reasoningBlocks: unknown): string[] {
+	if (typeof reasoningBlocks !== "object" || reasoningBlocks === null) return [];
+	const { provider, blocks } = reasoningBlocks as { provider?: unknown; blocks?: unknown };
+	if (provider !== "anthropic-messages" || !Array.isArray(blocks)) return [];
+	const said: string[] = [];
+	for (const block of blocks) {
+		if (typeof block !== "object" || block === null) continue;
+		const { type, thinking, signature } = block as { type?: unknown; thinking?: unknown; signature?: unknown };
+		if (type !== "thinking" || typeof thinking !== "string" || thinking.trim().length === 0) continue;
+		if (typeof signature !== "string") continue;
+		const outer = protoField(Buffer.from(signature, "base64"), 2);
+		const header = outer && protoField(outer, 1);
+		const kind = header && protoField(header, 8);
+		if (kind && Buffer.from(kind).toString("utf8") === "narration") said.push(thinking);
+	}
+	return said;
+}
+
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
 	readonly message: AssistantMessage & { copilotBilling?: CopilotStepBilling; copilotContinuation?: "delta" | "full" };
@@ -813,6 +868,25 @@ class Step {
 		}
 	}
 
+	/**
+	 * Claude's prose before a tool call can arrive as a thinking block whose signature names it narration. The
+	 * runtime streams every thinking block as one reasoning, so that prose reached Clio as thinking and the reply
+	 * had no text (row 313). The message's own blocks say which is which: narration moves out of the thinking
+	 * block and becomes the reply text, before any text the message itself carries.
+	 */
+	private narration(reasoningBlocks: unknown): void {
+		const said = narrationOf(reasoningBlocks);
+		if (said.length === 0) return;
+		if (this.thinkingIndex !== null) {
+			const block = this.message.content[this.thinkingIndex] as ThinkingContent;
+			for (const text of said) {
+				const at = block.thinking.indexOf(text);
+				if (at >= 0) block.thinking = block.thinking.slice(0, at) + block.thinking.slice(at + text.length);
+			}
+		}
+		this.text(said.join(""));
+	}
+
 	get isFinished(): boolean {
 		return this.finished;
 	}
@@ -907,6 +981,7 @@ class Step {
 				this.answered = true;
 				if (typeof event.data.apiCallId === "string") this.callIds.add(event.data.apiCallId);
 				const streamed = this.textIndex === null ? "" : (this.message.content[this.textIndex] as TextContent).text;
+				this.narration(event.data.reasoningBlocks);
 				if (streamed.length === 0 && event.data.content) this.text(event.data.content);
 				const requests = event.data.toolRequests ?? [];
 				if (requests.length === 0) return;

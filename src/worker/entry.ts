@@ -27,7 +27,6 @@ import {
 } from "../core/git-commit-attribution.js";
 import { installProxyFromEnv } from "../core/proxy-env.js";
 import { configureWorkerProcessSandbox } from "../core/sandbox/worker-process.js";
-import { ToolNames } from "../core/tool-names.js";
 
 process.env.AI_AGENT = AI_AGENT_NAME;
 
@@ -62,10 +61,17 @@ import {
 	WORKER_PROTOCOL_VERSION,
 	type WorkerHookEffect,
 	workerSpecDigest,
+	workerStaticHead,
 } from "./protocol.js";
 import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
-import { validateRehydratedWorkerRuntime, type WorkerSpec } from "./spec-contract.js";
+import {
+	envelopeAllowance,
+	envelopePermissionMode,
+	validateRehydratedWorkerRuntime,
+	type WorkerSpec,
+	workerSpecToolNames,
+} from "./spec-contract.js";
 import { createOrderedSteerHandler, createWorkerStdinDemux } from "./stdin-demux.js";
 
 /** Bound between channel-close abort and forced exit for a hung run. */
@@ -98,6 +104,40 @@ function announcedProcessGroupId(): number | null {
 }
 
 /**
+ * The envelope's static head names the request head this worker sends: its runtime, target, model, thinking, system
+ * prompt and tool declarations from this build. A spec whose head was sealed over anything else is refused before any
+ * model call, so a cache key or a plan built on the head describes this run (DESIGN 4.4).
+ */
+function assertStaticHead(spec: WorkerSpec): void {
+	const names = workerSpecToolNames(spec);
+	const head = workerStaticHead({
+		api: spec.runtimeId,
+		provider: spec.target.id,
+		model: spec.wireModelId,
+		thinking: spec.thinkingLevel ?? null,
+		systemPrompt: spec.systemPrompt,
+		tools: { names, schemas: attestedToolSchemaSignature(names) },
+	});
+	if (head !== spec.envelope.staticHead) {
+		throw new Error("worker: the envelope's static head does not match this spec's request head on this build");
+	}
+}
+
+/** The admitted MCP attestation with network only for the servers the envelope grants it. */
+function envelopeMcp(
+	mcp: NonNullable<WorkerSpec["permit"]["ceiling"]["mcp"]>,
+	envelope: WorkerSpec["envelope"],
+): NonNullable<WorkerSpec["permit"]["ceiling"]["mcp"]> {
+	const granted = new Set(envelope.network.mcp);
+	return {
+		projectRoot: mcp.projectRoot,
+		tools: mcp.tools.map(({ network: _network, ...entry }) =>
+			granted.has(entry.serverId) ? { ...entry, network: true as const } : entry,
+		),
+	};
+}
+
+/**
  * Attest this process, this node, and the route identity it resolved, on the
  * control lane, before any model call. The orchestrator compares every field
  * against the plan it approved and either kills a drifting peer or answers
@@ -105,12 +145,12 @@ function announcedProcessGroupId(): number | null {
  * spec digest.
  */
 function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
+	assertStaticHead(spec);
 	const specDigest = workerSpecDigest(spec);
 	const toolNames = attestedToolNames({
-		allowedTools: spec.allowedTools,
+		allowedTools: workerSpecToolNames(spec),
 		toolsSupported: workerProviderSupportsTools(input),
 		...(spec.helperResult === true ? { helperResult: true } : {}),
-		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		agentId: spec.agentId,
 		task: spec.task,
 		runtime: spec.runtime,
@@ -174,7 +214,7 @@ async function main(): Promise<number> {
 	setAutonomousCommitProcess(true);
 	// Every child this worker spawns through bash-exec or safe-exec runs under
 	// the dispatch-chosen OS sandbox from here on (decision Q8).
-	configureWorkerProcessSandbox(spec.sandbox);
+	configureWorkerProcessSandbox(spec.sandbox, spec.envelope.sandbox.confinesWrites);
 	// The dispatching session's own workers may write its dev extension folders; another session's may not.
 	if (spec.devRootOwner !== undefined) adoptDevRootOwner(spec.devRootOwner);
 	const attribution = withManagedGitCommitAttributionEnvironment(process.env, {
@@ -270,20 +310,21 @@ async function main(): Promise<number> {
 		target: spec.target,
 		runtime,
 		wireModelId: spec.wireModelId,
-		allowedTools: spec.allowedTools,
+		allowedTools: workerSpecToolNames(spec),
 		budget: spec.budget,
-		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
+		// Skills, approval route, command reach and network grants come from the sealed envelope (fleet M7).
+		...(spec.envelope.skills.discovery === "off" ? { noSkills: true } : {}),
 		...(spec.turnConstraints !== undefined ? { turnConstraints: spec.turnConstraints } : {}),
-		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
-		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
+		...(spec.envelope.skills.paths.length > 0 ? { skillPaths: [...spec.envelope.skills.paths] } : {}),
+		...(spec.envelope.skills.discovery === "bound-only" ? { agentSkills: [...spec.envelope.skills.bound] } : {}),
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
-		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
-		permitAllowance: { ...spec.permit.allowance },
-		...(spec.permit.ceiling.mcp !== undefined ? { mcp: spec.permit.ceiling.mcp } : {}),
+		onPermission: envelopePermissionMode(spec.envelope.approval),
+		permitAllowance: { git: spec.permit.allowance.git, ...envelopeAllowance(spec.envelope.approval) },
+		...(spec.permit.ceiling.mcp !== undefined ? { mcp: envelopeMcp(spec.permit.ceiling.mcp, spec.envelope) } : {}),
 		taskGit: {
 			allowance: spec.permit.allowance.git,
-			// A permit that already runs arbitrary code gains nothing from a repository hook (Q5).
-			executePermitted: spec.permit.ceiling.tools.some((tool) => tool === ToolNames.Bash || tool === ToolNames.RunScript),
+			// A run that already runs arbitrary code gains nothing from a repository hook (Q5).
+			executePermitted: spec.envelope.exec.shell !== "none",
 			...(spec.taskWorktree !== undefined ? { taskWorktree: { ...spec.taskWorktree } } : {}),
 		},
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
@@ -293,9 +334,12 @@ async function main(): Promise<number> {
 			? { emitGrantRequest: (request) => emitControlFrame({ kind: "grant_request", request }) }
 			: {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
-		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
+		// The envelope is the one source of the run's write scope (fleet M7).
+		...(spec.envelope.write.mode === "none" ? { readOnly: true } : {}),
 		...(spec.skipRepositoryInstructions === true ? { skipRepositoryInstructions: true } : {}),
-		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
+		...(spec.envelope.write.roots.length > 0
+			? { writeRoots: [...spec.envelope.write.roots], writeRootsCommandsBounded: spec.envelope.write.commandsBounded }
+			: {}),
 		...(spec.storeGrant !== undefined ? { storeGrant: structuredClone(spec.storeGrant) } : {}),
 		...(spec.flowPolicy !== undefined ? { flowPolicy: structuredClone(spec.flowPolicy) } : {}),
 		...(spec.flowRestrictions !== undefined ? { flowRestrictions: structuredClone(spec.flowRestrictions) } : {}),
@@ -347,7 +391,7 @@ async function main(): Promise<number> {
 		return 2;
 	}
 	// The worker's bash commands carry its own level as the ceiling for any clio-coder they start.
-	setToolEnvAutonomy(() => spec.permit.allowance.executeAutonomy ?? "default");
+	setToolEnvAutonomy(() => spec.envelope.approval.autonomy);
 	void startLoginEnvCapture();
 	// Slim streaming events before NDJSON serialization: pi's message_update
 	// carries the full cumulative message twice (top-level + assistantMessageEvent

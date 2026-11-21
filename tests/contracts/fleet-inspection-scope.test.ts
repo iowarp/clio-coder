@@ -7,8 +7,15 @@ import { fileURLToPath } from "node:url";
 import { renderCard, verdictText } from "../../src/cli/fleet-board.js";
 import { createBoardSource, loadBoard, loadTakeover, type WorkerCard } from "../../src/cli/fleet-board-model.js";
 import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
-import { answerFleetStatus } from "../../src/cli/fleet-status.js";
+import { runFleetStatus } from "../../src/cli/fleet-status.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import {
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+	resolveToolBudgetEnvelope,
+} from "../../src/domains/dispatch/budget-envelope.js";
 import { setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { gateDecisionsDirectory, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import { runFeedPath } from "../../src/domains/dispatch/run-feed.js";
@@ -151,54 +158,64 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 	}
 });
 
-test("fleet status with no ledger rows answers from its leaf with fleet.ts's bytes and exit codes (CLI-P11)", async (t) => {
+test("fleet status answers from its leaf with and without ledger rows (CLI-P11)", async (t) => {
 	const home = await isolateClioEnv("clio-fleet-status-leaf-");
 	try {
 		t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-20T12:00:00.000Z") });
-		const { runFleetCommand } = await import("../../src/cli/fleet.js");
-		// fleet.ts's status writes before its first await, so the capture is restored before the promise settles.
-		const full = (args: string[]) => {
-			const out = process.stdout.write.bind(process.stdout);
-			const err = process.stderr.write.bind(process.stderr);
-			let stdout = "";
-			let stderr = "";
-			process.stdout.write = ((chunk: string) => {
-				stdout += chunk;
-				return true;
-			}) as typeof process.stdout.write;
-			process.stderr.write = ((chunk: string) => {
-				stderr += chunk;
-				return true;
-			}) as typeof process.stderr.write;
-			let pending: Promise<number>;
-			try {
-				pending = runFleetCommand(args);
-			} finally {
-				process.stdout.write = out;
-				process.stderr.write = err;
-			}
-			return pending.then((code) => ({ code, stdout, stderr }));
-		};
 		const leaf = async (args: string[]) => {
 			let stdout = "";
 			let stderr = "";
-			const code = await answerFleetStatus(
+			const code = await runFleetStatus(
 				args,
 				{ write: (chunk: string) => (stdout += chunk) },
 				{ write: (chunk: string) => (stderr += chunk) },
 			);
 			return { code, stdout, stderr };
 		};
-		const forms = [["status", "--json"], ["status"], ["status", "--json", "--all"], ["status", "--bogus"]];
-		for (const args of forms) deepStrictEqual(await leaf(args), await full(args), args.join(" "));
+		deepStrictEqual(await leaf(["--bogus"]), {
+			code: 2,
+			stdout: "",
+			stderr: "clio-coder fleet: status: unknown flag: --bogus\n",
+		});
+		const header = `dispatch status @ 2026-11-20T12:00:00.000Z (ledger: ${clioStateDir()})\n`;
+		const retrying = "retrying: none (retry queue is in-memory and only visible in the owning process)\n";
+		const totalsLine = (stdout: string) => {
+			const { totals: x } = JSON.parse(stdout) as { totals: Record<string, { display: string }> };
+			return `totals: tokens=${x.total?.display} (in=${x.input?.display} out=${x.output?.display}) cost=${x.usd?.display} runtime=${x.elapsed?.display}\n`;
+		};
+		const empty = await leaf(["--json"]);
+		strictEqual(empty.code, 0, empty.stderr);
+		const emptyDoc = JSON.parse(empty.stdout) as Record<string, unknown>;
+		deepStrictEqual(
+			{ ...emptyDoc, totals: undefined },
+			{
+				generatedAt: "2026-11-20T12:00:00.000Z",
+				admission: { state: "open" },
+				running: [],
+				retrying: [],
+				totals: undefined,
+			},
+		);
+		deepStrictEqual(await leaf([]), {
+			code: 0,
+			stdout: `${header}admission: open\nrunning: none\n${retrying}${totalsLine(empty.stdout)}`,
+			stderr: "",
+		});
 		setCapacityDraining(true);
-		const drained = await leaf(["status"]);
+		const drained = await leaf([]);
 		ok(drained.stdout.includes("admission: draining until "), drained.stdout);
-		for (const args of forms.slice(0, 2))
-			deepStrictEqual(await leaf(args), await full(args), `drained ${args.join(" ")}`);
-		// A ledger row needs its telemetry, which only fleet.ts loads.
+		setCapacityDraining(false);
+		// A running row with a budget envelope: the leaf folds its journal and prints the envelope lines.
+		const budget = resolveToolBudgetEnvelope({
+			recipeId: "scout",
+			policy: { toolCalls: 18, readReserve: 4, synthesis: true },
+			hardCap: 150,
+			hasReadTool: true,
+			retry: false,
+			revision: false,
+		});
 		const ledger = openLedger();
-		ledger.create({
+		const row = ledger.create({
 			agentId: "agent",
 			executionRole: "builder",
 			task: "task",
@@ -207,10 +224,34 @@ test("fleet status with no ledger rows answers from its leaf with fleet.ts's byt
 			runtimeId: "openai",
 			runtimeKind: "http",
 			sessionId: null,
-			cwd: home.dir,
+			cwd: process.cwd(),
+			budget,
 		});
+		ledger.update(row.id, { status: "running", pid: process.pid, heartbeatAt: row.startedAt });
 		await ledger.persist();
-		strictEqual(await answerFleetStatus(["status", "--json"]), null);
+		const rows = await leaf(["--json"]);
+		strictEqual(rows.code, 0, rows.stderr);
+		const running = (JSON.parse(rows.stdout) as { running: Array<Record<string, unknown>> }).running;
+		deepStrictEqual(
+			running.map(({ runId, heartbeat, node, budget: envelope }) => ({ runId, heartbeat, node, envelope })),
+			[{ runId: row.id, heartbeat: "alive", node: "local", envelope: budget }],
+		);
+		const text = await leaf([]);
+		const first = running[0] as { elapsed: { display: string }; usd: { display: string } };
+		deepStrictEqual(text, {
+			code: 0,
+			stdout: [
+				`${header}admission: open\nrunning:\n`,
+				`  ${row.id}  agent  node=local  alive  attempt=0 depth=0  ${first.elapsed.display}  ${first.usd.display}\n`,
+				`    recipe policy: ${formatBudgetPolicy(budget)}\n`,
+				`    requested envelope: ${formatBudgetRequest(budget)}\n`,
+				`    effective envelope: ${formatEffectiveBudget(budget)}\n`,
+				`    clamp or escalation reason: ${formatBudgetReasons(budget)}\n`,
+				retrying,
+				totalsLine(rows.stdout),
+			].join(""),
+			stderr: "",
+		});
 	} finally {
 		home.restore();
 	}

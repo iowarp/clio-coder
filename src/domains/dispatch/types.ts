@@ -444,8 +444,8 @@ export interface RunLedgerProjection {
 	readRoots: ReadonlyArray<string>;
 	writeRoots: ReadonlyArray<string>;
 	scopeSource: "intent" | "legacy-write-roots" | "none";
-	/** Check tools (bash, verify, run_script) withheld because the write roots have no OS sandbox enforcing them. */
-	checksWithheld?: ReadonlyArray<string>;
+	/** Capabilities the run's envelope withheld, each with why and what would keep it (M7). */
+	withheld?: ReadonlyArray<import("./envelope.js").WithheldCapability>;
 }
 
 export interface RunEnvelope {
@@ -458,6 +458,11 @@ export interface RunEnvelope {
 	/** Semantic role this attempt's route statistics belong to. */
 	executionRole: ExecutionRole;
 	agentAudience?: AgentAudience;
+	/**
+	 * The peer session an ACP delegation ran in, recorded when it settles, so a later `continue_run` can reopen it.
+	 * `nonResumable` is the peer's own word that the session cannot take another turn.
+	 */
+	acpSession?: { sessionId: string; nonResumable?: { reason: string } };
 	requestOrigin?: DispatchRequestOrigin;
 	/** Who asked for the work this attempt continues. Display only: policy reads requestOrigin. */
 	rootRequestOrigin?: DispatchRequestOrigin;
@@ -629,6 +634,16 @@ export interface RunResultDelegation {
 	/** Present when agent-managed governance ran under the operator's trustedUnmediated opt-in. */
 	trustedUnmediated?: true;
 	toolCallLog: DelegationToolCallLogEntry[];
+	/** How the run opened its peer session: a new one, or an earlier one reopened by `session/resume` or `session/load`. */
+	opened: "new" | "resume" | "load";
+	/** Peer updates a `session/load` replayed as history and Clio kept out of this run's events. */
+	replayedUpdates?: number;
+	/** The window the peer session stayed open after its prompt returned, for background work that outlived it. */
+	postSettle?: { waitedMs: number; updates: number; ended: "idle" | "cap" | "aborted" };
+	/** The earlier run this one continued; `freshReason` says why it opened a new session instead of that one. */
+	continuedFrom?: { runId: string; acpSessionId: string; freshReason?: string };
+	/** The peer marked this run's session unable to take another turn. */
+	nonResumable?: { reason: string };
 }
 
 export interface RunResultSafetySummary {
@@ -744,6 +759,29 @@ export interface RunResultSafetySummary {
 	};
 	/** Worker runtime limitations. Worker receipts always carry it; main-agent receipts omit it. */
 	runtimeLimitations?: ReadonlyArray<string>;
+	/**
+	 * The capability envelope a native, SDK or subprocess worker ran under (fleet M7): its role, where it wrote, and
+	 * every capability a layer withheld. The worker's tools are the permit ceiling's; `permitDigest` binds the two.
+	 */
+	envelope?: {
+		version: number;
+		digest: string;
+		permitDigest: string;
+		role: import("./obligation.js").RunRole;
+		skills: { bound: ReadonlyArray<string>; discovery: import("./envelope.js").EnvelopeSkillDiscovery };
+		read: { roots: ReadonlyArray<string>; outside: ReadonlyArray<string> };
+		write: {
+			mode: import("./envelope.js").EnvelopeWriteMode;
+			roots: ReadonlyArray<string>;
+			commandsBounded: boolean;
+		};
+		exec: { shell: import("./envelope.js").EnvelopeShell; checks: import("./envelope.js").EnvelopeChecks };
+		network: { shell: boolean; tools: ReadonlyArray<string>; mcp: ReadonlyArray<string> };
+		approval: import("./envelope.js").EnvelopeApproval;
+		sandbox: { backend: import("./envelope.js").EnvelopeSandboxBackend; confinesWrites: boolean };
+		withheld: ReadonlyArray<import("./envelope.js").WithheldCapability>;
+		staticHead: string;
+	};
 	/**
 	 * The immutable permit a native, SDK or subprocess worker ran under. An ACP
 	 * receipt carries a record-only one; main-agent receipts omit it.

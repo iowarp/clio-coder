@@ -2,7 +2,7 @@
 	"openapi": "3.1.0",
 	"jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
 	"info": {
-		"title": "Clio Coder",
+		"title": "CLIO Coder",
 		"version": "0.0.0"
 	},
 	"paths": {
@@ -1260,7 +1260,7 @@
 		"/api/system": {
 			"get": {
 				"operationId": "system",
-				"summary": "Read-only doctor findings and the four resolved Clio paths",
+				"summary": "Read-only doctor findings and the four resolved CLIO Coder paths",
 				"security": [
 					{
 						"bearer": []
@@ -8197,7 +8197,7 @@
 		"/api/workspaces/{id}/runs/{runId}/verify": {
 			"post": {
 				"operationId": "runRecordVerify",
-				"summary": "Recheck record integrity against its run through Clio",
+				"summary": "Recheck record integrity against its run through CLIO Coder",
 				"security": [
 					{
 						"bearer": []
@@ -9439,7 +9439,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_6b1afa4b"
+															"$ref": "#/components/schemas/Union_7b98ebf8"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -13712,6 +13712,10 @@
 																"const": "agent"
 															},
 															{
+																"type": "string",
+																"const": "operator-message"
+															},
+															{
 																"type": "null"
 															}
 														]
@@ -13853,7 +13857,7 @@
 		"/api/sessions/{id}/decisions/supersede": {
 			"post": {
 				"operationId": "supersedeDecision",
-				"summary": "Mark a decision superseded; a correction also returns the request that tells Clio Coder",
+				"summary": "Mark a decision superseded; a correction also returns the request that tells CLIO Coder",
 				"security": [
 					{
 						"bearer": []
@@ -15903,7 +15907,7 @@
 		"/api/sessions/{id}/context": {
 			"get": {
 				"operationId": "sessionContext",
-				"summary": "The context window as Clio Coder accounts for it",
+				"summary": "The context window as CLIO Coder accounts for it",
 				"security": [
 					{
 						"bearer": []
@@ -21224,7 +21228,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_6b1afa4b"
+															"$ref": "#/components/schemas/Union_7b98ebf8"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -22048,7 +22052,7 @@
 		"/api/meta": {
 			"get": {
 				"operationId": "meta",
-				"summary": "Application and Clio versions",
+				"summary": "Application and CLIO Coder versions",
 				"security": [
 					{
 						"bearer": []
@@ -24744,6 +24748,13 @@
 				},
 				"maxItems": 32
 			},
+			"Array_365b8f6b": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_canonicalization_field_function_d24145f2"
+				},
+				"maxItems": 512
+			},
 			"Array_38ab0338": {
 				"type": "array",
 				"items": {
@@ -25034,13 +25045,6 @@
 				"items": {
 					"$ref": "#/components/schemas/Object_key_label_resetsAt_0c3b4eb1"
 				}
-			},
-			"Array_b41eac3a": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_canonicalization_field_function_dbe56c61"
-				},
-				"maxItems": 512
 			},
 			"Array_c52271ac": {
 				"type": "array",
@@ -25521,6 +25525,42 @@
 			"Enum_413aacec": {
 				"enum": ["normal", "text-only", "required", "tools-removed", "unknown"]
 			},
+			"Enum_4223a648": {
+				"enum": [
+					"worker-prompt",
+					"compiled-system-prompt",
+					"dynamic-messages",
+					"tool-names",
+					"tool-schemas",
+					"briefing",
+					"steering",
+					"worker-context-snapshot",
+					"worker-context-seed",
+					"project-context",
+					"plan-text",
+					"execution-plan",
+					"run-settlement",
+					"validation-result",
+					"response-schema",
+					"result-contract",
+					"safety-rule-pack",
+					"project-safety-policy",
+					"protected-artifacts",
+					"worker-permit",
+					"worker-envelope",
+					"mcp-server",
+					"checkout-tree",
+					"check-payload",
+					"task-diff",
+					"route-decision",
+					"agent-spec",
+					"route-prompt-composition",
+					"endpoint",
+					"settings",
+					"skill-file",
+					"package-provenance"
+				]
+			},
 			"Enum_44ee915d": {
 				"enum": ["auth_rejection", "transport_failure", "post_stream_or_unknown_failure"]
 			},
@@ -25749,41 +25789,6 @@
 					"build-failure",
 					"auth-failure",
 					"unknown"
-				]
-			},
-			"Enum_dc3d24e7": {
-				"enum": [
-					"worker-prompt",
-					"compiled-system-prompt",
-					"dynamic-messages",
-					"tool-names",
-					"tool-schemas",
-					"briefing",
-					"steering",
-					"worker-context-snapshot",
-					"worker-context-seed",
-					"project-context",
-					"plan-text",
-					"execution-plan",
-					"run-settlement",
-					"validation-result",
-					"response-schema",
-					"result-contract",
-					"safety-rule-pack",
-					"project-safety-policy",
-					"protected-artifacts",
-					"worker-permit",
-					"mcp-server",
-					"checkout-tree",
-					"check-payload",
-					"task-diff",
-					"route-decision",
-					"agent-spec",
-					"route-prompt-composition",
-					"endpoint",
-					"settings",
-					"skill-file",
-					"package-provenance"
 				]
 			},
 			"Enum_f3897064": {
@@ -27765,7 +27770,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_answerBudgetBytes_apiCalls_41950613": {
+			"Object_agentId_answerBudgetBytes_apiCalls_6694e53c": {
 				"type": "object",
 				"required": [
 					"version",
@@ -27820,7 +27825,7 @@
 					"digest"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_4f8e6e25"
+					"$ref": "#/components/schemas/Shape_7c5318fc"
 				},
 				"additionalProperties": false
 			},
@@ -29739,7 +29744,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_canonicalization_field_function_dbe56c61": {
+			"Object_canonicalization_field_function_d24145f2": {
 				"type": "object",
 				"required": ["field", "label", "function", "canonicalization", "subject", "hash"],
 				"properties": {
@@ -29759,7 +29764,7 @@
 						"$ref": "#/components/schemas/Enum_6e0d3d09"
 					},
 					"subject": {
-						"$ref": "#/components/schemas/Enum_dc3d24e7"
+						"$ref": "#/components/schemas/Enum_4223a648"
 					},
 					"store": {
 						"enum": ["run-journals", "context-seeds"]
@@ -32699,7 +32704,7 @@
 						"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 					},
 					"settled": {
-						"$ref": "#/components/schemas/Union_6b1afa4b"
+						"$ref": "#/components/schemas/Union_7b98ebf8"
 					},
 					"seal": {
 						"$ref": "#/components/schemas/Union_4dc8870f"
@@ -34285,225 +34290,6 @@
 					"$ref": "#/components/schemas/Object_issues_layers_rows_4a05be25"
 				}
 			},
-			"Shape_4f8e6e25": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"agentId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"executionRole": {
-					"$ref": "#/components/schemas/Enum_f3897064"
-				},
-				"requestOrigin": {
-					"$ref": "#/components/schemas/Union_d7ccdb8b"
-				},
-				"identity": {
-					"$ref": "#/components/schemas/Union_5cd84371"
-				},
-				"route": {
-					"$ref": "#/components/schemas/Object_runtimeId_runtimeKind_targetId_8f906072"
-				},
-				"node": {
-					"$ref": "#/components/schemas/Union_b0281a53"
-				},
-				"routeDecision": {
-					"$ref": "#/components/schemas/Union_cfddcd30"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"phaseTiming": {
-					"$ref": "#/components/schemas/Object_queueWaitMs_totalEndToEndMs_02a09d83"
-				},
-				"routingIntent": {
-					"$ref": "#/components/schemas/Object_deadlineMs_failover_locality_da525918"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"endedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"outcome": {
-					"$ref": "#/components/schemas/Enum_7c26d95b"
-				},
-				"outcomeCode": {
-					"$ref": "#/components/schemas/Union_6a2b4e12"
-				},
-				"exitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 1024
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 1024
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"terminalReason": {
-					"$ref": "#/components/schemas/Enum_8bfbcdd9"
-				},
-				"callIds": {
-					"$ref": "#/components/schemas/Union_90280c4e"
-				},
-				"processExitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"boundKind": {
-					"$ref": "#/components/schemas/Union_f6453495"
-				},
-				"stepPipeline": {
-					"$ref": "#/components/schemas/Object_done_stepTool_stoppedBy_0b2ff353"
-				},
-				"repairRounds": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"frameType": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_f52a393c"
-				},
-				"totalTokens": {
-					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				},
-				"apiCalls": {
-					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				},
-				"pricing": {
-					"$ref": "#/components/schemas/Object_freeRule_pricedBy_rateRef_25da2af5"
-				},
-				"toolCalls": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"tools": {
-					"$ref": "#/components/schemas/Array_9ef3a1fe"
-				},
-				"skills": {
-					"$ref": "#/components/schemas/Array_a62e240b"
-				},
-				"toolActivity": {
-					"$ref": "#/components/schemas/Union_c3096265"
-				},
-				"capabilityMismatch": {
-					"$ref": "#/components/schemas/Union_26e30db3"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Union_e315aa3b"
-				},
-				"context": {
-					"$ref": "#/components/schemas/Object_briefingBytes_project_worker_cbbba89f"
-				},
-				"upstream": {
-					"$ref": "#/components/schemas/Object_gatewayRoutes_responseModelIds_efe23277"
-				},
-				"blockedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"guardBlockedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"permissionRequestedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"escalations": {
-					"$ref": "#/components/schemas/Union_4322c019"
-				},
-				"flowRestrictions": {
-					"$ref": "#/components/schemas/Union_db2664c0"
-				},
-				"toolGovernance": {
-					"$ref": "#/components/schemas/Union_ac760949"
-				},
-				"verification": {
-					"$ref": "#/components/schemas/Object_basis_detail_state_8ef9228e"
-				},
-				"quality": {
-					"$ref": "#/components/schemas/Union_409ae0f7"
-				},
-				"validationGrounding": {
-					"$ref": "#/components/schemas/Union_c1723f5c"
-				},
-				"unclassifiedAfterLastCheck": {
-					"$ref": "#/components/schemas/Object_commands_count_93a31ad5"
-				},
-				"routeWarnings": {
-					"$ref": "#/components/schemas/Array_5164076d"
-				},
-				"answerBudgetBytes": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 1000000
-				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_7acf3e39"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_e1aa15ba"
-				},
-				"contextProvenance": {
-					"enum": ["recorded", "invalid", "not_applicable", "unknown"]
-				},
-				"hashes": {
-					"$ref": "#/components/schemas/Array_b41eac3a"
-				},
-				"result": {
-					"$ref": "#/components/schemas/Object_canonicalization_function_id_9126948f"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"digest": {
-					"type": "string",
-					"pattern": "^[0-9a-f]{64}$"
-				}
-			},
 			"Shape_4fbca3d1": {
 				"type": {
 					"type": "string",
@@ -35288,6 +35074,225 @@
 							"type": "null"
 						}
 					]
+				}
+			},
+			"Shape_7c5318fc": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"agentId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"executionRole": {
+					"$ref": "#/components/schemas/Enum_f3897064"
+				},
+				"requestOrigin": {
+					"$ref": "#/components/schemas/Union_d7ccdb8b"
+				},
+				"identity": {
+					"$ref": "#/components/schemas/Union_5cd84371"
+				},
+				"route": {
+					"$ref": "#/components/schemas/Object_runtimeId_runtimeKind_targetId_8f906072"
+				},
+				"node": {
+					"$ref": "#/components/schemas/Union_b0281a53"
+				},
+				"routeDecision": {
+					"$ref": "#/components/schemas/Union_cfddcd30"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"phaseTiming": {
+					"$ref": "#/components/schemas/Object_queueWaitMs_totalEndToEndMs_02a09d83"
+				},
+				"routingIntent": {
+					"$ref": "#/components/schemas/Object_deadlineMs_failover_locality_da525918"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"endedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"outcome": {
+					"$ref": "#/components/schemas/Enum_7c26d95b"
+				},
+				"outcomeCode": {
+					"$ref": "#/components/schemas/Union_6a2b4e12"
+				},
+				"exitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 1024
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 1024
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"terminalReason": {
+					"$ref": "#/components/schemas/Enum_8bfbcdd9"
+				},
+				"callIds": {
+					"$ref": "#/components/schemas/Union_90280c4e"
+				},
+				"processExitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"boundKind": {
+					"$ref": "#/components/schemas/Union_f6453495"
+				},
+				"stepPipeline": {
+					"$ref": "#/components/schemas/Object_done_stepTool_stoppedBy_0b2ff353"
+				},
+				"repairRounds": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"frameType": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_f52a393c"
+				},
+				"totalTokens": {
+					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				},
+				"apiCalls": {
+					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				},
+				"pricing": {
+					"$ref": "#/components/schemas/Object_freeRule_pricedBy_rateRef_25da2af5"
+				},
+				"toolCalls": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"tools": {
+					"$ref": "#/components/schemas/Array_9ef3a1fe"
+				},
+				"skills": {
+					"$ref": "#/components/schemas/Array_a62e240b"
+				},
+				"toolActivity": {
+					"$ref": "#/components/schemas/Union_c3096265"
+				},
+				"capabilityMismatch": {
+					"$ref": "#/components/schemas/Union_26e30db3"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Union_e315aa3b"
+				},
+				"context": {
+					"$ref": "#/components/schemas/Object_briefingBytes_project_worker_cbbba89f"
+				},
+				"upstream": {
+					"$ref": "#/components/schemas/Object_gatewayRoutes_responseModelIds_efe23277"
+				},
+				"blockedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"guardBlockedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"permissionRequestedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"escalations": {
+					"$ref": "#/components/schemas/Union_4322c019"
+				},
+				"flowRestrictions": {
+					"$ref": "#/components/schemas/Union_db2664c0"
+				},
+				"toolGovernance": {
+					"$ref": "#/components/schemas/Union_ac760949"
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Object_basis_detail_state_8ef9228e"
+				},
+				"quality": {
+					"$ref": "#/components/schemas/Union_409ae0f7"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Union_c1723f5c"
+				},
+				"unclassifiedAfterLastCheck": {
+					"$ref": "#/components/schemas/Object_commands_count_93a31ad5"
+				},
+				"routeWarnings": {
+					"$ref": "#/components/schemas/Array_5164076d"
+				},
+				"answerBudgetBytes": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 1000000
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_7acf3e39"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_e1aa15ba"
+				},
+				"contextProvenance": {
+					"enum": ["recorded", "invalid", "not_applicable", "unknown"]
+				},
+				"hashes": {
+					"$ref": "#/components/schemas/Array_365b8f6b"
+				},
+				"result": {
+					"$ref": "#/components/schemas/Object_canonicalization_function_id_9126948f"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"digest": {
+					"type": "string",
+					"pattern": "^[0-9a-f]{64}$"
 				}
 			},
 			"Shape_80c709dd": {
@@ -39119,16 +39124,6 @@
 					}
 				]
 			},
-			"Union_6b1afa4b": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_41950613"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_6ef9eef0": {
 				"anyOf": [
 					{
@@ -39248,6 +39243,16 @@
 					},
 					{
 						"$ref": "#/components/schemas/Object_display_names_a5a202ac"
+					}
+				]
+			},
+			"Union_7b98ebf8": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_6694e53c"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},

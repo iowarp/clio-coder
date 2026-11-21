@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -550,6 +551,38 @@ test("the first launch after an upgrade from 0.7.0 replaces its stored token and
 	assert.equal((await preferBackground(directory, config.packageRoot, control, ready, "linux")).kind, "open");
 	assert.equal((await readBackgroundConfig(files.config)).token, upgraded.token);
 	assert.ok(!calls.includes("restart"));
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+});
+
+test("a unit an earlier version rendered stays owned through token rotation, and install rewrites it in place", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-084-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4321, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	let enabled = false;
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		enabled ||= action === "enable";
+		return `FragmentPath=${enabled ? files.unitFile : ""}\nActiveState=active\nUnitFileState=linked\nMainPID=123\n`;
+	};
+	const ready = async () => ({ clio: "0.8.5", idle: true });
+	await installBackground(directory, config, control, ready);
+	// What 0.8.4 published: its own rendering, which named the product "Clio Coder", blessed by its manifest.
+	const unit = backgroundUnit(config, directory).replace("CLIO Coder", "Clio Coder");
+	await writeFile(files.unitFile, unit, { mode: 0o600 });
+	const owner = JSON.parse(await readFile(files.manifest, "utf8"));
+	const blessed = { ...owner, unit: createHash("sha256").update(unit).digest("hex") };
+	await writeFile(files.manifest, JSON.stringify(blessed), { mode: 0o600 });
+	assert.equal((await backgroundStatus(directory, control, async () => true)).definition, "outdated");
+	await rotateBackgroundToken(files.config);
+	assert.equal(await readFile(files.unitFile, "utf8"), unit, "a start leaves the unit file to the service manager");
+	calls.length = 0;
+	await installBackground(directory, config, control, ready);
+	assert.equal(await readFile(files.unitFile, "utf8"), backgroundUnit(config, directory));
+	assert.deepEqual(calls, ["show", "reload", "enable"], "repaired without restarting the running app");
+	assert.equal((await backgroundStatus(directory, control, async () => true)).definition, "current");
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
 

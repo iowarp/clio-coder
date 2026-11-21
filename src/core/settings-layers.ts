@@ -461,6 +461,11 @@ const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }>
 		key: "sandboxPassEnv",
 		message: "sandbox environment pass-through is set only in user settings; project value ignored",
 	},
+	// A repository could otherwise hand its own commands the operator's Copilot login.
+	{
+		key: "liveCheckTargets",
+		message: "live-check login targets are set only in user settings; project value ignored",
+	},
 	// A repository could otherwise reopen the sockets that run code outside the sandbox.
 	{
 		key: "sandboxUnixSockets",

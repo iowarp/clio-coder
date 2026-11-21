@@ -1,4 +1,4 @@
-import type { ToolResult, ToolSpec } from "../registry.js";
+import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { runFrontendCheck } from "./frontend.js";
 import { captureQualitySnapshot, loadQualityPolicy, type QualitySnapshot } from "./quality-policy.js";
 import { resolveVerifyCall } from "./resolve.js";
@@ -59,10 +59,14 @@ export const verifyTool: ToolSpec = {
 			}
 		}
 		const result = notRunWhenUnavailable(
-			await runResolvedVerify(args, {
-				...(options?.signal !== undefined ? { signal: options.signal } : {}),
-				...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
-			}),
+			await runResolvedVerify(
+				args,
+				{
+					...(options?.signal !== undefined ? { signal: options.signal } : {}),
+					...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+				},
+				options,
+			),
 		);
 		if (!applies || !policy) return result;
 		let stable = false;
@@ -99,13 +103,22 @@ function notRunWhenUnavailable(result: ToolResult): ToolResult {
 	return { ...result, details: { ...result.details, unresolved: true } };
 }
 
-async function runResolvedVerify(args: Record<string, unknown>, options: VerifyRunOptions): Promise<ToolResult> {
+async function runResolvedVerify(
+	args: Record<string, unknown>,
+	options: VerifyRunOptions,
+	invoke: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
 	const resolution = resolveVerifyCall(process.cwd(), args);
 	switch (resolution.kind) {
 		case "list":
 			return listChecks(typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined);
 		case "frontend":
-			return runFrontendCheck(args, options.signal !== undefined ? { signal: options.signal } : {});
+			// The route's image capability and result cap size the screenshot the check attaches on a vision route.
+			return runFrontendCheck(args, {
+				...(options.signal !== undefined ? { signal: options.signal } : {}),
+				...(invoke?.supportsImages !== undefined ? { supportsImages: invoke.supportsImages } : {}),
+				...(invoke?.toolResultMaxBytes !== undefined ? { toolResultMaxBytes: invoke.toolResultMaxBytes } : {}),
+			});
 		case "catalog": {
 			// The declared kind rides on the result as a typed field, so telemetry records it without reading the report.
 			const result = await runProjectCheck(resolution.check, options);

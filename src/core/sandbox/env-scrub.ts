@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import path from "node:path";
 import { holdsCredentialShape } from "../secret-shapes.js";
 import type { SandboxEnvPolicy } from "./types.js";
 
@@ -167,4 +169,53 @@ export function sandboxEnvPolicy(settings: {
 		secretNames: [...new Set(secretNames)],
 		...(maskSettings ? { maskSettings: true as const } : {}),
 	};
+}
+
+/**
+ * Runtimes whose official login lives in one file Clio knows, so `safety.liveCheckTargets` can name a target on
+ * one: copilot-sdk reads the official `copilot login` from `$COPILOT_HOME/config.json` (default `~/.copilot`).
+ * gh's token, the system keychain and Clio's own credentials.yaml are never on the list.
+ */
+export const LIVE_CHECK_LOGIN_RUNTIMES: ReadonlySet<string> = new Set(["copilot-sdk"]);
+
+/** The login files the targets `safety.liveCheckTargets` names read, absolute, at most one per runtime. */
+function liveCheckLoginFiles(
+	settings: {
+		safety: { liveCheckTargets: ReadonlyArray<string> };
+		targets: ReadonlyArray<{ id: string; runtime: string }>;
+	},
+	env: NodeJS.ProcessEnv,
+	home: string,
+): string[] {
+	const runtimes = new Set(
+		settings.safety.liveCheckTargets.flatMap((id) => {
+			const runtime = settings.targets.find((target) => target.id === id)?.runtime;
+			return runtime !== undefined && LIVE_CHECK_LOGIN_RUNTIMES.has(runtime) ? [runtime] : [];
+		}),
+	);
+	const files: string[] = [];
+	if (runtimes.has("copilot-sdk")) {
+		const copilotHome = env.COPILOT_HOME?.trim();
+		files.push(
+			path.join(
+				copilotHome !== undefined && path.isAbsolute(copilotHome) ? copilotHome : path.join(home, ".copilot"),
+				"config.json",
+			),
+		);
+	}
+	return files;
+}
+
+/**
+ * The main session's scrub policy: {@link sandboxEnvPolicy} plus the login files of the operator's live-check
+ * targets, which its contained commands may read (M-5). Workers and host verification of a worker's tree use
+ * {@link sandboxEnvPolicy} and keep every mask.
+ */
+export function mainSandboxEnvPolicy(
+	settings: Parameters<typeof sandboxEnvPolicy>[0] & Parameters<typeof liveCheckLoginFiles>[0],
+	env: NodeJS.ProcessEnv = process.env,
+	home: string = homedir(),
+): SandboxEnvPolicy {
+	const revealFiles = liveCheckLoginFiles(settings, env, home);
+	return { ...sandboxEnvPolicy(settings), ...(revealFiles.length > 0 ? { revealFiles } : {}) };
 }
