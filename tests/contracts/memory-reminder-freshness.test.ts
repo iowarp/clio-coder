@@ -10,7 +10,7 @@ import { recordMemoryObservations } from "../../src/domains/memory/guardian-gate
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { MemoryDeliveryGate, projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/operations.js";
-import { claimCommand, memoryRevision } from "../../src/domains/memory/promotion.js";
+import { claimCommand, claimFromEvidence, memoryRevision } from "../../src/domains/memory/promotion.js";
 import { createMemoryPromptReader } from "../../src/domains/memory/prompt-cache.js";
 import {
 	memoryCarried,
@@ -214,6 +214,9 @@ test("card D delivery: a changed quote withholds its lessons, an operator approv
 					redaction: { appliedBeforePersistence: true, replacementCount: 0, sourceFields: ["content"] },
 				},
 			};
+			// The claim its refs make, stored as every promotion stores it.
+			const claim = claimFromEvidence(text, record.evidenceRefs, root);
+			if (claim !== null) record.claim = claim;
 			const revision = memoryRevision(record);
 			if (by === "guardian")
 				record.observations = ["h1", "h2"].map((sessionId) => ({ at, sessionId, kind: "held" as const, revision }));

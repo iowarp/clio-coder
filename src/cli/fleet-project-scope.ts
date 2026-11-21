@@ -24,23 +24,10 @@ export function fleetInspectionScope(all: boolean, cwd = process.cwd()) {
 		const run = getRun(runId);
 		return run !== null && seesRun(run);
 	};
-	const seesRoot = (record: FleetRunRecord, getRun: (id: string) => RunEnvelope | null): boolean => {
-		if (all) return true;
-		// A root that records where it was launched answers from that alone. The
-		// ledger keeps the newest 1000 runs, so a root whose step runs were
-		// evicted must not vanish from its own project.
-		if (record.cwd !== undefined) return ownership.inProject(record.cwd);
-		// Old root records had no cwd. A complete set of recorded terminal runs
-		// can still establish their project; an unstarted legacy root cannot.
-		const terminalRuns = (record.steps ?? [])
-			.map((step) => step.result.terminalRunId)
-			.filter((id): id is string => typeof id === "string");
-		if (terminalRuns.length === 0) return false;
-		return terminalRuns.every((id) => {
-			const run = getRun(id);
-			return run !== null && seesRun(run);
-		});
-	};
+	// A root answers from where it was launched alone. The ledger keeps the newest 1000 runs, so a root whose step
+	// runs were evicted must not vanish from its own project.
+	const seesRoot = (record: FleetRunRecord, _getRun?: (id: string) => RunEnvelope | null): boolean =>
+		all || ownership.inProject(record.cwd);
 	return { all, seesRun, seesRunId, seesRoot };
 }
 

@@ -840,6 +840,101 @@ export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> 
 	};
 }
 
+/**
+ * Parsers for code skeletons, one per vendored grammar, loaded once. A fetched grammar (Ruby, C#) would cost a network
+ * fetch on the compaction path, so its files keep the plain clip; null means the grammar cannot load here.
+ */
+const skeletonParsers = new Map<GrammarName, Promise<ParserInstance | null>>();
+
+function skeletonParser(grammar: GrammarName): Promise<ParserInstance | null> {
+	let pending = skeletonParsers.get(grammar);
+	if (!pending) {
+		const file = WASM_BY_GRAMMAR[grammar];
+		pending = fetchedGrammarForFile(file)
+			? Promise.resolve(null)
+			: ensureParserInit()
+					.then(async () => {
+						const parser = new Parser();
+						parser.setLanguage(await Language.load(grammarAssetPath(file)));
+						return parser;
+					})
+					.catch(() => null);
+		skeletonParsers.set(grammar, pending);
+	}
+	return pending;
+}
+
+/** A read's `N | ` line-number prefix; a numbered read parses with the prefixes taken off. */
+const NUMBERED_LINE = /^ *\d+ \| /u;
+
+/**
+ * The source with every function body reduced to one marker line, so each signature, type, class and import stays in
+ * place (CTX-17). Line based: a brace body keeps its opening and closing lines, an indented body (Python) is replaced
+ * whole, and a body nested in an omitted one goes with it. The text may be a partial read, numbered or not; null when
+ * the file's language has no vendored grammar, the parse fails or runs past its budget, or nothing would be omitted.
+ */
+export async function codeSkeleton(path: string, text: string): Promise<{ text: string; bodies: number } | null> {
+	const grammar = grammarForSourceFile(path, text);
+	if (!grammar || text.trim().length === 0) return null;
+	const parser = await skeletonParser(grammar);
+	if (!parser) return null;
+	const lines = text.split("\n");
+	const numbered = lines.some((row) => NUMBERED_LINE.test(row));
+	const source = numbered ? lines.map((row) => row.replace(NUMBERED_LINE, "")).join("\n") : text;
+	let tree: Tree | null = null;
+	try {
+		const deadline = performance.now() + TREE_SITTER_PARSE_BUDGET_MS;
+		tree = parser.parse(source, null, { progressCallback: () => performance.now() > deadline });
+		if (!tree) {
+			parser.reset();
+			return null;
+		}
+		const omitted: Array<{ from: number; to: number; indented: boolean }> = [];
+		for (const node of descendants(tree.rootNode, [...FUNCTION_LIKE_NODE_TYPES])) {
+			const body = node.childForFieldName("body");
+			if (!body) continue;
+			const start = body.startPosition.row;
+			const end = body.endPosition.row;
+			if (body.text.startsWith("{")) {
+				if (end - start >= 2) omitted.push({ from: start + 1, to: end - 1, indented: false });
+			} else if (start > node.startPosition.row) {
+				omitted.push({ from: start, to: end, indented: true });
+			}
+		}
+		omitted.sort((a, b) => a.from - b.from || b.to - a.to);
+		const kept: typeof omitted = [];
+		for (const range of omitted) {
+			const last = kept[kept.length - 1];
+			if (last && range.from <= last.to) continue;
+			kept.push(range);
+		}
+		if (kept.length === 0) return null;
+		const out: string[] = [];
+		let row = 0;
+		let bodies = 0;
+		for (const range of kept) {
+			const first = lines[range.from] ?? "";
+			const indent = /^(?: *\d+ \| )?([ \t]*)/u.exec(first)?.[1] ?? "";
+			const count = range.to - range.from + 1;
+			const note = `${count} line${count === 1 ? "" : "s"} of body omitted`;
+			const marker = range.indented ? `${indent}...  # ${note}` : `${indent}/* ${note} */`;
+			// A body shorter than its marker stays as written.
+			if (lines.slice(range.from, range.to + 1).join("\n").length <= marker.length) continue;
+			out.push(...lines.slice(row, range.from), marker);
+			row = range.to + 1;
+			bodies += 1;
+		}
+		if (bodies === 0) return null;
+		out.push(...lines.slice(row));
+		const skeleton = out.join("\n");
+		return skeleton.length < text.length ? { text: skeleton, bodies } : null;
+	} catch {
+		return null;
+	} finally {
+		tree?.delete();
+	}
+}
+
 function languageFromPath(path: string): CodewikiLanguage {
 	if (/\.[cm]?tsx?$/.test(path)) return "typescript";
 	if (/\.[cm]?jsx?$/.test(path)) return "javascript";

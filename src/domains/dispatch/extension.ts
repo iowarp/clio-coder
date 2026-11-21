@@ -414,6 +414,7 @@ import {
 	hostVerificationSandbox,
 	runHostVerification,
 } from "./host-verification.js";
+import { architectPlanOutsideWriteRoots } from "./intent-compatibility.js";
 import { renderChecksWithheldNotice, renderDispatchIntentRequirements } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
@@ -6399,6 +6400,8 @@ export function createDispatchBundle(
 						intent: req.intent ?? null,
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
+		const planOutside = architectPlanOutsideWriteRoots(req.agentId, spec.resultContract, req.intent);
+		if (planOutside !== null) throw new Error(planOutside);
 		return { spec, capabilityMismatch };
 	}
 

@@ -141,8 +141,9 @@ test("checked address is pinned to the socket while Host retains the original na
 	}
 });
 
-test("legacy retrieve switch remains compatible and does not imply shell isolation", () => {
-	strictEqual(networkToolsDisabled({ CLIO_CODER_NO_NETWORK_TOOLS: "1" }), true);
+test("the retrieve switch reads only its own name", () => {
+	strictEqual(networkToolsDisabled({ CLIO_CODER_DISABLE_RETRIEVE_TOOLS: "1" }), true);
+	strictEqual(networkToolsDisabled({ CLIO_CODER_NO_NETWORK_TOOLS: "1" }), false);
 	strictEqual(networkToolsDisabled({ CLIO_CODER_DISABLE_RETRIEVE_TOOLS: "0" }), false);
 });
 

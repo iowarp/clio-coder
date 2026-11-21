@@ -28,7 +28,10 @@ import {
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
-import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
+import {
+	architectPlanOutsideWriteRoots,
+	classifyDispatchIntentCompatibility,
+} from "../../src/domains/dispatch/intent-compatibility.js";
 import { parallelWriterConflict } from "../../src/domains/dispatch/parallel-writers.js";
 import {
 	declaredScopeReplacementNotice,
@@ -658,6 +661,21 @@ describe("dispatch admission boundary", () => {
 		ok(refusal);
 		match(refusal.message, /actual file paths within the authorized write_roots/);
 		match(refusal.message, /host commits worktree tasks/);
+	});
+
+	it("refuses an architect whose write_roots exclude its plan's contract path before any worker runs", () => {
+		const contract = { kind: "architect-plan", path: ".clio-coder/artifacts/PLAN.md" };
+		const refusal = architectPlanOutsideWriteRoots("architect", contract, { writeRoots: ["PLAN.md"] });
+		match(
+			refusal ?? "",
+			/writes its plan only to \.clio-coder\/artifacts\/PLAN\.md, which intent\.write_roots \[PLAN\.md\] exclude/,
+		);
+		strictEqual(
+			architectPlanOutsideWriteRoots("architect", contract, { writeRoots: ["PLAN.md", ".clio-coder/artifacts"] }),
+			null,
+		);
+		strictEqual(architectPlanOutsideWriteRoots("architect", contract, { writeRoots: [] }), null);
+		strictEqual(architectPlanOutsideWriteRoots("coder", { kind: "mutation-report" }, { writeRoots: ["src"] }), null);
 	});
 
 	it("bounds admission errors and escapes control characters from declared paths", () => {

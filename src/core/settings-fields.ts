@@ -165,7 +165,6 @@ export const SETTINGS_FIELD_NAMES = [
 	"numRetries",
 	"oauthProfile",
 	"observationBytesPerTurn",
-	"observations",
 	"observe",
 	"offers",
 	"offloadKvCacheToGpu",

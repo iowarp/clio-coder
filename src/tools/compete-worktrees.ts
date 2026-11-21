@@ -134,7 +134,6 @@ export interface CompeteRunAdmission {
 const COMPETE_PARENT_SEGMENTS = [".clio-coder", "worktrees"] as const;
 const COMPETE_MANIFEST_FILE = ".clio-coder-compete-owner.json";
 const COMPETE_MANIFEST_KIND = "clio-coder-compete-group";
-const LEGACY_COMPETE_MANIFEST_KIND = "clio-compete-group";
 const COMPETE_COMMIT_IDENTITY = "clio-coder-compete";
 
 const SAFE_GROUP = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -289,7 +288,7 @@ function manifestFromUnknown(value: unknown): CompeteGroupManifest | null {
 	const manifest = value as Record<string, unknown>;
 	if (
 		manifest.version !== 2 ||
-		(manifest.kind !== COMPETE_MANIFEST_KIND && manifest.kind !== LEGACY_COMPETE_MANIFEST_KIND) ||
+		manifest.kind !== COMPETE_MANIFEST_KIND ||
 		typeof manifest.root !== "string" ||
 		typeof manifest.group !== "string" ||
 		typeof manifest.token !== "string" ||
@@ -373,14 +372,14 @@ export function isGitRepository(root: string): boolean {
 	}
 }
 
-function competeBranch(group: string, index: number, legacy = false): string {
+function competeBranch(group: string, index: number): string {
 	validateGroup(group);
 	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid compete candidate index ${index}`);
-	return `${legacy ? "clio" : "clio-coder"}/compete/${group}/${index}`;
+	return `clio-coder/compete/${group}/${index}`;
 }
 
 function competeBranchMatches(branch: string, group: string, index: number): boolean {
-	return branch === competeBranch(group, index) || branch === competeBranch(group, index, true);
+	return branch === competeBranch(group, index);
 }
 
 /** Claim the group before creating a branch or candidate worktree. */
@@ -707,7 +706,7 @@ function exactGroupBranches(root: string, group: string): string[] {
 			const parts = branch.split("/");
 			return (
 				parts.length === 4 &&
-				(parts[0] === "clio-coder" || parts[0] === "clio") &&
+				parts[0] === "clio-coder" &&
 				parts[1] === "compete" &&
 				parts[2] === group &&
 				/^\d+$/.test(parts[3] ?? "")
@@ -715,14 +714,9 @@ function exactGroupBranches(root: string, group: string): string[] {
 		});
 }
 
-/** Resolve a current candidate branch while retaining indefinite read support for released refs. */
-export function competeBranchForCandidate(root: string, group: string, index: number): string {
-	const branches = exactGroupBranches(root, group);
-	return (
-		branches.find((branch) => branch === competeBranch(group, index)) ??
-		branches.find((branch) => branch === competeBranch(group, index, true)) ??
-		competeBranch(group, index)
-	);
+/** The branch of a group's candidate. */
+export function competeBranchForCandidate(_root: string, group: string, index: number): string {
+	return competeBranch(group, index);
 }
 
 function removeRegisteredWorktree(root: string, path: string): void {

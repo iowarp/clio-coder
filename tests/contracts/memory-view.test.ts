@@ -193,11 +193,11 @@ test("detail names the subject, reach, track record and evidence without treatin
 		approval: { by: "guardian", at: "2026-10-14T01:00:00.000Z" },
 		lastVerifiedAt: "2026-10-14T03:00:00.000Z",
 		observations: [
-			{ kind: "held", at: "2026-10-14T01:00:00.000Z", sessionId: "origin-session" },
-			{ kind: "delivered", at: "2026-10-14T02:00:00.000Z", sessionId: "later-session" },
-			{ kind: "delivered", at: "2026-10-14T02:10:00.000Z", sessionId: "later-session" },
-			{ kind: "held", at: "2026-10-14T03:00:00.000Z", sessionId: "later-session" },
+			{ kind: "held", at: "2026-10-14T01:00:00.000Z", sessionId: "origin-session", revision: "0".repeat(16) },
+			{ kind: "held", at: "2026-10-14T03:00:00.000Z", sessionId: "later-session", revision: "0".repeat(16) },
 		],
+		deliveredCount: 2,
+		lastDeliveredAt: "2026-10-14T02:10:00.000Z",
 	});
 	const detail = memoryLessonDetail(lesson, true).join("\n");
 	for (const heading of ["Concerns", "Lesson", "Applies", "Track record", "Evidence"])
@@ -273,7 +273,9 @@ test("text, applicability, verification and feedback changes refresh a selected 
 			lesson: "New command",
 			appliesWhen: ["After changing config"],
 			lastVerifiedAt: "2026-10-14T03:00:00.000Z",
-			observations: [{ kind: "held", at: "2026-10-14T04:00:00.000Z", sessionId: "verification-session" }],
+			observations: [
+				{ kind: "held", at: "2026-10-14T04:00:00.000Z", sessionId: "verification-session", revision: "0".repeat(16) },
+			],
 		},
 	];
 	notStrictEqual(memoryViewSignature(status(), records, {}), before);

@@ -49,6 +49,8 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 			id: "fleet-foreign-root",
 			fleet: "foreign-fleet",
 			planHash: "hash",
+			planIdentityHash: "hash",
+			cwd: "/workspace/project",
 			stepIds: ["step"],
 			planSteps: [],
 			vars: {},
