@@ -9,10 +9,12 @@ import { StringEnum } from "../engine/ai.js";
 import { resolveRgBinary } from "./executables.js";
 import {
 	compileGlobRegex,
+	emptySearchText,
 	fallbackIgnoredDirs,
 	internalSearchExclusionNotice,
 	normalizeGlobInput,
 	rgIgnoreArgs,
+	searchedTree,
 } from "./ignore-policy.js";
 import {
 	commitObservationReservation,
@@ -111,6 +113,8 @@ function observedGrepLines(lines: ReadonlyArray<RenderedLine>): GrepObservedLine
 
 interface GrepRenderInput {
 	searchPath: string;
+	/** The glob as the caller sent it, named by an empty result. */
+	glob?: string | undefined;
 	search: SearchCompleteness;
 	fallback?: boolean;
 	withheldPaths: number;
@@ -155,6 +159,8 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 		? `\n[${input.oversizedLines} matches in lines longer than 1 MiB were omitted; narrow the pattern or exclude the file.]`
 		: "";
 	if (lines.length === 0) {
+		// The pattern is not echoed: a probe for protected content must not see its text come back (S4-01).
+		const globbed = input.glob !== undefined ? ` in files matching ${input.glob}` : "";
 		return finalizeObservation({
 			tool: ToolNames.Grep,
 			withheldPaths: input.withheldPaths,
@@ -164,7 +170,8 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 				searchNotice(search, 0, "matches") +
 				fallbackNotice +
 				oversizedNotice +
-				internalSearchExclusionNotice(input.searchPath),
+				internalSearchExclusionNotice(input.searchPath) +
+				`\n[${emptySearchText(`file contents under ${searchedTree(input.searchPath)}${globbed} for the pattern sent`)}]`,
 			details: { search },
 			shownCount: 0,
 			totalCount: search.complete ? 0 : null,
@@ -354,6 +361,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 	}
 	return renderGrepResult({
 		searchPath: input.searchPath,
+		glob: input.glob,
 		search,
 		withheldPaths: input.pathFilter.withheldPaths,
 		mode: input.mode,
@@ -545,6 +553,7 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 	}
 	return renderGrepResult({
 		searchPath: input.searchPath,
+		glob: input.glob,
 		fallback: true,
 		search,
 		withheldPaths: input.pathFilter.withheldPaths,
