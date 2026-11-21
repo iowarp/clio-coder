@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
-import { runTelemetrySurfaces } from "../../src/cli/telemetry-surfaces.js";
+import { loadSurfacesReport } from "../../src/cli/telemetry-surfaces.js";
 import { renderTokenSources } from "../../src/cli/telemetry-tokens.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -540,7 +540,7 @@ it("charges a dispatched worker's calls from its linked run journal to the turn 
 	}
 });
 
-it("telemetry surfaces folds run journals: a headless run --agent worker's firing and a dispatched worker's, each once (ACP-H7)", async () => {
+it("telemetry surfaces folds run journals: a headless run --agent worker's firing and a dispatched worker's, each once, past a stray file and an unreadable run (ACP-H7)", async () => {
 	const env = await isolateClioEnv("clio-coder-surfaces-runs-");
 	try {
 		const sessionId = "surfaces-session";
@@ -563,25 +563,26 @@ it("telemetry surfaces folds run journals: a headless run --agent worker's firin
 		write(telemetrySessionDirectory(clioStateDir(), sessionId), [
 			first,
 			makeTelemetryRecord("run.linked", { runId: "run-dispatched" }, first.ctx, { t: first.t, mono: 0 }),
+			makeTelemetryRecord("run.linked", { runId: "run-broken" }, first.ctx, { t: first.t, mono: 0 }),
 		]);
 		write(telemetryRunDirectory(clioStateDir(), "run-dispatched"), [
 			fired(sessionId, "run-dispatched", "fir_0000000a_1"),
 		]);
 		write(telemetryRunDirectory(clioStateDir(), "run-headless"), [fired(null, "run-headless", "fir_0000000b_1")]);
-		const surfaces = (argv: string[]) => {
-			const out: string[] = [];
-			const original = process.stdout.write;
-			process.stdout.write = ((chunk: string) => out.push(chunk) > 0) as typeof process.stdout.write;
-			try {
-				strictEqual(runTelemetrySurfaces([...argv, "--json"]), 0);
-			} finally {
-				process.stdout.write = original;
-			}
-			const { ledger } = JSON.parse(out.join("")) as ReturnType<typeof foldSideSurfaces>;
-			return ledger.map((row) => `${row.surface}:${row.fired}:${row.unledgered}`).join(",");
+		// One bad entry never sinks the fold: a stray file under runs/ is no run, and a run whose journal cannot be read
+		// is skipped and counted.
+		writeFileSync(join(telemetryRunDirectory(clioStateDir(), "run-dispatched"), "..", "stray.txt"), "not a run");
+		mkdirSync(join(telemetryRunDirectory(clioStateDir(), "run-broken"), "journal.jsonl"), { recursive: true });
+		const surfaces = async (sessionId: string | null) => {
+			const report = await loadSurfacesReport(clioStateDir(), sessionId);
+			const ledger = report.fold.ledger.map((row) => `${row.surface}:${row.fired}:${row.unledgered}`).join(",");
+			return `${report.scope.replace(clioStateDir(), "<state>")} | ${ledger} | unreadable ${report.unreadableRuns}`;
 		};
-		strictEqual(surfaces([]), "nudge.read-streak:2:2");
-		strictEqual(surfaces(["--session", sessionId]), "nudge.read-streak:1:1");
+		strictEqual(await surfaces(null), "every session and run journal in <state> | nudge.read-streak:2:2 | unreadable 1");
+		strictEqual(
+			await surfaces(sessionId),
+			"session surfaces-session and the runs it links | nudge.read-streak:1:1 | unreadable 1",
+		);
 	} finally {
 		env.restore();
 	}
