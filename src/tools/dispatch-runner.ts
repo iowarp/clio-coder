@@ -2781,7 +2781,7 @@ async function runCouncil(
 				const request: DispatchRequest = {
 					...base,
 					...(member.agent !== undefined ? { agentId: member.agent } : {}),
-					executionRole: "researcher",
+					executionRole: "seat",
 					readOnly: true,
 					toolProfile: "council-read-only",
 					// Admission already demoted the caller's declared write roots to

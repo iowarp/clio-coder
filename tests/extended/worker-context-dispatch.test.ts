@@ -262,7 +262,7 @@ require("node:readline").createInterface({input: process.stdin}).on("line", (lin
 			task: "Count inherited evidence.",
 			context: { mode: "splice" as const },
 			contextSeed: seed,
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			requestOrigin: "internal" as const,
 			budget: { toolCalls: 1000, readReserve: 10 },
 		};

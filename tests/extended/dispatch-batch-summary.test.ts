@@ -100,7 +100,7 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 	try {
 		const requests = ["Inspect entry points", "Inspect boundaries"].map((task) => ({
 			agentId: "scout",
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			task,
 		}));
 		// The second assignment succeeds on attempt 1 after attempt 0 was cut off (cf1h-D3).

@@ -155,7 +155,7 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 	}
 
 	// Row 146 (DESIGN 4.7): in a parallel batch a builder that declared nothing to write or produce is
-	// inspection: role explorer (`researcher` in ExecutionRole), no writes. writers: 1 asks for serialized writers.
+	// inspection: role explorer, no writes. writers: 1 asks for serialized writers.
 	// The reading is inferred, so it yields to evidence of a write: a named write root ("." included) or a check
 	// the operator named in the turn, which expects a change for the merge gate to judge.
 	if (mode === "parallel" && requests.length > 1 && args.writers !== 1) {
@@ -173,7 +173,7 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 				(request.intent?.expectedOutputs.length ?? 0) > 0
 			)
 				continue;
-			requests[index] = { ...readOnly(request), executionRole: "researcher" };
+			requests[index] = { ...readOnly(request), executionRole: "explorer" };
 			notices.push(
 				`${NOTICE_PREFIX} ${label(index)} runs read-only as an explorer: a builder in a parallel batch with no intent.write_roots and no expected_outputs is admitted as inspection; declare disjoint write roots or use worktree: true for a task that writes.`,
 			);

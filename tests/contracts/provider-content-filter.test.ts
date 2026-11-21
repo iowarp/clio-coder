@@ -167,7 +167,7 @@ describe("a filtered worker in dispatch", () => {
 		try {
 			const request = {
 				agentId: "scout",
-				executionRole: "researcher" as const,
+				executionRole: "explorer" as const,
 				task: "Inspect isolated fixture evidence.",
 				requestOrigin: "internal" as const,
 				resultContractOverride: { kind: "provenance-report" as const },

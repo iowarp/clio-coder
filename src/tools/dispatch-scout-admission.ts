@@ -161,7 +161,7 @@ export function prepareScoutContinuation(input: {
 					};
 		const request: DispatchRequest = {
 			agentId: input.source.run.facts.agentId,
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: subtask.task,
 			cwd: input.source.envelope.cwd,
 			requestOrigin: input.authorization === "harness-read-only" ? "harness" : "user",

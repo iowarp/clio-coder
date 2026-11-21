@@ -6,7 +6,7 @@
  */
 
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
-import type { EvidenceAssessed, EvidenceFindingsObject, RunSettled } from "../../core/telemetry/schemas.js";
+import type { EvidenceAssessed, EvidenceFindingsObject, RecordedRunSettled } from "../../core/telemetry/schemas.js";
 import type { RunPersonaOverride, RunPipelineProvenance } from "../dispatch/types.js";
 import type { DecisionRecord } from "../session/entries.js";
 import { runSettledDigest } from "../telemetry/run-digest.js";
@@ -66,7 +66,7 @@ interface Finding {
 
 /** The run's assessment from its journal records; null when the journal holds no run.settled to assess. */
 export function assessRun(runId: string, input: AssessRunInput): RunAssessment | null {
-	let settled: RunSettled | null = null;
+	let settled: RecordedRunSettled | null = null;
 	let settledAt = "";
 	for (const record of input.records) {
 		if (record.k === "run.settled" && record.t >= settledAt) {
@@ -164,7 +164,7 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
  * read-only recipe's run or a run with a finish record changed nothing to validate; a run with no evidence still owes it.
  */
 function validationOwed(
-	settled: RunSettled,
+	settled: RecordedRunSettled,
 	completion: Pick<TelemetryRecord<"completion.evaluated">, "data"> | undefined,
 	context: RunAssessmentContext | null,
 ): boolean {
@@ -180,7 +180,7 @@ function validationOwed(
 	return (settled.toolActivity ?? null) === null;
 }
 
-function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[] {
+function runFindings(settled: RecordedRunSettled, trust: CanonicalTrustStatus): Finding[] {
 	const out: Finding[] = [];
 	const add = (severity: EvidenceSeverity, tag: EvidenceTag, message: string) => out.push({ severity, tag, message });
 	const succeeded = settled.outcome === "succeeded";

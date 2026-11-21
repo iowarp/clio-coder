@@ -66,7 +66,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 const request = {
 	agentId: "scout",
 	task: "Inspect the fixture input and report available evidence.",
-	executionRole: "researcher" as const,
+	executionRole: "explorer" as const,
 	requestOrigin: "internal" as const,
 	resultContractOverride: { kind: "provenance-report" as const },
 };

@@ -25,7 +25,7 @@ const step = (id: string, dependencies: string[] = []): ExecutionPlanAgentStep =
 	id,
 	dependencies,
 	agentId: "scout",
-	executionRole: "researcher",
+	executionRole: "explorer",
 	scope: "readonly",
 	expectedResultContract: "provenance-report",
 	requestedAuthority: "read-only",

@@ -187,7 +187,7 @@ describe("dispatch admission boundary", () => {
 			const request = {
 				agentId: "scout",
 				task: "Add a test that runs this repository's build commands.",
-				executionRole: "researcher" as const,
+				executionRole: "explorer" as const,
 				requestOrigin: "harness" as const,
 				readOnly: true,
 			};
@@ -1042,8 +1042,8 @@ describe("dispatch admission boundary", () => {
 		deepStrictEqual(
 			builders.requests.map((request) => [request.readOnly === true, request.executionRole]),
 			[
-				[true, "researcher"],
-				[true, "researcher"],
+				[true, "explorer"],
+				[true, "explorer"],
 				[false, "builder"],
 			],
 		);
@@ -1064,7 +1064,7 @@ describe("dispatch admission boundary", () => {
 			beside.requests.map((request) => request.readOnly === true),
 			[true, false],
 		);
-		strictEqual(beside.requests[0]?.executionRole, "researcher");
+		strictEqual(beside.requests[0]?.executionRole, "explorer");
 		// Evidence of a write keeps the builder: an explicit "." write root, or a check the operator named in the turn.
 		const coderBesideScout = (intent?: Record<string, unknown>) => ({
 			mode: "parallel",

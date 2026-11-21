@@ -32,9 +32,9 @@ import {
 	MIDDLEWARE_EFFECTS,
 	ObjectRefSchema,
 	PricingSchema,
+	RecordedRunSettledSchema,
 	RunFeedBodySchema,
 	RunResultObjectSchema,
-	RunSettledSchema,
 	SessionCloseReason,
 	StepPipelineSettledSchema,
 	SYSTEM_ONE_OUTCOME,
@@ -1284,7 +1284,7 @@ export const RunTelemetrySchema = Type.Object(
 		settled: Type.Union([
 			Type.Object(
 				{
-					...RunSettledSchema.properties,
+					...RecordedRunSettledSchema.properties,
 					at: UtcSchema,
 					/** The run's identity: the digest of its run.settled payload (`run-digest.ts`). */
 					digest: Type.String({ pattern: "^[0-9a-f]{64}$" }),

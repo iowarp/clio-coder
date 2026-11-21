@@ -452,7 +452,7 @@ async function generateBootstrapWithModel(
 			runIdHint,
 			intent: scope.intent,
 			agentId: CONTEXT_BOOTSTRAP_AGENT_ID,
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: prompt,
 			cwd: input.cwd,
 			requestOrigin: "internal",

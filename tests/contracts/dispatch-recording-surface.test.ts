@@ -120,7 +120,7 @@ it("binds recording into approval plans and returns the manifest reference from 
 		const noRecordPlan = describeDispatchPlan({ ...args, record: false });
 		const recordedPlan = describeDispatchPlan(args);
 		ok(noRecordPlan.hash !== recordedPlan.hash);
-		const pinBase = { agentId: "scout", executionRole: "researcher" as const, task: "changed", record: false };
+		const pinBase = { agentId: "scout", executionRole: "explorer" as const, task: "changed", record: false };
 		equal(withResolvedPlanTaskPin(pinBase, artifact.tasks[0]).record, true);
 		const { record: _record, ...unrecorded } = artifact.tasks[0];
 		equal(Object.hasOwn(withResolvedPlanTaskPin({ ...pinBase, record: true }, unrecorded), "record"), false);

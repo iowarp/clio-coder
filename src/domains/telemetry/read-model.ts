@@ -61,6 +61,7 @@ import type {
 	CallUsage,
 	EvidenceAssessed,
 	ObjectRef,
+	RecordedRunSettled,
 	SurfaceOutcome,
 } from "../../core/telemetry/schemas.js";
 import { countsAsToolCall, EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
@@ -267,7 +268,7 @@ interface Run {
 	fold: ReturnType<typeof foldRunJournal>;
 	attempts: Attempt[];
 	byAttempt: Map<string, Attempt>;
-	settled: { at: string; data: EventPayload<"run.settled"> } | null;
+	settled: { at: string; data: RecordedRunSettled } | null;
 	assessed: { at: string; data: EvidenceAssessed } | null;
 	firstAt: string | null;
 	lastAt: string | null;

@@ -261,7 +261,7 @@ describe("dispatch schema composition", () => {
 			profiles: { code: { target: "mini", model: "ornith", thinkingLevel: "off" } },
 		});
 		assert.equal(dispatchSchemaCompositionFor(sameRouteTwice).compete, true);
-		const adaptive = fleetWith({ adaptiveRouting: { roles: ["verifier"], postures: ["balanced"], agentRoles: [] } });
+		const adaptive = fleetWith({ adaptiveRouting: { roles: ["checker"], postures: ["balanced"], agentRoles: [] } });
 		assert.equal(dispatchSchemaCompositionFor(adaptive).adaptiveRouting, true);
 	});
 

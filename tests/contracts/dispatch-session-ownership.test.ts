@@ -118,7 +118,7 @@ async function openSession(
 		workers,
 		request: {
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Inspect isolated fixture evidence.",
 			cwd: projectDir,
 			requestOrigin: "internal",
@@ -356,7 +356,7 @@ describe("dispatch session ownership", () => {
 		const { contract } = bundle;
 		const handle = await contract.dispatch({
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Inspect isolated fixture evidence.",
 			cwd: projectA,
 			requestOrigin: "internal",

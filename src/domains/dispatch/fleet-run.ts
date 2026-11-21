@@ -849,14 +849,14 @@ async function runFleetHoldingWorkspace(
 							memberIds.add(memberId);
 							const request: DispatchRequest = {
 								agentId,
-								executionRole: "researcher",
+								executionRole: "explorer",
 								task: step.task,
 								cwd: workspaceRoot,
 								requestOrigin: "user",
 								...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 								readOnly: true,
 								lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
-								// A proposal is a researcher's prose, not a builder report.
+								// A proposal is an explorer's prose, not a builder report.
 								resultContractOverride: { kind: "text-report" },
 								...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
 								...(step.target !== undefined ? { target: step.target } : {}),

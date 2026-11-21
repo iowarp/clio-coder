@@ -218,7 +218,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 	const request = {
 		agentId: "scout",
 		task: "Inspect fixture.",
-		executionRole: "researcher" as const,
+		executionRole: "explorer" as const,
 		requestOrigin: "internal" as const,
 		budget: { toolCalls: 1000, readReserve: 10 },
 	};

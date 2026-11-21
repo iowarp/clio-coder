@@ -16,7 +16,7 @@ function route(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 	return {
 		agentId: "scout",
 		specFingerprint: hash("spec"),
-		executionRole: "researcher",
+		executionRole: "explorer",
 		targetId: "mini",
 		modelId: "kat-coder",
 		runtimeId: "llamacpp",
@@ -59,7 +59,7 @@ describe("contracts/route identity keying", () => {
 		strictEqual(counts(route(), route({ nodeId: "blade" })), false);
 		strictEqual(counts(route(), route({ runtimeId: "lmstudio" })), false);
 		strictEqual(counts(route(), route({ specFingerprint: hash("spec-next") })), false);
-		strictEqual(counts(route(), route({ executionRole: "verifier" })), false);
+		strictEqual(counts(route(), route({ executionRole: "checker" })), false);
 		strictEqual(counts(route(), route({ thinkingLevel: "high" })), false);
 	});
 

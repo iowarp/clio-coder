@@ -106,7 +106,7 @@ async function dispatchReportingWorker(url: string, load: Record<string, unknown
 		const run = await bundle.contract.dispatch({
 			agentId: "scout",
 			task: "Inspect the fixture input and report available evidence.",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 			target: "ollama-t",
 			model: MODEL,

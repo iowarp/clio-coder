@@ -31,6 +31,7 @@ import {
 	type DurableQualitySourceCache,
 	type DurableQualitySources,
 } from "./durable-quality-sources.js";
+import { isExecutionRole } from "./execution-role.js";
 import {
 	evaluateRouteDecision,
 	fixedRouteDecision,
@@ -56,10 +57,14 @@ function receiptHasUnknownCost(receipt: RunResult): boolean {
 // Route-history projection
 // ---------------------------------------------------------------------------
 
-/** The route identity a history entry was settled under, as the policy's candidate shape. */
-function entryCandidate(entry: RouteHistoryEntry): RouteCandidate {
-	const { thinkingLevel, ...rest } = entry.route;
-	return { ...rest, ...(thinkingLevel !== null ? { thinkingLevel } : {}) };
+/**
+ * The route identity a history entry was settled under, as the policy's candidate shape; null for a run settled
+ * before fleet M12, whose role name is retired, so it is no current route's evidence.
+ */
+function entryCandidate(entry: RouteHistoryEntry): RouteCandidate | null {
+	const { thinkingLevel, executionRole, ...rest } = entry.route;
+	if (!isExecutionRole(executionRole)) return null;
+	return { ...rest, executionRole, ...(thinkingLevel !== null ? { thinkingLevel } : {}) };
 }
 
 /**
@@ -385,7 +390,9 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				const guard = routeDriftGuard(candidate);
 				const entries = sources.history.filter((entry) => {
 					const route = entryCandidate(entry);
-					return routeCapabilityKey(route) === key && !routeDriftInvalidates(routeDriftGuard(route), guard);
+					return (
+						route !== null && routeCapabilityKey(route) === key && !routeDriftInvalidates(routeDriftGuard(route), guard)
+					);
 				});
 				let integrityFailures = 0;
 				let validConstraints = 0;

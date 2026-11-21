@@ -3,8 +3,8 @@ import { Type } from "typebox";
 import type { TelemetryContext } from "./context.js";
 import { TelemetryContextSchema } from "./context.js";
 import { ContentClass, Tier, vocabulary } from "./enums.js";
-import type { JournalEventName, JournalPayload } from "./events.js";
-import { isJournalEvent, journalDefinition, validPayload } from "./events.js";
+import type { JournalEventName, JournalPayload, RecordedJournalPayload } from "./events.js";
+import { isJournalEvent, journalDefinition, validPayload, validRecordedPayload } from "./events.js";
 import { UUID_V7_PATTERN } from "./id-schemas.js";
 import { newRecordId } from "./ids.js";
 import { checkRecordSchema } from "./record-check.js";
@@ -86,7 +86,7 @@ export const EnvelopeSchema = Type.Object(
 	closed,
 );
 export type TelemetryRecord<K extends JournalEventName = JournalEventName> = K extends JournalEventName
-	? Omit<Static<typeof EnvelopeSchema>, "k" | "data"> & { k: K; data: JournalPayload<K> }
+	? Omit<Static<typeof EnvelopeSchema>, "k" | "data"> & { k: K; data: RecordedJournalPayload<K> }
 	: never;
 
 /** Called by the writer after dequeue; producers do not allocate ids or serialize per record (#434). */
@@ -156,10 +156,13 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 	if (!checkRecordSchema(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };
 	if (!isJournalEvent(value.k)) return { kind: "skipped", reason: "unknown-kind" };
 	const definition = journalDefinition(value.k);
-	if (value.kv !== definition.version) return { kind: "skipped", reason: "unknown-version" };
+	// An earlier version the definition keeps is sealed history, read as it was recorded.
+	const recorded = value.kv !== definition.version && definition.recorded?.[value.kv] !== undefined;
+	if (value.kv !== definition.version && !recorded) return { kind: "skipped", reason: "unknown-version" };
 	const data = value.data;
 	const invalid = { kind: "skipped", reason: "invalid-record", k: value.k } as const;
-	if (value.tier !== definition.tier || value.cc !== definition.cc || !validPayload(value.k, data)) return invalid;
+	const valid = recorded ? validRecordedPayload(value.k, value.kv, data) : validPayload(value.k, data);
+	if (value.tier !== definition.tier || value.cc !== definition.cc || !valid) return invalid;
 	if (value.k === "call.started" || value.k === "call.settled") {
 		const call = data as JournalPayload<"call.started">;
 		if (value.ctx.callId !== call.callId || value.ctx.attemptId !== call.attemptId) {

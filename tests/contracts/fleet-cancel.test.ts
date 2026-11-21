@@ -118,7 +118,7 @@ describe("fleet cancel requests", () => {
 		const created = () =>
 			ledger.create({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "cancel exit",
 				targetId: "local",
 				wireModelId: "model",
@@ -228,7 +228,7 @@ describe("fleet cancel requests", () => {
 			const created = () =>
 				ledger.create({
 					agentId: "scout",
-					executionRole: "researcher",
+					executionRole: "explorer",
 					task: "orphaned work",
 					targetId: "local",
 					wireModelId: "model",

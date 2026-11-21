@@ -532,14 +532,14 @@ export interface FleetSettings extends FleetRouteSettings {
 }
 
 /** Roles whose authority is narrow enough for active joint routing. */
-export const ACTIVE_ROUTING_ROLES = ["researcher", "verifier", "reviewer", "judge"] as const;
+export const ACTIVE_ROUTING_ROLES = ["explorer", "seat", "checker", "reviewer", "judge"] as const;
 export type ActiveRoutingRole = (typeof ACTIVE_ROUTING_ROLES)[number];
 
 /** Manual is exact rather than adaptive, so it is never an activated posture. */
 export const ACTIVE_ROUTING_POSTURES = ["quality", "balanced", "latency", "economy"] as const;
 export type ActiveRoutingPosture = (typeof ACTIVE_ROUTING_POSTURES)[number];
 
-export const ACTIVE_AGENT_AUTOMATION_ROLES = ["builder", "researcher", "verifier", "reviewer", "judge"] as const;
+export const ACTIVE_AGENT_AUTOMATION_ROLES = ["builder", "explorer", "seat", "checker", "reviewer", "judge"] as const;
 export type ActiveAgentAutomationRole = (typeof ACTIVE_AGENT_AUTOMATION_ROLES)[number];
 
 export interface ActiveAgentRole {

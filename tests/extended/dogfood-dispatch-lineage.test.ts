@@ -447,7 +447,7 @@ it("model tool JSON cannot author lineage, while a trusted retry keeps its exist
 		const run = await f.bundle.contract.dispatch({
 			agentId: "scout",
 			task: "Inspect input.txt",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			lineage: retry,
 			cwd: process.cwd(),
 		});

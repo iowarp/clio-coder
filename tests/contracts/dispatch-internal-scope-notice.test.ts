@@ -34,7 +34,7 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 		ok(scope.ok);
 		const request = {
 			agentId: "context-bootstrap",
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			task: "Inspect CLIO-CODER.md CLAUDE.md src/engine/types.ts and tests/contracts/bootstrap-route.test.ts.",
 			cwd: env.dir,
 			intent: scope.intent,
@@ -375,7 +375,7 @@ it("names the deny permit a judge-mode dispatch runs with when no safety judge i
 				await rejects(
 					bundle.contract.dispatch({
 						agentId: "scout",
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Read the README.",
 						cwd: env.dir,
 					}),

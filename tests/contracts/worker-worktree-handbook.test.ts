@@ -435,7 +435,7 @@ function scoutHarness() {
 			bundle.contract.dispatch({
 				agentId: "scout",
 				task: "Explain how this repository runs its tests.",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				requestOrigin: "internal",
 				cwd: root,
 				readOnly: true,

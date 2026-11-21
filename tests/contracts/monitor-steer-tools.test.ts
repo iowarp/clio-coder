@@ -79,7 +79,7 @@ async function fixture(scratch: IsolatedClioEnv) {
 	registerAllTools(registry, { mcpCapabilities: false, dispatch: bundle.contract });
 	const request: DispatchRequest = {
 		agentId: "scout",
-		executionRole: "researcher",
+		executionRole: "explorer",
 		task: "Inspect isolated fixture evidence.",
 		cwd: scratch.dir,
 		requestOrigin: "internal",

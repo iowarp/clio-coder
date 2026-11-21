@@ -85,7 +85,7 @@ describe("spawn failure diagnostics", () => {
 		try {
 			const run = await bundle.contract.dispatch({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "Inspect isolated fixture evidence.",
 				requestOrigin: "internal",
 				resultContractOverride: { kind: "provenance-report" },
