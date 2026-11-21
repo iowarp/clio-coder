@@ -3,6 +3,12 @@ import { test } from "node:test";
 import { createAssistantMessageEventStream, type StreamOptions } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import {
+	claimWireEffort,
+	observeWireEffort,
+	stampWireEffort,
+	wireEffortOf,
+} from "../../src/core/telemetry/call-effort.js";
+import {
 	observedToolCallOrigin,
 	TelemetryContextSchema,
 	telemetryContext,
@@ -158,12 +164,12 @@ test("a call journals the thinking level it asked for and the effort its payload
 			reportedModel: { kind: "unknown", reason: "not-observed" } as const,
 		};
 		const call = beginCall({ target, roundKind: "normal", toolChoice: "auto", thinkingLevel: "off" }, ctx);
-		const sent = async (payload: unknown): Promise<Record<string, unknown>> => {
+		const sent = async (payloads: unknown[]): Promise<Record<string, unknown>> => {
 			const message = { role: "assistant", content: [], stopReason: "stop", usage: { input: 5, output: 1 } };
 			const stream = observePayloadBytes(MODEL, {} as StreamOptions, (options) => {
 				const source = createAssistantMessageEventStream();
 				void (async () => {
-					await options?.onPayload?.(payload, MODEL);
+					for (const payload of payloads) await options?.onPayload?.(payload, MODEL);
 					source.push({ type: "done", reason: "stop", message } as never);
 					source.end();
 				})();
@@ -173,12 +179,53 @@ test("a call journals the thinking level it asked for and the effort its payload
 			return message as unknown as Record<string, unknown>;
 		};
 		// The level is asked for off, and the payload still carries an effort: the journal shows both.
-		const low = await sent({ model: "model", reasoning: { effort: "low", summary: "auto" } });
+		const low = await sent([{ model: "model", reasoning: { effort: "low", summary: "auto" } }]);
 		const facts = call.settle(callSettlementFromMessage(low, "none"));
 		strictEqual(facts?.wireEffort, "low");
 		strictEqual(facts?.thinkingLevel, "off");
-		const omitted = await sent({ model: "model", max_tokens: 10 });
+		const omitted = await sent([{ model: "model", max_tokens: 10 }]);
 		strictEqual(callSettlementFromMessage(omitted, "none").wireEffort, "omitted");
+		// Each payload is a whole request: a retry that names no effort sent none.
+		const retried = await sent([{ reasoning_effort: "high" }, { max_tokens: 10 }]);
+		strictEqual(callSettlementFromMessage(retried, "none").wireEffort, "omitted");
+		// A message that cannot take the fact (frozen, sealed, null) is skipped; the stamp never throws into the reply.
+		for (const message of [Object.freeze({}), Object.seal({}), null]) {
+			observeWireEffort(message, "high");
+			stampWireEffort(message, "high");
+			claimWireEffort(message);
+		}
+		// Managed-effort bodies pin the top-level effort for the cache; the trailing entry is the one in force.
+		const anthropic = {
+			output_config: { effort: "low" },
+			messages: [
+				{ role: "system", content: [], output_config: { effort: "medium" } },
+				{ role: "user", content: "hi" },
+				{ role: "system", content: [], output_config: { effort: "max" } },
+			],
+		};
+		strictEqual(wireEffortOf(anthropic), "max");
+		const responses = {
+			reasoning: { effort: "medium" },
+			input: [
+				{ type: "configuration_update", reasoning: { effort: "low" } },
+				{ role: "user", content: "hi" },
+				{ type: "configuration_update", reasoning: { effort: "xhigh" } },
+			],
+		};
+		strictEqual(wireEffortOf(responses), "xhigh");
+		strictEqual(wireEffortOf({ reasoning: { effort: "medium" }, input: [{ role: "user" }] }), "medium");
+		// Bedrock Converse carries the model's own fields beside the command.
+		strictEqual(
+			wireEffortOf({ modelId: "m", additionalModelRequestFields: { output_config: { effort: "high" } } }),
+			"high",
+		);
+		strictEqual(wireEffortOf({ additionalModelRequestFields: { reasoning_effort: "low" } }), "low");
+		const hostile = Object.defineProperty({}, "reasoning", {
+			get() {
+				throw new Error("getter");
+			},
+		});
+		strictEqual(wireEffortOf(hostile), undefined);
 		strictEqual(callSettlementFromMessage({ stopReason: "stop" }, "none").wireEffort, undefined, "no payload, no fact");
 		const started = records.find((record) => record.kind === "call.started");
 		const settled = records.find((record) => record.kind === "call.settled");

@@ -43,7 +43,7 @@ import type {
 } from "@github/copilot-sdk";
 import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
-import { stampWireEffort } from "../../core/telemetry/call-effort.js";
+import { claimWireEffort, stampWireEffort } from "../../core/telemetry/call-effort.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
 import type { AgentMessage } from "../types.js";
 import {
@@ -1286,7 +1286,11 @@ async function runStep(
 	const onPayload = options?.onPayload;
 	const request = async (payload: Record<string, unknown>): Promise<boolean> => {
 		if (onPayload !== undefined) await onPayload(payload, model);
-		return !step.isFinished;
+		if (step.isFinished) return false;
+		// A send or a tool-result delivery runs the model under the session's effort, which a reused conversation does
+		// not resend; a step that ends before one carries no effort (FX-49).
+		if (payload.request === "send" || payload.request === "toolResults") stampWireEffort(step.message, reasoningEffort);
+		return true;
 	};
 	// A host policy update (#423) is a posture change, not system text: the SDK fixes a session's system
 	// message at creation, so folding the update into it would discard the session and re-send the whole
@@ -1298,8 +1302,8 @@ async function runStep(
 	const tools = getCurrentTools(context.messages);
 	const systemHash = hash(systemPrompt);
 	const reasoningEffort = reasoningEffortFor(model, options as SimpleStreamOptions | undefined);
-	// The effort this step runs under, which a reused conversation does not resend (FX-49).
-	stampWireEffort(step.message, reasoningEffort);
+	// This route states its effort at dispatch; the payload seam never infers one from a session request (FX-49).
+	claimWireEffort(step.message);
 	// An omitted effort on a reasoning model leaves the runtime's default, which may think: not off.
 	step.thinkingOff = !model.reasoning || reasoningEffort === "none";
 	const contextTier = copilotContextTierFor(model);

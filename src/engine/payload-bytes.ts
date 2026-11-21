@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, AssistantMessageEventStream, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import { stampWireEffort, wireEffortOf } from "../core/telemetry/call-effort.js";
+import { observeWireEffort, wireEffortOf } from "../core/telemetry/call-effort.js";
 
 /**
  * Under transport option B Pi serializes and sends the request, so the payload it hands its provider is the request
@@ -17,7 +17,9 @@ export function observePayloadBytes<T extends StreamOptions>(
 	onSettled?: (serialized: string | undefined) => void,
 ): AssistantMessageEventStream {
 	let payload: unknown;
-	// The last effort any request of this call named: a Copilot step names it on its session request, not its send.
+	// Each payload a Pi provider hands over is a whole request, a retry included, so the last one names the effort sent
+	// and one that names none sent none. A route whose requests are partial (Copilot sessions) claims its message and
+	// stamps the effort itself.
 	let effort: string | undefined;
 	let requested = false;
 	const onPayload = options?.onPayload;
@@ -27,14 +29,14 @@ export function observePayloadBytes<T extends StreamOptions>(
 			const replacement = await onPayload?.(body, payloadModel);
 			payload = replacement === undefined ? body : replacement;
 			requested = true;
-			effort = wireEffortOf(payload) ?? effort;
+			effort = wireEffortOf(payload);
 			return replacement;
 		},
 	} as T);
 	let handedOver = false;
 	const remember = (message: AssistantMessage): void => {
 		let serialized: string | undefined;
-		if (requested) stampWireEffort(message, effort);
+		if (requested) observeWireEffort(message, effort);
 		const cacheKey =
 			payload !== null && typeof payload === "object"
 				? (payload as { prompt_cache_key?: unknown }).prompt_cache_key

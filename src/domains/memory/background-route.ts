@@ -476,7 +476,8 @@ function prepareBackgroundMemoryRoute(
 			// The route this client is bound to. The middleware reads it for the
 			// telemetry row, so a fallback client names the target that served the step.
 			route: { targetId, modelId: refined.wireModelId },
-			thinkingLevel,
+			// The level its requests ask for, clamped as `complete` sends it, so every attempt of a call records one level.
+			thinkingLevel: thinkingLevel === "off" ? "off" : refined.effectiveThinkingLevel,
 			// Wrapped at the layer that knows a request left the process: the step
 			// holds endpoint capacity while it is out and publishes the cache
 			// disturbance even when a timeout means the usage sink never sees it.
