@@ -4,7 +4,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-CLIO Coder 0.8.5 is one large release with breaking changes, built so that a script, a CI job or another agent can depend on CLIO Coder the way a person at the terminal does. `clio-coder run` has one versioned result, a typed cause behind every exit code, per-run limits, a dry run and host-validated structured answers. A run states whether it finished, and CLIO Coder seals that claim beside its own assessment of the work. Fleet dispatch routes each job to a role that owes evidence, proactive memory keeps only what has been demonstrated, and the Antigravity CLI joins the agents CLIO Coder delegates to. Every command and flag now has one spelling: earlier spellings are removed, and `clio-coder upgrade` migrates your settings and prints each change. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
+CLIO Coder 0.8.5 is one large release with breaking changes, built so that a script, a CI job or another agent can depend on CLIO Coder the way a person at the terminal does. `clio-coder run` has one versioned result, a typed cause behind every exit code, per-run limits, a dry run and host-validated structured answers. A run states whether it finished, and CLIO Coder seals that claim beside its own assessment of the work. Fleet dispatch routes each job to a role that owes evidence, and proactive memory keeps only what has been demonstrated. The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering and quota reporting. Every command and flag now has one spelling: earlier spellings are removed, and `clio-coder upgrade` migrates your settings and prints each change. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
 
 ### Highlights
 
@@ -15,12 +15,12 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 - **Sessions and fleets from the shell.** `clio-coder session history|show|export|fork|compact|rm`, `run --resume <id|prefix|name>` with `--fork`, `fleet run --detach` with `fleet wait`, and `clio-coder config get|set|unset`.
 - **Dispatch by job, graded by role.** Each dispatch goes to the agent whose job it is, a builtin `reviewer` judges diffs, every role owes a kind of evidence, and a worker that returns without it is retried once on another model.
 - **Memory that has to earn its place.** Notes are claims bound to a command that succeeded or a file that was read. A stored lesson is checked against the repository before it is delivered, automatic memory spending is capped at a share of the session, and mining earlier sessions is off unless you turn it on.
-- **Delegate to the Antigravity CLI.** `agy` is a built-in ACP delegation target with model and thinking selection, live steering, operator-answered questions and quota reporting.
+- **The Antigravity CLI over ACP.** The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering, operator-answered questions and quota reporting.
 - **Zarr and ADIOS2.** The `data` tool reads Zarr v2 and v3 stores and inspects ADIOS2 BP4 and BP5 directories.
 
 ### Breaking changes
 
-0.8.5 has one spelling for each command and flag. The earlier spellings below are gone, with no aliases: each is an unknown command or flag and exits 2.
+0.8.5 has one spelling for each command and flag. The earlier spellings below are gone, with no aliases: each is an unknown command or flag and exits 2; a removed `/loop` verb is refused in the session.
 
 **Headless `run`**
 
@@ -61,7 +61,7 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 
 #### Upgrading
 
-Run `clio-coder upgrade`, or run the installer again. After an update made with a package manager directly, run `clio-coder upgrade` once so the migration runs. Then run `clio-coder doctor`.
+Run `clio-coder upgrade`, or run the installer again. After an update made with a package manager directly, run `clio-coder upgrade --post-install`. The first launch also applies pending migrations. Then run `clio-coder doctor`.
 
 **What the upgrade rewrites.** The migration edits your user `settings.yaml` in place, keeps the previous file as `settings.yaml.retired.bak` beside it, and prints each change under "What changed for you in settings.yaml". A project's `.clio-coder/settings.yaml` is the repository's and is left for you to edit.
 
@@ -79,7 +79,7 @@ Run `clio-coder upgrade`, or run the installer again. After an update made with 
 | `identity`, `theme`, `telemetry.research.systemOneDataset` | Removed; nothing read them |
 | `permissionTimeoutMs` and `labels` on an external agent entry | Removed |
 
-A key written through a YAML anchor, alias or merge key is left as written, and the upgrade asks you to edit it by hand. A settings file that still names a retired key fails to load with a message naming `clio-coder upgrade`.
+A key written through a YAML anchor, alias or merge key is left as written, and the upgrade asks you to edit it by hand. While the migration is still pending, a settings file that names a retired key fails to load with a message naming `clio-coder upgrade`. Once it has run, a retired key is an ordinary unknown key, and `clio-coder doctor --fix` removes it.
 
 **What you retype.** The upgrade cannot reach scripts, CI jobs, shell aliases or editor configuration. Add `-` where a task is piped into `clio-coder run`, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, read the result from the `run_end` envelope, and replace every spelling in the removed commands table above.
 
@@ -130,7 +130,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Delegation to other agents**
 
-- The Antigravity CLI is a built-in ACP delegation target (`antigravity`). Add it with `clio-coder configure --interop` and run it with `/run antigravity`. It uses the `agy` login already on the machine.
+- The Antigravity CLI is now also an ACP delegation target (`antigravity`). Add it with `clio-coder configure --interop` and run it with `/run antigravity`. It uses the `agy` login already on the machine.
 - A dispatch that names a `<model>-<level>` id selects the model and its thinking level, and a refusal lists the values the agent offers.
 - Questions from the delegated agent reach the operator as a card headed "Delegated agent", and are cancelled when no operator is attached. A steer goes to the agent as its own prompt.
 - Quota exhaustion fails the run as `usage_limit_reached` with the reset time and the retry moves to another target. The agent's `run_command` and `run_workflow` calls are judged by the command they run.

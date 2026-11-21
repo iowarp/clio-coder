@@ -1,7 +1,7 @@
 CLIO Coder 0.8.5 gives every command and flag one spelling and removes the earlier ones. The upgrade migrates your settings for you. What it cannot migrate is text you typed elsewhere: scripts, CI jobs, shell aliases, and editor configuration. This guide covers both.
 
 ::: note Version scope
-This guide describes the upgrade from v0.8.4 to v0.8.5. A removed spelling is an unknown command or flag in 0.8.5 and exits 2.
+This guide describes the upgrade from v0.8.4 to v0.8.5. A removed spelling is an unknown command or flag in 0.8.5 and exits 2; a removed `/loop` verb is refused in the session.
 :::
 
 ::: needs
@@ -26,7 +26,7 @@ clio-coder upgrade
 
 An installer install gets the new version beside the old one, then its launcher is switched. An npm install is updated in place. For other package managers and source checkouts, `upgrade` prints the update command for that method.
 
-After the install step, `upgrade` applies pending migrations. If you updated with a package manager directly, run `clio-coder upgrade` once afterwards so the migrations run.
+After the install step, `upgrade` applies pending migrations. If you updated with a package manager directly, run `clio-coder upgrade --post-install`. The first launch also applies pending migrations.
 
 ### Read what changed in your settings
 
@@ -48,7 +48,7 @@ clio-coder config get interface.exitSummary
 clio-coder --version
 ```
 
-`doctor` lists problems first and exits 0 when nothing needs attention. If a settings key is still retired, the settings row names `clio-coder upgrade`. `config get` reads one setting, so you can confirm a value the migration rewrote.
+`doctor` lists problems first and exits 0 when nothing needs attention. While the migration is still pending, a retired key makes the settings row name `clio-coder upgrade`. Once it has run, a retired key is an ordinary unknown key, and `clio-coder doctor --fix` removes it. `config get` reads one setting, so you can confirm a value the migration rewrote.
 :::
 
 ::: result What you should see
@@ -90,6 +90,7 @@ Search your scripts, CI jobs, aliases, and editor configuration for these.
 | `clio-coder export`, `clio-coder import` | `clio-coder share export`, `clio-coder share import` |
 | `context-init`, `context-index`, `context-clear` | `context init`, `context index`, `context reset` |
 | `components`, `evolve`, `flywheel` | `dev components`, `dev evolve`, `dev flywheel` |
+| `clio-coder dev share`, `clio-coder dev gui` | `clio-coder share`, `clio-coder gui` |
 | `fleet run --json` | `fleet run --output-format stream-json` |
 | `fleet drain`, `fleet resume` | `fleet admission drain`, `fleet admission open` |
 | `fleet inspect` | `fleet status --json`, or `telemetry inspect --run <runId> --json` |

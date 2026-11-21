@@ -22,7 +22,7 @@ clio-coder run --dry-run --output-format json \
   "Fix the failing parser test." | jq '.plan'
 ```
 
-The plan names the route, the tools the agent may use, the sandbox mode, the limits, and the checks. Put this in a pull request job to catch a bad flag or a missing model connection before anything is spent.
+The plan names the route, the tools the agent may use, the sandbox mode, the limits, and the checks. Put this in a pull request job to catch a bad flag before anything is spent. Check that `.plan.route.target` is set.
 
 ### Ask for one result document
 
@@ -38,7 +38,7 @@ Use `--output-format stream-json` instead when another program should follow the
 
 ### Bound the run
 
-Each limit is a flag, and each one has its own exit code and cause.
+Each limit is a flag, and each one stops the run with its own cause code.
 
 ```sh
 clio-coder run --output-format json \
@@ -101,7 +101,7 @@ jq '.verify.checks' result.json         # each --verify check and whether it pas
 jq '.usage.total' result.json           # tokens and cost
 ```
 
-`causes` is empty on success. On a failure or a stop it lists every reason as a `code` with a `message`. `-o answer.md` also writes the answer to a file when the run exits 0.
+`causes` is empty on success. On a failure or a stop it lists every reason as a code, usually with a message. `-o answer.md` also writes the answer to a file when the run exits 0.
 :::
 
 ::: result What you should see
