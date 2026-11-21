@@ -2123,6 +2123,73 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps a scrolled-up reader on their row through a viewport-first re-layout and its idle swap", () => {
+		const terminal = new RenderingTerminal();
+		terminal.columns = 120;
+		terminal.rows = 30;
+		const tui = new TuiAltScreen(terminal);
+		const idle: Array<() => boolean> = [];
+		const drain = (): void => {
+			for (let step = idle[0]; step !== undefined; step = idle[0]) if (!step()) idle.shift();
+		};
+		const panel = createChatPanel({
+			now: () => 0,
+			getTerminalRows: () => terminal.rows,
+			copyMarks: true,
+			deferRelayout: true,
+			scheduleIdle: (step) => idle.push(step),
+		});
+		for (let turn = 0; turn < 150; turn += 1) {
+			const text = `Row-${String(turn).padStart(4, "0")} ${"lorem ipsum dolor sit amet ".repeat(5)}END`;
+			panel.appendUser(`Question ${turn}`);
+			streamAnswer(panel, text);
+			settleAnswer(panel, text);
+		}
+		const root = buildLayout(
+			{
+				banner: new Text("banner", 0, 0),
+				chat: panel,
+				editor: new Text("editor", 0, 0),
+				footer: new Text("footer", 0, 0),
+			},
+			{ mode: "fullscreen" },
+		);
+		ok(root instanceof VStack);
+		const scroll = root.children[0];
+		ok(scroll instanceof ScrollView);
+		tui.setLayoutRoot(root);
+		tui.start();
+		const top = () =>
+			Number(/Row-(\d+)/u.exec(tui.getScreenLines().map(stripTerminalSequences).join("\n"))?.[1] ?? Number.NaN);
+		try {
+			tui.renderNow(true);
+			drain();
+			scroll.scrollTo(scroll.scrollTop - 400, { disableFollow: true });
+			tui.renderNow(true);
+			const reading = top();
+			ok(Number.isFinite(reading) && reading < 140, `the reader is scrolled up, at Row-${reading}`);
+			for (const columns of [70, 120]) {
+				terminal.columns = columns;
+				tui.renderNow(true);
+				ok(idle.length > 0, `${columns} columns: the rows away from the viewport wait for idle steps`);
+				strictEqual(top(), reading, `${columns} columns: the re-layout kept the reader on their row`);
+				drain();
+				tui.renderNow(true);
+				strictEqual(top(), reading, `${columns} columns: the swap kept the reader on their row`);
+				strictEqual(scroll.isFollowingEnd, false);
+			}
+			scroll.scrollToEnd();
+			terminal.columns = 90;
+			tui.renderNow(true);
+			drain();
+			tui.renderNow(true);
+			strictEqual(scroll.isFollowingEnd, true, "a view that follows the end keeps following");
+			ok(/Row-0149/u.test(tui.getScreenLines().map(stripTerminalSequences).join("\n")), "the last answer is in view");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps a scrolled-up reader at their place when the width changes", () => {
 		const terminal = new RenderingTerminal();
 		terminal.columns = 120;

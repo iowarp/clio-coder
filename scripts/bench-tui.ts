@@ -229,6 +229,20 @@ async function sample(
 	const terminal = new CountingTerminal();
 	let view: never | null = null;
 	let style: (typeof styles)[number] | undefined = outputStyle;
+	// The application's idle scheduler, run between frames: rendering ahead and the viewport-first re-layout's catch-up.
+	const idle: Array<() => boolean> = [];
+	const pump = (): void => {
+		const step = idle[0];
+		if (step !== undefined && !step()) idle.shift();
+		if (idle.length > 0) setImmediate(pump);
+	};
+	const scheduleIdle = (step: () => boolean): void => {
+		idle.push(step);
+		if (idle.length === 1) setImmediate(pump);
+	};
+	const drainIdle = (): void => {
+		for (let step = idle[0]; step !== undefined; step = idle[0]) if (!step()) idle.shift();
+	};
 	const panelOptions = {
 		now: () => 1_000,
 		getTerminalRows: () => terminal.rows,
@@ -238,7 +252,7 @@ async function sample(
 	};
 	// Under --verify every transcript call is kept, so a fresh panel can replay it with no render cache.
 	const calls: Array<(target: ChatPanel) => void> = [];
-	const panel = recording(createChatPanel(panelOptions), calls);
+	const panel = recording(createChatPanel({ ...panelOptions, scheduleIdle, deferRelayout: true }), calls);
 	for (let index = 0; index < turns; index++) {
 		panel.appendUser(`Question ${index}`);
 		// Workloads that scan history need the history they scan: tool rows, and settled worker cards.
@@ -259,18 +273,25 @@ async function sample(
 	let draft = "draft";
 	const editor = new Text(draft, 0, 0);
 	const tui = mount(mode, terminal, panel, editor);
-	/** Whether the renderer's painted rows equal a from-scratch render of the same transcript and draft. */
+	/**
+	 * Whether the renderer's painted rows equal a from-scratch render of the same transcript and draft: at once the
+	 * rows on screen, which a pending re-layout renders first, then every row once the idle steps have caught up.
+	 */
 	const matchesFresh = (): boolean => {
 		const fresh = createChatPanel(panelOptions);
 		for (const replay of calls) replay(fresh);
 		const freshTerminal = new CountingTerminal();
 		freshTerminal.columns = terminal.columns;
 		const freshTui = mount(mode, freshTerminal, fresh, new Text(draft, 0, 0));
+		const same = (expected: readonly string[], actual: readonly string[]): boolean =>
+			expected.length === actual.length && expected.every((row, index) => row === actual[index]);
 		try {
 			freshTui.renderNow();
 			const expected = paintedRows(freshTui);
-			const actual = paintedRows(tui);
-			return expected.length === actual.length && expected.every((row, index) => row === actual[index]);
+			const shown = same(expected.slice(-terminal.rows), paintedRows(tui).slice(-terminal.rows));
+			drainIdle();
+			tui.renderNow();
+			return shown && same(expected, paintedRows(tui));
 		} finally {
 			freshTui.stop();
 		}

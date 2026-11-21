@@ -97,6 +97,14 @@ export class EntryRuns {
 		this.runs = next;
 	}
 
+	/** Runs meet at entry `index` from now on: a run covering both sides of it splits there, keeping all its rows. */
+	splitAt(index: number): void {
+		const at = this.find(index);
+		const run = this.runs[at];
+		if (run === undefined || run.from === index) return;
+		this.runs.splice(at, 1, cut(run, run.from, index) as EntryRun, cut(run, index, run.to) as EntryRun);
+	}
+
 	/** The transcript is `length` entries long now: the rows of entries past its end go. */
 	truncate(length: number): void {
 		if ((this.runs.at(-1)?.to ?? 0) <= length) return;
@@ -105,4 +113,96 @@ export class EntryRuns {
 			return part === null ? [] : [part];
 		});
 	}
+}
+
+/** Where a piece of a frame sits: its first row, its row count and the first entry it holds rows of. */
+export interface PlacedPiece {
+	readonly start: number;
+	readonly rows: number;
+	/** The entry the piece belongs to; a run's first entry. */
+	readonly from: number;
+	readonly run?: EntryRun;
+}
+
+/** The entry a frame's row belongs to and the row that entry starts at, its leading gap included. */
+function entryAtRow(layout: readonly PlacedPiece[], row: number): { entry: number; start: number } | null {
+	let low = 0;
+	let high = layout.length - 1;
+	while (low <= high) {
+		const middle = (low + high) >> 1;
+		const piece = layout[middle] as PlacedPiece;
+		if (row < piece.start) high = middle - 1;
+		else if (row >= piece.start + piece.rows) low = middle + 1;
+		else if (piece.run !== undefined) {
+			const offset = row - piece.start;
+			let first = 0;
+			let last = piece.run.starts.length - 1;
+			while (first < last) {
+				const mid = (first + last + 1) >> 1;
+				if ((piece.run.starts[mid] as number) <= offset) first = mid;
+				else last = mid - 1;
+			}
+			return { entry: piece.run.from + first, start: piece.start + (piece.run.starts[first] as number) };
+		} else {
+			let lead = middle;
+			while (lead > 0 && layout[lead - 1]?.run === undefined && layout[lead - 1]?.from === piece.from) lead -= 1;
+			return { entry: piece.from, start: (layout[lead] as PlacedPiece).start };
+		}
+	}
+	return null;
+}
+
+/** The rows `[start, end)` entry `index` spans in a frame, or null when the frame drew none of it. */
+export function entryRows(layout: readonly PlacedPiece[], index: number): { start: number; end: number } | null {
+	let low = 0;
+	let high = layout.length - 1;
+	let found = -1;
+	while (low <= high) {
+		const middle = (low + high) >> 1;
+		if ((layout[middle] as PlacedPiece).from <= index) {
+			found = middle;
+			low = middle + 1;
+		} else high = middle - 1;
+	}
+	const piece = layout[found];
+	if (piece === undefined) return null;
+	if (piece.run !== undefined) {
+		if (index >= piece.run.to) return null;
+		const at = index - piece.run.from;
+		const next = piece.run.starts[at + 1];
+		return {
+			start: piece.start + (piece.run.starts[at] as number),
+			end: piece.start + (next === undefined ? piece.rows : next),
+		};
+	}
+	if (piece.from !== index) return null;
+	let lead = found;
+	while (lead > 0 && layout[lead - 1]?.run === undefined && layout[lead - 1]?.from === index) lead -= 1;
+	return { start: (layout[lead] as PlacedPiece).start, end: piece.start + piece.rows };
+}
+
+/** Where the operator's viewport sits over the transcript, in transcript rows from its end; 0 follows the end. */
+export interface TranscriptViewport {
+	fromEnd: number;
+	rows: number;
+}
+
+/**
+ * What a re-layout renders first, read off the frame before it: the entries `[lo, hi)` within a screen of the
+ * viewport, and the entry its top row sits in, with how far into it, so the viewport can stay on that row.
+ */
+export function viewportWindow(
+	layout: readonly PlacedPiece[],
+	total: number,
+	entries: number,
+	viewport: TranscriptViewport,
+): { lo: number; hi: number; anchor: { entry: number; offset: number; top: number } | null } {
+	if (total === 0) return { lo: 0, hi: entries, anchor: null };
+	const bottom = Math.max(0, total - Math.max(0, viewport.fromEnd));
+	const top = Math.max(0, bottom - viewport.rows);
+	const lo = entryAtRow(layout, Math.max(0, top - viewport.rows))?.entry ?? 0;
+	const below = bottom + viewport.rows;
+	const hi = below >= total ? entries : (entryAtRow(layout, below)?.entry ?? entries - 1) + 1;
+	const at = entryAtRow(layout, top);
+	return { lo, hi, anchor: at === null ? null : { entry: at.entry, offset: top - at.start, top } };
 }
