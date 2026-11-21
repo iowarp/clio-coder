@@ -319,11 +319,29 @@ export function claimPathRefusal(
 	repositoryRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
 ): string | null {
+	return pathRefusal(claim, repositoryRoot, [tmpdir(), "/tmp", "/var/tmp", ...scratchRoots]);
+}
+
+/**
+ * The same rule at delivery, for a record written before it (CLI-P25), minus every judgement of scratch placement:
+ * scratch roots are the writer's (its TMPDIR and settings), so a reader judging them against its own would withhold a
+ * lesson that was valid where it was written. A declared scratch parameter is not judged, and no path is excused or
+ * refused for lying under a scratch root; a path of another worktree or checkout, or outside the repository, still is.
+ * Whatever passed at write passes here.
+ */
+export function claimDeliveryPathRefusal(claim: MemoryClaim, repositoryRoot: string): string | null {
+	return pathRefusal(claim, repositoryRoot, null);
+}
+
+/** `scratchRoots` null leaves scratch placement unjudged. */
+function pathRefusal(
+	claim: MemoryClaim,
+	repositoryRoot: string,
+	scratchRoots: ReadonlyArray<string> | null,
+): string | null {
 	const root = landedPath(repositoryRoot);
 	const worktrees = (relatedRepositoryRoots(root)?.roots ?? []).map(landedPath).filter((other) => other !== root);
-	const scratch = [...new Set([tmpdir(), "/tmp", "/var/tmp", ...scratchRoots].filter((dir) => isAbsolute(dir)))].map(
-		landedPath,
-	);
+	const scratch = [...new Set((scratchRoots ?? []).filter((dir) => isAbsolute(dir)))].map(landedPath);
 	const within = (path: string, dir: string) => path === dir || strictlyInside(path, dir);
 	const inWorktree = (target: string) => worktrees.some((other) => within(target, other));
 	const inRepository = (target: string) =>
@@ -333,7 +351,8 @@ export function claimPathRefusal(
 	const underScratch = (target: string) => scratch.some((dir) => within(target, dir));
 	const refused = ({ path, use }: { path: string; use: "word" | "program" | "scratch" }): boolean => {
 		const target = landedPath(resolve(root, path));
-		if (use === "scratch") return !underScratch(target) || within(target, root) || inWorktree(target);
+		if (use === "scratch")
+			return scratchRoots !== null && (!underScratch(target) || within(target, root) || inWorktree(target));
 		if (inRepository(target)) return false;
 		if (use === "word") return true;
 		return underScratch(target) || inWorktree(target) || enclosingRepository(target) !== null;

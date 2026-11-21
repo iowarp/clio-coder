@@ -287,6 +287,21 @@ describe("memory guardian gate", () => {
 			repository: { kind: "canonical-path", key: repo },
 		};
 		ok(checkoutDeliveryCheck(repo)(bound)?.includes("outside its repository checkout"));
+		// Delivery judges what the record binds, never where its reader keeps scratch: a declared scratch parameter under
+		// another session's scratch root is delivered, a global lesson may name a machine-wide tool, and a legacy record
+		// keyed by a subdirectory reads its own repository's paths as its own.
+		const deliver = checkoutDeliveryCheck(repo);
+		const elsewhere = "node fixture.mjs --out /srv/other-scratch/out.txt";
+		const lesson = (command: string) => ({ lesson: `Run \`${command}\`.`, evidenceRefs: [commandEvidenceRef(command)] });
+		const scratchParameter = { kind: "command" as const, command: pattern(elsewhere, 3) };
+		strictEqual(deliver({ ...bound, id: "mem-00000000000000b2", ...lesson(elsewhere), claim: scratchParameter }), null);
+		const tool = "node /opt/tools/lint.mjs";
+		const { repository: _repository, ...unscoped } = bound;
+		strictEqual(deliver({ ...unscoped, id: "mem-00000000000000b3", scope: "global", ...lesson(tool) }), null);
+		mkdirSync(join(repo, "sub"), { recursive: true });
+		const inside = `node ${join(repo, "fixture.mjs")} --mode native`;
+		const subdirectory = { kind: "canonical-path" as const, key: join(repo, "sub") };
+		strictEqual(deliver({ ...bound, id: "mem-00000000000000b4", ...lesson(inside), repository: subdirectory }), null);
 
 		// The legacy reader: a store written before claims is read as it is, and its first mutation keeps the count.
 		const legacyDir = scratch();
