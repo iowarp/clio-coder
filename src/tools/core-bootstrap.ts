@@ -129,6 +129,8 @@ export interface CoreToolBootstrapDeps {
 	storeWritable?: boolean;
 	/** A worker's dispatch tag grant (M-31): put and note into these tags only. */
 	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
+	/** A read-only worker registry: its gateway refuses a withheld write as read-only, as admission does. */
+	readOnly?: boolean;
 }
 
 export interface CoreToolRegistration {
@@ -424,6 +426,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 			...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
 			...(deps.rankCapabilities ? { rankCapabilities: deps.rankCapabilities } : {}),
 			...(deps.onCapabilityCalled ? { onCapabilityCalled: deps.onCapabilityCalled } : {}),
+			...(deps.readOnly === true ? { readOnly: true } : {}),
 		}),
 		{
 			path: "src/tools/gateway/index.ts",
