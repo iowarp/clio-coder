@@ -563,8 +563,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			if (disposed) return;
 			if ((reason === "turn-end" || reason === "turn-start") && bound()) armed = true;
 			if (!armed) {
-				// Unarmed, nothing runs, but a disabled guardian still says so (C-20).
-				if (!deps.enabled()) setState("off");
+				// Unarmed, nothing runs, but the state still says whether the guardian is on (C-20).
+				setState(deps.enabled() ? "idle" : "off");
 				return;
 			}
 			if (reason === "turn-end" || reason === "turn-start") {
@@ -582,8 +582,9 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		reset() {
 			if (disposed) return;
 			retire();
-			// `/new` parks the session: a guardian that waits for a first turn waits for the next bound one.
-			if (deps.awaitFirstTurn === true && !bound()) armed = false;
+			// A park, a resume or a branch switch: a guardian that waits for a first turn waits for the next bound one. The
+			// park fires while the old session is still current (`/new`, ACP session/close), so the session cannot decide.
+			if (deps.awaitFirstTurn === true) armed = false;
 			setState(deps.enabled() ? "idle" : "off");
 			if (armed) schedule(WAKE_DEBOUNCE_MS);
 		},
