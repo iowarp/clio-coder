@@ -73,6 +73,17 @@ export interface MemoryGateOutcome {
 	demoted: MemoryRecord[];
 	/** Ids named by an observation that the store no longer holds. */
 	missing: string[];
+	/**
+	 * Each observation as recorded: the record's claim revision after it, and whether an operator decided the record.
+	 * Delivery's unsettled-session ledger is fed from this; the record itself carries nothing more.
+	 */
+	observed: Array<{
+		memoryId: string;
+		sessionId: string;
+		kind: MemoryObservationKind;
+		revision: string;
+		operator: boolean;
+	}>;
 }
 
 /**
@@ -266,7 +277,7 @@ export async function recordMemoryObservations(
 	now: Date = new Date(),
 	options: MemoryMutationOptions = {},
 ): Promise<MemoryGateOutcome> {
-	const outcome: MemoryGateOutcome = { approved: [], demoted: [], missing: [] };
+	const outcome: MemoryGateOutcome = { approved: [], demoted: [], missing: [], observed: [] };
 	if (inputs.length === 0) return outcome;
 	const at = now.toISOString();
 	return mutateMemoryRecords(
@@ -285,6 +296,13 @@ export async function recordMemoryObservations(
 				const next = touched.has(current.id) ? current : cloneMemoryRecord(current);
 				observeMemoryRecord(next, input, at);
 				touched.set(next.id, next);
+				outcome.observed.push({
+					memoryId: next.id,
+					sessionId: input.sessionId,
+					kind: input.kind,
+					revision: memoryRevision(next),
+					operator: operatorDecided(next),
+				});
 			}
 			if (touched.size === 0) return { result: outcome };
 			gateTouched(records, touched, at, outcome);

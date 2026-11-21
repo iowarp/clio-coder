@@ -1,16 +1,26 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import type { SideShareFacts } from "../../src/domains/memory/background-budget.js";
+import {
+	decideBackgroundStep,
+	foldSideShare,
+	SIDE_SHARE_FREE_CALLS,
+} from "../../src/domains/memory/background-budget.js";
+import { createBackgroundCallJournal } from "../../src/domains/memory/background-route.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { createTaskMemoryTelemetrySink, type TaskMemoryTelemetryStep } from "../../src/domains/memory/memory-events.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const ZERO = { added: 0, updated: 0, deleted: 0 };
@@ -147,5 +157,221 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 		strictEqual(readTaskMemorySpendSummary(home.dir), settled);
 	} finally {
 		await journal.close();
+	}
+});
+
+test("the side-share governor admits three free calls, then refuses automatic calls over the share; the rules tiers make no model step", async (t) => {
+	const home = makeScratchHome("clio-coder-side-share-");
+	t.after(home.cleanup);
+	const sessionId = "share";
+	const memoryContext = { sessionId, agent: { role: "memory" as const, id: sessionId } };
+	const mainContext = { sessionId, agent: { role: "main" as const, id: sessionId } };
+	const target = {
+		targetId: "copilot",
+		runtimeId: "copilot-sdk",
+		api: "fixture",
+		requestedModel: "gpt-0x",
+		reportedModel: { kind: "unknown" as const, reason: "not-observed" as const },
+	};
+	const journal = await openCallJournal({
+		directory: telemetrySessionDirectory(home.dir, sessionId),
+		context: memoryContext,
+		writer: { clioCoderVersion: "fixture", piVersion: "fixture" },
+	});
+	const begin = (context: typeof memoryContext | typeof mainContext, purpose?: "memory.lesson") =>
+		beginCall({ roundKind: "tools-removed", toolChoice: "none", target, ...(purpose ? { purpose } : {}) }, context);
+	// Every call bills like a 0x Copilot model: premium units measured, and zero.
+	const settle = (
+		call: { settle: ReturnType<typeof begin>["settle"] },
+		output: number | null,
+		extra: Record<string, unknown> = {},
+	) =>
+		call.settle(
+			callSettlementFromMessage(
+				{
+					stopReason: "stop",
+					...(output === null
+						? {}
+						: {
+								usage: {
+									input: 1,
+									output,
+									cacheRead: 0,
+									cacheWrite: 0,
+									clioExternal: { tokenUsage: "provider-reported" },
+								},
+							}),
+					copilotBilling: { premiumRequests: 0, nanoAiu: 0, modelCalls: 1 },
+					...extra,
+				},
+				"none",
+			),
+		);
+	// One process's governor over the real live read model, behind the settle barrier the telemetry contract has; with
+	// `unreadable`, that barrier throws.
+	const processGovernor = (unreadable = false) => {
+		const model = createLiveTelemetryModel({ stateDir: () => home.dir });
+		model.bind(sessionId);
+		const telemetry = {
+			settledSessionSpend: async () => {
+				if (unreadable) throw new Error("journal unreadable");
+				await journal.flush();
+				return model.settled();
+			},
+			read: model,
+		};
+		const governor = createBackgroundCallJournal(
+			{} as ProvidersContract,
+			() => undefined,
+			() => ({ id: sessionId, cwdHash: "repo" }),
+			() => telemetry,
+		).sideShare;
+		ok(governor);
+		return { governor, model };
+	};
+	type Governor = ReturnType<typeof processGovernor>["governor"];
+	const memory = { ...DEFAULT_SETTINGS.context.memory, sideShare: 0.15, maxOutputTokens: 2000 };
+	const decideWith = (facts: SideShareFacts) => {
+		const decision = decideBackgroundStep({
+			route: { pricedBy: "free", rates: null, runtime: { auth: "none", tier: "local-native" }, quotaProviderId: null },
+			inputTokens: 100,
+			maxOutputTokens: 2000,
+			timeoutCapMs: 1000,
+			nowMs: 0,
+			session: { spendUsd: 0, ceilingUsd: 0 },
+			quota: null,
+			endpoint: { occupied: 0, admissionLimit: 1, prefillTokensPerSecond: null, generationTokensPerSecond: null },
+			sideShare: facts,
+		});
+		return decision.admit ? "admit" : decision.reason;
+	};
+	const decide = async (governor: Governor, purpose: "memory.lesson" | "memory.classify" = "memory.lesson") => {
+		const facts = governor.facts(await governor.journal(), purpose, memory);
+		return { facts, reason: decideWith(facts) };
+	};
+
+	// An unreadable journal fails closed: the current session's holds count, and its free calls stay three after they end.
+	const blind = processGovernor(true);
+	try {
+		const holds: Array<() => void> = [];
+		for (let call = 0; call < SIDE_SHARE_FREE_CALLS; call += 1) {
+			strictEqual((await decide(blind.governor)).reason, "admit");
+			holds.push(blind.governor.hold("memory.lesson", 2000, undefined));
+		}
+		strictEqual((await decide(blind.governor)).reason, "side_share", "held calls count; zero main admits only three");
+		for (const release of holds) release();
+		strictEqual((await decide(blind.governor)).reason, "side_share", "released, the three free calls are still spent");
+		strictEqual(
+			(await decide(blind.governor, "memory.classify")).reason,
+			"admit",
+			"an operator-requested call is exempt",
+		);
+	} finally {
+		blind.model.stop();
+	}
+
+	const first = processGovernor();
+	try {
+		const { governor } = first;
+		// Calls the process journal records (before any session) and calls another session holds are not this session's.
+		for (let call = 0; call < SIDE_SHARE_FREE_CALLS; call += 1)
+			governor.hold("memory.lesson", 2000, { sessionId: null, callId: newCallId() })();
+		const elsewhere = governor.hold("memory.lesson", 2000, { sessionId: "other", callId: newCallId() });
+		const cold = await decide(governor);
+		strictEqual(cold.facts.automaticCalls, 0, "process-journaled and other-session calls never count here");
+		strictEqual(cold.reason, "admit");
+		elsewhere();
+
+		settle(begin(mainContext), 10_000);
+		// Three journaled memory calls; the one without usage is charged its own request budget (500), not the setting.
+		for (const [index, output] of [100, 100, null].entries()) {
+			const call = begin(memoryContext, "memory.lesson");
+			const release = governor.hold("memory.lesson", output === null ? 500 : 2000, { sessionId, callId: call.callId });
+			if (index < 2) {
+				settle(call, output);
+				release();
+				continue;
+			}
+			// Released before its settlement reached the journal: still counted, never between held and recorded.
+			release();
+			strictEqual(
+				(await decide(governor)).facts.automaticCalls,
+				3,
+				"a released call counts until its settle is journaled",
+			);
+			settle(call, output);
+		}
+		// A never-sent attempt spent nothing and is no call.
+		settle(begin(memoryContext, "memory.lesson"), null, { callInvoked: false });
+		const settled = await decide(governor);
+		strictEqual(settled.facts.automaticCalls, 3, "counted once from the journal after it settles");
+		strictEqual(settled.facts.sideOutputTokens, 700);
+		deepStrictEqual(settled.facts.premium, { side: 0, main: 0 });
+		strictEqual(settled.reason, "admit", "700 over 10000 is under the share, and a 0x route's zero units refuse nothing");
+		// A retried call (a 401 attempt, then one that answered) is charged once, for what the retry measured.
+		const retried = begin(memoryContext, "memory.lesson");
+		const releaseRetried = governor.hold("memory.lesson", 2000, { sessionId, callId: retried.callId });
+		settle(retried, null);
+		const retry = retried.nextAttempt();
+		ok(retry);
+		settle(retry, 100);
+		releaseRetried();
+		const charged = await decide(governor);
+		strictEqual(charged.facts.automaticCalls, 4);
+		strictEqual(charged.facts.sideOutputTokens, 800, "the 401 attempt is not charged beside its retry");
+		strictEqual(charged.reason, "admit");
+		// A replayed settlement folds once.
+		const records = (await governor.journal()).records;
+		deepStrictEqual(
+			foldSideShare([...records, ...records], [], () => 2000).facts,
+			foldSideShare(records, [], () => 2000).facts,
+		);
+		settle(begin(memoryContext, "memory.lesson"), 2000);
+		strictEqual((await decide(governor)).reason, "side_share", "2800 over 10000: a further useful call is refused");
+	} finally {
+		first.model.stop();
+	}
+	// Resume in a new process: the unseeded live view is waited out, so the count continues.
+	const second = processGovernor();
+	try {
+		const resumed = await decide(second.governor);
+		strictEqual(resumed.facts.automaticCalls, 5, "a resumed session continues its count");
+		strictEqual(resumed.reason, "side_share");
+		const under = { ...resumed.facts, sideOutputTokens: 1 };
+		strictEqual(
+			decideWith({ ...under, premium: { side: 1, main: 0 } }),
+			"side_share",
+			"memory units over zero main units",
+		);
+		strictEqual(decideWith({ ...under, premium: { side: 0, main: 0 } }), "admit", "zero memory units refuse nothing");
+		strictEqual(decideWith({ ...resumed.facts, share: 0 }), "admit", "0 turns it off");
+	} finally {
+		second.model.stop();
+		await journal.close();
+	}
+
+	// The switches: the default rules tiers arm no model step on an error streak or the tool cadence; `model` does.
+	for (const surfaces of [undefined, { correct: "model" as const }, { bank: "model" as const }]) {
+		const registration = createMemoryInterventionRegistration({
+			bank: new TaskMemoryBank(),
+			everyNTools: 2,
+			...(surfaces ? { surfaces } : {}),
+		});
+		try {
+			registration.evaluate({ hook: "turn_start", sessionId: "switch", turnId: "t" });
+			for (const command of ["false", "false --again"])
+				registration.evaluate({
+					hook: "after_tool",
+					sessionId: "switch",
+					turnId: "t",
+					toolName: "bash",
+					toolArgs: { command },
+					metadata: { resultKind: "error" },
+				});
+			registration.signalLoop();
+			strictEqual(registration.owesBoundaryStep(), surfaces !== undefined, JSON.stringify(surfaces ?? "rules"));
+		} finally {
+			registration.dispose();
+		}
 	}
 });

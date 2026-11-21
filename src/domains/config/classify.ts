@@ -91,6 +91,13 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	// The main prompt is recompiled at the next turn, so its prefix is read again once; a worker reads it per dispatch.
 	"prompts.profile",
 	"context.memory.surfaces.observe",
+	// Reminders read it at each decision point; a running session's `# Memory` section stays as it was compiled, so a
+	// new session (or a resumed one recompiling its prompt) is the first to carry a changed section.
+	"context.memory.surfaces.delivery",
+	// The memory middleware and route read these at each trigger and each call; the next turn observes a change.
+	"context.memory.surfaces.correct",
+	"context.memory.surfaces.bank",
+	"context.memory.sideShare",
 	"turnControl",
 	// An engine resolves per call; the use that registers consult at startup is restart-required.
 	"systemOne",
