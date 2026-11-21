@@ -782,7 +782,15 @@ function cdTarget(segment: ReadonlyArray<string>): string | null {
 export type CommandPathEvent =
 	| { kind: "cd"; target: string; unmodeled: boolean }
 	| { kind: "write"; target: string }
-	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[]; origin: LinkOrigin }
+	| {
+			kind: "link";
+			symbolic: boolean;
+			sources: string[];
+			linkDirs: string[];
+			origin: LinkOrigin;
+			/** Where each link itself may land, as written; absent when the command reads them from input. */
+			links?: string[];
+	  }
 	| { kind: "delete"; target: string; scope: DeleteScope; findRoot?: FindRootFilter }
 	| { kind: "subshell"; open: boolean };
 
@@ -1421,14 +1429,19 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 	if (!symbolic && !hard && !copied) return;
 	let sources = operands;
 	let linkDirs = ["."];
+	const named = (dir: string) => (source: string) => path.posix.join(dir, path.posix.basename(source));
+	let links = operands.map(named("."));
 	if (targetDirectory !== null) {
 		linkDirs = [targetDirectory];
+		links = operands.map(named(targetDirectory));
 		out.push({ kind: "write", target: targetDirectory });
 	} else if (operands.length > 1) {
 		const destination = operands.at(-1) as string;
 		sources = operands.slice(0, -1);
 		const parent = path.posix.dirname(destination);
 		linkDirs = noTargetDirectory ? [parent] : [parent, destination];
+		// The destination is the link, or a directory the links go into.
+		links = noTargetDirectory ? [destination] : [destination, ...sources.map(named(destination))];
 	}
 	const origin: LinkOrigin = found.fromInput ? "input" : copied ? "copied" : "text";
 	if (origin === "input") {
@@ -1441,7 +1454,7 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 		});
 		return;
 	}
-	if (sources.length > 0) out.push({ kind: "link", symbolic: symbolic || copied, sources, linkDirs, origin });
+	if (sources.length > 0) out.push({ kind: "link", symbolic: symbolic || copied, sources, linkDirs, origin, links });
 }
 
 /**

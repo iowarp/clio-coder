@@ -432,6 +432,7 @@ function deleteTargetReason(
 	base: string | undefined,
 	pattern: string | null,
 	scratchRoots: ReadonlyArray<string>,
+	throughLink: (abs: string) => boolean = () => false,
 ): string | null {
 	const abs = canonicalizeRawPath(target, candidateBase(base));
 	const workspace = canonicalizePath(path.resolve(process.cwd()));
@@ -448,6 +449,9 @@ function deleteTargetReason(
 	const inScratch = [...tmpDeleteRoots(), ...scratchRoots].some((root) =>
 		scope === "children" ? isUnderPrefix(abs, root) : isStrictlyUnder(abs, root),
 	);
+	// A link the command plants first is followed by the delete, and nothing here can see where it points (row 261).
+	if (inScratch && throughLink(abs))
+		return `${DELETE_PATH_REASON_PREFIX}unresolved: ${target} below a link this command creates`;
 	return inScratch ? null : `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
 }
 
@@ -788,6 +792,7 @@ function deleteEventReasons(
 	event: Extract<CommandPathEvent, { kind: "delete" }>,
 	bases: ShellBases,
 	scratchRoots: ReadonlyArray<string> | undefined,
+	throughLink?: (abs: string) => boolean,
 ): string[] {
 	if (event.scope === "input") return [`${DELETE_PATH_REASON_PREFIX}unresolved: operands from input`];
 	if (event.scope === "remote") return [`${DELETE_PATH_REASON_PREFIX}remote: ${event.target}`];
@@ -814,10 +819,17 @@ function deleteEventReasons(
 	const from = path.isAbsolute(target) ? [undefined] : (bases ?? []);
 	const reasons = new Set<string>();
 	for (const base of from) {
-		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? []);
+		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? [], throughLink);
 		if (reason !== null) reasons.add(reason);
 	}
 	return [...reasons];
+}
+
+/** Where a link a command plants lands, as written and through the real path of its directory today. */
+function linkForms(link: string, base: string): string[] {
+	const lexical = path.resolve(base, link);
+	const real = canonicalizeRawPath(link, base);
+	return real === null || real === lexical ? [lexical] : [lexical, real];
 }
 
 function walkPathReasons(
@@ -834,6 +846,11 @@ function walkPathReasons(
 	// after it would otherwise resolve from the workspace it already left.
 	let escaped = false;
 	const escapedSubshells: boolean[] = [];
+	// Links the command plants before a delete, resolved from every base; `unknownLink` once one cannot be placed.
+	const planted: string[] = [];
+	let unknownLink = false;
+	const throughLink = (abs: string): boolean =>
+		unknownLink || planted.some((link) => abs !== link && isSameOrDescendant(abs, link));
 	for (const [index, event] of walk.entries()) {
 		if (event.kind === "subshell") {
 			if (event.open) {
@@ -865,6 +882,14 @@ function walkPathReasons(
 		}
 		if (event.kind === "link") {
 			for (const reason of linkReasons(event, bases)) writeReasons.add(reason);
+			if (!event.symbolic) continue;
+			for (const link of event.links ?? [""]) {
+				const expanded = expandShellHome(link);
+				if (expanded === null || expanded === "" || isDynamicShellPath(expanded)) unknownLink = true;
+				else if (path.isAbsolute(expanded)) planted.push(...linkForms(expanded, "/"));
+				else if (bases === null) unknownLink = true;
+				else for (const base of bases) planted.push(...linkForms(expanded, candidateBase(base)));
+			}
 			continue;
 		}
 		if (event.kind === "delete") {
@@ -876,7 +901,7 @@ function walkPathReasons(
 				!event.target.startsWith("~")
 			)
 				writeReasons.add(`${DELETE_PATH_REASON_PREFIX}outside-workspace: ${event.target} after a cd out of the workspace`);
-			for (const reason of deleteEventReasons(event, bases, scratchRoots)) writeReasons.add(reason);
+			for (const reason of deleteEventReasons(event, bases, scratchRoots, throughLink)) writeReasons.add(reason);
 			continue;
 		}
 		const target = event.target;

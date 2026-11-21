@@ -4516,9 +4516,12 @@ function deletesNeedingSnapshot(command: string, workspace: string): string[] {
 function deletesOnlyScratch(command: string, roots: ReadonlyArray<string>): boolean {
 	let deletes = 0;
 	for (const walk of extractCommandPathWalks(command)) {
+		// A link planted first may lead a later scratch path anywhere (row 261).
+		let linked = false;
 		for (const event of walk) {
+			if (event.kind === "link" && event.symbolic) linked = true;
 			if (event.kind !== "delete" || event.scope === "input" || event.scope === "remote") continue;
-			if (!path.isAbsolute(event.target)) return false;
+			if (linked || !path.isAbsolute(event.target)) return false;
 			const resolved = canonicalizeRawPath(event.target, "/");
 			if (resolved === null || !roots.some((root) => resolved !== root && isUnderOrSame(resolved, root))) return false;
 			deletes += 1;

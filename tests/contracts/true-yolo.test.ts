@@ -552,6 +552,11 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	writeFileSync(join(cwd, "fixture.txt"), "x\n");
 	symlinkSync(cwd, join(linkDir, "prior"));
 	const rel = basename(linkDir);
+	// Row 261: a scratch path below a link the same command plants first is not placed as scratch.
+	const planted = `ln -s ${cwd} $TMPDIR/${rel}/lit; rm -f $TMPDIR/${rel}/lit/fixture.txt`;
+	const linked = engine.evaluate(bash(planted), "default", { ...atDefault, snapshots: false });
+	strictEqual(`${linked.kind}/${linked.reasonCode}`, "ask/damage-control:delete-outside-workspace", planted);
+	match(linked.reasons.join("; "), /below a link this command creates/u, planted);
 	for (const command of [
 		`B=$TMPDIR/${rel}/alias; ln -s ${cwd} "$TMPDIR/${rel}/alias"; rm -f "$B/fixture.txt"`,
 		`B=$TMPDIR/${rel}/prior; rm -f "$B/x"`,
