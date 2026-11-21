@@ -490,7 +490,9 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
 	}
 	// A failed cd leaves the shell in the workspace, where a delete after `;` or a newline still runs, and a TMPDIR that
-	// is no directory never moves the shell: each keeps the .git block and the workspace snapshot ask.
+	// is no directory never moves the shell: each keeps the .git block, which is the floor's once the operator's scope
+	// judges it (row 261), and any other workspace delete keeps the snapshot ask.
+	const gitFloor = "block/yolo-floor:yolo-floor-workspace-git";
 	const absentTemp = join(temp, "xr43-absent");
 	for (const [command, env] of [
 		['cd "$TMPDIR"; rm -rf .git', temp],
@@ -502,28 +504,48 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		try {
 			strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 			const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
-			strictEqual(decision.kind, "ask", command);
-			match(decision.reasons.join("; "), /deletes (?:\.git|src) with no workspace snapshot/u, command);
+			if (command.endsWith(".git")) {
+				strictEqual(`${decision.kind}/${decision.reasonCode}`, gitFloor, command);
+				strictEqual(verdict(command, "yolo"), gitFloor, command);
+			} else {
+				strictEqual(decision.kind, "ask", command);
+				match(decision.reasons.join("; "), /deletes src with no workspace snapshot/u, command);
+			}
 		} finally {
 			process.env.TMPDIR = temp;
 		}
 	}
-	// Contained yolo hands the judge its default decision, whose scope holds the scratch roots: a delete a failed cd leaves
-	// in the workspace gets what the same delete written plainly gets, and the judge's reason names the workspace path.
+	// Row 261: deleting, emptying or moving away the workspace's .git is the floor at contained yolo (the default decision
+	// with the scratch roots, which the judge would read), at unconfined yolo and for a worker's yolo. A floor block is
+	// never an ask, so no judge sees it, and an operator who named the command does not clear it. A delete a failed cd
+	// leaves in the workspace gets what the same delete written plainly gets.
 	const contained = { ...atDefault, scratchRoots: [realpathSync(temp)], snapshots: false };
-	for (const [command, plain] of [
-		['cd "$TMPDIR"; rm -rf .git', "rm -rf .git"],
-		['cd "$TMPDIR"\nrm -rf .git', "rm -rf .git"],
-		['cd "$TMPDIR" || rm -rf .git', "rm -rf .git"],
-		['cd "$TMPDIR" && mkdir -p x; rm -rf .git', "rm -rf .git"],
-		['cd "$TMPDIR"\nrm -rf src', "rm -rf src"],
-	] as const) {
-		const chained = engine.evaluate(bash(command), "default", contained);
-		const bare = engine.evaluate(bash(plain), "default", contained);
-		strictEqual(`${chained.kind}/${chained.reasonCode}`, `${bare.kind}/${bare.reasonCode}`, command);
-		const first = (reasons: ReadonlyArray<string>) => reasons.find((reason) => reason.trim().length > 0);
-		strictEqual(first(chained.reasons), first(bare.reasons), command);
+	for (const command of [
+		"rm -rf .git",
+		'cd "$TMPDIR"; rm -rf .git',
+		'cd "$TMPDIR"\nrm -rf .git',
+		'cd "$TMPDIR" || rm -rf .git',
+		'cd "$TMPDIR" && mkdir -p x; rm -rf .git',
+		'cd "$X" && rm -rf .git',
+		"rm -rf .git/*",
+		"rm -rf ./{src,.git}",
+		"unlink .git",
+		"find . -delete",
+		"mv .git ../old-git",
+	]) {
+		const decision = engine.evaluate(bash(command), "default", contained);
+		strictEqual(`${decision.kind}/${decision.reasonCode}`, gitFloor, command);
+		strictEqual(verdict(command, "yolo"), gitFloor, command);
+		strictEqual(engine.evaluate(bash(command), "yolo").kind, "block", command);
 	}
+	// A delete inside .git keeps its ordinary review, and a pure `&&` chain from the temp cd deletes the temp .git.
+	for (const command of ["rm -f .git/index.lock", "rm -rf .git/worktrees/x", 'cd "$TMPDIR" && rm -rf .git']) {
+		strictEqual(verdict(command, "yolo").includes("yolo-floor"), false, command);
+		strictEqual(engine.evaluate(bash(command), "default", contained).reasonCode.includes("yolo-floor"), false, command);
+	}
+	const chainedSrc = engine.evaluate(bash('cd "$TMPDIR"\nrm -rf src'), "default", contained);
+	const plainSrc = engine.evaluate(bash("rm -rf src"), "default", contained);
+	strictEqual(`${chainedSrc.kind}/${chainedSrc.reasonCode}`, `${plainSrc.kind}/${plainSrc.reasonCode}`);
 	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
 	const linkDir = mkdtempSync(join(temp, "xr43-"));
 	t.after(() => rmSync(linkDir, { recursive: true, force: true }));
@@ -1133,7 +1155,7 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 	const sandboxed: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "sandboxed" };
 	const refused: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "refused" };
 	const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
-	for (const command of ["bash clean.sh", "bash git.sh", 'bash "$SCRIPT"']) {
+	for (const command of ["bash clean.sh", 'bash "$SCRIPT"']) {
 		const decision = engine.evaluate(bash(command), "yolo", sandboxed);
 		strictEqual(decision.kind, "allow", command);
 		strictEqual(decision.shellSandbox?.workspace, cwd, command);
@@ -1141,6 +1163,8 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).shellSandbox, undefined, command);
 	}
+	// A script that deletes the workspace's .git meets the floor, sandbox or not (row 261).
+	strictEqual(engine.evaluate(bash("bash git.sh"), "yolo", sandboxed).reasonCode, "yolo-floor:yolo-floor-workspace-git");
 	const runScript = { tool: ToolNames.RunScript, args: { script: "clean.sh" } };
 	strictEqual(engine.evaluate(runScript, "yolo", sandboxed).shellSandbox?.workspace, cwd);
 	strictEqual(engine.evaluate(runScript, "yolo", refused).kind, "block");

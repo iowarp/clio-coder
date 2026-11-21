@@ -170,6 +170,7 @@ import {
 	yoloFloorScriptRuns,
 	yoloFloorShellScript,
 	yoloFloorTrustGrant,
+	yoloFloorWorkspaceGitHit,
 } from "./yolo-floor.js";
 
 export type SafetyPolicySource =
@@ -1109,6 +1110,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (executable !== null) return floorMatch(executable);
 			const deleted = yoloFloorDeleteHit(candidate, callCwd, cwd);
 			if (deleted !== null) return floorMatch(deleted);
+			// A pure `&&` chain from a cd to the temp root places its relative deletes there alone (XR-43).
+			const git = yoloFloorWorkspaceGitHit(resolveScratchDeleteOperands(candidate).command, callCwd, cwd);
+			if (git !== null) return floorMatch(git);
 		}
 		if (invokesTrustMutation(command, rawText)) {
 			return floorMatch({
@@ -2089,13 +2093,42 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		});
 	};
 
+	/**
+	 * The workspace `.git` floor rule (row 261) holds at every level, so a call judged without the operator's scope (a
+	 * worker, a grant, a bare evaluation) meets it too; a call that already blocks keeps its own reason.
+	 */
+	const unscopedWorkspaceGit = (
+		rawCall: ClassifierCall,
+		normal: SafetyPolicyDecision,
+		posture: string | undefined,
+	): SafetyPolicyDecision => {
+		if (normal.kind === "block" || rawCall.tool !== ToolNames.Bash) return normal;
+		const call = normalizeCallPaths(rawCall);
+		const { callCwd, judgedCommand } = commandUnderJudgment(call);
+		if (judgedCommand === null) return normal;
+		const command = yoloFloorCommandText(judgedCommand);
+		const hit = yoloFloorWorkspaceGitHit(resolveScratchDeleteOperands(command).command, callCwd, cwd);
+		if (hit === null) return normal;
+		const { match } = floorMatch(hit);
+		return gateDecision("block", baseDecision(call, normal.classification, callCwd, posture, judgedCommand), {
+			ruleId: hit.ruleId,
+			reasonCode: `${YOLO_FLOOR_REASON_PREFIX}${hit.ruleId}`,
+			reasons: [hit.reason, "the yolo floor holds at every autonomy level"],
+			match,
+			policySource: "builtin-classifier",
+		});
+	};
+
 	const evaluateScoped = (
 		rawCall: ClassifierCall,
 		posture: string | undefined,
 		scope: OperatorScope | undefined,
 	): SafetyPolicyDecision => {
 		if (scope?.level === "default") return evaluateOperatorDefault(rawCall, posture, scope);
-		const decision = scope === undefined ? evaluateCall(rawCall, posture) : evaluateTrueYolo(rawCall, posture, scope);
+		const decision =
+			scope === undefined
+				? unscopedWorkspaceGit(rawCall, evaluateCall(rawCall, posture), posture)
+				: evaluateTrueYolo(rawCall, posture, scope);
 		// A command the operator's yolo admitted under `safety.sandbox: required`
 		// runs in the main-session sandbox, whatever stage allowed it (#419, #407).
 		if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed") return decision;
