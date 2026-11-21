@@ -452,7 +452,7 @@ function recordSettingsChange(proposal: Proposal, sessionId: string | undefined)
 
 function savedSettingEffect(path: string): string {
 	if (path.startsWith("targets."))
-		return "New sessions and dispatches see the target; switch a running chat with /model or /settings targets.";
+		return "New sessions and dispatches see the target; switch a running chat with /model or /settings models.";
 	if (isRoutingPath(path))
 		return "This session keeps its current routing. Exit and start a new Clio session to use the saved routing.";
 	switch (settingsChangeKind(path)) {

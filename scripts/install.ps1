@@ -457,7 +457,7 @@ function Install-ClioCoder {
 			try { $next = & $node $entry setup --next 2>$null; if ($LASTEXITCODE -ne 0) { $next = $null } } catch { $next = $null } finally { $ErrorActionPreference = $savedPreference }
 		}
 		if ($next) { $next | ForEach-Object { Write-Host $_ } } else { Write-Host "Run: $run" }
-		# Native Windows has no background service yet; `clio-coder gui` starts a private server and prints its link.
+		# The background service is a separate step: `clio-coder gui background install` adds the logon task.
 		Write-Host "Desktop app: $run gui"
 		# Last, so the command a user copies from the bottom is one that runs as printed.
 		if (-not (Path-Contains $env:Path $binDir)) { Write-Host "$binDir is not on this terminal's PATH. Until it is, run: $run" }

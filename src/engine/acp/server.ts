@@ -2058,7 +2058,8 @@ function handleChatEvent(
 				},
 				{
 					...ORCHESTRATOR_UPDATE_META,
-					[ACP_NOTICE_META_KEY]: { level: event.level },
+					// The key names what the notice reports, so a client can place a turn's own continuation in its transcript.
+					[ACP_NOTICE_META_KEY]: { level: event.level, ...(typeof event.key === "string" ? { key: event.key } : {}) },
 					...(isRecord(event.memory) ? { [ACP_MEMORY_CAPTURE_META_KEY]: memoryCaptureMeta(event.memory) } : {}),
 				},
 			);

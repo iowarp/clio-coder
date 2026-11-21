@@ -20,6 +20,7 @@ import {
 	routeDraft,
 	savedRoutePatch,
 } from "../client/chat/route-picker-model.js";
+import { sessionFacts } from "../client/chat/session-facts-model.js";
 import { settledKey, settledTurns } from "../client/chat/session-telemetry.js";
 import { presentTool } from "../client/chat/tool-presentation.js";
 import {
@@ -35,6 +36,7 @@ import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
 import { applySessionDelta, emptySession } from "../contracts/session-projection.js";
 import type { TimelineItem, Turn } from "../contracts/sessions.js";
+import { TRANSCRIPT_NOTICE_KIND } from "../contracts/transcript-notice.js";
 import { fleetEvent } from "../server/acp/fleet-events.js";
 import { projectConfigOptions } from "../server/acp/session-config.js";
 
@@ -1057,6 +1059,27 @@ test("engine notices stay out of the conversation segments", () => {
 		only(turns).segments.map((segment) => segment.kind),
 		["activity", "response"],
 	);
+	// A yolo continuation reports the turn's own flow, so it stands in the transcript where it happened (GUI-6).
+	const continued = groupTurns(
+		[
+			item({ id: "u", turnId: "t", kind: "user", text: "Continue" }),
+			item({ id: "tool", turnId: "t", kind: "tool" }),
+			item({
+				id: "notice",
+				turnId: "t",
+				kind: "notice",
+				toolKind: TRANSCRIPT_NOTICE_KIND,
+				text: "Continuing this turn because autonomy is yolo (1 of 3): the loop guard locked its tools.",
+			}),
+			item({ id: "answer", turnId: "t", kind: "text", text: "Done." }),
+		],
+		statuses({ t: "succeeded" }),
+	);
+	assert.deepEqual(
+		only(continued).segments.map((segment) => segment.kind),
+		["activity", "notice", "response"],
+	);
+	assert.deepEqual(sessionFacts(only(continued).items).other, [], "and it leaves Session notes");
 });
 
 test("the usage and context reads re-key on every settle, past the projection's 128-turn window", () => {
