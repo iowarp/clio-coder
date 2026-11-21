@@ -18,7 +18,7 @@ import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../c
 
 import { ANTHROPIC_USAGE_URL, fetchAnthropicUsage } from "./anthropic-usage.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
-import { formatPlan } from "./types.js";
+import { credentialFingerprint, formatPlan } from "./types.js";
 
 export const CLAUDE_CODE_QUOTA_PROVIDER_ID = "claude-code";
 
@@ -130,6 +130,11 @@ export function createClaudeCodeQuotaProvider(options: ClaudeCodeQuotaOptions = 
 		id: CLAUDE_CODE_QUOTA_PROVIDER_ID,
 		displayName: DISPLAY_NAME,
 		endpoint: ANTHROPIC_USAGE_URL,
+
+		async credentialScope(): Promise<string | null> {
+			const credentials = await readCredentials();
+			return credentials === null ? null : credentialFingerprint(CLAUDE_CODE_QUOTA_PROVIDER_ID, credentials.accessToken);
+		},
 
 		async detect(): Promise<boolean> {
 			return (await readCredentials()) !== null;

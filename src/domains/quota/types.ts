@@ -8,6 +8,8 @@
  * across the worker and transport boundaries.
  */
 
+import { createHash } from "node:crypto";
+
 /** Outcome of one usage read, including the reasons a read produced no data. */
 export type QuotaStatus = "ok" | "no_credentials" | "expired" | "error" | "loading";
 
@@ -66,13 +68,27 @@ export interface QuotaProvider {
 	displayName: string;
 	/**
 	 * The usage endpoint this adapter reads, when another adapter reads the same one. The cache polls adapters that
-	 * share an endpoint one at a time, and a failed read holds the endpoint for all of them.
+	 * share an endpoint one at a time, each turn bounded so a hung adapter cannot block its sibling.
 	 */
 	endpoint?: string;
+	/**
+	 * A non-secret fingerprint of the credential a read would spend (see credentialFingerprint), or null without one.
+	 * Readings and held failures are scoped by it, so a login switch never serves another account's reading or hold.
+	 * An adapter without it is never shared across processes.
+	 */
+	credentialScope?(): Promise<string | null>;
 	/** True when usable credentials are present, without spending a network call. */
 	detect(): Promise<boolean>;
 	/** Read current usage, reporting failure as a snapshot status rather than throwing. */
 	fetch(): Promise<UsageSnapshot>;
+}
+
+/**
+ * A short one-way digest naming which credential an adapter holds, never the credential itself: 16 hex characters of
+ * a domain-separated SHA-256, enough to tell two logins apart and useless for authenticating.
+ */
+export function credentialFingerprint(providerId: string, secret: string): string {
+	return createHash("sha256").update(`quota-credential\0${providerId}\0${secret}`).digest("hex").slice(0, 16);
 }
 
 /** Parse a numeric `Retry-After` value into non-negative seconds. */

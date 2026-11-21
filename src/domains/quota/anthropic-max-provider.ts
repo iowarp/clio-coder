@@ -17,6 +17,7 @@ import { openAuthStorage } from "../providers/auth/index.js";
 import { ANTHROPIC_USAGE_URL, fetchAnthropicUsage } from "./anthropic-usage.js";
 import { anthropicStreamSnapshot } from "./observed.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
+import { credentialFingerprint } from "./types.js";
 
 export const ANTHROPIC_MAX_QUOTA_PROVIDER_ID = "anthropic-max";
 
@@ -92,6 +93,11 @@ export function createAnthropicMaxQuotaProvider(options: AnthropicMaxQuotaOption
 		id: ANTHROPIC_MAX_QUOTA_PROVIDER_ID,
 		displayName: DISPLAY_NAME,
 		endpoint: ANTHROPIC_USAGE_URL,
+
+		async credentialScope(): Promise<string | null> {
+			const credentials = await readCredentials();
+			return credentials === null ? null : credentialFingerprint(ANTHROPIC_MAX_QUOTA_PROVIDER_ID, credentials.accessToken);
+		},
 
 		async detect(): Promise<boolean> {
 			return (await readCredentials()) !== null;

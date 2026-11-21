@@ -12,11 +12,12 @@ import { noteQuotaRead } from "./observed.js";
 import { journalPolledQuota } from "./reading.js";
 import {
 	type CacheEntry,
-	type EndpointHold,
-	type MissEntry,
+	emptySharedQuotaState,
+	mergeSharedQuotaState,
+	QUOTA_HOLD_CAP_MS,
 	readSharedQuotaState,
 	type SharedQuotaState,
-	writeSharedQuotaState,
+	updateSharedQuotaState,
 } from "./shared-state.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
@@ -28,14 +29,14 @@ export const DEFAULT_QUOTA_CACHE_TTL_MS = 5 * 60_000;
  */
 export const QUOTA_FAILURE_BACKOFF_MS = 60_000;
 
-/** Upper bound on a provider's Retry-After, so a malformed header cannot silence a provider for days. */
-const QUOTA_RETRY_AFTER_CAP_MS = 24 * 60 * 60_000;
+/** The longest one adapter's turn holds the next adapter on its endpoint: past the 15 s request timeout. */
+const DEFAULT_LANE_TURN_MS = 20_000;
 
 /** How long a failed read is held: the failure backoff, or the provider's Retry-After when that asks for longer. */
 function failureHoldMs(ttlMs: number, retryAfterSeconds: number | null | undefined): number {
 	const backoff = Math.min(ttlMs, QUOTA_FAILURE_BACKOFF_MS);
 	if (typeof retryAfterSeconds !== "number" || !Number.isFinite(retryAfterSeconds)) return backoff;
-	return Math.max(backoff, Math.min(retryAfterSeconds * 1000, QUOTA_RETRY_AFTER_CAP_MS));
+	return Math.max(backoff, Math.min(retryAfterSeconds * 1000, QUOTA_HOLD_CAP_MS));
 }
 
 export interface QuotaCacheOptions {
@@ -43,10 +44,12 @@ export interface QuotaCacheOptions {
 	/** Clock source in milliseconds, injected so tests can advance time. */
 	now?: () => number;
 	/**
-	 * A file through which this cache shares its readings, held failures and endpoint holds with every other
-	 * process; without one the cache lives in memory only.
+	 * A file through which this cache shares the readings and held failures of credential-scoped providers with every
+	 * other process; without one the cache lives in memory only.
 	 */
 	sharedStatePath?: string;
+	/** The longest one adapter's turn may hold the next adapter on the same endpoint. */
+	laneTurnMs?: number;
 }
 
 export interface QuotaCache {
@@ -56,7 +59,7 @@ export interface QuotaCache {
 	readLastGood(providerId: string): UsageSnapshot | null;
 	/** Store a successful snapshot as the new last good value. */
 	write(snapshot: UsageSnapshot): void;
-	/** Drop one provider's entry, or every entry when no id is given. */
+	/** Drop one provider's reading and hold, or every one when no id is given, here and in the shared file. */
 	clear(providerId?: string): void;
 	/**
 	 * Serve a fresh snapshot, reading from the provider only when the cached
@@ -64,109 +67,87 @@ export interface QuotaCache {
 	 * marked stale, so a transient outage does not erase known usage, and is
 	 * itself held: a missing credential until one is detected (or the TTL),
 	 * any other failure for QUOTA_FAILURE_BACKOFF_MS or the provider's
-	 * Retry-After, whichever is longer.
+	 * Retry-After, whichever is longer. Readings and holds count only for the
+	 * credential that made them.
 	 */
 	resolve(provider: QuotaProvider): Promise<UsageSnapshot>;
+}
+
+/** Wait for `previous`, but no longer than `ms`. */
+function boundedWait(previous: Promise<unknown>, ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		const timer = setTimeout(resolve, ms);
+		timer.unref?.();
+		void previous.then(() => {
+			clearTimeout(timer);
+			resolve();
+		});
+	});
 }
 
 export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 	const ttlMs = options.ttlMs ?? DEFAULT_QUOTA_CACHE_TTL_MS;
 	const now = options.now ?? Date.now;
 	const sharedStatePath = options.sharedStatePath;
-	const entries = new Map<string, CacheEntry>();
+	const laneTurnMs = options.laneTurnMs ?? DEFAULT_LANE_TURN_MS;
 	// Failed reads are held too. Without this, every read of a provider without credentials fetched and journaled
 	// again, and a surface that re-reads on each journal update polled in a closed loop.
-	const misses = new Map<string, MissEntry>();
-	// Adapters on one endpoint (anthropic-max and claude-code both read Anthropic's usage endpoint) poll one at a
-	// time, and a failure holds the endpoint for every one of them: both used to send a request together and both
-	// drew a 429.
-	const endpointHolds = new Map<string, EndpointHold>();
-	const endpointClearedAtMs = new Map<string, number>();
+	let state: SharedQuotaState = emptySharedQuotaState();
+	// Adapters on one endpoint (anthropic-max and claude-code both read Anthropic's usage endpoint) poll one at a time.
 	const endpointLanes = new Map<string, Promise<unknown>>();
-	let adopted = false;
 
-	const fresh = (entry: CacheEntry | undefined): boolean => entry !== undefined && now() - entry.storedAtMs < ttlMs;
-	const held = (item: { storedAtMs: number; holdMs: number } | undefined): boolean =>
-		item !== undefined && now() - item.storedAtMs < item.holdMs;
-	const missAnswer = (cached: CacheEntry | undefined, snapshot: UsageSnapshot): UsageSnapshot =>
-		cached === undefined
-			? snapshot
-			: { ...cached.snapshot, stale: true, message: snapshot.message ?? cached.snapshot.message ?? null };
+	// A stamp ahead of the clock (a clock stepped back, a skewed writer) counts as expired, never as held.
+	const within = (storedAtMs: number, spanMs: number): boolean => {
+		const elapsed = now() - storedAtMs;
+		return elapsed >= 0 && elapsed < spanMs;
+	};
+	const fresh = (entry: CacheEntry | undefined): entry is CacheEntry =>
+		entry !== undefined && within(entry.storedAtMs, ttlMs);
+	// An item belongs to a credential; a provider that names none (scope undefined) accepts only its own items.
+	const owns = (item: { scope?: string | null }, scope: string | null | undefined): boolean => item.scope === scope;
 
-	// Take every item another process stored after the newest this one knows of. A time ahead of this clock is
-	// skipped, so a skewed or foreign clock cannot hold a provider indefinitely.
-	const adoptShared = (): void => {
-		if (sharedStatePath === undefined) return;
-		adopted = true;
-		const shared = readSharedQuotaState(sharedStatePath);
-		const at = now();
-		for (const [id, entry] of shared.entries) {
-			if (entry.storedAtMs > at || entry.storedAtMs <= (entries.get(id)?.storedAtMs ?? -1)) continue;
-			entries.set(id, entry);
-			noteQuotaRead(entry.snapshot, ttlMs, entry.storedAtMs);
-		}
-		for (const [id, miss] of shared.misses) {
-			const known = Math.max(entries.get(id)?.storedAtMs ?? -1, misses.get(id)?.storedAtMs ?? -1);
-			if (miss.storedAtMs > at || miss.storedAtMs <= known) continue;
-			misses.set(id, miss);
-		}
-		for (const [endpoint, hold] of shared.endpoints) {
-			const known = Math.max(endpointHolds.get(endpoint)?.storedAtMs ?? -1, endpointClearedAtMs.get(endpoint) ?? -1);
-			if (hold.storedAtMs > at || hold.storedAtMs <= known) continue;
-			endpointHolds.set(endpoint, hold);
+	const adopt = (incoming: SharedQuotaState): void => {
+		const before = state.entries;
+		state = mergeSharedQuotaState(state, incoming);
+		for (const [id, entry] of state.entries) {
+			if (before.get(id) !== entry) noteQuotaRead(entry.snapshot, ttlMs, entry.storedAtMs);
 		}
 	};
-
-	const publishShared = (): void => {
+	const publish = (): void => {
 		if (sharedStatePath === undefined) return;
-		adoptShared();
-		const state: SharedQuotaState = {
-			entries,
-			misses: new Map([...misses].filter(([, miss]) => held(miss))),
-			endpoints: new Map([...endpointHolds].filter(([, hold]) => held(hold))),
-		};
-		writeSharedQuotaState(sharedStatePath, state);
+		const merged = updateSharedQuotaState(sharedStatePath, state, now());
+		if (merged !== null) adopt(merged);
 	};
 
 	/** What resolve answers without spending a read, or null when the provider is due. */
-	const heldAnswer = async (provider: QuotaProvider): Promise<UsageSnapshot | null> => {
-		const cached = entries.get(provider.id);
-		if (fresh(cached) && cached !== undefined) return cached.snapshot;
-		const miss = misses.get(provider.id);
-		if (miss !== undefined && held(miss)) {
-			// A missing credential holds until one appears; detect() is a local credential read, so a login (in
-			// this process or another) is picked up on the next read without spending a usage request.
-			if (miss.status !== "no_credentials") return miss.answer;
-			const detected = await provider.detect().catch(() => false);
-			if (!detected) return miss.answer;
-		}
-		const hold = provider.endpoint === undefined ? undefined : endpointHolds.get(provider.endpoint);
-		if (hold === undefined || !held(hold)) return null;
-		const remainingMs = hold.holdMs - (now() - hold.storedAtMs);
-		const answer = missAnswer(cached, {
-			providerId: provider.id,
-			displayName: provider.displayName,
-			status: "error",
-			windows: [],
-			message: hold.message,
-			retryAfterSeconds: hold.retryAfterSeconds === null ? null : Math.ceil(remainingMs / 1000),
-			fetchedAt: null,
-		});
-		misses.set(provider.id, { answer, status: "error", storedAtMs: now(), holdMs: remainingMs });
-		return answer;
+	const heldAnswer = async (
+		provider: QuotaProvider,
+		scope: string | null | undefined,
+	): Promise<UsageSnapshot | null> => {
+		const cached = state.entries.get(provider.id);
+		if (fresh(cached) && owns(cached, scope)) return cached.snapshot;
+		const miss = state.misses.get(provider.id);
+		if (miss === undefined || !owns(miss, scope) || !within(miss.storedAtMs, miss.holdMs)) return null;
+		// A missing credential holds until one appears; detect() is a local credential read, so a login (in
+		// this process or another) is picked up on the next read without spending a usage request.
+		if (miss.status !== "no_credentials") return miss.answer;
+		return (await provider.detect().catch(() => false)) ? null : miss.answer;
 	};
 
 	const resolveOne = async (provider: QuotaProvider): Promise<UsageSnapshot> => {
-		const known = await heldAnswer(provider);
+		const scope = provider.credentialScope === undefined ? undefined : await provider.credentialScope().catch(() => null);
+		const known = await heldAnswer(provider, scope);
 		if (known !== null) return known;
-		if (sharedStatePath !== undefined) {
-			adoptShared();
-			const shared = await heldAnswer(provider);
-			if (shared !== null) return shared;
+		const shared = sharedStatePath !== undefined && scope !== undefined;
+		if (shared) {
+			adopt(readSharedQuotaState(sharedStatePath, now()));
+			const adopted = await heldAnswer(provider, scope);
+			if (adopted !== null) return adopted;
 		}
 
-		const cached = entries.get(provider.id);
-		const endpoint = provider.endpoint;
+		const last = state.entries.get(provider.id);
+		// Another credential's reading is never this one's fallback.
+		const cached = last !== undefined && owns(last, scope) ? last : undefined;
 		const snapshot = await provider.fetch();
 		noteQuotaRead(snapshot, ttlMs, now());
 		journalPolledQuota(
@@ -182,79 +163,68 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 				: snapshot,
 			now(),
 		);
+		let answer: UsageSnapshot;
 		if (snapshot.status === "ok") {
-			misses.delete(provider.id);
-			entries.set(provider.id, { snapshot, storedAtMs: now() });
-			if (endpoint !== undefined) {
-				endpointHolds.delete(endpoint);
-				endpointClearedAtMs.set(endpoint, now());
-			}
-			publishShared();
-			return snapshot;
-		}
-		const answer = missAnswer(cached, snapshot);
-		const holdMs = snapshot.status === "no_credentials" ? ttlMs : failureHoldMs(ttlMs, snapshot.retryAfterSeconds);
-		misses.set(provider.id, { answer, status: snapshot.status, storedAtMs: now(), holdMs });
-		// An expired token or a missing credential belongs to one adapter; any other failure is the endpoint's.
-		if (endpoint !== undefined && snapshot.status === "error") {
-			endpointHolds.set(endpoint, {
+			state.misses.delete(provider.id);
+			state.entries.set(provider.id, { snapshot, storedAtMs: now(), ...(scope !== undefined ? { scope } : {}) });
+			answer = snapshot;
+		} else {
+			answer =
+				cached === undefined
+					? snapshot
+					: { ...cached.snapshot, stale: true, message: snapshot.message ?? cached.snapshot.message ?? null };
+			const holdMs = snapshot.status === "no_credentials" ? ttlMs : failureHoldMs(ttlMs, snapshot.retryAfterSeconds);
+			state.misses.set(provider.id, {
+				answer,
+				status: snapshot.status,
 				storedAtMs: now(),
 				holdMs,
-				message: snapshot.message ?? null,
-				retryAfterSeconds: snapshot.retryAfterSeconds ?? null,
+				...(scope !== undefined ? { scope } : {}),
 			});
 		}
-		publishShared();
+		if (shared) publish();
 		return answer;
 	};
 
 	return {
 		read(providerId) {
-			if (!adopted) adoptShared();
-			const entry = entries.get(providerId);
-			return fresh(entry) && entry !== undefined ? entry.snapshot : null;
+			const entry = state.entries.get(providerId);
+			return fresh(entry) ? entry.snapshot : null;
 		},
 
 		readLastGood(providerId) {
-			if (!adopted) adoptShared();
-			const entry = entries.get(providerId);
+			const entry = state.entries.get(providerId);
 			if (entry === undefined) return null;
-			return fresh(entry) ? entry.snapshot : { ...entry.snapshot, stale: true };
+			return within(entry.storedAtMs, ttlMs) ? entry.snapshot : { ...entry.snapshot, stale: true };
 		},
 
 		write(snapshot) {
-			entries.set(snapshot.providerId, { snapshot, storedAtMs: now() });
+			state.misses.delete(snapshot.providerId);
+			state.entries.set(snapshot.providerId, { snapshot, storedAtMs: now() });
 			noteQuotaRead(snapshot, ttlMs, now());
-			publishShared();
 		},
 
 		clear(providerId) {
-			if (providerId === undefined) {
-				entries.clear();
-				misses.clear();
-				endpointHolds.clear();
-			} else {
-				entries.delete(providerId);
-				misses.delete(providerId);
+			if (providerId === undefined && sharedStatePath !== undefined) adopt(readSharedQuotaState(sharedStatePath, now()));
+			const ids =
+				providerId === undefined ? [...new Set([...state.entries.keys(), ...state.misses.keys()])] : [providerId];
+			const at = now();
+			for (const id of ids) {
+				state.entries.delete(id);
+				state.misses.delete(id);
+				state.cleared.set(id, at);
 			}
-			if (sharedStatePath === undefined) return;
-			const shared = readSharedQuotaState(sharedStatePath);
-			if (providerId === undefined) {
-				shared.entries.clear();
-				shared.misses.clear();
-				shared.endpoints.clear();
-			} else {
-				shared.entries.delete(providerId);
-				shared.misses.delete(providerId);
-			}
-			writeSharedQuotaState(sharedStatePath, shared);
+			// The clear stamp travels with the file, so another process cannot write the cleared reading or hold back.
+			publish();
 		},
 
 		async resolve(provider) {
 			const endpoint = provider.endpoint;
 			if (endpoint === undefined) return resolveOne(provider);
-			const previous = endpointLanes.get(endpoint) ?? Promise.resolve();
-			const turn = previous.then(() => resolveOne(provider));
+			const previous = endpointLanes.get(endpoint);
+			const turn = (previous === undefined ? Promise.resolve() : boundedWait(previous, laneTurnMs)).then(() =>
+				resolveOne(provider),
+			);
 			const settled = turn.catch(() => undefined);
 			endpointLanes.set(endpoint, settled);
 			void settled.then(() => {
