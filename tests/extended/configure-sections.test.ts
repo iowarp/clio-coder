@@ -73,10 +73,9 @@ interface:
   smoothStreaming: off
   terminalProgress: false
   mode: regular
-  outputDetail: default
+  outputDetail: standard
   desktopNotifications: false
   panes:
-    enabled: off
     layout: off
 integrations:
   projectResources:

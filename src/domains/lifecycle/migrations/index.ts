@@ -42,6 +42,7 @@ import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
 import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import approvalsToConfig from "./2026-11-02-approvals-to-config.js";
 import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
+import retiredSettings from "./2026-11-21-retired-settings.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -55,6 +56,13 @@ export interface Migration {
 	id: string;
 	// biome-ignore lint/suspicious/noConfusingVoidType: migrations that change nothing worth reporting return nothing.
 	up(stateDir: string): Promise<void | MigrationReport>;
+	/**
+	 * A migration that rewrites the user settings.yaml in a way that changes what the
+	 * strict reader accepts gives the same rewrite here, pure and in memory, so a
+	 * read-only check can judge the file as `up` would leave it. It may throw what
+	 * `up` would throw. A migration that leaves validity alone omits it.
+	 */
+	projectSettings?(raw: unknown): unknown;
 }
 
 export interface MigrationManifest {
@@ -89,8 +97,13 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 // migrations (`2026-08-18-lmstudio-runtime-id`, `2026-09-18-ollama-runtime-id`)
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
+//
+// `retiredSettings` sits right after the v2 rewrite: the strict reader stopped
+// tolerating retired keys, so it must run before any migration that reads
+// settings through `readSettings`.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	settingsV2,
+	retiredSettings,
 	retirePanesKnobs,
 	playbooksAndPackages,
 	acpAdapters,
@@ -113,6 +126,21 @@ if (
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
+}
+
+/**
+ * The parsed user settings as every registered migration not in `applied` would
+ * leave them, computed in memory and in registry order; nothing is written. The
+ * installer's candidate check (the candidate's own doctor) judges an existing home
+ * this way, because `upgrade --post-install` applies those migrations only after the
+ * candidate is accepted. This is not a read-time alias: nothing loads the projection.
+ */
+export function projectPendingSettings(raw: unknown, applied: ReadonlySet<string>): unknown {
+	let next = raw;
+	for (const migration of REGISTRY) {
+		if (!applied.has(migration.id) && migration.projectSettings !== undefined) next = migration.projectSettings(next);
+	}
+	return next;
 }
 
 /** Read-only: `doctor` and the upgrade preview see a not yet moved manifest where it still is. */

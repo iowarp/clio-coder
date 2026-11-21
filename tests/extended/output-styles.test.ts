@@ -227,16 +227,16 @@ test("a forming bash call renders in time independent of its argument size and s
 	deepStrictEqual(panel.render(width), ended.render(width));
 });
 
-test("legacy preferences normalize without changing other settings or the input", () => {
-	for (const [legacy, expected] of [
-		["minimal", "compact"],
-		["default", "standard"],
-		["verbose", "detailed"],
-	]) {
+test("an older output-detail spelling is refused, not read: the upgrade rewrote it", () => {
+	for (const legacy of ["minimal", "default", "verbose"]) {
 		const raw = { version: 2, interface: { outputDetail: legacy }, fleet: { concurrency: 7 } };
 		const snapshot = structuredClone(raw);
 		const result = validateSettings(raw);
-		strictEqual(result.settings.interface.outputDetail, expected);
+		deepStrictEqual(
+			result.issues.map((issue) => issue.path),
+			["interface.outputDetail"],
+		);
+		strictEqual(result.settings.interface.outputDetail, "standard");
 		strictEqual(result.settings.fleet.concurrency, 7);
 		deepStrictEqual(raw, snapshot);
 	}

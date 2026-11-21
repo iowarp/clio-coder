@@ -46,22 +46,22 @@ it("hashes decisions and facts stably and keeps the collected block inside its b
 	strictEqual(renderCollectedBlock("x".repeat(9000)).length <= TURN_CONTROL_BLOCK_MAX_CHARS, true);
 });
 
-it("round-trips the defaults, drops retired workflows silently and refuses an invented one", () => {
+it("round-trips the defaults and refuses a retired or invented workflow", () => {
 	const defaults = validateSettings(parse(DEFAULT_SETTINGS_YAML));
 	deepStrictEqual(defaults.issues, []);
 	deepStrictEqual(defaults.settings.turnControl, DEFAULT_SETTINGS.turnControl);
+	// `clio-coder upgrade` removed the retired values from the user file; the reader no longer drops them.
 	const home = validateSettings({
 		turnControl: {
-			workflows: ["orientation", "direction", "ledger-facts", "detached-collection"],
+			workflows: ["orientation", "detached-collection"],
 			orientation: { maxSplit: 4, maxCostUsdPerTurn: null },
 		},
 	});
-	deepStrictEqual(home.issues, []);
-	deepStrictEqual(home.settings.turnControl, { workflows: ["detached-collection"] });
 	deepStrictEqual(
-		home.retired.map((entry) => entry.path),
-		["turnControl.orientation"],
+		home.issues.map((issue) => issue.path),
+		["turnControl.orientation", "turnControl.workflows[0]"],
 	);
+	strictEqual(home.issues[0]?.message, "unknown key");
 	const unknown = validateSettings({ turnControl: { workflows: ["invented"] } });
 	strictEqual(unknown.issues[0]?.path, "turnControl.workflows[0]");
 	match(unknown.issues[0]?.message ?? "", /detached-collection/);
