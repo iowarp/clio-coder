@@ -2762,6 +2762,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// Contained yolo cannot raise the card, so the scope goes to the next ask_user question about the escape.
 		if (unattended && offeredScope !== null) deps.escapeScopes?.offer(offeredScope);
 		const scopeHint = unattended && offeredScope !== null ? escapeScopeAskHint(offeredScope) : null;
+		// An escape with no session option says why none exists, so the agent does not look for one (row 328).
+		const noScope =
+			unattended && offeredScope === null
+				? (deps.escapeScopes?.noScopeReason(admissionCall, outcome.decision) ?? null)
+				: null;
+		const noScopeLine = noScope === null ? null : escapeNoScopeLine(noScope);
 		// Contained yolo publishes only what the operator's own words name: an
 		// outward call the judge allowed under any other rule is refused.
 		const outwardUnnamed =
@@ -2782,11 +2788,18 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (judged.kind === "block") {
 			disposeAdmissionArgs(judgedSpec, admissionCall.args ?? {});
 			const reasonCode = `${SAFETY_JUDGE_REASON_PREFIX}${judged.rule}`;
+			// One account of retrying: an offered session option replaces the judge's no-retry route (row 328).
+			const judgeReason =
+				scopeHint !== null
+					? [judged.account, ESCAPE_SCOPE_WAIT, scopeHint].join("\n")
+					: noScopeLine !== null
+						? `${judged.refusal}\n${noScopeLine}`
+						: judged.refusal;
 			const blocked = blockDecision(
 				outcome.decision,
 				{
 					short: `${admissionCall.tool} blocked by the safety judge (rule ${judged.rule})`,
-					detail: scopeHint === null ? judged.refusal : `${judged.refusal}\n${scopeHint}`,
+					detail: judgeReason,
 					hints: [],
 				},
 				{ kind: "block", reasonCode },
@@ -2796,7 +2809,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const verdict = withDenial(
 				{
 					kind: "blocked",
-					reason: scopeHint === null ? judged.refusal : `${judged.refusal}\n${scopeHint}`,
+					reason: judgeReason,
 					decision: blocked,
 				},
 				"clio_policy",
@@ -2826,7 +2839,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					parkAnsweredBlockedVerdict(
 						outcome.decision,
 						admissionCall.tool,
-						loopReason ?? (scopeHint === null ? CONTAINED_YOLO_REASON : `${CONTAINED_YOLO_ESCAPE_REASON}\n${scopeHint}`),
+						loopReason ??
+							(scopeHint !== null
+								? `${CONTAINED_YOLO_ESCAPE_REASON}\n${scopeHint}`
+								: noScopeLine !== null
+									? `${CONTAINED_YOLO_REASON}\n${noScopeLine}`
+									: CONTAINED_YOLO_REASON),
 						judged.kind === "park" ? judged.gateReason : outwardUnnamed ? containedOutwardReason(judged.rule) : undefined,
 					),
 					CONTAINED_YOLO_REASON,
@@ -3494,6 +3512,14 @@ const CONTAINED_YOLO_ESCAPE_REASON =
 /** How the agent can still get an escape approved: the option ask_user adds to a question about it. */
 function escapeScopeAskHint(scope: EscapeScope): string {
 	return `To run it, ask the operator with ask_user in one question that names running it outside the sandbox. Clio adds the option "${escapeScopeOptionLabel(scope)}" to that question; choosing it lets unsandboxed reruns of those same unchanged script files, from the same cwd with the same env, run this session without asking, so rerun the call after they choose it. Do not write that option yourself. Otherwise continue with work that does not need it and name it in your report as left for the operator.`;
+}
+
+/** What a judge-blocked escape with a session option on offer says about retrying, before the option's hint. */
+const ESCAPE_SCOPE_WAIT = "Until the operator answers, do not retry this call or a reworded form of it.";
+
+/** Why a refused sandbox escape gets no session option, and what can still let it run. */
+function escapeNoScopeLine(why: string): string {
+	return `Clio offers no session option for this call because ${why}; it runs only when an operator message, or an ask_user question the operator approves, names running it outside the sandbox.`;
 }
 
 /** The ask a granted escape scope answered, as the allow that runs it. */

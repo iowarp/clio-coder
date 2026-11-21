@@ -1130,3 +1130,64 @@ test("a contained-yolo escape refusal tells when to retry, and a granted rerun i
 	strictEqual(entries.length, 1);
 	for (const rerun of [1, 2]) strictEqual((await yolo.registry.invoke(call, turn)).kind, "ok", `rerun ${rerun}`);
 });
+
+// Row 328: a judge block of a contained-yolo escape gives one account of retrying. With a session option on offer
+// the judge's no-retry route yields to it; with none, the refusal says why no option exists.
+test("a judge-blocked contained-yolo escape gives one retry account: the scoped remedy, or why no option exists", async (t) => {
+	const cwd = workspace("clio-escape-judged-");
+	writeFileSync(join(cwd, "probe.sh"), "echo hi\n");
+	const outside = workspace("clio-escape-outside-");
+	writeFileSync(join(outside, "far.sh"), "echo far\n");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const escapeScopes = createEscapeScopeLedger({
+		session: () => "session-1",
+		entries: () => [],
+		append: () => {},
+		roots: () => [cwd],
+	});
+	const judge = createSafetyJudge({
+		config: () => ({ enabled: true, target: "local", model: "m", environment: [], allow: [], deny: [] }),
+		complete: async () => ({
+			text: JSON.stringify({ verdict: "block", rule: "unclear", reason: "The approval does not scope this write." }),
+		}),
+		operatorMessages: () => ["run the probes"],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const yolo = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: false },
+		{ escapeScopes, unattendedAsks: () => true, safetyJudge: judge },
+	);
+	const turn = { sessionId: "session-1", turnId: "turn-1" };
+	const scoped = await yolo.registry.invoke(bash("bash probe.sh && bash probe.sh", { unsandboxed: true }), turn);
+	ok(scoped.kind === "blocked" && scoped.denial !== undefined);
+	match(scoped.reason, /safety judge blocked this bash call \(rule unclear\)/u);
+	strictEqual(
+		/Do not retry (?:this call|the compound command) or a reworded|Run each sub-command/u.test(scoped.reason),
+		false,
+		scoped.reason,
+	);
+	match(scoped.reason, /Until the operator answers, do not retry this call or a reworded form of it/u);
+	match(scoped.reason, /rerun the call after they choose it/u);
+	match(denialLines(scoped.denial)[0], /Retry only after the operator answers/u);
+
+	const unscoped = await yolo.registry.invoke(bash(`bash ${outside}/far.sh`, { unsandboxed: true }), turn);
+	ok(unscoped.kind === "blocked" && unscoped.denial !== undefined);
+	match(unscoped.reason, /Do not retry this call or a reworded form of it/u);
+	strictEqual(
+		/rerun the call after they choose it|Approve for this session/u.test(unscoped.reason),
+		false,
+		unscoped.reason,
+	);
+	ok(
+		unscoped.reason.includes(
+			`Clio offers no session option for this call because its script ${join(outside, "far.sh")} lies outside the workspace and scratch roots`,
+		),
+		unscoped.reason,
+	);
+	deepStrictEqual(yolo.ran, []);
+});
