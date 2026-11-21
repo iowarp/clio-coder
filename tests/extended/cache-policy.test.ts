@@ -1,14 +1,23 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { hostname, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, describe, test } from "node:test";
+import { zstdDecompressSync } from "node:zlib";
 import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { validateSettings } from "../../src/core/config.js";
+import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, StateFileLockTimeoutError } from "../../src/core/state-file-lock.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import type { RuntimeNoticePayload } from "../../src/core/telemetry/live-events.js";
+import {
+	capacityStateLockPath,
+	MAIN_CACHE_LANE_LOCK_TIMEOUT_MS,
+	mainCacheLaneStore,
+} from "../../src/domains/dispatch/capacity-lease.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import anthropicMax from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
 import openai from "../../src/domains/providers/runtimes/cloud/openai.js";
@@ -23,10 +32,16 @@ import {
 	setEngineProviderCompactionPolicy,
 	setEngineSystemPrompt,
 } from "../../src/engine/agent.js";
-import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
+import { cleanupEngineSessionResources, completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import { engineMainStreamSimple, engineStreamSimple } from "../../src/engine/api-registry.js";
-import { sideCallCacheFamilyId, workerCacheFamilyId } from "../../src/engine/apis/cache-family.js";
+import {
+	sideCallCacheFamilyId,
+	useMainCacheLaneStore,
+	withMainCacheRouting,
+	workerCacheFamilyId,
+} from "../../src/engine/apis/cache-family.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
+import { setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 import {
 	closeResponsesWebSockets,
 	newTransportCall,
@@ -271,7 +286,9 @@ test("the main thread's Codex request sends the pinned prompt layer as its own i
 		strictEqual(text(side.input[at]), pinned + tail);
 		deepStrictEqual(main.input.slice(0, at), side.input.slice(0, at));
 		deepStrictEqual(main.input.slice(at + 2), side.input.slice(at + 1));
-		strictEqual(main.prompt_cache_key, side.prompt_cache_key);
+		// Only the main thread routes to the cache of its pinned head (M-11); a side call keeps the session it was given.
+		ok(typeof main.prompt_cache_key === "string" && main.prompt_cache_key.startsWith("clio-coder-m-"));
+		strictEqual(side.prompt_cache_key, "session");
 		deepStrictEqual(await send("main", "0".repeat(64)), side);
 		// Without a continuation the prompt stays in instructions: the pinned part there, the rest the first input item.
 		const stock = await send("main", hash, "sse");
@@ -287,6 +304,200 @@ test("the main thread's Codex request sends the pinned prompt layer as its own i
 		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("main sessions with one pinned head share a Codex cache routing key and keep their own turn state (M-11)", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "https://codex.invalid/backend-api" },
+		"gpt-6-luna",
+		null,
+	);
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${claims.toString("base64url")}.signature`;
+	const pinned = "Install-wide identity and harness.\n";
+	const read = { name: "read", description: "Read a file.", parameters: Type.Object({ path: Type.String() }) };
+	const sent: Array<{ key: unknown; header: string | null; turnState: string | null }> = [];
+	let issued = 0;
+	const fetch = async (_url: unknown, init?: RequestInit) => {
+		const headers = new Headers(init?.headers);
+		const raw = init?.body;
+		const text =
+			headers.get("content-encoding") === "zstd" && raw instanceof Uint8Array
+				? zstdDecompressSync(raw).toString("utf8")
+				: String(raw);
+		sent.push({
+			key: (JSON.parse(text) as { prompt_cache_key?: unknown }).prompt_cache_key,
+			header: headers.get("session-id"),
+			turnState: headers.get("x-codex-turn-state"),
+		});
+		const response = {
+			id: `resp_${sent.length}`,
+			status: "completed",
+			output: [],
+			usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11, input_tokens_details: { cached_tokens: 0 } },
+		};
+		const events = [
+			{ type: "response.created", response: { ...response, status: "in_progress" } },
+			{ type: "response.completed", response },
+		];
+		return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+			status: 200,
+			headers: { "content-type": "text/event-stream", "x-codex-turn-state": `state-${++issued}` },
+		});
+	};
+	// Two fresh sessions in two repositories: the same install layer and tools, a session layer of their own.
+	const send = async (sessionId: string, sessionLayer: string, messages: unknown[], layer = pinned) => {
+		const hash = createHash("sha256").update(layer).digest("hex");
+		await engineMainStreamSimple(
+			model,
+			{ systemPrompt: layer + sessionLayer, tools: [read], messages } as never,
+			{
+				apiKey,
+				sessionId,
+				transport: "sse",
+				fetch,
+				clioCoderPinnedPrefix: { chars: layer.length, hash },
+			} as never,
+		).result();
+		return sent.at(-1);
+	};
+	const task = { role: "user", content: "Say one word.", timestamp: 1 };
+	const call = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "a" } }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+		stopReason: "toolUse",
+		timestamp: 2,
+	};
+	const result = {
+		role: "toolResult",
+		toolCallId: "call_1",
+		toolName: "read",
+		content: [],
+		isError: false,
+		timestamp: 3,
+	};
+	const first = await send("session-repo-a", "Repo A handbook.\n", [task]);
+	ok(typeof first?.key === "string" && /^clio-coder-m-[a-f0-9]{40}-0$/u.test(first.key), String(first?.key));
+	// Two live sessions of one head take lanes of their own, as live workers do (FL-17).
+	const concurrent = await send("session-repo-b", "Repo B handbook.\n", [task]);
+	strictEqual(concurrent?.key, String(first.key).replace(/-0$/u, "-1"), "a concurrent live session takes the next lane");
+	// The backend routes by the header: it carries the same key as the body.
+	strictEqual(first?.header, first?.key);
+	strictEqual(concurrent?.header, concurrent?.key);
+	// Continuation stays per session: the second session never carries the first one's turn token, its tool round does.
+	strictEqual(concurrent?.turnState, null);
+	strictEqual((await send("session-repo-a", "Repo A handbook.\n", [task, call, result]))?.turnState, "state-1");
+	// A session that ends releases its lane, and the next session of that head reads the cache it routed to.
+	cleanupEngineSessionResources("session-repo-a");
+	const next = await send("session-repo-d", "Repo D handbook.\n", [task]);
+	strictEqual(next?.key, first?.key, "a released lane is reused");
+	strictEqual((await send("session-repo-b", "Repo B handbook.\n", [task, call, result]))?.key, concurrent?.key);
+	// Routing an already routed request changes nothing: no second lane, no routing id taken as a conversation.
+	const bContext = { systemPrompt: `${pinned}Repo B handbook.\n`, tools: [read], messages: [task] } as never;
+	const pinnedPrefix = { chars: pinned.length, hash: createHash("sha256").update(pinned).digest("hex") };
+	const routed = withMainCacheRouting(model, bContext, {
+		sessionId: "session-repo-b",
+		clioCoderPinnedPrefix: pinnedPrefix,
+	} as never);
+	strictEqual((routed as { sessionId?: string } | undefined)?.sessionId, concurrent?.key);
+	strictEqual(withMainCacheRouting(model, bContext, routed), routed, "routing twice is routing once");
+	const other = await send("session-repo-c", "Repo A handbook.\n", [task], "Another install's identity.\n");
+	ok(
+		typeof other?.key === "string" && other.key.endsWith("-0") && other.key !== first?.key,
+		"another head routes elsewhere",
+	);
+	for (const session of ["session-repo-b", "session-repo-c", "session-repo-d"]) cleanupEngineSessionResources(session);
+	// With the cross-process store registered, the lane is the store's and a session's cleanup releases it there.
+	const stored: string[] = [];
+	useMainCacheLaneStore({
+		claim: (key, conversation) => {
+			stored.push(`claim ${conversation} ${key.includes(model.baseUrl)}`);
+			return 7;
+		},
+		release: (conversation) => stored.push(`release ${conversation}`),
+	});
+	try {
+		const storeLane = await send("session-store", "Repo A handbook.\n", [task]);
+		strictEqual(storeLane?.key, String(first.key).replace(/-0$/u, "-7"));
+		cleanupEngineSessionResources("session-store");
+		deepStrictEqual(stored, ["claim session-store true", "release session-store"]);
+	} finally {
+		useMainCacheLaneStore(undefined);
+	}
+});
+
+test("a main lane claim behind a held admission lock waits a bounded time, then routes on an in-process lane with one host notice per conversation (M-11)", async (t) => {
+	const env = await isolateClioEnv("clio-coder-main-lane-lock-");
+	t.after(() => env.restore());
+	// Another live Clio process holds the admission lock and does not let go: this host, a live pid that is not ours.
+	const lockPath = `${capacityStateLockPath()}.lock`;
+	mkdirSync(dirname(lockPath), { recursive: true });
+	writeFileSync(lockPath, `${JSON.stringify({ host: hostname(), pid: process.ppid, at: new Date().toISOString() })}\n`);
+	const notices: RuntimeNoticePayload[] = [];
+	setResidencyNoticeSink((notice) => notices.push(notice));
+	const journaled: unknown[] = [];
+	const unsubscribe = telemetryHub().subscribe("cache.lane_fell_back", (payload) => {
+		journaled.push(payload);
+	});
+	const failures: unknown[] = [];
+	useMainCacheLaneStore({
+		claim: (key, conversation) => {
+			try {
+				return mainCacheLaneStore.claim(key, conversation);
+			} catch (error) {
+				failures.push(error);
+				throw error;
+			}
+		},
+		release: (conversation) => mainCacheLaneStore.release(conversation),
+	});
+	t.after(() => {
+		useMainCacheLaneStore(undefined);
+		setResidencyNoticeSink(null);
+		unsubscribe();
+		cleanupEngineSessionResources("held-lock-session");
+	});
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "https://codex.invalid/backend-api" },
+		"gpt-6-luna",
+		null,
+	);
+	const route = (layer: string) =>
+		(
+			withMainCacheRouting(
+				model,
+				{ systemPrompt: `${layer}Repo handbook.\n`, tools: [], messages: [] } as never,
+				{
+					sessionId: "held-lock-session",
+					clioCoderPinnedPrefix: { chars: layer.length, hash: createHash("sha256").update(layer).digest("hex") },
+				} as never,
+			) as { sessionId?: string } | undefined
+		)?.sessionId;
+	// The claim gives up after the short bound, not the 20 s default every other admission caller waits.
+	ok(MAIN_CACHE_LANE_LOCK_TIMEOUT_MS <= 2_000 && MAIN_CACHE_LANE_LOCK_TIMEOUT_MS < FILE_LOCK_ACQUIRE_TIMEOUT_MS);
+	const first = route("Install identity.\n");
+	ok(typeof first === "string" && /^clio-coder-m-[a-f0-9]{40}-0$/u.test(first), String(first));
+	strictEqual(failures.length, 1);
+	ok(failures[0] instanceof StateFileLockTimeoutError);
+	match(String((failures[0] as Error).message), new RegExp(`timed out after ${MAIN_CACHE_LANE_LOCK_TIMEOUT_MS}ms`, "u"));
+	strictEqual(notices.length, 1);
+	strictEqual(notices[0]?.kind, "cache-lane-fallback");
+	match(notices[0]?.message ?? "", /in-process cache lane/u);
+	deepStrictEqual(journaled, [{ reason: "lock-timeout", timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS, lane: 0 }]);
+	// Later turns keep the in-process lane without waiting on the store again.
+	strictEqual(route("Install identity.\n"), first);
+	strictEqual(failures.length, 1);
+	// A new head for the same conversation tries the store again and journals that fallback, but says so only once.
+	ok(route("Another identity.\n")?.endsWith("-0"));
+	strictEqual(failures.length, 2);
+	strictEqual(journaled.length, 2);
+	strictEqual(notices.length, 1, "one host notice per conversation");
+	// The peer's lock was waited on, never taken over.
+	ok(existsSync(lockPath));
 });
 
 test("the main thread's public Responses request marks the pinned prompt layer with its own breakpoint (PV-3)", async () => {

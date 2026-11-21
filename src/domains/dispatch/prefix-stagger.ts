@@ -1,3 +1,4 @@
+import { claimLeaseCacheLane } from "./capacity-lease.js";
 import type { DispatchPrefixGroup } from "./contract.js";
 import type { HeartbeatStamp } from "./heartbeat.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "./worker-spawn.js";
@@ -93,6 +94,21 @@ export function claimCacheLane(key: string): { lane: number; release: () => void
 			if (live.size === 0 && liveCacheLanes.get(key) === live) liveCacheLanes.delete(key);
 		},
 	};
+}
+
+/**
+ * A worker's cache lane, held on its capacity lease so every Clio process sharing this state dir sees it, and freed
+ * with the lease (FL-17, M-11). Only when the lease store cannot take it (the lease is gone, the store unreadable or
+ * locked past the timeout) does the worker fall back to this process's own lanes, which `release` frees.
+ */
+export function claimWorkerCacheLane(leaseId: string, key: string): { lane: number; release: () => void } {
+	try {
+		const lane = claimLeaseCacheLane(leaseId, key);
+		if (lane !== null) return { lane, release: () => {} };
+	} catch {
+		// Fall through to the in-process lanes.
+	}
+	return claimCacheLane(key);
 }
 
 /** The result a follower reports when it was aborted before its worker existed. */
