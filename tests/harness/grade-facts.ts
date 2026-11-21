@@ -31,7 +31,7 @@ export function cleanGradeFacts(overrides: Partial<GradeFacts> = {}, work: Parti
 			writeRootRequest: null,
 			completion: null,
 			ungroundedChecks: [],
-			reviewVerdict: null,
+			gateVerdict: null,
 			...work,
 		},
 		...overrides,

@@ -51,7 +51,7 @@ export function askUserWindowMs(
  */
 export function unattendedPermissionReason(tool: string, seconds: number): string {
 	return [
-		`The operator did not answer this ${tool} approval within ${seconds} s, so Clio denied it automatically; the call did not run.`,
+		`The operator did not answer this ${tool} approval within ${seconds} s, so CLIO Coder denied it automatically; the call did not run.`,
 		"Nobody is at the terminal to approve it: do not wait or ask again. Take another route that needs no approval, or record this open decision for your final reply and continue with the rest of the task.",
 	].join("\n");
 }

@@ -123,7 +123,7 @@ import {
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
 import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../../engine/acp/transport.js";
-import { engineRetryDelayMs } from "../../engine/ai.js";
+import { engineRetryDelayMs, useMainCacheLaneStore } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import { attestedToolSchemaSignature, INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
@@ -189,7 +189,6 @@ import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	isHoareResultContract,
 	mutationReportFailures,
-	parseVerifierResult,
 	type ResultContract,
 	resultContractAuthorship,
 	validateRecipeResult,
@@ -342,7 +341,12 @@ import type { WorktreeBootRecovery } from "./boot-recovery.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFromEnvelope } from "./budget-envelope.js";
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
-import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
+import {
+	capacityLeaseUsage,
+	capacityLeaseUsageAsync,
+	createNodeLeaseUsageReader,
+	mainCacheLaneStore,
+} from "./capacity-lease.js";
 import type {
 	AbortReason,
 	DispatchAdmissionObserver,
@@ -356,6 +360,7 @@ import type {
 	MainGrantOutcome,
 	WorkerGrantView,
 } from "./contract.js";
+import { createCrossProcessFleet, type ForeignAnswerOrigin } from "./cross-process-fleet.js";
 import {
 	type EnvelopeInput,
 	envelopeApproval,
@@ -405,6 +410,7 @@ import {
 } from "./fleet-change-return.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
+import { gateVerdictFactsOf } from "./gate-decisions.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { type GradeContract, type GradeFacts, type GradeVerdict, grade, type RunVerdict } from "./grading.js";
 import {
@@ -414,7 +420,7 @@ import {
 	judgeWithheldCause,
 } from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
-import { answerBudgetMessage, sealedAnswerBudgetBytes } from "./handback.js";
+import { answerBudgetMessage, sealedAnswerBudgetBytes, wallHandbackOutcomeDetail } from "./handback.js";
 import {
 	classifyHeartbeat,
 	DEFAULT_HEARTBEAT_SPEC,
@@ -448,6 +454,7 @@ import {
 	mergeCardCauseNote,
 } from "./merge-card.js";
 import {
+	compromisedReason,
 	mergeGateVerdict,
 	mergeWithheldDetail,
 	partialResultDetail,
@@ -477,12 +484,16 @@ import {
 import { type PeerInstructions, peerInstructionsStaleMessage, resolvePeerInstructions } from "./peer-instructions.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import { claimCacheLane, claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
+import {
+	claimSharedPrefix,
+	claimWorkerCacheLane,
+	startAfterPrefixHold,
+	waitForPrefixLeader,
+} from "./prefix-stagger.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
-	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
 	planQueueSlot,
@@ -493,6 +504,7 @@ import {
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
 import {
@@ -546,7 +558,10 @@ import {
 	countToolCalls,
 	executedCalls,
 	hasPotentiallyMutatingAttempt,
+	type InFlightCall,
 	observationCalls,
+	recordCallFinish,
+	recordCallStart,
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
@@ -591,7 +606,12 @@ import {
 	type PipelineInput,
 	validateJobSpec,
 } from "./validation.js";
-import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import {
+	describeUngroundedValidations,
+	groundClaimedValidations,
+	groundGateCheck,
+	invalidatesQuality,
+} from "./validation-grounding.js";
 import {
 	HOST_VERIFICATION_EVENT,
 	type VerificationSlotEvents,
@@ -1526,6 +1546,9 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 	const code = OUTCOME_CODE_SPECIFICITY.find((candidate) => codes.has(candidate)) ?? null;
 	if (codes.size <= 1) return { code, conflict: null };
 	if ([...codes].every((candidate) => LOOP_DEGENERATION_CODES.has(candidate))) return { code, conflict: null };
+	// A run the wall clock moved to handback that then ends without an answer is one story, told at settle (fleet M8).
+	if (code === "worker_run_timeout" && codes.size === 2 && codes.has("worker_final_output_missing"))
+		return { code, conflict: null };
 	return {
 		code,
 		conflict: `conflicting trusted outcome codes: ${[...codes].sort().join(", ")}`,
@@ -2701,32 +2724,32 @@ function supportsRequiredCapabilities(
 
 function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	if (runtimeKind === "sdk" && runtimeId === "claude-sdk") {
-		return ["Claude Agent SDK executes Claude Code tools; Clio mediates canUseTool decisions and records denials"];
+		return ["Claude Agent SDK executes Claude Code tools; CLIO Coder mediates canUseTool decisions and records denials"];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "claude-code") {
 		return [
-			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
+			"Claude CLI subprocess executes Claude Code tools; CLIO Coder constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "codex-cli") {
 		return [
-			"Codex CLI executes its own tools; Clio selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
-			"Codex CLI login and model configuration belong to the installed codex command; Clio only observes its JSONL run stream",
+			"Codex CLI executes its own tools; CLIO Coder selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
+			"Codex CLI login and model configuration belong to the installed codex command; CLIO Coder only observes its JSONL run stream",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "opencode-cli") {
 		return [
-			"OpenCode CLI owns its tools and permissions; Clio observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
+			"OpenCode CLI owns its tools and permissions; CLIO Coder observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "pi-cli") {
 		return [
-			"Pi CLI owns its tools; Clio can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
+			"Pi CLI owns its tools; CLIO Coder can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "antigravity-code") {
 		return [
-			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; Clio observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
+			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; CLIO Coder observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
 			"Antigravity resumes a conversation only when the caller supplies its id explicitly",
 			"Antigravity runs are one-shot and never retried automatically",
 		];
@@ -3170,7 +3193,7 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	if (!writeRoots || writeRoots.length === 0) return;
 	if (runtimeEnforcement(runtime).scopeEnforcement) return;
 	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
+		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without CLIO Coder per-tool mediation. Dispatch to a native or claude-sdk worker.`,
 	);
 }
 
@@ -3437,7 +3460,7 @@ function assertResponseSchemaEnforceable(
 
 function acpRuntimeLimitations(): string[] {
 	return [
-		"external ACP agent executes its own unknown tool surface; Clio mediates permission requests and records decisions",
+		"external ACP agent executes its own unknown tool surface; CLIO Coder mediates permission requests and records decisions",
 	];
 }
 
@@ -4378,6 +4401,8 @@ export function createDispatchBundle(
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const scheduling: SchedulingContract = maybeScheduling;
 	const prompts: PromptsContract = maybePrompts;
+	// Main sessions claim their cache lanes in the admission store beside the workers' leases (M-11).
+	useMainCacheLaneStore(mainCacheLaneStore);
 	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
 	/** The judge-withheld notice is a process fact, so it is raised once, not on every dispatch. */
@@ -4540,6 +4565,13 @@ export function createDispatchBundle(
 		...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
 		...(record.reviewer !== undefined ? { reviewer: record.reviewer } : {}),
 	});
+	/**
+	 * Answers another Clio process gave through a run's grant records, by request id, until their resolution is
+	 * published: the resolution then names that process instead of reading like this process's own card.
+	 */
+	const answeredElsewhere = new Map<string, ForeignAnswerOrigin>();
+	const answeredElsewhereReason = (decision: "approve" | "deny", origin: ForeignAnswerOrigin): string =>
+		`${decision === "approve" ? "approved" : "denied"} by the operator in another Clio process (pid ${origin.pid}${origin.host !== null ? ` on ${origin.host}` : ""})`;
 	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
@@ -4629,12 +4661,15 @@ export function createDispatchBundle(
 				: record.state === "canceled"
 					? "revoked"
 					: record.issuer !== undefined
-						? record.forwardedByMain === true && record.issuer === "operator"
-							? "operator:forwarded-by-main"
-							: record.reviewer === "safety-judge" && record.issuer === "main"
-								? "safety-judge"
-								: record.issuer
+						? record.issuer === "operator" && answeredElsewhere.has(record.requestId)
+							? "operator:another-process"
+							: record.forwardedByMain === true && record.issuer === "operator"
+								? "operator:forwarded-by-main"
+								: record.reviewer === "safety-judge" && record.issuer === "main"
+									? "safety-judge"
+									: record.issuer
 						: "worker";
+		answeredElsewhere.delete(record.requestId);
 		emitApproval(context.bus, "approval.resolved", {
 			status,
 			tool: record.tool,
@@ -4678,6 +4713,26 @@ export function createDispatchBundle(
 			);
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
+	});
+	// Cross-process fleet state (M11): run-directory records for this process's runs and asks, and, where a person can
+	// answer, the live runs and held asks of other Clio processes on this state directory.
+	const crossProcessFleet = createCrossProcessFleet({
+		bus: context.bus,
+		isLocalRun: (runId) => active.has(runId) || currentAssignmentRun(runId) !== null,
+		grantBinding: (requestId) => {
+			const record = grantBroker.get(requestId);
+			return record === null ? null : { attempt: record.attempt, argDigest: record.argDigest };
+		},
+		resolve: (runId, requestId, decision, answeredBy) => {
+			answeredElsewhere.set(requestId, answeredBy);
+			try {
+				contract.resolveWorkerPermission?.(runId, requestId, decision);
+			} catch (error) {
+				answeredElsewhere.delete(requestId);
+				throw error;
+			}
+		},
+		follow: options?.workerPermissionResponder === true,
 	});
 	/** Asks a fork adopted from the parked session that held them, by request id; a brokered ask's record holds its own. */
 	const adoptedAsks = new Map<string, { runId: string; sessionId: string }>();
@@ -5409,7 +5464,7 @@ export function createDispatchBundle(
 			return {
 				scheduled: false,
 				settlementDetail:
-					"automatic retry suppressed because this external agent loop is one-shot and Clio cannot prove replay is side-effect-free",
+					"automatic retry suppressed because this external agent loop is one-shot and CLIO Coder cannot prove replay is side-effect-free",
 			};
 		}
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
@@ -7020,7 +7075,7 @@ export function createDispatchBundle(
 		assertWorkerContextRequest(req, false);
 		if (req.storeTags !== undefined && req.storeTags.length > 0) {
 			throw new Error(
-				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no Clio store tool. Dispatch to a native worker.",
+				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no CLIO Coder store tool. Dispatch to a native worker.",
 			);
 		}
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
@@ -7031,7 +7086,7 @@ export function createDispatchBundle(
 		// so no ACP peer can keep a read-only run from changing user files.
 		if (req.readOnly === true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so Clio cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
+				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so CLIO Coder cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
 			);
 		}
 		// Operator decision Q6: agent-managed governance approves every call the
@@ -7039,7 +7094,7 @@ export function createDispatchBundle(
 		// operator's explicit trust.
 		if (toolGovernance === "agent-managed" && configured.trustedUnmediated !== true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so Clio cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so CLIO Coder cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
@@ -7288,6 +7343,9 @@ export function createDispatchBundle(
 				reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 			}
 		}
+		// The checkout and base the worktree was cut from, so a reviewer's packet can diff the task commit after cleanup.
+		if (sealed !== undefined && req.taskWorktree !== undefined)
+			sealed = { ...sealed, root: req.taskWorktree.root, base: req.taskWorktree.base };
 		if (sealed !== undefined) receiptDraft.worktree = sealed;
 		// A merge needs no card at default autonomy, so the operator's transcript says it landed.
 		const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? runId, sealed);
@@ -8137,7 +8195,7 @@ export function createDispatchBundle(
 						writeRootRequest: null,
 						completion: null,
 						ungroundedChecks: [],
-						reviewVerdict: null,
+						gateVerdict: null,
 					},
 				};
 				let graded = grade(gradeContract, gradeFacts);
@@ -8630,7 +8688,7 @@ export function createDispatchBundle(
 				: null;
 			if (claudeLaunch && lifecycle.authProfile && !launchCredential) {
 				throw new Error(
-					"Clio's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
+					"CLIO Coder's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
 				);
 			}
 			const launchAuthProfile = claudeLaunch
@@ -8959,11 +9017,13 @@ export function createDispatchBundle(
 						reportDispatchDiagnostic(`write peer instructions in task worktree ${req.taskWorktree.runId}`, error);
 					}
 				}
-				// Each live worker of one head takes its own provider session id; the lane frees when this worker ends (FL-17).
+				// Each live worker of one head takes its own provider session id on its capacity lease, so every process on this
+				// state dir sees it; the lane frees with the lease (FL-17, M-11).
 				// The head is the system prompt and tool surface alone: the prompt signature also covers each run's task.
 				const lane =
 					lifecycle.runtimeKind === "http" && lifecycle.systemPrompt.length > 0
-						? claimCacheLane(
+						? claimWorkerCacheLane(
+								capacityLease.leaseId,
 								sha256(
 									JSON.stringify([
 										lifecycle.target.target.id,
@@ -9102,6 +9162,10 @@ export function createDispatchBundle(
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
+		// The calls in flight by id, and the ones the host saw running when its abort started: the abort finishes them
+		// before the seal, so the stop detail reads this snapshot (M-37).
+		const inFlightCalls = new Map<string, InFlightCall>();
+		let callsAtAbort: InFlightCall[] | null = null;
 		let toolTelemetryIngestionErrors = 0;
 		const upstreamResponses: RunResultUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
@@ -9252,6 +9316,7 @@ export function createDispatchBundle(
 					usage?: unknown;
 					tool?: string;
 					toolCallId?: string;
+					action?: unknown;
 					sequence?: number;
 					outcomeCode?: unknown;
 					detail?: unknown;
@@ -9284,6 +9349,7 @@ export function createDispatchBundle(
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+				recordCallStart(inFlightCalls, event.payload);
 				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
 				else startsCarryIds = false;
 			}
@@ -9566,18 +9632,26 @@ export function createDispatchBundle(
 				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 				const source = event.payload.source;
 				const granted = (source === "operator" || source === "main") && event.payload.decision === "approved";
+				// An answer another Clio process gave through the run's grant records names that process.
+				const elsewhere =
+					source === "operator" && typeof event.payload.requestId === "string"
+						? answeredElsewhere.get(event.payload.requestId)
+						: undefined;
+				if (elsewhere !== undefined) answeredElsewhere.delete(event.payload.requestId as string);
 				const decidedBy =
-					source === "operator"
-						? "operator"
-						: source === "main"
-							? "main"
-							: source === "remembered"
-								? "remembered-denial"
-								: source === "timeout"
-									? "timeout"
-									: source === "binding"
-										? "policy:grant-binding"
-										: "policy:no-operator";
+					elsewhere !== undefined
+						? "operator:another-process"
+						: source === "operator"
+							? "operator"
+							: source === "main"
+								? "main"
+								: source === "remembered"
+									? "remembered-denial"
+									: source === "timeout"
+										? "timeout"
+										: source === "binding"
+											? "policy:grant-binding"
+											: "policy:no-operator";
 				const requestId =
 					typeof event.payload.requestId === "string"
 						? event.payload.requestId
@@ -9587,7 +9661,11 @@ export function createDispatchBundle(
 				const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
 				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
 				const reason =
-					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+					elsewhere !== undefined
+						? answeredElsewhereReason(granted ? "approve" : "deny", elsewhere)
+						: typeof event.payload.reason === "string"
+							? event.payload.reason
+							: `${event.payload.tool} requires approval`;
 				// A remembered answer never raised an escalation card, so it mints
 				// the adjacent request/resolve pair the way policy denials do.
 				if (
@@ -9626,6 +9704,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
+				recordCallFinish(inFlightCalls, event.payload);
 				const tool = pendingCapabilities.get(event.payload.toolCallId ?? "") ?? event.payload.tool;
 				pendingCapabilities.delete(event.payload.toolCallId ?? "");
 				if (tool === ToolNames.Gateway && event.payload.toolCallId)
@@ -9917,7 +9996,10 @@ export function createDispatchBundle(
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
 			req,
-			abort,
+			abort: () => {
+				callsAtAbort ??= [...inFlightCalls.values()];
+				abort();
+			},
 			kill: abort,
 			...(steer ? { steer } : {}),
 			...(resolvePermission ? { resolvePermission } : {}),
@@ -10301,6 +10383,19 @@ export function createDispatchBundle(
 				// meet a grounding rule from a prompt that asks for the impossible.
 				const workerCodeDetail =
 					resolvedOutcomeCode.code === null ? undefined : trustedOutcomeDetails.get(resolvedOutcomeCode.code);
+				// DESIGN 4.5 (fleet M8): the host, not the worker's line written at the handback, says whether a report came back.
+				const wallHandback =
+					resolvedOutcomeCode.code === "worker_run_timeout"
+						? wallHandbackOutcomeDetail({
+								reported: hasDurableFinalOutput(outputCapture.snapshot()),
+								unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+								runningAtStop: callsAtAbort,
+								hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+								hostSignals: result.hostSignals ?? [],
+								exitCode: result.exitCode ?? null,
+								signal: result.signal ?? null,
+							})
+						: undefined;
 				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
 				const classifyTool = (tool: string): ActionClass => safety.classify({ tool }).actionClass;
 				const mutatedPathCount = finishContract?.assessment.mutatedPaths.length ?? null;
@@ -10310,6 +10405,8 @@ export function createDispatchBundle(
 					obligation: resolveObligation(lifecycle.runRole, appliedResultContract?.kind ?? null, req.intent?.readRoots ?? []),
 					contractKind: appliedResultContract?.kind ?? null,
 					toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
+					...(req.gate?.packet !== undefined ? { packet: req.gate.packet.ids } : {}),
+					...(req.gate?.packet?.verified !== undefined ? { verifiedChecks: req.gate.packet.verified } : {}),
 				};
 				const gradeFacts: GradeFacts = {
 					termination: { outcome, detail: terminationDetail },
@@ -10318,6 +10415,7 @@ export function createDispatchBundle(
 						code: resolvedOutcomeCode.code,
 						...(workerCodeDetail !== undefined ? { detail: workerCodeDetail } : {}),
 					},
+					...(wallHandback !== undefined ? { wallHandback } : {}),
 					finishGateEngaged: finishContract?.rigor === "high" && finishContract.assessment.kind === "engage",
 					blockedWrites: blockedWriteAttempts(toolStats, classifyTool, mutatedPathCount),
 				};
@@ -10383,17 +10481,23 @@ export function createDispatchBundle(
 					// Only verify runs on the final tree ground a claim by check id or resolved command (bt-9, bt-27c).
 					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
-					readOnly: lifecycle.readOnly,
+					toolLaneObserved: gradeContract.toolLaneObserved,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
 				const activity = summarizeToolActivity(toolStats, classifyTool);
+				// A limitation the run recorded is a typed declaration whether or not the finish contract kept its words: an
+				// assessment of a run that changed nothing carries no evidence, and an empty list is not "none recorded".
+				const limitationSummaries =
+					finishContract?.assessment.evidence
+						.filter((item) => item.kind === "limitation")
+						.map((item) => item.summary.trim())
+						.filter((summary) => summary.length > 0) ?? [];
 				const recordedLimitations =
 					(toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0
-						? (finishContract?.assessment.evidence
-								.filter((item) => item.kind === "limitation")
-								.map((item) => item.summary.trim())
-								.filter((summary) => summary.length > 0) ?? ["a limitation was recorded"])
+						? limitationSummaries.length > 0
+							? limitationSummaries
+							: ["a limitation was recorded"]
 						: [];
 				gradeFacts.handback = {
 					finalOutput: hasDurableFinalOutput(capturedOutput),
@@ -10427,8 +10531,15 @@ export function createDispatchBundle(
 					// A claim is unmet evidence only when no checking call ran at all; a name that matched no command lowers quality.
 					ungroundedChecks:
 						validationGrounding !== null && invalidatesQuality(validationGrounding) ? validationGrounding.ungrounded : [],
-					reviewVerdict:
-						appliedResultContract?.kind === "review-verdict" ? (parseVerifierResult(finalText)?.verdict ?? null) : null,
+					gateVerdict: gateVerdictFactsOf(appliedResultContract, finalText, (claim) =>
+						groundGateCheck(
+							{
+								executedCommands: observedRunEffects.verificationCommands,
+								verifyRuns: runEffects.checkFreshness().verifyRuns,
+							},
+							claim,
+						),
+					),
 				};
 				applyGrade(grade(gradeContract, gradeFacts));
 				let sealedResultContractFact: RunResultContractFact | null =
@@ -10564,6 +10675,14 @@ export function createDispatchBundle(
 							? assuranceVerification
 							: verificationWithHostVerdict(assuranceVerification, hostVerification),
 				});
+				// What lowered it, in the merge gate's words: the checks this run executed that failed on its final tree.
+				const failedChecks = assuranceQuality.typedValidations
+					.filter((fact) => !fact.passed)
+					.map((fact) => fact.sourceId.replace(/^[\w-]+:/u, ""));
+				const assuranceFact = {
+					value: assurance,
+					cause: compromisedReason(appliedResultContract, finalText, failedChecks),
+				};
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
 				// check the merge used to rest on the exit status alone, and a Git
@@ -10580,6 +10699,7 @@ export function createDispatchBundle(
 					taskWorktreeHoldsWork(req.taskWorktree)
 						? {
 								assurance,
+								failedChecks,
 								contract: appliedResultContract,
 								output: finalText,
 								branch: req.taskWorktree.branch,
@@ -10592,6 +10712,14 @@ export function createDispatchBundle(
 				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);
 				const withheldVerdict = mergeGateInput === null ? null : mergeGateVerdict(mergeGateInput);
 				const mergeWithheld = withheldDetail !== null;
+				// One grade (4.8): a builder whose assurance is compromised is not delivered. A merge-mode branch with work is
+				// held by the merge gate, which reads the same assurance, and graded with its landing below.
+				if (mergeGateInput === null) {
+					gradeFacts.assurance = assuranceFact;
+					applyGrade(grade(gradeContract, gradeFacts));
+				}
+				// Its branch is kept like a host-rejected one, committed for the operator's one land command.
+				const assuranceHeld = req.taskWorktree !== undefined && outcomeCode === "assurance_compromised";
 				// A merge-mode run the worker finished but host verification rejected
 				// keeps its branch like a withheld merge, so its tree is committed there
 				// for the operator's one merge command instead of left as loose edits.
@@ -10600,7 +10728,8 @@ export function createDispatchBundle(
 				// A worker stopped at its tool-call cap, or one that reported it did not
 				// finish, commits what it changed on its preserved branch as a partial
 				// result: never merged, never dropped.
-				const cappedPartial = !workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined);
+				const cappedPartial =
+					!workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined, finalOutcome);
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
@@ -10615,8 +10744,13 @@ export function createDispatchBundle(
 				let claimReleased = false;
 				// Why landing the run's work failed or was held (V6); the grader seals it beside every other rule.
 				let landingFailure: { code: RunOutcomeCode | null; detail: string } | null = null;
+				// The operator merged a held branch from the card: a person accepted the result (V6).
+				let operatorMerged = false;
 				const landingAttempted = req.taskWorktree !== undefined;
-				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial)) {
+				if (
+					req.taskWorktree !== undefined &&
+					(finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial || assuranceHeld)
+				) {
 					const authorship =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
 							? resultContractAuthorship(appliedResultContract, capturedOutput?.state === "final" ? capturedOutput.text : null)
@@ -10632,7 +10766,7 @@ export function createDispatchBundle(
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
-						apply: mergeWithheld || hostRejectedMerge || cappedPartial ? "preserve" : (req.apply ?? "merge"),
+						apply: mergeWithheld || hostRejectedMerge || cappedPartial || assuranceHeld ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths,
 						commitMessage: taskCommitMessage,
 						authoredPaths,
@@ -10644,7 +10778,7 @@ export function createDispatchBundle(
 						landingFailure = {
 							code: null,
 							detail:
-								hostRejectedMerge || cappedPartial
+								hostRejectedMerge || cappedPartial || assuranceHeld
 									? [notedDetail(), worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
 									: (worktreeReceipt.detail ?? worktreeReceipt.reason),
 						};
@@ -10653,12 +10787,12 @@ export function createDispatchBundle(
 							detailNotes.push(partialResultDetail(req.taskWorktree.branch));
 							failureMessage = notedDetail() ?? failureMessage;
 						}
-					} else if (hostRejectedMerge) {
+					} else if (hostRejectedMerge || assuranceHeld) {
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
 							detailNotes.push(
-								`its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`clio-coder fleet land ${req.taskWorktree.branch}\` applies it if you accept the failed check`,
+								`its work is committed on the preserved branch ${req.taskWorktree.branch}, \`clio-coder fleet land ${req.taskWorktree.branch}\` previews the merge and \`clio-coder fleet land ${req.taskWorktree.branch} --yes\` lands it if you accept the failed check`,
 							);
 							failureMessage = notedDetail() ?? failureMessage;
 						}
@@ -10766,6 +10900,7 @@ export function createDispatchBundle(
 								};
 								landingFailure = { code: null, detail: landed.detail ?? landed.reason };
 							} else {
+								operatorMerged = true;
 								worktreeReceipt = {
 									...landed,
 									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
@@ -10824,6 +10959,8 @@ export function createDispatchBundle(
 				// The landing is the last rule: its words already carry the notes made before it.
 				const preLandingDetail = notedDetail();
 				if (landingAttempted) {
+					if (mergeGateInput !== null)
+						gradeFacts.assurance = { ...assuranceFact, ...(operatorMerged ? { operatorAccepted: true } : {}) };
 					gradeFacts.landing = { failure: landingFailure };
 					applyGrade(grade(gradeContract, gradeFacts));
 				}
@@ -12315,8 +12452,9 @@ export function createDispatchBundle(
 				}),
 			);
 			// No in-memory executor survives a process restart, so every active
-			// side-store lease from an earlier bundle is orphaned and must expire.
-			cleanupDispatchReservations({ startup: true, nowMs: now() });
+			// side-store lease from an earlier bundle is orphaned and must expire. Boot never waits on the admission lock
+			// for it (M-35): a held lock leaves the sweep to the first plan admission.
+			sweepDispatchReservationsAtStartup(now());
 			const runLedger = openLedger({
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
@@ -12432,6 +12570,7 @@ export function createDispatchBundle(
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();
+				crossProcessFleet.dispose();
 				workerApprovalWindows.dispose();
 			})().then(resolveStop, rejectStop);
 			return stopPromise;
@@ -13049,6 +13188,8 @@ export function createDispatchBundle(
 			return { receipt, receipts };
 		},
 		abort(runId, reason) {
+			// A run another Clio process owns: its owner takes the durable cancel request and seals it canceled.
+			if (currentAssignmentRun(runId) === null && crossProcessFleet.cancelForeign(runId, reason?.detail ?? null)) return;
 			const rootRunId = controlRootFor(runId);
 			const run = currentAssignmentRun(runId);
 			canceledControlRoots.add(rootRunId);
@@ -13164,10 +13305,18 @@ export function createDispatchBundle(
 			// answer is bound to the attempt and argument digest the worker parked.
 			const brokered = grantBroker.get(requestId);
 			if (brokered !== null) {
-				const result = grantBroker.decide(requestId, { decision, issuer: "operator", runId });
+				const elsewhere = answeredElsewhere.get(requestId);
+				const result = grantBroker.decide(requestId, {
+					decision,
+					issuer: "operator",
+					runId,
+					...(elsewhere !== undefined ? { reason: answeredElsewhereReason(decision, elsewhere) } : {}),
+				});
 				if (!result.ok) throw new Error(`resolveWorkerPermission: ${result.reason}`);
 				return;
 			}
+			// An ask another Clio process holds: the answer goes to its run directory, and that process applies it.
+			if (crossProcessFleet.answerForeign(runId, requestId, decision)) return;
 			if (workerApprovalWindows.isExpired(requestId)) {
 				throw new Error(`resolveWorkerPermission: run '${runId}' no longer accepts input for this ask; its window ended`);
 			}

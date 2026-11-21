@@ -164,7 +164,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Look up Clio commands and configuration", args: { query: "configuration and targets" } },
 			{ goal: "Propose and approve persistent repository memory", args: { query: "memory promotion" } },
 		],
-		uiLabel: "Clio docs",
+		uiLabel: "CLIO Coder docs",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.contextDocs, "Use a narrower query or a lower limit."),
 	},
 	[ToolNames.ClioLibrary]: {
@@ -173,7 +173,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		examples: [
 			{ goal: "Find review workflows and specialists with their readiness and invocation", args: { query: "review" } },
 		],
-		uiLabel: "Clio library",
+		uiLabel: "CLIO Coder library",
 		resultSizePolicy: observePolicy(
 			OBSERVE_SELF_CAPS.contextLibrary,
 			"Use kind, query, or ref to narrow the rows, or follow nextOffset.",
@@ -290,6 +290,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		promptHint:
 			"Prefer run_script over bash for a script that produces large or long-running output: it streams both streams to .clio-coder/runs/<runId>/ and records the script hash, argv, and declared inputs and outputs.",
+	},
+	[ToolNames.Browser]: {
+		promptHint: UNTRUSTED_CONTENT_BANNER,
+		objective:
+			"Drive a persistent headless browser session: open a URL, run Playwright scripts, look at the accessibility tree or a screenshot, close.",
+		uiLabel: "Browser",
+		resultSizePolicy: {
+			kind: "bounded",
+			maxBytes: 16_384,
+			followUpHint: "Use look with a target to scope the snapshot, or read the offloaded full result.",
+		},
 	},
 	// ORCHESTRATE: agent-class, receipts as evidence.
 	[ToolNames.Tasks]: {
@@ -622,10 +633,10 @@ function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
 						return policyCap(readMaxBytes());
 					},
 				}
-			: spec.name === ToolNames.Verify
+			: spec.name === ToolNames.Verify || spec.name === ToolNames.Browser
 				? {
 						...metadata.resultSizePolicy,
-						// The frontend check's screenshot gets read's image budget; its report text keeps the summary bound.
+						// The frontend check's and the browser's screenshots get read's image budget; their text keeps its bound.
 						get imageMaxBytes() {
 							return readMaxBytes();
 						},

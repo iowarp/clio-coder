@@ -70,6 +70,7 @@ import { shellCommandInk, toolOutputInk } from "./code-ink.js";
 import { renderDiffLines } from "./diff.js";
 import { LiveToolView } from "./live-tool-view.js";
 import { highlightJsonLine, tryRenderJson, tryRenderXml } from "./structured.js";
+import { renderToolResultImages } from "./tool-images.js";
 
 // The argument projection lives in the safety domain so the worker tool seam
 // scrubs by the same rules; re-exported here because this renderer is where
@@ -183,6 +184,8 @@ export interface ToolExecutionFinished {
 	 * approval event, which never reaches the session ledger.
 	 */
 	operatorGrant?: string | undefined;
+	/** Who gave `operatorGrant` when it was not the operator at this terminal, as `attach c2 (apr)`. Live only. */
+	grantedBy?: string | undefined;
 	autoApproved?: "yolo" | undefined;
 	/**
 	 * A worker card sits under this dispatch call and states the run's outcome,
@@ -863,12 +866,20 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
 	const driftText = skillLoadFacts(finished)?.drifted === true ? `${toolMeta(" · ")}${yellow("drifted")}` : "";
+	// A request the browser session's host grant refused is a warning the folded row states with the grant that admits it.
+	const blockedDetails = executed && row.toolName === ToolNames.Browser ? (detailsOf(finished.result) ?? null) : null;
+	const blockedGrant = stringField(blockedDetails, "blockedGrant");
+	const blockedHosts = Array.isArray(blockedDetails?.blockedHosts) ? blockedDetails.blockedHosts.join(", ") : "";
+	const blockedText =
+		blockedGrant === null
+			? ""
+			: `${toolMeta(" · ")}${yellow(sanitizeCallTargetText(`blocked ${blockedHosts}; to admit: ${blockedGrant}`))}`;
 	// An offloaded result says where the rest is, not what its path is: the
 	// path is a 64-hex name that wrapped a row across three, and /view and the
 	// full body's footer state it.
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
-		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}`,
+		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}${blockedText}`,
 		offload:
 			offloadPath === null
 				? ""
@@ -928,7 +939,7 @@ export function renderToolAwaitingApproval(
 	const actionWords = actionClassWords(view.actionClass);
 	const why =
 		view.axis.kind === "autonomy"
-			? `At ${approvalAxisText(view)}, Clio asks you before a call that ${actionWords}`
+			? `At ${approvalAxisText(view)}, CLIO Coder asks you before a call that ${actionWords}`
 			: `${approvalAxisText(view)} held this call for you; it ${actionWords}`;
 	lines.push(...cardRows(toolMeta(why), width, false));
 	const facts = [
@@ -973,7 +984,8 @@ function approvalReceiptRows(
 			: [];
 	// The operator's own mark: `?` is the class of a call that asks, and read as a question still open under a call
 	// that had already been allowed.
-	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
+	const by = "result" in call ? call.grantedBy : undefined;
+	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by ${by ?? "you"} · ${axis}`)}`, width, failure);
 }
 
 /**
@@ -1027,13 +1039,16 @@ function blockReasonClause(reason: string): string {
  */
 /** The first words of the denial Clio writes for a card nobody answered (`unattendedPermissionReason`). */
 const UNATTENDED_REFUSAL = /^The operator did not answer this \S+ approval within (\d+) s/u;
+/** A card a person denied: `User` at this terminal, or an attached approver by name (`overlay-permission-lifecycle`). */
+const DENIED_AT_PROMPT = /^(?:User|attach \S+(?: \([^)]*\))?) denied this call at the permission prompt/u;
 
 function refusalTail(reason: string): string {
 	// `The operator did not answer…, so Clio…` lost its point to the cut; the operator is the reader here.
 	const unattended = UNATTENDED_REFUSAL.exec(reason);
-	if (unattended) return `no answer in ${unattended[1]} s, so Clio denied it`;
+	if (unattended) return `no answer in ${unattended[1]} s, so CLIO Coder denied it`;
 	const clause = blockReasonClause(reason);
 	if (/^User denied this call/u.test(clause)) return clause.replace(/^User denied/u, "you denied");
+	// An attached approver's denial already names that client (`attach c2 (apr) denied this call…`).
 	const blocked = /^(\S+ blocked: )([a-z_]+)( in \S+)?$/u.exec(clause);
 	return blocked ? `${blocked[1]}${actionClassWords(blocked[2] ?? "")}${blocked[3] ?? ""}` : clause;
 }
@@ -1404,7 +1419,7 @@ function sublineParts(
 	const executed = call.actor !== undefined && !notRun && status !== "forming" && status !== "ready";
 	const actor = !executed
 		? ""
-		: `${toolMeta(call.actor === "operator" ? "you" : "Clio")} ${!settled ? toolMeta(call.actor === "operator" ? "are " : "is ") : ""}`;
+		: `${toolMeta(call.actor === "operator" ? "you" : "CLIO Coder")} ${!settled ? toolMeta(call.actor === "operator" ? "are " : "is ") : ""}`;
 	const requestedBy =
 		executed && call.requestedBy && !omitRequester
 			? toolMeta(` (requested by ${sanitizeCallTargetText(call.requestedBy)})`)
@@ -2092,6 +2107,7 @@ export function renderToolExecution(
 		...renderOutputMeta(finished, width, finished.isError, finished.outcome === "blocked" ? "decision" : "output"),
 	);
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+	out.push(...renderToolResultImages(finished.result, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
 	return out;
 }
@@ -2120,6 +2136,7 @@ export function renderToolResultOnly(
 	out.push(...approvalReceiptRows(finished, width, finished.isError));
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+	out.push(...renderToolResultImages(finished.result, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
 	return out;
 }
@@ -2646,8 +2663,8 @@ export function renderToolPreview(
 		const tailStatesRefusal = refusal !== undefined && blockReasonClause(refusal) === refusal.replace(/\.$/u, "");
 		let text = refusal && tailStatesRefusal ? withoutLeadingLine(told, refusal) : told;
 		if (finished?.outcome !== undefined) {
-			// An operator's own denial needs no account back; the tail says it, and /view keeps what the model read.
-			text = refusal?.startsWith("User denied") === true ? "" : withoutModelRejectionAdvice(text);
+			// A person's own denial needs no account back; the tail says it, and /view keeps what the model read.
+			text = refusal !== undefined && DENIED_AT_PROMPT.test(refusal) ? "" : withoutModelRejectionAdvice(text);
 		}
 		// The action row already names this run. A short monitor summary can
 		// start with the same id; keep the remainder here and the raw result in
@@ -2682,6 +2699,8 @@ export function renderToolPreview(
 			);
 		}
 	}
+	// A settled call's screenshots draw under its body where the terminal draws images (S5).
+	if (finished !== undefined && !failure) rows.push(...renderToolResultImages(finished.result, width, options));
 	return rows;
 }
 

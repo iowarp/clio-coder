@@ -147,6 +147,8 @@ export interface DispatchBoardRow {
 	outcomeDetail?: string | null;
 	/** Fleet node id; absent renders as the local node. */
 	node?: string;
+	/** Another Clio process owns the run: it takes no steering from here, and a cancel goes to its owner as a request. */
+	foreign?: true;
 	/** Review/compete gate badge (role + cycle). */
 	gate?: { role: string; cycle: number };
 	council?: { group: string; label: string; color?: string; round: number };
@@ -291,6 +293,8 @@ const PHASE_COLUMN_MIN_LABEL_WIDTH = 8;
 export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 	return (
 		row.plan === undefined &&
+		// Steering reaches only a worker this process holds the input channel of.
+		row.foreign !== true &&
 		runKindSupportsLiveSteering(row.runtimeKind) &&
 		// A queued run has no worker yet, and a stale one has stopped answering, so a message would reach no one. A
 		// stale worker that speaks again is running again, and takes messages again.
@@ -1061,7 +1065,7 @@ function dispatchCardBody(
 						"started",
 						[
 							...(started === null ? [] : [theme.fg("body", started)]),
-							...(row.earlier === true ? [theme.fg("annotation", "recorded before this Clio started")] : []),
+							...(row.earlier === true ? [theme.fg("annotation", "recorded before this CLIO Coder started")] : []),
 						],
 						contentWidth,
 					),
@@ -1728,9 +1732,9 @@ function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | 
 		case "agent":
 			return "by the main agent";
 		case "harness":
-			return "by Clio on your behalf";
+			return "by CLIO Coder on your behalf";
 		case "internal":
-			return "by Clio";
+			return "by CLIO Coder";
 		default:
 			return null;
 	}
@@ -2740,6 +2744,7 @@ function toRow(
 		ttft,
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 		...(entry.node !== undefined ? { node: entry.node } : {}),
+		...(entry.foreign === true ? { foreign: true as const } : {}),
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
 		...(entry.council !== undefined ? { council: { ...entry.council } } : {}),
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),

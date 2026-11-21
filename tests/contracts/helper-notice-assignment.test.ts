@@ -45,11 +45,11 @@ test("a retried helper leaves the footer on its assignment's terminal state and 
 			outcomeDetail: null,
 			reason: "failed",
 		});
-		deepStrictEqual(shown(), ["warning: Clio's Scout helper failed; your turn is not affected · /fleet shows why"]);
+		deepStrictEqual(shown(), ["warning: CLIO Coder's Scout helper failed; your turn is not affected · /fleet shows why"]);
 		bus.emit("run.started", { ...identity, runId: "run-b", pid: null, assignmentId: "run-a", attempt: 1 });
-		deepStrictEqual(shown(), ["info: Clio's Scout helper is working"]);
+		deepStrictEqual(shown(), ["info: CLIO Coder's Scout helper is working"]);
 		bus.emit("run.completed", { ...identity, runId: "run-b", outcome: "succeeded" } as never);
-		deepStrictEqual(shown(), ["success: Clio's Scout helper finished"]);
+		deepStrictEqual(shown(), ["success: CLIO Coder's Scout helper finished"]);
 	} finally {
 		dispose();
 	}
@@ -68,8 +68,8 @@ test("parallel helpers keep one notice each", () => {
 			reason: "failed",
 		});
 		deepStrictEqual(shown(), [
-			"warning: Clio's Scout helper failed; your turn is not affected · /fleet shows why",
-			"info: Clio's Scout helper is working",
+			"warning: CLIO Coder's Scout helper failed; your turn is not affected · /fleet shows why",
+			"info: CLIO Coder's Scout helper is working",
 		]);
 	} finally {
 		dispose();

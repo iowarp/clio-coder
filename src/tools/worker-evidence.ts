@@ -262,7 +262,7 @@ function admissionLabels(run: FinishedRun): string[] {
 		labels.push(
 			`validations=claimed:${grounding.claimed} grounded:${grounding.grounded}${
 				grounding.ungrounded.length > 0
-					? ` ${grounding.basis === "no-command-executed" ? "unverifiable" : grounding.basis === "unattributable-status" ? "unattributable" : "unmatched"}:${grounding.ungrounded
+					? ` ${grounding.basis === "no-command-executed" ? "unverifiable" : grounding.basis === "unattributable-status" ? "unattributable" : grounding.basis === "unobserved-lane" ? "unobserved" : "unmatched"}:${grounding.ungrounded
 							.map((name) => JSON.stringify(name))
 							.join(",")}`
 					: ""
@@ -306,16 +306,17 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 		// something and nothing changed, under an exit code that says success.
 		if (!landed && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
 	}
-	// DESIGN 4.5 (fleet M8): a builder a bound stopped names the tree it left, from the host's measured delta.
-	const changes = run.delivered?.checkoutChanges;
+	// DESIGN 4.5 (fleet M8): a builder a bound stopped names the tree it left, from the host's measured delta: the
+	// checkout it ran in, or the unmerged task worktree branch that holds its edits.
+	const worktree = run.delivered?.worktree ?? null;
+	const changed = worktree === null ? run.delivered?.checkoutChanges?.changedPaths : worktree.changedPaths;
 	if (
 		run.facts.outcome !== "succeeded" &&
-		(run.delivered?.worktree ?? null) === null &&
-		changes !== undefined &&
-		changes !== null &&
-		changes.changedPaths.length > 0
+		run.facts.worktree?.applied !== true &&
+		changed !== undefined &&
+		changed.length > 0
 	)
-		labels.push(...boundedPathField("changed", { count: changes.changedPaths.length, paths: changes.changedPaths }));
+		labels.push(...boundedPathField("changed", { count: changed.length, paths: changed }));
 	// A timed-out ask is always denied. Without its cause, a refused call read as a policy or routing refusal (bt-11 t).
 	const timedOut = run.facts.escalations?.timedOut ?? 0;
 	if (timedOut > 0) {
@@ -595,9 +596,11 @@ export function workerTextNonEvidenceNotices(
 				? `non-evidence: this run reported ${named} as passing review judgments and executed no command. They are its reading of the source, not checks that ran; do not report them as verified.`
 				: grounding.basis === "no-command-executed"
 					? `non-evidence: this run reported ${named} as passing and executed no command at all. Re-run the check yourself before repeating the claim.`
-					: grounding.basis === "unattributable-status"
-						? `non-evidence: this run reported ${named} as passing, but the command that ran it reported a later command's exit status, not the check's. Re-run the check yourself before repeating the claim.`
-						: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
+					: grounding.basis === "unobserved-lane"
+						? `non-evidence: this run reported ${named} as passing in a tool lane CLIO Coder does not observe. Re-run the check yourself before repeating the claim.`
+						: grounding.basis === "unattributable-status"
+							? `non-evidence: this run reported ${named} as passing, but the command that ran it reported a later command's exit status, not the check's. Re-run the check yourself before repeating the claim.`
+							: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
 		);
 	}
 	if (facts.capabilityMismatch !== null) {

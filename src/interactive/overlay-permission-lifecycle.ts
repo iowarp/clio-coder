@@ -137,6 +137,14 @@ export interface OverlayPermissionLifecycleDeps {
 	unattendedTimers?: UnattendedTimers;
 }
 
+/** Who answered a card from somewhere other than this terminal's keys: the journal's id and the row's words for it. */
+export interface ApprovalAnswerer {
+	/** `approval.resolved.decidedBy`, such as `attach:c2`. */
+	decidedBy: string;
+	/** How the call's row names them, as their host notice does: `attach c2 (apr)`. */
+	name: string;
+}
+
 export interface OverlayPermissionLifecycle {
 	confirm(): void;
 	/** Whether the card on screen offers its sandbox escape's session option (M-7). */
@@ -162,10 +170,11 @@ export interface OverlayPermissionLifecycle {
 	/** The card on screen now, main or worker, or null. */
 	cardOnScreen(): ApprovalRequestView | null;
 	/**
-	 * Answer the card on screen when it is `requestId`, as Enter or Escape would, recording `decidedBy` as who
-	 * decided. False, and nothing changes, when that request is not the card on screen.
+	 * Answer the card on screen when it is `requestId`, as Enter or Escape would, recording `by.decidedBy` on the
+	 * journal and naming `by.name` on the call's row. False, and nothing changes, when that request is not the card on
+	 * screen.
 	 */
-	answerOnScreen(requestId: string, decision: "approve" | "deny", decidedBy: string): boolean;
+	answerOnScreen(requestId: string, decision: "approve" | "deny", by: ApprovalAnswerer): boolean;
 	/** Called with the card's view each time a card takes the screen. */
 	onCardShown(listener: (view: ApprovalRequestView) => void): () => void;
 	onPermissionOverlayClosed(): void;
@@ -318,7 +327,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let pendingWorker: WorkerEscalationEntry | null = null;
 	let pendingWorkerView: ApprovalRequestView | null = null;
 	/** Who answered the card on screen when it was not the operator at this terminal. */
-	let answeredBy: string | null = null;
+	let answeredBy: ApprovalAnswerer | null = null;
 	const cardListeners = new Set<(view: ApprovalRequestView) => void>();
 	const cardShown = (view: ApprovalRequestView): void => {
 		for (const listener of cardListeners) {
@@ -401,7 +410,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		);
 		deps.appendNotice(
 			"warn",
-			`No answer within ${entry.seconds} s: Clio denied ${entry.tool}, which did not run, and the turn continued.`,
+			`No answer within ${entry.seconds} s: CLIO Coder denied ${entry.tool}, which did not run, and the turn continued.`,
 		);
 	};
 	const expireUnattended = (requestId: string): void => {
@@ -567,7 +576,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const announceWorkerExpiry = (
 		entry: WorkerEscalationEntry,
 		fallback: "deny" | "fail",
-		cause: "timeout" | "terminal" | "late-answer" | "revoked",
+		cause: "timeout" | "terminal" | "late-answer" | "revoked" | "answered",
 	): void => {
 		const heldFor = heldWorkerCeilings.get(entry.requestId);
 		dropWorkerCountdown(entry.requestId);
@@ -585,7 +594,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					? `${call} no longer needs an answer: its run ended, and the call did not run.`
 					: cause === "revoked"
 						? `${call} no longer needs an answer: the ask was withdrawn, and the call did not run.`
-						: `Your answer to ${call} came too late. It did not run, ${after}.`;
+						: cause === "answered"
+							? `${call} was answered in another Clio session.`
+							: `Your answer to ${call} came too late. It did not run, ${after}.`;
 		deps.appendNotice("warn", `${what} /view dispatch:${entry.runId}`);
 	};
 	const removeQueuedWorkers = (matches: (entry: WorkerEscalationEntry) => boolean): WorkerEscalationEntry[] => {
@@ -600,7 +611,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	};
 	const withdrawWorkers = (
 		matches: (entry: WorkerEscalationEntry) => boolean,
-		cause: "timeout" | "terminal" | "revoked",
+		cause: "timeout" | "terminal" | "revoked" | "answered",
 		fallback?: "deny" | "fail",
 	): void => {
 		const active = pendingWorker !== null && matches(pendingWorker) ? pendingWorker : null;
@@ -691,7 +702,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			cardShown(view);
 		}) ?? (() => {});
 
-	const unsubscribeWorker = deps.bus.subscribe("approval.requested", (payload) => {
+	const onWorkerRequested = (payload: PermissionRequestedPayload): void => {
 		const entry = workerEscalationEntry(payload, deps.getAutonomy());
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
@@ -704,6 +715,27 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		deps.onOperatorParked?.();
 		workerQueue.push(entry);
 		maybeOpenWorker();
+	};
+	const unsubscribeWorker = deps.bus.subscribe("approval.requested", onWorkerRequested);
+	// An ask another Clio process holds on this state directory (cross-process fleet state): the same card, and when
+	// it settles there, whoever answered, it leaves this one.
+	const unsubscribeForeignWorker = deps.bus.subscribe("approval.foreign_changed", (change) => {
+		if (change.kind === "requested") {
+			// The owner refused the answer given here and still holds the ask: it shows again, saying why.
+			if (change.refusal !== undefined && typeof change.request.requestId === "string") {
+				announcedWorkerRequestIds.delete(change.request.requestId);
+				expiredWorkerRequestIds.delete(change.request.requestId);
+			}
+			onWorkerRequested(change.request);
+			return;
+		}
+		const { requestId, status, decidedBy } = change.resolved;
+		if (typeof requestId !== "string") return;
+		withdrawWorkers(
+			(entry) => entry.requestId === requestId,
+			status === "expired" || decidedBy === "timeout" ? "timeout" : decidedBy === "revoked" ? "revoked" : "answered",
+			change.resolved.fallback === "fail" ? "fail" : undefined,
+		);
 	});
 	const unsubscribeSessionReattached = deps.bus.subscribe("session.reattached", reconsiderWorkerOwnership);
 	const unsubscribeSessionCreated = deps.bus.subscribe("session.created", reconsiderWorkerOwnership);
@@ -714,6 +746,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") {
 			// A held ask its owner answered leaves silently; this session never showed it.
 			if (foreignWorkers.delete(payload.requestId)) dropWorkerCountdown(payload.requestId);
+			// Answered by another Clio process on this state directory through the run's grant records: a card still open
+			// for it here leaves and says so.
+			if (payload.decidedBy === "operator:another-process") {
+				const requestId = payload.requestId;
+				withdrawWorkers((entry) => entry.requestId === requestId, "answered");
+			}
 			return;
 		}
 		const fallback = payload.fallback === "fail" ? "fail" : "deny";
@@ -745,7 +783,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		const forSession = confirmedForSession;
 		const wasDenied = denied;
 		const wasTimedOut = timedOut;
-		const decidedBy = answeredBy ?? "operator";
+		const answerer = answeredBy;
+		const decidedBy = answerer?.decidedBy ?? "operator";
 		answeredBy = null;
 		confirmed = false;
 		confirmedForSession = false;
@@ -812,6 +851,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 								type: "tool_approval_state",
 								toolCallId: permission.meta.toolCallId,
 								state: "resumed",
+								...(answerer !== null ? { grantedBy: answerer.name } : {}),
 							});
 					},
 				},
@@ -822,7 +862,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			// here printed the same guidance twice in one payload.
 			const cancellationReason = stopping
 				? "User stopped the turn at this call's approval card. It did not run, and the turn is over."
-				: "User denied this call at the permission prompt. It will not run; no approval is pending.";
+				: `${answerer?.name ?? "User"} denied this call at the permission prompt. It will not run; no approval is pending.`;
 			void resolvePermission(
 				{ bus: deps.bus, ...(deps.toolRegistry ? { registry: deps.toolRegistry } : {}) },
 				{
@@ -939,6 +979,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			unsubscribePermission();
 			unsubscribeAdmissionReview();
 			unsubscribeWorker();
+			unsubscribeForeignWorker();
 			unsubscribeWorkerResolution();
 			unsubscribeWorkerCompleted();
 			unsubscribeWorkerFailed();

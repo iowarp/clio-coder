@@ -225,7 +225,14 @@ export type AdmissionDenyCode =
 	| "git_destructive"
 	| "task_gate";
 
-export type AdmissionAskSource = "safety-net" | "tool-confirmation" | "autonomy" | "git-policy" | "session-consent";
+export type AdmissionAskSource =
+	| "safety-net"
+	| "tool-confirmation"
+	| "autonomy"
+	| "git-policy"
+	| "session-consent"
+	/** A before_tool hook's `request_approval`, raised past admission. */
+	| "hook";
 
 export type AdmissionDisposition =
 	| {

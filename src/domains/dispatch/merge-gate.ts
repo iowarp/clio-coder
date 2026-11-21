@@ -9,10 +9,18 @@ import { mutationReportChecks, mutationReportFailures } from "../agents/result-c
  * result. A worker stopped at its tool-call cap often stops mid-change, and one
  * whose report says it did not finish changed only part of what it was asked;
  * their edits are neither merged nor left as loose files, so the host commits
- * them on the preserved branch for the dispatcher to review, continue or land.
+ * them on the preserved branch for the dispatcher to review, continue or land. A run that timed out (its wall clock,
+ * fleet M8) stopped mid-change the same way.
  */
-export function preservesPartialResult(outcomeCode: string | null, hasTaskWorktree: boolean): boolean {
-	return hasTaskWorktree && (outcomeCode === "worker_tool_call_cap_exhausted" || outcomeCode === "worker_partial_work");
+export function preservesPartialResult(
+	outcomeCode: string | null,
+	hasTaskWorktree: boolean,
+	outcome?: string | null,
+): boolean {
+	return (
+		hasTaskWorktree &&
+		(outcome === "timed_out" || outcomeCode === "worker_tool_call_cap_exhausted" || outcomeCode === "worker_partial_work")
+	);
 }
 
 /**
@@ -36,7 +44,7 @@ export function taskWorktreeCommitMessage(input: {
 
 /** The failure detail suffix naming where a preserved partial result is and how to land it. */
 export function partialResultDetail(branch: string): string {
-	return `its partial work is committed on the preserved branch ${branch} and was not merged; review or continue it there, and \`clio-coder fleet land ${branch}\` applies it`;
+	return `its partial work is committed, unmerged on ${branch}; review or continue it there, \`clio-coder fleet land ${branch}\` previews the merge and \`clio-coder fleet land ${branch} --yes\` lands it`;
 }
 
 const DECLARED_CHECK_DETAIL_MAX_CHARS = 120;
@@ -50,6 +58,44 @@ export interface MergeGateInput {
 	branch: string;
 	/** Test cases or test files the task branch removed against its base, from `removedTestCases`. */
 	removedTests?: ReadonlyArray<string>;
+	/** Checks this run executed that failed on its final tree, from its typed validations. */
+	failedChecks?: ReadonlyArray<string>;
+}
+
+/**
+ * Why a compromised result is not trusted, in the words every surface shows: the merge gate's withheld reason and
+ * the grader's `assurance` rule both read it, so the card, the receipt and the envelope name one cause.
+ */
+export function compromisedReason(
+	contract: ResultContract | null,
+	output: string | null,
+	failedChecks: ReadonlyArray<string> = [],
+): string {
+	return compromisedVerdict(contract, output, failedChecks).reason;
+}
+
+function compromisedVerdict(
+	contract: ResultContract | null,
+	output: string | null,
+	failedChecks: ReadonlyArray<string>,
+): MergeGateVerdict {
+	const listed = (names: ReadonlyArray<string>): string => {
+		const named = names.slice(0, 3).map(boundedCheck).join("; ");
+		return `${named}${names.length > 3 ? `; and ${names.length - 3} more` : ""}`;
+	};
+	const failed = mutationReportFailures(contract, output);
+	const already = "if that failure was already there";
+	if (failed.length > 0)
+		return { reason: `the worker's own report lists a failing validation (${listed(failed)})`, appliesWhen: already };
+	if (failedChecks.length > 0)
+		return {
+			reason: `a check this run executed failed on its final tree (${listed(failedChecks)})`,
+			appliesWhen: already,
+		};
+	return {
+		reason: "its result is not trusted: a validation it claims was never observed or failed",
+		appliesWhen: "once a check backs the change",
+	};
 }
 
 /** A line that declares one test case, across the common frameworks. */
@@ -138,7 +184,7 @@ export function boundedCheck(check: string): string {
 export interface MergeGateVerdict {
 	/** The failing or unrun check, as a clause: what the operator is being asked to overlook. */
 	reason: string;
-	/** Completes "`clio-coder fleet land <branch>` applies it ...". */
+	/** Completes "`clio-coder fleet land <branch> --yes` lands it ...". */
 	appliesWhen: string;
 }
 
@@ -177,21 +223,8 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 			appliesWhen: "if removing those tests was intended",
 		};
 	}
-	if (input.assurance === "compromised") {
-		const failed = mutationReportFailures(input.contract, input.output);
-		if (failed.length > 0) {
-			const named = failed.slice(0, 3).map(boundedCheck).join("; ");
-			const more = failed.length > 3 ? `; and ${failed.length - 3} more` : "";
-			return {
-				reason: `the worker's own report lists a failing validation (${named}${more})`,
-				appliesWhen: "if that failure was already there",
-			};
-		}
-		return {
-			reason: "its result is not trusted: a validation it claims was never observed or failed",
-			appliesWhen: "once a check backs the change",
-		};
-	}
+	if (input.assurance === "compromised")
+		return compromisedVerdict(input.contract, input.output, input.failedChecks ?? []);
 	if (input.assurance === "grounded" || input.assurance === "reviewed" || input.contract === null) return null;
 	const first = mutationReportChecks(input.contract, input.output).declaredChecks[0];
 	if (first === undefined) return null;
@@ -205,5 +238,5 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 export function mergeWithheldDetail(input: MergeGateInput): string | null {
 	const verdict = mergeGateVerdict(input);
 	if (verdict === null) return null;
-	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, and \`clio-coder fleet land ${input.branch}\` applies it ${verdict.appliesWhen}`;
+	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, \`clio-coder fleet land ${input.branch}\` previews the merge and \`clio-coder fleet land ${input.branch} --yes\` lands it ${verdict.appliesWhen}`;
 }

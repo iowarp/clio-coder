@@ -27,13 +27,13 @@ export type ResultContract =
 	 * run is validated against the answer the gate asks for. No assurance level:
 	 * a review judges a subject, it does not mechanize proofs.
 	 */
-	| { kind: "review-verdict" }
+	| { kind: "review-verdict"; packet?: string[] }
 	/**
 	 * A judge's verdict (fleet design 4.8, M9): the gate's own answer, so V2 conformance applies to judges as it does
 	 * to reviewers. With `candidates` it is a compete judge's `{winner, checks}`, the winner one of that many subjects;
 	 * without, a council synthesis's `{verdict, text}`. Only the coordinator assigns it, never a recipe.
 	 */
-	| { kind: "judge-verdict"; candidates?: number }
+	| { kind: "judge-verdict"; candidates?: number; packet?: string[] }
 	| { kind: "council-report" }
 	/**
 	 * One council member's ballot under `synthesis: "vote"`.
@@ -273,11 +273,20 @@ export function resultContractResponseSchema(contract: ResultContract): Record<s
 	});
 	switch (contract.kind) {
 		case "verifier-report":
-		case "review-verdict":
+		case "review-verdict": {
 			if (contract.kind === "verifier-report" && contract.assurance !== undefined) return null;
+			const packet = contract.kind === "review-verdict" ? contract.packet : undefined;
 			return object({
 				verdict: { type: "string", enum: ["pass", "fail"] },
-				checks: { type: "array", items: object({ name: text, passed: { type: "boolean" }, evidence: text }) },
+				checks: { type: "array", minItems: 1, items: gateCheckSchema(packet) },
+			});
+		}
+		case "judge-verdict":
+			// Only a packet-bearing compete judge gets a bound shape; its cites name the packet's ids (M10).
+			if (contract.candidates === undefined || contract.packet === undefined || contract.packet.length === 0) return null;
+			return object({
+				winner: { type: "integer", minimum: 1, maximum: contract.candidates },
+				checks: { type: "array", minItems: 1, items: gateCheckSchema(contract.packet) },
 			});
 		case "debugger-report":
 			return object({
@@ -527,6 +536,67 @@ export interface VerifierCheck {
 	passed: boolean;
 	evidence: string;
 	obligation?: HoareObligation;
+	/** A gate verdict's references to its evidence packet's ids (M10); only review-verdict and judge-verdict carry them. */
+	cites?: string[];
+}
+
+/** The packet id a gate's example check cites: a diff when the packet has one, since that is what a gate judges. */
+function packetCiteExample(packet: ReadonlyArray<string>): string {
+	return packet.find((id) => id.endsWith(".diff")) ?? packet[0] ?? "s1.diff";
+}
+
+function packetCitesRule(packet: ReadonlyArray<string>): string {
+	return `"cites" is required on every check: the evidence packet ids the check rests on, drawn only from ${packet.join(", ")}; a verdict whose checks cite none of them is exhausted and decides nothing`;
+}
+
+/** One gate check as a bound JSON schema: with a packet, `cites` is required and its items are the packet's ids. */
+function gateCheckSchema(packet: ReadonlyArray<string> | undefined): Record<string, unknown> {
+	const text = { type: "string", minLength: 1 };
+	const properties: Record<string, unknown> = { name: text, passed: { type: "boolean" }, evidence: text };
+	if (packet !== undefined && packet.length > 0)
+		properties.cites = { type: "array", items: { type: "string", enum: [...packet] } };
+	return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
+}
+
+/**
+ * The one citation repair a gate verdict gets (M10): when its contract carries the evidence packet and no check cites
+ * a packet id, or a check cites an id the packet lacks, the worker asks once more and names exactly the ids that
+ * exist. Null when the verdict cites the packet, when the contract has no packet, or when the answer does not parse
+ * (the shape repair owns that). A second uncited verdict passes through to the grader, which seals it exhausted.
+ */
+export function gateCitationViolation(contract: ResultContract, output: string | null): string | null {
+	const packet = contract.kind === "review-verdict" || contract.kind === "judge-verdict" ? contract.packet : undefined;
+	if (packet === undefined || packet.length === 0) return null;
+	const parsed = parseJson(output);
+	if (!parsed.ok || !Array.isArray(parsed.value.checks)) return null;
+	const cited: string[] = [];
+	for (const entry of parsed.value.checks) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+		cited.push(...(parseGateCites((entry as Record<string, unknown>).cites) ?? []));
+	}
+	const known = new Set(packet);
+	const unknown = [...new Set(cited.filter((id) => !known.has(id)))];
+	if (cited.length > 0 && unknown.length === 0) return null;
+	const head =
+		unknown.length > 0
+			? `the verdict cites ids its evidence packet does not hold (${unknown.join(", ")})`
+			: "no check cites an evidence packet id";
+	return `${head}. The packet holds exactly these ids: ${packet.join(", ")}. Give every check a "cites" array of the ids it rests on, for example {"name":"...","passed":true,"evidence":"...","cites":["${packetCiteExample(packet)}"]}; a verdict that cites none of them is exhausted and decides nothing.`;
+}
+
+/**
+ * A gate check's `cites`: the evidence packet ids it rests on. Undefined when absent, null when malformed; the
+ * grader's cited-evidence rule, not this shape check, holds the ids to the packet.
+ */
+export function parseGateCites(value: unknown): string[] | null | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value) || value.length > 64) return null;
+	const cites: string[] = [];
+	for (const entry of value) {
+		if (typeof entry !== "string" || entry.trim().length === 0 || entry.length > 256) return null;
+		cites.push(entry.trim());
+	}
+	return cites;
 }
 
 /** Parsed `verifier-report` payload, for callers that need the verdict itself. */
@@ -1205,7 +1275,7 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 	// is the explicit exception: it reports that the task did not fit, so it
 	// carries subtasks instead of findings.
 	if (findings.length === 0 && !value.needsSplit) {
-		return degrade("Scout result must carry at least one cited finding, or set needsSplit");
+		return degrade(SCOUT_NO_FINDING_REASON);
 	}
 	if (value.needsSplit && findings.length > 0) {
 		return degrade("Scout split recommendations carry typed subtasks instead of findings");
@@ -1327,7 +1397,7 @@ function validateScoutCitation(
 					: `this run read only ${spans.map(([start, end]) => `${start}-${end}`).join(", ")}`;
 			return {
 				ok: false,
-				reason: `Scout citation is not grounded in a live read: ${citation.path}:${citation.line} (${observed})`,
+				reason: `${SCOUT_UNGROUNDED_REASON}: ${citation.path}:${citation.line} (${observed})`,
 			};
 		}
 	}
@@ -1339,6 +1409,41 @@ function validateScoutCitation(
 
 /** How many refused citations one repair message names before it counts the rest. */
 const SCOUT_CITATION_REFUSALS_NAMED = 8;
+
+const SCOUT_NO_FINDING_REASON = "Scout result must carry at least one cited finding, or set needsSplit";
+const SCOUT_UNGROUNDED_REASON = "Scout citation is not grounded in a live read";
+
+/**
+ * Explorer reports held to the observed-evidence obligation: their findings are only as good as what the run read.
+ * One that arrives before any tool ran is refused at the worker, where the run can still read, instead of being sealed
+ * failed by the dispatch obligation after the run is over (M-31).
+ */
+const OBSERVED_EXPLORER_KINDS: ReadonlySet<string> = new Set([
+	"scout-report",
+	"provenance-report",
+	"research-report",
+	"context-handbook",
+]);
+const UNOBSERVED_REPORT_REASON =
+	"This report was submitted before any tool ran, so none of it rests on anything this run observed";
+
+/** The refusal for an explorer report submitted before the run executed a tool, or null when none applies. */
+export function unobservedExplorerReportReason(kind: string, toolsExecuted: number): string | null {
+	return toolsExecuted === 0 && OBSERVED_EXPLORER_KINDS.has(kind) ? UNOBSERVED_REPORT_REASON : null;
+}
+
+/**
+ * Whether a refusal says the result lacks evidence the run could still gather by reading (M-31): an explorer report
+ * submitted before anything ran, no cited finding at all, or a citation outside every span the run read. A repair for
+ * one of these keeps the read tools; every other refusal is about the result's form.
+ */
+export function resultContractEvidenceShortfall(reason: string): boolean {
+	return (
+		reason.includes(UNOBSERVED_REPORT_REASON) ||
+		reason.includes(SCOUT_NO_FINDING_REASON) ||
+		reason.includes(SCOUT_UNGROUNDED_REASON)
+	);
+}
 
 /**
  * Every citation on a strictly conforming result has to ground. One that does
@@ -1460,7 +1565,12 @@ function validateVerifier(
 			return failure(contract, "fail", `Verifier field "checks[${index}]" must be an object`);
 		}
 		const check = raw as Record<string, unknown>;
-		const legal = assurance === undefined ? ["name", "passed", "evidence"] : ["name", "passed", "evidence", "obligation"];
+		const legal =
+			assurance !== undefined
+				? ["name", "passed", "evidence", "obligation"]
+				: contract.kind === "review-verdict"
+					? ["name", "passed", "evidence", "cites"]
+					: ["name", "passed", "evidence"];
 		const checkUnknown = Object.keys(check).filter((key) => !legal.includes(key));
 		if (checkUnknown.length > 0) {
 			return failure(
@@ -1478,6 +1588,13 @@ function validateVerifier(
 		if (!string(check.evidence)) {
 			return failure(contract, "fail", `Verifier field "checks[${index}].evidence" must be a non-empty string`);
 		}
+		const cites = parseGateCites(check.cites);
+		if (cites === null)
+			return failure(
+				contract,
+				"fail",
+				`Review verdict field "checks[${index}].cites" must be an array of evidence packet ids (non-empty strings)`,
+			);
 		let obligation: HoareObligation | undefined;
 		if (assurance !== undefined) {
 			if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(check.name) || names.has(check.name))
@@ -1503,6 +1620,7 @@ function validateVerifier(
 			passed: check.passed,
 			evidence: check.evidence,
 			...(obligation ? { obligation } : {}),
+			...(cites !== undefined ? { cites } : {}),
 		});
 	}
 	if ((value.verdict === "pass") !== checks.every((check) => check.passed)) {
@@ -1532,6 +1650,12 @@ function validateVerifier(
  */
 export function parseVerifierResult(output: string | null): VerifierResult | null {
 	const validation = validateVerifier({ kind: "verifier-report" }, output);
+	return validation.verifier ?? null;
+}
+
+/** Parse a reviewer gate's answer under its `review-verdict` contract, whose checks may cite packet ids (M10). */
+export function parseReviewVerdict(output: string | null): VerifierResult | null {
+	const validation = validateVerifier({ kind: "review-verdict" }, output);
 	return validation.verifier ?? null;
 }
 
@@ -2125,12 +2249,26 @@ function validateJudgeVerdict(
 	const winner = value.winner;
 	if (typeof winner !== "number" || !Number.isSafeInteger(winner) || winner < 1 || winner > contract.candidates)
 		return failure(contract, "unmeasured", `Judge verdict winner must be an integer 1..${contract.candidates}`);
-	const checks = parseChecks(value.checks);
-	if (checks === null || checks.length === 0)
+	const checks = Array.isArray(value.checks) ? value.checks : null;
+	if (
+		checks === null ||
+		checks.length === 0 ||
+		checks.some((entry) => {
+			if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return true;
+			const check = entry as Record<string, unknown>;
+			return (
+				!hasOnlyKeys(check, ["name", "passed", "evidence", "cites"]) ||
+				!string(check.name) ||
+				typeof check.passed !== "boolean" ||
+				!string(check.evidence) ||
+				parseGateCites(check.cites) === null
+			);
+		})
+	)
 		return failure(
 			contract,
 			"unmeasured",
-			'Judge verdict "checks" must be a non-empty array of {name, passed, evidence}',
+			'Judge verdict "checks" must be a non-empty array of {name, passed, evidence, cites}; cites lists evidence packet ids',
 		);
 	return success(contract, "unmeasured", value);
 }
@@ -2442,12 +2580,17 @@ export function resultContractShape(contract: ResultContract): string {
 			if (contract.assurance !== undefined)
 				return `{"verdict":"fail","assurance":"${contract.assurance}","checks":[{"name":"f.post","passed":false,"evidence":"specification source and argument, trace or missing proof evidence","obligation":{"target":"src/file.c:f","kind":"post","pre":"input contract","post":"output contract","formula":"verification condition","status":"unknown"}}]}. Every check requires an obligation; optional fields are invariant, hazard and check (an exact declared proof check ID). Statuses: mechanized, modeled, argued, assumed, refuted, unknown. Assurance is fixed at ${contract.assurance}. Assumed, refuted and unknown never pass. Machine claims require this run's matching native verify proof evidence on unchanged inputs; missing evidence must be unknown with passed=false, never an invented execution.`;
 			return 'one of {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]} or {"verdict":"fail","checks":[{"name":"npm run typecheck","passed":false,"evidence":"exit 1"}]}; verdict legal values are pass | fail and checks[].passed legal values are true | false';
-		case "review-verdict":
-			return 'one of {"verdict":"pass","checks":[{"name":"...","passed":true,"evidence":"what you inspected and observed"}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed"}]}; the verdict must agree with every check';
+		case "review-verdict": {
+			if (contract.packet === undefined || contract.packet.length === 0)
+				return 'one of {"verdict":"pass","checks":[{"name":"...","passed":true,"evidence":"what you inspected and observed"}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed"}]}; the verdict must agree with every check';
+			const example = packetCiteExample(contract.packet);
+			return `one of {"verdict":"pass","checks":[{"name":"the change does what the task asks","passed":true,"evidence":"what you inspected and observed","cites":["${example}"]}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed","cites":["${example}"]}]}; the verdict must agree with every check; ${packetCitesRule(contract.packet)}`;
+		}
 		case "judge-verdict":
-			return contract.candidates === undefined
-				? '{"verdict":"the conclusion","text":"the supported synthesis"}'
-				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on"}]}; winner is an integer 1..${contract.candidates}`;
+			if (contract.candidates === undefined) return '{"verdict":"the conclusion","text":"the supported synthesis"}';
+			return contract.packet === undefined || contract.packet.length === 0
+				? `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on"}]}; winner is an integer 1..${contract.candidates}`
+				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on","cites":["${packetCiteExample(contract.packet)}"]}]}; winner is an integer 1..${contract.candidates}; ${packetCitesRule(contract.packet)}`;
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "council-ballot":
@@ -2503,7 +2646,13 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 				? '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}'
 				: `{"verdict":"pass|fail","assurance":"${contract.assurance}","checks":[{"name":"...","passed":false,"evidence":"...","obligation":{...}}]}`;
 		case "review-verdict":
-			return '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}';
+			return contract.packet === undefined || contract.packet.length === 0
+				? '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}'
+				: `{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"...","cites":["${packetCiteExample(contract.packet)}"]}]}; cites from ${contract.packet.join(", ")}`;
+		case "judge-verdict":
+			return contract.candidates === undefined || contract.packet === undefined || contract.packet.length === 0
+				? resultContractShape(contract)
+				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"...","cites":["${packetCiteExample(contract.packet)}"]}]}; cites from ${contract.packet.join(", ")}`;
 		case "debugger-report":
 			return '{"diagnosis":"...","reproduction":"reproduced|not-reproduced|unknown","evidence":["..."]}';
 		case "research-report":
@@ -2747,15 +2896,43 @@ function parseContract(
 			throw new Error(`agent recipe: ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+	// A gate's packet ids are coordinator-authored (M10): a WorkerSpec may carry them, a recipe may not.
+	const packetIds = (): string[] | null | undefined => {
+		const packet = record.packet;
+		if (packet === undefined) return undefined;
+		if (
+			!callerBoundArtifacts ||
+			!Array.isArray(packet) ||
+			packet.length === 0 ||
+			packet.length > 256 ||
+			!packet.every((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 256)
+		)
+			return null;
+		return [...packet];
+	};
+	if (record.kind === "review-verdict" && kinds.includes(record.kind) && record.packet !== undefined) {
+		const packet = packetIds();
+		if (!only("kind", "packet") || packet === null || packet === undefined)
+			throw new Error(`agent recipe: ${sourcePath}: review-verdict accepts only kind, and a WorkerSpec's packet ids`);
+		return { kind: "review-verdict", packet };
+	}
 	if (record.kind === "judge-verdict" && kinds.includes(record.kind)) {
 		const candidates = record.candidates;
+		const packet = packetIds();
 		if (
-			!only("kind", "candidates") ||
+			!only("kind", "candidates", "packet") ||
+			packet === null ||
 			(candidates !== undefined &&
 				(typeof candidates !== "number" || !Number.isSafeInteger(candidates) || candidates < 1 || candidates > 64))
 		)
-			throw new Error(`agent recipe: ${sourcePath}: judge-verdict accepts only kind and candidates (1..64)`);
-		return { kind: "judge-verdict", ...(candidates !== undefined ? { candidates } : {}) };
+			throw new Error(
+				`agent recipe: ${sourcePath}: judge-verdict accepts only kind, candidates (1..64) and a WorkerSpec's packet ids`,
+			);
+		return {
+			kind: "judge-verdict",
+			...(candidates !== undefined ? { candidates } : {}),
+			...(packet !== undefined ? { packet } : {}),
+		};
 	}
 	if (record.kind === "verifier-report" && kinds.includes(record.kind)) {
 		if (!only("kind", "assurance") || (record.assurance !== undefined && !isHoareAssurance(record.assurance)))

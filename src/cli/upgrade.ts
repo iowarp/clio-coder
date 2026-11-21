@@ -27,6 +27,7 @@ import {
 	launcherWinsOnPath,
 } from "../domains/lifecycle/install-plan.js";
 import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
+import { APPLY_MIGRATIONS_COMMAND } from "../domains/lifecycle/migrations/registry-ids.js";
 import {
 	compareReleaseVersions,
 	fetchReleaseVersion,
@@ -758,7 +759,7 @@ export async function runUpgradeCommand(
 		presenter.commandAdvice("Update with the original package manager and its original global directory:", updateCommand);
 		presenter.commandAdvice(
 			"Then apply migrations and start clio-coder on the last session:",
-			"clio-coder upgrade --post-install\nclio-coder --continue",
+			`${APPLY_MIGRATIONS_COMMAND}\nclio-coder --continue`,
 		);
 		if (opts.dryRun) presenter.warn("Dry run: no changes made");
 		else presenter.fail("This installation needs a package-manager update; no package was replaced.");
@@ -967,7 +968,7 @@ export async function runUpgradeCommand(
 				method === "installer" ? "install.sh failed" : "npm install failed",
 				err instanceof Error ? err.message : String(err),
 			);
-			presenter.commandAdvice("To upgrade by hand, run:", `${updateCommand}\nclio-coder upgrade --post-install`);
+			presenter.commandAdvice("To upgrade by hand, run:", `${updateCommand}\n${APPLY_MIGRATIONS_COMMAND}`);
 			presenter.finish();
 			return 1;
 		}
@@ -976,7 +977,7 @@ export async function runUpgradeCommand(
 			return finish();
 		} catch (err) {
 			presenter.fail("post-install checks failed", err instanceof Error ? err.message : String(err));
-			presenter.commandAdvice("To finish the upgrade by hand, run:", "clio-coder upgrade --post-install");
+			presenter.commandAdvice("To finish the upgrade by hand, run:", APPLY_MIGRATIONS_COMMAND);
 			presenter.finish();
 			return 1;
 		}

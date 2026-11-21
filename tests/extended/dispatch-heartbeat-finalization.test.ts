@@ -13,7 +13,12 @@ import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/d
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readSettledRun, readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
-import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import {
+	isolateDispatchState,
+	makeDispatchBundle,
+	observedReadEvents,
+	restoreDispatchState,
+} from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 beforeEach(async () => isolateDispatchState());
@@ -255,6 +260,8 @@ it("never rewrites runs.json for a live worker's spend; a heartbeat transition d
 							},
 						};
 					}
+					// A provenance report carries the observed-evidence obligation (fleet design 4.8).
+					for (const event of observedReadEvents()) yield event;
 					const content = JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] });
 					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
 					settle({ exitCode: 0, signal: null });

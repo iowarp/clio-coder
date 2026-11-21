@@ -19,7 +19,7 @@ import { normalizeTokenUsage } from "../../core/token-split.js";
 
 import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
-import type { DispatchRunIdentity } from "../../core/telemetry/live-events.js";
+import type { DispatchRunIdentity, ForeignRunObservedPayload } from "../../core/telemetry/live-events.js";
 import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { type RunUsageFacts, RunUsageFactsSchema } from "../../core/telemetry/schemas.js";
 import { truncateToWidth } from "../../engine/tui-primitives.js";
@@ -434,6 +434,142 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		if (changed) markChanged();
 	}
 
+	function onStarted(raw: unknown): void {
+		const payload = (raw ?? {}) as Record<string, unknown>;
+		const runId = asRunId(payload.runId);
+		if (!runId) return;
+		const now = Date.now();
+		const summary = runs.get(runId) ?? emptyRun(runId, now);
+		applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
+		summary.status = "running";
+		summary.startedAtMs = now;
+		delete summary.retry;
+		summary.finishedAtMs = null;
+		summary.durationMs = null;
+		putRun(runId, summary);
+		markChanged();
+	}
+	function onProgressed(raw: unknown): void {
+		const payload = (raw ?? {}) as Record<string, unknown>;
+		const runId = asRunId(payload.runId);
+		if (!runId) return;
+		const summary = runs.get(runId);
+		if (!summary) return;
+		const now = Date.now();
+		const event = (payload.event ?? {}) as Record<string, unknown>;
+		const type = typeof event.type === "string" ? event.type : "";
+		if (type === "heartbeat_status") {
+			const status = resolveHeartbeat(event.status);
+			if (status && !isTerminal(summary.status) && summary.status !== "cancelling") summary.status = status;
+			// The fold keeps when the worker went quiet, so its last phase is not read as what it is doing now.
+			summary.progressFold.observe(event);
+			if (status === "dead") summary.progressFold.settle(undefined, false);
+			markChanged();
+			return;
+		}
+		if (type === "attempt_start") {
+			summary.failoverHops = (summary.failoverHops ?? 0) + 1;
+			const attemptRunId = asRunId(event.runId);
+			if (attemptRunId && attemptRunId !== runId) {
+				// Assignment notifications are relayed on the root run. The child
+				// has its own lifecycle row; starting it cannot revive this parent.
+				delete summary.retry;
+				markChanged();
+				return;
+			}
+			summary.status = "running";
+			summary.finishedAtMs = null;
+			summary.durationMs = null;
+			summary.progressFold.restart();
+			delete summary.retry;
+			markChanged();
+			return;
+		}
+		let changed = false;
+		if (type === "clio_coder_write_record_downgraded") {
+			const detail = (event.payload ?? {}) as Record<string, unknown>;
+			const tool = parseNonEmptyString(detail.tool);
+			const toolCallId = parseNonEmptyString(detail.toolCallId);
+			if (detail.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined) {
+				summary.writeRecordDowngrade = {
+					reason: "opaque_tool_succeeded",
+					tool: sanitizeCallTargetText(tool),
+					toolCallId: sanitizeCallTargetText(toolCallId),
+				};
+				changed = true;
+			}
+		}
+		changed = summary.progressFold.observe(payload.event) || changed;
+		if (type === "clio_coder_steer_received") {
+			const detail = (event.payload ?? {}) as Record<string, unknown>;
+			summary.steerAcknowledgement = { receivedAtMs: now, chars: Math.max(0, Math.floor(num(detail.chars, 0))) };
+			changed = true;
+		}
+		if (type === "message_end" && !isTerminal(summary.status)) {
+			const message = (event.message ?? {}) as { role?: unknown; usage?: Record<string, unknown> };
+			if (message.role === "assistant" && message.usage) {
+				// The run's spend comes from its call fold; a reply only says how full its context was.
+				const usage = normalizeTokenUsage(message.usage);
+				summary.lastContextTokens = usage.input + usage.cacheRead + usage.cacheWrite + usage.output;
+				changed = true;
+			}
+		}
+		// A worker's agent_end settles its displayed progress; only a terminal
+		// dispatch event changes the canonical run outcome.
+		if (type === "agent_end") changed = summary.progressFold.settle() || changed;
+		// Deltas cannot change run retention. Avoid scanning terminal history
+		// or publishing snapshots for ignored frames such as thinking repeats (#428).
+		if (changed) scheduleFlush();
+	}
+	function onCompleted(raw: unknown): void {
+		const payload = (raw ?? {}) as Record<string, unknown>;
+		const runId = asRunId(payload.runId);
+		if (!runId) return;
+		const now = Date.now();
+		const summary = runs.get(runId) ?? emptyRun(runId, now);
+		applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
+		summary.status = "completed";
+		summary.finishedAtMs = now;
+		summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
+		applyTerminalTokens(summary, payload);
+		applyTerminalDetail(summary, payload);
+		summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
+		putRun(runId, summary);
+		markChanged();
+	}
+	function onFailed(raw: unknown): void {
+		const payload = (raw ?? {}) as Record<string, unknown>;
+		const runId = asRunId(payload.runId);
+		if (!runId) return;
+		const now = Date.now();
+		const summary = runs.get(runId) ?? emptyRun(runId, now);
+		applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
+		summary.status = resolveDispatchFailureStatus(payload.reason);
+		summary.finishedAtMs = now;
+		summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
+		applyTerminalTokens(summary, payload);
+		applyTerminalDetail(summary, payload);
+		summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
+		putRun(runId, summary);
+		markChanged();
+	}
+	/** A live run another Clio process owns, read from its run directory: the same folds, with no journal behind them. */
+	function onForeignObserved(payload: ForeignRunObservedPayload): void {
+		if (payload.kind === "started") {
+			onStarted(payload.run);
+			const entry = runs.get(payload.run.runId);
+			if (entry !== undefined) entry.foreign = true;
+			return;
+		}
+		if (payload.kind === "progressed") {
+			onProgressed({ runId: payload.runId, agentId: payload.agentId, event: payload.event });
+			return;
+		}
+		const ended = { runId: payload.runId, agentId: payload.agentId, outcomeDetail: payload.outcomeDetail };
+		if (payload.outcome === "succeeded") onCompleted(ended);
+		else onFailed({ ...ended, reason: payload.outcome });
+	}
+
 	const unsubscribes: Array<() => void> = [
 		bus.subscribe("run.enqueued", (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
@@ -447,125 +583,11 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			putRun(runId, summary);
 			markChanged();
 		}),
-		bus.subscribe("run.started", (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const runId = asRunId(payload.runId);
-			if (!runId) return;
-			const now = Date.now();
-			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
-			summary.status = "running";
-			summary.startedAtMs = now;
-			delete summary.retry;
-			summary.finishedAtMs = null;
-			summary.durationMs = null;
-			putRun(runId, summary);
-			markChanged();
-		}),
-		bus.subscribe("run.progressed", (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const runId = asRunId(payload.runId);
-			if (!runId) return;
-			const summary = runs.get(runId);
-			if (!summary) return;
-			const now = Date.now();
-			const event = (payload.event ?? {}) as Record<string, unknown>;
-			const type = typeof event.type === "string" ? event.type : "";
-			if (type === "heartbeat_status") {
-				const status = resolveHeartbeat(event.status);
-				if (status && !isTerminal(summary.status) && summary.status !== "cancelling") summary.status = status;
-				// The fold keeps when the worker went quiet, so its last phase is not read as what it is doing now.
-				summary.progressFold.observe(event);
-				if (status === "dead") summary.progressFold.settle(undefined, false);
-				markChanged();
-				return;
-			}
-			if (type === "attempt_start") {
-				summary.failoverHops = (summary.failoverHops ?? 0) + 1;
-				const attemptRunId = asRunId(event.runId);
-				if (attemptRunId && attemptRunId !== runId) {
-					// Assignment notifications are relayed on the root run. The child
-					// has its own lifecycle row; starting it cannot revive this parent.
-					delete summary.retry;
-					markChanged();
-					return;
-				}
-				summary.status = "running";
-				summary.finishedAtMs = null;
-				summary.durationMs = null;
-				summary.progressFold.restart();
-				delete summary.retry;
-				markChanged();
-				return;
-			}
-			let changed = false;
-			if (type === "clio_coder_write_record_downgraded") {
-				const detail = (event.payload ?? {}) as Record<string, unknown>;
-				const tool = parseNonEmptyString(detail.tool);
-				const toolCallId = parseNonEmptyString(detail.toolCallId);
-				if (detail.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined) {
-					summary.writeRecordDowngrade = {
-						reason: "opaque_tool_succeeded",
-						tool: sanitizeCallTargetText(tool),
-						toolCallId: sanitizeCallTargetText(toolCallId),
-					};
-					changed = true;
-				}
-			}
-			changed = summary.progressFold.observe(payload.event) || changed;
-			if (type === "clio_coder_steer_received") {
-				const detail = (event.payload ?? {}) as Record<string, unknown>;
-				summary.steerAcknowledgement = { receivedAtMs: now, chars: Math.max(0, Math.floor(num(detail.chars, 0))) };
-				changed = true;
-			}
-			if (type === "message_end" && !isTerminal(summary.status)) {
-				const message = (event.message ?? {}) as { role?: unknown; usage?: Record<string, unknown> };
-				if (message.role === "assistant" && message.usage) {
-					// The run's spend comes from its call fold; a reply only says how full its context was.
-					const usage = normalizeTokenUsage(message.usage);
-					summary.lastContextTokens = usage.input + usage.cacheRead + usage.cacheWrite + usage.output;
-					changed = true;
-				}
-			}
-			// A worker's agent_end settles its displayed progress; only a terminal
-			// dispatch event changes the canonical run outcome.
-			if (type === "agent_end") changed = summary.progressFold.settle() || changed;
-			// Deltas cannot change run retention. Avoid scanning terminal history
-			// or publishing snapshots for ignored frames such as thinking repeats (#428).
-			if (changed) scheduleFlush();
-		}),
-		bus.subscribe("run.completed", (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const runId = asRunId(payload.runId);
-			if (!runId) return;
-			const now = Date.now();
-			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
-			summary.status = "completed";
-			summary.finishedAtMs = now;
-			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
-			applyTerminalTokens(summary, payload);
-			applyTerminalDetail(summary, payload);
-			summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
-			putRun(runId, summary);
-			markChanged();
-		}),
-		bus.subscribe("run.failed", (raw: unknown) => {
-			const payload = (raw ?? {}) as Record<string, unknown>;
-			const runId = asRunId(payload.runId);
-			if (!runId) return;
-			const now = Date.now();
-			const summary = runs.get(runId) ?? emptyRun(runId, now);
-			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
-			summary.status = resolveDispatchFailureStatus(payload.reason);
-			summary.finishedAtMs = now;
-			summary.durationMs = num(payload.durationMs, Math.max(0, now - summary.startedAtMs));
-			applyTerminalTokens(summary, payload);
-			applyTerminalDetail(summary, payload);
-			summary.outcomeDetail = typeof payload.outcomeDetail === "string" ? payload.outcomeDetail : null;
-			putRun(runId, summary);
-			markChanged();
-		}),
+		bus.subscribe("run.started", onStarted),
+		bus.subscribe("run.progressed", onProgressed),
+		bus.subscribe("run.completed", onCompleted),
+		bus.subscribe("run.failed", onFailed),
+		bus.subscribe("run.foreign_observed", onForeignObserved),
 		bus.subscribe("run.aborted", (raw) => {
 			const runId = asRunId(raw?.runId);
 			const summary = runId ? runs.get(runId) : undefined;

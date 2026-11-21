@@ -588,7 +588,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 
 	const stopExpiryWatch = watchCredentialExpiry(input.credentialExpiresAt, () => {
 		authFailure =
-			"Clio's Claude subscription access token expired. Start a new delegation to refresh it; this run was stopped without replaying its work.";
+			"CLIO Coder's Claude subscription access token expired. Start a new delegation to refresh it; this run was stopped without replaying its work.";
 		void beginForceTermination();
 	});
 	const promptTimeoutMs = turnTimeoutMs === 0 ? undefined : turnTimeoutMs;
@@ -800,7 +800,10 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					const updatedOptions = isRecord(updated) ? updated.configOptions : undefined;
 					const applied = peerSelectOption(updatedOptions, "model", "model")?.currentValue;
 					if (typeof applied === "string" && applied !== selected) {
-						throw new AcpError("acp_model_unavailable", `ACP peer kept model '${applied}' after Clio selected '${selected}'`);
+						throw new AcpError(
+							"acp_model_unavailable",
+							`ACP peer kept model '${applied}' after CLIO Coder selected '${selected}'`,
+						);
 					}
 					// Thinking levels differ per model (agy offers some models none), so the new state replaces the old.
 					if (Array.isArray(updatedOptions)) thoughtOption = peerSelectOption(updatedOptions, "thought_level");
@@ -831,7 +834,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					if (typeof applied === "string" && applied !== level) {
 						throw new AcpError(
 							"acp_thinking_unavailable",
-							`ACP peer kept thinking level '${applied}' after Clio selected '${level}'`,
+							`ACP peer kept thinking level '${applied}' after CLIO Coder selected '${level}'`,
 						);
 					}
 				}

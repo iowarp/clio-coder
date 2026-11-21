@@ -83,7 +83,7 @@ export interface PanesRuntimeDeps {
  */
 function unavailableReason(mux: MuxContract): string {
 	const reason = mux.detection().reason;
-	return `the pane layer is not available in this session: ${reason}. Start Clio inside a herdr session with \`clio-coder --with-panes\` to get panes`;
+	return `the pane layer is not available in this session: ${reason}. Start CLIO Coder inside a herdr session with \`clio-coder --with-panes\` to get panes`;
 }
 
 /** Fuzzy operator addressing shared by `close` and `zoom`: id, label, purpose; newest first. */
@@ -114,11 +114,11 @@ function noAgentReason(label: string): string {
 }
 
 function unsupportedReason(label: string): string {
-	return `the pane host does not admit prompts for ${label}, and Clio does not type into a peer by any other route. Ask the operator to give that pane its input`;
+	return `the pane host does not admit prompts for ${label}, and CLIO Coder does not type into a peer by any other route. Ask the operator to give that pane its input`;
 }
 
 function blockedReason(label: string): string {
-	return `${label} is blocked on an approval or a question for its operator; Clio does not answer for them`;
+	return `${label} is blocked on an approval or a question for its operator; CLIO Coder does not answer for them`;
 }
 
 /** The panes `read`, `send` and `wait` may address: peers Clio handed off to, nothing else. */
@@ -158,7 +158,7 @@ export function describePanesLeftBehind(mux: Pick<MuxContract, "list" | "docks" 
 	const left = mux.list().filter((record) => !dockIds.has(record.ref.paneId));
 	if (left.length === 0) return null;
 	const named = left.map((record) => `${record.label} (${record.ref.paneId})`).join(", ");
-	return `Clio left ${left.length} ${left.length === 1 ? "pane" : "panes"} open in herdr: ${named}. Utility panes stay when a session ends; the docks closed with it. Next time run \`/panes close all\` before \`/quit\` to take them with you, or close ${left.length === 1 ? "it" : "them"} now with \`herdr pane close <paneId>\`.`;
+	return `CLIO Coder left ${left.length} ${left.length === 1 ? "pane" : "panes"} open in herdr: ${named}. Utility panes stay when a session ends; the docks closed with it. Next time run \`/panes close all\` before \`/quit\` to take them with you, or close ${left.length === 1 ? "it" : "them"} now with \`herdr pane close <paneId>\`.`;
 }
 
 export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
@@ -498,7 +498,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					return {
 						status: "refused",
 						reason:
-							"a second Clio takes no brief on its command line: open it without one, then type its task into the new pane",
+							"a second CLIO Coder takes no brief on its command line: open it without one, then type its task into the new pane",
 					};
 				}
 				// The brief is free text: it rides as `textArg`, out of band of the pane's shell.
@@ -577,7 +577,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			if (interrupt !== undefined && !PANE_INTERRUPT_KEYS.includes(interrupt)) {
 				return {
 					status: "refused",
-					reason: `the only keys Clio presses in a peer are ${PANE_INTERRUPT_KEYS.join(" and ")}`,
+					reason: `the only keys CLIO Coder presses in a peer are ${PANE_INTERRUPT_KEYS.join(" and ")}`,
 				};
 			}
 			if (Buffer.byteLength(text, "utf8") > 8_192) {

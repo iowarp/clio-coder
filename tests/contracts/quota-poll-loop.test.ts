@@ -253,7 +253,7 @@ test("a quota.read that repeats the account's newest failed reading moves no ses
 				windows: [],
 				displayName: "OpenAI Codex",
 				status: "no_credentials",
-				message: "Clio holds no OpenAI Codex OAuth credential",
+				message: "CLIO Coder holds no OpenAI Codex OAuth credential",
 			},
 			processContext,
 			{ t: at, mono: 0 },

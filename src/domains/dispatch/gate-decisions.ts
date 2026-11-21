@@ -21,9 +21,17 @@ import { TelemetryContextSchema, telemetryContext } from "../../core/telemetry/c
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import { parseVerifierResult, type VerifierCheck, type VerifierResult } from "../agents/result-contract.js";
+import {
+	parseGateCites,
+	parseReviewVerdict,
+	parseVerifierResult,
+	type ResultContract,
+	type VerifierCheck,
+	type VerifierResult,
+} from "../agents/result-contract.js";
 import { publishGateDecision } from "../telemetry/index.js";
 import type { GateRouteCorrelation } from "./execution-role.js";
+import type { GateVerdictFacts } from "./grading.js";
 import type { RunGateSubjectRef } from "./types.js";
 import { normalizeYoloGateOutcome } from "./yolo-ids.js";
 
@@ -104,18 +112,29 @@ export interface CompeteGateResult {
 
 export type GateResultParse<T> = { ok: true; result: T } | { ok: false; reason: string };
 
-/** Parse a reviewer answer under the verifier-report contract. */
+/** Parse a reviewer answer under its review-verdict contract, or a Hoare verifier report a playbook check may return. */
 function parseReviewGateResult(output: string): GateResultParse<ReviewGateResult> {
-	const result = parseVerifierResult(output);
+	const result = parseReviewVerdict(output) ?? parseVerifierResult(output);
 	return result === null
-		? { ok: false, reason: "reviewer did not return a valid verifier report" }
+		? { ok: false, reason: "reviewer did not return a valid review verdict" }
 		: { ok: true, result };
 }
 
+/** The packet ids a verdict's checks cite, deduplicated in order: the references a decision records (M10). */
+function citedPacketIds(checks: ReadonlyArray<GateCheck>): string[] {
+	return [...new Set(checks.flatMap((check) => check.cites ?? []))];
+}
+
+/** The packet ids a verdict's checks cite, as a decision's detail records them (M10). */
+export function verdictCitesDetail(checks: ReadonlyArray<GateCheck>): string {
+	const cited = citedPacketIds(checks);
+	return cited.length === 0 ? "cites=none" : `cites=${cited.join(",")}`;
+}
+
 /**
- * What the grader sealed about the reviewer run (DESIGN 4.8): whether it left its cited-evidence obligation unmet,
- * which is a pass resting on no observation or on checks its report claims and never ran. The gate reads the sealed
- * verdict and counts nothing itself.
+ * What the grader sealed about a gate decider's run (DESIGN 4.8): whether it left its cited-evidence obligation unmet,
+ * which is a verdict citing none of its evidence packet, a citation of an id the packet does not hold, or a pass
+ * resting on checks its report claims and never ran. The gate reads the sealed verdict and counts nothing itself.
  */
 export interface ReviewerInspection {
 	obligationUnmet: boolean;
@@ -179,7 +198,7 @@ export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDeci
 			needsDecision: `review gate produced no structured verdict in cycle ${input.cycle}: ${parsed.reason}`,
 		};
 	}
-	const facts = `obligation=cited-evidence:${input.reviewer.obligationUnmet ? "unmet" : "met"}`;
+	const facts = `obligation=cited-evidence:${input.reviewer.obligationUnmet ? "unmet" : "met"}; ${verdictCitesDetail(parsed.result.checks)}`;
 	// A pass the reviewer never looked behind is a broken gate, not a verdict.
 	if (parsed.result.verdict === "pass" && input.reviewer.obligationUnmet) {
 		const reason = "the reviewer passed the work without inspecting it: obligation cited-evidence unmet";
@@ -200,7 +219,11 @@ export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDeci
 	}
 	const failed = parsed.result.checks.filter((check) => !check.passed);
 	return {
-		draft: { ...base, outcome: "revise", detail: `reviewer reported ${failed.length} failed check(s)` },
+		draft: {
+			...base,
+			outcome: "revise",
+			detail: `reviewer reported ${failed.length} failed check(s); ${verdictCitesDetail(parsed.result.checks)}`,
+		},
 		verdict: null,
 		findings: JSON.stringify({
 			verdict: "fail",
@@ -217,8 +240,10 @@ function parseGateChecks(value: unknown): GateCheck[] | null {
 	for (const entry of value) {
 		if (!isRecord(entry)) return null;
 		const keys = Object.keys(entry);
+		const cites = parseGateCites(entry.cites);
 		if (
-			keys.some((key) => key !== "name" && key !== "passed" && key !== "evidence") ||
+			keys.some((key) => key !== "name" && key !== "passed" && key !== "evidence" && key !== "cites") ||
+			cites === null ||
 			typeof entry.name !== "string" ||
 			entry.name.trim().length === 0 ||
 			typeof entry.passed !== "boolean" ||
@@ -227,7 +252,12 @@ function parseGateChecks(value: unknown): GateCheck[] | null {
 		) {
 			return null;
 		}
-		checks.push({ name: entry.name, passed: entry.passed, evidence: entry.evidence });
+		checks.push({
+			name: entry.name,
+			passed: entry.passed,
+			evidence: entry.evidence,
+			...(cites !== undefined ? { cites } : {}),
+		});
 	}
 	return checks;
 }
@@ -257,6 +287,34 @@ export function parseCompeteGateResult(output: string, candidateCount: number): 
 export type GateDecisionDraft = Omit<GateDecisionArtifact, "version" | "id" | "createdAt" | "integrity"> & {
 	createdAt?: string;
 };
+
+/**
+ * The typed fields of a gate decider's answer the grader reads (M10): a reviewer's verdict, and each check's citations
+ * of its evidence packet. Null for a run with no gate verdict contract, a council synthesis, or an answer that does not
+ * parse under its contract.
+ */
+export function gateVerdictFactsOf(
+	contract: ResultContract | null,
+	output: string | null,
+	ground: (claim: { name: string; evidence: string }) => { command: boolean; ran: boolean },
+): GateVerdictFacts | null {
+	const cites = (checks: ReadonlyArray<GateCheck>) =>
+		checks.map((check) => ({
+			name: check.name,
+			cites: [...(check.cites ?? [])],
+			passed: check.passed,
+			...ground({ name: check.name, evidence: check.evidence }),
+		}));
+	if (contract?.kind === "review-verdict") {
+		const parsed = parseReviewVerdict(output);
+		return parsed === null ? null : { verdict: parsed.verdict, checks: cites(parsed.checks) };
+	}
+	if (contract?.kind === "judge-verdict" && contract.candidates !== undefined && output !== null) {
+		const parsed = parseCompeteGateResult(output, contract.candidates);
+		return parsed.ok ? { verdict: null, checks: cites(parsed.result.checks) } : null;
+	}
+	return null;
+}
 
 export type GateDecisionVerification = { ok: true } | { ok: false; reason: string };
 
@@ -424,8 +482,13 @@ function semanticError(value: unknown): string | null {
 		return "gate decision cycle invalid";
 	}
 	const reviewOutcome = outcome === "pass" || outcome === "fail" || outcome === "revise" || outcome === "exhausted";
+	// A compete gate is exhausted when its judge left its cited-evidence obligation unmet (M10); the operator decides.
 	const competeOutcome =
-		outcome === "winner" || outcome === "no-winner" || outcome === "operator-confirmed" || outcome === "yolo-applied";
+		outcome === "winner" ||
+		outcome === "no-winner" ||
+		outcome === "exhausted" ||
+		outcome === "operator-confirmed" ||
+		outcome === "yolo-applied";
 	if ((value.topology === "review" && !reviewOutcome) || (value.topology === "compete" && !competeOutcome)) {
 		return "gate decision outcome is incompatible with topology";
 	}

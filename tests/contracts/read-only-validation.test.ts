@@ -56,7 +56,6 @@ it("every reader of a verifier report agrees on a closing report, and a second r
 				output: answer,
 				executedCommands: new Set<string>(),
 				executedCheckingCalls: 0,
-				readOnly: true,
 			})?.grounded,
 			0,
 			answer,
@@ -70,12 +69,11 @@ it("blocked-only verify checks seal no typed validation, including unattributed 
 		deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [{ check, outcome: "blocked" }], unchanged), []);
 	deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [], unchanged), []);
 });
-it("read-only read claims do not require command evidence, but test claims still do", () => {
+it("a builder's read claims are inspection prose and need no command evidence, but test claims still do", () => {
 	const input = {
 		contractKind: "mutation-report" as const,
 		executedCommands: new Set<string>(),
 		executedCheckingCalls: 0,
-		readOnly: true,
 	};
 	strictEqual(
 		groundClaimedValidations({
@@ -89,18 +87,15 @@ it("read-only read claims do not require command evidence, but test claims still
 			?.grounded,
 		0,
 	);
+	for (const name of ["tests pass", "npm test: 12 passing"])
+		strictEqual(
+			groundClaimedValidations({ ...input, output: JSON.stringify({ validations: [{ name, passed: true }] }) })?.basis,
+			"no-command-executed",
+			name,
+		);
 	strictEqual(
 		groundClaimedValidations({
 			...input,
-			readOnly: false,
-			output: JSON.stringify({ validations: [{ name: "read src/math.ts", passed: true }] }),
-		})?.grounded,
-		0,
-	);
-	strictEqual(
-		groundClaimedValidations({
-			...input,
-			readOnly: false,
 			output: JSON.stringify({ validations: [{ name: "npm test", passed: true, baseline: true }] }),
 		}),
 		null,
@@ -121,7 +116,7 @@ it("mutation reports accept omitted denied checks as an empty array without asse
 	match(resultContractShape(contract), /Checks that were denied.*declaredChecks/i);
 });
 
-it("read-only verifier verdicts and executable path claims still require command grounding", () => {
+it("verifier verdicts and executable path claims still require command grounding", () => {
 	for (const [contractKind, name] of [
 		["verifier-report", "reviewed src/foo.ts"],
 		["mutation-report", "./gradlew"],
@@ -129,7 +124,6 @@ it("read-only verifier verdicts and executable path claims still require command
 	] as const) {
 		const result = groundClaimedValidations({
 			contractKind,
-			readOnly: true,
 			output: JSON.stringify({ checks: [{ name, passed: true }] }),
 			executedCommands: new Set(),
 			executedCheckingCalls: 0,
@@ -140,7 +134,6 @@ it("read-only verifier verdicts and executable path claims still require command
 	strictEqual(
 		groundClaimedValidations({
 			contractKind: "mutation-report",
-			readOnly: true,
 			output: JSON.stringify({ validations: [{ name: "checked src/math.ts exports add", passed: true }] }),
 			executedCommands: new Set(),
 			executedCheckingCalls: 0,
@@ -298,7 +291,10 @@ it("the merge gate reads the run's assurance, never the task's words (M9)", () =
 	};
 	const detail = mergeWithheldDetail(failing) ?? "";
 	match(detail, /the worker's own report lists a failing validation \(npm test\)/u);
-	match(detail, /`clio-coder fleet land clio-coder\/task\/check` applies it if that failure was already there/u);
+	match(
+		detail,
+		/`clio-coder fleet land clio-coder\/task\/check` previews the merge and `clio-coder fleet land clio-coder\/task\/check --yes` lands it if that failure was already there/u,
+	);
 	doesNotMatch(detail, /requested validation/u);
 });
 

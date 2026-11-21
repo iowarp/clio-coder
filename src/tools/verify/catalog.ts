@@ -49,15 +49,45 @@ export const PROJECT_VERIFIER_CATALOG_CAPS = Object.freeze({
  * `reproduce` checks pinned input digests, runs the command in a clean
  * environment with a declared seed, and judges its metrics, their units and
  * their shapes against a reference file or a second clean run.
+ * `browser` starts the command as a dev server in a hermetic browser session, loads a loopback URL, runs an optional
+ * step file, and fails on console errors, uncaught exceptions, failed requests or, when asked, axe violations.
  */
-export type DeclaredCheckKind = "command" | "numeric-compare" | "perf-budget" | "reproduce";
+export type DeclaredCheckKind = "command" | "numeric-compare" | "perf-budget" | "reproduce" | "browser";
 
 export const DECLARED_CHECK_KINDS: ReadonlyArray<DeclaredCheckKind> = [
 	"command",
 	"numeric-compare",
 	"perf-budget",
 	"reproduce",
+	"browser",
 ];
+
+export type BrowserCheckAssertion = "console" | "exceptions" | "requests" | "axe";
+export const BROWSER_CHECK_ASSERTIONS: ReadonlyArray<BrowserCheckAssertion> = [
+	"console",
+	"exceptions",
+	"requests",
+	"axe",
+];
+/** What a browser check fails on when it names no `assert`. */
+export const BROWSER_CHECK_DEFAULT_ASSERTIONS: ReadonlyArray<BrowserCheckAssertion> = [
+	"console",
+	"exceptions",
+	"requests",
+];
+/** The catalog fields of a browser check beside the shared ones; `command` is its dev server. */
+export const BROWSER_CATALOG_FIELDS: ReadonlyArray<string> = ["url", "ready", "steps", "assert"];
+
+export interface DeclaredBrowserCheck {
+	/** The loopback page the check loads once the server answers. */
+	url: string;
+	/** Loopback URL that answers once the server is up; the page URL when absent. */
+	ready?: string;
+	/** Repository-relative module whose default export runs against the loaded page, as `browser run` takes it. */
+	steps?: string;
+	/** What fails the check; absent means console errors, uncaught exceptions and failed requests. */
+	assert?: BrowserCheckAssertion[];
+}
 
 export interface DeclaredNumericCompare {
 	/** Repository-relative JSON file of the same shape as the command's stdout. */
@@ -117,6 +147,7 @@ export interface DeclaredCheck {
 	numeric?: DeclaredNumericCompare;
 	perf?: DeclaredPerfBudget;
 	reproduce?: DeclaredReproduce;
+	browser?: DeclaredBrowserCheck;
 	proof?: DeclaredProof;
 	proofCatalogDigest?: string;
 	/**
@@ -144,7 +175,15 @@ const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs"
  * non-finite-fails judgement.
  */
 const KIND_FIELDS = [
-	...new Set(["reference", "tolerance", "budget", "baseline", "provenance", ...REPRODUCE_CATALOG_FIELDS]),
+	...new Set([
+		"reference",
+		"tolerance",
+		"budget",
+		"baseline",
+		"provenance",
+		...REPRODUCE_CATALOG_FIELDS,
+		...BROWSER_CATALOG_FIELDS,
+	]),
 ];
 const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "runs", "proof", ...KIND_FIELDS]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
@@ -294,6 +333,54 @@ function validateProvenance(value: unknown, location: string): string[][] | Erro
 	return probes;
 }
 
+/** A loopback http(s) URL: a browser check runs hermetic, so nothing else is reachable. */
+function validateLoopbackUrl(value: unknown, location: string): string | Error {
+	if (typeof value !== "string" || value.length === 0 || utf8Bytes(value) > PROJECT_VERIFIER_CATALOG_CAPS.argumentBytes)
+		return new Error(`${location} must be a non-empty URL string`);
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return new Error(`${location} is not a URL: '${value}'`);
+	}
+	const host = url.hostname.replace(/^\[|\]$/gu, "").toLowerCase();
+	const loopback =
+		host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127(?:\.\d{1,3}){3}$/u.test(host);
+	if ((url.protocol !== "http:" && url.protocol !== "https:") || !loopback)
+		return new Error(`${location} must be an http(s) loopback URL; a browser check runs hermetic: '${value}'`);
+	return value;
+}
+
+function validateBrowserCheck(value: Record<string, unknown>, location: string): DeclaredBrowserCheck | Error {
+	if (!Object.hasOwn(value, "url")) return new Error(`${location}.url is required for kind browser`);
+	const url = validateLoopbackUrl(value.url, `${location}.url`);
+	if (url instanceof Error) return url;
+	const check: DeclaredBrowserCheck = { url };
+	if (Object.hasOwn(value, "ready")) {
+		const ready = validateLoopbackUrl(value.ready, `${location}.ready`);
+		if (ready instanceof Error) return ready;
+		check.ready = ready;
+	}
+	if (Object.hasOwn(value, "steps")) {
+		const steps = validateRepositoryFile(value.steps, `${location}.steps`);
+		if (steps instanceof Error) return steps;
+		if (steps === "." || steps.endsWith("/")) return new Error(`${location}.steps must name a file`);
+		check.steps = steps;
+	}
+	if (Object.hasOwn(value, "assert")) {
+		const raw = value.assert;
+		if (
+			!Array.isArray(raw) ||
+			raw.length === 0 ||
+			!raw.every((entry) => (BROWSER_CHECK_ASSERTIONS as ReadonlyArray<unknown>).includes(entry))
+		)
+			return new Error(`${location}.assert must be a non-empty array of ${BROWSER_CHECK_ASSERTIONS.join(", ")}`);
+		if (new Set(raw).size !== raw.length) return new Error(`${location}.assert names an assertion twice`);
+		check.assert = [...raw] as BrowserCheckAssertion[];
+	}
+	return check;
+}
+
 /**
  * The kind-specific fields of one check. Version 1 admits no such field, so a
  * version-1 check is always `command`. Under version 2 the kind gates which
@@ -303,7 +390,7 @@ function validateCheckKind(
 	value: Record<string, unknown>,
 	location: string,
 	version: number,
-): Pick<DeclaredCheck, "kind" | "numeric" | "perf" | "reproduce"> | Error {
+): Pick<DeclaredCheck, "kind" | "numeric" | "perf" | "reproduce" | "browser"> | Error {
 	const kindValue = Object.hasOwn(value, "kind") ? value.kind : "command";
 	if (typeof kindValue !== "string" || !(DECLARED_CHECK_KINDS as ReadonlyArray<string>).includes(kindValue)) {
 		return new Error(`${location}.kind must be one of ${DECLARED_CHECK_KINDS.join(", ")}`);
@@ -315,11 +402,16 @@ function validateCheckKind(
 		"numeric-compare": ["reference", "tolerance", "inputs", "provenance", "seed", "repeat"],
 		"perf-budget": ["budget", "baseline", "tolerance"],
 		reproduce: [...REPRODUCE_CATALOG_FIELDS, "provenance"],
+		browser: BROWSER_CATALOG_FIELDS,
 	};
 	const stray = KIND_FIELDS.filter((field) => present(field) && !accepted[kind].includes(field));
 	if (stray.length > 0) return new Error(`${location} kind '${kind}' does not accept ${stray.join(", ")}`);
 	if (version === 1 && kind !== "command") return new Error(`${location}.kind requires catalog version 2`);
 	if (kind === "command") return { kind };
+	if (kind === "browser") {
+		const browser = validateBrowserCheck(value, location);
+		return browser instanceof Error ? browser : { kind, browser };
+	}
 	const provenance = present("provenance") ? validateProvenance(value.provenance, `${location}.provenance`) : undefined;
 	if (provenance instanceof Error) return provenance;
 	if (kind === "reproduce") {
@@ -582,8 +674,9 @@ export function parseProjectVerifierCatalogText(
 		let runs: string | undefined;
 		if (Object.hasOwn(value, "runs")) {
 			// A perf-budget baseline times one fixed command, and a reproduce check runs in a clean environment holding
-			// only HEAD or its pinned inputs, where a run's outputs never exist; neither can judge one run of a sweep.
-			if (kindFields.kind === "perf-budget" || kindFields.kind === "reproduce") {
+			// only HEAD or its pinned inputs, where a run's outputs never exist; neither can judge one run of a sweep. A
+			// browser check's command is its server, which takes no run directory.
+			if (kindFields.kind === "perf-budget" || kindFields.kind === "reproduce" || kindFields.kind === "browser") {
 				return catalogDiagnostic(`${location} kind '${kindFields.kind}' does not accept runs`);
 			}
 			const declared = validateRepositoryFile(value.runs, `${location}.runs`);

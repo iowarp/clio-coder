@@ -491,6 +491,8 @@ export function settleFinishedRun(
 				? {
 						path: receipt.worktree.path,
 						branch: receipt.worktree.branch,
+						...(receipt.worktree.root !== undefined ? { root: receipt.worktree.root } : {}),
+						...(receipt.worktree.base !== undefined ? { base: receipt.worktree.base } : {}),
 						diffHash: receipt.worktree.diffHash,
 						...(receipt.worktree.changedPaths !== undefined ? { changedPaths: [...receipt.worktree.changedPaths] } : {}),
 						...(receipt.worktree.deletedPaths !== undefined ? { deletedPaths: [...receipt.worktree.deletedPaths] } : {}),

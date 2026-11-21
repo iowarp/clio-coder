@@ -125,7 +125,7 @@ describe("demo guidance tips", () => {
 				["notify_operator"],
 			);
 			const tip = tipOf(effects) ?? "";
-			match(tip, /^\[tip\] Next time just ask: I can preview a Clio settings change/);
+			match(tip, /^\[tip\] Next time just ask: I can preview a CLIO Coder settings change/);
 			// The first tip ever says where tips come from and how to stop them.
 			match(tip, /Demo guidance in \/settings/);
 			ok(store.calls.includes("shown:settings-change"));

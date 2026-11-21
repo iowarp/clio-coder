@@ -45,7 +45,7 @@ describe("/doctor", () => {
 			strictEqual(parseSlashCommand(input).kind, "usage-error", input);
 		}
 		const reference = commandReference().find((entry) => entry.name === "doctor");
-		strictEqual(reference?.group, "Clio");
+		strictEqual(reference?.group, "CLIO Coder");
 		match(reference?.usage ?? "", /\/doctor \[--deep\]/);
 		deepStrictEqual(
 			BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "doctor")?.args?.flags?.map((flag) => flag.name),

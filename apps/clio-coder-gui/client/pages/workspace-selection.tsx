@@ -50,6 +50,7 @@ export function WorkspacePicker({
 	if (!workspaces.data.length)
 		return (
 			<p>
+				{purpose === "settings" ? "These are your user settings. " : null}
 				{shell ? (
 					<button type="button" className="wb-link" onClick={shell.openWorkspace}>
 						Open a workspace
@@ -57,7 +58,7 @@ export function WorkspacePicker({
 				) : (
 					<Link to="/">Open a workspace</Link>
 				)}{" "}
-				to {purpose === "settings" ? "inspect its configuration" : "inspect its records"}.
+				to {purpose === "settings" ? "see the project settings that apply there too" : "inspect its records"}.
 			</p>
 		);
 	return (

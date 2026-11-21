@@ -512,7 +512,7 @@
 					{
 						"severity": "warning",
 						"code": "context-window-unverified",
-						"message": "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+						"message": "This model's context window is unknown, so CLIO Coder compacts at its token budget instead. clio-coder configure can set the window."
 					}
 				],
 				"modelTier": "standard",
@@ -570,6 +570,11 @@
 					},
 					{
 						"id": "removed-tests",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "assurance",
 						"layer": "V4",
 						"status": "not_applicable"
 					},
@@ -1104,7 +1109,7 @@
 					"event": {
 						"type": "route_warning",
 						"level": "warning",
-						"message": "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+						"message": "This model's context window is unknown, so CLIO Coder compacts at its token budget instead. clio-coder configure can set the window."
 					}
 				}
 			},
@@ -1771,7 +1776,7 @@
 					"event": {
 						"type": "route_warning",
 						"level": "warning",
-						"message": "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+						"message": "This model's context window is unknown, so CLIO Coder compacts at its token budget instead. clio-coder configure can set the window."
 					}
 				}
 			},
@@ -2381,7 +2386,7 @@
 					"workspaceMutationPossible": true
 				},
 				"runtimeLimitations": [
-					"external ACP agent executes its own unknown tool surface; Clio mediates permission requests and records decisions"
+					"external ACP agent executes its own unknown tool surface; CLIO Coder mediates permission requests and records decisions"
 				],
 				"permit": {
 					"version": 1,
@@ -2487,6 +2492,11 @@
 					},
 					{
 						"id": "removed-tests",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "assurance",
 						"layer": "V4",
 						"status": "not_applicable"
 					},

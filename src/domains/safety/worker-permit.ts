@@ -296,7 +296,7 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 	if (ceilingErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${ceilingErrors.join("; ")}`);
 	if (input.readOnly && !readOnlyWorkAdmitted(input.runtime)) {
 		throw new WorkerPermitAdmissionError(
-			`runtime '${input.runtime.id}' cannot run read-only work: Clio cannot mediate its individual calls and it has no OS-level read-only sandbox, so it could change user files; trustedUnmediated does not change this. Choose a native, claude-sdk or codex-cli target for target '${input.runtime.targetId}'`,
+			`runtime '${input.runtime.id}' cannot run read-only work: CLIO Coder cannot mediate its individual calls and it has no OS-level read-only sandbox, so it could change user files; trustedUnmediated does not change this. Choose a native, claude-sdk or codex-cli target for target '${input.runtime.targetId}'`,
 		);
 	}
 	// Operator decision Q6: a runtime Clio cannot mediate per call takes
@@ -304,7 +304,7 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 	const unmediatedWrite = !input.readOnly && !input.runtime.enforcement.perCallMediation;
 	if (unmediatedWrite && !input.runtime.trustedUnmediated) {
 		throw new WorkerPermitAdmissionError(
-			`runtime '${input.runtime.id}' runs its own tool loop and Clio cannot mediate its individual calls, so it is refused write-capable work; choose a native or claude-sdk target, or set trustedUnmediated: true on target '${input.runtime.targetId}' in settings.yaml to accept the runtime's own authority`,
+			`runtime '${input.runtime.id}' runs its own tool loop and CLIO Coder cannot mediate its individual calls, so it is refused write-capable work; choose a native or claude-sdk target, or set trustedUnmediated: true on target '${input.runtime.targetId}' in settings.yaml to accept the runtime's own authority`,
 		);
 	}
 

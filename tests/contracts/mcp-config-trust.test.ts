@@ -683,7 +683,7 @@ describe("plugin mcp.json declarations", () => {
 			reason:
 				"plugin-scope server 'zulipchat' from plugin zulip-kit requires explicit trust: clio-coder mcp trust zulipchat",
 		});
-		ok(declared.diagnostics.some((entry) => entry.message.includes("Clio runs stdio servers only")));
+		ok(declared.diagnostics.some((entry) => entry.message.includes("CLIO Coder runs stdio servers only")));
 		strictEqual(
 			declared.servers.some((entry) => entry.id === "remote"),
 			false,

@@ -51,7 +51,13 @@ export function resolveModelCatalogOverlayRoots(options: { cwd?: string } = {}):
 		join(resolveClioDirs().config, MODEL_CATALOG_OVERLAY_DIR),
 		join(clioProjectRoot(cwd, MODEL_CATALOG_OVERLAY_DIR), ".clio-coder", MODEL_CATALOG_OVERLAY_DIR),
 		...envOverlayDirs(),
-	]).map((dir) => ({ dir, label: `overlay:${dir}` }));
+	]).map((dir) => ({ dir }));
+}
+
+/** A file the last load skipped: its path, and what is wrong with it, which can run over several lines. */
+export interface ModelCatalogOverlayProblem {
+	path: string;
+	message: string;
 }
 
 /**
@@ -61,7 +67,7 @@ export function resolveModelCatalogOverlayRoots(options: { cwd?: string } = {}):
 export class ModelCatalogOverlays {
 	private readonly roots: KnowledgeBaseRoot[];
 	private loaded: KnowledgeBaseEntry[] = [];
-	private skipped: string[] = [];
+	private skipped: ModelCatalogOverlayProblem[] = [];
 
 	constructor(roots: ReadonlyArray<string | KnowledgeBaseRoot>) {
 		this.roots = normalizeRoots(roots);
@@ -71,19 +77,15 @@ export class ModelCatalogOverlays {
 	/** Rereads every root; a root that cannot be listed leaves the previous entries in place. */
 	reload(): void {
 		const next: KnowledgeBaseEntry[] = [];
-		const skipped: string[] = [];
+		const skipped: ModelCatalogOverlayProblem[] = [];
 		for (const root of this.roots) {
 			for (const file of collectYamlFiles(root.dir)) {
-				const name = root.label ? `${root.label}:${file.name}` : file.name;
 				try {
 					const parsed = parseYaml(readFileSync(file.path, "utf8"));
-					if (!Array.isArray(parsed)) {
-						throw new Error(`knowledge base file ${name} must be a YAML list of KnowledgeBaseEntry`);
-					}
-					next.push(...parsed.map((item) => normalizeEntry(item, name)));
+					if (!Array.isArray(parsed)) throw new Error("must be a YAML list of catalog entries");
+					next.push(...parsed.map(normalizeEntry));
 				} catch (err) {
-					const message = err instanceof Error ? err.message : String(err);
-					skipped.push(message.includes(name) ? message : `knowledge base file ${name}: ${message}`);
+					skipped.push({ path: file.path, message: (err instanceof Error ? err.message : String(err)).trimEnd() });
 				}
 			}
 		}
@@ -95,8 +97,8 @@ export class ModelCatalogOverlays {
 		return this.loaded;
 	}
 
-	/** One message per file the last load skipped, each naming the file and what is wrong with it. */
-	problems(): ReadonlyArray<string> {
+	/** One problem per file the last load skipped. */
+	problems(): ReadonlyArray<ModelCatalogOverlayProblem> {
 		return this.skipped;
 	}
 }
@@ -142,48 +144,43 @@ function normalizeRoots(roots: ReadonlyArray<string | KnowledgeBaseRoot>): Knowl
 			throw new Error(`knowledge base path is not a directory: ${dir}`);
 		}
 		seen.add(dir);
-		out.push({
-			dir,
-			...(raw.label ? { label: raw.label } : {}),
-			...(raw.optional === true ? { optional: true } : {}),
-		});
+		out.push({ dir, ...(raw.optional === true ? { optional: true } : {}) });
 	}
 	return out;
 }
 
-function collectYamlFiles(dir: string, prefix = ""): Array<{ path: string; name: string }> {
-	const out: Array<{ path: string; name: string }> = [];
+function collectYamlFiles(dir: string): Array<{ path: string }> {
+	const out: Array<{ path: string }> = [];
 	const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
 	for (const entry of entries) {
 		const path = join(dir, entry.name);
-		const name = prefix ? `${prefix}/${entry.name}` : entry.name;
 		if (entry.isDirectory()) {
-			out.push(...collectYamlFiles(path, name));
+			out.push(...collectYamlFiles(path));
 			continue;
 		}
 		if (!entry.isFile()) continue;
 		if (!entry.name.endsWith(".yaml") && !entry.name.endsWith(".yml")) continue;
-		out.push({ path, name });
+		out.push({ path });
 	}
 	return out;
 }
 
-function normalizeEntry(raw: unknown, file: string): KnowledgeBaseEntry {
+function normalizeEntry(raw: unknown): KnowledgeBaseEntry {
 	if (typeof raw !== "object" || raw === null) {
-		throw new Error(`knowledge base file ${file}: every entry must be an object`);
+		throw new Error("every entry must be an object");
 	}
 	const candidate = raw as Record<string, unknown>;
 	const family = candidate.family;
 	const patterns = candidate.matchPatterns;
 	const capabilities = candidate.capabilities;
 	if (typeof family !== "string" || family.length === 0) {
-		throw new Error(`knowledge base file ${file}: entry is missing 'family' string`);
+		throw new Error("entry is missing 'family' string");
 	}
 	if (!Array.isArray(patterns) || patterns.some((p) => typeof p !== "string")) {
-		throw new Error(`knowledge base file ${file}: entry '${family}' needs matchPatterns: string[]`);
+		throw new Error(`entry '${family}' needs matchPatterns: string[]`);
 	}
 	if (typeof capabilities !== "object" || capabilities === null || Array.isArray(capabilities)) {
-		throw new Error(`knowledge base file ${file}: entry '${family}' needs capabilities object`);
+		throw new Error(`entry '${family}' needs capabilities object`);
 	}
 	const entry: KnowledgeBaseEntry = {
 		family,
@@ -192,14 +189,14 @@ function normalizeEntry(raw: unknown, file: string): KnowledgeBaseEntry {
 	};
 	if (candidate.quirks !== undefined) {
 		if (typeof candidate.quirks !== "object" || candidate.quirks === null || Array.isArray(candidate.quirks)) {
-			throw new Error(`knowledge base file ${file}: entry '${family}' quirks must be an object`);
+			throw new Error(`entry '${family}' quirks must be an object`);
 		}
 		entry.quirks = candidate.quirks as Record<string, unknown>;
 	}
 	const metadata = candidate["clio-coder"];
 	if (metadata !== undefined) {
 		if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
-			throw new Error(`knowledge base file ${file}: entry '${family}' clio-coder metadata must be an object`);
+			throw new Error(`entry '${family}' clio-coder metadata must be an object`);
 		}
 		entry.clioCoder = metadata as Record<string, unknown>;
 	}

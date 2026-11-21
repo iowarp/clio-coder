@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
+import type { SessionSummary } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
@@ -24,6 +25,7 @@ import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
 import { compactionRows, summarizeHealth } from "../chat/health.js";
 import { LiveJobs } from "../chat/JobStrip.js";
+import { LiveElsewhereTask } from "../chat/LiveElsewhereTask.js";
 import { MemoryCaptureChip } from "../chat/MemoryCaptureChip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { FilePreviewDialog } from "../chat/on-demand-panels.js";
@@ -81,6 +83,8 @@ export interface LocatedTask {
 	workspace: { id: string; name: string } | null;
 	/** Projects whose ledger could not be read, so "not found" is not a fact about them. */
 	unread: number;
+	/** The saved row the project's ledger holds for the task, when one was found. */
+	row?: SessionSummary;
 }
 
 /**
@@ -108,9 +112,8 @@ export async function locateTask(
 				undefined,
 				signal,
 			);
-			if (history.some((row) => row.id === id)) {
-				return { workspace: { id: project.id, name: project.name }, unread };
-			}
+			const row = history.find((entry) => entry.id === id);
+			if (row) return { workspace: { id: project.id, name: project.name }, unread, row };
 		} catch {
 			// A cancelled read is the page being left, not an unreadable project.
 			signal.throwIfAborted();
@@ -350,6 +353,23 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	if (notOpen && !snapshot && !located.error) {
 		const found = located.data?.workspace ?? null;
 		const unread = located.data?.unread ?? 0;
+		const live = located.data?.row?.liveElsewhere;
+		if (found && live)
+			return (
+				<>
+					<TopBar />
+					<LiveElsewhereTask
+						client={client}
+						sessionId={id}
+						workspaceId={found.id}
+						live={live}
+						resuming={resume.isPending}
+						resumeError={resume.error}
+						onReleased={() => resume.mutate(found.id)}
+						onRecheck={() => void located.refetch()}
+					/>
+				</>
+			);
 		return (
 			<>
 				<TopBar />

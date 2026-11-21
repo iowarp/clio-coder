@@ -2255,6 +2255,7 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 			requestBytes: q("requestBytes"),
 			sessionPinnedToSse: textFact(settled?.transport.sessionPinnedToSse ?? unobserved),
 			connectionReused: textFact(settled?.transport.connectionReused ?? unobserved),
+			session: textFact(settled?.transport.session ?? unobserved),
 			websocketFailures: q("websocketFailures"),
 			sseFallbacks: q("sseFallbacks"),
 			pinReason: settled?.transport.pinReason ?? null,
@@ -2270,7 +2271,19 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 		},
 		quota: settled?.quota ?? null,
 		responseId: settled?.responseId ?? null,
+		billing: settled?.billing
+			? {
+					provider: settled.billing.provider,
+					premiumRequests: seatUnit(settled.billing.premiumRequests, "units"),
+					nanoAiu: seatUnit(settled.billing.nanoAiu),
+					modelCalls: seatUnit(settled.billing.modelCalls),
+				}
+			: null,
 	};
+}
+
+function seatUnit(fact: Fact<number>, as: "count" | "units" = "count") {
+	return { fact, display: renderFact(fact, as) };
 }
 
 function matches(attempt: Attempt, filter: CallFilter): boolean {

@@ -98,7 +98,7 @@ export class ReaderUnavailableError extends Error {
 	constructor(reader: ScientificReader, pkg: ReaderPackage, reason: string) {
 		const asset = tarballAsset(reader, pkg);
 		super(
-			`Clio reads ${reader.formats} with ${pkg.name} ${pkg.version}, which it downloads once on first use and caches, and that download is not available: ${reason}. ` +
+			`CLIO Coder reads ${reader.formats} with ${pkg.name} ${pkg.version}, which it downloads once on first use and caches, and that download is not available: ${reason}. ` +
 				`No process on this host retries it for ${Math.round(READER_FETCH_RETRY_MS / 60_000)} minutes after a failure. ` +
 				`On an offline host, copy ${asset.url} (sha256 ${pkg.sha256}) to ${asset.path}, or use ${reader.fallback}.`,
 		);

@@ -89,7 +89,7 @@ export { WorkerChannelFailure } from "./worker-protocol.js";
  */
 export function missingChunkNotice(stderr: string, buildId: string | null): string | null {
 	if (!/ERR_MODULE_NOT_FOUND|Cannot find module/u.test(stderr)) return null;
-	return `[worker] A module of the parent's build ${buildId ?? "(source run)"} is missing from dist/; a later build may have pruned it. Restart Clio to load the current build.\n`;
+	return `[worker] A module of the parent's build ${buildId ?? "(source run)"} is missing from dist/; a later build may have pruned it. Restart CLIO Coder to load the current build.\n`;
 }
 
 export interface WorkerProcessCleanup extends ProcessGroupCleanupStatus {
@@ -119,6 +119,12 @@ export interface SpawnedWorkerResult {
 	channelFailure?: WorkerChannelFailure["operation"];
 	/** Local process ownership outcome; an SSH child cannot attest remote cleanup. */
 	processCleanup?: WorkerProcessCleanup;
+	/**
+	 * The signals this host delivered to the worker's process group after its abort started, in order: SIGTERM, then
+	 * SIGKILL when the grace ran out. `signal` is the child's own exit, which names none when the worker traps SIGTERM
+	 * and exits 1. Absent when the host never signalled.
+	 */
+	hostSignals?: NodeJS.Signals[];
 }
 
 export interface SpawnedWorker {
@@ -852,6 +858,7 @@ function attachWorkerChannel(
 
 	let settled = false;
 	let abortStarted = false;
+	const hostSignals: NodeJS.Signals[] = [];
 	let closed = false;
 	let leaderExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
 	let cleanupStatus: ProcessGroupCleanupStatus | null = null;
@@ -890,6 +897,7 @@ function attachWorkerChannel(
 		} else {
 			delivered = isAlive() && child.kill(signal);
 		}
+		if (delivered && abortStarted && hostSignals.at(-1) !== signal) hostSignals.push(signal);
 		if (delivered && signal === "SIGKILL" && abortStarted) {
 			try {
 				opts?.onForcedKill?.();
@@ -953,6 +961,7 @@ function attachWorkerChannel(
 			signal: sawSpawnError ? null : signal,
 			...diagnostics(),
 			processCleanup: { ...cleanupStatus, pipeDrainIncomplete },
+			...(hostSignals.length > 0 ? { hostSignals: [...hostSignals] } : {}),
 		});
 	}
 

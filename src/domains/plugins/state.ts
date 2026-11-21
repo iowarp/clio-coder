@@ -477,7 +477,7 @@ function scopeEntries(scope: PluginScope, cwd: string, onlyId?: string): Install
 		if (!compatible)
 			diagnostics.push({
 				type: "error",
-				message: `plugin requires Clio ${range}`,
+				message: `plugin requires CLIO Coder ${range}`,
 				path: candidate.manifestPath ?? rootPath,
 			});
 		const valid =
@@ -633,7 +633,7 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 	const digest = candidate.contentDigest;
 	const range = manifest.clio.compatibility?.clio;
 	if (range && !evaluateClioCompatibility(range).satisfied)
-		return { diagnostics: [{ type: "error", message: `plugin requires Clio ${range}` }] };
+		return { diagnostics: [{ type: "error", message: `plugin requires CLIO Coder ${range}` }] };
 	if (
 		(options.expectedKind !== undefined && options.expectedKind !== (manifest.clio.kind ?? "plugin")) ||
 		(options.expectedDigest !== undefined && options.expectedDigest !== digest) ||
@@ -694,9 +694,14 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 			published = true;
 			if (pluginContentDigest(target) !== digest) throw new Error("plugin changed during publication");
 			const origin = options.origin ?? { kind: "local" as const, source };
-			const trust = isForeignPluginOrigin(origin)
-				? "foreign"
-				: (options.trust ?? state.installed[manifest.name]?.trust ?? "trusted");
+			// An import is always foreign. Interop adoption decides per source: the operator's own home installs
+			// trusted on their reviewed approval, a project directory stays foreign (interop adoptedPackageTrust).
+			const trust =
+				typeof origin === "object" && origin.kind === "interop"
+					? (options.trust ?? "foreign")
+					: isForeignPluginOrigin(origin)
+						? "foreign"
+						: (options.trust ?? state.installed[manifest.name]?.trust ?? "trusted");
 			state.installed[manifest.name] = {
 				kind: manifest.clio.kind ?? "plugin",
 				installedAt: new Date().toISOString(),

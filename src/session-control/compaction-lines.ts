@@ -37,7 +37,7 @@ export function footerTokens(tokens: number): string {
  * run that saved nothing says so instead of leaving `13K → 13K` to be decoded.
  */
 /** How the compaction row starts, so a surface that routes it to the footer can tell it apart. */
-export const COMPACTION_LINE_LEAD = "Clio compacted ";
+export const COMPACTION_LINE_LEAD = "CLIO Coder compacted ";
 
 /**
  * The notice key of a context engine status line: the compaction row, the working-set eviction and skip lines and the

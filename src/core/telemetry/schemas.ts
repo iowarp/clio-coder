@@ -269,6 +269,8 @@ export const CallSettledSchema = Type.Object(
 				sessionPinnedToSse: factSchema(Type.Boolean()),
 				/** Present only when the call's own connection counters were attributable to it (#434). */
 				connectionReused: Type.Optional(factSchema(Type.Boolean())),
+				/** The Copilot session a copilot-sdk call went to, from Clio's own session pool (PV-2). */
+				session: Type.Optional(factSchema(vocabulary(["new", "spare", "continued", "resumed"]))),
 				/** WebSocket failures and SSE fallbacks inside this call, from the same attributable counters (#423). */
 				websocketFailures: Type.Optional(factSchema(count)),
 				sseFallbacks: Type.Optional(factSchema(count)),
@@ -553,6 +555,7 @@ export const MIDDLEWARE_EFFECTS = vocabulary([
 	"lock_tools",
 	"notify_operator",
 	"rewrite_tool_input",
+	"request_approval",
 ]);
 export const SYSTEM_ONE_OUTCOME = vocabulary([
 	"answered",
@@ -1272,7 +1275,13 @@ export const RunSettledSchema = Type.Object(
 					claimed: count,
 					grounded: count,
 					ungrounded: Type.Array(text, { maxItems: 64 }),
-					basis: vocabulary(["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]),
+					basis: vocabulary([
+						"grounded",
+						"no-command-executed",
+						"unmatched-command",
+						"unattributable-status",
+						"unobserved-lane",
+					]),
 				},
 				closed,
 			),
@@ -1522,6 +1531,8 @@ export const RunResultObjectSchema = Type.Object(
 				{
 					path: Type.String(),
 					branch: Type.String(),
+					root: Type.Optional(Type.String()),
+					base: Type.Optional(Type.String()),
 					diffHash: nullable(Type.String()),
 					changedPaths: Type.Optional(Type.Array(Type.String())),
 					deletedPaths: Type.Optional(Type.Array(Type.String())),
@@ -2020,7 +2031,7 @@ export const ToolSettledSchema = Type.Object(
 		 */
 		fileExt: Type.Optional(vocabulary(TOOL_FILE_KINDS)),
 		/** The declared kind of the check a verify call ran (`src/tools/verify/catalog.ts`). */
-		checkKind: Type.Optional(vocabulary(["command", "numeric-compare", "perf-budget", "reproduce"])),
+		checkKind: Type.Optional(vocabulary(["command", "numeric-compare", "perf-budget", "reproduce", "browser"])),
 		/** The skill a context call loaded; an operator-chosen name, so a share anonymizes it like a rule id. */
 		skill: Type.Optional(ExistingId),
 		/** The capabilities a gateway call or chain invoked, so the tool mix sees `data` or `web_fetch` behind it. */
@@ -2415,6 +2426,21 @@ export const AuthRefreshedSchema = Type.Object(
 		updatedAtBefore: Type.Optional(utc),
 		updatedAtAfter: Type.Optional(utc),
 		durationMs: duration,
+	},
+	closed,
+);
+/**
+ * A main session's prompt cache lane came from this process's own lanes because the cross-process lane store could
+ * not take the claim (M-11), so a concurrent Clio process may route to the same id.
+ */
+export const CacheLaneFellBackSchema = Type.Object(
+	{
+		/** lock-timeout: another holder kept the admission lock past the claim's bound. store-failed: any other error. */
+		reason: vocabulary(["lock-timeout", "store-failed"]),
+		/** The lock budget that ran out; null for a store failure. */
+		timeoutMs: Type.Union([count, Type.Null()]),
+		/** The in-process lane the conversation took instead. */
+		lane: count,
 	},
 	closed,
 );

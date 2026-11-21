@@ -135,7 +135,7 @@ it("titles a session from the typed input when a prompt template expanded it", a
 
 		// A turn another Clio submitted keeps its origin in the ledger, so a
 		// replay still says the operator did not type it.
-		const origin = "machine prompt from Clio in pane w1:p1";
+		const origin = "machine prompt from CLIO Coder in pane w1:p1";
 		await loop.submit("review the diff", { origin });
 		const origins = entries()
 			.filter((entry) => entry.kind === "message" && entry.role === "user")
@@ -240,7 +240,7 @@ it("persists and replays machine origin after the real engine injects a busy fol
 		await started;
 		strictEqual(loop.isStreaming(), true);
 		const text = "review the diff after this turn";
-		const origin = "machine prompt from Clio in pane w1:p1";
+		const origin = "machine prompt from CLIO Coder in pane w1:p1";
 		strictEqual(loop.queueFollowUp(text, { text, note: origin }, origin), true);
 		strictEqual(
 			entries().filter((entry) => entry.kind === "message" && entry.role === "user").length,

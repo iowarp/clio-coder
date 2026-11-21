@@ -1095,6 +1095,9 @@ export interface AcpReplayMeta {
 	turn?: number;
 	run?: boolean;
 	stopReason?: string;
+	/** The ledger's time for the request that opened a replayed turn, and for its newest entry. */
+	startedAt?: string;
+	finishedAt?: string;
 }
 /** Params of the `_clio-coder/permission/withdraw` notification. */
 export interface AcpPermissionWithdrawParams {
@@ -1293,6 +1296,8 @@ export interface AcpArtifactPage {
 	nextOffset: number | null;
 	/** Lines cut to fit one page; reassembly is exact only when this is absent. */
 	clippedLines?: number;
+	/** An `image` artifact's picture, on the first page when it fits one; absent otherwise. */
+	image?: { mimeType: string; data: string };
 	/** The overlay's `i` view, read with `details: true`. */
 	details?: { format: ViewArtifactFormat; lineCount: number };
 	refused?: { reason: string };

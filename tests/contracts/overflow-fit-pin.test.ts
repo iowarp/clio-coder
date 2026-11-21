@@ -616,7 +616,7 @@ function oldBuildTail(sliced: ReadonlyArray<Row>, sessionId: string, cwd: string
 				provider: "litellm",
 				model: model.id,
 				stopReason: "error",
-				errorMessage: `Context window exceeded before the provider call: the request would leave ${leave} output tokens of a ${WINDOW}-token window (estimated input ${input}), below the usable minimum of 4096.\n\nLiteLLM route '${model.id}' on target 'litellm' failed. Clio did not substitute another model; select a different route with /model, then resend.`,
+				errorMessage: `Context window exceeded before the provider call: the request would leave ${leave} output tokens of a ${WINDOW}-token window (estimated input ${input}), below the usable minimum of 4096.\n\nLiteLLM route '${model.id}' on target 'litellm' failed. CLIO Coder did not substitute another model; select a different route with /model, then resend.`,
 				failureRoute: {
 					targetId: "litellm",
 					url: target.url,

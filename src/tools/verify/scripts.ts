@@ -881,6 +881,7 @@ export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunO
 	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, options?.workspaceRoot ?? process.cwd());
 	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
 	if (check.kind === "reproduce") return withDeclaredEvidence(await runReproduceCheck(check, options), check);
+	if (check.kind === "browser") return withDeclaredEvidence(await runBrowserDeclaredCheck(check, cwd, options), check);
 	if (check.kind !== "command") {
 		return withDeclaredEvidence(await runJudgedCheck(check, file, vector, cwd, options), check);
 	}
@@ -888,6 +889,45 @@ export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunO
 		return withDeclaredEvidence(await runProofCheck(check, file, vector, cwd, options), check);
 	const result = await runVectorTool("verify", file, vector, { cwd, timeout_ms: check.timeoutMs }, options);
 	return withDeclaredEvidence(result, check);
+}
+
+/**
+ * A browser check's verdict. A component, sandbox or axe package that is not there judged nothing, so it reads as
+ * unavailable; a server that never answered ran and failed before judgement; otherwise the assertions decide.
+ */
+async function runBrowserDeclaredCheck(
+	check: DeclaredCheck,
+	cwd: string,
+	options?: VerifyRunOptions,
+): Promise<ToolResult> {
+	const { runBrowserCheck } = await import("./browser.js");
+	const outcome = await runBrowserCheck(check, cwd, {
+		workspaceRoot: options?.workspaceRoot ?? process.cwd(),
+		...(options?.signal !== undefined ? { signal: options.signal } : {}),
+		...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+	});
+	switch (outcome.kind) {
+		case "unavailable":
+			return {
+				kind: "error",
+				message: `verify: unavailable '${check.id}': browser check not run: ${outcome.message}. ${UNAVAILABLE_RETRY_DIRECTIVE}`,
+				details: { judgement: judgement("unavailable", "not-run") },
+			};
+		case "not-started":
+			return {
+				kind: "error",
+				message: `verify: ${outcome.summary}`,
+				details: { judgement: judgement("failed", "not-run") },
+			};
+		case "judged": {
+			const details = {
+				browserReport: outcome.report,
+				judgement: judgement("succeeded", outcome.report.passed ? "passed" : "failed"),
+			};
+			if (!outcome.report.passed) return { kind: "error", message: `verify: ${outcome.summary}`, details };
+			return { kind: "ok", output: `${outcome.summary}\n`, details };
+		}
+	}
 }
 
 async function runProofCheck(

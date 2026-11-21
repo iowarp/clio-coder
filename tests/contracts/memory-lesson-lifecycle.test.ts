@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runMemoryCommand } from "../../src/cli/memory.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import {
 	commandEvidenceRef,
@@ -312,6 +313,73 @@ test("a closed session's flow label restricts it from any branch, not only the a
 		closedSessionLessonSource(entries.map((entry) => JSON.stringify(entry)).join("\n"), "ledger", "closed", "/repo");
 	ok(review([...abandoned, ...active]), "the same ledger with no label stays reviewable");
 	strictEqual(review([...abandoned, label, ...active]), null);
+});
+
+test("a task that ends on finish is a completed lesson source when its turn wrote the reply finish declares", () => {
+	const at = "2026-11-21T10:00:00.000Z";
+	const message = (turnId: string, role: string, payload: unknown) => ({
+		kind: "message",
+		turnId,
+		timestamp: at,
+		role,
+		payload,
+	});
+	const work = [
+		message("u1", "user", { text: "run the check" }),
+		message("c1", "tool_call", { toolCallId: "c1", name: "bash", args: { command: "node scripts/check.mjs" } }),
+		message("r1", "tool_result", {
+			toolCallId: "c1",
+			outcome: "ok",
+			result: { content: [{ type: "text", text: "done" }], details: { kind: "ok", outcome: "success", exitCode: 0 } },
+		}),
+	];
+	const finishCall = (text: string) =>
+		message("a2", "assistant", {
+			text,
+			content: [
+				...(text ? [{ type: "text", text }] : []),
+				{ type: "toolCall", id: "f1", name: "finish", arguments: { state: "done" } },
+			],
+			stopReason: "toolUse",
+		});
+	// What the host appends once finish ends the turn: no provider message, an empty synthesized row.
+	const declared = [
+		message("c2", "tool_call", { toolCallId: "f1", name: "finish", args: { state: "done" } }),
+		message("r2", "tool_result", {
+			toolCallId: "f1",
+			toolName: "finish",
+			outcome: "ok",
+			result: {
+				content: [{ type: "text", text: "completion declared: done\n" }],
+				details: { kind: "ok" },
+				terminate: true,
+			},
+		}),
+		message("a3", "assistant", {
+			text: "",
+			stopReason: "stop",
+			terminalToolResult: true,
+			toolCallId: "f1",
+			toolName: "finish",
+		}),
+	];
+	const review = (entries: Array<{ turnId: string }>) =>
+		closedSessionLessonSource(
+			entries
+				.map((entry, index) => JSON.stringify({ ...entry, parentTurnId: entries[index - 1]?.turnId ?? null }))
+				.join("\n"),
+			"ledger",
+			"closed",
+			"/repo",
+		);
+	ok(review([...work, finishCall("The check passed."), ...declared]), "reply text and finish in one response");
+	const replied = message("a1", "assistant", {
+		text: "The check passed.",
+		content: [{ type: "text", text: "The check passed." }],
+		stopReason: "stop",
+	});
+	ok(review([...work, replied, finishCall(""), ...declared]), "the pinned finish round declares the reply before it");
+	strictEqual(review([...work, finishCall(""), ...declared]), null, "a bare finish with no reply in its turn");
 });
 
 test("a flow-restricted session files no lesson at scope end, and a clean one still does", async () => {
@@ -681,14 +749,26 @@ test("a recipe the task's receipts prove is filed though the model keeps nothing
 		},
 		async () => SILENT,
 	);
+	// M-29: the extraction settles once, after completion, with the outcome the task was left in, not the model's silence.
+	const journal: Array<{ event: string; facts: Record<string, unknown> }> = [];
+	const stop = telemetryHub().subscribe("memory.observation_recorded", (payload) => {
+		journal.push({ event: payload.event, facts: payload.facts });
+	});
 	try {
 		strictEqual(await closed.runtime.runIdleStep(true), "ran");
 		strictEqual(closed.marker()?.phase, "gated");
+		deepStrictEqual(
+			journal.map(({ event }) => event).filter((event) => /^lesson-(?:extraction|judgment)-/u.test(event)),
+			["lesson-extraction-started", "lesson-extraction-completed", "lesson-judgment-gated", "lesson-extraction-settled"],
+		);
+		const settled = journal.find(({ event }) => event === "lesson-extraction-settled")?.facts;
+		deepStrictEqual([settled?.decision, settled?.phase, settled?.reason], ["silent", "gated", "evidence-gate-held"]);
 		const records = closed.records();
 		strictEqual(records.length, 1);
 		strictEqual(records[0]?.approved, false, "its own session's evidence never promotes it");
 		ok(records[0]?.lesson.includes(`\`${COMMAND}\``));
 	} finally {
+		stop();
 		closed.cleanup();
 	}
 });

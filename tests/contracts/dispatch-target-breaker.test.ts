@@ -10,7 +10,7 @@ import {
 	type TargetBreaker,
 } from "../../src/domains/dispatch/target-breaker.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -194,6 +194,8 @@ describe("dispatch admission through the target breaker", () => {
 					send: () => true,
 					events: (async function* () {
 						const outcome = await done;
+						// A provenance report carries the observed-evidence obligation (fleet design 4.8).
+						if (outcome.exitCode === 0) for (const event of observedReadEvents()) yield event;
 						if (outcome.exitCode === 0)
 							yield {
 								type: "message_end",

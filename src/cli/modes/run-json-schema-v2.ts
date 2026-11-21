@@ -8,7 +8,9 @@
  * precedence function. An absent value is an absent key: v2 never sends `null`
  * for an optional field.
  */
+
 import type { RunSettled } from "../../core/telemetry/schemas.js";
+import { failsTheSameOnBase } from "../../domains/dispatch/host-verification-note.js";
 import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
 import { EXIT_CODES, EXPLORATION_STALLED_EXIT_CODE } from "../kit/exit-codes.js";
@@ -176,7 +178,7 @@ export function resolveRunExit(
 	return { exitCode, outcome, causes };
 }
 
-export type RunVerifyStatus = "passed" | "failed" | "timed_out" | "skipped";
+export type RunVerifyStatus = "passed" | "failed" | "not_implicated" | "timed_out" | "skipped";
 export type RunVerifySkipReason = "interrupted" | "deadline" | "turn_failed";
 
 export interface RunVerifyCheckV2 {
@@ -187,6 +189,16 @@ export interface RunVerifyCheckV2 {
 	exitCode?: number;
 	durationMs?: number;
 	ranAfterLastEdit?: boolean;
+	/**
+	 * CLI-4: a failing check replayed on the commit the run started from, through dispatch's base comparison. `failed`
+	 * with no reason is a base that fails the same way, so the check's own status reads `not_implicated`.
+	 */
+	base?: { status: "passed" | "failed" | "not_compared"; reason?: string };
+}
+
+/** A failing check the run's base fails the same way (CLI-4): it predates the run and does not count against it. */
+export function verifyNotImplicated(result: RunJsonVerifyResult): boolean {
+	return !result.passed && result.base !== undefined && failsTheSameOnBase({ baseComparison: result.base });
 }
 
 /**
@@ -204,10 +216,24 @@ export function verifyChecksV2(
 		return {
 			id: result.id,
 			command: result.command,
-			status: result.passed ? "passed" : result.timedOut ? "timed_out" : "failed",
+			status: result.passed
+				? "passed"
+				: result.timedOut
+					? "timed_out"
+					: verifyNotImplicated(result)
+						? "not_implicated"
+						: "failed",
 			...(result.exitCode !== null ? { exitCode: result.exitCode } : {}),
 			durationMs: result.durationMs,
 			ranAfterLastEdit: result.ranAfterLastEdit,
+			...(result.base !== undefined
+				? {
+						base: {
+							status: result.base.status,
+							...(result.base.reason !== undefined ? { reason: result.base.reason } : {}),
+						},
+					}
+				: {}),
 		};
 	});
 }

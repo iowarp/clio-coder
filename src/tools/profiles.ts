@@ -63,7 +63,7 @@ function narrowsToolSurface(profile: ToolProfileName | undefined): boolean {
 export function assertToolProfileEnforceable(profile: ToolProfileName | undefined, runtimeLabel: string): void {
 	if (narrowsToolSurface(profile)) {
 		throw new Error(
-			`${runtimeLabel} runtime cannot enforce tool_profile '${profile}': it runs its own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker, or use tool_profile full-agent.`,
+			`${runtimeLabel} runtime cannot enforce tool_profile '${profile}': it runs its own tool surface without CLIO Coder per-tool mediation. Dispatch to a native or claude-sdk worker, or use tool_profile full-agent.`,
 		);
 	}
 }

@@ -15,6 +15,7 @@ import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
+import { inlineImageRows } from "../renderers/tool-images.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
@@ -117,6 +118,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 			return "Workspace outputs";
 		case "tool-output":
 			return "Tool outputs";
+		case "screenshots":
+			return "Screenshots";
 		case "protected-artifact":
 			return "Protected artifacts";
 		case "compaction":
@@ -563,13 +566,22 @@ export class ViewOverlayView implements Component {
 			try {
 				const loaded = await Promise.resolve().then(() => artifact.load());
 				if (token !== this.loadToken) return;
+				const image = loaded.image;
+				const render =
+					image === undefined
+						? loaded.render
+						: (width: number) => {
+								const rows = inlineImageRows({ ...image, key: `view:${key}` }, width);
+								const text = loaded.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
+								return rows.length > 0 ? [...rows, "", ...text] : text;
+							};
 				this.content = {
 					key,
 					status: "loaded",
 					lines: loaded.lines,
 					format: loaded.format,
 					...(loaded.details ? { details: { key, status: "loaded" as const, ...loaded.details } } : {}),
-					...(loaded.render === undefined ? {} : { render: loaded.render }),
+					...(render === undefined ? {} : { render }),
 				};
 				this.queueContentRender(this.content, this.lastContentWidth);
 			} catch (err) {

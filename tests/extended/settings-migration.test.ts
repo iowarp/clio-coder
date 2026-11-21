@@ -9,6 +9,7 @@ import {
 	readFileSync,
 	statSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -329,6 +330,7 @@ describe("settings and migration boundary", () => {
 			"2026-11-02-approvals-to-config",
 			"2026-11-07-remove-copilot-consent",
 			"2026-11-21-retire-fleet-locks",
+			"2026-11-21-writer-set-lease-clock",
 		]);
 
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
@@ -367,7 +369,7 @@ describe("settings and migration boundary", () => {
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
@@ -473,6 +475,31 @@ describe("settings and migration boundary", () => {
 		strictEqual(kept.reports?.[id]?.attention.length, 1);
 		strictEqual(existsSync(join(locks, "b.json")), false);
 		strictEqual(readFileSync(join(locks, "notes.txt"), "utf8"), "kept\n");
+	});
+
+	it("moves a writer set record from a heartbeat duration to its expiry, and names one it cannot read", async () => {
+		const id = "2026-11-21-writer-set-lease-clock";
+		const dir = join(stateDir, "checkout-writer-leases");
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((other) => other !== id);
+		mkdirSync(dir, { recursive: true });
+		const at = "2026-11-21T12:00:00.000Z";
+		const v1 = { version: 1, checkout: "/repo", host: "h", pid: 7, processBirthToken: "t", acquiredAt: at };
+		writeFileSync(join(dir, "a.json"), JSON.stringify({ ...v1, heartbeatAt: at, heartbeatExpiresMs: 120_000 }));
+		utimesSync(join(dir, "a.json"), Date.parse(at) / 1000, Date.parse(at) / 1000);
+		writeFileSync(join(dir, "b.json"), "{}\n");
+		writeFileSync(join(scratch.dir, "config", "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const run = await runPending(stateDir);
+		deepStrictEqual(run.applied, [id]);
+		deepStrictEqual(JSON.parse(readFileSync(join(dir, "a.json"), "utf8")), {
+			...v1,
+			heartbeatAt: at,
+			version: 2,
+			expiresAt: "2026-11-21T12:02:00.000Z",
+		});
+		strictEqual(run.reports?.[id]?.attention.length, 1);
+		strictEqual(readFileSync(join(dir, "b.json"), "utf8"), "{}\n");
 	});
 
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {
@@ -631,7 +658,7 @@ describe("settings and migration boundary", () => {
 		// The third-party plugin stays in place and is named with the fix.
 		ok(existsSync(join(thirdParty, "fleets", "x.md")));
 		ok(
-			report.attention.some((line) => line.includes("lab-pack") && line.includes("older Clio")),
+			report.attention.some((line) => line.includes("lab-pack") && line.includes("older CLIO Coder")),
 			text,
 		);
 		// The plugin replacement is an upgrade receipt; no extension receipt is written.

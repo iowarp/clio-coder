@@ -93,7 +93,7 @@ const rows: Row[] = [
 		name: "reports missing credentials without spending a network call",
 		provider: "codex",
 		fault: "noCreds",
-		expect: { status: "no_credentials", message: "Clio holds no OpenAI Codex OAuth credential" },
+		expect: { status: "no_credentials", message: "CLIO Coder holds no OpenAI Codex OAuth credential" },
 	},
 ];
 

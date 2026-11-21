@@ -319,7 +319,7 @@ function validateEnv(value: unknown): Record<string, string> | string {
 	const env: Record<string, string> = {};
 	for (const [key, raw] of entries) {
 		if (!ENV_KEY_PATTERN.test(key)) return `env key '${key}' must match /^[A-Z_][A-Z0-9_]*$/`;
-		if (RUN_SCRIPT_RESERVED_ENV_KEYS.has(key)) return `env.${key} is set by Clio and cannot be declared`;
+		if (RUN_SCRIPT_RESERVED_ENV_KEYS.has(key)) return `env.${key} is set by CLIO Coder and cannot be declared`;
 		if (typeof raw !== "string") return `env.${key} must be a string`;
 		if (raw.includes("\0")) return `env.${key} must not contain a NUL byte`;
 		if (byteLength(raw) > RUN_SCRIPT_CAPS.envValueBytes) {

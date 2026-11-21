@@ -77,7 +77,7 @@ test("an untrusted project shows the header reminder; Trust all writes the recor
 		cards[0]?.done(true);
 		strictEqual(buildProjectTrustCard(workspace), null);
 		strictEqual(restarts(), 1);
-		strictEqual(trust.reminder(), "Project configuration trusted · restart Clio to apply it");
+		strictEqual(trust.reminder(), "Project configuration trusted · restart CLIO Coder to apply it");
 	} finally {
 		home.restore();
 	}

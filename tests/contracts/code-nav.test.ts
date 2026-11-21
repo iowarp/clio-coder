@@ -100,6 +100,26 @@ describe("code_nav tool", () => {
 		strictEqual((await payload({ mode: "path", query: "docs/" })).next, "mode=entries");
 	});
 
+	it("says what an empty search covered, that it proves no file absent, and the call that lists them", async () => {
+		// M-39: a worker read one empty code_nav search as "the workspace has no src/ tree".
+		const miss = await payload({ mode: "path", query: "src grid index" });
+		deepStrictEqual(miss.files, []);
+		match(String(miss.noMatch), /4 indexed paths for the substring "src grid index"/);
+		match(String(miss.noMatch), /matched as one string, spaces included/);
+		match(String(miss.noMatch), /not evidence that files are absent.*code_nav mode=path query=src\//);
+		match(String((await payload({ mode: "symbol", query: "noSuchSymbol" })).noMatch), /exact name "noSuchSymbol"/);
+		strictEqual((await payload({ mode: "path", query: "src/" })).noMatch, undefined);
+		for (const [tool, args, searched] of [
+			[ToolNames.Grep, { pattern: "noSuchText", path: "." }, /file contents under \. for the pattern sent/],
+			[ToolNames.Find, { pattern: "**/*.py", path: "." }, /paths under \. for the glob sent/],
+		] as const) {
+			const verdict = await registry.invoke({ tool, args });
+			if (verdict.kind !== "ok" || verdict.result.kind !== "ok") throw new Error(`${tool}: ${JSON.stringify(verdict)}`);
+			match(verdict.result.output, searched);
+			match(verdict.result.output, /not evidence that files are absent.*code_nav mode=path query=<dir>\//);
+		}
+	});
+
 	it("keeps an unchanged private index without a return clone and still detects same-metadata source edits", async () => {
 		const initial = await loadCodewikiForTool(workspace);
 		if (!initial.ok) throw new Error(initial.message);

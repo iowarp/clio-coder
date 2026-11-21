@@ -27,6 +27,52 @@ export const HANDBACK_NOTE_SHARE = 0.7;
 /** Share of a run's wall clock at which its next round is the handback round (DESIGN 4.5, fleet M8). */
 export const WALL_HANDBACK_SHARE = 0.85;
 
+/**
+ * What a run the wall clock moved to its handback round did next, as the host observed it (fleet M8). The worker's own
+ * line is written at the handback, before any report exists, so the sealed detail says whether a report came: a tool
+ * call still running at the handback can carry the run past its wall clock, where the host stops it with no answer.
+ * Only the host's own deadline abort (`hostStopped`) is a stop; a worker that crashed, was killed by something else or
+ * exited without a report is described by its exit.
+ */
+export function wallHandbackOutcomeDetail(input: {
+	reported: boolean;
+	unfinishedTools: ReadonlyArray<{ tool: string; count: number }>;
+	/** The calls the host saw in flight when its abort started, before the abort finished them; null without a snapshot. */
+	runningAtStop: ReadonlyArray<{ tool: string; object?: string }> | null;
+	hostStopped: boolean;
+	/** The signals the host itself delivered to the worker, in order (SIGTERM, then SIGKILL after the grace). */
+	hostSignals: ReadonlyArray<string>;
+	exitCode: number | null;
+	signal: string | null;
+}): string {
+	const share = `worker_run_timeout: the wall clock moved the run to its handback round at ${Math.round(WALL_HANDBACK_SHARE * 100)}%`;
+	if (input.reported) return `${share} and it handed back its report`;
+	if (!input.hostStopped) {
+		const exit = [
+			input.exitCode === null ? null : `exit code ${input.exitCode}`,
+			input.signal === null ? null : `signal ${input.signal}`,
+		].filter((part) => part !== null);
+		return `${share}, but it exited${exit.length === 0 ? "" : ` (${exit.join(", ")})`} before it wrote a report, so it handed back no report`;
+	}
+	// A worker traps SIGTERM and exits 1, so its exit names no signal; the host's own signals and the calls it saw
+	// running are the facts (M-37).
+	const labels =
+		input.runningAtStop !== null && input.runningAtStop.length > 0
+			? input.runningAtStop.map((call) => (call.object === undefined ? call.tool : `${call.tool}: ${call.object}`))
+			: input.unfinishedTools.flatMap((entry) => Array.from({ length: entry.count }, () => entry.tool));
+	const running =
+		labels.length === 0
+			? ""
+			: ` while ${labels.length} tool ${labels.length === 1 ? "call" : "calls"} (${labels.join(", ")}) ${labels.length === 1 ? "was" : "were"} still running`;
+	const signals =
+		input.hostSignals.length === 0
+			? ""
+			: input.hostSignals.length === 2 && input.hostSignals[0] === "SIGTERM" && input.hostSignals[1] === "SIGKILL"
+				? " with SIGTERM, then SIGKILL when the grace period ran out"
+				: ` with ${input.hostSignals.join(", then ")}`;
+	return `${share}, but it reached the wall clock before it wrote a report; the host stopped it${signals}${running}, so it handed back no report`;
+}
+
 /** What a batch shares, and what a lone run gets. */
 export const ANSWER_BUDGET_BYTES = 12_000;
 /** No run's answer budget is smaller than this, however large its batch. */

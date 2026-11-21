@@ -812,6 +812,18 @@ function isValidGate(value: unknown): value is RunGateProvenance {
 		}
 		if (value.worktree.backend === "herdr" && typeof value.worktree.workspaceId !== "string") return false;
 	}
+	if (value.packet !== undefined) {
+		if (!isPlainObject(value.packet)) return false;
+		const ids = value.packet.ids;
+		if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || id.length === 0)) return false;
+		if (typeof value.packet.digest !== "string" || !/^[0-9a-f]{64}$/u.test(value.packet.digest)) return false;
+		const verified = value.packet.verified;
+		if (
+			verified !== undefined &&
+			(!Array.isArray(verified) || verified.some((id) => typeof id !== "string" || !ids.includes(id)))
+		)
+			return false;
+	}
 	return true;
 }
 
@@ -823,6 +835,15 @@ function cloneGate(gate: RunGateProvenance): RunGateProvenance {
 		...(gate.subjects !== undefined ? { subjects: gate.subjects.map((subject) => ({ ...subject })) } : {}),
 		...(gate.verdict !== undefined ? { verdict: gate.verdict } : {}),
 		...(gate.worktree !== undefined ? { worktree: { ...gate.worktree } } : {}),
+		...(gate.packet !== undefined
+			? {
+					packet: {
+						ids: [...gate.packet.ids],
+						digest: gate.packet.digest,
+						...(gate.packet.verified !== undefined ? { verified: [...gate.packet.verified] } : {}),
+					},
+				}
+			: {}),
 	};
 }
 

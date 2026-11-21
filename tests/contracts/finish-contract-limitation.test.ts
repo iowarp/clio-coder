@@ -1081,6 +1081,23 @@ describe("the limitation tool", () => {
 		ok(result.output.startsWith("limitation recorded: "), result.output);
 	});
 
+	it("refuses a reason that claims the tools are gone, since the call itself ran (M-37)", async () => {
+		// The wave-41 luna reason, as limitation and as finish carry it; the refusal is typed and records nothing.
+		const claim = "the tool window closed before those edits";
+		const refused = await limitationTool.run({ scope: `8 modules not ported; ${claim}`, reason: "other" });
+		strictEqual(refused.kind, "error");
+		ok(refused.kind === "error" && refused.details?.refusal === "tools_open", JSON.stringify(refused));
+		const finished = await finishTool.run({ state: "partly_done", limitations: [{ what: claim, why: "other" }] });
+		ok(finished.kind === "error" && finished.details?.refusal === "tools_open", JSON.stringify(finished));
+		// A missing runner or an unavailable host tool is a real limitation and still records, and so is a JetBrains-style
+		// "tool window" panel task that says nothing about the run's tools being gone.
+		strictEqual((await limitationTool.run({ scope: "pytest is not installed here", reason: "no-runner" })).kind, "ok");
+		strictEqual(
+			(await limitationTool.run({ scope: "the tool window component is not implemented", reason: "out-of-scope" })).kind,
+			"ok",
+		);
+	});
+
 	it("is read class, parallel, and agrees with the classifier and plane table", () => {
 		strictEqual(limitationTool.baseActionClass, "read");
 		strictEqual(limitationTool.executionMode, "parallel");

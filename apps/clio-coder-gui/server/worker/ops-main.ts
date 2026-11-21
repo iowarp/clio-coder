@@ -34,7 +34,7 @@ serveWorker(async (call, progress) => {
 	}
 	if (call.method === "settings.write") {
 		const { writeSettingControl } = await import("../clio/adapters/settings-controls.js");
-		return writeSettingControl(call.params.cwd, call.params.write);
+		return writeSettingControl(call.params.cwd ?? null, call.params.write);
 	}
 	if (call.method.startsWith("reports.")) {
 		const { reportDialog } = await import("../clio/adapters/report.js");

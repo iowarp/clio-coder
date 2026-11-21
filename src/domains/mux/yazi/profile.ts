@@ -154,17 +154,17 @@ export function renderYaziKeymap(yaPath: string, platform: NodeJS.Platform = pro
 [[mgr.prepend_keymap]]
 on   = "<C-y>"
 run  = ${JSON.stringify(command)}
-desc = "Send the selection to Clio"
+desc = "Send the selection to CLIO Coder"
 
 [[mgr.prepend_keymap]]
 on   = "<Enter>"
 run  = ${JSON.stringify(`plugin clio-enter -- ${shellQuote(pick)}`)}
-desc = "Enter the directory, or send the selection to Clio"
+desc = "Enter the directory, or send the selection to CLIO Coder"
 
 [[mgr.prepend_keymap]]
 on   = "<A-e>"
 run  = ${JSON.stringify(dockTap)}
-desc = "Hide the files pane and return to Clio"
+desc = "Hide the files pane and return to CLIO Coder"
 
 [[mgr.prepend_keymap]]
 on   = ";"

@@ -42,6 +42,8 @@ export const RUN_OUTCOME_CODES = [
 	"worker_mutation_blocked",
 	"merge_withheld",
 	"worker_removed_tests",
+	/** A builder's assurance (fleet design 4.8) is compromised: the detail names the evidence that lowered it. */
+	"assurance_compromised",
 	"information_flow_blocked",
 	"acp_auth_required",
 	"acp_model_unavailable",
@@ -76,6 +78,7 @@ export const GRADE_RULE_IDS = [
 	"obligation",
 	"host-checks",
 	"removed-tests",
+	"assurance",
 	"landing",
 ] as const;
 export type GradeRuleId = (typeof GRADE_RULE_IDS)[number];
@@ -143,5 +146,7 @@ export const RUN_HASH_SUBJECTS = [
 	"settings",
 	"skill-file",
 	"package-provenance",
+	/** A gate decider's evidence packet as its provenance seals it (M10). */
+	"evidence-packet",
 ] as const;
 export type RunHashSubject = (typeof RUN_HASH_SUBJECTS)[number];

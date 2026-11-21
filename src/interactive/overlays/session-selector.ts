@@ -128,7 +128,7 @@ function previewLine(meta: SessionMeta): string {
  * row is spelled from this same table.
  */
 const SESSION_STATUS = {
-	open: { glyph: GLYPH.running, meaning: "open in a running Clio" },
+	open: { glyph: GLYPH.running, meaning: "open in a running CLIO Coder" },
 	closed: { glyph: GLYPH.queued, meaning: "not open" },
 } as const;
 

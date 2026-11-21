@@ -35,7 +35,7 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		notice: [
 			"asciinema 3.2.1, https://github.com/asciinema/asciinema/tree/v3.2.1",
 			"Copyright asciinema contributors. Licensed under GNU GPL version 3 or later; see LICENSE.",
-			"Clio invokes asciinema as a separate program. It is downloaded from upstream only on explicit request, not bundled into Clio.",
+			"CLIO Coder invokes asciinema as a separate program. It is downloaded from upstream only on explicit request, not bundled into CLIO Coder.",
 			"The exact v3.2.1 release source accompanies this installation in asciinema-3.2.1-source.tar.gz; see README.md and the source for build instructions and dependency licenses.",
 			"Preserve the license and corresponding source when redistributing this program under the GPL.",
 		].join("\n"),
@@ -79,7 +79,7 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 	{
 		id: "herdr",
 		version: "0.9.5",
-		summary: "terminal multiplexer with an agent-aware socket API; powers Clio panes",
+		summary: "terminal multiplexer with an agent-aware socket API; powers CLIO Coder panes",
 		homepage: "https://herdr.dev",
 		license: "Apache-2.0",
 		binaries: ["herdr"],

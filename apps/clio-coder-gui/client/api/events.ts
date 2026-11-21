@@ -274,7 +274,7 @@ export function subscribe(
 				if (event.payload.kind.startsWith("evidence."))
 					for (const key of ["evidence", "evidence-detail", "fleet-run-record"]) invalidate.add(key);
 				if (event.payload.kind.startsWith("targets."))
-					for (const key of ["targets", "routing", "workspace-settings", "config-graph", "settings-controls"])
+					for (const key of ["targets", "routing", "settings-report", "config-graph", "settings-controls"])
 						invalidate.add(key);
 			}
 			if (event.type === "operation.progress") operations.push({ ...event.payload });
