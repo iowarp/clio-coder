@@ -1,8 +1,8 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { verifyChecksV2 } from "../../src/cli/modes/run-json-schema-v2.js";
 import {
@@ -26,6 +26,13 @@ afterEach(() => {
 	}
 	for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** A run's state scratch directory, the place `run --verify` keeps a failing check's output. */
+function scratchDirFor(): string {
+	const dir = mkdtempSync(join(tmpdir(), "clio-verify-state-"));
+	scratch.push(dir);
+	return join(dir, "scratch", "run");
+}
 
 function alive(pid: number): boolean {
 	try {
@@ -89,7 +96,12 @@ describe("run --verify shutdown", () => {
 		const { command, pidFile } = termIgnoringCheck();
 		const shutdown = fakeShutdown();
 		const results = runHeadlessVerifyChecks(
-			{ checks: [{ id: "stubborn", command }], timeoutMs: 120_000, credited: () => new Set() },
+			{
+				checks: [{ id: "stubborn", command }],
+				timeoutMs: 120_000,
+				credited: () => new Set(),
+				scratchDir: scratchDirFor(),
+			},
 			shutdown.hooks,
 		);
 		const pid = await pidFrom(pidFile);
@@ -106,7 +118,12 @@ describe("run --verify shutdown", () => {
 		const { command, pidFile } = termIgnoringCheck();
 		const shutdown = fakeShutdown();
 		const results = runHeadlessVerifyChecks(
-			{ checks: [{ id: "stubborn", command }], timeoutMs: 120_000, credited: () => new Set() },
+			{
+				checks: [{ id: "stubborn", command }],
+				timeoutMs: 120_000,
+				credited: () => new Set(),
+				scratchDir: scratchDirFor(),
+			},
 			shutdown.hooks,
 		);
 		const pid = await pidFrom(pidFile);
@@ -125,6 +142,7 @@ describe("run --verify shutdown", () => {
 				checks: [{ id: "noisy", command: "trap 'exit 0' TERM; head -c 20000000 /dev/zero; exit 0" }],
 				timeoutMs: 60_000,
 				credited: () => new Set(),
+				scratchDir: scratchDirFor(),
 			},
 			fakeShutdown().hooks,
 		);
@@ -157,7 +175,13 @@ describe("run --verify base comparison (CLI-4)", () => {
 		process.chdir(repo);
 		const command = `${JSON.stringify(process.execPath)} test.js`;
 		const results = await runHeadlessVerifyChecks(
-			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 30_000, credited: () => new Set(), base },
+			{
+				checks: [{ id: "run-acceptance", command }],
+				timeoutMs: 30_000,
+				credited: () => new Set(),
+				base,
+				scratchDir: scratchDirFor(),
+			},
 			fakeShutdown().hooks,
 		).finally(() => process.chdir(previous));
 		strictEqual(results[0]?.passed, false);
@@ -205,7 +229,13 @@ describe("run --verify base comparison (CLI-4)", () => {
 		process.chdir(repo);
 		const command = `${JSON.stringify(process.execPath)} test.js`;
 		const results = await runHeadlessVerifyChecks(
-			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 30_000, credited: () => new Set(), base },
+			{
+				checks: [{ id: "run-acceptance", command }],
+				timeoutMs: 30_000,
+				credited: () => new Set(),
+				base,
+				scratchDir: scratchDirFor(),
+			},
 			fakeShutdown().hooks,
 		).finally(() => process.chdir(previous));
 		strictEqual(results[0]?.base?.status, "failed", JSON.stringify(results[0]?.base));
@@ -228,7 +258,13 @@ describe("run --verify base comparison (CLI-4)", () => {
 		const shutdown = fakeShutdown();
 		const command = `${JSON.stringify(process.execPath)} test.js`;
 		const pending = runHeadlessVerifyChecks(
-			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 50_000, credited: () => new Set(), base },
+			{
+				checks: [{ id: "run-acceptance", command }],
+				timeoutMs: 50_000,
+				credited: () => new Set(),
+				base,
+				scratchDir: scratchDirFor(),
+			},
 			shutdown.hooks,
 		);
 		try {
@@ -240,6 +276,48 @@ describe("run --verify base comparison (CLI-4)", () => {
 			strictEqual(results.length, 1);
 			strictEqual(results[0]?.passed, false);
 			strictEqual(results[0]?.base, undefined, JSON.stringify(results[0]));
+		} finally {
+			process.chdir(previous);
+		}
+	});
+
+	it("a forced exit kills the base replay, and its owner-only logs under the run's state dir are gone after", {
+		skip: bwrap.available && bwrap.backend === "bwrap" ? false : "the isolated base replay needs bubblewrap",
+		timeout: 60_000,
+	}, async () => {
+		const { repo, base } = redRepo(
+			"clio-verify-force-",
+			"setTimeout(() => process.exit(1), 600000);\n",
+			'require("node:fs").writeFileSync("ran.marker", "1"); process.exit(1);\n',
+		);
+		const scratchDir = join(repo, "..", `${basename(repo)}-state`, "scratch", "run-force");
+		scratch.push(dirname(dirname(scratchDir)));
+		const previous = process.cwd();
+		process.chdir(repo);
+		const shutdown = fakeShutdown();
+		const command = `${JSON.stringify(process.execPath)} test.js`;
+		const pending = runHeadlessVerifyChecks(
+			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 120_000, credited: () => new Set(), base, scratchDir },
+			shutdown.hooks,
+		);
+		try {
+			await pidFrom(join(repo, "ran.marker"));
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			const logs = existsSync(scratchDir)
+				? readdirSync(scratchDir).flatMap((dir) =>
+						readdirSync(join(scratchDir, dir)).map((file) => ({
+							dir: statSync(join(scratchDir, dir)).mode & 0o777,
+							file: statSync(join(scratchDir, dir, file)).mode & 0o777,
+						})),
+					)
+				: [];
+			// The replay would sleep for ten minutes: only a kill lets the checks settle inside the test's timeout.
+			shutdown.forceExit();
+			const results = await pending;
+			strictEqual(results[0]?.passed, false);
+			strictEqual(results[0]?.base, undefined, JSON.stringify(results[0]));
+			deepStrictEqual(logs, [{ dir: 0o700, file: 0o600 }]);
+			strictEqual(existsSync(scratchDir), false, "the scratch logs outlived the checks");
 		} finally {
 			process.chdir(previous);
 		}

@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { CompletionDeclaration } from "../../core/completion.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
@@ -211,7 +212,7 @@ export interface HeadlessMainAgentOptions {
 	 */
 	deadline?: HeadlessRunDeadline;
 	/** `clio-coder run --verify`: acceptance checks the run itself runs once the turn settled. */
-	verify?: HeadlessVerifyOptions;
+	verify?: Omit<HeadlessVerifyOptions, "base" | "scratchDir">;
 	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr). */
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** `safety.scratchRoots`: a check logged under one changes no tree (x5-4). */
@@ -1768,7 +1769,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null) {
 		const onForceExit = termination.onForceExit?.bind(termination);
 		verifyRun = runHeadlessVerifyChecks(
-			{ ...options.verify, base: verifyBase },
+			{ ...options.verify, base: verifyBase, scratchDir: join(clioStateDir(), "scratch", runId) },
 			{
 				onDrain: (hook, drainOptions) => {
 					termination.onDrain(hook, drainOptions);

@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { runBashCommand } from "../../core/bash-exec.js";
@@ -21,6 +20,11 @@ export interface HeadlessVerifyOptions {
 	 * null outside a git checkout with a commit. Absent means not captured, and no check is compared.
 	 */
 	base?: VerifyBase | null;
+	/**
+	 * The run's own scratch directory under the state root, never the system temp dir: where a failing check's whole
+	 * output waits for the base comparison. Created owner-only and removed on every exit path.
+	 */
+	scratchDir: string;
 }
 
 /**
@@ -77,6 +81,7 @@ async function compareFailuresWithBase(
 	cwd: string,
 	timeoutMs: number,
 	signal: AbortSignal,
+	scratchDir: string,
 ): Promise<void> {
 	const failed = results.filter((result) => !result.passed);
 	if (failed.length === 0) return;
@@ -85,8 +90,9 @@ async function compareFailuresWithBase(
 			result.base = { status: "not_compared", reason: "the run did not start in a git checkout with a commit" };
 		return;
 	}
-	const scratch = mkdtempSync(join(tmpdir(), "clio-verify-output-"));
 	try {
+		mkdirSync(scratchDir, { recursive: true, mode: 0o700 });
+		const scratch = mkdtempSync(join(scratchDir, "verify-"));
 		const checks: RunHostVerificationCheck[] = failed
 			.filter((result) => !result.timedOut)
 			.map((result, index) => {
@@ -122,8 +128,12 @@ async function compareFailuresWithBase(
 				? { status: "not_compared", base: base.commit, reason: "the check timed out on the run" }
 				: (comparison ?? { status: "not_compared", base: base.commit, reason: "base comparison unavailable" });
 		}
+	} catch (error) {
+		// A comparison that throws judged no base; each failed check says so rather than carrying no base at all.
+		const reason = `the base comparison failed: ${error instanceof Error ? error.message : String(error)}`;
+		for (const result of failed) result.base = { status: "not_compared", base: base.commit, reason };
 	} finally {
-		rmSync(scratch, { recursive: true, force: true });
+		rmSync(scratchDir, { recursive: true, force: true });
 	}
 }
 
@@ -162,8 +172,14 @@ export async function runHeadlessVerifyChecks(
 	const controller = new AbortController();
 	let activePid: number | null = null;
 	let activeRun: Promise<unknown> | null = null;
+	// A forced exit stops the base replay alone: a check it kills still seals as the failure it was.
+	const replay = new AbortController();
+	// A forced or any other exit cannot wait: kill the check in flight, abort the base replay, whose runner sends its
+	// sandbox SIGKILL synchronously on abort, and remove the scratch logs.
 	const killActive = (): void => {
 		if (activePid !== null) killGroup(activePid);
+		replay.abort();
+		rmSync(options.scratchDir, { recursive: true, force: true });
 	};
 	shutdown.onDrain(
 		async () => {
@@ -214,12 +230,13 @@ export async function runHeadlessVerifyChecks(
 				options.base,
 				process.cwd(),
 				options.timeoutMs,
-				controller.signal,
-			).catch(() => {});
+				AbortSignal.any([controller.signal, replay.signal]),
+				options.scratchDir,
+			);
 			activeRun = comparing;
 			await comparing;
 			activeRun = null;
-			if (controller.signal.aborted) for (const result of results) delete result.base;
+			if (controller.signal.aborted || replay.signal.aborted) for (const result of results) delete result.base;
 		}
 	} finally {
 		offForceExit?.();
