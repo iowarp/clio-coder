@@ -123,7 +123,7 @@ import {
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
 import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../../engine/acp/transport.js";
-import { engineRetryDelayMs } from "../../engine/ai.js";
+import { engineRetryDelayMs, useMainCacheLaneStore } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import { attestedToolSchemaSignature, INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
@@ -339,7 +339,12 @@ import type { WorktreeBootRecovery } from "./boot-recovery.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFromEnvelope } from "./budget-envelope.js";
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
-import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
+import {
+	capacityLeaseUsage,
+	capacityLeaseUsageAsync,
+	createNodeLeaseUsageReader,
+	mainCacheLaneStore,
+} from "./capacity-lease.js";
 import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	AbortReason,
@@ -475,7 +480,12 @@ import {
 import { type PeerInstructions, peerInstructionsStaleMessage, resolvePeerInstructions } from "./peer-instructions.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import { claimCacheLane, claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
+import {
+	claimSharedPrefix,
+	claimWorkerCacheLane,
+	startAfterPrefixHold,
+	waitForPrefixLeader,
+} from "./prefix-stagger.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -4346,6 +4356,8 @@ export function createDispatchBundle(
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const scheduling: SchedulingContract = maybeScheduling;
 	const prompts: PromptsContract = maybePrompts;
+	// Main sessions claim their cache lanes in the admission store beside the workers' leases (M-11).
+	useMainCacheLaneStore(mainCacheLaneStore);
 	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
 	/** The judge-withheld notice is a process fact, so it is raised once, not on every dispatch. */
@@ -8906,11 +8918,13 @@ export function createDispatchBundle(
 						reportDispatchDiagnostic(`write peer instructions in task worktree ${req.taskWorktree.runId}`, error);
 					}
 				}
-				// Each live worker of one head takes its own provider session id; the lane frees when this worker ends (FL-17).
+				// Each live worker of one head takes its own provider session id on its capacity lease, so every process on this
+				// state dir sees it; the lane frees with the lease (FL-17, M-11).
 				// The head is the system prompt and tool surface alone: the prompt signature also covers each run's task.
 				const lane =
 					lifecycle.runtimeKind === "http" && lifecycle.systemPrompt.length > 0
-						? claimCacheLane(
+						? claimWorkerCacheLane(
+								capacityLease.leaseId,
 								sha256(
 									JSON.stringify([
 										lifecycle.target.target.id,

@@ -19,11 +19,16 @@ import { AdmissionCanceledError, AdmissionTimedOutError } from "../../src/domain
 import type { AdmissionQueueRequest } from "../../src/domains/dispatch/admission-queue.js";
 import { createAdmissionQueue, orderAdmissionRequests } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
-import type { CapacityLease } from "../../src/domains/dispatch/capacity-lease.js";
+import type { CapacityLease, LeaseOwnerProbe } from "../../src/domains/dispatch/capacity-lease.js";
 import {
+	acquireCapacityLease,
 	capacityLeaseUsage,
 	capacityStateLockPath,
+	claimLeaseCacheLane,
+	claimMainCacheLane,
+	processBirthToken,
 	readCapacityStateUnsafe,
+	releaseMainCacheLanes,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
@@ -242,6 +247,41 @@ describe("dispatch admission boundary", () => {
 
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
+
+	it("hands out prompt cache lanes across processes: workers on their lease, main sessions beside it, both freed with their owner (M-11)", () => {
+		const peer = { pid: 999_001, token: "peer-birth" };
+		let peerAlive = true;
+		const probe: LeaseOwnerProbe = {
+			birthToken: (pid) => (pid === peer.pid ? (peerAlive ? peer.token : null) : processBirthToken(pid)),
+			tokenProvesDeath: true,
+		};
+		const limits = { global: 4, nodes: { local: 4 }, endpoints: {} };
+		const asPeer = { ownerPid: peer.pid, processBirthToken: peer.token, probe };
+		// Another process's main session holds lane 0; this process's sessions take the next lanes and keep them.
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "peer-session", ...asPeer }), 0);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1, "a held lane is kept");
+		strictEqual(claimMainCacheLane({ key: "other head", conversation: "elsewhere", probe }), 0);
+		// Workers take lanes on their leases, and no capacity reader counts a main session's lane.
+		const peerLease = acquireCapacityLease({ assignmentId: "peer-worker", nodeId: "local", limits, ...asPeer });
+		const ownLease = acquireCapacityLease({ assignmentId: "own-worker", nodeId: "local", limits, probe });
+		strictEqual(claimLeaseCacheLane(peerLease.leaseId, "worker head", { probe }), 0);
+		strictEqual(claimLeaseCacheLane(ownLease.leaseId, "worker head", { probe }), 1);
+		deepStrictEqual(readCapacityStateUnsafe().leases.find((lease) => lease.leaseId === ownLease.leaseId)?.cacheLane, {
+			key: "worker head",
+			lane: 1,
+		});
+		strictEqual(capacityLeaseUsage({ probe }).global, 2);
+		// The peer dies: its lease and its main lane are reaped by owner pid and birth token, and both lanes free.
+		peerAlive = false;
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "next", probe }), 0);
+		const later = acquireCapacityLease({ assignmentId: "later-worker", nodeId: "local", limits, probe });
+		strictEqual(claimLeaseCacheLane(later.leaseId, "worker head", { probe }), 0);
+		// A released conversation resumed in another process takes its old lane back while it is free.
+		releaseMainCacheLanes(undefined);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "fresh", probe }), 0);
+	});
 
 	it("states each run's bounds on the plan card: a priced estimate at the output bound, else only the timers and tool ceiling it has (M6)", async () => {
 		const planText = async (
