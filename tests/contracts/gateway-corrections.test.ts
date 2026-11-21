@@ -361,6 +361,14 @@ describe("gateway correction contracts", () => {
 		const broken = await registry.invoke({ tool: ToolNames.Gateway, args: { op: "chain", args: cut.slice(0, -2) } });
 		ok(broken.kind === "ok" && broken.result.kind === "error", JSON.stringify(broken));
 		strictEqual(ran.length, 8);
+		// A call whose args happen to carry `steps` is no chain: cut before its last field, it is refused, never
+		// run with that field dropped.
+		const call = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability, args: '{"id":"r2","steps":["x"]' },
+		});
+		ok(call.kind === "ok" && call.result.kind === "error", JSON.stringify(call));
+		strictEqual(ran.length, 8);
 	});
 
 	it("forwards op=call capability=dispatch to the direct tool and still refuses other direct tools (XR-60)", async () => {

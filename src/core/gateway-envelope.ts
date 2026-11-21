@@ -11,14 +11,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * A string `args` as the object it encodes. A chain envelope cut one brace short
- * (the most common truncation, C-8) is read with that brace restored, and only
- * when the restored object carries `steps`, so no other string is guessed at.
+ * (the most common truncation, C-8) is read with that brace restored, only when
+ * the envelope reads as a chain and the restored object carries `steps`; any
+ * other string that does not parse, a call's included, is never guessed at.
  */
-function parsedArgs(text: string): Record<string, unknown> | null {
+function parsedArgs(text: string, chainLike: boolean): Record<string, unknown> | null {
 	try {
 		const parsed: unknown = JSON.parse(text);
 		return isRecord(parsed) ? parsed : null;
 	} catch {
+		if (!chainLike) return null;
 		try {
 			const repaired: unknown = JSON.parse(`${text}}`);
 			return isRecord(repaired) && repaired.steps !== undefined ? repaired : null;
@@ -40,12 +42,13 @@ export function normalizeGatewayArguments(args: Readonly<Record<string, unknown>
 		const alias = out.name ?? out.tool;
 		if (typeof alias === "string") out.capability = alias;
 	}
+	// A chain by its envelope: `op` chain, or no `op` and no capability. An explicit other op never is.
+	const chainLike = out.op === "chain" || (out.op === undefined && typeof out.capability !== "string");
 	if (typeof out.args === "string") {
 		// The body reports a string that is not an object.
-		const parsed = parsedArgs(out.args);
+		const parsed = parsedArgs(out.args, chainLike && out.steps === undefined);
 		if (parsed !== null) out.args = parsed;
 	}
-	const chainLike = out.op === "chain" || (out.op === undefined && typeof out.capability !== "string");
 	if (chainLike && out.steps === undefined && isRecord(out.args) && out.args.steps !== undefined) {
 		const { steps, ...rest } = out.args;
 		out.steps = steps;
