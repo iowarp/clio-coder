@@ -31,7 +31,7 @@ describe("contracts/pane refusal remedies", () => {
 			getCwd: () => "/workspace",
 		});
 
-		deepStrictEqual(await panes.open({ preset: "yazi" }), {
+		deepStrictEqual(await panes.open({ preset: "files" }), {
 			status: "refused",
 			reason: "the files pane is disabled by interface.panes.files.enabled",
 		});

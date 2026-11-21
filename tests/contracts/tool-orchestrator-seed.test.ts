@@ -57,9 +57,13 @@ describe("tool-orchestrator seed", { concurrency: false }, () => {
 			const tools = request.tools as Array<{ function: { name: string } }>;
 			deepStrictEqual(tools.map((tool) => tool.function.name).sort(), [
 				"bash",
+				"code_nav",
 				"dispatch",
 				"edit",
+				"finish",
 				"gateway",
+				"grep",
+				"memory_note",
 				"read",
 				"verify",
 				"write",
