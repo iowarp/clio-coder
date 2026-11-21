@@ -38,7 +38,7 @@ async function readTargets(client: AcpClient): Promise<CliTargets> {
 		throw new AppProblem("unsupported", "This CLIO Coder build does not expose target inventory.");
 	const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
 	if (!Value.Check(AcpTargetList, raw))
-		throw new AppProblem("upstream_acp", "Clio returned an invalid target inventory.");
+		throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target inventory.");
 	const result = {
 		targets: raw.targets.map((target) => ({
 			id: target.id,
@@ -55,7 +55,7 @@ async function readTargets(client: AcpClient): Promise<CliTargets> {
 		truncated: raw._meta?.[ACP_TRUNCATED_META_KEY] === true,
 	};
 	if (!Value.Check(CliTargets, result))
-		throw new AppProblem("upstream_acp", "Clio returned an invalid target projection.");
+		throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target projection.");
 	return result;
 }
 export class TargetsService {
@@ -80,10 +80,10 @@ export class TargetsService {
 			run: async (progress, signal): Promise<TargetOperationResult> => {
 				progress(
 					action === "probe"
-						? "Clio is probing the selected target."
+						? "CLIO Coder is probing the selected target."
 						: action === "signout"
-							? "Clio is removing the stored credential."
-							: "Clio is updating user target settings.",
+							? "CLIO Coder is removing the stored credential."
+							: "CLIO Coder is updating user target settings.",
 				);
 				let probe: AcpTargetProbe | undefined;
 				let probedTargets: CliTargets | undefined;
@@ -99,7 +99,7 @@ export class TargetsService {
 									await client.request(ACP_TARGETS_PROBE_METHOD, { targetId: id }, 60_000),
 								);
 								if (!Value.Check(AcpTargetProbe, probe) || probe.targetId !== id)
-									throw new AppProblem("upstream_acp", "Clio returned an invalid target probe.");
+									throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target probe.");
 								return { probe, targets: await readTargets(client) };
 							},
 							signal,
@@ -114,7 +114,7 @@ export class TargetsService {
 					if (action === "signout" && error instanceof AppProblem && /exit code 1\b/.test(error.message))
 						throw new AppProblem(
 							"operation_failed",
-							`Nothing was removed for ${id}. Either Clio has no stored credential for it, or its key comes from an environment variable, which is cleared where it is set.`,
+							`Nothing was removed for ${id}. Either CLIO Coder has no stored credential for it, or its key comes from an environment variable, which is cleared where it is set.`,
 						);
 					throw error;
 				}

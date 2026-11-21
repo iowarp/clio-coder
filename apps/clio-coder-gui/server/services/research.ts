@@ -28,7 +28,7 @@ type ToolResult = { id: string; message: string };
 
 function checked<T extends TSchema>(schema: T, value: unknown, what: string): Static<T> {
 	if (!Value.Check(schema, value))
-		throw new AppProblem("operation_failed", `Clio returned an invalid research ${what}.`);
+		throw new AppProblem("operation_failed", `CLIO Coder returned an invalid research ${what}.`);
 	return value as Static<T>;
 }
 
@@ -180,7 +180,7 @@ export class ResearchService {
 	): Promise<ToolResult> {
 		if (signal.aborted) throw new AppProblem("operation_failed", "Research campaign was cancelled before it started.");
 		const { child, birthToken } = await runClioCommand({ kind: "research.start", request }, cwd, this.env);
-		progress(`Clio is opening a campaign on ${request.check}/${request.metric}.`);
+		progress(`CLIO Coder is opening a campaign on ${request.check}/${request.metric}.`);
 		return new Promise((resolve, reject) => {
 			let failure: Error | undefined;
 			let campaignId: string | undefined;
@@ -268,6 +268,6 @@ export class ResearchService {
 /** The runner keeps no stderr, so the usual reason `research status|report` fails is named here. */
 function missing(error: unknown, id: string): unknown {
 	if (error instanceof AppProblem && /exit code 1\b|invalid UTF-8 or JSON/.test(error.message))
-		return new AppProblem("not_found", `Clio could not read research campaign ${id} in this workspace.`);
+		return new AppProblem("not_found", `CLIO Coder could not read research campaign ${id} in this workspace.`);
 	return error;
 }

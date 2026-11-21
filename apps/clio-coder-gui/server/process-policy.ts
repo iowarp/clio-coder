@@ -65,9 +65,10 @@ export async function resolveClioCommand(
 	if (override) {
 		if (!isAbsolute(override)) throw new AppProblem("validation", "CLIO_CODER_WEB_CLI must be an absolute path.");
 		const file = await realpath(override).catch(() => {
-			throw new AppProblem("unavailable", "The configured Clio CLI cannot be found.");
+			throw new AppProblem("unavailable", "The configured clio-coder command cannot be found.");
 		});
-		if (!(await stat(file)).isFile()) throw new AppProblem("validation", "The configured Clio CLI must be a file.");
+		if (!(await stat(file)).isFile())
+			throw new AppProblem("validation", "The configured clio-coder command must be a file.");
 		return /\.[cm]?js$/.test(file) ? { file: process.execPath, prefix: [file] } : { file, prefix: [] };
 	}
 	const checkout = join(resolvePackageRoot(), "dist/cli/index.js");
@@ -375,7 +376,7 @@ export function serviceCommand(
 	unitFile: string,
 ) {
 	if (!isServiceName("systemd", unit) || !isAbsolute(unitFile) || !unitFile.endsWith(`/${unit}`))
-		throw new Error("Invalid Clio background service identity.");
+		throw new Error("Invalid CLIO Coder background service identity.");
 	if (action === "reload") return ["--user", "daemon-reload"];
 	if (action === "show")
 		return ["--user", "show", unit, "--property=FragmentPath,ActiveState,UnitFileState,MainPID,Result"];
@@ -433,7 +434,8 @@ export async function controlService(
 ) {
 	const host = serviceHost(platform);
 	if (host === null) throw new Error(backgroundCapabilityReason(platform));
-	if (!isServiceName(host, unit) || !isAbsolute(unitFile)) throw new Error("Invalid Clio background service identity.");
+	if (!isServiceName(host, unit) || !isAbsolute(unitFile))
+		throw new Error("Invalid CLIO Coder background service identity.");
 	// Enabling links or registers the service with the user's real login session, which no environment override
 	// redirects. A unit file in a temp directory is a test fixture, and enabling one once left real login units
 	// pointing at deleted scratch paths.
@@ -486,7 +488,7 @@ async function controlTask(action: ServiceAction, name: string, unitFile: string
 	if (text === null && (action === "reload" || action === "disable")) return "";
 	if (text === null) throw new Error("The background service definition is missing.");
 	const spec = parseTaskSpec(text);
-	if (spec.name !== name) throw new Error("Invalid Clio background service identity.");
+	if (spec.name !== name) throw new Error("Invalid CLIO Coder background service identity.");
 	const result = await runServiceTool(
 		"powershell.exe",
 		["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", taskScript(action)],

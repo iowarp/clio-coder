@@ -294,7 +294,9 @@ export async function installBackground(
 					([key, value]) => proposed.roots[key as keyof typeof proposed.roots] !== value,
 				)
 			)
-				throw new Error("Background handover requires the same Clio data roots. Run: clio-coder gui background status");
+				throw new Error(
+					"Background handover requires the same CLIO Coder data roots. Run: clio-coder gui background status",
+				);
 			await assertWindowsLauncherRemovable(directory);
 		}
 		launchMoved = foreign || !sameLaunch(state.config.launch, proposed.launch);
@@ -609,7 +611,7 @@ export async function backgroundRemoval(directory: string, packageRoot: string, 
 	if (state.status === "absent") return null;
 	// Reset and uninstall both call this before they delete anything, so the refusal names neither.
 	if (!(await sameInstallation(state.config.packageRoot, packageRoot)))
-		throw new Error("Background service belongs to another installation; Clio state was left unchanged.");
+		throw new Error("Background service belongs to another installation; CLIO Coder state was left unchanged.");
 	await serviceState(state.files, control);
 	await desktopOwned(state.config, directory);
 	await assertWindowsLauncherRemovable(directory);

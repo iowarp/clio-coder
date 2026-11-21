@@ -13,14 +13,14 @@ export const closeMachines = () => runner.close();
 
 function object(value: unknown): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value))
-		throw new AppProblem("unavailable", "Clio returned an invalid machine record.");
+		throw new AppProblem("unavailable", "CLIO Coder returned an invalid machine record.");
 	return value as Record<string, unknown>;
 }
 
 export async function readMachines(cwd: string): Promise<Machine[]> {
 	const raw = object(await runner.run({ kind: "machines.list" }, cwd));
 	if (!Array.isArray(raw.nodes) || raw.nodes.length > 10_000)
-		throw new AppProblem("unavailable", "Clio returned an invalid machine inventory.");
+		throw new AppProblem("unavailable", "CLIO Coder returned an invalid machine inventory.");
 	return raw.nodes.map((entry) => {
 		const item = object(entry);
 		const node = object(item.node);
@@ -44,7 +44,7 @@ export async function readMachines(cwd: string): Promise<Machine[]> {
 			project: record?.project ?? null,
 		});
 		if (!Value.Check(Machine, projected))
-			throw new AppProblem("unavailable", "Clio returned an invalid machine projection.");
+			throw new AppProblem("unavailable", "CLIO Coder returned an invalid machine projection.");
 		return projected;
 	});
 }
@@ -67,7 +67,7 @@ const Endpoint = Type.Object(
 export async function readMachineEndpoints(cwd: string): Promise<MachineEndpoint[]> {
 	const raw = object(await runner.run({ kind: "machines.list" }, cwd));
 	if (!Array.isArray(raw.nodes) || raw.nodes.length > 10_000)
-		throw new AppProblem("unavailable", "Clio returned an invalid machine inventory.");
+		throw new AppProblem("unavailable", "CLIO Coder returned an invalid machine inventory.");
 	return raw.nodes.map((entry) => {
 		const node = object(object(entry).node);
 		const endpoint = Value.Clean(Endpoint, {
@@ -80,7 +80,7 @@ export async function readMachineEndpoints(cwd: string): Promise<MachineEndpoint
 			clioCoderEntry: node.clioCoderEntry ?? null,
 		});
 		if (!Value.Check(Endpoint, endpoint))
-			throw new AppProblem("unavailable", "Clio returned an invalid machine endpoint.");
+			throw new AppProblem("unavailable", "CLIO Coder returned an invalid machine endpoint.");
 		return endpoint;
 	});
 }
@@ -97,7 +97,10 @@ export async function mutateMachine(cwd: string, mutation: MachineMutation) {
 		}
 		const raw = object(await runner.run({ kind: "machines.check", id: mutation.id }, cwd));
 		if (raw.nodeId !== mutation.id || typeof raw.ok !== "boolean")
-			throw new AppProblem("operation_failed", "Clio returned an invalid readiness result. Refresh recorded checks.");
+			throw new AppProblem(
+				"operation_failed",
+				"CLIO Coder returned an invalid readiness result. Refresh recorded checks.",
+			);
 		return {
 			id: mutation.id,
 			message: raw.ok
@@ -108,7 +111,7 @@ export async function mutateMachine(cwd: string, mutation: MachineMutation) {
 		if (mutation.action === "remove" && error instanceof AppProblem && /exit code 2/.test(error.message))
 			throw new AppProblem(
 				"operation_failed",
-				"Clio refused removal. The node may be unknown, the standing default, or pinned by a fleet profile. Refresh the registry and clear any placement references in settings before retrying.",
+				"CLIO Coder refused removal. The node may be unknown, the standing default, or pinned by a fleet profile. Refresh the registry and clear any placement references in settings before retrying.",
 			);
 		throw error;
 	}

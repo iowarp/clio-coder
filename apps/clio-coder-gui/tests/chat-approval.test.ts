@@ -187,7 +187,7 @@ const DECISION = {
 	authorizationCopy: "You are authorizing one edit to a file in this workspace.",
 	consequenceCopy: "The file changes on disk.",
 	reversibilityCopy: "",
-	requestedByCopy: "Clio Coder asked for it.",
+	requestedByCopy: "CLIO Coder asked for it.",
 	actionClass: "write",
 	affectedScope: "workspace",
 	reversibility: "limited",
