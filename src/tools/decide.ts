@@ -26,6 +26,11 @@ export const DECIDE_CAPS = Object.freeze({
 
 const KEBAB_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
+/** `Cache_Key` names the same decision as `cache-key`; refusing it cost a round per spelling (C-24). */
+function kebabKey(key: string): string {
+	return key.toLowerCase().replaceAll("_", "-");
+}
+
 export interface DecideToolDeps {
 	decisionBoard?: DecisionBoardStore;
 }
@@ -90,8 +95,9 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 		baseActionClass: "read",
 		executionMode: "sequential",
 		async run(args): Promise<ToolResult> {
-			const key = boundedText(args.key, "key", DECIDE_CAPS.keyBytes);
-			if (key instanceof Error) return { kind: "error", message: key.message };
+			const given = boundedText(args.key, "key", DECIDE_CAPS.keyBytes);
+			if (given instanceof Error) return { kind: "error", message: given.message };
+			const key = kebabKey(given);
 			if (!KEBAB_KEY.test(key)) {
 				return { kind: "error", message: "decide: key must be kebab-case (lowercase letters, digits, single hyphens)" };
 			}
@@ -127,9 +133,10 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 				outcome.superseded === null
 					? ""
 					: ` (supersedes ${decisionRef(outcome.superseded.interviewId, outcome.superseded.key)})`;
+			const keyNote = key === given ? "" : ` (key read as "${key}" from "${given}")`;
 			return {
 				kind: "ok",
-				output: `decision recorded: ${key} = ${value} [${ref}]${supersededNote}\n`,
+				output: `decision recorded: ${key} = ${value} [${ref}]${supersededNote}${keyNote}\n`,
 				details: {
 					decision: {
 						ref,

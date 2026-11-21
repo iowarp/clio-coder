@@ -190,7 +190,7 @@ describe("git tool", () => {
 		// DF-9: a nested args array was dropped and the default 20-commit log ran, green.
 		match(
 			await refusal({ op: "log", args: ["-1", "--format=fuller", "HEAD"] }),
-			/^git: op log does not take field "args"; nothing ran\. log takes rev, limit, stat, path, .*use op show with rev\. Example: /,
+			/^git: op log has no field for "--format=fuller" in args; nothing ran\. log takes rev, limit, stat, path, .*use op show with rev\. Example: /,
 		);
 		match(await refusal({ op: "status", limit: 3 }), /^git: op status does not take field "limit"; nothing ran\./);
 	});
@@ -203,6 +203,42 @@ describe("git tool", () => {
 		strictEqual(gitTool.safetyCall?.({ op: "add", file: "a.txt" })?.args?.command, "git add -- a.txt");
 		match(await refusal({ op: "log", path: "a.txt", file: "docs" }), /^git: op log got both path and file/);
 		match(await refusal({ op: "commit", message: "m", file: "a.txt" }), /^git: op commit does not take field "file"/);
+	});
+
+	it("folds an argv array and the range, ref and max_count spellings into the typed fields (C-23)", async () => {
+		const argv = async (args: Record<string, unknown>) => (await call(args)).details?.argv;
+		for (const [sent, typed] of [
+			[
+				{ op: "log", args: ["-1", "--stat"] },
+				{ op: "log", limit: 1, stat: true },
+			],
+			[
+				{ args: ["log", "--oneline", "-n", "2", "HEAD~1..HEAD", "--", "docs"] },
+				{ op: "log", limit: 2, rev: "HEAD~1..HEAD", path: "docs" },
+			],
+			[
+				{ op: "log", max_count: 1, ref: "HEAD" },
+				{ op: "log", limit: 1, rev: "HEAD" },
+			],
+			[
+				{ op: "diff", args: ["--cached", "--name-only"] },
+				{ op: "diff", cached: true, name_only: true },
+			],
+			[
+				{ op: "diff", range: "HEAD~1..HEAD" },
+				{ op: "diff", rev: "HEAD~1..HEAD" },
+			],
+			[
+				{ op: "show", args: ["show", "HEAD~1", "--stat"] },
+				{ op: "show", rev: "HEAD~1", stat: true },
+			],
+		] as const) {
+			deepStrictEqual(await argv(sent), await argv(typed), JSON.stringify(sent));
+			deepStrictEqual(gitCallIdentity(sent), gitCallIdentity(typed));
+		}
+		match(await refusal({ op: "log", args: ["-p"] }), /^git: op log has no field for "-p" in args; nothing ran/);
+		match(await refusal({ op: "log", rev: "main", ref: "HEAD" }), /^git: op log got both rev and ref/);
+		match(await refusal({ args: ["commit", "-m", "x"] }), /^git: expected args\.op/);
 	});
 });
 

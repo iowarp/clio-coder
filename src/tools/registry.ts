@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -687,6 +688,12 @@ export interface ToolInvokeOptions {
 	 */
 	nested?: boolean;
 	/**
+	 * Set by the gateway on the capability a call or chain step runs under the
+	 * model's call. Its tool.decided and tool.settled rows carry `inner` so each
+	 * decision has its own settlement and counters count the model's call (C-9).
+	 */
+	gatewayInner?: true;
+	/**
 	 * The capability surface this run was admitted to, when the run is
 	 * narrower than the registry (a worker). The gateway refuses to call any
 	 * capability outside it, so a recipe's declared tools bound the gateway
@@ -801,6 +808,8 @@ export interface AskUserToolPolicy {
 	planOnly?: boolean;
 	/** A plan card was answered with anything but keeping the plan: work or a revision follows and may still need the operator. */
 	asksAfterClose?: boolean;
+	/** The interview the same operator prompt closed before this continuation turn began (C-25). */
+	closedEarlier?: AskUserToolPolicy;
 	id: string;
 	status: AskUserInterviewStatus;
 	startedAt: string;
@@ -2223,6 +2232,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			tool: call.tool,
 			classification: decision.classification,
 			decision: auditDecision,
+			...(gatewayInnerScope.getStore() === true ? { inner: true as const } : {}),
 			...(overrides?.requestId !== undefined ? { requestId: overrides.requestId } : {}),
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 			...(overrides?.reasonCode !== undefined ? { reasonCode: overrides.reasonCode } : {}),
@@ -2309,7 +2319,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 
 	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string, options?: ParkCancelOptions): void => {
-		withToolTelemetryContext(entry.options ?? {}, () => {
+		withRegistryScope(entry.options, () => {
 			cleanupParkedEntry(entry);
 			disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 			// A denied/cancelled park is still a model attempt: observe it so
@@ -2666,7 +2676,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listVisible: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "direct"),
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
-			return withToolTelemetryContext(options ?? {}, async () => {
+			return withRegistryScope(options, async () => {
 				if (deps.principal === "worker") return invokeAdmitted(call, options);
 				// A refusal is final for the identical call within the turn: the same
 				// policy, the same operator and the same server would answer it the
@@ -2732,7 +2742,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			});
 		},
 		async requestReadRootApproval(root, options, task) {
-			return withToolTelemetryContext(options ?? {}, async () => {
+			return withRegistryScope(options, async () => {
 				// Contained yolo never waits for a person, so the Scout run reports the approval it needed instead.
 				if (
 					(deps.principal ?? "main") !== "main" ||
@@ -2844,7 +2854,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (entry) pending.push({ entry });
 			}
 			for (const { entry, reparkIndex } of pending) {
-				await withToolTelemetryContext(entry.options ?? {}, async () => {
+				await withRegistryScope(entry.options, async () => {
 					if (entry.readRootApproval === true) {
 						if (grant === undefined || grant.actionClass !== "read" || (grant.issuer ?? "operator") !== "operator") {
 							reparkEntry(entry, reparkIndex);
@@ -3198,6 +3208,14 @@ function operatorAnswers(verdict: RegistryVerdict): Array<{ question: string; an
 }
 
 /** Delegated execution evidence stays in process, never in model-visible result fields. */
+/** Whether the invocation in progress is a capability the gateway runs under the model's call (C-9). */
+const gatewayInnerScope = new AsyncLocalStorage<boolean>();
+
+/** The telemetry scope of one invocation, with whether its decisions are a gateway call's inner rows. */
+function withRegistryScope<T>(options: ToolInvokeOptions | undefined, work: () => T): T {
+	return gatewayInnerScope.run(options?.gatewayInner === true, () => withToolTelemetryContext(options ?? {}, work));
+}
+
 const nestedExecutions = new WeakMap<ToolResult, { decision: SafetyDecision; execution: ExecutionProvenance }>();
 
 const nestedChainResults = new WeakMap<ToolResult, ExecutionProvenance>();

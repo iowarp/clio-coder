@@ -64,10 +64,6 @@ describe("gateway correction contracts", () => {
 				`{"op":"call","capability":"${capability}","args":{"id":"r7"}}`,
 			],
 			[{ op: "chain", parameters: { steps: [] } }, 'steps belongs at the top level beside op: {"op":"chain"'],
-			[
-				{ op: "chain", capability, args: { steps: [{ capability, args: { id: "r7" } }] } },
-				"steps belongs at the top level",
-			],
 		] as const) {
 			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
 			ok(verdict.kind === "ok" && verdict.result.kind === "error", JSON.stringify(verdict));
@@ -322,6 +318,57 @@ describe("gateway correction contracts", () => {
 			);
 		}
 		strictEqual(calls.length, 2);
+	});
+
+	it("repairs the chain envelopes models send, so the steps run instead of a refused round (C-8)", async () => {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
+		const capability = mcpToolName("lab", "stage");
+		ok(capability);
+		const ran: unknown[] = [];
+		registry.register({
+			name: capability,
+			placement: "gateway",
+			description: "Stage a fixture",
+			parameters: Type.Object({ id: Type.String() }),
+			baseActionClass: "read",
+			run: async (args) => {
+				ran.push(args.id);
+				return { kind: "ok", output: `staged ${String(args.id)}` };
+			},
+		});
+		registry.register(createGatewayTool({ registry }));
+		const steps = [{ id: "a", capability, args: { id: "r1" } }];
+		const cut = JSON.stringify({ steps }).slice(0, -1);
+		const digits = [
+			{ id: "1", capability, args: { id: "r1" } },
+			{ id: "2", capability, args: { id: { $from: "1", path: ["output"] } }, after: ["1"] },
+		];
+		for (const args of [
+			{ op: "chain", args: cut },
+			{ args: cut },
+			{ op: "chain", args: { steps } },
+			{ op: "chain", capability, args: { steps } },
+			{ args: { steps } },
+			{ steps },
+			{ op: "chain", steps: digits },
+		]) {
+			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
+			ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify({ args, verdict }));
+			strictEqual(verdict.result.details?.op, "chain");
+		}
+		deepStrictEqual(ran, ["r1", "r1", "r1", "r1", "r1", "r1", "r1", "staged r1"]);
+		// A string that is not one brace short of a chain stays refused, and no step runs.
+		const broken = await registry.invoke({ tool: ToolNames.Gateway, args: { op: "chain", args: cut.slice(0, -2) } });
+		ok(broken.kind === "ok" && broken.result.kind === "error", JSON.stringify(broken));
+		strictEqual(ran.length, 8);
+		// A call whose args happen to carry `steps` is no chain: cut before its last field, it is refused, never
+		// run with that field dropped.
+		const call = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability, args: '{"id":"r2","steps":["x"]' },
+		});
+		ok(call.kind === "ok" && call.result.kind === "error", JSON.stringify(call));
+		strictEqual(ran.length, 8);
 	});
 
 	it("forwards op=call capability=dispatch to the direct tool and still refuses other direct tools (XR-60)", async () => {

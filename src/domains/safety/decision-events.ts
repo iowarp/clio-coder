@@ -35,6 +35,8 @@ export interface ToolDecisionInput {
 	reasonCode?: string;
 	/** The confirmation rule that raised the ask, when one did. */
 	confirmationRuleId?: string;
+	/** A capability a gateway call or chain step ran under the model's call (C-9). */
+	inner?: true;
 }
 
 /** The confirmation rule an ask carries, spread into a {@link ToolDecisionInput}. */
@@ -61,6 +63,7 @@ export function toolDecidedPayload(input: ToolDecisionInput): EventPayload<"tool
 		...(policySource !== undefined ? { policySource } : {}),
 		...(input.policy?.policyHash !== undefined ? { policyHash: input.policy.policyHash } : {}),
 		...(input.confirmationRuleId !== undefined ? { confirmationRuleId: input.confirmationRuleId } : {}),
+		...(input.inner === true ? { inner: true as const } : {}),
 	};
 }
 
