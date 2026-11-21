@@ -966,10 +966,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			if (op === "describe") return runDescribe(args, options);
 			if (op === "call") return runCall(args, options);
 			if (op === "chain") {
-				// One canonical shape: steps nested in args is refused with the shape, never run (bt-23 N4).
-				if (args.steps === undefined && isRecord(args.args) && args.args.steps !== undefined) {
-					return { kind: "error", message: `gateway: invalid chain: ${chainShapeHint}` };
-				}
+				// `steps` nested in args was lifted beside op on normalize (C-8).
 				const executed: ToolResult[] = [];
 				const result = await runGatewayChain(
 					args.steps,

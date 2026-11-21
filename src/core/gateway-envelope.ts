@@ -10,9 +10,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * A string `args` as the object it encodes. A chain envelope cut one brace short
+ * (the most common truncation, C-8) is read with that brace restored, and only
+ * when the restored object carries `steps`, so no other string is guessed at.
+ */
+function parsedArgs(text: string): Record<string, unknown> | null {
+	try {
+		const parsed: unknown = JSON.parse(text);
+		return isRecord(parsed) ? parsed : null;
+	} catch {
+		try {
+			const repaired: unknown = JSON.parse(`${text}}`);
+			return isRecord(repaired) && repaired.steps !== undefined ? repaired : null;
+		} catch {
+			return null;
+		}
+	}
+}
+
+/**
  * Accept the weak-model shapes: `args` as a JSON string, `name`/`tool` for
  * `capability`, an empty `parameters` object, and a missing `op` inferred from
- * what else was given.
+ * what else was given. A chain's `steps` nested in `args` is lifted beside
+ * `op`, and `steps` without a capability reads as a chain (C-8).
  */
 export function normalizeGatewayArguments(args: Readonly<Record<string, unknown>>): Record<string, unknown> {
 	const out: Record<string, unknown> = { ...args };
@@ -21,13 +41,18 @@ export function normalizeGatewayArguments(args: Readonly<Record<string, unknown>
 		if (typeof alias === "string") out.capability = alias;
 	}
 	if (typeof out.args === "string") {
-		try {
-			const parsed: unknown = JSON.parse(out.args);
-			if (isRecord(parsed)) out.args = parsed;
-		} catch {
-			// The body reports the unparseable string.
-		}
+		// The body reports a string that is not an object.
+		const parsed = parsedArgs(out.args);
+		if (parsed !== null) out.args = parsed;
 	}
+	const chainLike = out.op === "chain" || (out.op === undefined && typeof out.capability !== "string");
+	if (chainLike && out.steps === undefined && isRecord(out.args) && out.args.steps !== undefined) {
+		const { steps, ...rest } = out.args;
+		out.steps = steps;
+		if (Object.keys(rest).length === 0) delete out.args;
+		else out.args = rest;
+	}
+	if (out.op === "chain" && out.steps !== undefined) delete out.capability;
 	// An empty `parameters` object carries nothing; refusing it blamed a correctly
 	// shaped call for an envelope it never used (bt-23 N3).
 	if (isRecord(out.parameters) && Object.keys(out.parameters).length === 0) delete out.parameters;
@@ -36,7 +61,8 @@ export function normalizeGatewayArguments(args: Readonly<Record<string, unknown>
 	// as find answered a mis-wrapped call with a successful discovery listing,
 	// and the model took that as the call having run.
 	if (typeof out.op !== "string") {
-		if (out.args !== undefined) out.op = "call";
+		if (out.steps !== undefined && typeof out.capability !== "string") out.op = "chain";
+		else if (out.args !== undefined) out.op = "call";
 		else if (typeof out.capability === "string") out.op = "describe";
 		else out.op = "find";
 	}
