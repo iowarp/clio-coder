@@ -797,6 +797,12 @@ export type CommandPathEvent =
 			findRoot?: FindRootFilter;
 			/** A find root's whole argument list, so a reader can tell what its expression may select. */
 			expression?: string[];
+			/**
+			 * A delete a row 261 reading found where the b1c4855bf walk found none (a here-document body it dropped, an
+			 * `env -S` string, an env spelled as a path, `xargs rm` input). It only ever adds judgment: scratch placement
+			 * never counts it.
+			 */
+			added?: true;
 	  }
 	| { kind: "subshell"; open: boolean };
 
@@ -907,14 +913,16 @@ export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
 	if (withoutBodies === command) return [extractCommandPathWalk(command)];
 	const removedAll = !scanShellLike(withoutBodies).some((token) => token.operator && token.value === "<<");
-	if (
-		removedAll &&
-		dataOutputs !== null &&
-		!mayRunHeredocOutputs(withoutBodies, dataOutputs) &&
-		heredocDataTrusted(withoutBodies, dataOutputs)
-	)
-		return [extractCommandPathWalk(withoutBodies)];
-	return [extractCommandPathWalk(command, !removedAll), extractCommandPathWalk(withoutBodies)];
+	const baseStrips = removedAll && dataOutputs !== null && !mayRunHeredocOutputs(withoutBodies, dataOutputs);
+	if (baseStrips && heredocDataTrusted(withoutBodies, dataOutputs ?? [])) return [extractCommandPathWalk(withoutBodies)];
+	const full = extractCommandPathWalk(command, !removedAll);
+	const stripped = extractCommandPathWalk(withoutBodies);
+	if (baseStrips) {
+		// Row 261: the base reading dropped these bodies, so a delete only they hold is this reading's own addition.
+		const seen = new Set(stripped.flatMap((event) => (event.kind === "delete" ? [event.target] : [])));
+		for (const event of full) if (event.kind === "delete" && !seen.has(event.target)) event.added = true;
+	}
+	return [full, stripped];
 }
 
 /** Commands that copy a here-document to their output as text and run none of it. */

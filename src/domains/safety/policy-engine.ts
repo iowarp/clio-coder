@@ -4627,7 +4627,9 @@ function deletesOnlyScratch(command: string, roots: ReadonlyArray<string>): bool
 		for (const event of walk) {
 			if (event.kind === "link" && event.symbolic) linked = true;
 			if (event.kind !== "delete" || event.scope === "input" || event.scope === "remote") continue;
-			if (linked || !path.isAbsolute(event.target)) return false;
+			// A delete a row 261 reading adds (an env, xargs or here-document body the base walk skipped) never makes a
+			// call scratch-only, so it cannot drop the snapshot a discard beside it needs.
+			if (linked || event.added === true || !path.isAbsolute(event.target)) return false;
 			const resolved = canonicalizeRawPath(event.target, "/");
 			if (resolved === null || !roots.some((root) => resolved !== root && isUnderOrSame(resolved, root))) return false;
 			deletes += 1;
