@@ -3242,8 +3242,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 												(error: unknown) => {
 													const message = error instanceof Error ? error.message : String(error);
 													// The run never started: another process's fleet holds this
-													// workspace, the lock timed out, or the birth token was missing.
-													// The id minted here never ran and is not reported.
+													// workspace, the lock timed out, the birth token was missing, or
+													// admission refused its reservation. The minted id is not reported.
 													if (!started && !admitted) {
 														admitted = true;
 														clearTimeout(admissionCap);
