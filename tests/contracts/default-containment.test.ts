@@ -178,6 +178,9 @@ test("every browser op is contained at default like bash; a host beyond loopback
 		{ op: "open", url: "http://127.0.0.1:5173/" },
 		{ op: "run", script: "await page.click('#save')" },
 		{ op: "look" },
+		{ op: "serve", command: "npm run dev", ready: "http://127.0.0.1:5173/" },
+		// Hermetic reaches loopback only: no host to ask for, and the body refuses this one plainly.
+		{ op: "open", url: "https://example.com/", hermetic: true },
 	]) {
 		strictEqual((await session.registry.invoke({ tool: ToolNames.Browser, args })).kind, "ok", JSON.stringify(args));
 	}
@@ -190,6 +193,8 @@ test("every browser op is contained at default like bash; a host beyond loopback
 		{ op: "open", sandboxed: true },
 		{ op: "run", sandboxed: true },
 		{ op: "look", sandboxed: true },
+		{ op: "serve", sandboxed: true },
+		{ op: "open", sandboxed: true },
 	]);
 });
 

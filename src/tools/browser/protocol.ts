@@ -19,8 +19,13 @@ export interface BrowserInit {
 	/** Relative `file` scripts resolve here. */
 	workspace: string;
 	viewport: BrowserViewport;
-	/** Hosts besides loopback the page may reach. */
+	/** Hosts besides loopback the page may reach; always empty in a hermetic session. */
 	grantedHosts: string[];
+	/**
+	 * Loopback only, for the session's lifetime: no host is ever granted. Contained, the driver also runs in an empty
+	 * network namespace whose loopback only the browser and the servers `serve` started share.
+	 */
+	hermetic: boolean;
 }
 
 export interface BrowserOpenRequest {
@@ -57,6 +62,19 @@ export interface BrowserCloseRequest {
 	page?: string;
 }
 
+/** Start a dev server inside the session (or stop one) and wait until its loopback `ready` URL answers. */
+export interface BrowserServeRequest {
+	op: "serve";
+	id: number;
+	/** Shell command line, run with `sh -c`. */
+	command?: string;
+	ready?: string;
+	/** Absolute directory inside the workspace. */
+	cwd?: string;
+	stop: boolean;
+	timeoutMs: number;
+}
+
 export interface BrowserCancelRequest {
 	op: "cancel";
 	id: number;
@@ -69,6 +87,7 @@ export type BrowserRequest =
 	| BrowserRunRequest
 	| BrowserLookRequest
 	| BrowserCloseRequest
+	| BrowserServeRequest
 	| BrowserCancelRequest;
 
 export interface BrowserConsoleRecord {
@@ -119,6 +138,20 @@ export interface BrowserSnapshot {
 	matches?: number;
 }
 
+export interface BrowserServerState {
+	command: string;
+	cwd: string;
+	ready: string;
+	state: "starting" | "ready" | "exited" | "stopped";
+	/** Process group id as the driver sees it (inside the sandbox's PID namespace when contained). */
+	pid?: number;
+	exitCode?: number | null;
+	signal?: string | null;
+	readyMs?: number;
+	/** Last lines of the server's stdout and stderr. */
+	logTail: string[];
+}
+
 export interface BrowserReplyBody {
 	pageFacts?: BrowserPageFacts;
 	pages?: BrowserPageFacts[];
@@ -131,6 +164,7 @@ export interface BrowserReplyBody {
 	events?: BrowserEventDelta;
 	closed?: "page" | "session";
 	engine?: string;
+	servers?: BrowserServerState[];
 }
 
 export type BrowserReply =
