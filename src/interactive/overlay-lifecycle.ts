@@ -225,7 +225,11 @@ export interface OverlayLifecycleController {
 	/** The live card opened less than `PERMISSION_SETTLE_MS` ago, so Enter does not allow it yet. */
 	isPermissionSettling(): boolean;
 	cancelPermission(): void;
-	/** Re-present a parked call before composer input can submit through a mount gap. */
+	/** The approval card on screen, for a second decision source such as an attached approver. */
+	permissionCards(): Pick<
+		import("./overlay-permission-lifecycle.js").OverlayPermissionLifecycle,
+		"cardOnScreen" | "answerOnScreen" | "onCardShown"
+	>;
 	retryPendingPermission(): boolean;
 	stopTurnFromPermission(): void;
 	/** A key reached the app while a permission card was up: the operator is present (#421). */
@@ -789,6 +793,18 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			footer.refresh();
 			tui.requestRender();
 		},
+		permissionCards: () => ({
+			cardOnScreen: () => overlayPermission?.cardOnScreen() ?? null,
+			answerOnScreen: (requestId, decision, decidedBy) => {
+				const answered = overlayPermission?.answerOnScreen(requestId, decision, decidedBy) === true;
+				if (answered) {
+					footer.refresh();
+					tui.requestRender();
+				}
+				return answered;
+			},
+			onCardShown: (listener) => overlayPermission?.onCardShown(listener) ?? (() => undefined),
+		}),
 		retryPendingPermission: () => {
 			if (overlayTransitions.state !== "closed" || !deps.app.toolRegistry?.hasParkedCalls()) return false;
 			overlayPermission?.retryPending();
