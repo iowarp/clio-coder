@@ -44,7 +44,6 @@ import { withProviderCheckpointMeasurements } from "../entries.js";
 import { observationCheckpoint, observationSourceUnits } from "../memory-source.js";
 import { firstTokenStallLimitMs } from "../retry.js";
 import { filterEntriesToActivePath } from "../tree/active-path.js";
-import { serializeConversation } from "./branch-summary.js";
 import {
 	type CompactInput,
 	type CompactionCallObservation,
@@ -358,17 +357,18 @@ export async function runCompactionFlow(
 					: {}),
 				entries,
 				cwd: meta.cwd,
-				offerMemory: (slice, ordinary, projected) => {
+				offerMemory: (slice, ordinary, serializeRefs) => {
 					const scope = admission?.memory?.observationStatus().scope;
 					if (!scope) return null;
 					// Units come from the raw ledger slice, the material the batches were
 					// prepared from; an uncovered unit is serialized from the projected
-					// entries so it costs what the ordinary summary would have paid for it.
+					// entries under the ordinary text's caps, so it costs and carries what
+					// the ordinary summary would have.
 					return (
 						admission?.memory?.offerCompaction({
 							source: { ...scope, checkpoint: observationCheckpoint(entries), units: observationSourceUnits(slice) },
 							ordinary,
-							serialize: (refs) => serializeConversation(projected.filter((entry) => refs.includes(entry.turnId))),
+							serialize: serializeRefs,
 						}) ?? null
 					);
 				},
