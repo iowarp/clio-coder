@@ -525,7 +525,8 @@ function quotedTempDirRebinding(command: string): boolean {
 }
 
 function hasStableTempDirReferences(command: string): boolean {
-	if (quotedTempDirRebinding(command)) return false;
+	// Row 287: a line continuation can split a TMPDIR rebinding (`TM\<newline>PDIR=.`) past every count below.
+	if (command.includes("\\\n") || quotedTempDirRebinding(command)) return false;
 	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
 	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
@@ -569,7 +570,7 @@ function expandTempDirReferences(command: string): string {
  * (readonly) or reads for its own behaviour; an assignment to one never proves the value a later reference sees.
  */
 const SCRATCH_SPECIAL =
-	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TIMEFORMAT|TMOUT|TMPDIR|UID|_)$/u;
+	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TIMEFORMAT|TMOUT|TMPDIR|UID|_|LD_\w*|DYLD_\w*|GCONV_PATH|GLIBC_TUNABLES|LOCPATH|NLSPATH|MALLOC_\w*|HOSTALIASES|POSIXLY_CORRECT)$/u;
 const SCRATCH_DELETES: ReadonlySet<string> = new Set(["rm", "rmdir", "unlink"]);
 /** Options of a delete that leave where it deletes alone. */
 const SCRATCH_DELETE_OPTION =
@@ -585,7 +586,7 @@ const SCRATCH_INERT_BUILTINS: ReadonlySet<string> = new Set([
 	"test",
 	"[",
 ]);
-const SCRATCH_SET_FLAGS = /^[-+][abefhkmnptuvxBCEHPT]+$/u;
+const SCRATCH_SET_FLAGS = /^[-+][befhmnptuvxBCEHPT]+$/u;
 const SCRATCH_SET_NAMES: ReadonlySet<string> = new Set([
 	"errexit",
 	"nounset",
@@ -593,7 +594,6 @@ const SCRATCH_SET_NAMES: ReadonlySet<string> = new Set([
 	"xtrace",
 	"noglob",
 	"noclobber",
-	"allexport",
 	"verbose",
 	"errtrace",
 	"functrace",
@@ -612,7 +612,7 @@ function scratchSetOptions(args: ReadonlyArray<string | null>): boolean {
 		const arg = args[index];
 		if (arg === null || arg === undefined) return false;
 		// `-o NAME`, alone or ending a cluster (`-euo pipefail`), names one option.
-		const named = /^[-+][abefhkmnptuvxBCEHPT]*o$/u.test(arg);
+		const named = /^[-+][befhmnptuvxBCEHPT]*o$/u.test(arg);
 		if (!named && !SCRATCH_SET_FLAGS.test(arg)) return false;
 		if (named) {
 			index += 1;
@@ -637,7 +637,7 @@ function scratchTemplate(word: ShellWord, temp: string): string | null {
 	const rest = words.slice(2) as string[];
 	if (rest.length === 0) return `${temp}/tmp.XXXXXXXXXX`;
 	const template = rest[0] === "-t" && rest.length === 2 ? rest[1] : rest.length === 1 ? rest[0] : undefined;
-	if (template === undefined || template.startsWith("-") || !/X{3,}$/u.test(template)) return null;
+	if (template === undefined || template.startsWith("-") || !/^[\w./+@%,:-]+X{3,}$/u.test(template)) return null;
 	if (rest[0] === "-t") return template.includes("/") ? null : `${temp}/${template}`;
 	return template.startsWith(`${temp}/`) ? template : null;
 }
@@ -745,6 +745,8 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 			if (index > 0 && ops[index - 1] === "||") {
 				conditional = true;
 				cdBase = null;
+				// The `||` side runs exactly when an earlier step failed, so a pin made past the head may never have been made.
+				for (const name of chainNames) pins.delete(name);
 			}
 			const alone = pipeline.commands.length === 1;
 			for (const step of pipeline.commands) {
@@ -827,6 +829,8 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 		// After the and-or a pin made past its head may never have been made, and the shell may be wherever a cd left it.
 		for (const name of chainNames) pins.delete(name);
 	}
+	// A program may plant a link where the walk would follow the cd as a base, so only a call that runs none keeps it.
+	if (linkRisk) leadingCd = null;
 	if (!hasDelete || (edits.length === 0 && leadingCd === null)) return unchanged;
 	let projected = command;
 	for (const edit of [...edits].sort((left, right) => right.start - left.start))

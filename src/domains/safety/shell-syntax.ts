@@ -140,12 +140,11 @@ class Parser {
 		return this.pos >= this.src.length;
 	}
 
-	/** Blanks, line continuations and a comment that starts a word; never a newline. */
+	/** Blanks and a comment that starts a word; never a newline. */
 	private skipBlanks(): void {
 		for (;;) {
 			const char = this.peek();
 			if (BLANK.test(char)) this.pos += 1;
-			else if (char === "\\" && this.peek(1) === "\n") this.pos += 2;
 			else if (char === "#") {
 				while (!this.atEnd() && this.peek() !== "\n") this.pos += 1;
 			} else return;
@@ -298,7 +297,7 @@ class Parser {
 	private tryRedirect(): ShellRedirect | null {
 		const start = this.pos;
 		const rest = this.src.slice(this.pos);
-		if (/^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/u.test(rest)) fail();
+		if (/^\{[^}\s]*\}[<>]/u.test(rest)) fail();
 		// A process substitution is a word, not a redirection.
 		if (/^[<>]\(/u.test(rest)) return null;
 		const match = /^(\d*)(&>>|&>|<<<|<<-|<<|<>|<&|>&|>>|>\||<|>)/u.exec(rest);
@@ -319,6 +318,8 @@ class Parser {
 		};
 		if (op === "<<" || op === "<<-") {
 			const raw = this.src.slice(target.start, target.end);
+			// bash removes only quotes from a delimiter: `$'EOF'` ends at a line `$EOF`, which this reading would not see.
+			if (raw.includes("$") || raw.includes("`")) fail();
 			const quoted = /['"\\]/u.test(raw);
 			if (target.parts.some((part) => part.kind !== "literal")) fail();
 			const delimiter = target.parts.map((part) => (part.kind === "literal" ? part.text : "")).join("");
@@ -342,7 +343,7 @@ class Parser {
 				const next = this.peek(1);
 				if (next === "") fail();
 				this.pos += 2;
-				if (next !== "\n") literal(next, true);
+				literal(next, true);
 			} else if (char === "'") {
 				const close = this.src.indexOf("'", this.pos + 1);
 				if (close === -1) fail();
@@ -379,7 +380,6 @@ class Parser {
 				const next = this.peek(1);
 				if (next === "") fail();
 				this.pos += 2;
-				if (next === "\n") continue;
 				literal(/[$`"\\]/u.test(next) ? next : `\\${next}`, true);
 			} else if (char === "`") parts.push({ kind: "command", script: this.readBacktick(), quoted: true });
 			else if (char === "$") this.readDollar(parts, literal, true);
@@ -492,15 +492,19 @@ class Parser {
 				continue;
 			}
 			if (char === '"') {
+				// A substitution nested in these quotes has its own quoting this count cannot follow.
 				index += 1;
-				while (index < this.src.length && this.src[index] !== '"') index += this.src[index] === "\\" ? 2 : 1;
+				while (index < this.src.length && this.src[index] !== '"') {
+					if (this.src[index] === "$" || this.src[index] === "`") fail();
+					index += this.src[index] === "\\" ? 2 : 1;
+				}
 				if (index >= this.src.length) fail();
 				index += 1;
 				continue;
 			}
 			if (char === "`") {
 				const close = this.src.indexOf("`", index + 1);
-				if (close === -1) fail();
+				if (close === -1 || this.src.slice(index + 1, close).includes("\\")) fail();
 				index = close + 1;
 				continue;
 			}
@@ -519,7 +523,8 @@ class Parser {
 
 /** The script a command string is, or null outside the grammar this module reads. */
 export function parseShellScript(source: string, depth = 0): ShellScript | null {
-	if (depth > MAX_DEPTH) return null;
+	// A line continuation is removed before bash splits words, so it can join or split any token: outside the grammar.
+	if (depth > MAX_DEPTH || source.includes("\\\n")) return null;
 	try {
 		return new Parser(source).parseScript();
 	} catch (error) {

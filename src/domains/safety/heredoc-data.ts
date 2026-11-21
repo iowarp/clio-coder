@@ -71,7 +71,7 @@ const VERSION_PROGRAMS: ReadonlySet<string> = new Set([
 	"go",
 	"rustc",
 ]);
-const PLAIN_REDIRECTS: ReadonlySet<string> = new Set([">", ">>", ">|", "<", "<<<", "&>", "&>>", ">&", "<&", "<>"]);
+const PLAIN_REDIRECTS: ReadonlySet<string> = new Set([">", ">>", ">|", "<", "<<<", "&>", "&>>", ">&", "<&"]);
 const STDOUT_REDIRECTS: ReadonlySet<string> = new Set([">", ">>", ">|", "&>", "&>>", ">&", "<>"]);
 const DESCRIPTOR = /^(?:\d+-?|-)$/u;
 
@@ -116,8 +116,17 @@ function readStep(command: ShellSimpleCommand, alone: boolean, negated: boolean,
 	const words = args as string[];
 	const docs: ShellRedirect[] = [];
 	for (const redirect of command.redirects) {
-		if (redirect.heredoc !== undefined) docs.push(redirect);
-		else if (!PLAIN_REDIRECTS.has(redirect.op) || staticWordValue(redirect.target) === null) return false;
+		if (redirect.heredoc !== undefined) {
+			docs.push(redirect);
+			continue;
+		}
+		const target = staticWordValue(redirect.target);
+		if (!PLAIN_REDIRECTS.has(redirect.op) || target === null) return false;
+		// A duplicated or numbered descriptor can carry a body anywhere (`3>.git/config 1>&3`): only stderr to stdout or a
+		// file is read.
+		if (redirect.op === ">&" || redirect.op === "<&") {
+			if (redirect.fd !== 2 || target !== "1") return false;
+		} else if (redirect.fd !== null && redirect.fd !== 1 && redirect.fd !== 2) return false;
 	}
 	reading.names.push(name);
 	if (name === "printf" && words.some((word) => word.startsWith("-v"))) return false;

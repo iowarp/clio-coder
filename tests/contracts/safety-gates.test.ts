@@ -1345,6 +1345,10 @@ describe("safety gate boundary", () => {
 			`cat > node <<'EOF'\n${gone}\nEOF\nPATH=.:$PATH node --version`,
 			`tee a.sh <<'EOF' | sh\n${gone}\nEOF`,
 			`alias cat=sh; cat > a.txt <<'EOF'\n${gone}\nEOF`,
+			// Red-team round: a delimiter a line continuation or `$'...'` spells, and a copy through a duplicated descriptor.
+			`cat <<E\\\nOF > /dev/null\n$(${gone})\nEOF`,
+			`cat <<$'EOF' > /dev/null\nhello\n$EOF\n${gone}\nEOF`,
+			`cat 3>.git/config 1>&3 <<'EOF'\n${gone}\nEOF\ngit status`,
 			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
 		])
 			strictEqual(reason(command) !== null, true, command);

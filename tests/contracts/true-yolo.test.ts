@@ -750,6 +750,13 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'B=$TMPDIR/base; B=/etc :; rm -rf "$B"',
 		'B="$TMPDIR/base dir"; rm -rf $B',
 		'B=$TMPDIR/base & rm -rf "$B"',
+		// Red-team round: a mktemp template the shell splits, a pin `||` skips, a line continuation that rebinds a pin or
+		// TMPDIR, and a link a program plants after the temp cd.
+		"D=$(mktemp -d -t 'a b.XXXXXX'); rm -rf $D",
+		'B=/etc\nfalse && B="$TMPDIR/sub" || rm -rf "$B"',
+		'B="$TMPDIR/sub"\nB\\\n=/etc\nrm -rf "$B"',
+		'TM\\\nPDIR=/etc\nrm -rf "$TMPDIR/x"',
+		`cd "$TMPDIR" && python3 -c 'import os; os.symlink("/etc", "link")' && rm -rf link/*`,
 		'B=$TMPDIR/base; node -e 1; rm -rf "$B/"',
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
