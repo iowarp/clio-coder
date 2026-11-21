@@ -201,16 +201,15 @@ describe("--read-only leaves every user file unchanged", { timeout: 600_000 }, (
 		deepEqual(userFiles(), baseline);
 	});
 
-	// One command tries the workspace, the sentinel and Clio's state root,
-	// then writes its private /tmp, which is where TMPDIR points. The state
-	// path is assembled at run time, so the sandbox, not the floor's reading
-	// of the command text, is what keeps it out.
+	// One command tries the workspace and the sentinel, then writes its private
+	// /tmp, which is where TMPDIR points. It no longer names Clio's state root:
+	// since row 314 the yolo floor resolves an assembled state path and refuses
+	// the whole call, which would leave the sandbox nothing to prove here.
 	const shellCommand = (): string =>
 		[
 			`echo changed > ${join(work, "notes.txt")}`,
 			`echo changed > ${join(sentinel, "keep.txt")}`,
 			`touch ${join(work, "planted.txt")} ${join(sentinel, "planted.txt")}`,
-			`s=sta; touch "${home}/$\{s}te/planted"`,
 			`echo scratch > "$TMPDIR/probe" && echo "tmp-ok $TMPDIR"`,
 			`touch ${join(work, "planted.txt")}`,
 		].join("; ");
