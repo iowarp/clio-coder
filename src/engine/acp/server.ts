@@ -1490,6 +1490,30 @@ function toolLocations(toolName: string | undefined, args: unknown, cwd: string)
 	return [{ path: boundString(resolvePath(cwd, redactUrlCredentials(path)), ACP_MAX_LOCATION_PATH_BYTES) }];
 }
 
+/**
+ * The title, kind and locations a client renders for one call, read through the
+ * capability a gateway call reaches. The live start and the replayed one both
+ * present a call through this, so a reloaded card matches the live one.
+ */
+function toolCallPresentation(
+	toolName: string | undefined,
+	args: unknown,
+	cwd: string,
+): Pick<AcpToolCallSnapshot, "title" | "kind" | "locations"> {
+	const call = toolName === undefined ? undefined : effectiveToolCall(toolName, args);
+	const chainSteps = toolName === undefined ? [] : gatewayChainPlan(toolName, args);
+	const capability =
+		chainSteps.length > 0
+			? `gateway chain(${chainSteps.map((step) => step.capability).join(", ")})`
+			: (call?.toolName ?? toolName);
+	const locations = toolLocations(capability, call?.viaGateway ? call.args : args, cwd);
+	return {
+		...(locations !== null ? { locations } : {}),
+		title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
+		kind: toolKind(chainSteps.length > 0 ? toolName : capability),
+	};
+}
+
 function utf8Bytes(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
@@ -2086,21 +2110,12 @@ function handleChatEvent(
 		active.lastEmittedToolCallId = toolCallId;
 		// Clients render kind, title and locations per capability, and the
 		// coordinator reaches most capabilities through gateway op=call.
-		const call = toolName === undefined ? undefined : effectiveToolCall(toolName, event.args);
-		const chainSteps = toolName === undefined ? [] : gatewayChainPlan(toolName, event.args);
-		const capability =
-			chainSteps.length > 0
-				? `gateway chain(${chainSteps.map((step) => step.capability).join(", ")})`
-				: (call?.toolName ?? toolName);
-		const locations = toolLocations(capability, call?.viaGateway ? call.args : event.args, cwd);
 		// Built once and kept: the permission request for this call must send the
 		// same objects rather than recompute them from a copy of the arguments that
 		// may since have been normalized.
 		const snapshot: AcpToolCallSnapshot = {
 			rawInput: boundRawRecord(event.args),
-			...(locations !== null ? { locations } : {}),
-			title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
-			kind: toolKind(chainSteps.length > 0 ? toolName : capability),
+			...toolCallPresentation(toolName, event.args, cwd),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
 		sendUpdate(transport, sessionId, active, {
@@ -2567,6 +2582,7 @@ function prepareAcpReplay(
 	entries: ReadonlyArray<SessionEntry>,
 	leafTurnId: string | null,
 	sessionId: string,
+	cwd: string,
 	createdTarget: string | null = null,
 ): PreparedAcpReplay {
 	const branch = filterEntriesToActivePath(entries, leafTurnId ?? undefined);
@@ -2576,6 +2592,8 @@ function prepareAcpReplay(
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
 	const cutOffToolCalls = new Set<string>();
+	// Each replayed call's presentation, which its terminal update repeats as the live one does.
+	const presented = new Map<string, ReturnType<typeof toolCallPresentation>>();
 	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
 		if (entry.kind === "workerRun") {
@@ -2683,15 +2701,18 @@ function prepareAcpReplay(
 			const toolCallId = startToolCallId(ids, call.engineId);
 			ids.openToolCalls.add(toolCallId);
 			ids.lastEmittedToolCallId = toolCallId;
+			const presentation = toolCallPresentation(call.name, call.args, cwd);
+			presented.set(toolCallId, presentation);
 			current.frames.push({
 				update: {
 					sessionUpdate: "tool_call",
 					toolCallId,
 					name: call.name,
-					title: call.name,
-					kind: toolKind(call.name),
+					title: presentation.title,
+					kind: presentation.kind,
 					status: "in_progress" satisfies AcpToolCallStatus,
 					rawInput: boundRawRecord(call.args),
+					...(presentation.locations !== undefined ? { locations: presentation.locations } : {}),
 				},
 			});
 			continue;
@@ -2708,12 +2729,13 @@ function prepareAcpReplay(
 				(payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked");
 			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
+			const started = presented.get(toolCallId);
 			current.frames.push({
 				update: {
 					sessionUpdate: "tool_call_update",
 					toolCallId,
-					title: name,
-					kind: toolKind(name),
+					title: started?.title ?? name,
+					kind: started?.kind ?? toolKind(name),
 					status: (failed ? "failed" : "completed") satisfies AcpToolCallStatus,
 					...(output.length > 0 ? { content: toolCallContent(output) } : {}),
 					rawOutput: boundRawRecord({
@@ -5694,6 +5716,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						entries,
 						leafTurnId,
 						id,
+						canonicalCwd,
 						options.session?.history().find((meta) => meta.id === id)?.target ?? null,
 					)
 				: undefined,
@@ -5798,7 +5821,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			try {
 				entries = options.readSessionEntries(id);
 				const leaf = options.session.leafId(id);
-				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, stored.target) : undefined;
+				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, canonicalCwd, stored.target) : undefined;
 			} catch (error) {
 				throw loadFailure(error);
 			}
@@ -5814,7 +5837,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					},
 					id,
 				);
-				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id, stored.target) : undefined;
+				replay = replayToClient
+					? prepareAcpReplay(restored.entries, restored.leafTurnId, id, canonicalCwd, stored.target)
+					: undefined;
 			} catch (error) {
 				await options.mcpCapabilities?.detachClientServers();
 				// The session never loaded: nothing was bound or appended, so there is no boundary to checkpoint.
@@ -6319,7 +6344,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				turnId,
 			);
 			forkLeaf = restored.leafTurnId;
-			if (replayToClient) replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
+			if (replayToClient)
+				replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, canonicalCwd, meta.target);
 		} catch (error) {
 			options.diagnostics?.(`fork replay failed: ${acpErrorMessage(error)}`);
 			resetForSession(forkLeaf, []);

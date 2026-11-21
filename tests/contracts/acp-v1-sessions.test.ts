@@ -1238,6 +1238,52 @@ test("ACP replay carries each turn's recorded model and route and each call's re
 	}
 });
 
+test("ACP replay presents a gateway call under the live title, kind and locations (M-10)", async () => {
+	const args = { op: "call", capability: "ls", args: { path: "ws" } };
+	const message = (
+		role: "user" | "tool_call" | "tool_result",
+		turnId: string,
+		parentTurnId: string | null,
+		payload: unknown,
+	) => ({
+		kind: "message" as const,
+		role,
+		turnId,
+		parentTurnId,
+		timestamp: "2026-09-25T12:00:00.000Z",
+		payload,
+	});
+	const peer = fixture(
+		[
+			message("user", "ask", null, "List"),
+			message("tool_call", "call", "ask", { name: "gateway", toolCallId: "gw-1", args }),
+			message("tool_result", "result", "call", { toolCallId: "gw-1", toolName: "gateway", result: "a", isError: false }),
+		],
+		(emit) => {
+			emit({ type: "tool_execution_start", toolCallId: "gw-1", toolName: "gateway", args });
+			emit({ type: "tool_execution_end", toolCallId: "gw-1", toolName: "gateway", result: "a", isError: false });
+		},
+	);
+	const shown = (from: number) =>
+		peer.updates
+			.slice(from)
+			.map((params) => params.update as Record<string, unknown>)
+			.filter((update) => update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")
+			.map(({ sessionUpdate, title, kind, locations }) => ({ sessionUpdate, title, kind, locations }));
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const replayed = shown(0);
+		const from = peer.updates.length;
+		await peer.call("session/prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "List" }] });
+		const live = shown(from);
+		strictEqual(live[0]?.title, "ls");
+		deepStrictEqual(replayed, live);
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP advertises only slash commands executable from a prompt", async () => {
 	let submitted = false;
 	const commands: AcpCommandControl = {
