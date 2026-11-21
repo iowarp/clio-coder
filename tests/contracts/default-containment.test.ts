@@ -22,9 +22,12 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { PLAYWRIGHT_CORE_VERSION } from "../../src/domains/lifecycle/browser-component.js";
 import { componentInstallDir } from "../../src/domains/lifecycle/components.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { ActionClass, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { denialLines } from "../../src/domains/safety/denial.js";
+import { createEscapeScopeLedger, ESCAPE_SCOPE_CUSTOM_TYPE } from "../../src/domains/safety/escape-scope.js";
 import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
 import { isSameOrDescendant } from "../../src/domains/safety/path-policy.js";
 import {
@@ -44,7 +47,9 @@ import {
 	createWorkspaceSnapshots,
 	type WorkspaceSnapshotOutcome,
 } from "../../src/domains/workspace-snapshots/store.js";
+import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createAskUserTool } from "../../src/tools/ask-user.js";
 import { bashTool } from "../../src/tools/bash.js";
 import {
 	browserOutwardHosts,
@@ -54,10 +59,16 @@ import {
 	grantBrowserHosts,
 } from "../../src/tools/browser/surface.js";
 import { editTool } from "../../src/tools/edit.js";
-import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
+import {
+	createRegistry,
+	type PermissionRequiredMeta,
+	type RegistryDeps,
+	type ToolSpec,
+} from "../../src/tools/registry.js";
 import { createRunScriptTool } from "../../src/tools/run-script.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
+import { loopSafety } from "../harness/loop-guard.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function workspace(prefix: string): string {
@@ -1097,4 +1108,176 @@ test("an MCP tool call keeps a rail's own ask or block, and at yolo is never ref
 			scriptSandbox,
 		);
 	}
+});
+
+// M-7: an escape approved for the session covers reruns of its exact, unchanged script files only.
+test("a sandbox escape approved for this session covers reruns of the same unchanged script; anything else asks", async (t) => {
+	const cwd = workspace("clio-escape-scope-");
+	mkdirSync(join(cwd, "probes"));
+	mkdirSync(join(cwd, "other"));
+	for (const file of ["probes/a.sh", "probes/b.sh", "other/c.sh"]) writeFileSync(join(cwd, file), "echo hi\n");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const entries: unknown[] = [];
+	const ledger = () =>
+		createEscapeScopeLedger({
+			session: () => "session-1",
+			entries: () => entries,
+			append: (grant) => entries.push({ kind: "custom", customType: ESCAPE_SCOPE_CUSTOM_TYPE, data: grant }),
+			roots: () => [cwd],
+		});
+	const unsandboxed = (command: string) => bash(command, { unsandboxed: true });
+
+	// The approval card: the parked escape carries its scope, and the session option grants it.
+	const card = defaultSession(cwd, { sandbox: true, snapshots: false }, { escapeScopes: ledger() });
+	const asked: PermissionRequiredMeta[] = [];
+	card.registry.onPermissionRequired((_call, _decision, meta) => asked.push(meta));
+	const first = card.registry.invoke(unsandboxed("bash probes/a.sh"));
+	await new Promise((settle) => setImmediate(settle));
+	const offered = asked[0];
+	ok(offered?.escapeScope !== undefined);
+	deepStrictEqual(
+		offered.escapeScope.scripts.map((script) => script.path),
+		[join(cwd, "probes", "a.sh")],
+	);
+	await card.registry.resumeParkedCalls({
+		actionClass: "execute",
+		requestId: offered.requestId,
+		requestedBy: "tool:one_shot",
+		sessionScope: true,
+	});
+	strictEqual((await first).kind, "ok");
+	strictEqual(entries.length, 1);
+	// The same unchanged file: no card. A sibling in the same directory, another env, or the file edited: a card.
+	strictEqual((await card.registry.invoke(unsandboxed("bash probes/a.sh"))).kind, "ok");
+	strictEqual(asked.length, 1);
+	const asks = async (command: string): Promise<void> => {
+		void card.registry.invoke(unsandboxed(command));
+		await new Promise((settle) => setImmediate(settle));
+		card.registry.cancelParkedCalls("test");
+	};
+	for (const command of ["bash probes/b.sh", "FOO=1 bash probes/a.sh"]) await asks(command);
+	strictEqual(asked.length, 3);
+	// The grant is on the session ledger, so a ledger read afresh (a resumed session) still holds it.
+	const resumed = defaultSession(cwd, { sandbox: true, snapshots: false }, { escapeScopes: ledger() });
+	strictEqual((await resumed.registry.invoke(unsandboxed("bash probes/a.sh"))).kind, "ok");
+	writeFileSync(join(cwd, "probes/a.sh"), "echo edited\n");
+	await asks("bash probes/a.sh");
+	strictEqual(asked.length, 4);
+	deepStrictEqual(
+		card.ran.map((entry) => entry.command),
+		["bash probes/a.sh", "bash probes/a.sh"],
+	);
+
+	// Contained yolo: the refusal names the option, ask_user adds it to a question about leaving the sandbox,
+	// drops one the agent wrote itself, and only the operator's pick of it grants; typed text never does.
+	entries.length = 0;
+	const answers: Array<(labels: string[]) => { options?: string[]; value?: string }> = [
+		() => ({ value: "yes, approve unsandboxed runs of other/c.sh for the session" }),
+		(labels) => ({ options: [labels.at(-1) ?? ""] }),
+	];
+	const yolo = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: false },
+		{ escapeScopes: ledger(), unattendedAsks: () => true },
+	);
+	const shown: string[][] = [];
+	yolo.registry.register(
+		createAskUserTool({
+			askUser: async (questions) => {
+				const labels = (questions[0]?.options ?? []).map((option) => option.label);
+				shown.push(labels);
+				const pick = answers.shift()?.(labels) ?? {};
+				const answer = [...(pick.options ?? []), pick.value ?? ""].filter((part) => part.length > 0).join(" ");
+				return { answers: [{ question: questions[0]?.question ?? "", answer, ...pick }] };
+			},
+		}),
+	);
+	const refused = await yolo.registry.invoke(unsandboxed("bash other/c.sh"));
+	strictEqual(refused.kind, "blocked");
+	ok(
+		refused.kind === "blocked" &&
+			refused.reason.includes(`Approve for this session: script ${join(cwd, "other", "c.sh")} (sha256:`),
+	);
+	const ask = (question: string) =>
+		yolo.registry.invoke({
+			tool: ToolNames.AskUser,
+			args: {
+				action: "ask",
+				mode: "single_question",
+				questions: [
+					{
+						question,
+						options: [{ label: "Yes, run it once" }, { label: "Approve for this session: everything" }, { label: "No" }],
+					},
+				],
+			},
+		});
+	await ask("Run other/c.sh outside the sandbox?");
+	strictEqual(entries.length, 0);
+	await ask("Run other/c.sh outside the sandbox, again?");
+	strictEqual(entries.length, 1);
+	for (const labels of shown) {
+		strictEqual(labels.includes("Approve for this session: everything"), false);
+		ok(labels.at(-1)?.startsWith(`Approve for this session: script ${join(cwd, "other", "c.sh")} (sha256:`));
+	}
+	strictEqual((await yolo.registry.invoke(unsandboxed("bash other/c.sh"))).kind, "ok");
+});
+
+// M-7 bounce: the refused escape says one true thing about retrying, and once the operator grants its scope the
+// refusal is no failed attempt the loop guard counts, so two reruns in the same turn both run.
+test("a contained-yolo escape refusal tells when to retry, and a granted rerun is not a repeat of a failed attempt", async (t) => {
+	const cwd = workspace("clio-escape-loop-");
+	writeFileSync(join(cwd, "probe.sh"), "echo hi\\n");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const entries: unknown[] = [];
+	const escapeScopes = createEscapeScopeLedger({
+		session: () => "session-1",
+		entries: () => entries,
+		append: (grant) => entries.push({ kind: "custom", customType: ESCAPE_SCOPE_CUSTOM_TYPE, data: grant }),
+		roots: () => [cwd],
+	});
+	const guard = createLoopGuardRegistration({ safety: loopSafety() });
+	const yolo = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: false },
+		{
+			escapeScopes,
+			unattendedAsks: () => true,
+			middleware: createMiddlewareBundle({ registrations: [guard] }).contract,
+		},
+	);
+	yolo.registry.register(
+		createAskUserTool({
+			askUser: async (questions) => {
+				const label = questions[0]?.options?.at(-1)?.label ?? "";
+				return { answers: [{ question: questions[0]?.question ?? "", answer: label, options: [label] }] };
+			},
+		}),
+	);
+	const turn = { sessionId: "session-1", turnId: "turn-1" };
+	const call = bash("bash probe.sh", { unsandboxed: true });
+	const refused = await yolo.registry.invoke(call, turn);
+	ok(refused.kind === "blocked" && refused.denial !== undefined);
+	const [account, remedy] = denialLines(refused.denial);
+	strictEqual(account.includes("Not retryable"), false, account);
+	match(account, /until the operator answers an ask_user question/u);
+	match(remedy, /session option/u);
+	match(refused.reason, /rerun the call after they choose it/u);
+	await yolo.registry.invoke(
+		{
+			tool: ToolNames.AskUser,
+			args: {
+				action: "ask",
+				mode: "single_question",
+				questions: [{ question: "Run probe.sh outside the sandbox?", options: [{ label: "Yes, once" }] }],
+			},
+		},
+		turn,
+	);
+	strictEqual(entries.length, 1);
+	for (const rerun of [1, 2]) strictEqual((await yolo.registry.invoke(call, turn)).kind, "ok", `rerun ${rerun}`);
 });

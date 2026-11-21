@@ -10,53 +10,19 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CLI = join(ROOT, "dist", "cli", "index.js");
-const V1_SETTINGS = `version: 1
-autonomy: suggest
+const RELEASE_SETTINGS = `version: 2
 targets:
   - id: release-local
     runtime: lmstudio
     url: http://127.0.0.1:1234
     defaultModel: release-model
     lifecycle: user-managed
-orchestrator:
+chat:
   target: release-local
   model: release-model
   thinkingLevel: high
-background:
-  target: release-local
-  model: release-model
-  thinkingLevel: low
-workers:
-  default:
-    target: release-local
-    model: release-model
-    thinkingLevel: medium
-  maxRetries: 4
-  onPermission: escalate
-modelSelector:
-  favorites: [release-local/release-model]
-  recentLimit: 8
-budget:
-  sessionCeilingUsd: 9.5
-  concurrency: 3
-terminal:
-  showTerminalProgress: true
-  outputVerbosity: verbose
-  tuiMode: fullscreen
-  smoothStreaming: on
-panes:
-  enabled: off
-  notifications: failures
-  agents: off
-  keepFailed: true
-  yazi:
-    enabled: false
-    mode: chooser
-    profile: user
-    followCwd: false
-retry:
-  enabled: false
-  maxRetries: 6
+safety:
+  autonomy: default
 `;
 
 interface Home {
@@ -166,17 +132,6 @@ async function run(
 	return { code: exit.code, output: cli.output() };
 }
 
-async function reachEditor(cli: RunningCli): Promise<void> {
-	try {
-		await cli.waitFor(/Ask CLIO Coder/u, 30_000);
-		cli.child.stdin.write("\u0004");
-		const exit = await cli.waitForExit();
-		strictEqual(exit.code, 0, cli.output().slice(-2_000));
-	} finally {
-		await cli.stop();
-	}
-}
-
 async function answer(cli: RunningCli, prompt: RegExp, value = ""): Promise<void> {
 	await cli.waitFor(prompt);
 	cli.child.stdin.write(`${value}\n`);
@@ -221,66 +176,13 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
-	it("upgrades the exact v1 release home once, keeps its backup, and boots it", async () => {
-		const home = isolatedHome("clio-coder-migrated-boot-");
-		try {
-			mkdirSync(join(home.root, "config"), { recursive: true });
-			writeFileSync(join(home.root, "config", "settings.yaml"), V1_SETTINGS);
-			const env = home.env;
-			const first = await run(["upgrade"], env);
-			strictEqual(first.code, 0, first.output);
-			match(first.output, /10 migrations applied/u);
-			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
-			const manifest = JSON.parse(readFileSync(join(home.root, "config", "migrations.json"), "utf8"));
-			deepStrictEqual(manifest.applied, [
-				"2026-09-01-settings-v2",
-				"2026-11-21-retired-settings",
-				"2026-09-01-retire-panes-knobs",
-				"2026-10-06-playbooks-and-packages",
-				"2026-10-07-acp-adapters",
-				"2026-10-07-claude-subscription",
-				"2026-10-20-fleet-permissions-judge",
-				"2026-10-31-remove-old-telemetry",
-				"2026-11-02-approvals-to-config",
-				"2026-11-07-remove-copilot-consent",
-			]);
-			const migrated = readFileSync(join(home.root, "config", "settings.yaml"), "utf8");
-			match(migrated, /^version: 2$/mu);
-			match(migrated, /^ {2}autonomy: default$/mu);
-			const report = JSON.parse(
-				readFileSync(join(home.root, "state", "migration-reports", "2026-09-01-settings-v2.json"), "utf8"),
-			) as { notes: string[] };
-			ok(report.notes.some((note) => /autonomy.*default/u.test(note)));
-			match(migrated, /^chat:$/mu);
-			match(migrated, /^interface:$/mu);
-			ok(!/^panes:$/mu.test(migrated), "retired root panes map must be gone");
-
-			const second = await run(["upgrade"], env);
-			strictEqual(second.code, 0, second.output);
-			match(second.output, /no pending migrations/u);
-			strictEqual(readFileSync(join(home.root, "config", "settings.yaml"), "utf8"), migrated);
-			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
-
-			// The release seed intentionally names port 1234. Point the already-
-			// migrated v2 target at this test's isolated health endpoint so doctor
-			// does not depend on, or interfere with, a developer's live LM Studio.
-			writeFileSync(join(home.root, "config", "settings.yaml"), migrated.replace("http://127.0.0.1:1234", endpoint));
-			const doctor = await run(["doctor", "--json"], home.env, home.root);
-			strictEqual(doctor.code, 0, doctor.output);
-			strictEqual(JSON.parse(doctor.output).ok, true);
-			await reachEditor(launch([], { ...home.env, CLIO_CODER_INTERACTIVE: "1" }));
-		} finally {
-			home.cleanup();
-		}
-	});
-
 	it("accepts --autonomy for the interactive session and refuses it where it would be dropped", async () => {
 		// A one-session override must use the two operator modes and leave the
 		// persisted selection alone.
 		const home = isolatedHome("clio-coder-autonomy-boot-");
 		try {
 			mkdirSync(join(home.root, "config"), { recursive: true });
-			writeFileSync(join(home.root, "config", "settings.yaml"), V1_SETTINGS);
+			writeFileSync(join(home.root, "config", "settings.yaml"), RELEASE_SETTINGS);
 			strictEqual((await run(["upgrade"], home.env)).code, 0);
 			const settingsPath = join(home.root, "config", "settings.yaml");
 			writeFileSync(

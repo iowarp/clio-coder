@@ -45,6 +45,7 @@ import {
 	registerEngineBuiltins,
 	registerEngineFauxProvider,
 } from "./api-registry.js";
+import { sideCallCacheFamilyId } from "./apis/cache-family.js";
 import { engineModels } from "./models.js";
 import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
@@ -161,6 +162,13 @@ async function completeEngineTextAttempt(input: EngineTextCompletionInput): Prom
 			// Accounting must not replace the completion outcome (#430).
 		}
 	};
+	const sessionId = sideCallCacheFamilyId({
+		api: input.model.api,
+		provider: input.model.provider,
+		modelId: input.model.id,
+		thinkingLevel: input.thinkingLevel,
+		systemPrompt: input.systemPrompt,
+	});
 	const response = await (async () => {
 		input.signal.throwIfAborted();
 		tracking.start(input.model.api, input.transport);
@@ -172,6 +180,7 @@ async function completeEngineTextAttempt(input: EngineTextCompletionInput): Prom
 			},
 			{
 				fetch: tracking.fetch,
+				...(sessionId === undefined ? {} : { sessionId }),
 				...(input.transport === undefined ? {} : { transport: input.transport }),
 				...(input.headers === undefined ? {} : { headers: input.headers }),
 				maxTokens: input.maxTokens,

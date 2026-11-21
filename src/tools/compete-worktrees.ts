@@ -36,6 +36,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
+import { dropHostTerminalEnv, TOOL_SESSION_SPAWN } from "../core/tool-env-controls.js";
 import type { DispatchRequest, ResolvedVerificationCheck } from "../domains/dispatch/contract.js";
 import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "../domains/dispatch/workspace-checkpoint.js";
@@ -145,7 +146,9 @@ function git(root: string, args: string[]): string {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
-		env: withoutRepositoryEnv(),
+		// `worktree add` runs the repository's hooks: away from the TUI's terminal and its pane host (M-12).
+		...TOOL_SESSION_SPAWN,
+		env: dropHostTerminalEnv(withoutRepositoryEnv()),
 	}).trim();
 }
 

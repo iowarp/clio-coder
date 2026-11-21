@@ -110,6 +110,8 @@ export interface RunCliArgs {
 	outputFormat?: RunOutputFormat;
 	/** `-o/--output-last-message`: the file that receives the final answer when the run exits 0. */
 	outputLastMessage?: string;
+	/** `--output <path>`, repeatable: each is an `output: <path>` line of the prompt, a file the run owes (M-4). */
+	outputs: string[];
 	/**
 	 * `--output-schema <file.json>`: the JSON Schema the final answer must validate against (SPEC 6.8), or the task
 	 * envelope's inline `output.schema` object, checked with the same refusals.
@@ -144,7 +146,7 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  * | --turn-mode, --allow-tools, --deny-tools, --delegate-tools, --no-delegate | ok | usage |
  * | --resume, --continue, --fork, --name                           | ok    | usage |
  * | --continue <runId> (an ACP delegation run to continue)         | text  | ok    |
- * | --fail-on-noop, --verify, --answers                            | ok    | usage |
+ * | --fail-on-noop, --verify, --answers, --output                  | ok    | usage |
  * | --systemone                                                    | ok    | usage |
  * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
  * | --autonomy                                                     | ok    | usage |
@@ -199,6 +201,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): CliArgDiagnostic[] {
 		[parsed.maxToolCalls !== undefined, "--max-tool-calls"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
+		[parsed.outputs.length > 0, "--output"],
 		[parsed.systemOne !== undefined, "--systemone"],
 	];
 	for (const [present, flag] of mainOnly) {
@@ -269,6 +272,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		forkSession: false,
 		failOnNoop: false,
 		verify: [],
+		outputs: [],
 		skillPaths: [],
 		fileArgs: [],
 		messages: [],
@@ -313,6 +317,13 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 				if (isRunOutputFormat(value)) parsed.outputFormat = value;
 				else parsed.diagnostics.push({ type: "error", message: "--output-format must be one of: text|json|stream-json" });
 			}
+			continue;
+		}
+		if (arg === "--output" || arg?.startsWith("--output=")) {
+			const value = arg === "--output" ? need(arg) : arg.slice("--output=".length);
+			if (value !== null && value.trim().length > 0) {
+				if (!parsed.outputs.includes(value.trim())) parsed.outputs.push(value.trim());
+			} else if (value !== null) parsed.diagnostics.push({ type: "error", message: "--output requires a path" });
 			continue;
 		}
 		if (arg === "--output-last-message" || arg === "-o" || arg?.startsWith("--output-last-message=")) {

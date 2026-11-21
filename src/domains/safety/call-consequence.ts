@@ -11,7 +11,7 @@ import { describeBashCallConsequences, type PathKind } from "./command-consequen
 import { outwardShellReason } from "./containment.js";
 import type { SafetyDecision } from "./contract.js";
 import { isSameOrDescendant } from "./path-policy.js";
-import { shellCommandSteps } from "./protected-artifacts.js";
+import { type ShellCommandStep, shellCommandSteps } from "./protected-artifacts.js";
 
 /** What exists at `path` once resolved against `cwd`; null when it does not, or cannot be read. */
 function pathKindIn(cwd: string): (path: string) => PathKind {
@@ -138,6 +138,19 @@ const SCRIPT_MAX_BYTES = 1024 * 1024;
 const SCRIPTS_READ = 2;
 
 /**
+ * The script file one shell step executes, as spelled: the command word when it names a file by path, or
+ * an interpreter's first operand (`node probe.mjs`, `bun run x.ts`). Undefined for any other step, an
+ * inline `-c` script included.
+ */
+export function stepScriptOperand(step: ShellCommandStep): string | undefined {
+	if (step.commandPath !== undefined) return step.commandPath;
+	if (!SCRIPT_INTERPRETERS.has(basename(step.executable))) return undefined;
+	if (step.args.some((word) => INLINE_FLAGS.has(word))) return undefined;
+	const operands = step.args.filter((word) => !word.startsWith("-"));
+	return operands[0] === "run" ? operands[1] : operands[0];
+}
+
+/**
  * The script files a bash or run_script call executes, read where they lie inside `roots` (the workspace and
  * scratch roots), so approving a directory of scripts is not approving an unread file (M-5). A file outside them,
  * a link out of them, a binary or an inline `-c` script is not read. Each head is raw: the reader redacts it.
@@ -148,15 +161,8 @@ export function scriptFilesRun(call: ClassifierCall, roots: ReadonlyArray<string
 	if (call.tool === ToolNames.RunScript && typeof call.args?.script === "string") spelled.push(call.args.script);
 	else if (call.tool === ToolNames.Bash && typeof call.args?.command === "string") {
 		for (const step of shellCommandSteps(call.args.command)) {
-			if (step.commandPath !== undefined) {
-				spelled.push(step.commandPath);
-				continue;
-			}
-			if (!SCRIPT_INTERPRETERS.has(basename(step.executable))) continue;
-			if (step.args.some((word) => INLINE_FLAGS.has(word))) continue;
-			const operands = step.args.filter((word) => !word.startsWith("-"));
-			const first = operands[0] === "run" ? operands[1] : operands[0];
-			if (first !== undefined) spelled.push(first);
+			const operand = stepScriptOperand(step);
+			if (operand !== undefined) spelled.push(operand);
 		}
 	}
 	const found: ScriptFileRun[] = [];

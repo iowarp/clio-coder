@@ -455,6 +455,8 @@ test("a council member's one-line preview skips a code-fence line (FX-19.3)", ()
 	strictEqual(councilAnswerGist('```json\n{"answer":"tabs win"}\n```'), '{"answer":"tabs win"}');
 	strictEqual(councilAnswerGist("~~~\nplain body\n~~~"), "plain body");
 	strictEqual(councilAnswerGist("tabs win\n```json\n{}\n```"), "tabs win");
+	// A pretty-printed object of no known report shape reads as one line, not as its opening brace (f-r5-council-copy).
+	strictEqual(councilAnswerGist('```json\n{\n  "ok": true,\n  "note": "fine"\n}\n```'), '{"ok":true,"note":"fine"}');
 });
 
 test("a member answer with an empty findings array and no report shape is not previewed as no findings (FX-21)", () => {

@@ -70,6 +70,7 @@ import type { JobOperations } from "../tools/job-types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
 import { type ArcadeSession, openArcadeOverlay } from "./arcade-overlay.js";
+import { createAttachController } from "./attach-host.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
@@ -1176,6 +1177,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const loopJobs = deps.jobs
 		? reportLoopChanges(deps.jobs, ({ level, text }) => appendNotice(level, text, busNoticeSink))
 		: undefined;
+	// `/attach`: a second terminal watches this session, answers its card, or pairs.
+	const attachController = createAttachController({
+		bus: deps.bus,
+		chat: deps.chat,
+		...(deps.session ? { session: deps.session } : {}),
+		cards: () => overlayLifecycle.permissionCards(),
+		notice: (level, text) => appendNotice(level, text, busNoticeSink),
+		showTurn: (text, origin) => showMachineTurn(text, origin),
+	});
 	const eventProjection = createInteractiveEventProjection({
 		heldQueueNotice: (count) =>
 			`${count === 1 ? "1 queued message is" : `${count} queued messages are`} held and nothing was sent. ${keybindings.actionLabel("clio-coder.message.interrupt")} sends the queue in order, ${keybindings.actionLabel("clio-coder.queue.open")} then a restores it to the composer, and a new prompt takes it at its first slot.`,
@@ -1553,6 +1563,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
 		...(deps.panes ? { panes: deps.panes } : {}),
+		attach: attachController,
 		...(deps.music ? { music: deps.music } : {}),
 		...(loopJobs ? { jobs: loopJobs.jobs } : {}),
 		openModel: () => openModelOverlayState(),
@@ -2412,6 +2423,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				watchPane?.dispose();
 				muxBridge?.dispose();
 				peerInbox?.dispose();
+				attachController.dispose();
 				detachedBatchWake.dispose();
 				interactiveSubscriptions.dispose();
 				exitSummary.dispose();
