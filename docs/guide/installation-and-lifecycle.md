@@ -389,8 +389,8 @@ explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
 | Task | Command | Result |
 | --- | --- | --- |
 | Set up a new installation | `clio-coder configure` | Guided setup: choose the kind of model access you already have, select a discovered model, review what CLIO Coder checked, then start `clio-coder`. |
-| Change a connection | `clio-coder configure --section targets` | Open Connections to add or edit endpoints, credentials, and available models. |
-| Choose models for each role | `clio-coder configure --settings` | Open Chat, Fleet, or Context & Memory to choose the target and model used for that work. |
+| Change a connection | `clio-coder configure --section connections` | Open Connections to add or edit endpoints, credentials, and available models. |
+| Choose models for each role | `clio-coder configure --settings` | Open Models, Workers, or Context and memory to choose the target and model used for that work. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
 | Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions, and records fleet preflight results. |
 | Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before replacing an npm-global or installer install. It follows the channel an installer install recorded and leaves a pinned install alone. After success, CLIO Coder asks you to exit and restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS is not replaced under the running session: `/upgrade` arms the update to run after every session of that install has quit. |
@@ -1073,7 +1073,7 @@ its first entries, all read off the disk on that run, before removing anything;
 remembered list drifts as soon as a new artifact is written into a root. The
 roots and files that survive are listed too (`Survives: ...`). After a `--settings` or `--all` reset the command prints
 `clio-coder configure` as the next step, and after `--auth` it prints
-`clio-coder configure --section targets`.
+`clio-coder configure --section connections`.
 
 *   `--state`: Deletes the state root only. It holds every session transcript and the telemetry journals beside it, so a reset is the end of `resume`, `/view`, and their history. Project approvals live in the config root and survive it. Its preview carries that note.
 *   `--data`: Deletes the data root only: memory, the project store (`store/`, every tag's blobs and records) and any vendored external tools (durable products). Stored blobs and records are not recoverable once deleted, so copy out what you need first; the [`store` tool's](tool-usage.md#store-keep-results-and-datasets-outside-the-working-tree) `get` gives each blob's path. Vendored tools can be fetched again: `clio-coder tools install <id>` downloads them again.
@@ -1244,7 +1244,7 @@ chat after a successful setup.
 clio-coder configure
 clio-coder configure --quick
 clio-coder configure --settings
-clio-coder configure --section targets
+clio-coder configure --section connections
 ```
 
 Lifecycle facts that belong here:

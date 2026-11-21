@@ -33,7 +33,7 @@ The implicit `local` node already exists. Adding a node keeps unpinned work loca
 
 Use an existing SSH alias to select the user, port and identity. You can also pass `--user`, `--port` and `--identity-file` explicitly. `--labels cpu,build` adds operator declarations. Start with one slot until you know the node's workload and resource limits.
 
-In the terminal, `/settings fleet` opens the **Workers** area; choose **Add SSH node** under **Machines**. The guided flow asks for a name and host, then offers to test and record readiness or preview an install. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry. A test started here always records its result.
+In the terminal, `/settings workers` opens the **Workers** area; choose **Add SSH node** under **Machines**. The guided flow asks for a name and host, then offers to test and record readiness or preview an install. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry. A test started here always records its result.
 
 ::: capture tui-settings-fleet
 :::

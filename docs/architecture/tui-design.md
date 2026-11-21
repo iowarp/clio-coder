@@ -12,7 +12,7 @@ The governing architectural principle: **the user reads state from color, struct
 
 ## Output Styles
 
-Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal`). Default is the startup tier (`interface.outputDetail: standard`). Persisted values remain `compact`, `standard` and `detailed`. The control is **Output detail** in `/settings interface` or `clio-coder configure --section interface`. The row budgets below are the `POLICIES` in [transcript-detail.ts](../../src/interactive/transcript-detail.ts).
+Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal`). Default is the startup tier (`interface.outputDetail: standard`). Persisted values remain `compact`, `standard` and `detailed`. The control is **Output detail** in `/settings chat` or `clio-coder configure --section chat`. The row budgets below are the `POLICIES` in [transcript-detail.ts](../../src/interactive/transcript-detail.ts).
 
 | Content | Minimal | Default | Detailed |
 | :--- | :--- | :--- | :--- |
@@ -245,7 +245,7 @@ The visual hierarchy coordinates four primary screen surfaces: Header, Transcrip
 ### 4.1 Welcome Launchpad & Session Header
 
 The header operates in two distinct modes:
-- **Launchpad (before the first prompt)**: Default shows a seven-row titled panel with model, autonomy, awareness and one next action, plus an `Instructions` row when a project preload exists. Under 48 columns or 20 rows it keeps only the route and the next action. Detailed adds artwork, project facts, two reserved account-usage rows and a process-local tagline; below 48 columns or 30 rows it falls back to the Default panel. The next action names what blocks work (`/model` for an unset route, `/settings targets` for an unavailable or degraded one, then `/context init`, `/context refresh` or `/context` by awareness). Welcome-only reads happen off the render path. Minimal, demo-off, the ASCII glyph set (`CLIO_CODER_ASCII=1`, `TERM=dumb` or `TERM=unknown`) and screen-reader mode skip the launchpad and print a one-row identity header ([welcome-dashboard.ts](../../src/interactive/welcome-dashboard.ts)).
+- **Launchpad (before the first prompt)**: Default shows a seven-row titled panel with model, autonomy, awareness and one next action, plus an `Instructions` row when a project preload exists. Under 48 columns or 20 rows it keeps only the route and the next action. Detailed adds artwork, project facts, two reserved account-usage rows and a process-local tagline; below 48 columns or 30 rows it falls back to the Default panel. The next action names what blocks work (`/model` for an unset route, `/settings connections` for an unavailable or degraded one, then `/context init`, `/context refresh` or `/context` by awareness). Welcome-only reads happen off the render path. Minimal, demo-off, the ASCII glyph set (`CLIO_CODER_ASCII=1`, `TERM=dumb` or `TERM=unknown`) and screen-reader mode skip the launchpad and print a one-row identity header ([welcome-dashboard.ts](../../src/interactive/welcome-dashboard.ts)).
 - **Session Header (after prompt admission)**: One live line with brand, version and active route. Workspace and Git facts stay in the footer instead of repeating above the transcript. `/new` restores the tier-appropriate welcome.
 
 ### 4.2 Composer (ClioEditor)

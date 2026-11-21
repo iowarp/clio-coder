@@ -1,9 +1,8 @@
 import type { ClioSettings } from "./config.js";
 import { type RouteName, type RouteProvenance, routeFields } from "./route-provenance.js";
 import { getAtPath } from "./session-routing.js";
-import { settingsAreaForPath } from "./settings-areas.js";
+import { resolveSharedSettingsArea, settingsAreaForPath } from "./settings-areas.js";
 import { SETTING_CONTROLS } from "./settings-controls.js";
-import { resolveSettingsSection, settingsSectionForPath } from "./settings-navigation.js";
 import { renderUsdLimit } from "./telemetry/render.js";
 
 export const AUTONOMY_HELP = {
@@ -49,7 +48,7 @@ export function settingsAwareness(
 	limit = 12,
 	provenance?: RouteProvenance,
 ) {
-	const area = resolveSettingsSection(query);
+	const area = resolveSharedSettingsArea(query);
 	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
 
 	const controls = SETTING_CONTROLS.map((control, index) => {
@@ -57,9 +56,7 @@ export function settingsAwareness(
 		const score = terms.filter((term) => text.includes(term)).length;
 		return { control, index, score };
 	})
-		.filter(({ control, score }) =>
-			area ? settingsSectionForPath(control.path) === area : terms.length === 0 || score > 0,
-		)
+		.filter(({ control, score }) => (area ? settingsAreaForPath(control.path) === area : terms.length === 0 || score > 0))
 		.sort((a, b) => (area ? a.index - b.index : b.score - a.score || a.index - b.index))
 		.map(({ control }) => control);
 	const route = (value: ClioSettings["fleet"]["default"]) => ({
@@ -96,7 +93,7 @@ export function settingsAwareness(
 			tui: control.menu
 				? `/settings ${settingsAreaForPath(control.path)}`
 				: "no /settings row; Edit settings file in /settings advanced",
-			cli: `clio-coder configure --section ${settingsSectionForPath(control.path)}`,
+			cli: `clio-coder configure --section ${settingsAreaForPath(control.path)}`,
 		};
 	});
 	return {

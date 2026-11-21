@@ -12,13 +12,13 @@ import {
 import type { OutputStyle, PanesSettings, SmoothStreaming, TuiMode, WorkerPermissionMode } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
 import { getAtPath, resolveMemoryRoute } from "../core/session-routing.js";
-import { formatControlValue, orderSettingsEntries, type SettingControl } from "../core/settings-controls.js";
 import {
-	resolveSettingsSection,
-	SETTINGS_SECTIONS,
-	type SettingsSectionId,
-	settingsGroupForPath,
-} from "../core/settings-navigation.js";
+	resolveSharedSettingsArea,
+	SHARED_SETTINGS_AREAS,
+	type SharedSettingsAreaId,
+	settingsPlacementForPath,
+} from "../core/settings-areas.js";
+import { formatControlValue, orderSettingsEntries, type SettingControl } from "../core/settings-controls.js";
 import { renderUsdLimit } from "../core/telemetry/render.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
@@ -57,7 +57,7 @@ import {
 } from "../domains/scheduling/local-capacity.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
-import { editSettingControl, orderedSectionControls } from "./configure-controls.js";
+import { editSettingControl, orderedAreaControls } from "./configure-controls.js";
 import { editSettings } from "./configure-editor.js";
 import { runConfigureImport } from "./configure-import.js";
 import { runInteropReview } from "./configure-interop.js";
@@ -1327,6 +1327,8 @@ interface SectionIo {
 
 interface SectionAction {
 	controlPath?: string;
+	/** A setting path that places an action without a setting of its own beside that setting's group. */
+	place?: string;
 	label: string;
 	hint?: string | (() => string);
 	run: (io: SectionIo) => Promise<void>;
@@ -1455,8 +1457,12 @@ const DIAGNOSTICS_SECTION: SectionSpec = {
 	],
 };
 
-const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "actions">> = {
-	targets: {
+/**
+ * The hand-written parts of the configure screens, named by subject. Each part's summary rows open the area
+ * PART_AREA names; each action lands in the area its setting lives in, so the screens follow the shared areas.
+ */
+const CONTENT_PARTS = {
+	connections: {
 		fields: () => {
 			const settings = readSettings();
 			const rows: Array<readonly [string, string]> = [];
@@ -1470,6 +1476,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Add a target",
+				place: "targets",
 				hint: "register a provider endpoint",
 				run: async (io) => {
 					if (canRunOnboarding(io.streams)) {
@@ -1485,6 +1492,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Edit a target",
+				place: "targets",
 				hint: "endpoint, credentials, model, capabilities",
 				run: async (io) => {
 					const targets = readSettings().targets;
@@ -1506,6 +1514,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Rename a target",
+				place: "targets",
 				run: async (io) => {
 					const ids = readSettings().targets.map((target) => target.id);
 					if (ids.length === 0) return;
@@ -1522,6 +1531,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 			{
 				label: "Remove a target",
+				place: "targets",
 				run: async (io) => {
 					const settings = readSettings();
 					const ids = settings.targets.map((target) => target.id);
@@ -1540,7 +1550,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 		],
 	},
-	chat: {
+	chatModel: {
 		fields: () => {
 			const settings = readSettings();
 			return [
@@ -1551,8 +1561,6 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Model cycle set", listOr(settings.chat.modelPicker.cycleSet)],
 				["Max output tokens", String(settings.chat.maxOutputTokens)],
 				["Prompt prewarm", onOff(settings.chat.prewarm)],
-				["Retry transient errors", onOff(settings.chat.retry.enabled)],
-				["Max retries", String(settings.chat.retry.maxRetries)],
 			];
 		},
 		actions: [
@@ -1564,7 +1572,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 		],
 	},
-	fleet: {
+	workers: {
 		fields: () => {
 			const settings = readSettings();
 			return [
@@ -1573,7 +1581,6 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Fleet thinking", settings.fleet.default.thinkingLevel],
 				["Concurrency limit", concurrencyLabel(settings.fleet.concurrency)],
 				["Max retries", String(settings.fleet.retry.maxRetries)],
-				["Task worktree root", settings.fleet.worktrees.root],
 				["Tool calls per run", String(settings.fleet.limits.toolCallsPerRun)],
 				["Run timeout", `${settings.fleet.limits.internalRunTimeoutMs / 1000}s`],
 				["Worker profiles", listOr(Object.keys(settings.fleet.profiles))],
@@ -1720,7 +1727,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 		],
 	},
-	interface: {
+	display: {
 		fields: () => {
 			const settings = readSettings();
 			return [
@@ -1729,7 +1736,8 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Smooth streaming", settings.interface.smoothStreaming],
 				["Terminal progress", onOff(settings.interface.terminalProgress)],
 				["Desktop notifications", onOff(settings.interface.desktopNotifications)],
-				["Startup layout", settings.interface.panes.layout],
+				["Retry transient errors", onOff(settings.chat.retry.enabled)],
+				["Max retries", String(settings.chat.retry.maxRetries)],
 			];
 		},
 		actions: [
@@ -1827,10 +1835,12 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 		],
 	},
-	integrations: {
+	workspace: {
 		fields: () => {
 			const settings = readSettings();
 			const rows: Array<readonly [string, string]> = [
+				["Startup layout", settings.interface.panes.layout],
+				["Task worktree root", settings.fleet.worktrees.root],
 				["Trust project imports", settings.integrations.projectResources.trustProjectImports ? "trusted" : "untrusted"],
 				["External ACP agents", String(settings.integrations.externalAgents.entries.length)],
 				["Runtime plugins", listOr(settings.integrations.runtimePlugins)],
@@ -1911,7 +1921,33 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			},
 		],
 	},
+} satisfies Record<string, Pick<SectionSpec, "fields" | "actions">>;
+
+const PART_AREA: Record<keyof typeof CONTENT_PARTS, SharedSettingsAreaId> = {
+	connections: "models",
+	chatModel: "models",
+	workers: "workers",
+	context: "context",
+	safety: "safety",
+	display: "chat",
+	workspace: "workspace",
+	advanced: "advanced",
 };
+
+/** One area's screen: its parts' summary rows, and every hand-written action whose setting lives there. */
+function areaContent(area: SharedSettingsAreaId): Pick<SectionSpec, "fields" | "actions"> {
+	const parts = Object.entries(CONTENT_PARTS) as Array<
+		[keyof typeof CONTENT_PARTS, Pick<SectionSpec, "fields" | "actions">]
+	>;
+	return {
+		fields: () => parts.filter(([name]) => PART_AREA[name] === area).flatMap(([, part]) => part.fields()),
+		actions: parts.flatMap(([name, part]) =>
+			part.actions.filter(
+				(action) => (action.controlPath ? settingsPlacementForPath(action.controlPath).area : PART_AREA[name]) === area,
+			),
+		),
+	};
+}
 
 const GUIDED_CONTROL_PATHS = new Set([
 	"chat.target",
@@ -1946,32 +1982,36 @@ function settingControlAction(group: string, control: SettingControl): SectionAc
 	};
 }
 
-const SECTIONS: ReadonlyArray<SectionSpec> = SETTINGS_SECTIONS.map((section) => ({
-	id: section.id,
-	title: section.label,
-	summary: section.description,
-	aliases: section.aliases,
-	...SECTION_CONTENT[section.id],
-	actions: orderSettingsEntries(
-		section.id,
-		[
-			...SECTION_CONTENT[section.id].actions.map((action) => {
-				const path = action.controlPath;
-				if (!path) return action;
-				const control = orderedSectionControls(section.id).find(({ control }) => control.path === path)?.control;
-				return {
-					...action,
-					label: `${settingsGroupForPath(path)} · ${path.endsWith(".target") ? action.label : (control?.label ?? action.label)}`,
-					hint: () => `${formatControlValue(getAtPath(readSettings(), path))} · ${control?.description ?? ""}`,
-				};
-			}),
-			...orderedSectionControls(section.id)
-				.filter(({ control }) => !GUIDED_CONTROL_PATHS.has(control.path))
-				.map(({ group, control }) => ({ ...settingControlAction(group, control), controlPath: control.path })),
-		],
-		(action) => action.controlPath ?? "",
-	),
-}));
+const SECTIONS: ReadonlyArray<SectionSpec> = SHARED_SETTINGS_AREAS.map((area) => {
+	const content = areaContent(area.id);
+	const catalog = orderedAreaControls(area.id);
+	return {
+		id: area.id,
+		title: area.label,
+		summary: area.description,
+		aliases: area.aliases,
+		fields: content.fields,
+		actions: orderSettingsEntries(
+			area.id,
+			[
+				...content.actions.map((action) => {
+					const path = action.controlPath;
+					if (!path) return action;
+					const control = catalog.find(({ control }) => control.path === path)?.control;
+					return {
+						...action,
+						label: `${settingsPlacementForPath(path).group} · ${path.endsWith(".target") ? action.label : (control?.label ?? action.label)}`,
+						hint: () => `${formatControlValue(getAtPath(readSettings(), path))} · ${control?.description ?? ""}`,
+					};
+				}),
+				...catalog
+					.filter(({ control }) => !GUIDED_CONTROL_PATHS.has(control.path))
+					.map(({ group, control }) => ({ ...settingControlAction(group, control), controlPath: control.path })),
+			],
+			(action) => action.controlPath ?? action.place ?? "",
+		),
+	};
+});
 
 /** A `ParsedArgs` with nothing set, for the target wizard called from a section. */
 function emptyArgs(): ParsedArgs {
@@ -2192,7 +2232,7 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 function findSection(name: string): SectionSpec | undefined {
 	const wanted = name.trim().toLowerCase();
 	if (["diagnostics", "doctor", "diag"].includes(wanted)) return DIAGNOSTICS_SECTION;
-	return SECTIONS.find((section) => section.id === resolveSettingsSection(wanted));
+	return SECTIONS.find((section) => section.id === resolveSharedSettingsArea(wanted));
 }
 
 const SECTION_IDS: ReadonlyArray<string> = SECTIONS.map((section) => section.id);
@@ -2249,7 +2289,7 @@ async function runInteractive(
 		}
 		// Without a terminal there is nobody to answer, and printing a prompt into
 		// a pipe is a dead end that reads as a hang. The screen is still worth
-		// showing, so a scripted `configure --section fleet` is a read of that
+		// showing, so a scripted `configure --section workers` is a read of that
 		// section rather than a refusal.
 		if ((streams.in as { isTTY?: boolean }).isTTY !== true) {
 			renderSection(spec, streams.out).done("Done");

@@ -1,8 +1,9 @@
 /**
- * The interactive /settings taxonomy. `settings-navigation.ts` keeps the eight
- * sections that `clio-coder configure` and the GUI share; this module groups
- * the same controls by what a person expects to find, so a schema prefix never
- * decides where a row lives. Keep it free of UI and I/O imports.
+ * The settings taxonomy that /settings, `clio-coder configure` and the GUI share.
+ * It groups the controls by what a person expects to find, so a schema prefix
+ * never decides where a row lives. Recent & Pinned is the TUI's own landing
+ * entry; configure and the GUI list the other seven. Keep it free of UI and I/O
+ * imports.
  */
 export const SETTINGS_AREAS = [
 	{
@@ -17,7 +18,6 @@ export const SETTINGS_AREAS = [
 		description:
 			"Where models come from and which one answers: connections, the chat model, reasoning, speed, and quick switching.",
 		aliases: [
-			"targets",
 			"target",
 			"connections",
 			"connection",
@@ -33,13 +33,13 @@ export const SETTINGS_AREAS = [
 		id: "chat",
 		label: "Chat and display",
 		description: "How replies show up and recover: output detail, streaming, alerts, retries, transcript, and guidance.",
-		aliases: ["interface", "appearance", "terminal", "layout", "display", "retry"],
+		aliases: ["appearance", "terminal", "layout", "display", "retry"],
 	},
 	{
 		id: "workers",
 		label: "Workers",
 		description: "Workers and agents: default worker, profiles, agent routes, machines, limits, run history, and loops.",
-		aliases: ["agents", "agent", "fleet", "delegation", "delegate", "scouts", "routing", "worker", "loops"],
+		aliases: ["agents", "agent", "delegation", "delegate", "scouts", "routing", "worker", "loops"],
 	},
 	{
 		id: "context",
@@ -64,7 +64,6 @@ export const SETTINGS_AREAS = [
 			"file",
 			"git",
 			"worktrees",
-			"integrations",
 			"library",
 			"plugins",
 			"skills",
@@ -316,7 +315,24 @@ const GUIDED_ROW_ID_BY_PATH: Readonly<Record<string, string>> = {
 	"integrations.externalAgents.entries": "delegation.agents",
 };
 
+/** Where a setting path lives on every surface that lists settings: its guided row's place when one exists. */
+export function settingsPlacementForPath(path: string): SettingsPlacement {
+	return settingsPlacementForRow(GUIDED_ROW_ID_BY_PATH[path] ?? `setting.${path}`, path);
+}
+
 /** The area a person is sent to for a setting path, which is its guided row when one exists. */
 export function settingsAreaForPath(path: string): SettingsAreaId {
-	return settingsPlacementForRow(GUIDED_ROW_ID_BY_PATH[path] ?? `setting.${path}`, path).area;
+	return settingsPlacementForPath(path).area;
+}
+
+export type SharedSettingsAreaId = Exclude<SettingsAreaId, "recent">;
+/** The areas `clio-coder configure` and the GUI list: every area but the TUI's Recent & Pinned. */
+export const SHARED_SETTINGS_AREAS = SETTINGS_AREAS.filter(
+	(area): area is Extract<(typeof SETTINGS_AREAS)[number], { id: SharedSettingsAreaId }> => area.id !== "recent",
+);
+
+/** An area `clio-coder configure` and the GUI list, by id or alias; the TUI's Recent & Pinned is not one. */
+export function resolveSharedSettingsArea(name: string): SharedSettingsAreaId | undefined {
+	const area = resolveSettingsArea(name);
+	return area === "recent" ? undefined : area;
 }

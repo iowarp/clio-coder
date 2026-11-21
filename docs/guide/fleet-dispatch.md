@@ -312,7 +312,7 @@ fleet:
       residency: observe        # default; manage requires an explicit opt-in
 ```
 
-`/settings fleet` opens **Settings → Fleet**; the slash command `/fleet` opens the
+`/settings workers` opens **Settings → Workers**; the slash command `/fleet` opens the
 Fleet Runs board instead. **Add SSH node** asks for a name and host, then offers a
 test or installation preview. **Discover with Tailscale** offers peer endpoints.
 Each SSH row opens check evidence and timestamps plus **Test**, **Preview exact
@@ -532,8 +532,8 @@ Delegated peers are listed separately; their presence does not verify SSH
 hardware or project access. Inference routing remains a separate choice
 ([fleet-inventory.ts](../../src/domains/prompts/fleet-inventory.ts)).
 
-Set a standing preference through **Settings → Fleet → Standing worker node
-preference** (`/settings fleet`), or set `fleet.defaultNode` to `local` or a
+Set a standing preference through **Settings → Workers → Standing worker node
+preference** (`/settings workers`), or set `fleet.defaultNode` to `local` or a
 configured node id. Leave it `null` to permit a once-per-session question when
 useful. Profile pins live at `fleet.profiles.<name>.node`, and an agent bound to
 that profile through `fleet.agentProfiles` inherits the pin. The compact dispatch
@@ -2232,7 +2232,7 @@ hard block.
 - `/fleet` opens the Fleet Runs board: running, retrying and finished runs with their
   actual node. `←` on an empty composer opens the same overlay, and so does `Alt+W` in a
   session without a pane host. In a `--with-panes` session `Alt+W` drives the
-  [workers dock](#workers-dock-and-dashboard) instead. Settings → Fleet (`/settings fleet`) holds
+  [workers dock](#workers-dock-and-dashboard) instead. Settings → Workers (`/settings workers`) holds
   the default worker, profiles and node pins, the standing placement preference, guided
   SSH add and optional Tailscale discovery, and node rows with readiness and capacity.
   Open an SSH row for evidence, timestamps, a recorded test, installation preview or
