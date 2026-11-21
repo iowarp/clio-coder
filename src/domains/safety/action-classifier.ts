@@ -813,7 +813,7 @@ function deleteEventReasons(
 	event: Extract<CommandPathEvent, { kind: "delete" }>,
 	bases: ShellBases,
 	scratchRoots: ReadonlyArray<string> | undefined,
-	throughLink?: (abs: string) => boolean,
+	throughLink?: (abs: string, follows: boolean) => boolean,
 ): string[] {
 	if (event.scope === "input") return [`${DELETE_PATH_REASON_PREFIX}unresolved: operands from input`];
 	if (event.scope === "remote") return [`${DELETE_PATH_REASON_PREFIX}remote: ${event.target}`];
@@ -837,10 +837,15 @@ function deleteEventReasons(
 		scope = "children";
 	}
 	if (!path.isAbsolute(target) && bases === null) return [`${DELETE_PATH_REASON_PREFIX}unresolved: ${raw}`];
+	// A delete goes through a link it names when the path ends in `/` or `/.`, expands a glob below it, or is a find
+	// root; a bare link name removes only the link.
+	const follows =
+		scope === "children" || event.scope === "children" || event.findRoot !== undefined || /\/\.?$/u.test(expanded);
+	const through = throughLink === undefined ? undefined : (abs: string) => throughLink(abs, follows);
 	const from = path.isAbsolute(target) ? [undefined] : (bases ?? []);
 	const reasons = new Set<string>();
 	for (const base of from) {
-		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? [], throughLink);
+		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? [], through);
 		if (reason !== null) reasons.add(reason);
 	}
 	return [...reasons];
@@ -870,8 +875,8 @@ function walkPathReasons(
 	// Links the command plants before a delete, resolved from every base; `unknownLink` once one cannot be placed.
 	const planted: string[] = [];
 	let unknownLink = false;
-	const throughLink = (abs: string): boolean =>
-		unknownLink || planted.some((link) => abs !== link && isSameOrDescendant(abs, link));
+	const throughLink = (abs: string, follows: boolean): boolean =>
+		unknownLink || planted.some((link) => (follows || abs !== link) && isSameOrDescendant(abs, link));
 	for (const [index, event] of walk.entries()) {
 		if (event.kind === "subshell") {
 			if (event.open) {

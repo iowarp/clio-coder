@@ -785,8 +785,15 @@ function cdTarget(segment: ReadonlyArray<string>): string | null {
  * a function definition, or with CDPATH named.
  */
 export type CommandPathEvent =
-	| { kind: "cd"; target: string; unmodeled: boolean }
-	| { kind: "write"; target: string }
+	| {
+			kind: "cd";
+			target: string;
+			unmodeled: boolean;
+			/** Whether the later steps of its `&&` run run only once this cd succeeded (row 261). */
+			certain?: boolean;
+			run?: number;
+	  }
+	| { kind: "write"; target: string; run?: number }
 	| {
 			kind: "link";
 			symbolic: boolean;
@@ -795,8 +802,19 @@ export type CommandPathEvent =
 			origin: LinkOrigin;
 			/** Where each link itself may land, as written; absent when the command reads them from input. */
 			links?: string[];
+			/** `mv`: the sources leave where they were. */
+			moved?: boolean;
+			run?: number;
 	  }
-	| { kind: "delete"; target: string; scope: DeleteScope; findRoot?: FindRootFilter }
+	| {
+			kind: "delete";
+			target: string;
+			scope: DeleteScope;
+			findRoot?: FindRootFilter;
+			/** A find root's whole argument list, so a reader can tell what its expression may select. */
+			expression?: string[];
+			run?: number;
+	  }
 	| { kind: "subshell"; open: boolean };
 
 /**
@@ -842,6 +860,17 @@ interface CommandPathWalkState {
 	heredocSeen: boolean;
 	/** Whether a top-level here-document counts, or only one inside a substitution or `sh -c`. */
 	topLevelHeredocs: boolean;
+	/**
+	 * The `&&` run the current segment belongs to: a new id after any other separator. Ids never repeat, a child
+	 * script's included, so two events share one only when the later runs only if the earlier step succeeded.
+	 */
+	run: number;
+	runs: number;
+	/** The separator before the current segment, null at the start of a script. */
+	lastSeparator: string | null;
+	/** The words of the segment before the current one, and of the one piped into it, if any. */
+	lastArgv: string[];
+	pipedFrom: string[] | null;
 }
 
 /** Words that open a loop whose condition and body may run more than once; `done` closes it. */
@@ -876,6 +905,11 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
 		caseSeen: false,
 		heredocSeen: false,
 		topLevelHeredocs,
+		run: 0,
+		runs: 0,
+		lastSeparator: null,
+		lastArgv: [],
+		pipedFrom: null,
 	};
 	collectPathWalk(command, 0, walk);
 	return walk.caseSeen ? walk.events.filter((event) => event.kind !== "subshell") : walk.events;
@@ -1287,6 +1321,12 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
 			collectSegmentPathEvents(segment, depth, walk);
 			segment = [];
+			walk.pipedFrom = token.value === "|" ? walk.lastArgv : null;
+			if (token.value !== "&&") {
+				walk.runs += 1;
+				walk.run = walk.runs;
+			}
+			walk.lastSeparator = token.value;
 			// `name()` defines a function whose body may run any number of times.
 			const next = tokens[index + 1];
 			if (token.value === "(" && next?.operator === true && next.value === ")") walk.functionSeen = true;
@@ -1303,11 +1343,22 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 
 function collectChildScript(script: string, depth: number, walk: CommandPathWalkState): void {
 	if (depth >= INNER_SHELL_MAX_DEPTH) return;
+	const saved = { run: walk.run, lastSeparator: walk.lastSeparator, lastArgv: walk.lastArgv, pipedFrom: walk.pipedFrom };
+	const fresh = (): void => {
+		walk.runs += 1;
+		walk.run = walk.runs;
+		walk.lastSeparator = null;
+		walk.lastArgv = [];
+		walk.pipedFrom = null;
+	};
 	walk.events.push({ kind: "subshell", open: true });
+	fresh();
 	collectPathWalk(script, depth + 1, walk);
 	// A body line can hide a later command from the walk above, as a lone quote does.
 	const withoutBodies = withoutHeredocBodies(script);
+	fresh();
 	if (withoutBodies !== script) collectPathWalk(withoutBodies, depth + 1, walk);
+	Object.assign(walk, saved);
 	// A here-document body can move where the scanner thinks a substitution
 	// ends, so the script may hold commands of the parent: keep its cds.
 	if (!walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
@@ -1325,26 +1376,104 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 		if (LOOP_WORDS.has(word)) walk.loopDepth += 1;
 		if (word === "case") walk.caseSeen = true;
 	}
+	const first = walk.events.length;
+	const unmodeled = walk.loopDepth > 0 || walk.functionSeen || walk.cdpath || walk.heredocSeen;
+	// The steps that run only once the step before them succeeded keep a cd's landing.
+	const certain = walk.lastSeparator === null || [";", "&&", "("].includes(walk.lastSeparator);
+	// `env -C DIR cmd` runs cmd in DIR, and `env -S 'cmd args'` runs the words of its string (row 261).
+	const env = envInvocation(argv);
+	if (env?.chdir !== undefined) {
+		walk.events.push({ kind: "subshell", open: true });
+		walk.events.push({ kind: "cd", target: env.chdir, unmodeled, certain: true });
+	}
 	const writes: string[] = [];
 	collectRedirectTargets(segment, writes);
 	collectInvokedWriteTargets(argv, writes);
 	collectInPlaceEditTargets(argv, writes);
 	for (const target of writes.filter(isInterestingWriteTarget)) walk.events.push({ kind: "write", target });
 	collectLinkEvents(argv, walk.events);
+	const deletesFrom = walk.events.length;
 	collectDeleteEvents(argv, walk.events);
+	// `xargs rm` removes what the stage piped into it prints: an echo's or printf's words, or a find's matches.
+	if (
+		walk.pipedFrom !== null &&
+		walk.events.slice(deletesFrom).some((event) => event.kind === "delete" && event.scope === "input")
+	)
+		walk.events.push(...pipedDeletes(walk.pipedFrom));
+	if (env?.split !== undefined) collectChildScript(env.split, depth, walk);
+	if (env?.chdir !== undefined && !walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
 	const cd = cdTarget(argv);
-	if (cd !== null) {
-		walk.events.push({
-			kind: "cd",
-			target: cd,
-			unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath || walk.heredocSeen,
-		});
-	}
+	if (cd !== null) walk.events.push({ kind: "cd", target: cd, unmodeled, certain });
+	for (const event of walk.events.slice(first))
+		if (event.kind !== "subshell" && event.run === undefined) event.run = walk.run;
+	walk.lastArgv = argv;
 	const script = segmentShellScript(argv);
 	if (typeof script === "string") collectChildScript(script, depth, walk);
 	// The body starts on the next line, so this segment's own cd is real.
 	if ((depth > 0 || walk.topLevelHeredocs) && segment.some((token) => token.operator && token.value === "<<"))
 		walk.heredocSeen = true;
+}
+
+/**
+ * What a leading `env` does besides setting variables: `-C DIR` (`--chdir`) runs the command in DIR, and `-S STR`
+ * (`--split-string`) runs the words of STR followed by the rest. Null when the segment does not start with env.
+ */
+function envInvocation(argv: ReadonlyArray<string>): { chdir?: string; split?: string } | null {
+	let index = 0;
+	while (index < argv.length && /^[A-Za-z_]\w*=/u.test(argv[index] ?? "")) index += 1;
+	if (basenameToken(argv[index]) !== "env") return null;
+	const out: { chdir?: string; split?: string } = {};
+	for (index += 1; index < argv.length; index += 1) {
+		const word = argv[index] ?? "";
+		if (word === "--") {
+			index += 1;
+			break;
+		}
+		if (word.startsWith("--")) {
+			const eq = word.indexOf("=");
+			const name = eq === -1 ? word : word.slice(0, eq);
+			const takes = name === "--chdir" || name === "--split-string" || name === "--unset";
+			const value = eq !== -1 ? word.slice(eq + 1) : takes ? argv[++index] : undefined;
+			if (name === "--chdir" && value !== undefined) out.chdir = value;
+			if (name === "--split-string" && value !== undefined) out.split = value;
+			continue;
+		}
+		if (word.startsWith("-") && word !== "-") {
+			for (let at = 1; at < word.length; at += 1) {
+				const flag = word[at] as string;
+				if (!"uCS".includes(flag)) continue;
+				const rest = word.slice(at + 1);
+				const value = rest.length > 0 ? rest : argv[++index];
+				if (flag === "C" && value !== undefined) out.chdir = value;
+				if (flag === "S" && value !== undefined) out.split = value;
+				break;
+			}
+			continue;
+		}
+		if (/^[A-Za-z_]\w*=/u.test(word)) continue;
+		break;
+	}
+	if (out.split !== undefined) {
+		const rest = argv.slice(index).map((word) => `'${word.replaceAll("'", `'\\''`)}'`);
+		out.split = [out.split, ...rest].join(" ");
+	}
+	return out.chdir === undefined && out.split === undefined ? null : out;
+}
+
+/** The deletes `xargs rm` makes of a piped stage: each literal word an echo or printf prints, or a find's roots. */
+function pipedDeletes(producer: ReadonlyArray<string>): CommandPathEvent[] {
+	const index = commandTokenIndex(producer);
+	if (index === null) return [];
+	const name = basenameToken(producer[index]);
+	if (name === "find") return findRootDeletes(producer.slice(index + 1));
+	if (name !== "echo" && name !== "printf") return [];
+	let words = producer.slice(index + 1);
+	if (name === "echo") while (/^-[neE]+$/u.test(words[0] ?? "")) words = words.slice(1);
+	else words = words.slice(1);
+	return words
+		.flatMap((word) => word.split(/\s+/u))
+		.filter((word) => word !== "")
+		.map((target) => ({ kind: "delete", target, scope: "path" }) as CommandPathEvent);
 }
 
 /** Commands that run the command after them, possibly with options and arguments of their own. */
@@ -1543,7 +1672,16 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 		});
 		return;
 	}
-	if (sources.length > 0) out.push({ kind: "link", symbolic: symbolic || copied, sources, linkDirs, origin, links });
+	if (sources.length > 0)
+		out.push({
+			kind: "link",
+			symbolic: symbolic || copied,
+			sources,
+			linkDirs,
+			origin,
+			links,
+			...(executable === "mv" ? { moved: true } : {}),
+		});
 }
 
 /**
@@ -3712,7 +3850,13 @@ function findTestMatchesAll(test: string, value: string | undefined): boolean {
 
 function findRootDeletes(args: ReadonlyArray<string>): CommandPathEvent[] {
 	const findRoot: FindRootFilter = findExpressionFilters(args) ? "filtered" : "unfiltered";
-	return findRoots(args).map((target) => ({ kind: "delete", target, scope: "children", findRoot }));
+	return findRoots(args).map((target) => ({
+		kind: "delete",
+		target,
+		scope: "children",
+		findRoot,
+		expression: [...args],
+	}));
 }
 
 function findRoots(args: ReadonlyArray<string>): string[] {

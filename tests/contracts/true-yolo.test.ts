@@ -559,6 +559,25 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		"unlink .git",
 		"find . -delete",
 		"mv .git ../old-git",
+		// Row 261 bounce: `$PWD`, find selecting .git, env -S and -C, mv -t, xargs fed .git, git worktree remove, and a
+		// delete through a link the same command plants, by `/`, `/.`, a glob or a find root.
+		'rm -rf "$PWD/.git"',
+		'rm -rf "${PWD}/.git"',
+		'mv "$PWD/.git" /tmp/g',
+		"find . -name .git -exec rm -rf {} +",
+		"find . -name .git -delete",
+		"find .git -mtime -99999 -delete",
+		"env -S 'rm -rf .git'",
+		`env -C .. rm -rf ${basename(cwd)}/.git`,
+		"mv -ft /tmp .git",
+		"mv -t/tmp .git",
+		"echo .git | xargs rm -rf",
+		"git worktree remove --force .",
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/"`,
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/."`,
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/"*`,
+		`ln -s ${cwd} "$TMPDIR/l261"; find "$TMPDIR/l261" -delete`,
+		`ln -s ${cwd}/.git "$TMPDIR/g261"; rm -rf "$TMPDIR/g261/"*`,
 	]) {
 		const decision = engine.evaluate(bash(command), "default", contained);
 		strictEqual(`${decision.kind}/${decision.reasonCode}`, gitFloor, command);
@@ -566,7 +585,19 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(engine.evaluate(bash(command), "yolo").kind, "block", command);
 	}
 	// A delete inside .git keeps its ordinary review, and a pure `&&` chain from the temp cd deletes the temp .git.
-	for (const command of ["rm -f .git/index.lock", "rm -rf .git/worktrees/x", 'cd "$TMPDIR" && rm -rf .git']) {
+	// Row 261 bounce: a successful cd in a pure `&&` run moves the base, a glob followed by `..` or a brace sequence
+	// that cannot name the workspace .git does not hit, and a bare link name removes only the link.
+	for (const command of [
+		"rm -f .git/index.lock",
+		"rm -rf .git/worktrees/x",
+		'cd "$TMPDIR" && rm -rf .git',
+		'cd "$TMPDIR/fixture" && rm -rf .git',
+		"cd fixtures/repo && rm -rf .git",
+		"cd /tmp/other && rm -rf .git",
+		'rm -rf "$TMPDIR/foo/*/../bar"',
+		"rm -rf $TMPDIR/fixture-{1..3}/.git",
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -f "$TMPDIR/l261"`,
+	]) {
 		strictEqual(verdict(command, "yolo").includes("yolo-floor"), false, command);
 		strictEqual(engine.evaluate(bash(command), "default", contained).reasonCode.includes("yolo-floor"), false, command);
 	}

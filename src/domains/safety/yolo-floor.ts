@@ -639,16 +639,42 @@ function deleteHit(target: string, reason: string): YoloFloorHit {
 	};
 }
 
-/** Brace alternatives as bash expands them before globbing; null for a sequence (`{1..3}`) or too many words. */
+/** A bash brace sequence's words: `{1..3}`, `{a..c}`, `{01..10..2}`; null for anything else or too many. */
+function braceSequence(body: string): string[] | null {
+	const numeric = /^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$/u.exec(body);
+	if (numeric !== null) {
+		const [from, to] = [Number(numeric[1]), Number(numeric[2])];
+		const step = Math.abs(Number(numeric[3] ?? 1)) || 1;
+		const width = /^-?0\d/u.test(numeric[1] ?? "") || /^-?0\d/u.test(numeric[2] ?? "") ? (numeric[1] ?? "").length : 0;
+		if (Math.abs(to - from) / step > 64) return null;
+		const out: string[] = [];
+		for (let value = from; from <= to ? value <= to : value >= to; value += from <= to ? step : -step)
+			out.push(String(value).padStart(width, "0"));
+		return out;
+	}
+	const alpha = /^([A-Za-z])\.\.([A-Za-z])$/u.exec(body);
+	if (alpha === null) return null;
+	const [from, to] = [(alpha[1] as string).charCodeAt(0), (alpha[2] as string).charCodeAt(0)];
+	if (Math.abs(to - from) > 64) return null;
+	const out: string[] = [];
+	for (let code = from; from <= to ? code <= to : code >= to; code += from <= to ? 1 : -1)
+		out.push(String.fromCharCode(code));
+	return out;
+}
+
+/** Brace alternatives and sequences as bash expands them before globbing; null for too many words or a nesting. */
 function expandBraces(word: string, depth = 0): string[] | null {
 	if (depth > 8) return null;
 	for (const match of word.matchAll(/\{([^{}]*)\}/gu)) {
 		const body = match[1] ?? "";
-		if (body.includes("..")) return null;
-		if (!body.includes(",")) continue;
+		const alternatives = body.includes(",") ? body.split(",") : braceSequence(body);
+		if (alternatives === null) {
+			if (body.includes("..")) return null;
+			continue;
+		}
 		const start = match.index;
 		const out: string[] = [];
-		for (const alternative of body.split(",")) {
+		for (const alternative of alternatives) {
 			const more = expandBraces(`${word.slice(0, start)}${alternative}${word.slice(start + match[0].length)}`, depth + 1);
 			if (more === null) return null;
 			out.push(...more);
@@ -663,11 +689,12 @@ const GLOB_SEGMENT = /[*?[]/u;
 
 /**
  * Whether one path segment as written can name `name`: a literal compares as text, a glob as bash matches it with
- * dotglob off (a leading dot is matched only by a leading dot). A glob the reader cannot translate matches anything.
+ * dotglob off (a leading dot is matched only by a leading dot), or as find's -name matches it with `dotglob`.
+ * A glob the reader cannot translate matches anything.
  */
-function segmentNames(segment: string, name: string): boolean {
+function segmentNames(segment: string, name: string, dotglob = false): boolean {
 	if (!GLOB_SEGMENT.test(segment)) return segment === name;
-	if (name.startsWith(".") && !segment.startsWith(".")) return false;
+	if (!dotglob && name.startsWith(".") && !segment.startsWith(".")) return false;
 	let source = "";
 	for (let index = 0; index < segment.length; index += 1) {
 		const char = segment[index] as string;
@@ -683,7 +710,7 @@ function segmentNames(segment: string, name: string): boolean {
 		} else source += char.replace(/[.*+?^${}()|[\]\\/-]/gu, "\\$&");
 	}
 	try {
-		return new RegExp(`^${source}$`, "u").test(name);
+		return new RegExp(`^${source}$`, "su").test(name);
 	} catch {
 		return true;
 	}
@@ -712,52 +739,122 @@ function emptiesGit(written: ReadonlyArray<string>, git: ReadonlyArray<string>):
 	);
 }
 
+/** A path the shell follows through its last component: `x/`, `x/.`, `.`, `..`. */
+const followsLast = (word: string): boolean => word.endsWith("/") || /(?:^|\/)\.{1,2}$/u.test(word);
+
+/**
+ * Whether a find expression keeps `.git` out of what it removes: no alternation or negation, and a -name, -iname,
+ * -path or -wholename test whose pattern cannot be `.git` or end in `/.git`. A test that rejects nothing, a type or
+ * time test alone, or a -regex does not; find's patterns match a leading dot.
+ */
+function findExcludesGit(expression: ReadonlyArray<string>): boolean {
+	if (expression.some((word) => ["-o", "-or", ",", "!", "-not", "("].includes(word))) return false;
+	return expression.some((word, index) => {
+		const pattern = expression[index + 1];
+		if (pattern === undefined) return false;
+		const fold = word.startsWith("-i");
+		const name = fold ? ".git" : ".git";
+		const value = fold ? pattern.toLowerCase() : pattern;
+		if (word === "-name" || word === "-iname") return !segmentNames(value, name, true);
+		if (/^-i?(?:path|wholename)$/u.test(word)) {
+			const last = value.split("/").at(-1) ?? "";
+			return !value.includes(".git") && !segmentNames(last, name, true) && !/\*\*?$|\*\/?$/u.test(value);
+		}
+		return false;
+	});
+}
+
+interface FloorLink {
+	/** Where the link lands, as segments, and where it points, or null when the floor cannot place its source. */
+	at: string[];
+	to: string[] | null;
+}
+
 /**
  * The floor's reading of a delete of the workspace's own `.git` (maintainer ruling, row 261): deleting, emptying or
  * moving away the `.git` directory or a linked worktree's `.git` file, the workspace root, or a directory above it,
- * however rm, rmdir, unlink, shred, an unfiltered `find -delete` or `find -exec rm`, or mv names it, glob and brace
- * included. A relative target resolves from the call's cwd and every directory a literal cd may leave the shell in,
- * since a cd may fail and a `;`, `||` or newline runs the delete where the shell already was. A pure `&&` chain from
- * a cd to the temp root reaches here already projected (XR-43), so it is placed under the temp root alone. After a cd
- * the floor cannot place, a relative target that could still name the `.git`, the workspace or one of its parents
- * from some directory is a hit. A delete inside `.git` (a stale `index.lock`, `.git/worktrees/x`) and a filtered
- * `find` keep their ordinary judgment, and a target named only at run time is not placed.
+ * through rm, rmdir, unlink, an unfiltered `find -delete` or `-exec rm` (or one whose expression may select `.git`),
+ * `xargs rm` fed a literal list or a find, mv, or `git worktree remove`, globs, braces and `$PWD` included, and through
+ * a link the same command planted. A relative target resolves from every directory the shell may be in: a cd moves
+ * the base for the rest of its `&&` run, but after `;`, `||` or a newline a failed cd leaves the shell where it was,
+ * so both bases count; a pure `&&` chain from a cd to the temp root reaches here already projected (XR-43). After a cd
+ * the floor cannot place, a relative target that could still name the `.git`, the workspace or one of its parents is a
+ * hit. A delete inside `.git` (a stale `index.lock`, `.git/worktrees/x`) keeps its ordinary judgment, a bare link name
+ * removes only the link, and a target named only at run time is not placed.
  */
 export function yoloFloorWorkspaceGitHit(command: string, cwd: string, workspace: string): YoloFloorHit | null {
 	const lexicalWorkspace = path.resolve(workspace);
 	const realWorkspace = canonicalizePath(lexicalWorkspace) ?? lexicalWorkspace;
 	const gitPaths = [...new Set([lexicalWorkspace, realWorkspace])].map((root) => [...pathSegments(root), ".git"]);
+	const workspaceNames = new Set(gitPaths.flat());
+	const reachesGit = (written: ReadonlyArray<string>): boolean =>
+		gitPaths.some((git) => segmentsReach(written, git, false) || emptiesGit(written, git));
+	/** Each form a written path takes from each base: as written, and through the real path of what it walks. */
 	const placed = (target: string, bases: ReadonlyArray<string>): string[][] => {
 		const segments = target.split("/");
 		const globAt = segments.findIndex((segment) => GLOB_SEGMENT.test(segment));
 		const literal = globAt === -1 ? target : segments.slice(0, globAt).join("/") || (target.startsWith("/") ? "/" : ".");
 		const rest = globAt === -1 ? [] : segments.slice(globAt).filter((segment) => segment !== "" && segment !== ".");
+		const follow = globAt !== -1 || followsLast(literal) || target.endsWith("/");
 		const from = path.isAbsolute(literal) ? ["/"] : bases;
 		return from.flatMap((base) => {
 			const lexical = path.resolve(base, literal);
-			const real = canonicalizeRawPath(literal, base);
+			// rm, rmdir and mv act on a link itself unless the path goes through it.
+			const parent = follow ? null : canonicalizeRawPath(path.dirname(literal), base);
+			const real = follow
+				? canonicalizeRawPath(literal, base)
+				: parent === null
+					? null
+					: path.join(parent, path.basename(lexical));
 			return [...new Set([lexical, ...(real === null ? [] : [real])])].map((dir) => [...pathSegments(dir), ...rest]);
 		});
 	};
 	/** Why a written target reaches the `.git`, or null. */
-	const reaches = (raw: string, bases: ReadonlyArray<string>, unplaced: boolean): string | null => {
-		const home = expandHomeWord(raw);
-		if (home === null) return null;
-		const words = expandBraces(home);
-		if (words === null) return /\.git|^[./]*$/u.test(home) ? raw : null;
-		for (const word of words) {
-			// `..` after a glob climbs out of whatever matched: nothing places it.
-			const afterGlob = word.split("/").slice(word.split("/").findIndex((part) => GLOB_SEGMENT.test(part)));
-			if (GLOB_SEGMENT.test(word) && afterGlob.includes("..")) return raw;
-			for (const written of placed(word, bases)) {
-				if (gitPaths.some((git) => segmentsReach(written, git, false) || emptiesGit(written, git))) return raw;
+	const reaches = (
+		raw: string,
+		bases: ReadonlyArray<string>,
+		unplaced: boolean,
+		links: ReadonlyArray<FloorLink>,
+		follows = false,
+	): string | null => {
+		// `$PWD` is the directory the shell is in, each base.
+		const pwd = /^(?:\$PWD|\$\{PWD\})(?=\/|$)/u.exec(raw);
+		const spellings = pwd === null ? [raw] : bases.map((base) => `${base}${raw.slice(pwd[0].length)}`);
+		for (const spelling of spellings) {
+			const home = expandHomeWord(spelling);
+			if (home === null) continue;
+			const words = expandBraces(home);
+			if (words === null) {
+				if (/\.git|^[./]*$/u.test(home)) return raw;
+				continue;
 			}
-			if (unplaced && !path.isAbsolute(word)) {
-				const inner = path.posix
-					.normalize(word)
-					.split("/")
-					.filter((part) => part !== "" && part !== "." && part !== "..");
-				if (inner.length === 0 || gitPaths.some((git) => segmentsReach(inner, git, true))) return raw;
+			for (const word of words) {
+				const parts = word.split("/");
+				const globAt = parts.findIndex((part) => GLOB_SEGMENT.test(part));
+				if (globAt !== -1 && parts.slice(globAt + 1).includes("..")) {
+					// `..` after a glob climbs out of whatever matched, a link included: only a name that can be the `.git`,
+					// the workspace or a parent of it, or no name at all, may land on one.
+					const after = parts.slice(parts.lastIndexOf("..") + 1).filter((part) => part !== "" && part !== ".");
+					const next = after[0];
+					if (next === undefined || [".git", ...workspaceNames].some((name) => segmentNames(next, name))) return raw;
+					continue;
+				}
+				const through = follows || globAt !== -1 || followsLast(word);
+				for (const written of placed(word, bases)) {
+					if (reachesGit(written)) return raw;
+					for (const link of links) {
+						if (written.length < link.at.length || (written.length === link.at.length && !through)) continue;
+						if (!link.at.every((segment, index) => segmentNames(written[index] as string, segment))) continue;
+						if (link.to === null || reachesGit([...link.to, ...written.slice(link.at.length)])) return raw;
+					}
+				}
+				if (unplaced && !path.isAbsolute(word)) {
+					const inner = path.posix
+						.normalize(word)
+						.split("/")
+						.filter((part) => part !== "" && part !== "." && part !== "..");
+					if (inner.length === 0 || gitPaths.some((git) => segmentsReach(inner, git, true))) return raw;
+				}
 			}
 		}
 		return null;
@@ -769,66 +866,127 @@ export function yoloFloorWorkspaceGitHit(command: string, cwd: string, workspace
 			reason: `matched ${id}: ${how} ${spelled}, which reaches the workspace's own ${path.join(lexicalWorkspace, ".git")}; yolo never deletes, empties or moves away the workspace's git history, even when the operator named the command; delete inside it by its full path, or ask the operator to run it themselves`,
 		};
 	};
-	const reached = new Set<string>([cwd]);
-	let anyUnplaced = false;
 	for (const walk of extractCommandPathWalks(command)) {
 		let bases: string[] = [cwd];
+		// Every directory the shell may be in once the current `&&` run stops early.
+		let possible = new Set(bases);
+		let run: number | undefined;
 		let unplaced = false;
-		const saved: Array<{ bases: string[]; unplaced: boolean }> = [];
+		let links: FloorLink[] = [];
+		const saved: Array<{ bases: string[]; possible: Set<string>; run: number | undefined; unplaced: boolean }> = [];
 		for (const event of walk) {
 			if (event.kind === "subshell") {
-				if (event.open) saved.push({ bases: [...bases], unplaced });
-				else ({ bases, unplaced } = saved.pop() ?? { bases, unplaced });
+				if (event.open) saved.push({ bases: [...bases], possible: new Set(possible), run, unplaced });
+				else {
+					const back = saved.pop();
+					if (back !== undefined) ({ bases, possible, run, unplaced } = back);
+				}
 				continue;
+			}
+			if (event.run !== run) {
+				if (run !== undefined) bases = [...possible];
+				run = event.run;
+				possible = new Set(bases);
 			}
 			if (event.kind === "cd") {
 				const target = expandHomeWord(event.target);
-				// A cd may fail or land anywhere, so every directory the shell was in stays a base.
+				// A cd the floor cannot follow may land anywhere.
 				if (target === null || event.unmodeled || target.startsWith("~") || /[*?[{]/u.test(target)) {
 					unplaced = true;
-					anyUnplaced = true;
 					continue;
 				}
 				const from = path.isAbsolute(target) ? ["/"] : bases;
-				const landed = from.flatMap((base) => {
-					const lexical = path.resolve(base, target);
-					const real = canonicalizeRawPath(target, base);
-					return real === null || real === lexical ? [lexical] : [lexical, real];
-				});
-				const merged = [...new Set([...bases, ...landed])];
-				if (merged.length > MAX_FLOOR_BASES) {
-					unplaced = true;
-					anyUnplaced = true;
-				} else bases = merged;
-				for (const base of bases) reached.add(base);
+				const landed = [
+					...new Set(
+						from.flatMap((base) => {
+							const lexical = path.resolve(base, target);
+							const real = canonicalizeRawPath(target, base);
+							return real === null || real === lexical ? [lexical] : [lexical, real];
+						}),
+					),
+				];
+				const next = event.certain === true ? landed : [...new Set([...bases, ...landed])];
+				for (const base of landed) possible.add(base);
+				if (next.length > MAX_FLOOR_BASES || possible.size > MAX_FLOOR_BASES) unplaced = true;
+				else bases = next;
+				continue;
+			}
+			if (event.kind === "link") {
+				if (event.moved === true) {
+					for (const source of event.sources) {
+						const spelled = reaches(source, bases, unplaced, links);
+						if (spelled !== null) return hit(spelled, "moves away");
+					}
+				}
+				if (!event.symbolic || event.links === undefined) continue;
+				for (const link of event.links) {
+					for (const at of placed(link, bases)) {
+						if (at.some((segment) => GLOB_SEGMENT.test(segment))) continue;
+						const parent = `/${at.slice(0, -1).join("/")}`;
+						for (const source of event.sources) {
+							const home = expandHomeWord(source);
+							if (home === null || /[*?[{]/u.test(home)) {
+								links = [...links, { at, to: null }];
+								continue;
+							}
+							// A symlink's relative text resolves from the link's directory; a copied link keeps it.
+							const toAbs = path.resolve(parent, home);
+							const real = canonicalizeRawPath(home, parent);
+							for (const to of new Set([toAbs, ...(real === null ? [] : [real])]))
+								links = [...links, { at, to: pathSegments(to) }];
+						}
+					}
+				}
 				continue;
 			}
 			if (event.kind !== "delete" || event.scope === "input" || event.scope === "remote") continue;
-			// A filtered find removes only what its expression matches, and rsync's operands include its sources.
-			if (event.scope === "children" && event.findRoot !== "unfiltered") continue;
-			const spelled = reaches(event.target, bases, unplaced);
+			if (event.scope === "children" && event.findRoot === "filtered") {
+				// A filtered find removes what its expression selects: from the `.git` itself everything it matches, and
+				// from above it the `.git` too unless the expression keeps it out. A root under a planted link is read where
+				// the link points, and one whose link the floor cannot place is a hit.
+				const roots = placed(event.target, bases).flatMap((written) => [
+					written,
+					...links
+						.filter(
+							(link) =>
+								written.length >= link.at.length &&
+								link.at.every((segment, index) => segmentNames(written[index] as string, segment)),
+						)
+						.map((link) => (link.to === null ? null : [...link.to, ...written.slice(link.at.length)])),
+				]);
+				for (const written of roots) {
+					if (written === null) return hit(event.target, "deletes what find selects under");
+					if (!gitPaths.some((git) => segmentsReach(written, git, false))) continue;
+					const atGit = gitPaths.some((git) => written.length === git.length);
+					if (atGit || !findExcludesGit(event.expression ?? [])) return hit(event.target, "deletes what find selects under");
+				}
+				continue;
+			}
+			const spelled = reaches(event.target, bases, unplaced, links, event.scope === "children");
 			if (spelled !== null) return hit(spelled, "deletes");
 		}
 	}
 	for (const step of shellCommandSteps(command, homedir())) {
-		if (step.executable !== "shred" && step.executable !== "mv") continue;
-		const operands: string[] = [];
-		let targetDirectory = step.executable === "shred";
-		let options = true;
-		for (let index = 0; index < step.args.length; index += 1) {
-			const word = step.args[index] as string;
-			if (options && word === "--") options = false;
-			else if (options && step.executable === "mv" && (word === "-t" || word === "-S" || word === "--suffix")) {
-				targetDirectory ||= word === "-t";
-				index += 1;
-			} else if (options && word.startsWith("-")) targetDirectory ||= word.startsWith("--target-directory");
-			else operands.push(word);
+		if (step.executable === "shred") {
+			const operands = step.args.filter((word) => !word.startsWith("-"));
+			for (const operand of operands) {
+				const spelled = reaches(operand, [cwd], false, []);
+				if (spelled !== null) return hit(spelled, "overwrites");
+			}
+			continue;
 		}
-		// mv moves every operand but the last unless -t names the destination; shred overwrites every operand.
-		const sources = targetDirectory ? operands : operands.slice(0, -1);
-		for (const source of sources) {
-			const spelled = reaches(source, [...reached], anyUnplaced);
-			if (spelled !== null) return hit(spelled, step.executable === "mv" ? "moves away" : "overwrites");
+		if (step.executable !== "git") continue;
+		// `git worktree remove` deletes the worktree it names, the workspace included.
+		let base = cwd;
+		let index = 0;
+		while (index < step.args.length && step.args[index]?.startsWith("-")) {
+			if (step.args[index] === "-C") base = path.resolve(base, step.args[index + 1] ?? ".");
+			index += step.args[index] === "-C" || step.args[index] === "-c" ? 2 : 1;
+		}
+		if (step.args[index] !== "worktree" || step.args[index + 1] !== "remove") continue;
+		for (const operand of step.args.slice(index + 2).filter((word) => !word.startsWith("-"))) {
+			const spelled = reaches(operand, [base], false, []);
+			if (spelled !== null) return hit(spelled, "removes the worktree");
 		}
 	}
 	return null;

@@ -1102,7 +1102,15 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		callCwd: string,
 		trees: ClioOwnedTrees,
 		rawText = false,
+		gitOnly = false,
 	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
+		if (gitOnly) {
+			for (const candidate of commands) {
+				const git = yoloFloorWorkspaceGitHit(resolveScratchDeleteOperands(candidate).command, callCwd, cwd);
+				if (git !== null) return floorMatch(git);
+			}
+			return null;
+		}
 		const text = matchSourcedRule(texts, floorRules);
 		if (text !== null) return text;
 		const command = commands[0] ?? "";
@@ -1138,16 +1146,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return null;
 	};
 	/** One script line against the floor, from every directory the scan places it in. */
-	const floorLine = (trees: ClioOwnedTrees) => (raw: string, read: ScriptLine, callCwd: string) => {
-		// A here-document body or a comment is data the script carries, not a command.
-		if (read.data) return null;
-		const texts = read.expanded === raw ? [raw] : [read.expanded, raw];
-		for (const base of read.bases ?? [callCwd]) {
-			const hit = commandFloorHit(texts, texts, base, trees);
-			if (hit !== null) return hit;
-		}
-		return null;
-	};
+	const floorLine =
+		(trees: ClioOwnedTrees, gitOnly = false) =>
+		(raw: string, read: ScriptLine, callCwd: string) => {
+			// A here-document body or a comment is data the script carries, not a command.
+			if (read.data) return null;
+			const texts = read.expanded === raw ? [raw] : [read.expanded, raw];
+			for (const base of read.bases ?? [callCwd]) {
+				const hit = commandFloorHit(texts, texts, base, trees, false, gitOnly);
+				if (hit !== null) return hit;
+			}
+			return null;
+		};
 	/**
 	 * Reads of Clio's own credential store are floor at both autonomy levels:
 	 * no task needs Clio's provider tokens, and yolo used to read them. Typed
@@ -1209,12 +1219,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	 * The floor for one call (#407), at yolo and at the operator's default: the
 	 * command's own text and targets, reads of Clio's credential store, then
 	 * each shell script the call runs by literal path, read line by line. A
-	 * script the scan cannot read through runs.
+	 * script the scan cannot read through runs. `gitOnly` reads the command and its scripts for the workspace `.git`
+	 * rule alone, for a call judged without the operator's scope, and leaves what it cannot read to the caller.
 	 */
 	const floorBlock = (
 		call: ClassifierCall,
 		callCwd: string,
 		originalCommand: string | null,
+		gitOnly = false,
 	): Omit<
 		SafetyPolicyDecision,
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
@@ -1243,9 +1255,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				(text): text is string => text !== null,
 			);
 			const commands = [...new Set([command, ...decoded])];
-			const hit = commandFloorHit([...new Set([...commands, ...shellCommandSegments(command)])], commands, callCwd, trees);
+			const hit = commandFloorHit(
+				[...new Set([...commands, ...shellCommandSegments(command)])],
+				commands,
+				callCwd,
+				trees,
+				false,
+				gitOnly,
+			);
 			if (hit !== null) return held(hit);
-		} else if (clioOwnedMutation(call, callCwd, null, trees)) {
+		} else if (!gitOnly && clioOwnedMutation(call, callCwd, null, trees)) {
 			return held(
 				floorMatch({
 					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
@@ -1254,9 +1273,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			);
 		}
 		const floorCall = command === originalCommand ? call : { ...call, args: { ...call.args, command } };
-		const credentials = credentialReadHit(floorCall, callCwd, command);
+		const credentials = gitOnly ? null : credentialReadHit(floorCall, callCwd, command);
 		if (credentials !== null) return held(floorMatch(credentials, "read"));
-		const raw = command === null ? null : yoloFloorRawCandidates(command);
+		const raw = command === null || gitOnly ? null : yoloFloorRawCandidates(command);
 		if (raw?.overflow === true) {
 			return held(
 				floorMatch({
@@ -1285,7 +1304,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				);
 			}
 		}
-		const line = floorLine(trees);
+		const line = floorLine(trees, gitOnly);
 		const scriptHit = (scan: ScriptHit | null) =>
 			scan === null ? null : held(scan, [`script ${scan.file} line ${scan.line}: ${scan.text.slice(0, 200)}`]);
 		const budgets: ScriptBudget[] = [];
@@ -1335,6 +1354,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (run.sourced) home = false;
 			}
 		}
+		if (gitOnly) return null;
 		// No copy the scan could read refuses, but a sourced name was looked up before the bash tool's PATH was known.
 		if (budgets.some((budget) => budget.pathPending)) {
 			return {
@@ -2103,21 +2123,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		normal: SafetyPolicyDecision,
 		posture: string | undefined,
 	): SafetyPolicyDecision => {
-		if (normal.kind === "block" || rawCall.tool !== ToolNames.Bash) return normal;
+		if (normal.kind === "block" || (rawCall.tool !== ToolNames.Bash && rawCall.tool !== ToolNames.RunScript))
+			return normal;
 		const call = normalizeCallPaths(rawCall);
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
-		if (judgedCommand === null) return normal;
-		const command = yoloFloorCommandText(judgedCommand);
-		const hit = yoloFloorWorkspaceGitHit(resolveScratchDeleteOperands(command).command, callCwd, cwd);
-		if (hit === null) return normal;
-		const { match } = floorMatch(hit);
-		return gateDecision("block", baseDecision(call, normal.classification, callCwd, posture, judgedCommand), {
-			ruleId: hit.ruleId,
-			reasonCode: `${YOLO_FLOOR_REASON_PREFIX}${hit.ruleId}`,
-			reasons: [hit.reason, "the yolo floor holds at every autonomy level"],
-			match,
-			policySource: "builtin-classifier",
-		});
+		// The scoped floor's own reading, the scripts the call runs included, narrowed to the `.git` rule.
+		const floor = floorBlock(call, callCwd, judgedCommand, true);
+		if (floor === null || floor.ruleId !== YOLO_FLOOR_RULE_IDS.workspaceGit) return normal;
+		return gateDecision("block", baseDecision(call, normal.classification, callCwd, posture, judgedCommand), floor);
 	};
 
 	const evaluateScoped = (
