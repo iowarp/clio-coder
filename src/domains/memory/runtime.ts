@@ -1,6 +1,7 @@
 import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import type { MemoryDeliveryMode } from "../../core/defaults.js";
 import type { FoldPlannerView } from "../context/fold/pressure.js";
 import { foldProjection } from "../context/fold/pressure.js";
 import type { MemoryCommitScope, SuccessfulMemoryContextCommit } from "./commit-state.js";
@@ -35,7 +36,7 @@ import type {
 } from "./intervention.js";
 import { createMemoryInterventionRegistration } from "./intervention.js";
 import { type HistoryFiling, type HistoryLessons, MemoryLessonFeedback } from "./lesson-feedback.js";
-import { createKeptLessonSource, type KeptLesson } from "./lesson-projection.js";
+import { createKeptLessonSource, type KeptLesson, MemoryDeliveryGate } from "./lesson-projection.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationEvent, observationTracing, traceObservation } from "./observation-events.js";
 import {
@@ -57,6 +58,7 @@ import {
 	sourceCoverageDigest,
 } from "./observations.js";
 import { memorySectionBlocks } from "./prompt-section.js";
+import { readDemotedMemoryIds } from "./recall-use.js";
 import { memoryRouteJson } from "./secret-text.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
@@ -78,7 +80,12 @@ export interface MemoryRuntimeInfrastructure {
 	 * Session owns the reading.
 	 */
 	closedLessonSource?(sessionId: string): { scope: MemoryCommitScope; source: CompletedLessonSource } | null;
-	settings(): { enabled: boolean; surfaces: { observe: "off" | "on" }; maxOutputTokens: number; timeoutMs: number };
+	settings(): {
+		enabled: boolean;
+		surfaces: { observe: "off" | "on"; delivery?: MemoryDeliveryMode };
+		maxOutputTokens: number;
+		timeoutMs: number;
+	};
 	/** Session owns active ancestry, original bytes and checkpoint lineage. */
 	source(): ObservationSource | null;
 	usableHistoryTokens(): number;
@@ -122,6 +129,7 @@ export type MemoryInterventionInfrastructure = Omit<
 	MemoryInterventionDeps,
 	| "bank"
 	| "getKeptLessons"
+	| "getDelivery"
 	| "deferBoundaryPolicy"
 	| "onContentCancelled"
 	| "onInjectedEntries"
@@ -266,6 +274,34 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		event: (name, facts) => this.#event(name, facts),
 	});
 
+	/**
+	 * Delivery's per-session gate (DESIGN 4.4): the `# Memory` section and every reminder ask it before carrying a
+	 * lesson, so a lesson withheld or demoted at load is refused on every path.
+	 */
+	readonly delivery = new MemoryDeliveryGate({
+		dataDir: () => {
+			const dataDir = this.#infrastructure?.dataDir?.();
+			if (!dataDir) throw new Error("memory data root unavailable");
+			return dataDir;
+		},
+		stateDir: () => {
+			const stateDir = this.#infrastructure?.stateDir();
+			if (!stateDir) throw new Error("memory state root unavailable");
+			return stateDir;
+		},
+		sessionId: () => this.#infrastructure?.currentSession?.()?.id,
+		demoted: () => {
+			const stateDir = this.#infrastructure?.stateDir();
+			return stateDir ? readDemotedMemoryIds(stateDir) : new Set<string>();
+		},
+		mode: () => this.#infrastructure?.settings().surfaces.delivery ?? "decision",
+		notice: (line) => this.#infrastructure?.notice?.(line),
+		diagnostic: (line) => this.#infrastructure?.diagnostic?.(line),
+		event: (name, facts) => this.#event(name, facts),
+	});
+	/** The lessons this session may be reminded of: those it could see when it began, plus operator approvals since. */
+	#deliveryBaseline: { session: string | undefined; revisions: Set<string> } | null = null;
+
 	configure(infrastructure: MemoryRuntimeInfrastructure): void {
 		this.#infrastructure = infrastructure;
 	}
@@ -308,15 +344,51 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	}
 
 	/** Resolves when lesson store writes started so far have settled, for a caller that must wait on them. */
-	whenLessonsSettled(): Promise<void> {
-		return this.#feedback.whenSettled();
+	async whenLessonsSettled(): Promise<void> {
+		await this.#feedback.whenSettled();
+		await this.delivery.whenSettled();
+	}
+
+	/**
+	 * Kept lessons reminders may carry in this session: admitted by the delivery gate, not demoted by recall-use, and,
+	 * mid-session, only those this session could see when it began or that an operator approved since. A lesson another
+	 * running session got approved reaches this session's successor, not this session (DESIGN 4.4).
+	 */
+	deliverableLessons(): readonly KeptLesson[] {
+		const infra = this.#infrastructure;
+		if (!infra?.settings().enabled || !infra.dataDir) return [];
+		try {
+			const root = infra.cwd?.() ?? process.cwd();
+			const baseline = this.#sessionBaseline(root);
+			const demoted = this.delivery.demoted();
+			return this.#keptLessons
+				.lessons(root, (record) => !demoted.has(record.id) && this.delivery.admit(record, root))
+				.filter((lesson) => baseline.has(lesson.revision) || lesson.approval === "operator");
+		} catch {
+			return []; /* An unreadable store surfaces nothing; the session continues without it. */
+		}
+	}
+
+	/**
+	 * The kept lessons this session could see when it began, fixed on its first prompt read whatever the delivery mode,
+	 * so turning delivery on mid-session admits no lesson a peer got approved since. Only reads: no delivery check runs.
+	 */
+	#sessionBaseline(root: string): Set<string> {
+		const session = this.#infrastructure?.currentSession?.()?.id;
+		if (this.#deliveryBaseline === null || this.#deliveryBaseline.session !== session)
+			this.#deliveryBaseline = {
+				session,
+				revisions: new Set(this.#keptLessons.lessons(root).map((lesson) => lesson.revision)),
+			};
+		return this.#deliveryBaseline.revisions;
 	}
 
 	createIntervention(deps: MemoryInterventionInfrastructure): MemoryInterventionRegistration {
 		if (this.#registration) throw new Error("memory intervention already bound");
 		const original = createMemoryInterventionRegistration({
 			...deps,
-			getKeptLessons: () => this.keptLessons(),
+			getKeptLessons: () => this.deliverableLessons(),
+			getDelivery: () => this.delivery.mode(),
 			// Only a job actually in flight holds the boundary step back. Pending observation
 			// work runs only when idle, so waiting on it starved every mid-turn step.
 			deferBoundaryPolicy: () => this.#controller !== null,
@@ -674,6 +746,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 						"quota_window",
 						"quota_retry",
 						"time_budget",
+						"side_share",
 						"information_flow_blocked",
 						"store-error",
 						"judge-unavailable",
@@ -1128,6 +1201,15 @@ export class MemoryRuntime implements MemoryObservationCommands {
 
 	recordPromptSelection(selection: MemoryPromptSelection): void {
 		this.#promptSelection = structuredClone(selection);
+		// The section is read as a session begins, under every delivery mode, so it fixes what later reminders may carry.
+		const infra = this.#infrastructure;
+		if (infra?.settings().enabled && infra.dataDir && this.#deliveryBaseline?.session !== infra.currentSession?.()?.id) {
+			try {
+				this.#sessionBaseline(infra.cwd?.() ?? process.cwd());
+			} catch {
+				// An unreadable store leaves the baseline to the first reminder.
+			}
+		}
 	}
 
 	/**
@@ -1175,6 +1257,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		if (submitted.length)
 			this.#event("memory-reminders-submitted", {
 				count: submitted.length,
+				// Admitted reminder bytes, the cost a rules-tier surface is priced by (DESIGN 4.4, MD5).
+				bytes: submitted.reduce((sum, offer) => sum + Buffer.byteLength(offer.content, "utf8"), 0),
 				offers: submitted.map((offer) => ({
 					id: offer.id,
 					kind: offer.kind,

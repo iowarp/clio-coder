@@ -615,10 +615,37 @@ export interface MemorySurfaceSettings {
 	 * benefit is not. `context.memory.observations.enabled: true` still turns it on when this key is unset.
 	 */
 	observe: "off" | "on";
+	/**
+	 * Which channels deliver kept lessons. `section` is the `# Memory` section alone; `decision`, the default, adds
+	 * reminders at decision points (a failed call, a verification gap, a touched file, the turn's task); `broadcast`
+	 * adds the first-change broadcast to `decision`, off by default as a policy choice; `off` delivers nothing from the
+	 * store, and `memory_recall` still reaches every layer.
+	 */
+	delivery: MemoryDeliveryMode;
+	/**
+	 * In-session correction after repeated failures. `rules` (the default) keeps the repeated-failure annotation and
+	 * turn-end reminder and makes no model call; `model` adds the model step on `tool_error_streak` and `loop_signal`.
+	 * Rules by default as a policy choice: 111 lane model calls produced no reminder.
+	 */
+	correct: "rules" | "model";
+	/**
+	 * Task-bank maintenance between folds. `rules` (the default) writes procedural entries from failures and knowledge
+	 * from operator statements; `model` adds the `interval` model step every `cadenceToolCalls` tools. Rules by default
+	 * as a policy choice: 818 lane model calls, a product read by restoration 11 times.
+	 */
+	bank: "rules" | "model";
 }
+
+export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
 
 export interface MemorySettings {
 	enabled: boolean;
+	/**
+	 * The side-share governor: after three automatic memory calls a session refuses more while its memory output is over
+	 * this share of its main output (and of its premium units, where the route reports them). 0 turns it off. A design
+	 * assumption, not a measured optimum.
+	 */
+	sideShare: number;
 	surfaces: MemorySurfaceSettings;
 	target: string | null;
 	model: string | null;
@@ -883,7 +910,8 @@ export const DEFAULT_SETTINGS = {
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
-			surfaces: { observe: "off" },
+			sideShare: 0.15,
+			surfaces: { observe: "off", delivery: "decision", correct: "rules", bank: "rules" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1113,8 +1141,12 @@ context:
     provider: off
   memory:
     enabled: true
+    sideShare: 0.15
     surfaces:
       observe: off
+      delivery: decision
+      correct: rules
+      bank: rules
     target: null
     model: null
     thinkingLevel: off

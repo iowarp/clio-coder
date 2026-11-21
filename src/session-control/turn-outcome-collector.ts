@@ -64,6 +64,13 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration, ReadSt
 	/** These firings' effects never entered a request (a spent nudge, a released buffer, an ended turn). */
 	suppressFirings(firingIds: ReadonlyArray<string>): void;
 	/**
+	 * The submit's turn is over though no turn_end hook ran for it (a throw or an abort before any reply): what its
+	 * requests carried settles now, as at a turn_end. A firing still held for a later request stays open.
+	 */
+	endTurn(): void;
+	/** The conversation was reset (a new, resumed or forked session, a park): nothing it left open can enter a request. */
+	closeSession(): void;
+	/**
 	 * Settle one steering triage round of either route (memory design 4.5), which acts on the queue rather than through
 	 * a request: `acted` when a verdict's relabel or interrupt applied to the queued message `applied`, `expired` when
 	 * the queue moved on before it could. A round with no verdict, or no session, fired nothing.
@@ -405,6 +412,8 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				if (firing !== undefined && firing.admitted === null) settle(firing, "suppressed", { kind: "none" });
 			}
 		},
+		endTurn,
+		closeSession,
 		settleTriage(owner, verdicts, applied) {
 			if (hub === null || owner === undefined || verdicts.length === 0) return;
 			const firing: OpenFiring = {

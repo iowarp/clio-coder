@@ -128,11 +128,7 @@ import {
 } from "../domains/memory/index.js";
 import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/memory/intervention.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
-import {
-	createMemoryRecallUseRegistration,
-	demotedMemoryIds,
-	readRecallUseLedger,
-} from "../domains/memory/recall-use.js";
+import { createMemoryRecallUseRegistration } from "../domains/memory/recall-use.js";
 import { createMemorySessionProjection } from "../domains/memory/session-projection.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
 import {
@@ -1146,6 +1142,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const loopGuard = createLoopGuardRegistration({
 		safety,
 		bus,
+		readResultMaxBytes: () => (effectiveSettingsForDispatch?.() ?? resolvedSettings).context.toolResultMaxBytes,
 		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
 		sameCallBlockLimit: INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
 		turnToolCallBudget: () => readOrchTurnToolCallBudget(),
@@ -1241,6 +1238,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		() => telemetry?.acquireTelemetrySession,
 		() => session?.current(),
+		() => telemetry,
 	);
 	// Lesson gate decisions reach the operator through the transcript notice
 	// path once the chat loop has bound it; before that, a diagnostic line.
@@ -1311,6 +1309,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				windowSteps: memory.trajectorySteps,
 				maxTokens: memory.maxOutputTokens,
 				timeoutMs: memory.timeoutMs,
+				surfaces: memory.surfaces,
 			};
 		},
 		...createBackgroundMemoryRouting(
@@ -2228,7 +2227,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryReader = createMemoryPromptReader({
 		getDataDir: clioDataDir,
 		onSelection: (selection) => memoryOwner.recordPromptSelection(selection),
-		relevanceGate: { demoted: () => demotedMemoryIds(readRecallUseLedger(clioStateDir())) },
+		relevanceGate: { demoted: () => memoryOwner.delivery.demoted() },
+		delivery: memoryOwner.delivery,
 	});
 	// The turn's own words, for a listing asked for without a query and for triage.
 	let operatorTask = "";
