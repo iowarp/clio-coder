@@ -1,9 +1,16 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
-import { DispatchArtifactProvider, RunRecordArtifactProvider } from "../../src/domains/session/view-artifacts.js";
+import type { MessageEntry } from "../../src/domains/session/entries.js";
+import {
+	DispatchArtifactProvider,
+	RunRecordArtifactProvider,
+	ScreenshotArtifactProvider,
+} from "../../src/domains/session/view-artifacts.js";
+import { readAcpArtifact } from "../../src/engine/acp/artifacts.js";
 import { recordedRunAnswerLines } from "../../src/interactive/fleet-run-history.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -123,6 +130,45 @@ test("dispatch and run record views read a /run worker's settled output and muta
 		const emptyObservedBody = (await emptyObserved.load()).lines.join("\n");
 		ok(emptyObservedBody.includes("No changed paths recorded."));
 		ok(!emptyObservedBody.includes("Changed paths were not recorded."));
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("the screenshots view lists a tool's screenshot files still on disk and an ACP read carries the picture", async () => {
+	const scratch = await isolateClioEnv("clio-coder-view-shots-");
+	try {
+		const png = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+			"base64",
+		);
+		const shot = join(scratch.dir, "001-look-1280x800.png");
+		writeFileSync(shot, png);
+		const entry: MessageEntry = {
+			kind: "message",
+			role: "tool_result",
+			turnId: "turn-shot",
+			parentTurnId: null,
+			timestamp: "2026-11-21T12:00:00.000Z",
+			payload: {
+				toolName: "browser",
+				result: { content: [{ type: "text", text: "ok" }], details: { shots: [shot, join(scratch.dir, "gone.png")] } },
+			},
+		};
+		const deps = { stateDir: join(scratch.dir, "state"), readSessionEntries: () => [entry] };
+		const listed = await new ScreenshotArtifactProvider(deps).list();
+		deepStrictEqual(
+			listed.map((artifact) => [artifact.category, artifact.path, artifact.sizeBytes]),
+			[["screenshots", shot, png.length]],
+		);
+		const loaded = await listed[0]?.load();
+		deepStrictEqual(loaded?.format, "image");
+		deepStrictEqual(loaded?.image, { mimeType: "image/png", data: png.toString("base64"), path: shot });
+		const page = await readAcpArtifact(deps, { id: `screenshots/${listed[0]?.id}` });
+		deepStrictEqual(
+			[page.format, page.image?.mimeType, page.image?.data, page.lines[0]],
+			["image", "image/png", png.toString("base64"), shot],
+		);
 	} finally {
 		scratch.restore();
 	}

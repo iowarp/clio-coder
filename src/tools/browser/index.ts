@@ -3,6 +3,7 @@ import path from "node:path";
 import { prepareBoundedImage } from "../../core/file-references.js";
 import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { DISPLAY_IMAGES_MAX_CHARS, MAX_DISPLAY_IMAGES, type ToolResultImage } from "../../core/tool-result-images.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../../core/untrusted-content.js";
 import {
 	BrowserComponentUnavailableError,
@@ -175,19 +176,46 @@ function formatBrowserReply(
 	return [...head, UNTRUSTED_CONTENT_BANNER, ...body].join("\n");
 }
 
-async function withImages(
+/**
+ * Downscaled copies of a call's screenshots for people to look at (ACP clients, the GUI tool card, the terminal card),
+ * within {@link DISPLAY_IMAGES_MAX_CHARS} of base64 together. They ride on `details.displayImages`, never on the
+ * result's images, so a route that takes no image input sends the model none, and they cost the observation pool
+ * nothing.
+ */
+async function displayCopies(paths: ReadonlyArray<string>): Promise<ToolResultImage[]> {
+	const files = paths.slice(0, MAX_DISPLAY_IMAGES);
+	let budget = DISPLAY_IMAGES_MAX_CHARS;
+	const copies: ToolResultImage[] = [];
+	for (const [index, file] of files.entries()) {
+		let bytes: Buffer;
+		try {
+			bytes = readFileSync(file);
+		} catch {
+			continue;
+		}
+		const encoded = await prepareBoundedImage(bytes, Math.floor(budget / (files.length - index)));
+		if (encoded === null) continue;
+		copies.push({ mimeType: encoded.mimeType, data: encoded.data });
+		budget -= encoded.data.length;
+	}
+	return copies;
+}
+
+export async function browserResultWithShots(
 	output: string,
 	paths: ReadonlyArray<string>,
 	details: Record<string, unknown>,
 	options: ToolInvokeOptions | undefined,
 ): Promise<ToolResult> {
 	if (paths.length === 0) return { kind: "ok", output, details };
-	if (!acceptsImageInput({ vision: options?.supportsImages }))
+	if (!acceptsImageInput({ vision: options?.supportsImages })) {
+		const displayImages = await displayCopies(paths);
 		return {
 			kind: "ok",
 			output: `${output}\n(this route takes no image input: ask the vision tool about a screenshot path)`,
-			details,
+			details: displayImages.length > 0 ? { ...details, displayImages } : details,
 		};
+	}
 	const reservation = reserveObservation(readMaxBytes(), options);
 	commitObservationReservation(reservation);
 	try {
@@ -458,7 +486,7 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 				...(options?.shellSandbox !== undefined ? { sandboxed: true } : {}),
 			};
 			if (!reply.ok) return { kind: "error", message: output, details };
-			return withImages(
+			return browserResultWithShots(
 				output,
 				(reply.shots ?? []).map((shot) => shot.path),
 				details,
