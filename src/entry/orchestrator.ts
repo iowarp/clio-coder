@@ -1827,6 +1827,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
 		},
 		sessionCodeConsent,
+		escapeScopes: safetyJudge.escapeScopes,
 		safetyJudge,
 		hookDrift,
 		// Recoverability for the main agent on every surface; workers never snapshot.

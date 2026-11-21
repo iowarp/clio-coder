@@ -38,6 +38,12 @@ export interface ToolDenial {
 	serverHint?: "read-only" | "destructive";
 	/** Set when the registry refuses an identical call later in this turn without running it. */
 	repeatRefused?: true;
+	/**
+	 * Set on a refusal an operator's answer on an ask_user round can lift, a sandbox escape whose session option
+	 * ask_user carries (M-7): the registry forgets refusals once the operator answers, so the repeat is refused
+	 * only until then.
+	 */
+	untilOperatorAnswers?: true;
 	/** Why the refusing rule fired when the action class was not the reason; stated in place of the class. */
 	basis?: string;
 }
@@ -60,13 +66,15 @@ export function denialLines(denial: ToolDenial): [refusal: string, remedy: strin
 			: denial.code;
 	const hint = denial.serverHint !== undefined ? `, which the server marks ${denial.serverHint}` : "";
 	const repeat =
-		denial.repeatRefused === true
-			? "an identical call later in this turn is refused without running"
-			: denial.layer === "operator_approval"
-				? "an identical call asks the operator again"
-				: "an identical call meets the same refusal";
+		denial.untilOperatorAnswers === true
+			? "an identical call is refused without running until the operator answers an ask_user question about it, and then is admitted afresh"
+			: denial.repeatRefused === true
+				? "an identical call later in this turn is refused without running"
+				: denial.layer === "operator_approval"
+					? "an identical call asks the operator again"
+					: "an identical call meets the same refusal";
 	return [
-		`Refused by ${LAYER_LABEL[denial.layer]}${source !== undefined ? ` (${source})` : ""}; ${denial.basis ?? `Clio classifies this call as ${denial.actionClass}${hint}`}. Not retryable: ${repeat}.`,
+		`Refused by ${LAYER_LABEL[denial.layer]}${source !== undefined ? ` (${source})` : ""}; ${denial.basis ?? `Clio classifies this call as ${denial.actionClass}${hint}`}. ${denial.untilOperatorAnswers === true ? "Retry only after the operator answers" : "Not retryable"}: ${repeat}.`,
 		`To allow it: ${denial.allowedBy}`,
 	];
 }

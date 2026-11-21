@@ -388,6 +388,8 @@ export interface ShellCommandStep {
 	args: string[];
 	/** Targets of `>`-style redirects that replace the file's contents. `>>` is not listed. */
 	truncatingRedirects: string[];
+	/** `NAME=value` words before the command word (after an `env` too), as written; absent when none. */
+	assignments?: string[];
 }
 
 /**
@@ -423,10 +425,12 @@ export function shellCommandSteps(command: string, home?: string): ShellCommandS
 			continue;
 		}
 		const commandWord = argv[commandIndex] ?? "";
+		const assignments = argv.slice(0, commandIndex).filter(isEnvAssignment);
 		steps.push({
 			executable: basenameToken(argv[commandIndex]),
 			args: argv.slice(commandIndex + 1),
 			truncatingRedirects,
+			...(assignments.length > 0 ? { assignments } : {}),
 			...(isRelativeCommandPath(argv[commandIndex]) ? { relativePath: true as const } : {}),
 			...(commandWord.includes("/") ? { commandPath: commandWord } : {}),
 		});

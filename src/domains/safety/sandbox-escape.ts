@@ -49,6 +49,14 @@ const LEAVES_SANDBOX =
 	/(?<!\b(?:not|never|no|without|don't|do not)\s+)(?:\bunsandboxed\b|\bunconfined\b|\b(?:outside|out of|without|leav(?:e|es|ing)|escap(?:e|es|ing)|exit(?:s|ing)?|bypass(?:es|ing)?)\s+(?:of\s+)?(?:the\s+|its\s+|this\s+|a\s+)?sandbox\b)/iu;
 
 /**
+ * True when `text` names leaving the sandbox (unsandboxed, unconfined, outside the sandbox, ...), unless a
+ * negation stands right before it; the bare word sandbox does not count.
+ */
+export function namesLeavingSandbox(text: string): boolean {
+	return LEAVES_SANDBOX.test(text);
+}
+
+/**
  * The one reading of an affirmative option: its label starts with yes, allow, approve or run it, as a
  * whole word, and is not a "yes, but" counter-offer or a label that speaks of the sandbox without
  * naming leaving it ("Yes, in the sandbox").
