@@ -37,8 +37,8 @@ const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-response
  * still reads nothing.
  *
  * The id is a routing affinity, not a partition: a few requests miss under one id and a few hit across ids. Live
- * conversations that share an id lose their own history more often, so the dispatcher gives each live member a lane
- * of its own (`claimCacheLane`) and the lane is part of the id.
+ * conversations that share an id lose their own history more often, so each live worker takes a lane of its own on
+ * its capacity lease (`claimWorkerCacheLane`), seen by every process of the state dir, and the lane is part of the id.
  *
  * The id is content, not a session: workers of a later session reuse the head while the backend still holds it, and
  * the parent session's own affinity carries none of its workers' traffic.
@@ -64,48 +64,107 @@ export function sideCallCacheFamilyId(input: Omit<CacheFamilyInput, "tools" | "l
 /** The option a routed main request carries its own conversation id in, for the state that belongs to one session. */
 const CONVERSATION = "clioCoderConversation";
 
-/** The lane each live main conversation of this process holds, and the lanes each head has taken. */
-const mainLaneOf = new Map<string, { head: string; lane: number }>();
-const mainLanesOf = new Map<string, Set<number>>();
+/**
+ * Where main sessions claim their cache lanes across processes: the dispatch admission store registers itself at
+ * boot (M-11), so two processes on one install never put two live conversations on one routing id.
+ */
+export interface MainCacheLaneStore {
+	claim(key: string, conversation: string): number;
+	/** Release this process's lane of one conversation, or all of them when none is named. */
+	release(conversation: string | undefined): void;
+}
+let laneStore: MainCacheLaneStore | undefined;
+export function useMainCacheLaneStore(store: MainCacheLaneStore | undefined): void {
+	laneStore = store;
+}
+
+/** The lane each live main conversation of this process holds; `shared` when the store holds it. */
+const mainLaneOf = new Map<string, { key: string; lane: number; shared: boolean; claimedAt: number }>();
+/** The fallback's lanes by key, for conversations the store could not take. */
+const localLanesOf = new Map<string, Set<number>>();
 /** Long-lived hosts open many sessions; a conversation never cleaned up must not hold a lane forever. */
 const MAX_MAIN_CONVERSATIONS = 256;
+/** A held store lane is renewed this often, well inside the store's one-hour expiry for owners without a birth token. */
+const STORE_RENEW_MS = 10 * 60_000;
 
 function releaseMainLane(conversation: string): void {
 	const held = mainLaneOf.get(conversation);
 	if (held === undefined) return;
 	mainLaneOf.delete(conversation);
-	const lanes = mainLanesOf.get(held.head);
+	if (held.shared) {
+		releaseStoreLane(conversation);
+		return;
+	}
+	const lanes = localLanesOf.get(held.key);
 	lanes?.delete(held.lane);
-	if (lanes?.size === 0) mainLanesOf.delete(held.head);
+	if (lanes?.size === 0) localLanesOf.delete(held.key);
+}
+
+function releaseStoreLane(conversation: string | undefined): void {
+	try {
+		laneStore?.release(conversation);
+	} catch {
+		// The store reaps the record when this process ends; a failed release only keeps the lane until then.
+	}
 }
 
 registerSessionResourceCleanup((sessionId) => {
-	if (sessionId !== undefined) return releaseMainLane(sessionId);
+	if (sessionId !== undefined) {
+		releaseMainLane(sessionId);
+		return;
+	}
+	const shared = [...mainLaneOf.values()].some((held) => held.shared);
 	mainLaneOf.clear();
-	mainLanesOf.clear();
+	localLanesOf.clear();
+	if (shared) releaseStoreLane(undefined);
 });
 
 /**
- * The lane a live main conversation takes among this process's live conversations of one head, as workers take one
- * through `claimCacheLane` (FL-17): the lowest free lane, kept across its turns and released when its session
- * resources are (a /new, /resume, a route change, a closed host session). Sessions one after another take lane 0 and
- * share the head's cache; concurrent ones (several herdr lanes on one install, an ACP or GUI host holding several
- * sessions) stop sharing one id, under which live conversations lose their own history more often.
+ * The lane a live main conversation takes among the live conversations of one key, as workers take one on their
+ * capacity lease (FL-17): kept across its turns and released when its session resources are (a /new, /resume, a
+ * route change, a closed host session) or, through the store, when its process dies. Sessions one after another take
+ * lane 0 and share the head's cache; concurrent ones (two herdr lanes or a TUI beside a GUI or ACP host on one
+ * install, or several sessions in one host) stop sharing one id, under which live conversations lose their own
+ * history more often. The store spans every process of this state dir; when it is absent or fails, the lanes are
+ * this process's own.
  */
-function claimMainLane(head: string, conversation: string): number {
+function claimMainLane(key: string, conversation: string, nowMs = Date.now()): number {
 	const held = mainLaneOf.get(conversation);
-	if (held?.head === head) return held.lane;
+	if (held?.key === key && !(held.shared && nowMs - held.claimedAt >= STORE_RENEW_MS)) return held.lane;
+	if (held?.key === key) {
+		try {
+			const lane = laneStore?.claim(key, conversation);
+			// A record the store had reaped comes back as a fresh claim, possibly on another lane.
+			if (lane !== undefined) {
+				held.lane = lane;
+				held.claimedAt = nowMs;
+				return lane;
+			}
+		} catch {
+			// Keep the lane this conversation has; the next request tries the renewal again.
+			return held.lane;
+		}
+	}
 	releaseMainLane(conversation);
 	if (mainLaneOf.size >= MAX_MAIN_CONVERSATIONS) {
 		const oldest = mainLaneOf.keys().next().value;
 		if (oldest !== undefined) releaseMainLane(oldest);
 	}
-	const lanes = mainLanesOf.get(head) ?? new Set<number>();
-	mainLanesOf.set(head, lanes);
+	if (laneStore !== undefined) {
+		try {
+			const lane = laneStore.claim(key, conversation);
+			mainLaneOf.set(conversation, { key, lane, shared: true, claimedAt: nowMs });
+			return lane;
+		} catch {
+			// An unreadable or locked store must not stop the turn: fall back to this process's own lanes.
+		}
+	}
+	const lanes = localLanesOf.get(key) ?? new Set<number>();
+	localLanesOf.set(key, lanes);
 	let lane = 0;
 	while (lanes.has(lane)) lane += 1;
 	lanes.add(lane);
-	mainLaneOf.set(conversation, { head, lane });
+	mainLaneOf.set(conversation, { key, lane, shared: false, claimedAt: nowMs });
 	return lane;
 }
 
@@ -150,7 +209,7 @@ export function withMainCacheRouting<T extends StreamOptions | SimpleStreamOptio
 		tools: tools ?? [],
 	});
 	// At most 60 characters, under the 64 Pi clamps a prompt cache key to.
-	const lane = claimMainLane(head, conversation) % 1_000_000;
+	const lane = claimMainLane(JSON.stringify(["main", model.baseUrl, head]), conversation) % 1_000_000;
 	return { ...options, sessionId: `clio-coder-m-${head}-${lane}`, [CONVERSATION]: conversation };
 }
 

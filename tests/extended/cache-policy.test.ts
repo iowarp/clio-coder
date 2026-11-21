@@ -28,6 +28,7 @@ import { cleanupEngineSessionResources, completeEngineText, streamSimple } from 
 import { engineMainStreamSimple, engineStreamSimple } from "../../src/engine/api-registry.js";
 import {
 	sideCallCacheFamilyId,
+	useMainCacheLaneStore,
 	withMainCacheRouting,
 	workerCacheFamilyId,
 } from "../../src/engine/apis/cache-family.js";
@@ -401,6 +402,23 @@ test("main sessions with one pinned head share a Codex cache routing key and kee
 		"another head routes elsewhere",
 	);
 	for (const session of ["session-repo-b", "session-repo-c", "session-repo-d"]) cleanupEngineSessionResources(session);
+	// With the cross-process store registered, the lane is the store's and a session's cleanup releases it there.
+	const stored: string[] = [];
+	useMainCacheLaneStore({
+		claim: (key, conversation) => {
+			stored.push(`claim ${conversation} ${key.includes(model.baseUrl)}`);
+			return 7;
+		},
+		release: (conversation) => stored.push(`release ${conversation}`),
+	});
+	try {
+		const storeLane = await send("session-store", "Repo A handbook.\n", [task]);
+		strictEqual(storeLane?.key, String(first.key).replace(/-0$/u, "-7"));
+		cleanupEngineSessionResources("session-store");
+		deepStrictEqual(stored, ["claim session-store true", "release session-store"]);
+	} finally {
+		useMainCacheLaneStore(undefined);
+	}
 });
 
 test("the main thread's public Responses request marks the pinned prompt layer with its own breakpoint (PV-3)", async () => {
