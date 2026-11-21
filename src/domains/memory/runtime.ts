@@ -531,10 +531,12 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				this.#feedback.durableOutcomes(input);
 			},
 			onDeliveryOutcomes: (outcomes, final) => {
-				this.#event("reminder-outcomes", {
-					final,
-					outcomes: outcomes.map((outcome) => ({ kind: outcome.kind, ids: outcome.entries.map((entry) => entry.id) })),
-				});
+				// A final settlement with nothing decided is bookkeeping, not an outcome worth a journal row (C-32).
+				if (outcomes.length > 0)
+					this.#event("reminder-outcomes", {
+						final,
+						outcomes: outcomes.map((outcome) => ({ kind: outcome.kind, ids: outcome.entries.map((entry) => entry.id) })),
+					});
 				this.#feedback.settleDeliveries(outcomes, final);
 			},
 			onKnowledgeReview: (review) => this.#feedback.reviewKnowledge(review),
