@@ -321,6 +321,14 @@ export function noteRunCompletion(completion: RunCompletionV2): void {
 	runCompletion = completion;
 }
 
+/** A `run --agent` run's completion from its sealed receipt (CLI-P58); the envelope carries it, `--exit-code` does not read it. */
+let agentCompletion: RunCompletionV2 | undefined;
+
+/** The settled `run --agent` run hands over its completion; a no-op for v1 runs. */
+export function noteAgentRunCompletion(completion: RunCompletionV2): void {
+	if (v2Started !== null) agentCompletion = completion;
+}
+
 /**
  * `run --exit-code` (SPEC C19, ruling 7): a run that ended 0 whose completion state (the host's assessment) is
  * `partly_done` or `not_done` exits 1; `done` and an undeclared run keep 0. Every other exit is unchanged, and without
@@ -611,6 +619,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	structuredNote = undefined;
 	runPlan = undefined;
 	runCompletion = undefined;
+	agentCompletion = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
@@ -647,7 +656,11 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
-			...(runCompletion !== undefined ? { completion: runCompletion } : {}),
+			...(runCompletion !== undefined
+				? { completion: runCompletion }
+				: agentCompletion !== undefined
+					? { completion: agentCompletion }
+					: {}),
 			result: {
 				text: settledAnswer(seen),
 				artifacts: [],

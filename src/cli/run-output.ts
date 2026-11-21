@@ -6,10 +6,11 @@ import {
 	TOOL_GUARD_REASON_CODE,
 	workerFailureHeadline,
 } from "../domains/dispatch/failure-headline.js";
-import type { RunResult } from "../domains/dispatch/types.js";
+import type { RunResult, SafetyBlockedAttempt } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { holdCutOffText, redactUrlCredentials } from "../domains/safety/redaction.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
+import type { RunCompletionV2 } from "./modes/run-json-schema-v2.js";
 
 function strings(value: unknown): string[] {
 	return Array.isArray(value)
@@ -243,6 +244,49 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	return redactUrlCredentials(
 		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length, verifier, executed.length)}\n`,
 	);
+}
+
+/** The execute-class calls the run refused, a denied ask or a block; a guard's repetition stop is not a refusal. */
+function refusedExecuteCalls(receipt: RunResult): SafetyBlockedAttempt[] {
+	const safety = receipt.safety;
+	return [...(safety?.permissionRequestedAttempts ?? []), ...(safety?.blockedAttempts ?? [])].filter(
+		(attempt) => attempt.actionClass === "execute" && attempt.reasonCode !== TOOL_GUARD_REASON_CODE,
+	);
+}
+
+/**
+ * `run --agent`'s completion in the shape a main run's takes (CLI-P58), read only from the sealed receipt, never from
+ * its prose. A worker declares through its sealed final answer: exit 0 claims `done`, any other exit `not_done`. A
+ * `done` is assessed `partly_done` when a check failed (a failed result-contract quality or a rejected host
+ * verification) or when an execute call was refused and nothing verified the run, which is how a refused run of the
+ * operator's named check reads. `unverified` holds the checks the sealed report names as not run.
+ */
+export function agentRunCompletion(receipt: RunResult): RunCompletionV2 {
+	const refused = refusedExecuteCalls(receipt);
+	const limitations = refused.map((attempt) => {
+		const why =
+			attempt.reason ?? (attempt.permissionRequired === true ? "needed an approval this run could not give" : undefined);
+		const what = `${attempt.tool} call refused${why !== undefined ? `: ${why}` : ""}`;
+		return { what: limitationLine(redactUrlCredentials(what)), why: "blocked_by_policy" };
+	});
+	const unverified = sealedResultLimitations(receipt).map((item) => limitationLine(redactUrlCredentials(item)));
+	if (receipt.output?.state !== "final")
+		return { declared: false, claimed: null, assessed: "unknown", state: "unknown", limitations, unverified };
+	const facts: NonNullable<RunCompletionV2["facts"]> = [];
+	if (receipt.quality?.resultContract?.quality === "fail" || receipt.hostVerification?.status === "rejected")
+		facts.push("failed_check");
+	if (refused.length > 0 && receipt.verification?.state !== "verified") facts.push("refused_check");
+	const claimed = receipt.exitCode === 0 ? "done" : "not_done";
+	const assessed = claimed === "done" && facts.length > 0 ? "partly_done" : claimed;
+	return {
+		declared: true,
+		claimed,
+		assessed,
+		state: assessed,
+		...(facts.length > 0 ? { facts } : {}),
+		limitations,
+		unverified,
+	};
 }
 
 /** The completion caveat from the receipt's own counts, through the one rule every run surface uses. */

@@ -336,7 +336,9 @@ export interface RunDispatchedRunV2 {
  * A main run's completion as the host sealed it (fleet design 4.3): the claim the agent declared through `finish`, the
  * host's assessment of it (min(claimed, facts): a `done` over an unvalidated mutation, a standing failed check, an
  * uncollected child run or an open task-board item is `partly_done`, and so is one whose last observation calls the
- * pool refused), and `state`, which is the assessment.
+ * pool refused), and `state`, which is the assessment. A `run --agent` completion is read from the worker's sealed
+ * receipt instead (CLI-P58): its sealed final answer is the declaration, and a `done` over a refused execute call that
+ * left the run unverified is `partly_done` with fact `refused_check`.
  * Undeclared: `declared: false`, `claimed: null`, state `unknown`.
  */
 export interface RunCompletionV2 {
@@ -345,7 +347,9 @@ export interface RunCompletionV2 {
 	assessed: "done" | "partly_done" | "not_done" | "unknown";
 	state: "done" | "partly_done" | "not_done" | "unknown";
 	/** The open obligations that lowered a `done` claim. */
-	facts?: Array<"unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task" | "observation_budget">;
+	facts?: Array<
+		"unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task" | "observation_budget" | "refused_check"
+	>;
 	limitations: Array<{ what: string; why: string }>;
 	unverified: string[];
 	remaining?: string[];
@@ -373,7 +377,8 @@ export interface RunResultEnvelopeV2 {
 	/**
 	 * Fleet design 4.3: how the main agent declared the run ended through its `finish` tool, never read from the
 	 * answer text. `declared: false` with state `unknown` when it declared nothing. `run --exit-code` maps a declared
-	 * `partly_done` or `not_done` on an exit-0 run to 1. Present once a main run settles.
+	 * `partly_done` or `not_done` on an exit-0 run to 1. Present once a main run settles. A `run --agent` run carries
+	 * the same object read from its sealed receipt (CLI-P58); `--exit-code` does not read that one.
 	 */
 	completion?: RunCompletionV2;
 	/** `structured` and `enforcedBy` appear only with `--output-schema` (SPEC 6.6); `structured` only on exit 0. */

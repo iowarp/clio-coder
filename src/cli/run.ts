@@ -33,6 +33,7 @@ import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } 
 import { loadScriptedAnswers } from "./run-answers.js";
 import {
 	completionExitCode,
+	noteAgentRunCompletion,
 	noteStructuredV2,
 	noteTextAnswer,
 	requestRunTextSummary,
@@ -806,7 +807,7 @@ async function runDispatch(
 	const { TelemetryDomainModule } = await import("../domains/telemetry/index.js");
 	const { assistantTextFromEvent } = await import("../tools/dispatch-event-text.js");
 	const { createJsonCredentialScrub, projectDispatchJsonEvent } = await import("./modes/json-stream.js");
-	const { formatDispatchHumanOutput, verifierVerdict } = await import("./run-output.js");
+	const { agentRunCompletion, formatDispatchHumanOutput, verifierVerdict } = await import("./run-output.js");
 	const { createCliWorkerHooks } = await import("./worker-extension-hooks.js");
 
 	ensureClioState();
@@ -1127,6 +1128,7 @@ async function runDispatch(
 			});
 		}
 		if (parsed.json) {
+			noteAgentRunCompletion(agentRunCompletion(receipt));
 			for (const frame of credentials.finish<RunJsonAgentFrame>(receipt.exitCode === 0)) writeAgentFrame(frame);
 			const verifier = verifierVerdict(receipt);
 			for (const frame of credentials.scrub<RunJsonAgentFrame>({
