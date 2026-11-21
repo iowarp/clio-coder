@@ -112,7 +112,7 @@ test("the ready line yields the port with or without a launch fragment and nothi
 	assert.equal(parseReadyLine("[clio-coder:gui] Background app ready at http://127.0.0.1:4343."), null);
 	assert.equal(parseReadyLine("[clio-coder:gui] http://10.0.0.5:38211/"), null);
 	assert.equal(parseReadyLine("[clio-coder:gui] http://127.0.0.1:0/"), null);
-	assert.equal(parseReadyLine("Clio Coder runs while this terminal stays open."), null);
+	assert.equal(parseReadyLine("CLIO Coder runs while this terminal stays open."), null);
 });
 
 test("the version gate refuses a different package version or a different known build and names the install", () => {

@@ -64,7 +64,7 @@ When setup still needs something, CLIO Coder says it the same way everywhere (st
 
 `clio-coder configure --quick` retains the URL-first shortcut. It identifies compatible local runtimes where possible, requires live model discovery, and is intended for users who already know the endpoint.
 
-For saved defaults use `clio-coder configure --settings`. Each area shows its complete setting catalog in one grouped menu; uncommon controls are not hidden behind a second page. Chat, fleet, and proactive-memory routes select a connection and then offer its discovered/catalog models instead of asking for a handwritten model id. **Use connection default** keeps inheritance, so later changes to that connection’s default also apply to the route. Proactive memory's connection picker offers **Chat route (no memory model set)**, which runs the memory tier on the active chat route. Turn proactive memory off to stop its background model calls. Jump to a section with `clio-coder configure --section targets|chat|fleet|context|safety|interface|integrations|advanced`. Runtime IDs available in the installed build come from `clio-coder configure --list`.
+For saved defaults use `clio-coder configure --settings`. Each area shows its complete setting catalog in one grouped menu; uncommon controls are not hidden behind a second page. Chat, fleet, and proactive-memory routes select a connection and then offer its discovered/catalog models instead of asking for a handwritten model id. **Use connection default** keeps inheritance, so later changes to that connection’s default also apply to the route. Proactive memory's connection picker offers **Chat route (no memory model set)**, which runs the memory tier on the active chat route. Turn proactive memory off to stop its background model calls. Jump to an area with `clio-coder configure --section models|chat|workers|context|safety|workspace|advanced`; no other name opens one. Runtime IDs available in the installed build come from `clio-coder configure --list`.
 
 ## Setup files
 
@@ -116,18 +116,17 @@ The curated model of a route found through steps 1 to 3 is the runtime's `defaul
 
 ## Advanced settings
 
-Configure and GUI Settings use the same eight sections. TUI `/settings` groups its controls into the areas described in [Settings Center](#settings-center). The GUI hides or identifies controls specific to terminal presentation. Configure and GUI sections are:
+Configure, GUI Settings and TUI `/settings` share one set of areas; the TUI adds **Recent & Pinned** in front. The GUI hides or identifies controls specific to terminal presentation. The areas are:
 
-| Section | Owns |
+| Area | Owns |
 | --- | --- |
-| Connections | Targets, provider credentials, models |
-| Chat | Chat route, thinking, output budget, retries |
-| Fleet | Worker defaults, profiles, routing, capacity, limits |
-| Context & Memory | Working-set eviction, compaction, memory |
-| Permissions & Limits | Autonomy, approvals, spending, safety limits |
-| Appearance | Output detail, terminal mode, streaming, panes |
-| Integrations | External agents, project resources, plugins, library, Git |
-| Advanced | Diagnostics and validated full-file editor |
+| Models | Connections, the chat model, reasoning and length, speed, quick switching, model tiers |
+| Chat and display | Output detail, streaming, alerts, retries, transcript, guidance, updates |
+| Workers | Worker defaults, profiles, agent routes, routing, machines, limits, run history, loops |
+| Context and memory | Compaction, working-set eviction, memory, semantic search |
+| Safety and limits | Autonomy, safety judge, approvals, sandbox, review, spending and tool limits |
+| Workspace | Panes, files, Git, task copies, library, external agents, plugins |
+| Advanced | Diagnostics, timing and size limits, experimental engines, and the validated full-file editor |
 
 Settings YAML paths shown in the inventory below are canonical. Use [Configuration reference](configuration-reference.md) for the full settings-key/default map and the owning code for exact types.
 
@@ -145,11 +144,11 @@ Other settings apply at the boundary shown in the inventory. The routing classif
 
 ## Settings Center
 
-Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI command `/config` opens `/settings connections` (see [commands and modes](commands-and-modes.md)). The TUI starts with **Recent & Pinned**, then seven areas: **Models**, **Chat and display**, **Workers**, **Context and memory**, **Safety and limits**, **Workspace**, and **Advanced**. Configure and GUI use the eight sections listed above. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
+Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI command `/config` opens `/settings models` (see [commands and modes](commands-and-modes.md)). The TUI starts with **Recent & Pinned**, then seven areas: **Models**, **Chat and display**, **Workers**, **Context and memory**, **Safety and limits**, **Workspace**, and **Advanced**. Configure and GUI list the same seven areas. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
 
 Use **Models → Connections → Add a target** to reopen Guided setup inside the TUI. It runs the same setup flow as configure, including model inventories, passive checks, and review before Save. **Models → Chat model** selects the connection and model that answer you. **Workers → Default worker** selects the connection, model, and thinking level for delegated work; profiles and agent routes stay in Workers. **Safety and limits** opens with **Autonomy**, then **Safety judge**, worker approvals, **Sandbox**, review and spending/tool limits.
 
-Each section keeps related controls together. Configure combines a route's connection and model into one guided action; the TUI offers separate connection and model pickers in the same group. Select **Use connection default** in a TUI or GUI model picker to clear that route's model override. A blank override in the text fallback has the same meaning; a typed model id is unverified. **Context & Memory → Proactive memory → Memory connection → Chat route (no memory model set)** clears the dedicated memory route, so the memory tier follows the active chat route. Turn proactive memory off to disable it.
+Each section keeps related controls together. Configure combines a route's connection and model into one guided action; the TUI offers separate connection and model pickers in the same group. Select **Use connection default** in a TUI or GUI model picker to clear that route's model override. A blank override in the text fallback has the same meaning; a typed model id is unverified. **Context and memory → Proactive memory → Memory connection → Chat route (no memory model set)** clears the dedicated memory route, so the memory tier follows the active chat route. Turn proactive memory off to disable it.
 
 In the TUI, use arrows to move, Enter to open, and `/` to filter by name or canonical key. On wide terminals, Tab switches between sections and their controls; narrow terminals show one level at a time. Esc goes back. Previewing a value does not save it. Edits offer this session, this project, global, or cancel when the control supports that scope. A **this session** choice belongs to the conversation that was open when it was made, and it is not saved to any file. Switching conversations swaps in that conversation's own choices. A choice made before the first message goes to the conversation that message creates, and resuming an existing conversation drops it. A fork starts from a copy of its parent's choices, and a resumed conversation gets the ones it kept. Startup flags such as `--autonomy` and `--demo` apply to every conversation. Project saves require trusted project settings. Restart-required controls explain that timing before saving; target and profile removal shows affected routes before confirmation.
 
@@ -465,9 +464,9 @@ Renamed version-1 paths and retired keys, including the version-2 keys `fleet.de
 
 A target is a named connection to a model provider or server. It combines a runtime, endpoint and authentication with model defaults; a model ID alone does not describe that connection.
 
-In the TUI, open `/settings connections` (or `/settings targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. **Connect by URL** asks only for an endpoint URL, a key when the endpoint needs one, and a model from its live list; it saves the connection and makes that model the chat model. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
+In the TUI, open `/settings models`, choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. **Connect by URL** asks only for an endpoint URL, a key when the endpoint needs one, and a model from its live list; it saves the connection and makes that model the chat model. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
-Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
+Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section models` for the target console. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 
 A target binds an id to a registered runtime, endpoint/auth, model defaults, and optional capability or runtime-specific settings. Example user settings:
 

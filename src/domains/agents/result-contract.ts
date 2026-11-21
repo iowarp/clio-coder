@@ -553,13 +553,21 @@ export function parseDelegationPlanResult(output: string | null): DelegationPlan
 export const COUNCIL_BALLOT_VERDICT_MAX_BYTES = 64;
 
 /**
+ * The verdict slot of the ballot example. It names what goes there instead of
+ * showing an answer: an example token such as "yes" is what a small model
+ * copies into its ballot whatever the question (FL-23), so no ballot example
+ * carries one.
+ */
+const COUNCIL_BALLOT_VERDICT_PLACEHOLDER = "<your answer as one short token>";
+
+/**
  * The ballot's wire shape, quoted verbatim to the member that must cast it and
  * by the repair round that corrects it. Exported because the council composes
  * the member's ask from it, which is the rule this module already states: a
  * contract's example is written once so a prompt cannot drift from its
  * validator.
  */
-export const COUNCIL_BALLOT_SHAPE = '{"verdict":"yes","text":"the answer and the evidence behind it"}';
+export const COUNCIL_BALLOT_SHAPE = `{"verdict":${JSON.stringify(COUNCIL_BALLOT_VERDICT_PLACEHOLDER)},"text":"the answer and the evidence behind it"}`;
 
 /**
  * The ballot shape for a question that listed its answers. The verdict is a
@@ -568,7 +576,7 @@ export const COUNCIL_BALLOT_SHAPE = '{"verdict":"yes","text":"the answer and the
 export function councilBallotShape(options?: ReadonlyArray<string>): string {
 	if (options === undefined || options.length === 0) return COUNCIL_BALLOT_SHAPE;
 	const placeholder = `<one of: ${options.join("|")}>`;
-	return COUNCIL_BALLOT_SHAPE.replace('"verdict":"yes"', `"verdict":${JSON.stringify(placeholder)}`);
+	return COUNCIL_BALLOT_SHAPE.replace(JSON.stringify(COUNCIL_BALLOT_VERDICT_PLACEHOLDER), JSON.stringify(placeholder));
 }
 
 /** Whether a listed answer can be cast as a verdict at all: one non-empty line within the verdict bound. */
@@ -580,6 +588,19 @@ export function isCouncilBallotOption(option: string): boolean {
 		!trimmed.includes("\n") &&
 		Buffer.byteLength(trimmed, "utf8") <= COUNCIL_BALLOT_VERDICT_MAX_BYTES
 	);
+}
+
+/**
+ * The key a verdict is tallied and matched under: lower-cased, with any run of
+ * spaces, hyphens and underscores read as one space, so `url-path`, `URL path`
+ * and `url_path` are one answer. Spelling alone split a 4-of-5 agreement into a
+ * reported tie on the Copilot seat (FL-23).
+ */
+export function councilVerdictKey(verdict: string): string {
+	return verdict
+		.trim()
+		.toLowerCase()
+		.replace(/[\s_-]+/gu, " ");
 }
 
 interface CouncilBallot {
@@ -622,10 +643,18 @@ function validateCouncilBallot(contract: ResultContract, output: string | null):
 			`Council ballot verdict must be a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} UTF-8 bytes`,
 		);
 	}
+	// A copied placeholder is no answer; the tally would count it as one.
+	if (councilVerdictKey(ballot.verdict) === COUNCIL_BALLOT_VERDICT_PLACEHOLDER) {
+		return failure(
+			contract,
+			"unmeasured",
+			`Council ballot verdict ${JSON.stringify(ballot.verdict)} copies the placeholder; cast your own answer as the verdict`,
+		);
+	}
 	const options = contract.kind === "council-ballot" ? contract.options : undefined;
 	if (options !== undefined && options.length > 0) {
-		const verdict = ballot.verdict.toLowerCase();
-		if (!options.some((option) => option.toLowerCase() === verdict)) {
+		const verdict = councilVerdictKey(ballot.verdict);
+		if (!options.some((option) => councilVerdictKey(option) === verdict)) {
 			return failure(
 				contract,
 				"unmeasured",

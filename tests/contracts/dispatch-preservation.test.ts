@@ -188,6 +188,8 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 				pid,
 				processBirthToken: "1",
 				acquiredAt: new Date().toISOString(),
+				heartbeatAt: new Date().toISOString(),
+				heartbeatExpiresMs: 120_000,
 			}),
 		);
 	const child = spawn("sh", ["-c", "sleep 0 & echo $!; exec sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
@@ -207,6 +209,8 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 				pid: zombie,
 				processBirthToken: processBirthToken(zombie) ?? "x",
 				acquiredAt: new Date().toISOString(),
+				heartbeatAt: new Date().toISOString(),
+				heartbeatExpiresMs: 120_000,
 			}),
 		);
 		acquireCheckoutWriterLease({ checkout: root, holder }).release();
@@ -221,7 +225,6 @@ function writeLeaseRecord(
 	record: Record<string, unknown>,
 	writtenAgoMs: number,
 	holderClockSkewMs = 0,
-	heartbeat = true,
 ): void {
 	const writtenAt = Date.now() - writtenAgoMs;
 	writeFileSync(
@@ -230,9 +233,8 @@ function writeLeaseRecord(
 			version: 1,
 			acquiredAt: new Date(writtenAt - 3_600_000 + holderClockSkewMs).toISOString(),
 			...record,
-			...(heartbeat
-				? { heartbeatAt: new Date(writtenAt + holderClockSkewMs).toISOString(), heartbeatExpiresMs: 120_000 }
-				: {}),
+			heartbeatAt: new Date(writtenAt + holderClockSkewMs).toISOString(),
+			heartbeatExpiresMs: 120_000,
 		}),
 	);
 	utimesSync(path, writtenAt / 1000, writtenAt / 1000);
@@ -244,20 +246,15 @@ test("another host's writer lease is honored until its heartbeat lapses, never b
 	const path = first.path;
 	first.release();
 	// The pid is dead here; on another host that proves nothing.
-	const foreign = (writtenAgoMs: number, heartbeat = true) =>
+	const foreign = (writtenAgoMs: number) =>
 		writeLeaseRecord(
 			path,
 			{ checkout: root, host: "other-node.invalid", pid: 999_999_999, processBirthToken: "1" },
 			writtenAgoMs,
-			0,
-			heartbeat,
 		);
 	try {
 		foreign(60_000);
 		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /held by pid 999999999 on host other-node/u);
-		// A record from a writer that never beats keeps the old rule: held.
-		foreign(3_600_000, false);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /on host other-node/u);
 		foreign(121_000);
 		const taken = acquireCheckoutWriterLease({ checkout: root, holder });
 		const record = JSON.parse(readFileSync(path, "utf8"));
