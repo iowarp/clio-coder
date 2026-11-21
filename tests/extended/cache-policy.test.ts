@@ -19,9 +19,9 @@ import {
 	setEngineProviderCompactionPolicy,
 	setEngineSystemPrompt,
 } from "../../src/engine/agent.js";
-import { streamSimple } from "../../src/engine/ai.js";
+import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import { engineMainStreamSimple } from "../../src/engine/api-registry.js";
-import { workerCacheFamilyId } from "../../src/engine/apis/cache-family.js";
+import { sideCallCacheFamilyId, workerCacheFamilyId } from "../../src/engine/apis/cache-family.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 
 registerClioApiProviders();
@@ -153,6 +153,58 @@ test("workers with one stable head share a session id only where the backend rou
 	// Only a measured session-routed backend takes the shared id; elsewhere a worker keeps an id of its own.
 	for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
 		strictEqual(workerCacheFamilyId({ ...head, api }), undefined);
+});
+
+test("tool-free side calls of one head share a session id on Codex and only there (OI-6)", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },
+		"gpt-6-luna",
+		null,
+	);
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${claims.toString("base64url")}.signature`;
+	const dir = mkdtempSync(join(tmpdir(), "clio-side-family-"));
+	const previous = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+	let calls = 0;
+	const key = async (systemPrompt: string, userPrompt: string) => {
+		const path = join(dir, `${calls++}.jsonl`);
+		process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+		await completeEngineText({
+			model,
+			systemPrompt,
+			userPrompt,
+			maxTokens: 16,
+			thinkingLevel: "low",
+			signal: new AbortController().signal,
+			timeoutMs: 5_000,
+			apiKey,
+			transport: "sse",
+		}).catch(() => undefined);
+		const dump = JSON.parse(readFileSync(path, "utf8").trim()) as { payloads: Array<{ prompt_cache_key?: unknown }> };
+		return dump.payloads.at(-1)?.prompt_cache_key;
+	};
+	try {
+		const family = sideCallCacheFamilyId({
+			api: model.api,
+			provider: model.provider,
+			modelId: model.id,
+			thinkingLevel: "low",
+			systemPrompt: "# Memory review",
+		});
+		ok(family !== undefined && /^clio-coder-s-[a-f0-9]{40}$/u.test(family));
+		strictEqual(await key("# Memory review", "first task"), family);
+		strictEqual(await key("# Memory review", "another task"), family);
+		ok((await key("# Judge", "first task")) !== family);
+		for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
+			strictEqual(
+				sideCallCacheFamilyId({ api, provider: "p", modelId: "m", thinkingLevel: "low", systemPrompt: "x" }),
+				undefined,
+			);
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("the main thread's Codex request sends the pinned prompt layer as its own item, the rest right after it", async () => {

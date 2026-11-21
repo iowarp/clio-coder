@@ -40,6 +40,23 @@ const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-response
  */
 export function workerCacheFamilyId(input: CacheFamilyInput): string | undefined {
 	if (!SESSION_ROUTED_APIS.has(input.api)) return undefined;
+	// At most 64 characters, the length Pi clamps a prompt cache key to.
+	return `clio-coder-w-${headDigest(input)}-${input.lane % 1_000_000}`;
+}
+
+/**
+ * The session id a tool-free side call (memory retention and review, judges) takes on a session-routed API, or
+ * undefined where the id plays no part in cache lookup (OI-6). Without one Pi sends no `session-id` header, so each
+ * side call is routed on its own and never reads the system prompt an identical earlier call wrote. A side call has
+ * no history of its own, so calls of one head share the id without a lane: each sends its full input, and the
+ * backend reuses only the leading items they have in common.
+ */
+export function sideCallCacheFamilyId(input: Omit<CacheFamilyInput, "tools" | "lane">): string | undefined {
+	if (!SESSION_ROUTED_APIS.has(input.api)) return undefined;
+	return `clio-coder-s-${headDigest({ ...input, tools: [] })}`;
+}
+
+function headDigest(input: Omit<CacheFamilyInput, "lane">): string {
 	const head = JSON.stringify([
 		input.api,
 		input.provider,
@@ -48,6 +65,5 @@ export function workerCacheFamilyId(input: CacheFamilyInput): string | undefined
 		input.systemPrompt,
 		input.tools.map((tool) => [tool.name, tool.description, tool.parameters]),
 	]);
-	// At most 64 characters, the length Pi clamps a prompt cache key to.
-	return `clio-coder-w-${createHash("sha256").update(head).digest("hex").slice(0, 40)}-${input.lane % 1_000_000}`;
+	return createHash("sha256").update(head).digest("hex").slice(0, 40);
 }
