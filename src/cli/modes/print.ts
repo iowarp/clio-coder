@@ -343,6 +343,8 @@ interface HeadlessMainAgentRunStats {
 	reportPaths: Set<string>;
 	/** Dispatched runs whose task worktree merged into this workspace. */
 	mergedTaskWorktrees: number;
+	/** A call of a state-changing class succeeded, the main run's side of a worker's tool activity (C-37). */
+	mutatingSucceeded: boolean;
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
 	/**
@@ -707,6 +709,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (outcome === "blocked" || decision === "blocked") {
 		if (!withheldDuplicateRead && !readOnlyCeiling) stats.unresolvedBlocks.add(action);
 	} else if (outcome === "ok" || (outcome === undefined && !event.isError)) {
+		if (!terminating && MAIN_MUTATING_CLASSES.has(action)) stats.mutatingSucceeded = true;
 		const capability =
 			tool === ToolNames.Gateway
 				? (event.result as { details?: { capability?: unknown } } | undefined)?.details?.capability
@@ -792,6 +795,15 @@ function writtenPaths(stats: HeadlessMainAgentRunStats): number {
 function changedWorkspace(stats: HeadlessMainAgentRunStats): boolean {
 	return writtenPaths(stats) > 0 || stats.mergedTaskWorktrees > 0;
 }
+
+/** A worker's mutating classes less dispatch, which the main run counts by its merged worktrees instead (C-37). */
+const MAIN_MUTATING_CLASSES: ReadonlySet<string> = new Set([
+	"write",
+	"execute",
+	"system_modify",
+	"git_destructive",
+	"destructive",
+]);
 
 /** A blocked call or a failed dispatch remains, and nothing changed the workspace. */
 function unmetWithoutChange(stats: HeadlessMainAgentRunStats): boolean {
@@ -1146,9 +1158,15 @@ async function recordHeadlessMainAgentRun(input: {
 				},
 			);
 			const completion = sessionId === null ? undefined : await sessionCompletion(sessionId, input.startedAt);
+			// What the host saw change that the settled facts cannot carry owes validation as they do (C-37).
+			const observedChange = changedWorkspace(input.stats) || input.stats.mutatingSucceeded;
+			const assessment = finished.settlement.assessment;
 			const settlement =
-				completion !== undefined && finished.settlement.assessment !== undefined
-					? { ...finished.settlement, assessment: { ...finished.settlement.assessment, completion } }
+				assessment !== undefined
+					? {
+							...finished.settlement,
+							assessment: { ...assessment, ...(completion !== undefined ? { completion } : {}), observedChange },
+						}
 					: finished.settlement;
 			await journal.settle(settlement);
 		} finally {
@@ -1283,6 +1301,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		permissionRequestedByTool: new Map<string, number>(),
 		reportPaths: new Set(),
 		mergedTaskWorktrees: 0,
+		mutatingSucceeded: false,
 		unresolvedBlocks: new Set<string>(),
 		failedDispatch: null,
 		// A read-only run can change nothing, so like an answer turn it asked for no change (C-1).

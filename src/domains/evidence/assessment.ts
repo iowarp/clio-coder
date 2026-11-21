@@ -37,6 +37,11 @@ export interface RunAssessmentContext {
 	 * headless main run's turn records it in its session, which settles before the run scope opens (C-11).
 	 */
 	completion?: Pick<TelemetryRecord<"completion.evaluated">, "id" | "t" | "data">;
+	/**
+	 * A change the run's host observed that its settled facts do not carry: a headless main run's successful mutating
+	 * call or merged dispatch worktree (C-37).
+	 */
+	observedChange?: boolean;
 }
 
 export interface AssessRunInput {
@@ -133,7 +138,7 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 				attempt === 0 &&
 				settled.stepPipeline?.done !== false &&
 				trustVerdict(trust) !== "compromised" &&
-				!(findings.some((entry) => entry.tag === "no-validation") && validationOwed(settled, completion)),
+				!(findings.some((entry) => entry.tag === "no-validation") && validationOwed(settled, completion, context)),
 			failureCause,
 			// Plain data for the journal: the canonical status hands out readonly artifact lists.
 			trust: JSON.parse(JSON.stringify(trust)) as EvidenceAssessed["trust"],
@@ -152,18 +157,27 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 }
 
 /**
- * Whether a run without validation evidence fails first-pass success for it (C-37): one that declared checks, or
- * changed state, by its finish contract's count of mutated paths or, without that record, by its tool activity. A
- * read-only recipe's run or an answer changed nothing to validate; a run with no evidence either way still owes it.
+ * Whether a run without validation evidence fails first-pass success for it (C-37): one that declared checks, or one
+ * that any signal shows changed state: its finish contract's mutated paths, a successful mutating call, a command the
+ * check classifier could not read, an applied worktree or one its host observed. A finish record that counted no paths
+ * outweighs none of them, since it cannot see a script's or a merged worktree's writes. Without any signal, a
+ * read-only recipe's run or a run with a finish record changed nothing to validate; a run with no evidence still owes it.
  */
 function validationOwed(
 	settled: RunSettled,
 	completion: Pick<TelemetryRecord<"completion.evaluated">, "data"> | undefined,
+	context: RunAssessmentContext | null,
 ): boolean {
 	if (settled.hostVerification !== null || (settled.quality?.resultContract ?? null) !== null) return true;
-	if (completion !== undefined) return completion.data.mutatedPaths > 0;
-	if (settled.verification.basis === "read-only-agent") return false;
-	return settled.toolActivity?.mutatingSucceeded ?? true;
+	const changed =
+		(completion?.data.mutatedPaths ?? 0) > 0 ||
+		settled.toolActivity?.mutatingSucceeded === true ||
+		settled.unclassifiedAfterLastCheck !== undefined ||
+		settled.worktree?.applied === true ||
+		context?.observedChange === true;
+	if (changed) return true;
+	if (completion !== undefined || settled.verification.basis === "read-only-agent") return false;
+	return (settled.toolActivity ?? null) === null;
 }
 
 function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[] {
