@@ -41,7 +41,7 @@ const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, st
 	},
 	"fleet.permissions.escalation.fallback": { deny: "Deny the tool", fail: "Stop the worker" },
 	"integrations.externalAgents.defaults.toolGovernance": {
-		"clio-coder-policy": "Clio permissions",
+		"clio-coder-policy": "CLIO Coder permissions",
 		"agent-managed": "Agent permissions",
 		"deny-all": "Deny all tools",
 	},
@@ -62,7 +62,7 @@ const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, st
 	"interface.panes.notifications": { failures: "Failures only", all: "All updates", off: "Off" },
 	"interface.panes.layout": { off: "Off", workers: "Workers", cockpit: "Workers and files" },
 	"interface.panes.files.mode": { companion: "Stay open", chooser: "Choose once" },
-	"interface.panes.files.profile": { managed: "Clio theme", user: "My file manager" },
+	"interface.panes.files.profile": { managed: "CLIO Coder theme", user: "My file manager" },
 	"fleet.worktrees.root": { disk: "Disk", tmpfs: "Memory", auto: "Automatic" },
 	"integrations.git.commitAuthor": { auto: "Automatic", human: "Always me" },
 };

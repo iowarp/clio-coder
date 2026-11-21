@@ -95,7 +95,7 @@ function assertDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, wo
 		const root = canonicalizeExistingPath(path.join(home, entry));
 		if (!contained(home, root)) throw new Error(`declared write root ${entry} resolves outside the workspace`);
 		const hit = managed.find((protectedPath) => contained(protectedPath, root) || contained(root, protectedPath));
-		if (hit) throw new Error(`declared write root ${entry} overlaps Clio-managed path ${hit}`);
+		if (hit) throw new Error(`declared write root ${entry} overlaps CLIO Coder-managed path ${hit}`);
 		// The sandbox keeps Git metadata read-only, and creating the root would plant a .git in a non-repository.
 		if (contained(path.join(home, ".git"), root)) throw new Error(`declared write root ${entry} is inside Git metadata`);
 	}

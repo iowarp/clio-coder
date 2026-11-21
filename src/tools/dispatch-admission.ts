@@ -23,15 +23,15 @@ import {
 import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { operatorNamedChecks } from "../domains/dispatch/operator-checks.js";
-import {
-	confineGrantOnlyWriters,
-	overlappingWriteRootsWarning,
-	parallelWriterConflict,
-} from "../domains/dispatch/parallel-writers.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { planCardLimitsUnderTimeout } from "../domains/dispatch/run-limits.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
+import {
+	confineGrantOnlyWriters,
+	overlappingWriteRootsWarning,
+	writerSetConflict,
+} from "../domains/dispatch/writer-set.js";
 import {
 	councilVoterPersona,
 	dispatchRequestsFromArgs,
@@ -643,7 +643,10 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			return task.role === "synthesis" ? (task.council?.rounds ?? 1) : (task.council?.round ?? 1) - 1;
 		return index;
 	};
+	/** Set by the last markReservedPlan call when its plan ran wider than a limit and was split into waves (M8). */
+	let reservedWaveNotice: string | null = null;
 	const markReservedPlan = (args: Record<string, unknown>, artifact: ResolvedDispatchPlanArtifact) => {
+		reservedWaveNotice = null;
 		const prepared = withResolvedDispatchPlan(args, artifact);
 		if (deps.dispatch.reservations === undefined) return markPrepared(prepared);
 		const tasks = artifact.tasks.map((task, index) => {
@@ -663,6 +666,18 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			topology: artifact.topology === "fleet" ? "parallel" : artifact.topology,
 			tasks,
 		});
+		// DESIGN 4.5: a plan wider than a concurrency limit runs as waves instead of being refused (M8).
+		const waveCount = (waves: ReadonlyArray<number>): number => new Set(waves).size;
+		const asked = waveCount(tasks.map((task) => task.wave));
+		const reserved = waveCount(reservation.members.map((member) => member.wave));
+		if (reserved > asked) {
+			const widest = Math.max(
+				...[...new Set(reservation.members.map((member) => member.wave))].map(
+					(wave) => reservation.members.filter((member) => member.wave === wave).length,
+				),
+			);
+			reservedWaveNotice = `dispatch waves: the ${tasks.length} tasks run as ${reserved} waves of at most ${widest}, because they are more than the worker or endpoint slots allow at once; later waves start as earlier ones settle, each within its run's wall clock.`;
+		}
 		try {
 			const marked = markPrepared(prepared);
 			state.trustedReservationOwners.set(marked, reservation.ownerId);
@@ -821,7 +836,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		});
 		if (mode === "parallel" && args.writers !== 1) {
 			const specs = deps.getAgentSpecs();
-			const conflict = parallelWriterConflict(parsed.requests, specs);
+			const conflict = writerSetConflict(parsed.requests, specs);
 			if (conflict !== null && !confineGrantOnlyWriters(parsed.requests, specs)) return shapeRejection(args, conflict);
 			announceOverlappingWriteRoots(deps, args, parsed.requests, parsed.positions);
 		}
@@ -872,12 +887,6 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			if (mode !== "parallel") return shapeRejection(args, `dispatch: detach only supports parallel mode; got '${mode}'`);
 			if (reviewResult.review !== undefined) {
 				return shapeRejection(args, "dispatch: detach cannot combine with a review gate; run gated dispatch attached");
-			}
-			if (timeoutMsArg(args) !== undefined) {
-				return shapeRejection(
-					args,
-					'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
-				);
 			}
 		}
 		const snapshotFields = {
@@ -1110,7 +1119,16 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				costCeilingUsd: resolvedCostCeiling(),
 				deadlineMs: null,
 			});
-			return trustExecution(marked, dispatchExecutionSnapshot(marked, snapshotFields));
+			const waveNotice = reservedWaveNotice;
+			return trustExecution(
+				marked,
+				dispatchExecutionSnapshot(
+					marked,
+					waveNotice === null
+						? snapshotFields
+						: { ...snapshotFields, notices: [...(snapshotFields.notices ?? []), waveNotice] },
+				),
+			);
 		} catch (error) {
 			return preparationFailure(args, error);
 		}

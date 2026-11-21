@@ -501,7 +501,7 @@ test("rollback keeps the capable desktop manager and cleanup while launching the
 		mkdirSync(f.receipts, { recursive: true });
 		chmodSync(f.receipts, 0o555);
 		try {
-			const readOnly = f.run("launch", "--version");
+			const readOnly = f.run("launch", "doctor");
 			assert.equal(readOnly.status, 0, readOnly.stderr);
 			assert.equal(readOnly.stdout.trim(), active);
 			assert.deepEqual(readdirSync(f.receipts), []);
@@ -509,4 +509,27 @@ test("rollback keeps the capable desktop manager and cleanup while launching the
 			chmodSync(f.receipts, 0o755);
 		}
 	}
+});
+
+test("version and help probes create no state root while a real run keeps its receipt", (t) => {
+	const f = fixture(t);
+	mkdirSync(join(f.record.current, suffix, "dist/cli"), { recursive: true });
+	writeFileSync(
+		join(f.record.current, suffix, "dist/cli/index.js"),
+		`if (process.argv[2] === "doctor") console.log(require("node:fs").readdirSync(${JSON.stringify(f.receipts)}).length);`,
+	);
+	mkdirSync(join(f.root, "runtime"));
+	copyFileSync(process.execPath, f.record.node);
+	mkdirSync(join(f.root, "bin"));
+	writeFileSync(f.record.launcher, "owned launcher");
+	const state = join(f.root, "home/state");
+	for (const probe of ["version", "--version", "-v", "help", "--help", "-h"]) {
+		const result = f.run("launch", probe, "--build");
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(existsSync(state), false, `${probe} created the state root`);
+	}
+	const real = f.run("launch", "doctor");
+	assert.equal(real.status, 0, real.stderr);
+	assert.equal(real.stdout.trim(), "1", "a real run is covered by its receipt while it runs");
+	assert.deepEqual(readdirSync(f.receipts), [], "the receipt goes when the launch exits");
 });

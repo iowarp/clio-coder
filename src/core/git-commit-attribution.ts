@@ -1039,7 +1039,7 @@ export function withManagedGitCommitAttributionEnvironment(
 	const countRaw = env.GIT_CONFIG_COUNT;
 	const count = countRaw === undefined ? 0 : COUNT.test(countRaw) ? Number(countRaw) : Number.NaN;
 	if (!Number.isSafeInteger(count) || count > 1_024) {
-		return { env, diagnostic: boundedDiagnostic("GIT_CONFIG_COUNT is invalid; Clio commit attribution skipped") };
+		return { env, diagnostic: boundedDiagnostic("GIT_CONFIG_COUNT is invalid; CLIO Coder commit attribution skipped") };
 	}
 	const cwd = resolve(options.cwd ?? process.cwd());
 	const probe = probeRepository(cwd, env);
@@ -1047,7 +1047,9 @@ export function withManagedGitCommitAttributionEnvironment(
 	if (probe.kind === "custom") {
 		return {
 			env,
-			diagnostic: boundedDiagnostic(`core.hooksPath is set to '${probe.hooksPath}'; Clio commit attribution skipped`),
+			diagnostic: boundedDiagnostic(
+				`core.hooksPath is set to '${probe.hooksPath}'; CLIO Coder commit attribution skipped`,
+			),
 		};
 	}
 	if (probe.declaredDefaultHooksPath !== null) {
@@ -1061,7 +1063,7 @@ export function withManagedGitCommitAttributionEnvironment(
 		const reason = error instanceof Error ? error.message : String(error);
 		return {
 			env,
-			diagnostic: boundedDiagnostic(`managed hooks unavailable; Clio commit attribution skipped (${reason})`),
+			diagnostic: boundedDiagnostic(`managed hooks unavailable; CLIO Coder commit attribution skipped (${reason})`),
 		};
 	}
 	if (hooksDirectory === null) return { env, diagnostic: null };

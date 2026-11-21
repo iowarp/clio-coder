@@ -56,7 +56,7 @@ function extensionState(ext: InstalledExtension): string {
 /** The install state as the operator reads it; the CLI keeps the one-word vocabulary. */
 function stateWords(state: string): string {
 	if (state === "eligible") return "enabled";
-	if (state === "incompatible") return "needs another Clio version";
+	if (state === "incompatible") return "needs another CLIO Coder version";
 	if (state === "untrusted") return "waits for workspace trust";
 	if (state === "muted") return "muted for this session";
 	if (state === "awaiting consent") return "awaiting your consent";
@@ -117,7 +117,7 @@ function confinement(
 		return `not started; it runs in an OS sandbox when one is available, with the network ${net ? "open as declared" : "blocked as declared"}`;
 	if (sandbox.backend === null)
 		return `no OS sandbox (${sandbox.reason ?? "unavailable"}); Node flags only, so ${net ? "the network is open as declared" : "the declared network ban is not enforced"}`;
-	return `${sandbox.backend} OS sandbox; network ${sandbox.network === "blocked" ? "blocked (enforced)" : "open as declared"}; secrets masked and Clio-managed paths read-only`;
+	return `${sandbox.backend} OS sandbox; network ${sandbox.network === "blocked" ? "blocked (enforced)" : "open as declared"}; secrets masked and CLIO Coder-managed paths read-only`;
 }
 
 const SCOPE_GROUP: Readonly<Record<InstalledExtension["scope"], string>> = {
@@ -200,7 +200,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 			const drifted = ext.diagnostics.some((diagnostic) => /drift/u.test(diagnostic.message));
 			const next = (): string | undefined => {
 				if (drifted)
-					return `Its files changed after it was installed, so Clio will not run it. Reinstall it from its source with clio-coder extensions install <path> --${ext.scope === "dev" ? "user" : ext.scope} --force, or remove it.`;
+					return `Its files changed after it was installed, so CLIO Coder will not run it. Reinstall it from its source with clio-coder extensions install <path> --${ext.scope === "dev" ? "user" : ext.scope} --force, or remove it.`;
 				if (state === "disabled")
 					return `Disabled. clio-coder extensions enable ${ext.id} --${ext.scope} turns it back on.`;
 				if (!hasRuntime || state !== "eligible") return undefined;

@@ -939,7 +939,7 @@ export function renderToolAwaitingApproval(
 	const actionWords = actionClassWords(view.actionClass);
 	const why =
 		view.axis.kind === "autonomy"
-			? `At ${approvalAxisText(view)}, Clio asks you before a call that ${actionWords}`
+			? `At ${approvalAxisText(view)}, CLIO Coder asks you before a call that ${actionWords}`
 			: `${approvalAxisText(view)} held this call for you; it ${actionWords}`;
 	lines.push(...cardRows(toolMeta(why), width, false));
 	const facts = [
@@ -1045,7 +1045,7 @@ const DENIED_AT_PROMPT = /^(?:User|attach \S+(?: \([^)]*\))?) denied this call a
 function refusalTail(reason: string): string {
 	// `The operator did not answer…, so Clio…` lost its point to the cut; the operator is the reader here.
 	const unattended = UNATTENDED_REFUSAL.exec(reason);
-	if (unattended) return `no answer in ${unattended[1]} s, so Clio denied it`;
+	if (unattended) return `no answer in ${unattended[1]} s, so CLIO Coder denied it`;
 	const clause = blockReasonClause(reason);
 	if (/^User denied this call/u.test(clause)) return clause.replace(/^User denied/u, "you denied");
 	// An attached approver's denial already names that client (`attach c2 (apr) denied this call…`).
@@ -1419,7 +1419,7 @@ function sublineParts(
 	const executed = call.actor !== undefined && !notRun && status !== "forming" && status !== "ready";
 	const actor = !executed
 		? ""
-		: `${toolMeta(call.actor === "operator" ? "you" : "Clio")} ${!settled ? toolMeta(call.actor === "operator" ? "are " : "is ") : ""}`;
+		: `${toolMeta(call.actor === "operator" ? "you" : "CLIO Coder")} ${!settled ? toolMeta(call.actor === "operator" ? "are " : "is ") : ""}`;
 	const requestedBy =
 		executed && call.requestedBy && !omitRequester
 			? toolMeta(` (requested by ${sanitizeCallTargetText(call.requestedBy)})`)

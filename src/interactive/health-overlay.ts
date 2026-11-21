@@ -102,7 +102,7 @@ function ownerNames(journals: ReadonlyArray<Journal>, sessionId: string | null):
 		const split = journal.owner.indexOf(":");
 		const kind = split < 0 ? journal.owner : journal.owner.slice(0, split);
 		const id = split < 0 ? "" : journal.owner.slice(split + 1);
-		if (kind === "process") return { label: "this Clio process", of: "this Clio process's", id };
+		if (kind === "process") return { label: "this CLIO Coder process", of: "this CLIO Coder process's", id };
 		if (kind === "session" && id === sessionId) return { label: "this session", of: "this session's", id };
 		const label =
 			kind === "session"
@@ -146,7 +146,7 @@ function healthSummary(data: HealthData): { text: string; ok: boolean } {
 	const health = data.health;
 	if (!health)
 		return {
-			text: "Clio cannot check its record keeping or responsiveness: this session has no telemetry read model.",
+			text: "CLIO Coder cannot check its record keeping or responsiveness: this session has no telemetry read model.",
 			ok: false,
 		};
 	const names = ownerNames(health.journals, data.sessionId);
@@ -169,21 +169,21 @@ function healthSummary(data: HealthData): { text: string; ok: boolean } {
 	const saving =
 		losses.length === 0
 			? health.journals.length === 0
-				? "Clio has no journal open yet, so nothing is being saved."
+				? "CLIO Coder has no journal open yet, so nothing is being saved."
 				: unowned > 0
 					? "Every open journal is saving what it is sent."
-					: "Everything Clio records is being saved."
+					: "Everything CLIO Coder records is being saved."
 			: losses.length === 1 && only
 				? `${records(only.count)} ${only.sentence}.`
-				: `Clio lost ${records(total)}: ${losses.map((entry) => `${renderCount(entry.count)} ${entry.phrase}`).join(", ")}.`;
+				: `CLIO Coder lost ${records(total)}: ${losses.map((entry) => `${renderCount(entry.count)} ${entry.phrase}`).join(", ")}.`;
 	const lag = health.loopLag;
 	const slowest = lag.p99.fact.kind === "measured" ? lag.p99.fact.value : null;
 	const longest = lag.max.fact.kind === "measured" ? lag.max.fact.value : null;
 	const responsive =
 		slowest === null
-			? `Responsiveness is not measured yet; Clio checks it every ${WINDOW_SECONDS} seconds while a session is open.`
+			? `Responsiveness is not measured yet; CLIO Coder checks it every ${WINDOW_SECONDS} seconds while a session is open.`
 			: slowest > SLOW_TICK_MS
-				? `Clio is responding slowly: the slowest 1% of its ticks ran ${lag.p99.display} late.`
+				? `CLIO Coder is responding slowly: the slowest 1% of its ticks ran ${lag.p99.display} late.`
 				: longest !== null && longest >= STALL_MS
 					? `Responsiveness is normal apart from one pause of ${lag.max.display}.`
 					: "Responsiveness is normal.";
@@ -248,10 +248,10 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 	const health = data.health;
 	if (health && style !== "compact") {
 		lines.push(
-			sectionRule(theme, safe, "Saving what Clio records"),
+			sectionRule(theme, safe, "Saving what CLIO Coder records"),
 			...(style === "detailed"
 				? note(
-						"Clio writes every model call and event to a journal on disk: one for this process, one for each session and worker run.",
+						"CLIO Coder writes every model call and event to a journal on disk: one for this process, one for each session and worker run.",
 					)
 				: []),
 		);
@@ -279,7 +279,9 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 		lines.push(sectionRule(theme, safe, "Responsiveness"));
 		const lag = health.loopLag;
 		if (lag.max.fact.kind === "unknown")
-			lines.push(...missing(`Not measured yet: Clio checks every ${WINDOW_SECONDS} seconds while a session is open.`));
+			lines.push(
+				...missing(`Not measured yet: CLIO Coder checks every ${WINDOW_SECONDS} seconds while a session is open.`),
+			);
 		else
 			lines.push(
 				...chipRows(
@@ -297,7 +299,7 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 				),
 				...(style === "detailed"
 					? note(
-							`How late Clio's 10 ms timer ran in the latest ${WINDOW_SECONDS}-second check. Under ${SLOW_TICK_MS}ms is not noticeable.`,
+							`How late CLIO Coder's 10 ms timer ran in the latest ${WINDOW_SECONDS}-second check. Under ${SLOW_TICK_MS}ms is not noticeable.`,
 						)
 					: []),
 			);
@@ -459,7 +461,7 @@ function journalRows(
 	// The ids are for someone matching a journal on disk, so they come after the counts, whole or not at all.
 	const idRow = (name: OwnerName | undefined): string[] => {
 		// The process journal's id names nothing an operator can act on; a session or run id is what /resume and /view take.
-		if (!name || name.id.length === 0 || name.label === "this Clio process") return [];
+		if (!name || name.id.length === 0 || name.label === "this CLIO Coder process") return [];
 		const inline = `${name.label} id ${name.id}`;
 		if (visibleWidth(inline) <= width) return [theme.fg("annotation", inline)];
 		return visibleWidth(name.id) <= width ? [theme.fg("annotation", name.id)] : [];
@@ -481,7 +483,7 @@ function journalRows(
 		const id =
 			name &&
 			name.id.length > 0 &&
-			name.label !== "this Clio process" &&
+			name.label !== "this CLIO Coder process" &&
 			visibleWidth(`${name.label}  ${name.id}`) <= width
 				? name.id
 				: null;

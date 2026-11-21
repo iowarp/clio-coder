@@ -50,6 +50,8 @@ import { engineModels } from "./models.js";
 import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
 
+// Dispatch registers the admission store's cross-process cache lanes for main sessions here (M-11).
+export { useMainCacheLaneStore } from "./apis/cache-family.js";
 export { providerCheckpointCompatibility } from "./apis/openai-compaction.js";
 // The compaction summary's stall watchdog ends its first-token window where the main turn does (CLI-P9).
 export { hasAssistantGenerationDelta } from "./generation-delta.js";

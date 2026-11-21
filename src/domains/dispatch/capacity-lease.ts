@@ -57,6 +57,27 @@ export interface CapacityLease {
 	heartbeatAt: string;
 	reservationOwnerId: string | null;
 	reservationMemberId: string | null;
+	/** The worker's prompt cache lane among the live leases of its head, on every process of this state dir (FL-17). */
+	cacheLane?: CacheLane;
+}
+/** A lane among the live holders of one cache key: `key` names the head, `lane` ends its provider routing id. */
+export interface CacheLane {
+	key: string;
+	lane: number;
+}
+/**
+ * A main session's prompt cache lane (M-11). It holds no capacity slot, so no admission reader sees it, and it is
+ * reaped like a lease by its owner process. A released record stays as a hint for a bounded time so the same
+ * conversation resumed in a new process takes its old lane back when it is free.
+ */
+export interface MainCacheLaneRecord extends CacheLane {
+	conversation: string;
+	host: string;
+	ownerPid: number;
+	processBirthToken: string;
+	acquiredAt: string;
+	expiresAt: string;
+	releasedAt?: string;
 }
 export interface CapacityLimits {
 	global: number;
@@ -74,6 +95,8 @@ export interface CapacityStateFile {
 	leases: CapacityLease[];
 	/** Fully validated and interpreted only by reservation-store.ts. */
 	reservations: unknown[];
+	/** Main sessions' cache lanes; absent when there are none. */
+	cacheLanes?: MainCacheLaneRecord[];
 }
 export interface LeaseOwnerProbe {
 	birthToken(pid: number): string | null;
@@ -131,7 +154,25 @@ export function capacityStateLockPath(): string {
 	return capacityStatePath();
 }
 function clone(lease: CapacityLease): CapacityLease {
-	return { ...lease };
+	return { ...lease, ...(lease.cacheLane !== undefined ? { cacheLane: { ...lease.cacheLane } } : {}) };
+}
+function validCacheLane(value: unknown): value is CacheLane {
+	if (typeof value !== "object" || value === null) return false;
+	const lane = value as Partial<CacheLane>;
+	return typeof lane.key === "string" && Number.isInteger(lane.lane) && (lane.lane ?? -1) >= 0;
+}
+function validMainCacheLane(value: unknown): value is MainCacheLaneRecord {
+	if (!validCacheLane(value)) return false;
+	const record = value as Partial<MainCacheLaneRecord>;
+	return (
+		typeof record.conversation === "string" &&
+		typeof record.host === "string" &&
+		Number.isInteger(record.ownerPid) &&
+		typeof record.processBirthToken === "string" &&
+		validTimestamp(record.acquiredAt) &&
+		validTimestamp(record.expiresAt) &&
+		(record.releasedAt === undefined || validTimestamp(record.releasedAt))
+	);
 }
 function valid(value: unknown): value is CapacityLease {
 	if (typeof value !== "object" || value === null) return false;
@@ -148,7 +189,8 @@ function valid(value: unknown): value is CapacityLease {
 		typeof lease.expiresAt === "string" &&
 		typeof lease.heartbeatAt === "string" &&
 		(lease.reservationOwnerId === null || typeof lease.reservationOwnerId === "string") &&
-		(lease.reservationMemberId === null || typeof lease.reservationMemberId === "string")
+		(lease.reservationMemberId === null || typeof lease.reservationMemberId === "string") &&
+		(lease.cacheLane === undefined || validCacheLane(lease.cacheLane))
 	);
 }
 function validTimestamp(value: unknown): value is string {
@@ -211,15 +253,16 @@ export function validReservationRecord(value: unknown): value is DispatchReserva
 /**
  * A stored record no current reader accepts. A settled one holds no capacity and is dropped where it is read.
  * A live one (an active reservation, or a lease whose expiry has not run out) may still bind a running process's
- * slots, so admission refuses until `clio-coder doctor --fix` drops it.
+ * slots, so admission refuses until `clio-coder doctor --fix` drops it. A main session's cache lane holds no slot, so
+ * an invalid one is never live.
  */
 export interface InvalidAdmissionRecord {
-	kind: "reservation" | "capacity lease";
+	kind: "reservation" | "capacity lease" | "cache lane";
 	label: string;
 	live: boolean;
 }
 
-function recordLabel(value: unknown, key: "ownerId" | "leaseId", index: number): string {
+function recordLabel(value: unknown, key: "ownerId" | "leaseId" | "conversation", index: number): string {
 	const id = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
 	return typeof id === "string" && /^[\w.:-]{1,80}$/u.test(id) ? `'${id}'` : `#${index}`;
 }
@@ -266,8 +309,20 @@ function scanCapacityState(nowMs: number): CapacityStateScan {
 		invalid.push({ kind: "reservation", label: recordLabel(record, "ownerId", index), live: status === "active" });
 		return false;
 	});
+	// A cache lane holds no capacity, so an invalid one is dropped where it is read, like a settled record.
+	const cacheLanes = (Array.isArray(parsed.cacheLanes) ? parsed.cacheLanes : []).filter((record, index) => {
+		if (validMainCacheLane(record)) return true;
+		invalid.push({ kind: "cache lane", label: recordLabel(record, "conversation", index), live: false });
+		return false;
+	});
+	const { cacheLanes: _stored, ...rest } = parsed;
 	return {
-		state: { ...parsed, leases: leases.map(clone), reservations: structuredClone(reservations) },
+		state: {
+			...rest,
+			leases: leases.map(clone),
+			reservations: structuredClone(reservations),
+			...(cacheLanes.length > 0 ? { cacheLanes: cacheLanes.map((record) => ({ ...record })) } : {}),
+		},
 		invalid,
 	};
 }
@@ -305,22 +360,56 @@ export interface DispatchAdmissionStoreAudit {
 	problem: string | null;
 	reservations: number;
 	leases: number;
+	/** Main sessions' cache lane records (M-11): held ones and released hints. */
+	cacheLanes: number;
+	/** The processes that hold a cache lane and are still alive, as `pid N` here or `pid N on host` elsewhere. */
+	cacheLaneOwners: ReadonlyArray<string>;
 	invalid: ReadonlyArray<InvalidAdmissionRecord>;
 }
 
-/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
-export function auditDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmissionStoreAudit | null {
-	if (!capacityStateExists()) return null;
-	const scan = scanCapacityState(nowMs);
-	if ("problem" in scan)
-		return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+function unreadableAudit(problem: string): DispatchAdmissionStoreAudit {
+	return {
+		path: capacityStatePath(),
+		problem,
+		reservations: 0,
+		leases: 0,
+		cacheLanes: 0,
+		cacheLaneOwners: [],
+		invalid: [],
+	};
+}
+
+function storeAudit(
+	state: CapacityStateFile,
+	invalid: ReadonlyArray<InvalidAdmissionRecord>,
+	nowMs: number,
+	probe: LeaseOwnerProbe,
+): DispatchAdmissionStoreAudit {
+	const owners = new Set<string>();
+	for (const record of state.cacheLanes ?? []) {
+		if (record.releasedAt !== undefined || !ownerStillHolds(record, nowMs, probe)) continue;
+		owners.add(onThisHost(record.host) ? `pid ${record.ownerPid}` : `pid ${record.ownerPid} on ${record.host}`);
+	}
 	return {
 		path: capacityStatePath(),
 		problem: null,
-		reservations: scan.state.reservations.length,
-		leases: scan.state.leases.length,
-		invalid: scan.invalid,
+		reservations: state.reservations.length,
+		leases: state.leases.length,
+		cacheLanes: state.cacheLanes?.length ?? 0,
+		cacheLaneOwners: [...owners],
+		invalid,
 	};
+}
+
+/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
+export function auditDispatchAdmissionStore(
+	nowMs = Date.now(),
+	probe: LeaseOwnerProbe = defaultProbe,
+): DispatchAdmissionStoreAudit | null {
+	if (!capacityStateExists()) return null;
+	const scan = scanCapacityState(nowMs);
+	if ("problem" in scan) return unreadableAudit(scan.problem);
+	return storeAudit(scan.state, scan.invalid, nowMs, probe);
 }
 
 /**
@@ -333,16 +422,10 @@ export function repairDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmiss
 		const scan = scanCapacityState(nowMs);
 		if ("problem" in scan) {
 			writeCapacityStateUnsafe({ version: 2, draining: null, leases: [], reservations: [] });
-			return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+			return unreadableAudit(scan.problem);
 		}
 		if (scan.invalid.length > 0) writeCapacityStateUnsafe(scan.state);
-		return {
-			path: capacityStatePath(),
-			problem: null,
-			reservations: scan.state.reservations.length,
-			leases: scan.state.leases.length,
-			invalid: scan.invalid,
-		};
+		return storeAudit(scan.state, scan.invalid, nowMs, defaultProbe);
 	});
 }
 export function writeCapacityStateUnsafe(file: CapacityStateFile): void {
@@ -408,7 +491,10 @@ const defaultProbe: LeaseOwnerProbe = {
 	tokenProvesDeath: BIRTH_TOKEN_SOURCE_AVAILABLE,
 	alive: processAlive,
 };
-function ownerHoldsLease(lease: CapacityLease, probe: LeaseOwnerProbe): boolean {
+function ownerHoldsLease(
+	lease: Pick<CapacityLease, "ownerPid" | "processBirthToken">,
+	probe: LeaseOwnerProbe,
+): boolean {
 	const current = probe.birthToken(lease.ownerPid);
 	if (current === null || current !== lease.processBirthToken) return false;
 	// A synthetic token matches any process that reuses the pid, so where a
@@ -417,20 +503,205 @@ function ownerHoldsLease(lease: CapacityLease, probe: LeaseOwnerProbe): boolean 
 	if (probe.tokenProvesDeath === false) return probe.alive?.(lease.ownerPid) ?? false;
 	return true;
 }
+function ownerStillHolds(
+	record: Pick<CapacityLease, "host" | "ownerPid" | "processBirthToken" | "expiresAt">,
+	nowMs: number,
+	probe: LeaseOwnerProbe,
+): boolean {
+	// A record from another host is never probed here: on a shared state dir a
+	// local pid probe would inspect the wrong process. Only its age can end it.
+	if (!onThisHost(record.host)) return Date.parse(record.expiresAt) + FOREIGN_LEASE_GRACE_MS > nowMs;
+	if (!ownerHoldsLease(record, probe)) return false;
+	// A real birth token identifies this exact process, so it outranks the
+	// expiry: an owner that missed heartbeats because it sat blocked on the
+	// admission lock is alive, not gone, and taking its slot would put two
+	// processes over the same cap. Where the token is synthetic it proves
+	// nothing about pid reuse, so there the expiry still decides.
+	return probe.tokenProvesDeath !== false || Date.parse(record.expiresAt) > nowMs;
+}
 function reclaim(file: CapacityStateFile, nowMs: number, probe: LeaseOwnerProbe): void {
-	file.leases = file.leases.filter((lease) => {
-		// A lease from another host is never probed here: on a shared state dir a
-		// local pid probe would inspect the wrong process. Only its age can end it.
-		if (!onThisHost(lease.host)) return Date.parse(lease.expiresAt) + FOREIGN_LEASE_GRACE_MS > nowMs;
-		if (!ownerHoldsLease(lease, probe)) return false;
-		// A real birth token identifies this exact process, so it outranks the
-		// expiry: an owner that missed heartbeats because it sat blocked on the
-		// admission lock is alive, not gone, and taking its slot would put two
-		// processes over the same cap. Where the token is synthetic it proves
-		// nothing about pid reuse, so there the expiry still decides.
-		return probe.tokenProvesDeath !== false || Date.parse(lease.expiresAt) > nowMs;
+	file.leases = file.leases.filter((lease) => ownerStillHolds(lease, nowMs, probe));
+	if (file.cacheLanes === undefined) return;
+	const at = new Date(nowMs).toISOString();
+	const kept: MainCacheLaneRecord[] = [];
+	for (const record of file.cacheLanes) {
+		// A dead owner's lane becomes a hint for its conversation; a hint lasts as long as a cached prefix might.
+		if (record.releasedAt === undefined && !ownerStillHolds(record, nowMs, probe)) record.releasedAt = at;
+		if (record.releasedAt === undefined || Date.parse(record.releasedAt) + MAIN_CACHE_LANE_HINT_MS > nowMs)
+			kept.push(record);
+	}
+	setCacheLanes(file, kept);
+}
+function setCacheLanes(file: CapacityStateFile, records: MainCacheLaneRecord[]): void {
+	if (records.length > 0) file.cacheLanes = records;
+	else delete file.cacheLanes;
+}
+
+/** A main session's lane outlives no-birth-token owners by this long without a claim; each claim renews it. */
+const MAIN_CACHE_LANE_TTL_MS = 60 * 60_000;
+/** How long a released main lane stays a hint for its conversation: about as long as the backend keeps a prefix. */
+const MAIN_CACHE_LANE_HINT_MS = 60 * 60_000;
+const MAX_MAIN_CACHE_LANES = 1_000;
+/**
+ * How long a main lane claim or release waits for the admission lock before the engine falls back to its own lanes.
+ * Both run synchronously on the main thread at a conversation's first turn, its renewal and its cleanup, so the wait
+ * is a frozen TUI. Every holder of this lock reads and rewrites one bounded JSON file, a few milliseconds even with
+ * an fsync; a one-second budget still covers a queue of several such writers on a slow disk, and a wait past it means
+ * a holder that is stuck, not busy. The cost of giving up is cache affinity only: the turn runs on an in-process lane.
+ */
+export const MAIN_CACHE_LANE_LOCK_TIMEOUT_MS = 1_000;
+
+function lowestFreeCacheLane(file: CapacityStateFile, key: string, preferred?: number): number {
+	const taken = new Set<number>();
+	for (const lease of file.leases) if (lease.cacheLane?.key === key) taken.add(lease.cacheLane.lane);
+	for (const record of file.cacheLanes ?? [])
+		if (record.key === key && record.releasedAt === undefined) taken.add(record.lane);
+	if (preferred !== undefined && !taken.has(preferred)) return preferred;
+	let lane = 0;
+	while (taken.has(lane)) lane += 1;
+	return lane;
+}
+
+/**
+ * The prompt cache lane of a worker's lease (FL-17): the lowest lane no live lease or main session of `key` holds on
+ * any process sharing this state dir, kept on the lease and released with it. Null when the lease is gone.
+ */
+export function claimLeaseCacheLane(
+	leaseId: string,
+	key: string,
+	options: { nowMs?: number; probe?: LeaseOwnerProbe } = {},
+): number | null {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		const file = readCapacityStateUnsafe();
+		reclaim(file, options.nowMs ?? Date.now(), options.probe ?? defaultProbe);
+		const lease = file.leases.find((entry) => entry.leaseId === leaseId);
+		if (lease === undefined) return null;
+		if (lease.cacheLane?.key === key) return lease.cacheLane.lane;
+		delete lease.cacheLane;
+		lease.cacheLane = { key, lane: lowestFreeCacheLane(file, key) };
+		writeCapacityStateUnsafe(file);
+		return lease.cacheLane.lane;
 	});
 }
+
+export interface ClaimMainCacheLaneInput {
+	key: string;
+	conversation: string;
+	nowMs?: number;
+	ownerPid?: number;
+	processBirthToken?: string;
+	probe?: LeaseOwnerProbe;
+	/** Lock acquisition budget; the default is the store-wide one. */
+	timeoutMs?: number;
+}
+
+/**
+ * A main session's prompt cache lane (M-11): kept while it holds `key`, else its old lane on `key` when that is free,
+ * else the lowest free one, across every process sharing this state dir. Each claim renews the record.
+ */
+export function claimMainCacheLane(input: ClaimMainCacheLaneInput): number {
+	const lock = input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {};
+	return withStateFileLockSync(
+		capacityStateLockPath(),
+		() => {
+			const nowMs = input.nowMs ?? Date.now();
+			const file = readCapacityStateUnsafe();
+			reclaim(file, nowMs, input.probe ?? defaultProbe);
+			const ownerPid = input.ownerPid ?? process.pid;
+			const token = input.processBirthToken ?? processBirthToken(ownerPid);
+			if (!token) throw new Error("dispatch: cannot establish process birth token");
+			const host = hostname();
+			const records = file.cacheLanes ?? [];
+			const at = new Date(nowMs).toISOString();
+			const expiresAt = new Date(nowMs + MAIN_CACHE_LANE_TTL_MS).toISOString();
+			const ours = (record: MainCacheLaneRecord): boolean =>
+				record.releasedAt === undefined &&
+				record.conversation === input.conversation &&
+				record.host === host &&
+				record.ownerPid === ownerPid &&
+				record.processBirthToken === token;
+			const held = records.find((record) => ours(record) && record.key === input.key);
+			if (held !== undefined) {
+				held.expiresAt = expiresAt;
+				writeCapacityStateUnsafe(file);
+				return held.lane;
+			}
+			const hint = [...records]
+				.reverse()
+				.find(
+					(record) =>
+						record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key,
+				);
+			// This conversation's other head and its released hints on this key give way to the new claim.
+			const kept = records.filter(
+				(record) =>
+					!ours(record) &&
+					!(record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key),
+			);
+			setCacheLanes(file, kept);
+			const lane = lowestFreeCacheLane(file, input.key, hint?.lane);
+			// The oldest hints go first; a full store of live lanes is a claim failure, as a full lease store is.
+			while (kept.length >= MAX_MAIN_CACHE_LANES) {
+				const index = kept.findIndex((record) => record.releasedAt !== undefined);
+				if (index < 0) throw new Error(`dispatch: main cache lane store is full (${kept.length}/${MAX_MAIN_CACHE_LANES})`);
+				kept.splice(index, 1);
+			}
+			kept.push({
+				key: input.key,
+				lane,
+				conversation: input.conversation,
+				host,
+				ownerPid,
+				processBirthToken: token,
+				acquiredAt: at,
+				expiresAt,
+			});
+			setCacheLanes(file, kept);
+			writeCapacityStateUnsafe(file);
+			return lane;
+		},
+		lock,
+	);
+}
+
+/** Release this process's main cache lanes: one conversation's, or all of them when none is named. */
+export function releaseMainCacheLanes(
+	conversation: string | undefined,
+	owner: { ownerPid?: number; processBirthToken?: string; nowMs?: number; timeoutMs?: number } = {},
+): void {
+	if (!capacityStateExists()) return;
+	const lock = owner.timeoutMs !== undefined ? { timeoutMs: owner.timeoutMs } : {};
+	withStateFileLockSync(
+		capacityStateLockPath(),
+		() => {
+			const file = readCapacityStateUnsafe();
+			const ownerPid = owner.ownerPid ?? process.pid;
+			const token = owner.processBirthToken ?? processBirthToken(ownerPid);
+			const at = new Date(owner.nowMs ?? Date.now()).toISOString();
+			let changed = false;
+			for (const record of file.cacheLanes ?? []) {
+				if (record.releasedAt !== undefined || record.host !== hostname() || record.ownerPid !== ownerPid) continue;
+				if (record.processBirthToken !== token) continue;
+				if (conversation !== undefined && record.conversation !== conversation) continue;
+				record.releasedAt = at;
+				changed = true;
+			}
+			if (changed) writeCapacityStateUnsafe(file);
+		},
+		lock,
+	);
+}
+
+/**
+ * The cross-process lane store the engine's main cache routing claims through (M-11). It runs on the main thread, so
+ * it waits `MAIN_CACHE_LANE_LOCK_TIMEOUT_MS` for the lock, never the store-wide 20 s.
+ */
+export const mainCacheLaneStore = {
+	claim: (key: string, conversation: string): number =>
+		claimMainCacheLane({ key, conversation, timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS }),
+	release: (conversation: string | undefined): void =>
+		releaseMainCacheLanes(conversation, { timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS }),
+};
 /** Inspect/expire the drain inside an admission-state transaction. The caller persists the mutated state. */
 export function activeCapacityDrainUnsafe(file: CapacityStateFile, nowMs: number): CapacityDrain | null {
 	if (file.draining === null) return null;
@@ -468,6 +739,18 @@ function heldReservationUsage(
 	const foreignNodeHosts = new Map<string, Set<string>>();
 	const foreignEndpointHosts = new Map<string, Set<string>>();
 	let ownHeld = false;
+	// Plans take capacity in the order they were reserved (DESIGN 4.5, fleet M8): a member of one plan waits only
+	// behind plans reserved before it, so two plans admitted while capacity was busy never wait on each other.
+	const transferringCreatedAt =
+		transferring === undefined
+			? undefined
+			: (values.find(
+					(value): value is { createdAt: string } =>
+						typeof value === "object" &&
+						value !== null &&
+						(value as { ownerId?: unknown }).ownerId === transferring.ownerId &&
+						typeof (value as { createdAt?: unknown }).createdAt === "string",
+				)?.createdAt ?? undefined);
 	for (const value of values) {
 		if (typeof value !== "object" || value === null)
 			throw new Error("dispatch capacity store has invalid reservation records");
@@ -477,7 +760,15 @@ function heldReservationUsage(
 			host?: unknown;
 			status?: unknown;
 			members?: unknown;
+			createdAt?: unknown;
 		};
+		if (
+			transferringCreatedAt !== undefined &&
+			record.ownerId !== transferring?.ownerId &&
+			typeof record.createdAt === "string" &&
+			Date.parse(record.createdAt) > Date.parse(transferringCreatedAt)
+		)
+			continue;
 		if (typeof record.status !== "string" || !RESERVATION_STATUSES.has(record.status) || !Array.isArray(record.members))
 			throw new Error("dispatch capacity store has invalid reservation records");
 		if (record.status !== "active") continue;
@@ -947,11 +1238,17 @@ export function releaseCapacityLeasesOwnedBy(owner: {
 		if (owner.birth === null) return 0;
 		const file = readCapacityStateUnsafe();
 		const before = file.leases.length;
-		file.leases = file.leases.filter(
-			(lease) => lease.host !== owner.host || lease.ownerPid !== owner.pid || lease.processBirthToken !== owner.birth,
-		);
+		const owned = (record: Pick<CapacityLease, "host" | "ownerPid" | "processBirthToken">): boolean =>
+			record.host === owner.host && record.ownerPid === owner.pid && record.processBirthToken === owner.birth;
+		file.leases = file.leases.filter((lease) => !owned(lease));
 		const released = before - file.leases.length;
-		if (released > 0) writeCapacityStateUnsafe(file);
+		// The dead owner's main cache lanes go with its leases; they hold no slot, so they are not counted.
+		const lanes = file.cacheLanes?.length ?? 0;
+		setCacheLanes(
+			file,
+			(file.cacheLanes ?? []).filter((record) => !owned(record)),
+		);
+		if (released > 0 || (file.cacheLanes?.length ?? 0) !== lanes) writeCapacityStateUnsafe(file);
 		return released;
 	});
 }

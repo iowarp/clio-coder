@@ -239,7 +239,7 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio-coder.suspend": {
 		defaultKeys: "ctrl+z",
 		label: "Suspend",
-		description: "Suspend Clio (resume with fg; unavailable on Windows)",
+		description: "Suspend CLIO Coder (resume with fg; unavailable on Windows)",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,

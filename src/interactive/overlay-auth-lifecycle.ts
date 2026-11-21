@@ -268,7 +268,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 				return;
 			}
 			if (resolved.runtime.auth === "api-key") {
-				runKeyFlow(() => enterApiKey("API key required before Clio can connect to this target."));
+				runKeyFlow(() => enterApiKey("API key required before CLIO Coder can connect to this target."));
 				return;
 			}
 			authDialogDismiss = dialog.controller.dismiss;

@@ -432,10 +432,12 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				const failure = event as Extract<ConfigReloadFailedPayload, { message: string }>;
 				const headline = typeof failure.headline === "string" && failure.headline ? failure.headline : failure.message;
 				deps.notify("error", `${headline} · [config] settings reload rejected`, "config:reload-failed", 0);
-				const keys = Array.isArray(failure.keys) && failure.keys.length > 0 ? failure.keys.join(", ") : "none named";
+				// The line already names the keys and, for a settings failure, the file; a
+				// second mention of either only lengthened the notice (M-30).
+				const file = failure.message.includes(failure.file) ? "" : ` File: ${failure.file}.`;
 				deps.appendTranscriptNotice(
 					"error",
-					`[config] settings reload rejected; this session keeps its last good settings. File: ${failure.file}. Key: ${keys}. Error: ${failure.message}`,
+					`[config] settings reload rejected; this session keeps its last good settings.${file} Error: ${failure.message}`,
 				);
 			} else if (event.message === null) {
 				deps.dismissNotification("config:reload-failed");

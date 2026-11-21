@@ -38,7 +38,7 @@ describe("contracts/panes /quit names the utility panes it leaves open (#272)", 
 		});
 		strictEqual(
 			left,
-			"Clio left 1 pane open in herdr: bash in panes (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.",
+			"CLIO Coder left 1 pane open in herdr: bash in panes (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.",
 		);
 	});
 
@@ -48,7 +48,7 @@ describe("contracts/panes /quit names the utility panes it leaves open (#272)", 
 			docks: () => [],
 			detection: () => userHost,
 		});
-		match(left ?? "", /^Clio left 2 panes open in herdr: bash in panes \(p3\), logs: run-1 \(p4\)\./);
+		match(left ?? "", /^CLIO Coder left 2 panes open in herdr: bash in panes \(p3\), logs: run-1 \(p4\)\./);
 		match(left ?? "", /close them now with `herdr pane close <paneId>`\.$/);
 	});
 

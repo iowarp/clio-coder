@@ -459,7 +459,7 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 								kind: "ok",
 								output:
 									from !== undefined
-										? `browser close: detached from ${from}; the tabs Clio opened there are closed, the browser and its other tabs keep running`
+										? `browser close: detached from ${from}; the tabs CLIO Coder opened there are closed, the browser and its other tabs keep running`
 										: "browser close: session closed; its pages, servers and profile are gone",
 							};
 						}

@@ -638,7 +638,7 @@ function uniqueDecisionKey(base: string, existing: ReadonlySet<string>): string 
 
 /** Why Clio chose an answer for the operator: who was absent, and for how long. */
 function autoRationale(unattended: UnattendedRound | undefined): string {
-	return `The operator did not answer within ${unattended?.afterSeconds ?? 0} s; Clio chose this for them.`;
+	return `The operator did not answer within ${unattended?.afterSeconds ?? 0} s; CLIO Coder chose this for them.`;
 }
 
 function decisionFromAnswer(
@@ -822,7 +822,7 @@ function unattendedGuidance(
 		.filter((answer) => answer.auto === true)
 		.map((answer) => `- ${answer.question.split("\n")[0]?.trim() ?? answer.question} -> ${answer.answer}`);
 	return [
-		`The operator did not answer within ${unattended.afterSeconds} s, so Clio answered for them and closed the interview. Clio chose:`,
+		`The operator did not answer within ${unattended.afterSeconds} s, so CLIO Coder answered for them and closed the interview. CLIO Coder chose:`,
 		...chosen,
 		exposure === "outward"
 			? "An outward question nobody answered is a no: do not take that step. Continue with the rest of the task, and name each unanswered outward step as an open decision in your final reply."
@@ -982,7 +982,7 @@ export async function closeAskUserInterviewOnAssistantTurn(
 type AskUserHostCloseReason = "turn_finished";
 
 const HOST_CLOSE_SUMMARY: Record<AskUserHostCloseReason, string> = {
-	turn_finished: "The interview ended with the turn before Clio closed it.",
+	turn_finished: "The interview ended with the turn before CLIO Coder closed it.",
 };
 
 async function finalizeAskUserInterview(
@@ -1028,7 +1028,7 @@ async function closeAutoResolved(
 ): Promise<ToolResult> {
 	policy.status = "complete";
 	policy.endedAt = answeredAt;
-	const note = `Answered by Clio: no operator answer within ${unattended.afterSeconds} s.`;
+	const note = `Answered by CLIO Coder: no operator answer within ${unattended.afterSeconds} s.`;
 	policy.summary = policy.summary === undefined ? note : `${policy.summary} ${note}`;
 	if (!standalone) {
 		upsertDecisions(policy, deriveAnswerDecisions(questions, answers, policy, unattended));

@@ -17,6 +17,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import type { ClioSettings } from "../../core/config.js";
+import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { gitCommitAuthorSetting, resolveClioCommitAuthorship } from "../../core/git-commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
@@ -25,6 +26,7 @@ import { freeClaim, type PricingSum, sumFacts, sumPricing, sumRunSpend } from ".
 import { renderPricing } from "../../core/telemetry/render.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { gitCheckoutRoot } from "../../tools/task-worktree.js";
 import type { Playbook } from "../agents/playbook.js";
 import type { PlaybookCommandRegistry } from "../agents/playbook-commands.js";
 import { mutationReportPaths, resultContractAuthorship } from "../agents/result-contract.js";
@@ -70,7 +72,6 @@ import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from 
 import { changedCheckFiles, deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
 import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
-import { acquireFleetWorkspaceLock } from "./fleet-workspace-lock.js";
 import {
 	decideReviewGate,
 	type GateDecisionCorrelation,
@@ -87,6 +88,7 @@ import type { RunResult } from "./types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "./workspace-checkpoint.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
 import { createWriteBoundaryEnforcer } from "./write-boundary-enforcer.js";
+import { joinWriterSet } from "./writer-set.js";
 
 /** Owner id for a plan with no model runs; it holds nothing to release. */
 const NO_WORKER_RESERVATION = "fleet-no-worker-reservation";
@@ -260,7 +262,7 @@ export interface ExecuteFleetRunInput {
 	 * The settings that choose the sandbox loop checks and gates run in, as host
 	 * verification's checks do; absent reads as `safety.sandbox: auto`.
 	 */
-	settings?: Readonly<Pick<ClioSettings, "safety" | "targets">>;
+	settings?: Readonly<Pick<ClioSettings, "safety" | "targets"> & { fleet?: Pick<ClioSettings["fleet"], "limits"> }>;
 	/** Cancel the fleet, including queued and running proposals. */
 	signal?: AbortSignal;
 	/**
@@ -435,7 +437,23 @@ function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number {
 export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
 	// Taken before the root claims its verdict or writes a record, so a refused
 	// run leaves no durable trace and its minted id never reads as a real root.
-	const lease = await acquireFleetWorkspaceLock({ workspaceRoot: input.workspaceRoot, rootId: input.fleetRootId });
+	// A fleet holds the checkout's writer set for its whole run; another fleet or another process's writer there queues
+	// it until the fleet run wall clock passes (DESIGN 4.5).
+	const lease = await joinWriterSet({
+		checkout: gitCheckoutRoot(input.workspaceRoot) ?? input.workspaceRoot,
+		member: {
+			group: input.fleetRootId,
+			roots: null,
+			isolated: false,
+			agentId: "fleet",
+			runId: input.fleetRootId,
+			fleet: true,
+		},
+		deadlineAt: Date.now() + (input.settings?.fleet ?? DEFAULT_SETTINGS.fleet).limits.runTimeoutMs,
+		...(input.signal !== undefined ? { signal: input.signal } : {}),
+		onQueued: (waitingOn) =>
+			input.onNotice?.(`fleet ${input.fleetRootId} queued behind ${waitingOn}; it starts when that settles`),
+	});
 	let emergencySeal = (): void => {};
 	const unregisterEmergency = input.registerEmergencySeal?.(() => {
 		try {
@@ -444,7 +462,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			/* Forced shutdown persistence is best effort. */
 		}
 		try {
-			lease.releaseSync();
+			lease.release();
 		} catch {
 			/* A dead owner can be reclaimed on the next run. */
 		}
@@ -473,13 +491,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		try {
 			await rootTelemetry?.close();
 		} finally {
-			await lease.release().catch((error: unknown) => {
-				// The record names this live process, so other processes are refused
-				// here until it exits or its next acquisition retries the release; say
-				// so rather than let the leftover look like a hang.
+			try {
+				lease.release();
+			} catch (error) {
+				// The record names this live process, so other processes queue behind
+				// it until it exits; say so rather than let the leftover look like a hang.
 				const message = error instanceof Error ? error.message : String(error);
-				input.onNotice?.(`could not release the workspace fleet lock: ${message}`);
-			});
+				input.onNotice?.(`could not release the checkout's writer set: ${message}`);
+			}
 			unregisterEmergency?.();
 		}
 	}

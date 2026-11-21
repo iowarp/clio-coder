@@ -85,7 +85,7 @@ function endingWords(next: AgentStatus, nextModel: string, wait: SilentWait): st
 	const request = next.modelRequest && next.modelRequest.sentAt >= wait.waitingFrom ? next.modelRequest : undefined;
 	if (phase === "writing" || phase === "thinking" || request?.firstByteAt) return "then output arrived";
 	if (phase === "cancelling" || next.cancelRequestedAt !== undefined) return "then you stopped it";
-	if (phase === "retrying") return "then Clio retried";
+	if (phase === "retrying") return "then CLIO Coder retried";
 	if (phase === "tool_running" || phase === "tool_blocked") return "then a tool call arrived";
 	return "then the wait ended";
 }

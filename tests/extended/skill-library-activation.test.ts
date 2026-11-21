@@ -38,14 +38,14 @@ it("activates every bundled skill from its native package in a workspace with pe
 			recursive: true,
 		});
 		const catalog = discoverLibrary({ cwd }).entries;
-		// 43 = 42 local packages + 1 blessed remote package (wtfp, pinned by
+		// 44 = 43 local packages + 1 blessed remote package (wtfp, pinned by
 		// GitHub tree URL). Installing a remote package clones it over the
 		// network, which this offline test lane must not depend on, so the
 		// remote entry is excluded from the install loop below and its skills
 		// are intentionally not counted in the `skills.length` assertion.
-		strictEqual(catalog.length, 43);
+		strictEqual(catalog.length, 44);
 		const installableCatalog = catalog.filter((entry) => !/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(entry.sourceUrl));
-		strictEqual(installableCatalog.length, 42);
+		strictEqual(installableCatalog.length, 43);
 		const refresh = (project: string) => reloadPluginResources(project);
 		refresh(cwd);
 		// Skills first: a pack such as hpc requires a bundled skill, and a plan without requirements refuses it.
@@ -61,8 +61,8 @@ it("activates every bundled skill from its native package in a workspace with pe
 		refresh(cwd);
 		const skills = loadSkills({ cwd }).items;
 		// 52 since hpc-sweep (4556475b1) and hypothesis-workflow (c461e6204) joined their packs
-		// and the hoare pack (#454) added hoare-verification.
-		strictEqual(skills.length, 52);
+		// and the hoare pack (#454) added hoare-verification; 53 since web-debug (9d0e7201b).
+		strictEqual(skills.length, 53);
 		const context = createContextTool({ getCwd: () => cwd });
 		for (const skill of skills) {
 			strictEqual(skill.source, "plugin", skill.name);
@@ -220,7 +220,7 @@ it("explains a discovered but untrusted skill without claiming it is unknown or 
 			{ pendingSkillPolicy: automaticPolicy() },
 		);
 		ok(result.kind === "error");
-		match(result.message, /not imported into Clio/);
+		match(result.message, /not imported into CLIO Coder/);
 		deepStrictEqual(result.details?.refusal, {
 			subject: "skill",
 			name: "foreign-only",

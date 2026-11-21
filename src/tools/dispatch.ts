@@ -6,7 +6,7 @@ import { DISPATCH_JOB_TABLE_TEXT } from "../domains/agents/dispatch-jobs.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { requestedWriteNone } from "../domains/dispatch/envelope.js";
 import { councilJudgeAgentId, gateDeciderAgentId, reviewDeciderAgentId } from "../domains/dispatch/execution-role.js";
-import { canonicalWriteRoots } from "../domains/dispatch/parallel-writers.js";
+import { canonicalWriteRoots } from "../domains/dispatch/writer-set.js";
 import type { ToolCallDispatchRole, ToolCallDispatchTask, ToolCallLanding } from "../domains/middleware/index.js";
 import { createDispatchAdmissionController } from "./dispatch-admission.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";

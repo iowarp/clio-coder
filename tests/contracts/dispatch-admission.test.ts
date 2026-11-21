@@ -19,11 +19,16 @@ import { AdmissionCanceledError, AdmissionTimedOutError } from "../../src/domain
 import type { AdmissionQueueRequest } from "../../src/domains/dispatch/admission-queue.js";
 import { createAdmissionQueue, orderAdmissionRequests } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
-import type { CapacityLease } from "../../src/domains/dispatch/capacity-lease.js";
+import type { CapacityLease, LeaseOwnerProbe } from "../../src/domains/dispatch/capacity-lease.js";
 import {
+	acquireCapacityLease,
 	capacityLeaseUsage,
 	capacityStateLockPath,
+	claimLeaseCacheLane,
+	claimMainCacheLane,
+	processBirthToken,
 	readCapacityStateUnsafe,
+	releaseMainCacheLanes,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
@@ -32,7 +37,6 @@ import {
 	architectPlanOutsideWriteRoots,
 	classifyDispatchIntentCompatibility,
 } from "../../src/domains/dispatch/intent-compatibility.js";
-import { parallelWriterConflict } from "../../src/domains/dispatch/parallel-writers.js";
 import {
 	declaredScopeReplacementNotice,
 	inferredScopeParentTokenNotice,
@@ -44,6 +48,7 @@ import {
 	validateJobSpec,
 } from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import { writerSetConflict } from "../../src/domains/dispatch/writer-set.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -56,9 +61,11 @@ import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copi
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { planFacts, readDispatchPlan } from "../../src/interactive/dispatch-plan-summary.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { normalizeDispatchAdmission } from "../../src/tools/dispatch-normalize.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
+import type { DispatchToolDeps } from "../../src/tools/dispatch-types.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -243,6 +250,41 @@ describe("dispatch admission boundary", () => {
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
 
+	it("hands out prompt cache lanes across processes: workers on their lease, main sessions beside it, both freed with their owner (M-11)", () => {
+		const peer = { pid: 999_001, token: "peer-birth" };
+		let peerAlive = true;
+		const probe: LeaseOwnerProbe = {
+			birthToken: (pid) => (pid === peer.pid ? (peerAlive ? peer.token : null) : processBirthToken(pid)),
+			tokenProvesDeath: true,
+		};
+		const limits = { global: 4, nodes: { local: 4 }, endpoints: {} };
+		const asPeer = { ownerPid: peer.pid, processBirthToken: peer.token, probe };
+		// Another process's main session holds lane 0; this process's sessions take the next lanes and keep them.
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "peer-session", ...asPeer }), 0);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1, "a held lane is kept");
+		strictEqual(claimMainCacheLane({ key: "other head", conversation: "elsewhere", probe }), 0);
+		// Workers take lanes on their leases, and no capacity reader counts a main session's lane.
+		const peerLease = acquireCapacityLease({ assignmentId: "peer-worker", nodeId: "local", limits, ...asPeer });
+		const ownLease = acquireCapacityLease({ assignmentId: "own-worker", nodeId: "local", limits, probe });
+		strictEqual(claimLeaseCacheLane(peerLease.leaseId, "worker head", { probe }), 0);
+		strictEqual(claimLeaseCacheLane(ownLease.leaseId, "worker head", { probe }), 1);
+		deepStrictEqual(readCapacityStateUnsafe().leases.find((lease) => lease.leaseId === ownLease.leaseId)?.cacheLane, {
+			key: "worker head",
+			lane: 1,
+		});
+		strictEqual(capacityLeaseUsage({ probe }).global, 2);
+		// The peer dies: its lease and its main lane are reaped by owner pid and birth token, and both lanes free.
+		peerAlive = false;
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "next", probe }), 0);
+		const later = acquireCapacityLease({ assignmentId: "later-worker", nodeId: "local", limits, probe });
+		strictEqual(claimLeaseCacheLane(later.leaseId, "worker head", { probe }), 0);
+		// A released conversation resumed in another process takes its old lane back while it is free.
+		releaseMainCacheLanes(undefined);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "fresh", probe }), 0);
+	});
+
 	it("states each run's bounds on the plan card: a priced estimate at the output bound, else only the timers and tool ceiling it has (M6)", async () => {
 		const planText = async (
 			runtime: RuntimeDescriptor,
@@ -290,7 +332,7 @@ describe("dispatch admission boundary", () => {
 		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
 		match(
 			unpriced,
-			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; Clio stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 600 s, and the run stops at its 1800000 ms wall clock; CLIO Coder stops it at 300 tool calls/u,
 		);
 		// The approval card's Plan rows carry the same limits text the plan signs, once when both workers share it.
 		const card = readDispatchPlan(unpriced);
@@ -298,21 +340,52 @@ describe("dispatch admission boundary", () => {
 		const cardLimits = planFacts(card).filter((fact) => fact.label === "limits");
 		strictEqual(cardLimits.length, 1, unpriced);
 		ok(unpriced.split("\n").includes(`    limits: ${cardLimits[0]?.value}`), unpriced);
-		match(cardLimits[0]?.value ?? "", /Clio stops it at 300 tool calls/u);
+		match(cardLimits[0]?.value ?? "", /CLIO Coder stops it at 300 tool calls/u);
 		match(
 			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
-			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; Clio stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; CLIO Coder stops it at 300 tool calls/u,
 		);
 		// An external one-shot worker's tool calls are not counted, so no tool ceiling is promised.
 		const external = await planText(claudeCodeRuntime, "claude-haiku-5-5");
-		match(external, /limits: .*one launch whose tool calls Clio cannot count, so no tool ceiling applies/u);
-		ok(!/Clio stops it at/u.test(external), external);
+		match(external, /limits: .*one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies/u);
+		ok(!/CLIO Coder stops it at/u.test(external), external);
 		const priced = (maxOutputTokens: number) => planText(anthropic, "claude-haiku-5-5", maxOutputTokens);
 		const estimate = (text: string) => /limits: cost (~\S+ est) per model call at a (\d+)-token output bound/u.exec(text);
 		const [small, large] = [estimate(await priced(100)), estimate(await priced(4000))];
 		strictEqual(small?.[2], "100");
 		strictEqual(large?.[2], "4000");
 		ok(small?.[1] !== large?.[1], `${small?.[1]} moves with the output bound to ${large?.[1]}`);
+	});
+
+	it("runs a 6-task plan on a 4-slot endpoint as two waves with a notice, not a refusal (M8)", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [
+			{ id: "local", runtime: "openai", defaultModel: "gpt-4o", url: "http://127.0.0.1:9/v1", maxConcurrentRequests: 4 },
+		];
+		settings.fleet.default = { ...settings.fleet.default, target: "local", model: "gpt-4o" };
+		const context = dispatchStubContext({ settings });
+		const bundle = makeDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			const admission = createDispatchAdmissionController({
+				dispatch: bundle.contract,
+				getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+				getAutonomy: () => "yolo",
+			} as DispatchToolDeps);
+			const prepared = admission.prepareAdmissionArguments({
+				agent: "scout",
+				mode: "parallel",
+				tasks: [1, 2, 3, 4, 5, 6].map((n) => ({ task: `Inspect module ${n} of the fixture.` })),
+			});
+			ok(prepared);
+			strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined, JSON.stringify(prepared));
+			const snapshot = admission.state.trustedExecutionSnapshots.get(prepared);
+			const notices = snapshot?.kind === "dispatch" ? (snapshot.notices ?? []) : [];
+			match(notices.join("\n"), /^dispatch waves: the 6 tasks run as 2 waves of at most 4,/mu, JSON.stringify(notices));
+			admission.disposeAdmissionArguments(prepared);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("preserves declared intent through admission when briefing quotes an absolute workspace", async () => {
@@ -928,7 +1001,7 @@ describe("dispatch admission boundary", () => {
 			declared.requests.map((request) => request.readOnly),
 			[true, true, true],
 		);
-		strictEqual(parallelWriterConflict(declared.requests, specs), null);
+		strictEqual(writerSetConflict(declared.requests, specs), null);
 		strictEqual(declared.notices.length, 3);
 		match(
 			declared.notices[0] ?? "",
@@ -974,7 +1047,7 @@ describe("dispatch admission boundary", () => {
 				[false, "builder"],
 			],
 		);
-		strictEqual(parallelWriterConflict(builders.requests, specs), null);
+		strictEqual(writerSetConflict(builders.requests, specs), null);
 		match(
 			builders.notices.join("\n"),
 			/task 2 \(debugger\) runs read-only as an explorer: a builder in a parallel batch with no intent\.write_roots/u,
@@ -1034,7 +1107,7 @@ describe("dispatch admission boundary", () => {
 			{ auto, resolveIntent },
 		);
 		ok(writers.ok);
-		match(String(parallelWriterConflict(writers.requests, specs)), /withhold bash and verify .* worktree: true/u);
+		match(String(writerSetConflict(writers.requests, specs)), /withhold bash and verify .* worktree: true/u);
 	});
 
 	it("resolves the plan artifact's legacy scope against the dispatch cwd, not the process cwd", () => {

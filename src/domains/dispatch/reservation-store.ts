@@ -205,9 +205,53 @@ function heldAllocation(record: DispatchReservationRecord): ReservationAllocatio
 	};
 }
 
+/**
+ * Split each wave whose width passes a concurrency limit into consecutive waves that fit it (DESIGN 4.5, fleet M8). A
+ * council runs its whole roster at once, so its waves stay as given. Pure.
+ */
+function splitReservationWaves(
+	tasks: ReadonlyArray<ReservationPlanTask>,
+	capacity: Pick<ReservationCapacitySnapshot, "global" | "nodes" | "endpoints">,
+	topology?: ReservationTopology,
+): ReservationPlanTask[] {
+	if (topology === "council") return tasks.map((task) => ({ ...task }));
+	const limitOf = (limit: number | undefined): number =>
+		limit === undefined || !Number.isFinite(limit) ? Number.POSITIVE_INFINITY : Math.max(1, limit);
+	// The main turn's own request holds its endpoint slot until the dispatch call returns, so a wave wider than the
+	// slots left to workers would wait on itself and never admit. A wave of one still meets the foreground refusal.
+	const endpointLimitOf = (endpoint: ReservationCapacitySnapshot["endpoints"][string] | undefined): number =>
+		endpoint === undefined ? Number.POSITIVE_INFINITY : limitOf(endpoint.limit - (endpoint.foregroundStreams ?? 0));
+	const out: ReservationPlanTask[] = [];
+	let next = 0;
+	for (const wave of [...new Set(tasks.map((task) => task.wave))].sort((a, b) => a - b)) {
+		let counts = { global: 0, nodes: new Map<string, number>(), endpoints: new Map<string, number>() };
+		for (const task of tasks.filter((entry) => entry.wave === wave)) {
+			const nodeFull = (counts.nodes.get(task.nodeId) ?? 0) >= limitOf(capacity.nodes[task.nodeId]?.limit);
+			const endpointFull =
+				task.endpointKey !== undefined &&
+				(counts.endpoints.get(task.endpointKey) ?? 0) >= endpointLimitOf(capacity.endpoints[task.endpointKey]);
+			if (counts.global > 0 && (counts.global >= limitOf(capacity.global.limit) || nodeFull || endpointFull)) {
+				next += 1;
+				counts = { global: 0, nodes: new Map(), endpoints: new Map() };
+			}
+			counts.global += 1;
+			counts.nodes.set(task.nodeId, (counts.nodes.get(task.nodeId) ?? 0) + 1);
+			if (task.endpointKey !== undefined)
+				counts.endpoints.set(task.endpointKey, (counts.endpoints.get(task.endpointKey) ?? 0) + 1);
+			out.push({ ...task, wave: next });
+		}
+		next += 1;
+	}
+	return out;
+}
+
+/**
+ * Admit a plan whose every wave fits the limits. Slots in use or held by other plans do not refuse it: its members
+ * queue for them with their run's deadline, behind every plan reserved before it (DESIGN 4.5, fleet M8). Refusal is
+ * left for a wave that can never fit.
+ */
 function allocateReservation(
 	tasks: ReadonlyArray<ReservationPlanTask>,
-	existing: ReadonlyArray<DispatchReservationRecord>,
 	capacity: ReservationCapacitySnapshot,
 	topology?: ReservationTopology,
 ): ReservationPlanResult {
@@ -215,39 +259,32 @@ function allocateReservation(
 	const duplicate = tasks.find((task, index) => tasks.slice(0, index).some((entry) => entry.memberId === task.memberId));
 	if (duplicate) return { ok: false, reason: `duplicate reservation member '${duplicate.memberId}'` };
 	const requested = reservationAllocation(tasks);
-	const activeRecords = existing.filter((record) => record.status === "active");
-	const held = activeRecords.map(heldAllocation);
-	const globalUsed = capacity.global.active + held.reduce((sum, allocation) => sum + allocation.globalSlots, 0);
-	if (globalUsed + requested.globalSlots > capacity.global.limit) {
+	if (requested.globalSlots > capacity.global.limit) {
 		return {
 			ok: false,
-			reason: `global concurrency capacity exceeded (${globalUsed + requested.globalSlots}/${capacity.global.limit})`,
+			reason: `global concurrency capacity exceeded (${requested.globalSlots}/${capacity.global.limit})`,
 		};
 	}
 	for (const [nodeId, slots] of Object.entries(requested.nodeSlots)) {
 		const node = capacity.nodes[nodeId];
 		if (!node || !Number.isFinite(node.limit)) continue;
-		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.nodeSlots[nodeId] ?? 0), 0);
-		const used = node.active + heldSlots;
-		if (used + slots > node.limit) {
-			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${used + slots}/${node.limit})${nodeNote(node)}` };
+		if (slots > node.limit) {
+			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${slots}/${node.limit})${nodeNote(node)}` };
 		}
 	}
 	for (const [endpointKey, slots] of Object.entries(requested.endpointSlots)) {
 		const endpoint = capacity.endpoints[endpointKey];
 		if (!endpoint || !Number.isFinite(endpoint.limit)) continue;
-		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.endpointSlots[endpointKey] ?? 0), 0);
-		const used = endpoint.active + heldSlots;
-		if (used + slots > endpoint.limit) {
+		if (slots > endpoint.limit) {
 			return {
 				ok: false,
 				reason: endpointCapacityDenial({
 					endpointKey,
 					limit: endpoint.limit,
-					used,
+					used: 0,
 					requested: slots,
 					leases: endpoint.leases ?? endpoint.active - (endpoint.foregroundStreams ?? 0),
-					reservations: heldSlots,
+					reservations: 0,
 					foregroundStreams: endpoint.foregroundStreams ?? 0,
 					...(topology === undefined ? {} : { topology }),
 				}),
@@ -277,7 +314,8 @@ export function createDispatchReservation(input: {
 				`dispatch: reservation denied: capacity is draining (requested by pid ${drain.requestedByPid} at ${drain.requestedAt})`,
 			);
 		}
-		const planned = allocateReservation(input.tasks, records, input.capacity, input.topology);
+		const tasks = splitReservationWaves(input.tasks, input.capacity, input.topology);
+		const planned = allocateReservation(tasks, input.capacity, input.topology);
 		if (!planned.ok) {
 			replaceReservations(state, records);
 			writeCapacityStateUnsafe(state);
@@ -297,7 +335,7 @@ export function createDispatchReservation(input: {
 			createdAt,
 			expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_RESERVATION_TTL_MS)).toISOString(),
 			settledAt: null,
-			members: input.tasks.map((task) => ({ ...task, status: "held", consumedAt: null, releasedAt: null })),
+			members: tasks.map((task) => ({ ...task, status: "held", consumedAt: null, releasedAt: null })),
 		};
 		replaceReservations(state, [record, ...records]);
 		writeCapacityStateUnsafe(state);

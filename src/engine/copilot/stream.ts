@@ -45,6 +45,7 @@ import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
 import { claimWireEffort, stampWireEffort } from "../../core/telemetry/call-effort.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
+import type { PinnedPromptPrefix } from "../apis/anthropic-system-split.js";
 import type { AgentMessage } from "../types.js";
 import {
 	COPILOT_CLIENT_NAME,
@@ -304,11 +305,11 @@ class Conversation {
 			this.delivered.delete(toolCallId);
 			return Promise.resolve(ready);
 		}
-		if (this.disposed) return Promise.reject(new Error("Clio's Copilot conversation was closed"));
+		if (this.disposed) return Promise.reject(new Error("CLIO Coder's Copilot conversation was closed"));
 		return new Promise<ToolResultObject>((resolve, reject) => {
 			const retire = () => {
 				this.parked.delete(toolCallId);
-				reject(new Error("Copilot retired this tool call before Clio returned its result"));
+				reject(new Error("Copilot retired this tool call before CLIO Coder returned its result"));
 			};
 			if (signal?.aborted) {
 				retire();
@@ -467,7 +468,7 @@ function openSpare(base: Parameters<typeof openConversationHeld>[0], announce: (
 	})();
 }
 
-function remove(conversation: Conversation, reason = "Clio closed this Copilot conversation"): void {
+function remove(conversation: Conversation, reason = "CLIO Coder closed this Copilot conversation"): void {
 	const index = conversations.indexOf(conversation);
 	if (index >= 0) conversations.splice(index, 1);
 	void conversation.dispose(reason);
@@ -572,7 +573,7 @@ function forgetStored(record: CopilotConversationRecord): void {
 export function disposeCopilotConversations(sessionId: string): void {
 	for (const conversation of [...conversations]) {
 		if (conversation.key === sessionId)
-			remove(conversation, "The Clio session ended; its Copilot conversation was closed");
+			remove(conversation, "The CLIO Coder session ended; its Copilot conversation was closed");
 	}
 }
 
@@ -811,9 +812,20 @@ function narrationOf(reasoningBlocks: unknown): string[] {
 	return said;
 }
 
+/**
+ * The session a step's request went to, as Clio's own pool knows it: `new` (createSession for this step), `spare`
+ * (a PV-2 pooled session holding nothing), `continued` (an open one holding the transcript), `resumed` (resumeSession
+ * on one an earlier process left).
+ */
+type CopilotSessionOrigin = "new" | "spare" | "continued" | "resumed";
+
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
-	readonly message: AssistantMessage & { copilotBilling?: CopilotStepBilling; copilotContinuation?: "delta" | "full" };
+	readonly message: AssistantMessage & {
+		copilotBilling?: CopilotStepBilling;
+		copilotContinuation?: "delta" | "full";
+		copilotSession?: CopilotSessionOrigin;
+	};
 	private textIndex: number | null = null;
 	private thinkingIndex: number | null = null;
 	private started = false;
@@ -845,6 +857,8 @@ class Step {
 	onDetach: ((step: Step) => void) | null = null;
 	/** Whether this step's request continued a session holding the transcript (delta) or carried all of it (full). */
 	continuation: "delta" | "full" | null = null;
+	/** Which Copilot session this step's request went to: one it opened, a pooled spare, one it continued or resumed. */
+	session: CopilotSessionOrigin | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
 	onFinish:
 		| ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[]; toolNames: string[] }) => void)
@@ -1127,6 +1141,8 @@ class Step {
 		}
 		// Read by the prompt-cache record: a full request after a continued one explains the cache it re-wrote.
 		if (this.continuation !== null) this.message.copilotContinuation = this.continuation;
+		// Read by the call's transport facts (`src/domains/telemetry/call-facts.ts`).
+		if (this.session !== null) this.message.copilotSession = this.session;
 		if (stop === "stop" || stop === "toolUse") {
 			this.message.stopReason = stop;
 			this.stream.push({ type: "done", reason: stop, message: this.message });
@@ -1159,7 +1175,7 @@ function declareTools(conversationRef: () => Conversation | null, tools: Readonl
 		defer: "never" as const,
 		handler: (_args: unknown, invocation: { toolCallId: string; signal?: AbortSignal }) => {
 			const conversation = conversationRef();
-			if (!conversation) return Promise.reject(new Error("Clio's Copilot conversation is not available"));
+			if (!conversation) return Promise.reject(new Error("CLIO Coder's Copilot conversation is not available"));
 			return conversation.park(invocation.toolCallId, invocation.signal);
 		},
 	}));
@@ -1226,6 +1242,8 @@ async function openConversationHeld(input: {
 	key: string;
 	model: Model<Api>;
 	systemPrompt: string;
+	/** The prompt cut at its pinned boundary, when a main call named one that still leads the prompt. */
+	systemBlocks?: ReadonlyArray<SystemBlock>;
 	tools: ReadonlyArray<Tool>;
 	reasoningEffort: string | undefined;
 	contextTier: ContextTier;
@@ -1246,7 +1264,11 @@ async function openConversationHeld(input: {
 		streaming: true,
 		// Replace, not append: Clio's compiled prompt carries its identity, safety rules and tool contract, and
 		// Copilot's default sections describe built-in tools that are excluded here.
-		systemMessage: { mode: "replace" as const, content: input.systemPrompt },
+		systemMessage: {
+			mode: "replace" as const,
+			content: input.systemPrompt,
+			...(input.systemBlocks !== undefined ? { contentBlocks: input.systemBlocks } : {}),
+		},
 		tools: declareTools(() => conversation, input.tools),
 		availableTools: ["custom:*"],
 		infiniteSessions: { enabled: false },
@@ -1294,6 +1316,30 @@ async function openConversationHeld(input: {
 
 interface Plan {
 	conversation: Conversation | null;
+}
+
+/** One block of a replace-mode system message, in the runtime's experimental wire shape (SDK 1.0.26 rpc.d.ts). */
+interface SystemBlock {
+	content: string;
+	isStatic?: boolean;
+	cacheBreakpoint?: boolean;
+}
+
+/**
+ * The install-wide pinned layer as a static block with a cache breakpoint after it, and the session layer (handbook,
+ * workspace) as a dynamic block, so a fresh session in another repository can read the same head from cache (row 335).
+ * The blocks concatenate to the prompt. None when the boundary is absent, empty, the whole prompt, or its hash no
+ * longer matches the prompt's head.
+ */
+function pinnedSystemBlocks(
+	systemPrompt: string,
+	prefix: PinnedPromptPrefix | undefined,
+): ReadonlyArray<SystemBlock> | undefined {
+	if (prefix === undefined || !Number.isSafeInteger(prefix.chars) || prefix.chars <= 0) return undefined;
+	if (systemPrompt.length <= prefix.chars) return undefined;
+	const pinned = systemPrompt.slice(0, prefix.chars);
+	if (createHash("sha256").update(pinned).digest("hex") !== prefix.hash) return undefined;
+	return [{ content: pinned, isStatic: true, cacheBreakpoint: true }, { content: systemPrompt.slice(prefix.chars) }];
 }
 
 /** A model the runtime does not serve fails with the account's listed models named, so the fix is one copy away. */
@@ -1450,7 +1496,7 @@ async function runStep(
 			open.pendingToolCallIds.length > 0 &&
 			open.pendingToolCallIds.every((id) => settledCalls.has(id)),
 	))
-		remove(stale, "Clio's transcript moved past the calls this Copilot run waited on; its conversation was closed");
+		remove(stale, "CLIO Coder's transcript moved past the calls this Copilot run waited on; its conversation was closed");
 	const reused = conversation !== null;
 	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
 	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);
@@ -1464,8 +1510,34 @@ async function runStep(
 	const fresh = lastSeen ? core.slice(core.indexOf(lastSeen) + 1) : core;
 
 	let bound = false;
-	const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
-	const session = { model: model.id, systemMessage: systemPrompt, tools, reasoningEffort, contextTier };
+	let origin: CopilotSessionOrigin = continued ? "continued" : reused ? "spare" : "new";
+	const systemBlocks = pinnedSystemBlocks(
+		systemPrompt,
+		(options as { clioCopilotPinnedPrefix?: PinnedPromptPrefix } | undefined)?.clioCopilotPinnedPrefix,
+	);
+	const base = {
+		key,
+		model,
+		systemPrompt,
+		...(systemBlocks !== undefined ? { systemBlocks } : {}),
+		tools,
+		reasoningEffort,
+		contextTier,
+	};
+	// The dump names each block's size and marks (the static one by its hash), not its text twice.
+	const systemMessageBlocks = systemBlocks?.map(({ content, ...marks }) => ({
+		chars: content.length,
+		...(marks.isStatic ? { hash: createHash("sha256").update(content).digest("hex") } : {}),
+		...marks,
+	}));
+	const session = {
+		model: model.id,
+		systemMessage: systemPrompt,
+		...(systemMessageBlocks !== undefined ? { systemMessageBlocks } : {}),
+		tools,
+		reasoningEffort,
+		contextTier,
+	};
 	try {
 		if (!conversation) {
 			evictFor(key);
@@ -1481,6 +1553,7 @@ async function runStep(
 				if (opened) {
 					// Its record stays until something is sent, so a step cancelled before then keeps it resumable.
 					continued = true;
+					origin = "resumed";
 					opened.persisted = true;
 					persistedByKey.set(key, opened);
 				}
@@ -1528,7 +1601,7 @@ async function runStep(
 				// Copilot answers a call to a tool it was never given ("does not exist") and its run goes on without
 				// Clio, while Clio's loop may still run that name (a gateway capability called directly). The two
 				// transcripts have diverged, so delivering Clio's result would leave both sides waiting on each other.
-				remove(active, "Copilot answered a tool call it was not given; the next call reseeds from Clio's transcript");
+				remove(active, "Copilot answered a tool call it was not given; the next call reseeds from CLIO Coder's transcript");
 				return;
 			}
 			if (stop === "toolUse" || stop === "stop") {
@@ -1550,6 +1623,7 @@ async function runStep(
 		}
 		unpersist(active);
 		step.continuation = continued ? "delta" : "full";
+		step.session = origin;
 		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort || active.contextTier !== contextTier) {
 			// The tier is named whenever either side is long_context, so leaving it returns the session to default.
 			const tierOption = contextTier === "long_context" || active.contextTier === "long_context" ? { contextTier } : {};

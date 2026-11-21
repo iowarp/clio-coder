@@ -44,7 +44,7 @@ export function runMigrations(meta: SessionMeta, sessionPath: string): Migration
 	}
 	if (from > CURRENT_SESSION_FORMAT_VERSION) {
 		throw new Error(
-			`session was written by a newer Clio (format version ${from}, this build reads version ${CURRENT_SESSION_FORMAT_VERSION}): ${sessionPath}. Upgrade clio-coder to resume this session.`,
+			`session was written by a newer CLIO Coder (format version ${from}, this build reads version ${CURRENT_SESSION_FORMAT_VERSION}): ${sessionPath}. Upgrade clio-coder to resume this session.`,
 		);
 	}
 	if (from < CURRENT_SESSION_FORMAT_VERSION) {

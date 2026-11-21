@@ -56,7 +56,7 @@ export function createRestartSessionTool(deps: RestartSessionDeps): ToolSpec {
 			const reason = typeof args.reason === "string" && args.reason.trim() ? `\nReason: ${args.reason.trim()}` : "";
 			return {
 				ruleId: RESTART_SESSION_RULE_ID,
-				detail: `Restart Clio on the new build and continue: ${continuationOf(args)}${reason}`,
+				detail: `Restart CLIO Coder on the new build and continue: ${continuationOf(args)}${reason}`,
 				hints: [],
 			};
 		},

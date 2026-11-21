@@ -5,7 +5,7 @@ import { nodeComponentRemedyEvent } from "../../src/domains/dispatch/failure-cla
 describe("node tools remedy relay", () => {
 	it("rewrites a relayed worker frame to the node-side install command", () => {
 		const message =
-			"The copilot-sdk runtime needs @github/copilot-sdk@1.0.26. Run: clio-coder tools install copilot-sdk. This installs a separate component at /home/u/c/copilot-sdk/1.0.26; it does not change Clio's installation.";
+			"The copilot-sdk runtime needs @github/copilot-sdk@1.0.26. Run: clio-coder tools install copilot-sdk. This installs a separate component at /home/u/c/copilot-sdk/1.0.26; it does not change CLIO Coder's installation.";
 		const frame = { type: "agent_end", detail: { errorMessage: message, lines: [message] }, count: 1 };
 		const relayed = nodeComponentRemedyEvent(frame, "loop");
 		const text = JSON.stringify(relayed);

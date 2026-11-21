@@ -145,6 +145,8 @@ export interface FleetRetrySettings {
 
 export interface FleetLimitsSettings {
 	toolCallsPerRun: number;
+	/** Wall clock of one dispatched run, queue time included; a recipe or a call's timeout_ms may only lower it. */
+	runTimeoutMs: number;
 	internalRunTimeoutMs: number;
 }
 
@@ -922,6 +924,7 @@ export const DEFAULT_SETTINGS = {
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
 			toolCallsPerRun: 300,
+			runTimeoutMs: 1800000,
 			internalRunTimeoutMs: 2700000,
 		},
 		history: { maxRuns: GUARDRAIL_DEFAULTS.maxDispatchRuns, journal: true },
@@ -1145,7 +1148,7 @@ fleet:
   concurrency: auto
   # On by default; workers that share a prompt prefix start after the leader streams (at most 15 s), so they reuse its cache. Handles return at once.
   staggerSharedPrefix: true
-  # Delegated harness runtime ids that read their own repository instruction files beside the rules Clio compiles.
+  # Delegated harness runtime ids that read their own repository instruction files beside the rules CLIO Coder compiles.
   keepPeerInstructionFiles: []
   worktrees:
     root: disk
@@ -1155,6 +1158,8 @@ fleet:
     breakerThreshold: 1
   limits:
     toolCallsPerRun: 300
+    # Wall clock of one dispatched run, queue time included (30 minutes).
+    runTimeoutMs: 1800000
     internalRunTimeoutMs: 2700000
   history:
     maxRuns: 1000
@@ -1264,7 +1269,7 @@ safety:
   # Wrapper scripts (a path, or a bare basename) that run a check with the
   # words after them, so a wrapper before pnpm test counts as validation.
   validationWrappers: []
-  # Seconds a permission card or ask_user question waits for you before Clio
+  # Seconds a permission card or ask_user question waits for you before CLIO Coder
   # resolves it and keeps working: the call is denied, the question takes its
   # recommended option unless that option leaves the workspace. 0 waits
   # forever. Honored only in this file.
@@ -1358,7 +1363,7 @@ telemetry:
     providerHeaders: true
     busTrace: false
 
-# When Clio itself fails (an internal error, a crash), it may suggest /report once:
+# When CLIO Coder itself fails (an internal error, a crash), it may suggest /report once:
 # at most one suggestion a week, never again for a problem you said no to. off
 # never suggests. Nothing is sent without your keypress.
 report:

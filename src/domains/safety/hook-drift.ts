@@ -109,7 +109,7 @@ function summarize(changes: ReadonlyArray<GitHookChange>, workspace: string): st
 export function gitHookDriftNotice(changes: ReadonlyArray<GitHookChange>, workspace: string): string {
 	const named = changes.slice(0, REPORT_MAX_FILES).map((change) => describeGitHookChange(change, workspace));
 	const more = changes.length > REPORT_MAX_FILES ? `; and ${changes.length - REPORT_MAX_FILES} more` : "";
-	return `[safety] git hook files or executable git config changed during this session: ${named.join("; ")}${more}. A hook runs outside the sandbox, so the next git command the agent runs outside it asks you first, and Clio's own git operations run with hooks off.`;
+	return `[safety] git hook files or executable git config changed during this session: ${named.join("; ")}${more}. A hook runs outside the sandbox, so the next git command the agent runs outside it asks you first, and CLIO Coder's own git operations run with hooks off.`;
 }
 
 function changeKey(change: GitHookChange): string {

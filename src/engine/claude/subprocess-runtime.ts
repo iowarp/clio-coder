@@ -320,7 +320,7 @@ export function startClaudeCodeWorkerRun(
 	const onAbort = (): void => abort();
 	const stopExpiryWatch = watchCredentialExpiry(input.credentialExpiresAt, () => {
 		transportError =
-			"Clio's Claude subscription access token expired. Start a new assignment to refresh it; this run was stopped without replaying its work.";
+			"CLIO Coder's Claude subscription access token expired. Start a new assignment to refresh it; this run was stopped without replaying its work.";
 		terminator.terminate();
 	});
 	if (input.signal?.aborted) abort();

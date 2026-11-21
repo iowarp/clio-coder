@@ -66,7 +66,7 @@ export function missingGrammarNote(files: Iterable<CodewikiFile>): string | unde
 		.filter((reason): reason is string => reason !== null);
 	const why = reasons.length > 0 ? reasons.join("; ") : "offline, or the download failed";
 	return (
-		`${names} symbols come from line patterns, not a parser: Clio downloads the ${names} tree-sitter grammar on first use ` +
+		`${names} symbols come from line patterns, not a parser: CLIO Coder downloads the ${names} tree-sitter grammar on first use ` +
 		`and could not (${why}). Symbols and imports for those files may be incomplete; use grep for an exhaustive search.`
 	);
 }

@@ -656,22 +656,23 @@ class AskUserOverlayView implements Component {
 				: "declines the step outside the workspace and picks the other recommended options";
 		}
 		const withOptions = this.questions.filter(questionHasOptions).length;
-		if (withOptions === 0) return "leaves this to Clio's judgment";
+		if (withOptions === 0) return "leaves this to CLIO Coder's judgment";
 		if (withOptions === this.questions.length) {
 			return withOptions > 1 ? "picks the recommended option for each question" : "picks the recommended option";
 		}
-		return "picks each recommended option, or leaves it to Clio's judgment";
+		return "picks each recommended option, or leaves it to CLIO Coder's judgment";
 	}
 
 	/** The same outcome for one narrow row, with its subject: the choice itself when there is only one. */
 	private unattendedOutcomeShort(): string {
 		if (this.operatorOnly()) return "it closes unanswered";
-		if (this.presentation.tier === "outward" || (this.escapes() && this.questions.length === 1)) return "Clio declines";
-		if (this.escapes()) return "Clio declines the step outside the workspace";
+		if (this.presentation.tier === "outward" || (this.escapes() && this.questions.length === 1))
+			return "CLIO Coder declines";
+		if (this.escapes()) return "CLIO Coder declines the step outside the workspace";
 		const only = this.questions.length === 1 ? this.questions[0] : undefined;
-		if (only === undefined) return "Clio picks each recommended option";
+		if (only === undefined) return "CLIO Coder picks each recommended option";
 		const label = only.options?.[recommendedOptionIndex(only)]?.label;
-		return label === undefined ? "Clio decides" : `Clio picks ${label}`;
+		return label === undefined ? "CLIO Coder decides" : `CLIO Coder picks ${label}`;
 	}
 
 	/** The option this question's timeout would take, while a timer is part of the round. */
@@ -716,7 +717,7 @@ class AskUserOverlayView implements Component {
 				// The option rows mark the pick as recommended, so the narrowest form can leave the name to them.
 				...(this.presentation.tier === "outward" || this.operatorOnly() || this.escapes()
 					? []
-					: [`${GLYPH.warn} ${remaining}, then Clio picks · key holds`]),
+					: [`${GLYPH.warn} ${remaining}, then CLIO Coder picks · key holds`]),
 			];
 			const fits = candidates.find((candidate) => visibleWidth(candidate) <= width);
 			if (fits !== undefined) return [fitRow(theme.fg("warning", fits), width)];
@@ -729,7 +730,7 @@ class AskUserOverlayView implements Component {
 				"warning",
 				this.operatorOnly()
 					? `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()}: nothing is chosen and the turn ends. Any key holds.`
-					: `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} and Clio continues. Any key holds.`,
+					: `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} and CLIO Coder continues. Any key holds.`,
 			),
 			width,
 		);
@@ -1461,7 +1462,7 @@ class AskUserOverlayView implements Component {
 	 */
 	private renderQuestionHeader(question: AskUserQuestion, width: number, stripNamesIt = false): string[] {
 		const theme = clioTheme();
-		const parts: string[] = [theme.fg("pendingAnswer", this.confirmation ? "Confirm" : "Clio asks you")];
+		const parts: string[] = [theme.fg("pendingAnswer", this.confirmation ? "Confirm" : "CLIO Coder asks you")];
 		// The strip above already carries the active question's name with the
 		// cursor on it; the header repeats it only when there is no strip.
 		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, escapeTerminalControls(question.header)));
@@ -2047,7 +2048,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		// The interview names waiting, sent and between-rounds in its own body.
 		ownsStatus: true,
 		title: () =>
-			view.interviewTitle() ?? (view.isDecisionPending() ? `Clio interview · ${view.decisionTitle()}` : "Clio interview"),
+			view.interviewTitle() ??
+			(view.isDecisionPending() ? `CLIO Coder interview · ${view.decisionTitle()}` : "CLIO Coder interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),
 		footerHint: (innerWidth) => view.railHint(Math.max(1, innerWidth - 3)),

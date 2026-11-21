@@ -249,6 +249,20 @@ async function retainWithinDeadline(
 	});
 	const started = performance.now();
 	let usage: TaskMemoryStepUsage | null = null;
+	let decision: TaskMemoryEnvelope["decision"] | undefined;
+	// The extraction settles once, as its last record, with the outcome the task
+	// was left in: the model pass's own verdict is only an input to it (M-29).
+	const settle = (outcome: RetentionStatus): void => {
+		if (restoringCandidates) return;
+		event("lesson-extraction-settled", {
+			attempts,
+			usage,
+			durationMs: performance.now() - started,
+			...(decision !== undefined ? { decision } : {}),
+			phase: outcome.phase,
+			reason: outcome.reason,
+		});
+	};
 	if (!savedCandidates.length && observationTracing())
 		traceObservation("lesson-input", {
 			sourceRefs: input.source.refs,
@@ -293,14 +307,7 @@ async function retainWithinDeadline(
 							}
 						: {}),
 				});
-		if (!restoringCandidates)
-			event("lesson-extraction-settled", {
-				attempts,
-				usage,
-				durationMs: performance.now() - started,
-				decision: result.decision,
-				reason: result.reason,
-			});
+		decision = result.decision;
 		// Recipes the task's own receipts prove; computed after the model pass so a
 		// lesson the model wrote for the same command keeps the model's wording.
 		const proven = restoringCandidates ? [] : provenRecipes(input.source, input.cwd);
@@ -335,6 +342,7 @@ async function retainWithinDeadline(
 			};
 			await save(pending, !input.isCurrent());
 			event("lesson-extraction-deferred", { reason: pending.reason, attempts });
+			settle(pending);
 			return pending;
 		}
 		const quoted = (command: string) =>
@@ -461,6 +469,7 @@ async function retainWithinDeadline(
 				attempts,
 			},
 		);
+		settle(bounded);
 		return bounded;
 	} catch {
 		const recorded = readRetention(path);
@@ -475,6 +484,7 @@ async function retainWithinDeadline(
 			/* The claim is recoverable after process interruption. */
 		});
 		event("lesson-retention-deferred", { phase: pending.phase, reason: pending.reason, attempts });
+		settle(pending);
 		return pending;
 	}
 }

@@ -276,7 +276,11 @@ export function permissionRailTitle(
 ): string {
 	const presentation = permissionDecisionPresentation(view);
 	const who =
-		view.origin.kind === "worker" ? `Worker ${view.origin.agentId}` : context.actor.length > 0 ? context.actor : "Clio";
+		view.origin.kind === "worker"
+			? `Worker ${view.origin.agentId}`
+			: context.actor.length > 0
+				? context.actor
+				: "CLIO Coder";
 	const depth = context.queueDepth ?? view.queueDepth ?? 0;
 	const count = depth > 1 ? ` · 1 of ${depth}` : "";
 	// `Worker coder needs approval · worker call` says worker twice and nothing about the call.
@@ -688,7 +692,7 @@ function permissionFacts(
 		// Silence here would read as "no notable effect" on exactly the commands Clio cannot read.
 		facts.push({
 			label: "effect",
-			value: "not classified: Clio has no reading of what this command changes",
+			value: "not classified: CLIO Coder has no reading of what this command changes",
 			tone: "warning",
 		});
 	}
@@ -773,7 +777,7 @@ function permissionFacts(
 			...hangingWrap(
 				theme.fg(
 					"warning",
-					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} denies this call and Clio continues without it. Any key holds the card.`,
+					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} denies this call and CLIO Coder continues without it. Any key holds the card.`,
 				),
 				width,
 			),

@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -13,11 +14,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { after, before, mock, test } from "node:test";
-import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
-import { resolveClioDirs } from "../../src/core/xdg.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { createBackgroundMemoryModelClient } from "../../src/domains/memory/background-route.js";
@@ -38,11 +40,14 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { copilotSdkAccount, copilotSdkRestartIdle, listCopilotSdkModels } from "../../src/engine/ai.js";
-import { engineStreamSimple } from "../../src/engine/api-registry.js";
+import { engineMainStreamSimple, engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
 import {
@@ -55,7 +60,9 @@ import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js"
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
+import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -804,6 +811,8 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 	settings.context.memory.target = target.id;
 	settings.context.memory.model = "three-levels";
 	const bundle = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+	// A side call leaves an empty spare that opens on its own time (PV-2), so the newest session may be that spare.
+	const asked = () => [...fake().sessions].reverse().find((session) => session.prompts.length > 0);
 	await bundle.extension.start();
 	try {
 		await prepareListedModelCapabilities(bundle.contract, target.id);
@@ -816,19 +825,19 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 			maxTokens: 512,
 			signal: new AbortController().signal,
 		});
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low", "the lowest listed effort, not the default");
+		strictEqual(asked()?.config.reasoningEffort, "low", "the lowest listed effort, not the default");
 		// Another caller that streams with no level keeps the effort out, and an effort sent is always a listed one.
 		const model = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "three-levels", null);
 		await engineStreamSimple(model, normalizeContext({ messages: [user("hello")] }), {
 			sessionId: "off-session",
 		}).result();
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, undefined);
+		strictEqual(asked()?.config.reasoningEffort, undefined);
 		const minimal = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "minimal-levels", null);
 		const sent = await engineStreamSimple(minimal, normalizeContext({ messages: [user("hello")] }), {
 			sessionId: "minimal-session",
 			reasoning: "minimal",
 		}).result();
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "minimal");
+		strictEqual(asked()?.config.reasoningEffort, "minimal");
 		strictEqual(
 			(sent as { clioCoderWireEffort?: string }).clioCoderWireEffort,
 			"minimal",
@@ -1209,6 +1218,47 @@ test("the provider dump records each request Clio hands the Copilot runtime (c2b
 	strictEqual(results[0]?.[0]?.textResultForLlm, "file body");
 });
 
+test("a main session sends the pinned layer as a static cached block and the session layer dynamic (row 335)", async () => {
+	const pinned = "Pinned identity and tool contract.\n\n";
+	const systemPrompt = `${pinned}Session handbook for repo A.`;
+	const prefix = { chars: pinned.length, hash: createHash("sha256").update(pinned).digest("hex") };
+	const path = join(env.dir, "copilot-blocks-dump.jsonl");
+	process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+	const main = (sessionId: string, pinnedPrefix: typeof prefix) =>
+		engineMainStreamSimple(model, normalizeContext({ systemPrompt, messages: [user("hello")] }), {
+			sessionId,
+			clioCoderPinnedPrefix: pinnedPrefix,
+		} as SimpleStreamOptions).result();
+	try {
+		strictEqual((await main("blocks-session", prefix)).stopReason, "stop");
+		deepStrictEqual(fake().sessions.at(-1)?.config.systemMessage, {
+			mode: "replace",
+			content: systemPrompt,
+			contentBlocks: [
+				{ content: pinned, isStatic: true, cacheBreakpoint: true },
+				{ content: "Session handbook for repo A." },
+			],
+		});
+		// A prefix whose hash no longer matches the prompt's head sends the prompt as one block.
+		await main("stale-blocks-session", { ...prefix, hash: "0".repeat(64) });
+		deepStrictEqual(fake().sessions.at(-1)?.config.systemMessage, { mode: "replace", content: systemPrompt });
+	} finally {
+		delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		disposeCopilotConversations("blocks-session");
+		disposeCopilotConversations("stale-blocks-session");
+	}
+	ok(await eventually(() => existsSync(path) && readFileSync(path, "utf8").trim().split("\n").length === 2));
+	const [split] = readFileSync(path, "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as { payloads: Array<Record<string, unknown>> });
+	// The dump names each block's size and marks, so a cache A/B can see what the runtime was offered.
+	deepStrictEqual(split?.payloads[0]?.systemMessageBlocks, [
+		{ chars: pinned.length, hash: prefix.hash, isStatic: true, cacheBreakpoint: true },
+		{ chars: "Session handbook for repo A.".length },
+	]);
+});
+
 test("a call to a tool Copilot was never given reseeds the next call instead of waiting on Copilot's own run", async () => {
 	disposeCopilotConversations("undeclared-session");
 	const before = fake().sessions.length;
@@ -1383,17 +1433,85 @@ test("a rewritten history seeds a fresh session; a side call never disturbs the 
 });
 
 test("a side call leaves one spare session, and the next side call of its configuration runs there (PV-2)", async () => {
-	const side = (text: string) =>
-		engineStreamSimple(model, normalizeContext({ systemPrompt: "Side judge.", messages: [user(text)] }), {}).result();
+	// The safety judge's own path: its one-shot round settles through the side request admission, not a call scope.
+	const origin = { id: "judge-transport", cwdHash: "judgehash" };
+	const journals = createSessionJournals(clioStateDir(), () => {});
+	const admit = createSideRequestAdmission({
+		providers: { getTarget: () => ({ id: "copilot", runtime: "copilot-sdk" }) } as never,
+		telemetry: {
+			acquireTelemetrySession: journals.acquire,
+			settledSessionSpend: async () => ({ usd: 0 }),
+		} as never,
+		getCeilingUsd: () => 0,
+		currentSession: () => origin.id,
+		repoIdentity: () => origin.cwdHash,
+		role: "safety-judge",
+	});
+	const side = async (text: string) => {
+		const signal = new AbortController().signal;
+		let account: Awaited<ReturnType<typeof admit>> | undefined;
+		return runOutOfTurnRound({
+			model: model as never,
+			messages: [],
+			systemPrompt: "Side judge.",
+			userText: text,
+			thinkingLevel: "off",
+			signal,
+			runtimeId: "copilot-sdk",
+			beforeRequest: async () => {
+				account = await admit({ targetId: "copilot", model: "fake-model", signal });
+				return account.withContext ? { withContext: account.withContext } : undefined;
+			},
+			onUsage: (usage, observation) => account?.(usage, observation),
+		});
+	};
 	try {
 		const start = fake().sessions.length;
-		strictEqual((await side("judge one")).stopReason, "stop");
+		const transport = (call: CallSettled | undefined) => {
+			const { kind, continuation, session, connectionReused } = call?.transport ?? {};
+			return { kind, continuation, session, connectionReused };
+		};
+		const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" });
+		const notReported = { kind: "unknown", reason: "provider-omitted" };
+		strictEqual((await side("judge one")).text, "hello");
 		ok(await eventually(() => fake().sessions.length === start + 2), "the side call's own session and one spare");
-		strictEqual((await side("judge two")).stopReason, "stop");
+		strictEqual((await side("judge two")).text, "hello");
 		match(fake().sessions[start + 1]?.prompts[0] ?? "", /judge two/, "the second side call ran on the spare");
 		ok(await eventually(() => fake().sessions.length === start + 3), "taking the spare leaves a new one");
 		strictEqual(fake().sessions[start + 2]?.prompts.length, 0, "and the new spare is still empty");
+		await journals.closeAll();
+		const [one, two, ...rest] = (
+			await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))
+		).records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
+		strictEqual(rest.length, 0, "each judge call settled once");
+		strictEqual(one?.stop.reason, "stop");
+		deepStrictEqual(transport(one), {
+			kind: "subprocess",
+			continuation: counted("full"),
+			session: counted("new"),
+			connectionReused: notReported,
+		});
+		strictEqual(two?.stop.reason, "stop");
+		// The seat billing and served model the stream stamped reach the judge's journal too.
+		const seat = {
+			provider: "github-copilot",
+			premiumRequests: { kind: "measured", value: 1, source: "provider" },
+			nanoAiu: { kind: "measured", value: 100, source: "provider" },
+			modelCalls: counted(1),
+		};
+		const served = { kind: "measured", value: "fake-model", source: "provider" };
+		for (const call of [one, two]) {
+			deepStrictEqual(call?.billing, seat);
+			deepStrictEqual(call?.target.reportedModel, served);
+		}
+		deepStrictEqual(transport(two), {
+			kind: "subprocess",
+			continuation: counted("full"),
+			session: counted("spare"),
+			connectionReused: notReported,
+		});
 	} finally {
+		await journals.closeAll();
 		disposeCopilotConversations("default");
 	}
 });
@@ -1412,6 +1530,15 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	// A note that rode only on the request that delivered the result is not a rewrite.
 	const next = await step({ tools: [readTool], messages: [...held, user("next")] }, key);
 	strictEqual((next as { copilotContinuation?: string }).copilotContinuation, "delta");
+	const continued = callSettlementFromMessage(next, "none").transport;
+	deepStrictEqual(
+		[continued.kind, continued.continuation, continued.session],
+		[
+			"subprocess",
+			{ kind: "measured", value: "delta", source: "local-count" },
+			{ kind: "measured", value: "continued", source: "local-count" },
+		],
+	);
 	strictEqual(fake().sessions.length, start + 1);
 	deepStrictEqual(fake().sessions.at(-1)?.prompts.slice(1), ["next"], "the delta carries only the new turn");
 
@@ -1611,7 +1738,7 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 	disposeCopilotConversations("side-session");
 	// Dispose rejects the parked handlers at once, then disconnects and removes the records asynchronously. Wait for
 	// those events, not for a fixed time a loaded host may not keep to; the bound only stops a real regression hanging.
-	const ended = () => fake().rejected.some((reason) => /Clio session ended/.test(reason));
+	const ended = () => fake().rejected.some((reason) => /CLIO Coder session ended/.test(reason));
 	ok(await eventually(ended, 60_000), "the parked handler was rejected");
 	ok(await eventually(() => fake().disconnected.includes(session.sessionId), 60_000), "the session was disconnected");
 	ok(await eventually(() => !existsSync(records), 60_000), "the session's records were removed");
@@ -1657,7 +1784,7 @@ test("sessionFs keeps session state in Clio's cache and serves the workspace rea
 		// ".." out of the state path is a workspace path, so it is refused too.
 		() => session.fs.writeFile(join(config.sessionStatePath, "a", "..", "..", "escape.txt"), "x"),
 	]) {
-		await rejects(write(), /Clio does not let the Copilot runtime change/);
+		await rejects(write(), /CLIO Coder does not let the Copilot runtime change/);
 	}
 	strictEqual(existsSync(join(process.cwd(), "copilot-wrote.txt")), false);
 	await session.fs.writeFile(join(config.sessionStatePath, "note.txt"), "state");
@@ -1741,7 +1868,7 @@ test("a lost runtime or a closed conversation settles the open step, and the cli
 	const closed = await settledWithinTurns(pending);
 	ok(closed !== "pending", "disposal settles the open step");
 	strictEqual(closed.stopReason, "error");
-	match(closed.errorMessage ?? "", /Clio session ended/);
+	match(closed.errorMessage ?? "", /CLIO Coder session ended/);
 
 	const clientsBefore = fake().instances.length;
 	const sendsBefore = fake().order.filter((entry) => entry.startsWith("send ")).length;

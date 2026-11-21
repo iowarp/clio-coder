@@ -1127,7 +1127,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				goneCwd = cwd;
 				notify(
 					"warning",
-					`The workspace directory no longer exists, so completion lists built-in commands only; restart Clio in an existing directory (${cwd}).`,
+					`The workspace directory no longer exists, so completion lists built-in commands only; restart CLIO Coder in an existing directory (${cwd}).`,
 					"workspace:missing",
 				);
 			}

@@ -28,8 +28,8 @@ mtime age, or a record another process must read after restart.
 filesystem fact, and it measures its own acquisition deadline with
 `performance.now()`, because that wait is a span inside the calling process.
 
-The checkout writer lease ages a holder on another host with neither host's
-clock. [checkout-writer-lease.ts](../../src/domains/dispatch/checkout-writer-lease.ts)
+The writer set ages an owner on another host with neither host's
+clock. [writer-set.ts](../../src/domains/dispatch/writer-set.ts)
 writes a probe file beside the record and subtracts the record's modification
 time from the probe's, so both instants come from the filesystem that stores
 the lease and two hosts with skewed clocks agree on its age.

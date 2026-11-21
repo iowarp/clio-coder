@@ -44,7 +44,7 @@ async function describeInventory(deps: PanesToolDeps): Promise<ToolResult> {
 		output: [
 			header,
 			...(dockLine.length > 0 ? [`docks: ${dockLine}`] : []),
-			...(rows.length > 0 ? rows : ["- no Clio-owned panes"]),
+			...(rows.length > 0 ? rows : ["- no CLIO Coder-owned panes"]),
 		].join("\n"),
 		details: { action: "list", mode: status.mode, available: status.available, docks, panes: status.panes },
 	};
@@ -144,7 +144,7 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				if (result.status === "opened") {
 					return {
 						kind: "ok",
-						output: `opened ${peer} in Clio-owned pane ${result.paneId}; interactive handoff in ${result.cwd}; no managed run record is produced.`,
+						output: `opened ${peer} in CLIO Coder-owned pane ${result.paneId}; interactive handoff in ${result.cwd}; no managed run record is produced.`,
 						details: { action: "handoff", peer, paneId: result.paneId, workspace: result.cwd, managed: false },
 					};
 				}
@@ -246,7 +246,7 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 					};
 				}
 				if (result.status === "not-found") {
-					return { kind: "error", message: `panes: no Clio-owned pane matches '${result.target}'` };
+					return { kind: "error", message: `panes: no CLIO Coder-owned pane matches '${result.target}'` };
 				}
 				return { kind: "error", message: `panes: ${result.reason}` };
 			}

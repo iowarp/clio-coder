@@ -54,7 +54,7 @@ The main owning files are:
 
 The control flow in `executeFleetRun` is:
 
-1. It calls `acquireFleetWorkspaceLock` with the workspace root and the fleet root id. The comment at that line states that the lock is taken before the root claims its verdict or writes a record, so a refused run leaves no durable trace.
+1. It joins the checkout's writer set (`joinWriterSet`) as a fleet member keyed by the fleet root id, queueing behind another fleet or another process's writer until `fleet.limits.runTimeoutMs` passes. The join happens before the root claims its verdict or writes a record, so a run that gave up leaves no durable trace.
 2. It registers an emergency seal with `input.registerEmergencySeal`, if the caller supplied one, so forced shutdown can persist the run's final state and release the lock.
 3. It opens the root telemetry journal with `openFleetRootTelemetry`. If that fails, the function throws an error whose message begins `fleet root telemetry journal unavailable`.
 4. It calls `input.onStarted` and then `runFleetHoldingWorkspace`, which keeps the lock for the whole run.

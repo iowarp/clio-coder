@@ -127,6 +127,8 @@ import type { ApprovalRequestView, MutationFacts } from "../../session-control/a
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import {
 	classifyTurnEnding,
+	HOST_STATUS_NOTICE_KEY,
+	THINKING_CLAMP_NOTICE_KEY,
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
@@ -924,11 +926,19 @@ const ACP_VISIBLE_ADMISSION_REASONS = new Set(["handoff-skill-refused"]);
 const ACP_ADMISSION_FALLBACK_REASON = "admission-failed";
 
 /**
- * Context engine status lines (working set, the compaction row, the no-gain line) report Clio's own housekeeping, so
- * they are not reply text. Their producer tags them with `CONTEXT_STATUS_NOTICE_KEY`; the wording is free to change.
+ * Host information lines are not reply text: context engine status (working set, the compaction row, the no-gain line)
+ * reports Clio's own housekeeping, the thinking clamp line says the route cannot apply the requested level, and host
+ * status lines report the route, model residency, skill surface, image sidecar and project instructions. Their
+ * producers tag them by key; the wording is free to change. Warnings, errors and untagged lines stay reply text.
  */
-function isContextStatusNotice(level: unknown, noticeKey: unknown): boolean {
-	return level === "info" && noticeKey === CONTEXT_STATUS_NOTICE_KEY;
+const ACP_HOST_INFO_NOTICE_KEYS: ReadonlySet<unknown> = new Set([
+	CONTEXT_STATUS_NOTICE_KEY,
+	THINKING_CLAMP_NOTICE_KEY,
+	HOST_STATUS_NOTICE_KEY,
+]);
+
+function isHostInfoNotice(level: unknown, noticeKey: unknown): boolean {
+	return level === "info" && ACP_HOST_INFO_NOTICE_KEYS.has(noticeKey);
 }
 
 function admissionReason(raw: string): string {
@@ -2107,9 +2117,9 @@ function handleChatEvent(
 			typeof event.text === "string" &&
 			event.text.length > 0
 		) {
-			// A context status line crosses the way startup notices do, so a client that ignores `_meta` shows a reply
+			// A host information line crosses the way startup notices do, so a client that ignores `_meta` shows a reply
 			// carrying only the model's text.
-			if (isContextStatusNotice(event.level, event.key)) {
+			if (isHostInfoNotice(event.level, event.key)) {
 				const notice = { level: "info", text: safeStoredString(event.text, ACP_MAX_CHUNK_BYTES) };
 				sendUpdate(transport, sessionId, active, {
 					sessionUpdate: "session_info_update",
@@ -8475,7 +8485,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (active.admissionReason !== undefined && !active.sawTurnEnd && active.updatesSent === 0) {
 			throw new AcpRequestError(
 				active.admissionReason === "authentication-required" ? -32000 : -32603,
-				`Clio could not admit this prompt: ${active.admissionReason}`,
+				`CLIO Coder could not admit this prompt: ${active.admissionReason}`,
 				{
 					code: "prompt_not_admitted",
 					reason: active.admissionReason,
