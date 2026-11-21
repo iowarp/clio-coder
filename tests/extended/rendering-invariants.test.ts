@@ -3783,6 +3783,29 @@ describe("tool classes", () => {
 		}
 	});
 
+	it("states on the folded browser row a host the session's grant refused, with the grant that admits it", () => {
+		const grant = 'browser open with allow_hosts ["cdn.example.com"]';
+		const folded = renderToolExecution(
+			{
+				toolCallId: "w",
+				toolName: "browser",
+				args: { op: "run", page: "p1", script: "await page.reload()" },
+				result: {
+					content: [{ type: "text", text: `browser run page p1\nblocked: cdn.example.com not granted; to admit: ${grant}` }],
+					details: { op: "run", blockedHosts: ["cdn.example.com"], blockedGrant: grant },
+				},
+				isError: false,
+			},
+			240,
+		)
+			.map(stripTerminalSequences)
+			.join("\n");
+		match(
+			folded.split("\n")[0] ?? "",
+			/blocked cdn\.example\.com; to admit: browser open with allow_hosts \["cdn\.example\.com"\]/u,
+		);
+	});
+
 	it("states the operator's local command as not sent to the model once", () => {
 		for (const running of [true, false]) {
 			const plain = renderBashTranscriptExecution(

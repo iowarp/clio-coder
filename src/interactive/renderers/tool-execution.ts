@@ -863,12 +863,20 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
 	const driftText = skillLoadFacts(finished)?.drifted === true ? `${toolMeta(" · ")}${yellow("drifted")}` : "";
+	// A request the browser session's host grant refused is a warning the folded row states with the grant that admits it.
+	const blockedDetails = executed && row.toolName === ToolNames.Browser ? (detailsOf(finished.result) ?? null) : null;
+	const blockedGrant = stringField(blockedDetails, "blockedGrant");
+	const blockedHosts = Array.isArray(blockedDetails?.blockedHosts) ? blockedDetails.blockedHosts.join(", ") : "";
+	const blockedText =
+		blockedGrant === null
+			? ""
+			: `${toolMeta(" · ")}${yellow(sanitizeCallTargetText(`blocked ${blockedHosts}; to admit: ${blockedGrant}`))}`;
 	// An offloaded result says where the rest is, not what its path is: the
 	// path is a 64-hex name that wrapped a row across three, and /view and the
 	// full body's footer state it.
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
-		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}`,
+		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}${blockedText}`,
 		offload:
 			offloadPath === null
 				? ""
