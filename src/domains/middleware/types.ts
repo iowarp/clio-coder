@@ -63,6 +63,11 @@ export type MiddlewareEffect =
 			source?: "memory";
 			audience?: "model";
 			fact?: CompletionFact;
+			/**
+			 * Host-only: checks that ran after the last change and failed, as operator-safe labels, for the finish
+			 * advisory footer. Never sent to the model, and not declarable from a hooks file.
+			 */
+			failedChecks?: ReadonlyArray<string>;
 	  }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| {

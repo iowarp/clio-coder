@@ -15,6 +15,7 @@ import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import { systemReminderBlock } from "../core/reminder-framing.js";
+import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -1860,6 +1861,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							...(attempt.options?.samplingParams?.response_format !== undefined
 								? { responseFormat: "json-schema" as const }
 								: {}),
+							...requestedThinking(effectiveThinkingLevel),
 						});
 						// Every attempt of a locked round carries the same tail directive, as does the "auto" form of a
 						// middleware text lock; the system prompt and earlier messages keep their bytes.
@@ -2158,6 +2160,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				(contractResponseFormat !== undefined && synthesisToolLock && !helperToolAvailable)
 					? { responseFormat: "json-schema" as const }
 					: {}),
+				...requestedThinking(effectiveThinkingLevel),
 			});
 			callTracking = null;
 			callUsageReported = false;

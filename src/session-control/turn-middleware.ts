@@ -408,6 +408,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		source: NoticeSource = "reminder",
 		modelOnly = false,
 		firingId?: string,
+		failedChecks: ReadonlyArray<string> = [],
 	): boolean => {
 		if (modelOnly && severity !== "hard-block") {
 			// Advice for the model rides the next request and stays in the ledger
@@ -434,6 +435,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const declared = named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX);
 			const runChecks = named(FINISH_CONTRACT_RUN_CHECKS_PREFIX);
 			const ran = named(FINISH_CONTRACT_RAN_CHANGED_PREFIX);
+			const more = (list: ReadonlyArray<string>) => (list.length > 1 ? ` and ${list.length - 1} more` : "");
 			const hint =
 				declared.length > 0
 					? `; run verify ${declared[0]}${declared.length > 1 ? ` (or ${declared.slice(1).join(", ")})` : ""}`
@@ -442,9 +444,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						: "";
 			deps.emitFooterNotice(
 				"warning",
-				ran.length > 0
-					? `Clio changed files and ran ${ran[0]}${ran.length > 1 ? ` and ${ran.length - 1} more` : ""} afterwards, but no recognized check covered the change${hint}`
-					: `Clio changed files but ran no check on them afterwards${hint}`,
+				failedChecks.length > 0
+					? `Clio changed files and ran ${failedChecks[0]}${more(failedChecks)} after the edit; ${failedChecks.length > 1 ? "they" : "it"} failed${hint}`
+					: ran.length > 0
+						? `Clio changed files and ran ${ran[0]}${more(ran)} afterwards, but no recognized check covered the change${hint}`
+						: `Clio changed files but ran no check on them afterwards${hint}`,
 				"finish.unverified",
 			);
 			return false;
@@ -893,6 +897,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						effect.source === "memory" ? "memory" : "reminder",
 						effect.audience === "model",
 						firings.get(effect),
+						effect.failedChecks,
 					);
 					enter(effect, carried);
 					continue;

@@ -1,6 +1,7 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
 import { SURFACE_IDS } from "../side-surfaces.js";
+import { REQUESTED_THINKING_LEVELS, WIRE_EFFORT_PATTERN } from "./call-effort.js";
 import {
 	ConfigChangeScope,
 	ConfigChangeSource,
@@ -161,6 +162,8 @@ const call = {
 	]),
 	/** Present only when the request bound its reply to a JSON schema through `response_format`. */
 	responseFormat: Type.Optional(vocabulary(["json-schema"])),
+	/** The thinking level the call asked for, as Clio names it; absent where the caller did not state one (FX-49). */
+	thinkingLevel: Type.Optional(vocabulary(REQUESTED_THINKING_LEVELS)),
 };
 const span = { start: duration, end: duration };
 const sha256Hex = Type.String({ pattern: "^[0-9a-f]{64}$" });
@@ -213,6 +216,11 @@ export type CallStarted = Static<typeof CallStartedSchema>;
 export const CallSettledSchema = Type.Object(
 	{
 		...call,
+		/**
+		 * The reasoning effort the request handed to the provider carried, in the provider's spelling, or `omitted`; absent
+		 * when no request was seen (FX-49).
+		 */
+		wireEffort: Type.Optional(Type.String({ pattern: WIRE_EFFORT_PATTERN })),
 		disposition: Disposition,
 		stop,
 		usage: Type.Union([UsageSchema, Type.Null()]),
@@ -1465,7 +1473,9 @@ export const RunResultObjectSchema = Type.Object(
 								outputTail: Type.String(),
 								evidenceRunId: nullable(Type.String()),
 								/** Why the check ran nothing (refused, unconfigured, or its executable never started); absent when it ran. */
-								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed", "shutdown"])),
+								notRun: Type.Optional(
+									vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed", "shutdown", "no-tests"]),
+								),
 								/** The same check replayed on the task base; null when it was not compared. */
 								baseComparison: nullable(
 									Type.Object(

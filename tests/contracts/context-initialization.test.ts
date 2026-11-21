@@ -16,8 +16,9 @@ import { parseClioMd, serializeClioMd } from "../../src/domains/context/clio-md.
 import { fitGeneratedHandbook, normalizeHandbookRule } from "../../src/domains/context/handbook-budget.js";
 import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
 import { resolveDeliveryTools } from "../../src/engine/loop-guard.js";
-import { visibleWidth } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createContextActivityStore, formatContextActivityRailLines } from "../../src/interactive/context-activity.js";
+import { GLYPH } from "../../src/interactive/theme/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("warns when the generated handbook is ignored without changing its ignore rule", async () => {
@@ -210,6 +211,27 @@ it("a settled /context reset leaves its card as the only receipt; the rail drops
 	const refresh = createContextOperation({ ...base, kind: "context-refresh", origin: "automatic", reason: "x" }, emit);
 	refresh.finish("completed", "refreshed");
 	assert.equal(store.current()?.kind, "context-refresh");
+	store.unsubscribe();
+});
+
+it("a compaction that changed nothing settles without the done mark or a filled bar (CLI-P55)", () => {
+	const bus = createTelemetryHub();
+	const store = createContextActivityStore(bus);
+	const emit = (event: Parameters<Parameters<typeof createContextOperation>[1]>[0]) =>
+		bus.emit("context.activity_changed", event);
+	const compact = createContextOperation(
+		{ cwd: process.cwd(), sessionId: null, kind: "compaction", origin: "operator", reason: "x" },
+		emit,
+	);
+	compact.progress({ phase: "compact", status: "started", message: "preparing" });
+	compact.finish("unchanged", "nothing older than the protected recent window to summarize");
+	const activity = store.current();
+	assert.equal(activity?.outcome, "unchanged");
+	assert.ok(activity);
+	const [header = "", bar = ""] = formatContextActivityRailLines(activity, 60).map(stripTerminalSequences);
+	assert.match(header, /Context compact · no change/u);
+	assert.doesNotMatch(header, new RegExp(`^${GLYPH.ok} `, "u"));
+	assert.ok(!bar.includes(GLYPH.barFull), bar);
 	store.unsubscribe();
 });
 

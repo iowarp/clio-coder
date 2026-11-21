@@ -44,6 +44,40 @@
 			"type": "array",
 			"items": { "$ref": "#/$defs/cause" }
 		},
+		"completion": {
+			"description": "How the run ended as the host sealed it, never read from the answer text. A main run: the claim its agent declared through finish and the host's assessment; --exit-code maps a partly_done or not_done state on an exit-0 run to 1. With --agent: read from the worker's sealed receipt, where a done over a refused execute call that left the run unverified is partly_done (fact refused_check); --exit-code does not read it.",
+			"type": "object",
+			"required": ["declared", "claimed", "assessed", "state", "limitations", "unverified"],
+			"properties": {
+				"declared": { "type": "boolean" },
+				"claimed": { "enum": ["done", "partly_done", "not_done", null] },
+				"assessed": { "enum": ["done", "partly_done", "not_done", "unknown"] },
+				"state": { "enum": ["done", "partly_done", "not_done", "unknown"] },
+				"facts": {
+					"type": "array",
+					"items": {
+						"enum": [
+							"unvalidated_mutation",
+							"failed_check",
+							"uncollected_run",
+							"open_task",
+							"observation_budget",
+							"refused_check"
+						]
+					}
+				},
+				"limitations": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["what", "why"],
+						"properties": { "what": { "type": "string" }, "why": { "type": "string" } }
+					}
+				},
+				"unverified": { "type": "array", "items": { "type": "string" } },
+				"remaining": { "type": "array", "items": { "type": "string" } }
+			}
+		},
 		"result": {
 			"type": "object",
 			"required": ["text", "artifacts"],

@@ -248,7 +248,9 @@ function validationFailureOf(
 	const result = record.result?.state === "resolved" ? record.result.value : null;
 	if (entry.authority.id === "host-verification") {
 		const failed = (result?.hostVerification?.checks ?? []).filter(
-			(check) => check.exitCode !== 0 || (check.notRun !== undefined && check.notRun !== "nothing-changed"),
+			(check) =>
+				check.exitCode !== 0 ||
+				(check.notRun !== undefined && check.notRun !== "nothing-changed" && check.notRun !== "no-tests"),
 		);
 		if (failed.length > 0)
 			return `Clio's own check failed: ${failed.map((check) => (check.notRun !== undefined ? `${check.check} did not run: ${hostCheckNotRunNote(check.notRun)}` : `${check.check} exited ${check.exitCode ?? "without a code"}`)).join(", ")}`;

@@ -1,6 +1,15 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -17,6 +26,7 @@ import {
 	workspaceFingerprint,
 } from "../../src/domains/dispatch/host-verification.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
 import type { RunHostVerification } from "../../src/domains/dispatch/types.js";
 import { loadProjectVerifierCatalog } from "../../src/tools/verify/catalog.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, runProjectCheck } from "../../src/tools/verify/scripts.js";
@@ -195,6 +205,50 @@ describe("host verification judgment identity", () => {
 			strictEqual(runCount(scratch), 2);
 		});
 	}
+
+	it("seals a unittest run that collected no test as not run and unverified, so a merge-mode worktree does not land, and keeps a setUpClass error that exits 5 a rejection (CLI-P51)", async () => {
+		const scratch = makeScratch();
+		const python = join(scratch.project, "python3");
+		const check: ResolvedCheck = {
+			check: "python-unittest",
+			argv: [python, "-m", "unittest", "discover", "-s", "."],
+			cwd: scratch.project,
+			timeoutMs: 30_000,
+		};
+		const fake = (summary: string) => {
+			writeFileSync(python, `#!/bin/sh\necho ran >> ${JSON.stringify(scratch.log)}\n${summary}\nexit 5\n`);
+			chmodSync(python, 0o755);
+		};
+		fake("echo 'Ran 0 tests in 0.000s' >&2\necho >&2\necho 'NO TESTS RAN' >&2");
+		for (const runId of ["first", "second"]) {
+			const host = await verify(scratch, runId, check);
+			strictEqual(host?.status, "skipped", runId);
+			strictEqual(host?.reason, "no_tests_collected");
+			strictEqual(host?.checks[0]?.notRun, "no-tests");
+			strictEqual(host?.checks[0]?.exitCode, 0);
+			strictEqual(host?.checks[0]?.memo, false, "a run that judged nothing is never reused as a pass");
+			match(host?.checks[0]?.outputTail ?? "", /not run: no tests collected \(exit 5\)/u);
+			// The merge gate reads only the host status first: a run that judged nothing must not land as host-verified.
+			match(
+				mergeWithheldDetail({
+					quality: "fail",
+					hostStatus: host?.status,
+					contract: null,
+					output: null,
+					branch: "clio-coder/task/no-tests",
+				}) ?? "",
+				/merge withheld: the worker's own report lists a failing validation/u,
+			);
+		}
+		strictEqual(runCount(scratch), 2);
+		fake(
+			"echo 'ERROR: setUpClass (test_a.T)' >&2\necho 'RuntimeError: boom' >&2\necho 'Ran 0 tests in 0.000s' >&2\necho 'FAILED (errors=1)' >&2",
+		);
+		const crashed = await verify(scratch, "setup-class", check);
+		strictEqual(crashed?.status, "rejected");
+		strictEqual(crashed?.checks[0]?.notRun, undefined);
+		strictEqual(crashed?.checks[0]?.exitCode, 5);
+	});
 
 	for (const kind of ["numeric-compare", "perf-budget"] as const) {
 		it(`does not reuse an exit-only pass for a ${kind} judgment`, async () => {

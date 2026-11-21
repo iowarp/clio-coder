@@ -297,6 +297,12 @@ export interface RunCheckFacts {
 	 * every outcome and a later run of the same check replaces it (bt-44).
 	 */
 	failing: ReadonlyArray<string>;
+	/**
+	 * The red ones among {@link failing} that ran on the tree the last change left: started after it landed, not a
+	 * check that changed the tree itself, not run outside the workspace. A failure that only settled after the change
+	 * is not one the change met (CLI-P54).
+	 */
+	failedAfterChange: ReadonlyArray<string>;
 }
 
 export function runCheckFacts(
@@ -304,8 +310,16 @@ export function runCheckFacts(
 	workspaceRoot: string,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 ): RunCheckFacts {
-	const { passCalls, sealed } = foldStanding(entries, workspaceRoot, [], declared, undefined, pathStartedAt(entries));
-	return { passCalls, failing: [...sealed].flatMap(([name, passed]) => (passed ? [] : [name])) };
+	const { passCalls, sealed, freshRed } = foldStanding(
+		entries,
+		workspaceRoot,
+		[],
+		declared,
+		undefined,
+		pathStartedAt(entries),
+	);
+	const failing = [...sealed].flatMap(([name, passed]) => (passed ? [] : [name]));
+	return { passCalls, failing, failedAfterChange: failing.filter((name) => freshRed.has(name)) };
 }
 
 function foldStanding(
@@ -319,6 +333,7 @@ function foldStanding(
 	checks: ObservedCheck[];
 	passCalls: Map<string, ObservedCheck>;
 	sealed: Map<string, boolean>;
+	freshRed: Set<string>;
 	dispatchRuns: Set<string>;
 } {
 	const root = path.resolve(workspaceRoot);
@@ -329,6 +344,8 @@ function foldStanding(
 	const standing = new Map<string, ObservedCheck>();
 	const standingCalls = new Map<string, string>();
 	const sealed = new Map<string, boolean>();
+	// Sealed reds that ran whole on the tree the last change left; a failed settle does not ask for freshness.
+	const freshRed = new Set<string>();
 	// The check each standing name ran, so a later run of it under another spelling re-files it, as the recorder does (SF-2).
 	const identities = new Map<string, string>();
 	const dispatchRuns = new Set<string>();
@@ -340,8 +357,12 @@ function foldStanding(
 			revision += 1;
 			for (const [name, item] of standing) if (item.passed) standing.delete(name);
 			sealed.clear();
+			freshRed.clear();
 		}
 		if (call.name === null || !call.statusAttributable || !settlement.settled) return;
+		if (failed && settlement.fresh && call.reading.shape !== "mixed" && call.reading.shell?.outsideCwd !== true)
+			freshRed.add(call.name);
+		else freshRed.delete(call.name);
 		const identity = call.reading.identity ?? call.name;
 		identities.set(call.name, identity);
 		// Earlier spellings of this check still standing take its outcome; one that already agrees keeps its own call, and
@@ -416,5 +437,5 @@ function foldStanding(
 			return key === undefined ? [] : [[key, item] as const];
 		}),
 	);
-	return { checks, passCalls, sealed, dispatchRuns };
+	return { checks, passCalls, sealed, freshRed, dispatchRuns };
 }

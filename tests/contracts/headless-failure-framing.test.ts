@@ -2,9 +2,16 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { writeFrame } from "../../src/cli/modes/jsonl.js";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { createToolCallIdMinter } from "../../src/cli/modes/run-json-schema-v2.js";
-import { completionExitCode, withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-failure.js";
+import {
+	completionExitCode,
+	noteAgentRunCompletion,
+	withRunFailureReporting,
+	withRunResultV2,
+} from "../../src/cli/run-failure.js";
+import { agentRunCompletion } from "../../src/cli/run-output.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
@@ -556,6 +563,66 @@ test("a declared not_done or partly_done keeps exit 0, rides the envelope, and -
 		limitations: [],
 		unverified: [],
 	});
+});
+
+test("run --agent's run_end carries its sealed receipt's completion; a refused execute call makes a done partly_done (CLI-P58)", async (t) => {
+	const env = await isolateClioEnv("headless-agent-completion-");
+	t.after(() => env.restore());
+	const report = { mutatedPaths: ["calc.py"], validations: [], declaredChecks: ["python3 calc.py: refused"] };
+	const sealed = {
+		...fixtureReceiptDraft(fixtureEnvelope()),
+		digest: "d",
+		output: {
+			state: "final",
+			text: "",
+			bytes: 0,
+			truncated: false,
+			structured: { kind: "mutation-report", data: report },
+		},
+	};
+	const refused = { tool: "bash", actionClass: "execute", permissionRequired: true, reason: "headless run denies asks" };
+	const safety = { decisions: {}, blockedAttempts: [], permissionRequestedAttempts: [refused] };
+	const envelopeOf = async (receipt: object) => {
+		const stdout: string[] = [];
+		const write = process.stdout.write;
+		process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+			stdout.push(String(chunk));
+			for (const argument of rest) if (typeof argument === "function") argument();
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			const code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
+				writeFrame({ type: "result", result: receipt } as never);
+				noteAgentRunCompletion(agentRunCompletion(receipt as never));
+				return 0;
+			});
+			strictEqual(code, 0);
+			const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}");
+			return end as { exitCode?: number; outcome?: string; completion?: unknown };
+		} finally {
+			process.stdout.write = write;
+		}
+	};
+	const partly = await envelopeOf({ ...sealed, safety });
+	// Additive: the exit code and outcome stay the worker's own.
+	strictEqual(partly.exitCode, 0);
+	strictEqual(partly.outcome, "succeeded");
+	deepStrictEqual(partly.completion, {
+		declared: true,
+		claimed: "done",
+		assessed: "partly_done",
+		state: "partly_done",
+		facts: ["refused_check"],
+		limitations: [{ what: "bash call refused: headless run denies asks", why: "blocked_by_policy" }],
+		unverified: ["python3 calc.py: refused"],
+	});
+	// A check that verified the run after the refusal leaves the done standing.
+	const verified = await envelopeOf({
+		...sealed,
+		safety,
+		verification: { state: "verified", basis: "validation-tool" },
+	});
+	strictEqual((verified.completion as { state?: string }).state, "done");
 });
 
 test("a v2 run_end lists every child run the main agent dispatched, a steer cancel as canceled (row 164)", async (t) => {

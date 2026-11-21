@@ -545,11 +545,28 @@ describe("production compaction controls", () => {
 		try {
 			loop.resetForSession(f.entries().at(-1)?.turnId ?? null, buildModelReplayAgentMessagesFromTurns(f.entries()));
 			await loop.compact();
-			match(notices.join("\n"), /too short to compact \(.* of .* tokens used\)/u);
+			match(
+				notices.join("\n"),
+				/too short to compact \(.* of .* tokens used\); every turn is still inside the kept recent window/u,
+			);
 			doesNotMatch(notices.join("\n"), /session is empty|instructions were not used/u);
 			strictEqual(f.calls.length, 0);
 			await loop.compact("keep the API decisions");
 			match(notices.at(-1) ?? "", /too short to compact .*\. Your compaction instructions were not used$/u);
+			// After a checkpoint that kept the whole exchange, the notice still says why without a count it cannot measure.
+			const checkpoint = appendEntry(f.state, {
+				kind: "compactionSummary",
+				parentTurnId: assistant.turnId,
+				firstKeptTurnId: user.turnId,
+				summary: "Earlier work: the operator greeted the assistant and nothing else happened. ".repeat(20),
+				tokensBefore: 200,
+			});
+			f.pinLeaf(checkpoint.turnId);
+			loop.resetForSession(checkpoint.turnId, buildModelReplayAgentMessagesFromTurns(f.entries()));
+			await loop.compact();
+			match(notices.at(-1) ?? "", /too short to compact \(.*\); every turn is still inside the kept recent window/u);
+			doesNotMatch(notices.join("\n"), /turns protected/u);
+			strictEqual(f.calls.length, 0);
 		} finally {
 			loop.dispose();
 		}

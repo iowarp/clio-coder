@@ -775,11 +775,16 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 		}).result();
 		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, undefined);
 		const minimal = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "minimal-levels", null);
-		await engineStreamSimple(minimal, normalizeContext({ messages: [user("hello")] }), {
+		const sent = await engineStreamSimple(minimal, normalizeContext({ messages: [user("hello")] }), {
 			sessionId: "minimal-session",
 			reasoning: "minimal",
 		}).result();
 		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "minimal");
+		strictEqual(
+			(sent as { clioCoderWireEffort?: string }).clioCoderWireEffort,
+			"minimal",
+			"the effort the send ran under",
+		);
 	} finally {
 		disposeCopilotConversations("off-session");
 		disposeCopilotConversations("minimal-session");
@@ -968,6 +973,8 @@ test("a model the runtime does not serve fails naming the account's enabled mode
 		{ sessionId: "unknown-model" },
 	).result();
 	strictEqual(refused.stopReason, "error");
+	// Session setup failed before any request ran the model, so the call claims no effort (FX-49).
+	strictEqual((refused as { clioCoderWireEffort?: string }).clioCoderWireEffort, undefined);
 	match(
 		refused.errorMessage ?? "",
 		/Model "no-such-model" is not available\. GitHub Copilot lists these models for this account: fake-model\.$/,
@@ -978,6 +985,7 @@ test("a model the runtime does not serve fails naming the account's enabled mode
 		{ sessionId: "unlisted-model" },
 	).result();
 	strictEqual(served.stopReason, "stop");
+	strictEqual((served as { clioCoderWireEffort?: string }).clioCoderWireEffort, "omitted");
 });
 
 test("the runtime authenticates as the copilot login user only, and no token reaches Clio's files", () => {

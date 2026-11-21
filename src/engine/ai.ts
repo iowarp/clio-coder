@@ -1,3 +1,4 @@
+import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
 /**
  * Thin wrapper over @earendil-works/pi-ai. Domains consume this module, not
@@ -151,7 +152,7 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 }
 
 async function completeEngineTextAttempt(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
-	input.callTelemetry?.startAttempt();
+	input.callTelemetry?.startAttempt(requestedThinking(input.thinkingLevel));
 	const tracking = trackCallFetch(input.fetch);
 	const observe = (observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">): void => {
 		try {

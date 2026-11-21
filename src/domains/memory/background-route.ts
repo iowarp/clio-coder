@@ -13,6 +13,7 @@ import type { ThinkingLevel } from "../../core/defaults.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolveMemoryRoute } from "../../core/session-routing.js";
 import type { MemorySurfaceId } from "../../core/side-surfaces.js";
+import { requestedThinking } from "../../core/telemetry/call-effort.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
@@ -475,6 +476,8 @@ function prepareBackgroundMemoryRoute(
 			// The route this client is bound to. The middleware reads it for the
 			// telemetry row, so a fallback client names the target that served the step.
 			route: { targetId, modelId: refined.wireModelId },
+			// The level its requests ask for, clamped as `complete` sends it, so every attempt of a call records one level.
+			thinkingLevel: thinkingLevel === "off" ? leastThinkingLevel(refined) : refined.effectiveThinkingLevel,
 			// Wrapped at the layer that knows a request left the process: the step
 			// holds endpoint capacity while it is out and publishes the cache
 			// disturbance even when a timeout means the usage sink never sees it.
@@ -581,7 +584,8 @@ function prepareBackgroundMemoryRoute(
 							let facts = unobservedRunUsageFacts();
 							const observer = request.callTelemetry;
 							const callTelemetry = {
-								startAttempt: () => observer?.startAttempt(),
+								startAttempt: (next?: Parameters<NonNullable<typeof observer>["startAttempt"]>[0]) =>
+									observer?.startAttempt(next),
 								withContext: <T>(work: () => T): T => (observer ? observer.withContext(work) : work()),
 								settle(message: unknown) {
 									const settled = callSettlementFromMessage(
@@ -810,8 +814,8 @@ export function createBackgroundMemoryRouting(
 				let attempt: SideShareAttempt | undefined;
 				const callTelemetry = {
 					...scope,
-					startAttempt() {
-						const identity = scope.startAttempt();
+					startAttempt(next?: Parameters<typeof scope.startAttempt>[0]) {
+						const identity = scope.startAttempt({ ...requestedThinking(client.thinkingLevel), ...next });
 						// The first attempt names the call the side-share governor holds; it stays held until that attempt settles.
 						if (identity && options && attempt === undefined)
 							attempt = { sessionId: options.origin?.id ?? null, callId: identity.callId };
