@@ -1,8 +1,19 @@
-import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
+import {
+	accessSync,
+	chmodSync,
+	constants,
+	type Dirent,
+	existsSync,
+	readdirSync,
+	readFileSync,
+	type Stats,
+	statSync,
+} from "node:fs";
 import { join, relative as relativePath } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
-import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
+import { formatSettingsIssues, readSettings, validateSettings, validateSettingsFile } from "../../core/config.js";
 import { copilotKeychainOnlyDetail } from "../../core/copilot-keychain.js";
 import { detectNewerHome, initializeClioHome } from "../../core/init.js";
 import {
@@ -44,7 +55,7 @@ import { cacheReport } from "../telemetry/read-model.js";
 import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { describeTracking } from "./install-plan.js";
-import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
+import { listMigrations, projectPendingSettings, readMigrationManifestResult } from "./migrations/index.js";
 import { nativeAutoUpdatePolicy } from "./native-update.js";
 import { readStateInfoResult } from "./state.js";
 import { deferredResultPath, readDeferredWait, readLastBackgroundUpdate } from "./update-check.js";
@@ -617,7 +628,13 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			currentSettingsValid = true;
 			findings.push({ ok: true, name: "settings.yaml", detail: settings });
 		} else {
-			findings.push({ ok: false, name: "settings.yaml", detail: formatSettingsIssues(validation.issues) });
+			findings.push(
+				settingsAfterPendingMigrations(settings, dirs.state) ?? {
+					ok: false,
+					name: "settings.yaml",
+					detail: formatSettingsIssues(validation.issues),
+				},
+			);
 		}
 		const settingsMode = process.platform === "win32" ? null : statSync(settings).mode & 0o777;
 		if (settingsTightenedFrom !== null) {
@@ -646,23 +663,6 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				),
 			});
 		}
-		if (validation.retired.length > 0) {
-			// Retired keys with no replacement do nothing; loading proceeds, so this warns.
-			findings.push({
-				ok: true,
-				level: "warn",
-				name: "settings.yaml retired keys",
-				detail: foldDetail(
-					`${validation.retired.map((entry) => entry.path).join(", ")} retired and ignored (${validation.retired[0]?.reason ?? ""}); run \`clio-coder doctor --fix\``,
-				),
-			});
-		}
-		if (settingsRepair?.removed?.length)
-			findings.push({
-				ok: true,
-				name: "settings.yaml retired keys",
-				detail: `removed ${settingsRepair.removed.join(", ")}`,
-			});
 		const retiredValues = validation.issues.flatMap((issue) => (issue.repair !== undefined ? [issue.repair] : []));
 		if (retiredValues.length > 0) {
 			findings.push({
@@ -780,7 +780,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const availableMigrations = listMigrations().map((migration) => migration.id);
 	const appliedMigrations = new Set(migrationRead.manifest.applied);
 	const satisfiedMigrations = new Set(
-		currentSettingsValid ? ["2026-09-01-settings-v2", "2026-09-01-retire-panes-knobs"] : [],
+		currentSettingsValid
+			? ["2026-09-01-settings-v2", "2026-11-21-retired-settings", "2026-09-01-retire-panes-knobs"]
+			: [],
 	);
 	const unrecordedMigrations = availableMigrations.filter((id) => !appliedMigrations.has(id));
 	const pendingMigrations = unrecordedMigrations.filter((id) => !satisfiedMigrations.has(id));
@@ -1725,4 +1727,38 @@ function clioBinariesOnPath(): string[] {
 		}
 	}
 	return found;
+}
+
+/**
+ * A settings file that fails as written but that the pending registered migrations
+ * rewrite into one the strict reader accepts is not broken: `upgrade --post-install`
+ * runs those migrations, and the installer's candidate check runs this doctor before
+ * it, so refusing here refused every upgrade from a release that wrote a retired key.
+ * The row then passes with a warning naming the command. A file the projection still
+ * fails, a projection that throws, a schema-clean failure (syntax, access) or an
+ * untrusted manifest leave the ordinary failing row. Nothing is written or loaded
+ * from the projection.
+ */
+function settingsAfterPendingMigrations(file: string, stateDir: string): DoctorFinding | null {
+	const manifest = readMigrationManifestResult(stateDir);
+	if (manifest.problem !== null) return null;
+	const applied = new Set(manifest.manifest.applied);
+	const pending = listMigrations()
+		.filter((migration) => !applied.has(migration.id) && migration.projectSettings !== undefined)
+		.map((migration) => migration.id);
+	if (pending.length === 0) return null;
+	let projected: ReturnType<typeof validateSettings>;
+	try {
+		const raw = (parseYaml(readFileSync(file, "utf8")) as unknown) ?? {};
+		projected = validateSettings(projectPendingSettings(raw, applied));
+	} catch {
+		return null;
+	}
+	if (projected.issues.length > 0) return null;
+	return {
+		ok: true,
+		level: "warn",
+		name: "settings.yaml",
+		detail: `fails as written; pending migration${pending.length === 1 ? "" : "s"} ${pending.join(", ")} rewrite${pending.length === 1 ? "s" : ""} it into a valid file: run \`clio-coder upgrade\``,
+	};
 }

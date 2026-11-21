@@ -146,7 +146,6 @@ describe("bash write targets after cd, and links made in the same command", () =
 			`cat > notes.ts <<'EOF'\n${data}\nEOF`,
 			`cat <<"EOF" >> notes.ts\n${data}\nEOF`,
 			`tee notes.ts >/dev/null <<\\EOF\n${data}\nEOF`,
-			`cat > a.ts <<'EOF'\n${data}\nEOF\ncat > b.ts <<'EOF'\n${data}\nEOF\nnpm test`,
 		]) {
 			assertExecute(command);
 		}
@@ -164,11 +163,17 @@ describe("bash write targets after cd, and links made in the same command", () =
 			`cat > run.sh <<'EOF'\n${code}\nEOF\nbash run.sh`,
 			// A script a later step may run without naming it (bt-low1).
 			`cat > build.sh <<'EOF'\n${code}\nEOF\nmake`,
-			`cat > .git/hooks/pre-commit <<'EOF'\n${code}\nEOF\ngit commit -m x`,
 			`cat() { sh; }; cat > n.ts <<'EOF'\n${code}\nEOF`,
+			// Row 261 final: a later step that is no pure reader (a test runner) may run the copies, so they stay code.
+			`cat > a.ts <<'EOF'\n${data}\nEOF\ncat > b.ts <<'EOF'\n${data}\nEOF\nnpm test`,
 		]) {
 			assertEscalated(command, fromRoot);
 		}
+		// A write into the workspace's own .git (a hook, its config) is named too: git runs it later (row 261).
+		assertEscalated(`cat > .git/hooks/pre-commit <<'EOF'\n${code}\nEOF\ngit commit -m x`, [
+			`bash-write-target: git-metadata: ${join(root, ".git", "hooks", "pre-commit")}`,
+			...fromRoot,
+		]);
 	});
 
 	it("cannot place a relative write after a cd the shell expands at run time, or one a loop repeats", () => {

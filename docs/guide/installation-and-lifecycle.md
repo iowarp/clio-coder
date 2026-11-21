@@ -631,7 +631,7 @@ Runs a series of health sweeps across the environment:
 *   Asserts owner-only permissions on credentials (`0o600`) and warns when `settings.yaml` is wider than owner-only.
 *   Reports the installed CLIO Coder, Node, platform, and engine package readiness.
 *   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
-*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential and settings permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema. `--fix` rewrites retired enum values and YAML 1.1 booleans in place and removes settings keys that were retired with no replacement (the ones doctor names in its `settings.yaml retired keys` row), but it does not rename moved keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; moved paths with no registered migration still require deliberate editing. The rows, levels and exit codes are in [Doctor](doctor.md).
+*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential and settings permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema. `--fix` rewrites retired enum values and YAML 1.1 booleans in place but it does not remove retired keys, rename moved keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of retired settings keys; moved paths with no registered migration still require deliberate editing. The rows, levels and exit codes are in [Doctor](doctor.md).
 
 ### B. Upgrades (`clio-coder upgrade`)
 Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data. The dated migration `2026-10-06-playbooks-and-packages` converts the user home once: `<configDir>/fleets` merges into `<configDir>/playbooks` without overwriting, plugin install records and the user Library index rename the fleet kind to playbook, a Library plugin the current layout cannot read (for example a single plugin that carried an extension manifest) is replaced with the Library copy that ships inside CLIO Coder, and an api 2 extension installed before capability envelopes were bound is reinstalled from the Library or named with the command that reinstalls it. A workspace's `.clio-coder/` converts the first time CLIO Coder opens it, with one notice. Third-party plugins that still declare `fleets` stay installed but do not load, and the report names the fix for their author. Nothing in the conversion deletes operator data, and each package it writes leaves a Library receipt with actor `upgrade`. The dated migration `2026-10-31-remove-old-telemetry` deletes, once, the files the telemetry stores before #434 wrote, such as `trace.sqlite`, `receipts/`, `audit/`, `evidence-index.json`, `route-history.json` and `<dataDir>/evidence/`, and keeps session ledgers, run recordings, the memory store and `<stateDir>/telemetry/` ([retention](../architecture/telemetry.md#retention)). Boot applies it on its own when a background update skipped `clio-coder upgrade`.
@@ -951,18 +951,24 @@ for a recorded prerelease channel) for installer installs.
 
 #### Current migration contract
 
-The source tree registers nine migrations in execution order
+The source tree registers ten migrations in execution order
 (`src/domains/lifecycle/migrations/index.ts`):
 
 1. `2026-09-01-settings-v2`
-2. `2026-09-01-retire-panes-knobs`
-3. `2026-10-06-playbooks-and-packages`
-4. `2026-10-07-acp-adapters`
-5. `2026-10-07-claude-subscription`
-6. `2026-10-20-fleet-permissions-judge`
-7. `2026-10-31-remove-old-telemetry`
-8. `2026-11-02-approvals-to-config`
-9. `2026-11-07-remove-copilot-consent`
+2. `2026-11-21-retired-settings`
+3. `2026-09-01-retire-panes-knobs`
+4. `2026-10-06-playbooks-and-packages`
+5. `2026-10-07-acp-adapters`
+6. `2026-10-07-claude-subscription`
+7. `2026-10-20-fleet-permissions-judge`
+8. `2026-10-31-remove-old-telemetry`
+9. `2026-11-02-approvals-to-config`
+10. `2026-11-07-remove-copilot-consent`
+
+The retired-settings migration removes the keys retired without a replacement
+from the user `settings.yaml`, rewrites the older `interface.exitSummary` and
+`interface.outputDetail` spellings and a version-2 `fleet.nodes[].clioEntry`,
+reports every change and keeps the previous file as `settings.yaml.retired.bak`.
 
 The approvals migration copies project approval records from
 `<stateDir>/workspace-trust/` to `<configDir>/workspace-trust/`, keeps a record
@@ -1029,8 +1035,8 @@ has the settings details.
   and have no alias. Set `runtime: lmstudio` or `runtime: ollama` on the target
   in `settings.yaml`; see [Built-in runtimes](configuration-and-targets.md#built-in-runtimes).
 - **Retired settings keys.** Keys retired without a replacement, such as
-  `context.compaction.excludeLastTurns`, are ignored with a `settings.yaml retired keys`
-  warning from `clio-coder doctor`, and `clio-coder doctor --fix` deletes them.
+  `context.compaction.excludeLastTurns`, are removed from the user `settings.yaml` by
+  `clio-coder upgrade`; a file that still names one is refused as an unknown key.
 - **Plugin manifest `evals` key.** A plugin whose `ai.iowarp.clio` block still
   declares `evals` is refused with
   `ai.iowarp.clio key 'evals' was removed in 0.7.0; delete it from the package manifest and reinstall`,

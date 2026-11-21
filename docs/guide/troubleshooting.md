@@ -146,7 +146,7 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 
 | Error / Symptom | Cause | Fix |
 | --- | --- | --- |
-| `fleet.decisionProfiles` / `turnControl.interpretation` / `turnControl.orientation` / `fleet.speculativeDispatch` / old `systemOne` under `settings.yaml retired keys` | Legacy keys in `settings.yaml` | Run `clio-coder doctor --fix`; configure active engine via `systemOne.use`. |
+| `fleet.decisionProfiles` / `turnControl.interpretation` / `turnControl.orientation` / `fleet.speculativeDispatch` / old `systemOne` keys reported as `unknown key` | Retired keys in a `settings.yaml` no upgrade has rewritten | Run `clio-coder upgrade --post-install`, or delete the key; configure active engine via `systemOne.use`. |
 | ``runtime 'lmstudio-native' was removed in 0.5.6; set `runtime: lmstudio` on this target in settings.yaml`` (or `ollama-native` -> `ollama`) | Unaliased retired runtime ID | Replace with `lmstudio` or `ollama` in `settings.yaml`. |
 | `ai.iowarp.clio key 'evals' was removed in 0.7.0; delete it from the package manifest and reinstall` | Legacy manifest key | Delete `evals` from plugin manifest and reinstall. |
 | `The 'github-copilot' login is retired ...` (`auth login github-copilot`, exit `2`) | Retired impersonation flow | Run `copilot login` and use a `copilot-sdk` target. |

@@ -300,21 +300,8 @@ export function interfaceGuidanceEnabled(settings: Pick<InterfaceSettings, "demo
 	return settings.demo && settings.outputDetail !== "compact";
 }
 
-/** Read older preferences without rewriting a user's settings on startup. */
 export function normalizeOutputStyle(value: unknown): OutputStyle | undefined {
-	switch (value) {
-		case "minimal":
-		case "compact":
-			return "compact";
-		case "default":
-		case "standard":
-			return "standard";
-		case "verbose":
-		case "detailed":
-			return "detailed";
-		default:
-			return undefined;
-	}
+	return OUTPUT_STYLES.find((style) => style === value);
 }
 
 export function nextOutputStyle(style: OutputStyle): OutputStyle {
@@ -326,9 +313,7 @@ export type SmoothStreaming = "off" | "auto" | "on";
 export const EXIT_SUMMARY_STYLES = ["auto", "brief", "standard", "report", "off"] as const;
 export type ExitSummaryStyle = (typeof EXIT_SUMMARY_STYLES)[number];
 
-/** Read the legacy summary preference without rewriting user settings. */
 export function normalizeExitSummaryStyle(value: unknown): ExitSummaryStyle | undefined {
-	if (value === "full") return "standard";
 	return EXIT_SUMMARY_STYLES.find((style) => style === value);
 }
 

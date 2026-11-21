@@ -138,7 +138,8 @@ export function createFinishContractRegistration(
 		const { toolName, args } = effectiveToolCall(input.toolName ?? "", input.toolArgs);
 		const command = toolName === ToolNames.Bash && typeof args?.command === "string" ? args.command : null;
 		// A cd moves where relative targets land; those keep the plain rule.
-		if (command !== null && extractCommandPathWalks(command).some((walk) => walk.some((e) => e.kind === "cd"))) return;
+		if (command !== null && extractCommandPathWalks(command, "base").some((walk) => walk.some((e) => e.kind === "cd")))
+			return;
 		const cwd = typeof args?.cwd === "string" && args.cwd.length > 0 ? args.cwd : ".";
 		const base = resolve(process.cwd(), cwd);
 		for (const raw of mutationPathsForTool(toolName, args)) {

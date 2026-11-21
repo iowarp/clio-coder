@@ -56,6 +56,7 @@ import {
 	type OperatorYoloScope,
 } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
+import { setValidationWrappers } from "../../src/domains/safety/protected-artifacts.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { jobAuthorityRefusal } from "../../src/entry/job-runtime.js";
 import { createYoloActivation, YOLO_ACCEPT_LABEL, YOLO_DECLINE_LABEL } from "../../src/interactive/yolo-activation.js";
@@ -484,7 +485,9 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
 	}
 	// A failed cd leaves the shell in the workspace, where a delete after `;` or a newline still runs, and a TMPDIR that
-	// is no directory never moves the shell: each keeps the .git block and the workspace snapshot ask.
+	// is no directory never moves the shell: each keeps the .git block, which is the floor's once the operator's scope
+	// judges it (row 261), and any other workspace delete keeps the snapshot ask.
+	const gitFloor = "block/yolo-floor:yolo-floor-workspace-git";
 	const absentTemp = join(temp, "xr43-absent");
 	for (const [command, env] of [
 		['cd "$TMPDIR"; rm -rf .git', temp],
@@ -496,18 +499,181 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		try {
 			strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 			const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
-			strictEqual(decision.kind, "ask", command);
-			match(decision.reasons.join("; "), /deletes (?:\.git|src) with no workspace snapshot/u, command);
+			if (command.endsWith(".git")) {
+				strictEqual(`${decision.kind}/${decision.reasonCode}`, gitFloor, command);
+				strictEqual(verdict(command, "yolo"), gitFloor, command);
+			} else {
+				strictEqual(decision.kind, "ask", command);
+				match(decision.reasons.join("; "), /deletes src with no workspace snapshot/u, command);
+			}
 		} finally {
 			process.env.TMPDIR = temp;
 		}
 	}
+	// Row 261: deleting, emptying or moving away the workspace's .git is the floor at contained yolo (the default decision
+	// with the scratch roots, which the judge would read), at unconfined yolo and for a worker's yolo. A floor block is
+	// never an ask, so no judge sees it, and an operator who named the command does not clear it. A delete a failed cd
+	// leaves in the workspace gets what the same delete written plainly gets.
+	const contained = { ...atDefault, scratchRoots: [realpathSync(temp)], snapshots: false };
+	// Row 261 final (r261c): the floor gaps the second review found, each red at the bounce-1 head.
+	symlinkSync(".git", join(cwd, "gitlink261"));
+	t.after(() => rmSync(join(cwd, "gitlink261"), { force: true }));
+	const ws = basename(cwd);
+	const floorShapes261 = [
+		"! cd /nonexistent && rm -rf .git",
+		"pushd /tmp && popd && rm -rf .git",
+		"cd /tmp && cd - && rm -rf .git",
+		'HOME="$PWD" cd && rm -rf .git',
+		`ln -s ${cwd}/src ${temp}/w261 && cd ${temp}/w261 && rm -rf ../.git`,
+		`ln -s ${cwd}/src ${temp}/w261 && cd -P ${temp}/w261 && cd .. && rm -rf .git`,
+		`ln -s ${cwd}/src "$TMPDIR/a261" && rm -rf "$TMPDIR/a261/../.git"`,
+		"mv gitlink261 /tmp/g261 && rm -rf /tmp/g261/*",
+		'find "$PWD/.git" -mtime -99999 -delete',
+		"find . -mtime -99999 -delete -name foo",
+		"find . -name package.json -exec rm -rf .git {} +",
+		`env -C .. sh -c 'rm -rf ${ws}/.git'`,
+		"command env -S 'rm -rf .git'",
+		'env -C /tmp env -C "$PWD" rm -rf .git',
+		"printf '.git\\n' | xargs rm -rf",
+		"xargs rm -rf <<< .git",
+		`cd .. && git worktree remove --force ${ws}`,
+		"git --git-dir .git worktree remove --force .",
+		`git -C.. worktree remove --force ${ws}`,
+		`cd .. && shred ${ws}/.git`,
+		// Row 261 last pass (r261f): env by path or with clustered options, a here-document body after a grouped or
+		// negated alias step, and a find -execdir operand.
+		`env -iC .. rm -rf ${ws}/.git`,
+		`env -iC .. sh -c 'rm -rf ${ws}/.git'`,
+		`/usr/bin/env -C .. rm -rf ${ws}/.git`,
+		"/usr/bin/env rm -rf .git",
+		'S=sh; T=opt; A=al; B=ias; { "$S$T" -s expand_aliases; }; { "$A$B" echo=sh; }\necho <<\'EOF\'\nrm -rf .git\nEOF',
+		"! S=sh; X=1 \"$S\" -c true\necho <<'EOF'\nrm -rf .git\nEOF",
+		`find . -name package.json -execdir rm -r ${cwd} {} +`,
+		`find . -name package.json -execdir rm -r -f ${cwd} {} +`,
+	];
+	// Row 261 final: every fail-open both second-round reviews named ends blocked or with the judge, never allowed:
+	// without a sandbox no verdict is an allow, and with one an allow is only the sandbox's own containment.
+	const failOpens261 = [
+		...floorShapes261,
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nbash a.t*",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nbash a.'txt'",
+		"cat > a.'txt' <<'EOF'\nrm -rf .git\nEOF\nbash a.txt",
+		"F=a; cat > \"$F.txt\" <<'EOF'\nrm -rf .git\nEOF\nbash a.txt",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nexec bash a.t*",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\necho a.t* | xargs bash",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nfind . -name 'a.t*' -exec bash {} +",
+		"cat > x.py <<'EOF'\nrm -rf .git\nEOF\npython3 *.py",
+		"IFS=/; B=$TMPDIR/.git; rm -rf $B",
+		"trap 'B=.git' DEBUG; B=$TMPDIR/base; rm -rf \"$B\"",
+		'function echo { B=.git; }; B=$TMPDIR/base; echo; rm -rf "$B"',
+		"shopt -s expand_aliases; a''lias echo='B=.git'\nB=$TMPDIR/base; echo; rm -rf \"$B\"",
+		'\\readonly B=.git; B=$TMPDIR/base; rm -rf "$B"',
+		`coproc sh -c 'ln -s ${cwd}/.git "$TMPDIR/base"'; B=$TMPDIR/base; rm -rf "$B/."`,
+		"\\declare T''MPDIR=.; rm -rf \"$TMPDIR/.git\"",
+		"p''rintf -v T''MPDIR .; rm -rf \"$TMPDIR/.git\"",
+		"\\read T''MPDIR <<< .; rm -rf \"$TMPDIR/.git\"",
+		'P=TMP; trap "${P}DIR=." DEBUG; rm -rf "$TMPDIR/.git"',
+		"(tee /dev/null <<'EOF'\nrm -rf .git\nEOF\n) | sh",
+		"{ tee report.md <<'EOF'\nrm -rf .git\nEOF\n} | sh",
+		"cd .git && cat > config <<'EOF'\n[core]\n\tfsmonitor = rm -rf .planning\nEOF\ncd .. && git status",
+		"cat > a.txt <<'EOF'\n[core]\n\tfsmonitor = rm -rf .planning\nEOF\ncat a.txt > .git/config && git status",
+		'cat > a.txt <<\'EOF\'\n#!/bin/sh\ncat credentials.yaml >&2\nEOF\ntee "$HOME/.local/bin/wc" < a.txt && chmod +x "$HOME/.local/bin/wc" && wc',
+		'S=sh; T=opt; A=al; B=ias; "$S$T" -s expand_aliases; "$A$B" echo=sh\necho <<\'EOF\'\ncat credentials.yaml >&2\nEOF',
+		"$'sh\\x6fpt' -s expand_aliases; $'\\x61lias' echo=sh\necho <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		"P=PA; export \"${P}TH=/tmp/evil\"\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		"(. evil.sh); echo <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		// Row 261 last pass (r261e, r261f).
+		"P=PA; { export \"${P}TH=/tmp/evil\"; }\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		'echo foo"TMPDIR" && rm -rf "$TMPDIR/x"',
+		"cat > a.txt <<'EOF'\nrm /tmp/foo\nEOF\ngit reset --hard",
+		"git reset --hard && env -S 'rm /tmp/foo'",
+		"git reset --hard && echo /tmp/foo | xargs rm",
+	];
+	for (const command of failOpens261) {
+		const bare = engine.evaluate(bash(command), "default", { ...contained, sandbox: false });
+		strictEqual(bare.kind === "allow", false, `${command}: ${bare.kind}/${bare.reasonCode}`);
+		const held = engine.evaluate(bash(command), "default", contained);
+		strictEqual(
+			held.kind === "allow" && !held.reasonCode.startsWith("contained:"),
+			false,
+			`${command}: ${held.kind}/${held.reasonCode}`,
+		);
+	}
+	for (const command of [
+		"rm -rf .git",
+		'cd "$TMPDIR"; rm -rf .git',
+		'cd "$TMPDIR"\nrm -rf .git',
+		'cd "$TMPDIR" || rm -rf .git',
+		'cd "$TMPDIR" && mkdir -p x; rm -rf .git',
+		'cd "$X" && rm -rf .git',
+		"rm -rf .git/*",
+		"rm -rf ./{src,.git}",
+		"unlink .git",
+		"find . -delete",
+		"mv .git ../old-git",
+		// Row 261 bounce: `$PWD`, find selecting .git, env -S and -C, mv -t, xargs fed .git, git worktree remove, and a
+		// delete through a link the same command plants, by `/`, `/.`, a glob or a find root.
+		'rm -rf "$PWD/.git"',
+		'rm -rf "${PWD}/.git"',
+		'mv "$PWD/.git" /tmp/g',
+		"find . -name .git -exec rm -rf {} +",
+		"find . -name .git -delete",
+		"find .git -mtime -99999 -delete",
+		"env -S 'rm -rf .git'",
+		`env -C .. rm -rf ${basename(cwd)}/.git`,
+		"mv -ft /tmp .git",
+		"mv -t/tmp .git",
+		"echo .git | xargs rm -rf",
+		"git worktree remove --force .",
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/"`,
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/."`,
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/"*`,
+		`ln -s ${cwd} "$TMPDIR/l261"; find "$TMPDIR/l261" -delete`,
+		`ln -s ${cwd}/.git "$TMPDIR/g261"; rm -rf "$TMPDIR/g261/"*`,
+		// Row 261 final: a relative target resolves from the call's directory and every cd landing, whatever joins them,
+		// so a fixture's .git deleted after a cd hits too (maintainer ruling).
+		'cd "$TMPDIR" && rm -rf .git',
+		'cd "$TMPDIR/fixture" && rm -rf .git',
+		"cd fixtures/repo && rm -rf .git",
+		"cd /tmp/other && rm -rf .git",
+		...floorShapes261,
+	]) {
+		const decision = engine.evaluate(bash(command), "default", contained);
+		strictEqual(`${decision.kind}/${decision.reasonCode}`, gitFloor, command);
+		strictEqual(verdict(command, "yolo"), gitFloor, command);
+		strictEqual(engine.evaluate(bash(command), "yolo").kind, "block", command);
+	}
+	// r261f-5: a cd with HOME set on its own line lands in that HOME, whichever directory the call starts in.
+	mkdirSync(join(cwd, "src"), { recursive: true });
+	const fromSrc = { tool: ToolNames.Bash, args: { command: `HOME=${cwd} cd && rm -rf .git`, cwd: join(cwd, "src") } };
+	strictEqual(engine.evaluate(fromSrc, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:yolo-floor-workspace-git");
+	strictEqual(engine.evaluate(fromSrc, "default", contained).reasonCode, "yolo-floor:yolo-floor-workspace-git");
+	// A delete inside .git keeps its ordinary review. Row 261 bounce: a glob followed by `..` or a brace sequence that
+	// cannot name the workspace .git does not hit, and a bare link name removes only the link.
+	for (const command of [
+		"rm -f .git/index.lock",
+		"rm -rf .git/worktrees/x",
+		'rm -rf "$TMPDIR/foo/*/../bar"',
+		"rm -rf $TMPDIR/fixture-{1..3}/.git",
+		`ln -s ${cwd} "$TMPDIR/l261"; rm -f "$TMPDIR/l261"`,
+	]) {
+		strictEqual(verdict(command, "yolo").includes("yolo-floor"), false, command);
+		strictEqual(engine.evaluate(bash(command), "default", contained).reasonCode.includes("yolo-floor"), false, command);
+	}
+	const chainedSrc = engine.evaluate(bash('cd "$TMPDIR"\nrm -rf src'), "default", contained);
+	const plainSrc = engine.evaluate(bash("rm -rf src"), "default", contained);
+	strictEqual(`${chainedSrc.kind}/${chainedSrc.reasonCode}`, `${plainSrc.kind}/${plainSrc.reasonCode}`);
 	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
 	const linkDir = mkdtempSync(join(temp, "xr43-"));
 	t.after(() => rmSync(linkDir, { recursive: true, force: true }));
 	writeFileSync(join(cwd, "fixture.txt"), "x\n");
 	symlinkSync(cwd, join(linkDir, "prior"));
 	const rel = basename(linkDir);
+	// Row 261: a scratch path below a link the same command plants first is not placed as scratch.
+	const planted = `ln -s ${cwd} $TMPDIR/${rel}/lit; rm -f $TMPDIR/${rel}/lit/fixture.txt`;
+	const linked = engine.evaluate(bash(planted), "default", { ...atDefault, snapshots: false });
+	strictEqual(`${linked.kind}/${linked.reasonCode}`, "ask/damage-control:delete-outside-workspace", planted);
+	match(linked.reasons.join("; "), /below a link this command creates/u, planted);
 	for (const command of [
 		`B=$TMPDIR/${rel}/alias; ln -s ${cwd} "$TMPDIR/${rel}/alias"; rm -f "$B/fixture.txt"`,
 		`B=$TMPDIR/${rel}/prior; rm -f "$B/x"`,
@@ -533,10 +699,21 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'B=$TMPDIR/base; read B < /dev/null; rm -rf "$B"',
 		"B='$TMPDIR/base'; rm -rf \"$B\"",
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H/etc"',
-		// The shell rewrites PWD and OLDPWD on cd, and a later cd drops every pin.
+		// The shell rewrites PWD and OLDPWD on cd.
 		`PWD=$TMPDIR; cd ${process.cwd()}; rm -f "$PWD/fixture.txt"`,
 		`OLDPWD=$TMPDIR; cd ${process.cwd()}; rm -f "$OLDPWD/fixture.txt"`,
-		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
+		// A pin dies when it may not hold where the delete runs: a skipped or subshell assignment, a reassignment without a
+		// plain `NAME=`, a trap, or a path a program run before it may have linked.
+		'false || B=$TMPDIR/base && rm -rf "$B"',
+		`cd ${process.cwd()} && B=$TMPDIR/base; rm -rf "$B"`,
+		'B=$TMPDIR/base | true; rm -rf "$B"',
+		'B=$TMPDIR/base; B=/etc >/dev/null; rm -rf "$B"',
+		'B=$TMPDIR/base; B[0]=/etc; rm -rf "$B"',
+		'B=$TMPDIR/base; : $((B=0)); rm -rf "$B"',
+		'B=$TMPDIR/base; exec {B}>/dev/null; rm -rf "$B"',
+		"B=$TMPDIR/base; trap 'B=/etc' DEBUG; rm -rf \"$B\"",
+		`B=$TMPDIR/base; ln -s ${process.cwd()} "$B/a"; rm -rf "$B/a/src"`,
+		'B=$TMPDIR/base; node -e 1; rm -rf "$B/"',
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
@@ -1100,7 +1277,7 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 	const sandboxed: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "sandboxed" };
 	const refused: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "refused" };
 	const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
-	for (const command of ["bash clean.sh", "bash git.sh", 'bash "$SCRIPT"']) {
+	for (const command of ["bash clean.sh", 'bash "$SCRIPT"']) {
 		const decision = engine.evaluate(bash(command), "yolo", sandboxed);
 		strictEqual(decision.kind, "allow", command);
 		strictEqual(decision.shellSandbox?.workspace, cwd, command);
@@ -1108,6 +1285,8 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).shellSandbox, undefined, command);
 	}
+	// A script that deletes the workspace's .git meets the floor, sandbox or not (row 261).
+	strictEqual(engine.evaluate(bash("bash git.sh"), "yolo", sandboxed).reasonCode, "yolo-floor:yolo-floor-workspace-git");
 	const runScript = { tool: ToolNames.RunScript, args: { script: "clean.sh" } };
 	strictEqual(engine.evaluate(runScript, "yolo", sandboxed).shellSandbox?.workspace, cwd);
 	strictEqual(engine.evaluate(runScript, "yolo", refused).kind, "block");
@@ -1910,6 +2089,123 @@ test("the raw-text reading covers every line with a substitution the shell runs,
 	]) {
 		strictEqual(judge(command).kind, "allow", command);
 	}
+});
+
+// FX-46: a declared validation wrapper is read through like timeout or nice, and only ever tightens.
+test("a declared validation wrapper is judged by what it runs, at least as strictly as the bare command", (t) => {
+	const cwd = workspace("clio-yolo-wrapper-");
+	const savedCwd = process.cwd();
+	process.chdir(cwd);
+	t.after(() => {
+		setValidationWrappers([]);
+		process.chdir(savedCwd);
+	});
+	mkdirSync(join(cwd, "scripts"));
+	for (const name of ["slot.sh", "x.sh"]) {
+		writeFileSync(join(cwd, "scripts", name), '#!/bin/sh\nexec "$@"\n');
+		chmodSync(join(cwd, "scripts", name), 0o755);
+	}
+	const engine = engineFor(cwd);
+	const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+	const contained = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as const;
+	const verdicts = (command: string) =>
+		[
+			engine.evaluate(bash(command)),
+			engine.evaluate(bash(command), "default", contained),
+			engine.evaluate(bash(command), "yolo", OPERATOR_YOLO),
+		].map((decision) => `${decision.kind}/${decision.reasonCode}`);
+	const outside = `rm -rf ~/clio-fx46-outside-${basename(cwd)}`;
+	const undeclared = "./scripts/x.sh rm -rf .git";
+	const before = verdicts(undeclared);
+	setValidationWrappers(["scripts/slot.sh"]);
+	const git = "block/yolo-floor:yolo-floor-workspace-git";
+	deepStrictEqual(verdicts("scripts/slot.sh rm -rf .git"), ["block/damage-control:delete-outside-workspace", git, git]);
+	const kinds = (command: string) => verdicts(command).map((verdict) => verdict.split("/")[0]);
+	deepStrictEqual(kinds(`timeout 60 scripts/slot.sh -q ${outside}`), kinds(outside));
+	strictEqual(verdicts(`scripts/slot.sh ${outside}`)[0], "block/damage-control:delete-outside-workspace");
+	// Row 261 bounce: an option's value, a redirection between the wrapper and its options, and a wrapper inside a nested
+	// script are read through; a tie keeps the stricter reading's rule and snapshot requirement; and the wrapper is found
+	// from the call's own working directory.
+	for (const command of [
+		"scripts/slot.sh -s 1 rm -rf .git",
+		"scripts/slot.sh -qs 1 rm -rf .git",
+		"scripts/slot.sh >/dev/null -q rm -rf .git",
+		"sh -c 'scripts/slot.sh rm -rf .git'",
+		"sh -c 'scripts/slot.sh -s 1 rm -rf .git'",
+		// r261f-3: each option is read on its own, so a value one takes never hides the next.
+		"scripts/slot.sh -s 1 -q rm -rf .git",
+		"sh -c 'scripts/slot.sh -s 1 -q rm -rf .git'",
+	])
+		strictEqual(verdicts(command)[2], git, command);
+	strictEqual(engine.evaluate(bash("scripts/slot.sh rm -rf src"), "default", contained).recoverable, true);
+	// r261c-14: an ask/ask tie keeps the sandbox the call as written runs in.
+	const pushed = engine.evaluate(bash("scripts/slot.sh git push --force"), "default", contained);
+	setValidationWrappers([]);
+	const pushedAsWritten = engine.evaluate(bash("scripts/slot.sh git push --force"), "default", contained);
+	setValidationWrappers(["scripts/slot.sh"]);
+	if (pushedAsWritten.shellSandbox !== undefined) deepStrictEqual(pushed.shellSandbox, pushedAsWritten.shellSandbox);
+	strictEqual(verdicts(`scripts/slot.sh ${outside}`)[2], verdicts(outside)[2]);
+	process.chdir(savedCwd);
+	try {
+		const call = { tool: ToolNames.Bash, args: { command: "scripts/slot.sh rm -rf .git", cwd } };
+		strictEqual(engine.evaluate(call, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:yolo-floor-workspace-git");
+	} finally {
+		process.chdir(cwd);
+	}
+	// Row 261 last pass (r261e): never looser than b1c4855bf, whose decisions are pinned per scope (sandbox and snapshots,
+	// no sandbox, no snapshots): the kind's rank, and on a tie its rule, its snapshot (R) and its sandbox (S). An allow
+	// keeps exactly base's sandbox, since a sandbox on an allow lets admission skip the autonomy ask.
+	const scopes = [contained, { ...contained, sandbox: false }, { ...contained, snapshots: false }];
+	const rank: Record<string, number> = { allow: 0, ask: 1, block: 2 };
+	const reset = "damage-control:git-reset-hard";
+	const outsideRm = "damage-control:delete-outside-workspace";
+	const substitution = "bash-command-substitution";
+	const pinned: ReadonlyArray<readonly [string, ...string[]]> = [
+		['echo foo"TMPDIR" && rm -rf "$TMPDIR/x"', `ask+R+S ${outsideRm}`, `ask+R ${outsideRm}`, `ask+S ${outsideRm}`],
+		["./scripts/slot.sh git reset --hard", "allow+R+S bash-unrecognized", "allow+R bash-unrecognized", `ask+S ${reset}`],
+		[
+			'./scripts/slot.sh ssh host "$(id)"',
+			"allow+S bash-unrecognized",
+			`ask ${substitution}`,
+			"allow+S bash-unrecognized",
+		],
+		[
+			'./scripts/slot.sh -s git reset --hard && ./scripts/slot.sh -s foo ssh host "$(id)"',
+			"allow+R+S bash-shell-operators",
+			`ask+R ${substitution}`,
+			`ask+S ${reset}`,
+		],
+		[
+			"cat > a.txt <<'EOF'\nrm /tmp/foo\nEOF\ngit reset --hard",
+			"allow+R+S bash-shell-operators",
+			"allow+R bash-shell-operators",
+			`ask+S ${reset}`,
+		],
+		[
+			"git reset --hard && env -S 'rm /tmp/foo'",
+			"allow+R+S bash-shell-operators",
+			"allow+R bash-shell-operators",
+			`ask+S ${reset}`,
+		],
+		["git reset --hard && echo /tmp/foo | xargs rm", `ask+R+S ${outsideRm}`, `ask+R ${outsideRm}`, `ask+S ${reset}`],
+	];
+	for (const [command, ...base] of pinned) {
+		for (const [index, scope] of scopes.entries()) {
+			const decision = engine.evaluate(bash(command), "default", scope);
+			const [head = "", reasonCode] = (base[index] as string).split(" ");
+			const [kind = "", ...flags] = head.split("+");
+			const label = `${command} @${index}: ${decision.kind}/${decision.reasonCode}`;
+			strictEqual((rank[decision.kind] ?? -1) >= (rank[kind] ?? 3), true, label);
+			if (decision.kind !== kind) continue;
+			strictEqual(decision.reasonCode, reasonCode, label);
+			if (flags.includes("R")) strictEqual(decision.recoverable, true, label);
+			if (kind === "allow" || flags.includes("S"))
+				strictEqual(decision.shellSandbox !== undefined, flags.includes("S"), label);
+		}
+	}
+	// An undeclared script stays opaque, and a check behind the declared wrapper is not judged more strictly.
+	deepStrictEqual(verdicts(undeclared), before);
+	deepStrictEqual(verdicts("scripts/slot.sh ls"), verdicts("scripts/x.sh ls"));
 });
 
 test("the yolo floor places a top-level delete after a literal cd, and judges one after any other cd as unplaced", async (t) => {
