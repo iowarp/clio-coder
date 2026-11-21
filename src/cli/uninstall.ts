@@ -40,6 +40,7 @@ import {
 	installerExeFiles,
 	installRootHolders,
 	installRootServiceFiles,
+	launchReceipts,
 } from "../domains/lifecycle/install-plan.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { writeCliFailure } from "./kit/json-out.js";
@@ -940,23 +941,19 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	}
 	try {
 		if (removedInstall) {
-			const active = join(removedInstall.root, ".active");
 			const own = new Set([process.pid, Number(process.env.CLIO_CODER_LAUNCHER_PID)]);
-			if (existsSync(active)) {
-				for (const name of readdirSync(active)) {
-					const pid = Number(name.replace(/\.json$/, ""));
-					if (!Number.isSafeInteger(pid) || pid <= 0 || own.has(pid)) continue;
-					let live = true;
-					try {
-						process.kill(pid, 0);
-					} catch (error) {
-						live = !(error instanceof Error && "code" in error && error.code === "ESRCH");
-					}
-					if (live) {
-						presenter.fail(`Another native session (pid ${pid}) is still running; close it before uninstalling`);
-						presenter.finish();
-						return 1;
-					}
+			for (const { pid } of launchReceipts(removedInstall.root)) {
+				if (own.has(pid)) continue;
+				let live = true;
+				try {
+					process.kill(pid, 0);
+				} catch (error) {
+					live = !(error instanceof Error && "code" in error && error.code === "ESRCH");
+				}
+				if (live) {
+					presenter.fail(`Another native session (pid ${pid}) is still running; close it before uninstalling`);
+					presenter.finish();
+					return 1;
 				}
 			}
 		}
