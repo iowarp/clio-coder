@@ -1393,20 +1393,6 @@ async function runReviewGated(
 				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent, packet),
 				systemPrompt: REVIEWER_GATE_PROMPT,
 				readOnly: true,
-				// The packet names the builder's run result by absolute path; the reviewer reads the builder's scope (M1).
-				intent: judgeIntent(
-					narrowDispatchIntentToReadOnly(
-						base.intent ?? {
-							version: 2,
-							readRoots: [],
-							writeRoots: [],
-							relevantPaths: [],
-							pathProvenance: [],
-							expectedOutputs: [],
-							verification: [],
-						},
-					),
-				),
 				gate: {
 					role: "reviewer",
 					group,
