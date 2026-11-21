@@ -56,7 +56,7 @@ export const STRUCTURED_SETTINGS: Readonly<Record<string, StructuredSettingEdito
 			{
 				key: "executionRole",
 				label: "Execution role",
-				choices: ["builder", "researcher", "verifier", "reviewer", "judge"],
+				choices: ["builder", "explorer", "seat", "checker", "reviewer", "judge"],
 			},
 		],
 	},

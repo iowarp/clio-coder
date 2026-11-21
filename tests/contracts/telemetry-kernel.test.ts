@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createAssistantMessageEventStream, type StreamOptions } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
@@ -428,6 +429,42 @@ test("segment readers preserve future records and distinguish a torn tail from i
 	strictEqual(validPayload("compaction.settled", { ...outcome, checkpointTurnId: null }), false);
 	strictEqual(validPayload("compaction.settled", { ...outcome, callIds: [callId, callId] }), false);
 	strictEqual(validPayload("compaction.settled", { ...outcome, outcome: "failed", checkpointTurnId: null }), true);
+});
+
+test("run.settled writes the fleet role names at version 2 and a sealed version 1 reads as recorded (M12)", () => {
+	const golden = new URL("../fixtures/telemetry/golden/vccap2ywu7n8/runs/2s47tzn7p4bz/journal.jsonl", import.meta.url);
+	const sealed = readFileSync(golden, "utf8")
+		.split("\n")
+		.filter((line) => line.includes('"k":"run.settled"'))
+		.map((line) => JSON.parse(line.slice(0, line.lastIndexOf("\t"))) as TelemetryRecord<"run.settled">)[0];
+	ok(sealed !== undefined && sealed.kv === 1);
+	const as = (kv: number, executionRole: string) => ({ ...sealed, kv, data: { ...sealed.data, executionRole } });
+	const read = (kv: number, executionRole: string) => {
+		const result = readTelemetryRecord(as(kv, executionRole));
+		return result.kind === "record" && result.record.k === "run.settled" ? result.record.data.executionRole : result;
+	};
+	// A sealed version 1 keeps its role names as recorded; a version 2 holds only the fleet vocabulary.
+	strictEqual(read(1, "researcher"), "researcher");
+	strictEqual(read(1, "verifier"), "verifier");
+	strictEqual(read(2, "explorer"), "explorer");
+	strictEqual(read(2, "seat"), "seat");
+	for (const [kv, role] of [
+		[2, "researcher"],
+		[2, "verifier"],
+		[1, "explorer"],
+	] as const)
+		deepStrictEqual(read(kv, role), { kind: "skipped", reason: "invalid-record", k: "run.settled" });
+	const ctx = {
+		sessionId: "vccap2ywu7n8",
+		runId: "2s47tzn7p4bz",
+		agent: { role: "worker" as const, id: "2s47tzn7p4bz" },
+	};
+	const written = makeTelemetryRecord("run.settled", { ...sealed.data, executionRole: "checker" } as never, ctx, {
+		t: sealed.t,
+		mono: 0,
+	});
+	strictEqual(written.kv, 2);
+	strictEqual(validPayload("run.settled", { ...sealed.data, executionRole: "verifier" }), false);
 });
 
 test("a settled breakdown keeps its measured zeros beside a larger total; only a total-only row loses them (#434)", () => {

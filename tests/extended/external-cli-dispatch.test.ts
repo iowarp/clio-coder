@@ -105,7 +105,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 			target: "codex-test",
 			task: "Reply PONG",
 			readOnly: true as const,
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			requestOrigin: "user" as const,
 			cwd: root,
 		};
@@ -219,7 +219,7 @@ for (const event of [
 			target: "codex-test",
 			task: "Reply PONG",
 			readOnly: true,
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "user",
 			cwd: root,
 		});
@@ -489,7 +489,7 @@ for (const event of [
 			agentId: "coder",
 			target: "pi-test",
 			task: "Reply PONG",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "user",
 			cwd: root,
 		});
@@ -645,7 +645,7 @@ if (process.argv[2] === "--version") {
 			agentId: "coder",
 			target: "pi-test",
 			task: "Reply PONG",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "user",
 			cwd: root,
 		});
@@ -814,7 +814,7 @@ test("a tool-runtime worker in the current checkout keeps the checkout delta on 
 	try {
 		const handle = await bundle.contract.dispatch({
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Inspect the fixture.",
 			cwd: root,
 			requestOrigin: "internal",

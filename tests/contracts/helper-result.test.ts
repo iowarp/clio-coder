@@ -310,7 +310,7 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 		const run = await bundle.contract.dispatch({
 			agentId: "provenance",
 			task: "Inspect receipt evidence",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 			cwd: env.dir,
 		});

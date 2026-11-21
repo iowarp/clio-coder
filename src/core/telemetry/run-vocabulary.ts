@@ -150,3 +150,34 @@ export const RUN_HASH_SUBJECTS = [
 	"evidence-packet",
 ] as const;
 export type RunHashSubject = (typeof RUN_HASH_SUBJECTS)[number];
+
+/**
+ * The execution roles a run journals and route statistics key on (fleet DESIGN 4.2, M12): the role vocabulary plus
+ * `recovery`, the population of every attempt after the first.
+ */
+export const EXECUTION_ROLE_VOCABULARY = [
+	"builder",
+	"explorer",
+	"seat",
+	"checker",
+	"reviewer",
+	"judge",
+	"recovery",
+] as const;
+
+/**
+ * The execution roles run journals held before fleet M12 (`run.settled` and `route.decided` version 1). Sealed
+ * history reads in these names as recorded; nothing writes them and no live path matches them.
+ */
+export const RETIRED_EXECUTION_ROLE_VOCABULARY = [
+	"builder",
+	"reviewer",
+	"judge",
+	"researcher",
+	"verifier",
+	"recovery",
+] as const;
+
+/** A role as some journal recorded it, current or pre-M12. */
+export const RECORDED_EXECUTION_ROLE_VOCABULARY = [...EXECUTION_ROLE_VOCABULARY, "researcher", "verifier"] as const;
+export type RecordedExecutionRole = (typeof RECORDED_EXECUTION_ROLE_VOCABULARY)[number];

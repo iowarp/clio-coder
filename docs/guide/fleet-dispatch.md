@@ -1841,7 +1841,7 @@ selection requires both the execution role and posture to be named, a call that 
 version: 2
 fleet:
   adaptiveRouting:
-    roles: [researcher, verifier, reviewer, judge]
+    roles: [explorer, seat, checker, reviewer, judge]
     postures: [quality, balanced]
     agentRoles: []
 ```
@@ -1854,7 +1854,7 @@ a decision p95 of at most 10 ms. If no tuple is ready, active mode refuses the a
 falls back to the fixed route, and manual or `failover: none` intent never
 drifts.
 
-`roles` takes `researcher`, `verifier`, `reviewer` and `judge`. `postures` takes
+`roles` takes `explorer`, `seat`, `checker`, `reviewer` and `judge`. `postures` takes
 `quality`, `balanced`, `latency` and `economy`; `manual` is exact by definition and is
 never an activated posture. `agentRoles` takes `{agentId, executionRole}` pairs, with
 `builder` also allowed as an execution role, and rejects `agentId: auto`. All three lists

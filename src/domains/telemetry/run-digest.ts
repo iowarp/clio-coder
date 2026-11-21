@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { RunSettled } from "../../core/telemetry/schemas.js";
+import type { RecordedRunSettled } from "../../core/telemetry/schemas.js";
 import { canonicalJson } from "../prompts/hash.js";
 
 /**
@@ -7,6 +7,6 @@ import { canonicalJson } from "../prompts/hash.js";
  * result object by digest, so the identity commits to what the run delivered too. Gate subjects, Scout sources and
  * plan sources cite it; a reader that acts on one checks it against the sealed record.
  */
-export function runSettledDigest(payload: RunSettled): string {
+export function runSettledDigest(payload: RecordedRunSettled): string {
 	return createHash("sha256").update(canonicalJson(payload), "utf8").digest("hex");
 }

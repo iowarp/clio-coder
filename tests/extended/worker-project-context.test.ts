@@ -66,7 +66,7 @@ for (const scenario of [
 				bundle.contract.dispatch({
 					agentId: scenario.agentId,
 					task: "Inspect the fixture.",
-					executionRole: "researcher",
+					executionRole: "explorer",
 					requestOrigin: "internal",
 					cwd: env.dir,
 				}),
@@ -97,7 +97,7 @@ test("worker authored prefixes retain safe text, disclose omissions, and honor r
 			[null, true],
 		] as const) {
 			const messages = buildDynamicPromptMessages(
-				{ agentId: "coder", task: "Inspect.", executionRole: "researcher" },
+				{ agentId: "coder", task: "Inspect.", executionRole: "explorer" },
 				{
 					projectContextTier: "bounded",
 					projectPrompt,
@@ -137,7 +137,7 @@ test("derived verification remains gated while authored verification prose is un
 		};
 		for (const capabilityClass of ["workspace-edit", "verification"] as const) {
 			const context = { projectContextTier: "bounded" as const, capabilityClass, project };
-			const request = { agentId: "coder", task: "Inspect.", executionRole: "researcher" as const };
+			const request = { agentId: "coder", task: "Inspect.", executionRole: "explorer" as const };
 			const legacy = buildDynamicPromptMessages(request, context);
 			strictEqual(legacy[0]?.body.includes("DERIVED CHECK"), capabilityClass === "verification");
 			const raw = buildDynamicPromptMessages(request, { ...context, projectPrompt });

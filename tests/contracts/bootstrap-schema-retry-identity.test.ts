@@ -44,7 +44,7 @@ for (const schemaFallback of [false, true]) {
 				// as an empty list; the existing researcher recipe stays read-only.
 				deepStrictEqual(scope.workingContextPaths, []);
 				deepStrictEqual(scope.writeBoundaries, []);
-				strictEqual(request.executionRole, "researcher");
+				strictEqual(request.executionRole, "explorer");
 				strictEqual(request.noSkills, true);
 				if (schemaFallback && request.responseSchema) {
 					throw new UnsupportedResponseSchemaError("fixture does not support response schemas");
@@ -108,12 +108,12 @@ test("legacy scope inference refuses absolute paths glued to key separators inst
 	try {
 		for (const task of ["Read key:/data/x.txt", "Summarize path=/etc/hosts"]) {
 			throws(
-				() => resolveDispatchPathScope({ agentId: "researcher", executionRole: "researcher", task, cwd }),
+				() => resolveDispatchPathScope({ agentId: "researcher", executionRole: "explorer", task, cwd }),
 				/legacy_scope_path_absolute/u,
 				task,
 			);
 		}
-		resolveDispatchPathScope({ agentId: "researcher", executionRole: "researcher", task: "Read key:data/x.txt", cwd });
+		resolveDispatchPathScope({ agentId: "researcher", executionRole: "explorer", task: "Read key:data/x.txt", cwd });
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}
@@ -124,7 +124,7 @@ test("legacy scope inference skips scheme URIs but still refuses file:// paths",
 	try {
 		const scope = resolveDispatchPathScope({
 			agentId: "researcher",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Draft project://paper/background from s3://bucket/notes and https://example.org/a/b",
 			cwd,
 		});
@@ -136,7 +136,7 @@ test("legacy scope inference skips scheme URIs but still refuses file:// paths",
 			() =>
 				resolveDispatchPathScope({
 					agentId: "researcher",
-					executionRole: "researcher",
+					executionRole: "explorer",
 					task: "Read file:///etc/hosts",
 					cwd,
 				}),

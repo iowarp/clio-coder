@@ -140,7 +140,7 @@ describe("--max-cost-usd and parallel dispatches", () => {
 		try {
 			const request = {
 				agentId: "scout",
-				executionRole: "researcher" as const,
+				executionRole: "explorer" as const,
 				task: "Inspect which functions lib/math.js exports.",
 				requestOrigin: "internal" as const,
 			};

@@ -74,7 +74,7 @@ test("fleet status --json ends with SIGPIPE status when its reader takes one byt
 		for (let i = 0; i < 600; i += 1) {
 			const row = ledger.create({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: `closed reader ${i}`,
 				targetId: "local",
 				wireModelId: "model",

@@ -322,6 +322,7 @@ describe("settings and migration boundary", () => {
 		const ids = listMigrations().map((migration) => migration.id);
 		deepStrictEqual(ids, [
 			"2026-11-21-retired-settings",
+			"2026-11-21-fleet-role-names",
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
@@ -369,7 +370,7 @@ describe("settings and migration boundary", () => {
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock","2026-11-21-fleet-role-names"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
@@ -500,6 +501,47 @@ describe("settings and migration boundary", () => {
 		});
 		strictEqual(run.reports?.[id]?.attention.length, 1);
 		strictEqual(readFileSync(join(dir, "b.json"), "utf8"), "{}\n");
+	});
+
+	it("renames persisted worker roles to the fleet vocabulary in settings and the live ledger, once (M12)", async () => {
+		const id = "2026-11-21-fleet-role-names";
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((other) => other !== id);
+		writeFileSync(join(scratch.dir, "config", "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const written =
+			"version: 2\n# kept\nfleet:\n  adaptiveRouting:\n    roles: [researcher, verifier, judge]\n    postures: [balanced]\n    agentRoles:\n      - { agentId: scout, executionRole: researcher }\n      - { agentId: verifier, executionRole: verifier }\n";
+		writeFileSync(settingsFile, written, "utf8");
+		mkdirSync(stateDir, { recursive: true });
+		const rows = [
+			{ version: 1, id: "a", executionRole: "researcher" },
+			{ version: 1, id: "b", executionRole: "researcher", gate: { role: "member", group: "g", cycle: 1 } },
+			{ version: 1, id: "c", executionRole: "verifier" },
+			{ version: 1, id: "d", executionRole: "builder" },
+		];
+		writeFileSync(join(stateDir, "runs.json"), JSON.stringify(rows), "utf8");
+		const run = await runPending(stateDir);
+		deepStrictEqual(run.applied, [id]);
+		const text = readFileSync(settingsFile, "utf8");
+		ok(text.includes("# kept"));
+		deepStrictEqual(parseYaml(text).fleet.adaptiveRouting, {
+			roles: ["explorer", "seat", "checker", "judge"],
+			postures: ["balanced"],
+			agentRoles: [
+				{ agentId: "scout", executionRole: "explorer" },
+				{ agentId: "scout", executionRole: "seat" },
+				{ agentId: "verifier", executionRole: "checker" },
+			],
+		});
+		deepStrictEqual(validateSettings(parseYaml(text)).issues, []);
+		deepStrictEqual(
+			(JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8")) as Array<{ executionRole: string }>).map(
+				(row) => row.executionRole,
+			),
+			["explorer", "seat", "checker", "builder"],
+		);
+		strictEqual(run.reports?.[id]?.changed.length, 5);
+		deepStrictEqual((await runPending(stateDir)).applied, []);
 	});
 
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {

@@ -14,7 +14,7 @@ import { lstatSync, readdirSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { listStateDirectorySync, withinStateRoot } from "../../core/state-boundary.js";
 import type { Fact } from "../../core/telemetry/fact.js";
-import type { RunSettled } from "../../core/telemetry/schemas.js";
+import type { RecordedRunSettled, RunSettled } from "../../core/telemetry/schemas.js";
 import {
 	telemetryBundlePath,
 	telemetryJournalFiles,
@@ -44,8 +44,11 @@ export function routeSettledLabel(
 
 export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
 
-/** The executed route identity a history entry is keyed and drift-checked by. */
-export type RouteHistoryIdentity = NonNullable<RunSettled["routeDecision"]>["executed"];
+/**
+ * The executed route identity a history entry is keyed and drift-checked by, its role as the run recorded it: a run
+ * settled before fleet M12 names a retired role, which matches no current route.
+ */
+export type RouteHistoryIdentity = NonNullable<RecordedRunSettled["routeDecision"]>["executed"];
 
 /** One settled run on this host, as the route quality reduction reads it. */
 export interface SettledRunFacts {

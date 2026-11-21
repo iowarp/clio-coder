@@ -9439,7 +9439,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_b2573459"
+															"$ref": "#/components/schemas/Union_bc06f0d1"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -21276,7 +21276,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_b2573459"
+															"$ref": "#/components/schemas/Union_bc06f0d1"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -25602,6 +25602,9 @@
 			"Enum_2f17e4ad": {
 				"enum": ["verified", "failed", "absent", "unknown", "not_applicable"]
 			},
+			"Enum_32558611": {
+				"enum": ["builder", "explorer", "seat", "checker", "reviewer", "judge", "recovery", "researcher", "verifier"]
+			},
 			"Enum_3bf738aa": {
 				"enum": [
 					"main",
@@ -25889,9 +25892,6 @@
 					"auth-failure",
 					"unknown"
 				]
-			},
-			"Enum_f3897064": {
-				"enum": ["builder", "reviewer", "judge", "researcher", "verifier", "recovery"]
 			},
 			"Enum_f6275625": {
 				"enum": ["not_recorded", "not_observed", "artifact_missing", "historical_format"]
@@ -27870,7 +27870,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_answerBudgetBytes_apiCalls_d01e4597": {
+			"Object_agentId_answerBudgetBytes_apiCalls_383aa2c7": {
 				"type": "object",
 				"required": [
 					"version",
@@ -27925,7 +27925,7 @@
 					"digest"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_de7fbe27"
+					"$ref": "#/components/schemas/Shape_e282a6bf"
 				},
 				"additionalProperties": false
 			},
@@ -28061,7 +28061,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_endpointIdentityHash_executionRole_7c0b8997": {
+			"Object_agentId_endpointIdentityHash_executionRole_1a48c25a": {
 				"type": "object",
 				"required": [
 					"agentId",
@@ -28089,7 +28089,7 @@
 						"maxLength": 256
 					},
 					"executionRole": {
-						"$ref": "#/components/schemas/Enum_f3897064"
+						"$ref": "#/components/schemas/Enum_32558611"
 					},
 					"targetId": {
 						"type": "string",
@@ -30426,11 +30426,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_constraintsValid_decisionHash_durationMs_b673e280": {
+			"Object_constraintsValid_decisionHash_durationMs_fc30c8ad": {
 				"type": "object",
 				"required": ["decisionHash", "mode", "durationMs", "constraintsValid", "executed"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_5a1e7f2e"
+					"$ref": "#/components/schemas/Shape_08ddbf7d"
 				},
 				"additionalProperties": false
 			},
@@ -32870,7 +32870,7 @@
 						"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 					},
 					"settled": {
-						"$ref": "#/components/schemas/Union_b2573459"
+						"$ref": "#/components/schemas/Union_bc06f0d1"
 					},
 					"seal": {
 						"$ref": "#/components/schemas/Union_4dc8870f"
@@ -33843,6 +33843,25 @@
 					"$ref": "#/components/schemas/Object_agentId_apiCalls_durationMs_9c2c98d9"
 				}
 			},
+			"Shape_08ddbf7d": {
+				"decisionHash": {
+					"type": "string",
+					"pattern": "^[0-9a-f]{64}$"
+				},
+				"mode": {
+					"enum": ["fixed", "shadow", "active"]
+				},
+				"durationMs": {
+					"type": "number",
+					"minimum": 0
+				},
+				"constraintsValid": {
+					"type": "boolean"
+				},
+				"executed": {
+					"$ref": "#/components/schemas/Object_agentId_endpointIdentityHash_executionRole_1a48c25a"
+				}
+			},
 			"Shape_0a722f6b": {
 				"calls": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
@@ -34799,25 +34818,6 @@
 							"type": "null"
 						}
 					]
-				}
-			},
-			"Shape_5a1e7f2e": {
-				"decisionHash": {
-					"type": "string",
-					"pattern": "^[0-9a-f]{64}$"
-				},
-				"mode": {
-					"enum": ["fixed", "shadow", "active"]
-				},
-				"durationMs": {
-					"type": "number",
-					"minimum": 0
-				},
-				"constraintsValid": {
-					"type": "boolean"
-				},
-				"executed": {
-					"$ref": "#/components/schemas/Object_agentId_endpointIdentityHash_executionRole_7c0b8997"
 				}
 			},
 			"Shape_5bd7d227": {
@@ -36811,7 +36811,18 @@
 					"const": true
 				}
 			},
-			"Shape_de7fbe27": {
+			"Shape_e0f3765c": {
+				"context": {
+					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_fb814a10"
+				},
+				"turn": {
+					"$ref": "#/components/schemas/Union_c2e91107"
+				},
+				"session": {
+					"$ref": "#/components/schemas/Union_0bf4f725"
+				}
+			},
+			"Shape_e282a6bf": {
 				"version": {
 					"type": "number",
 					"const": 1
@@ -36822,7 +36833,7 @@
 					"maxLength": 512
 				},
 				"executionRole": {
-					"$ref": "#/components/schemas/Enum_f3897064"
+					"$ref": "#/components/schemas/Enum_32558611"
 				},
 				"requestOrigin": {
 					"$ref": "#/components/schemas/Union_d7ccdb8b"
@@ -36837,7 +36848,7 @@
 					"$ref": "#/components/schemas/Union_b0281a53"
 				},
 				"routeDecision": {
-					"$ref": "#/components/schemas/Union_cfddcd30"
+					"$ref": "#/components/schemas/Union_8593bf0d"
 				},
 				"attempt": {
 					"type": "integer",
@@ -37031,17 +37042,6 @@
 				"digest": {
 					"type": "string",
 					"pattern": "^[0-9a-f]{64}$"
-				}
-			},
-			"Shape_e0f3765c": {
-				"context": {
-					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_fb814a10"
-				},
-				"turn": {
-					"$ref": "#/components/schemas/Union_c2e91107"
-				},
-				"session": {
-					"$ref": "#/components/schemas/Union_0bf4f725"
 				}
 			},
 			"Shape_e2cced2d": {
@@ -39569,6 +39569,16 @@
 					}
 				]
 			},
+			"Union_8593bf0d": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_constraintsValid_decisionHash_durationMs_fc30c8ad"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_86259f38": {
 				"anyOf": [
 					{
@@ -40063,16 +40073,6 @@
 					}
 				]
 			},
-			"Union_b2573459": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_d01e4597"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_b27917c3": {
 				"anyOf": [
 					{
@@ -40239,6 +40239,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_chars_sections_tier_6a58dfbc"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_bc06f0d1": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_383aa2c7"
 					},
 					{
 						"type": "null"
@@ -40415,16 +40425,6 @@
 				"anyOf": [
 					{
 						"enum": ["recipe", "model", "operator"]
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_cfddcd30": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_constraintsValid_decisionHash_durationMs_b673e280"
 					},
 					{
 						"type": "null"

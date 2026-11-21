@@ -52,7 +52,7 @@ const base: RunEnvelope = {
 	version: 1,
 	id: "member-one",
 	agentId: "researcher",
-	executionRole: "researcher",
+	executionRole: "explorer",
 	task: "Review fixture evidence",
 	targetId: "fixture-target",
 	wireModelId: "fixture-model",

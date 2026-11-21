@@ -998,7 +998,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						const memberRequest: DispatchRequest = {
 							...base,
 							...(member.agent !== undefined ? { agentId: member.agent } : {}),
-							executionRole: "researcher",
+							executionRole: "seat",
 							readOnly: true,
 							toolProfile: "council-read-only",
 							// A member inherits the caller's declared scope but never its

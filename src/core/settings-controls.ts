@@ -310,7 +310,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"fleet.retry.routeCooldownMs":
 		"After repeated failures, CLIO Coder waits before trying the same connection and model again. A successful run clears the wait. Choose 0 to disable it.",
 	"fleet.adaptiveRouting.roles":
-		"Automatic model selection only takes effect when both the worker role and its priority are enabled. Otherwise CLIO Coder records its suggestion without using it. Choose researcher, verifier, reviewer, or judge.",
+		"Automatic model selection only takes effect when both the worker role and its priority are enabled. Otherwise CLIO Coder records its suggestion without using it. Choose explorer, seat, checker, reviewer, or judge.",
 	"fleet.adaptiveRouting.postures":
 		"Choose which priorities may select a model automatically: quality, balanced, speed, or lower cost. Manually chosen models stay fixed.",
 	"fleet.adaptiveRouting.agentRoles":

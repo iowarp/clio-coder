@@ -123,7 +123,7 @@ for (const agentId of ["scout", "provenance"] as const) {
 			const run = await bundle.contract.dispatch({
 				agentId,
 				task: "Inspect fixture evidence.",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				requestOrigin: "internal",
 				resultContractOverride: { kind: "provenance-report" },
 			});

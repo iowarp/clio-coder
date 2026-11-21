@@ -71,7 +71,7 @@ async function retryFixture(
 	const request: DispatchRequest = {
 		agentId: options.native ? "scout" : "retry-fixture",
 		task: "Inspect the fixture input.",
-		executionRole: "researcher",
+		executionRole: "explorer",
 	};
 	const resolution = bundle.contract.preview?.(request);
 	ok(resolution);

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
-import type { EvidenceAssessed, RunResultObject, RunSettled } from "../core/telemetry/schemas.js";
+import type { EvidenceAssessed, RecordedRunSettled, RunResultObject } from "../core/telemetry/schemas.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	parseVerifierResult,
@@ -36,7 +36,7 @@ export interface FinishedRun {
 	/** The run's identity, the digest of its run.settled; null for a view built before the run settled. */
 	digest: string | null;
 	facts: Pick<
-		RunSettled,
+		RecordedRunSettled,
 		| "route"
 		| "node"
 		| "routingIntent"
