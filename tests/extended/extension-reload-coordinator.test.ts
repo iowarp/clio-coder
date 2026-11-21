@@ -11,6 +11,7 @@ import type {
 	ExtensionReloadPrepareResult,
 	ExtensionsContract,
 } from "../../src/domains/extensions/index.js";
+import { createExtensionRuntimeHookBridge, type ExtensionEffect } from "../../src/domains/extensions/index.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { extensionSnapshotFor } from "../../src/domains/extensions/snapshot-access.js";
 import { bindExtensionSnapshotStore } from "../../src/domains/extensions/snapshot-store.js";
@@ -32,6 +33,7 @@ import {
 } from "../../src/entry/extension-reload.js";
 import { middlewareOwner } from "../harness/middleware-owner.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 const domainContext: DomainContext = { bus: {} as DomainContext["bus"], getContract: () => undefined };
@@ -163,6 +165,52 @@ describe("extension reload coordinator publication", () => {
 	afterEach(() => {
 		bindExtensionSnapshotStore(null);
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
+	it("records effect-free runtime hook runs as one receipt per turn and each effect on its own (C-33)", async (t) => {
+		const env = await isolateClioEnv("clio-coder-quiet-hook-receipts-");
+		t.after(() => env.restore());
+		const project = scratch();
+		const source = scratch();
+		writeFileSync(
+			path.join(source, "clio-coder-extension.json"),
+			JSON.stringify({
+				id: "quiet_gate",
+				name: "Quiet gate",
+				version: "1.0.0",
+				description: "Watches reads",
+				runtime: {
+					api: 2,
+					entrypoint: "extension.mjs",
+					hooks: [{ on: "before_tool", tools: ["read"], timeoutMs: 1000, onTimeout: "pass", onError: "pass" }],
+				},
+			}),
+		);
+		writeFileSync(path.join(source, "extension.mjs"), "export default () => {};\n");
+		ok(installExtension(source, { cwd: project, scope: "user" }).extension?.loadable);
+		const harness = liveHarness(project);
+		t.after(() => harness.stop());
+		const bridge = createExtensionRuntimeHookBridge();
+		let effects: ExtensionEffect[] = [];
+		bridge.bind({ hook: async () => ({ kind: "ok", effects }), notify: () => {} });
+		strictEqual(harness.coordinator({ runtimeHooks: bridge }).applyBoot().status, "committed");
+		const read = { hook: "before_tool", toolName: "read", toolArgs: {}, turnId: "turn-1", sessionId: "s-1" } as const;
+		for (let n = 0; n < 3; n += 1) await harness.middleware.runAwaitedHook?.(read);
+		effects = [{ kind: "notify_operator", message: "seen", key: "seen" }];
+		await harness.middleware.runAwaitedHook?.(read);
+		const runtime = () =>
+			harness.receipts
+				.filter((receipt) => receipt.kind === "runtime")
+				.map((receipt) => [receipt.turnId, receipt.effectKinds ?? [], receipt.runs ?? 1]);
+		deepStrictEqual(runtime(), [["turn-1", ["notify_operator"], 1]], "an effect keeps its own receipt at once");
+		await harness.middleware.runAsyncHook?.({ hook: "turn_end", turnId: "turn-1", sessionId: "s-1" });
+		deepStrictEqual(runtime(), [
+			["turn-1", ["notify_operator"], 1],
+			["turn-1", [], 3],
+		]);
+		const quiet = harness.receipts.at(-1);
+		deepStrictEqual([quiet?.outcome, quiet?.toolName, quiet?.sessionId], ["runtime-ok", "read", "s-1"]);
+		ok((quiet?.maxDurationMs ?? -1) >= 0 && (quiet?.durationMs ?? -1) >= (quiet?.maxDurationMs ?? 0));
 	});
 
 	it("keeps boot at generation zero until the composition root publishes the paired first generation", () => {

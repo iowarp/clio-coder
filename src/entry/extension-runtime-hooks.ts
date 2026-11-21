@@ -89,9 +89,71 @@ function createPermits(size: number): WorkerPermits {
 
 type ToolOrTurnPoint = "before_tool" | "after_tool" | "turn_start" | "turn_end";
 
+/**
+ * Effect-free runs of extension runtime hooks, held per hook, generation, session, run and turn until `flush`
+ * writes one receipt for each: how many ran, their total and their longest duration (C-33). A hook that answers
+ * every tool call with nothing otherwise wrote a receipt per call. The holder outlives a generation, so a reload
+ * between a turn's calls loses none of them.
+ */
+export interface QuietHookRuns {
+	add(receipt: HookReceipt): void;
+	flush(): void;
+}
+
+export function createQuietHookRuns(sink: HookReceiptSink): QuietHookRuns {
+	const held = new Map<
+		string,
+		{ first: HookReceipt; at: number; runs: number; total: number; max: number; mixed: boolean }
+	>();
+	return {
+		add(receipt) {
+			const key = JSON.stringify([
+				receipt.hookId,
+				receipt.extension?.generation ?? null,
+				receipt.sessionId ?? null,
+				receipt.runId ?? null,
+				receipt.turnId ?? null,
+			]);
+			const duration = Math.max(0, receipt.durationMs ?? 0);
+			const prior = held.get(key);
+			if (prior === undefined) {
+				held.set(key, { first: receipt, at: receipt.at, runs: 1, total: duration, max: duration, mixed: false });
+				return;
+			}
+			prior.at = receipt.at;
+			prior.runs += 1;
+			prior.total += duration;
+			prior.max = Math.max(prior.max, duration);
+			if (prior.first.toolName !== receipt.toolName) prior.mixed = true;
+		},
+		flush() {
+			const pending = [...held.values()];
+			held.clear();
+			for (const { first, at, runs, total, max, mixed } of pending) {
+				// A hook whose filter names several tools stands for all of them, so the receipt names none.
+				const { toolName, ...rest } = first;
+				try {
+					sink({
+						...rest,
+						at,
+						durationMs: total,
+						runs,
+						maxDurationMs: max,
+						...(!mixed && toolName !== undefined ? { toolName } : {}),
+					});
+				} catch {
+					// Receipts are observability; a failed write changes no call.
+				}
+			}
+		},
+	};
+}
+
 export interface ExtensionRuntimeHookOptions {
 	generation: number;
 	recordReceipt: HookReceiptSink;
+	/** Where effect-free ok runs go instead of a receipt each; without it every run writes its own. */
+	quietRuns?: QuietHookRuns;
 	now?: () => number;
 	/** The session gateway's MCP ownership, so an `mcp_<id>__*` hook guards the server a call reaches. */
 	mcpOwner?: McpToolOwnerLookup;
@@ -457,8 +519,13 @@ function createRuntimeHookRunner(
 		},
 		settle(verdict, startedAt, effectKinds, toolName, sessionId, runId) {
 			const turnId = verdict.turnId;
+			// A run that changed nothing waits for its turn's aggregate; an effect, a failure or a timeout is recorded now.
+			const record =
+				verdict.kind === "ok" && effectKinds.length === 0 && options.quietRuns !== undefined
+					? options.quietRuns.add
+					: options.recordReceipt;
 			try {
-				options.recordReceipt({
+				record({
 					at: now(),
 					...(turnId ? { turnId } : {}),
 					hookId: id,

@@ -1519,6 +1519,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	workerHookSource = extensionReload.workerHooks;
 	await bootPhaseBoundary?.();
 	extensionReload.applyBoot();
+	termination.onDrain(() => extensionReload.flushHookReceipts());
 	middlewareRegistrar.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
 	// The interactive graph loads while Stage 0 takes keys, before the chat loop starts producers whose notices reach

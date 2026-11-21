@@ -733,6 +733,9 @@ export const HookRanSchema = Type.Object(
 		]),
 		effectKinds: Type.Optional(Type.Array(ExistingId, { maxItems: 32 })),
 		durationMs: Type.Optional(duration),
+		/** One record for this many effect-free runs in a turn; `durationMs` is their total. */
+		runs: Type.Optional(count),
+		maxDurationMs: Type.Optional(duration),
 		timeoutMs: Type.Optional(duration),
 		exitCode: Type.Optional(Type.Integer()),
 		outputChars: Type.Optional(count),

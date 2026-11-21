@@ -60,6 +60,8 @@ export function startWorkerHookHost(options: WorkerHookHostOptions): WorkerHookH
 			// A run that ends before startup settles would otherwise report its runtimes' staging as a failed reload.
 			await host.ready.catch(() => undefined);
 			await host.dispose();
+			// No main turn ends here, so the effect-free hook runs of the workers it served are written now.
+			reload.flushHookReceipts();
 		},
 	};
 }
