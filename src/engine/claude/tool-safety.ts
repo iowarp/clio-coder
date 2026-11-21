@@ -180,6 +180,7 @@ export const CLAUDE_SDK_CLIO_SERVER = "clio";
  * the same permission gate as a preset tool.
  */
 export const CLAUDE_SDK_BRIDGED_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.CodeNav,
 	ToolNames.Context,
 	ToolNames.Artifact,
 	ToolNames.Verify,

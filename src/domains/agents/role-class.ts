@@ -7,7 +7,7 @@
  * gate gives it another position; `artifact-write` is the builder row narrowed to terminal artifacts.
  */
 
-import { ToolNames } from "../../core/tool-names.js";
+import { type ToolName, ToolNames } from "../../core/tool-names.js";
 import type { RunRole } from "../dispatch/obligation.js";
 import { classify } from "../safety/action-classifier.js";
 import type { AgentCapabilityClass } from "./spec.js";
@@ -18,12 +18,18 @@ export type RoleClass = RunRole | "coordinator";
 interface RoleRow {
 	/** Why the row holds no such tool, as a clause after "<subject> ceiling", or null when it holds it. */
 	excludes(tool: string, action: string): string | null;
+	/** Tools every run in the row holds whatever its recipe lists; the request and runtime layers still subtract. */
+	holds: ReadonlyArray<ToolName>;
 	writes: boolean;
 	remedy?: string;
 }
 
+/** Every position in the work graph reads code, so every row holds code navigation. */
+const NAVIGATION: ReadonlyArray<ToolName> = [ToolNames.CodeNav];
+
 const readOnlyRow = (remedy: string): RoleRow => ({
 	excludes: (tool, action) => (action === "read" ? null : `excludes ${action} tool ${tool}`),
+	holds: NAVIGATION,
 	writes: false,
 	remedy,
 });
@@ -34,13 +40,14 @@ const checksRow = (remedy: string): RoleRow => ({
 		action === "read" || tool === ToolNames.Verify
 			? null
 			: `excludes ${tool === ToolNames.Bash ? "bash" : `${action} tool ${tool}`}; checks run through typed verification`,
+	holds: NAVIGATION,
 	writes: false,
 	remedy,
 });
 
 const ROLE_TABLE = {
-	coordinator: { excludes: () => null, writes: true },
-	builder: { excludes: () => null, writes: true },
+	coordinator: { excludes: () => null, holds: NAVIGATION, writes: true },
+	builder: { excludes: () => null, holds: NAVIGATION, writes: true },
 	"artifact-builder": {
 		excludes: (tool, action) => {
 			if (
@@ -54,6 +61,7 @@ const ROLE_TABLE = {
 			if (action === "write" && tool !== ToolNames.Artifact) return `allows only the artifact write, not ${tool}`;
 			return null;
 		},
+		holds: NAVIGATION,
 		writes: true,
 		remedy: "an artifact writer changes only terminal artifacts; dispatch a workspace-edit recipe to change files",
 	},
@@ -110,6 +118,14 @@ export function roleExcludes(
 ): string | null {
 	if (tool === ToolNames.Gateway) return null;
 	return rowFor(role, capabilityClass).excludes(tool, action);
+}
+
+/** The tools `role` (narrowed by its recipe's class) gives every run in it, whatever the recipe declares. */
+export function roleHeldTools(
+	role: RoleClass,
+	capabilityClass: AgentCapabilityClass | string | null,
+): ReadonlyArray<ToolName> {
+	return rowFor(role, capabilityClass).holds;
 }
 
 /** What would keep a tool `role` does not hold. */

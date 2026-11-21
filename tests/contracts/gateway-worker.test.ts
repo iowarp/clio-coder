@@ -117,7 +117,8 @@ describe("gateway on the worker surface", () => {
 			const request = { agentId: "coder", task: "inspect the git log", cwd: scratch(), executionRole: "builder" as const };
 			const preview = bundle.contract.preview?.(request);
 			ok(preview);
-			const surface = [...RECIPE_TOOLS, ToolNames.Gateway].sort();
+			// Every role row holds code_nav, so the surface carries it beside the recipe's tools.
+			const surface = [...RECIPE_TOOLS, ToolNames.CodeNav, ToolNames.Gateway].sort();
 			strictEqual(preview.toolSignature, createHash("sha256").update(JSON.stringify(surface)).digest("hex"));
 			// The worker attests its sealed envelope's names, which already carry gateway (M7).
 			const attested = attestedToolSignature({

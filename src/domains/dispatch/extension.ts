@@ -2813,6 +2813,7 @@ function resolveDispatchEnvelopeStage(input: {
 		capabilityClass: spec.capabilityClass,
 		recipeTools: (recipe.tools ?? []) as ReadonlyArray<ToolName>,
 		profiledTools: admission.allowedTools,
+		...(admission.toolProfile !== undefined ? { toolProfile: admission.toolProfile } : {}),
 		denied: deniedToolNames(req),
 		ledger: req.ledger !== undefined,
 		write: { mode, roots: facts.roots },

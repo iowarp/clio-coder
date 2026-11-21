@@ -178,7 +178,7 @@ describe("native worker MCP capabilities", () => {
 			strictEqual(
 				preview.toolSignature,
 				createHash("sha256")
-					.update(JSON.stringify([...TOOLS, ToolNames.Edit, ToolNames.Write].sort()))
+					.update(JSON.stringify([...TOOLS, ToolNames.CodeNav, ToolNames.Edit, ToolNames.Write].sort()))
 					.digest("hex"),
 			);
 		} finally {
