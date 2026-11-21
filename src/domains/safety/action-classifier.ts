@@ -434,6 +434,7 @@ function deleteTargetReason(
 	base: string | undefined,
 	pattern: string | null,
 	scratchRoots: ReadonlyArray<string>,
+	throughLink: (abs: string, follows?: boolean) => boolean = () => false,
 ): string | null {
 	const abs = canonicalizeRawPath(target, candidateBase(base));
 	const workspace = canonicalizePath(path.resolve(process.cwd()));
@@ -450,6 +451,19 @@ function deleteTargetReason(
 	const inScratch = [...tmpDeleteRoots(), ...scratchRoots].some((root) =>
 		scope === "children" ? isUnderPrefix(abs, root) : isStrictlyUnder(abs, root),
 	);
+	// A link the command plants first is followed by the delete, and nothing here can see where it points (row 261).
+	// A `..` after a link climbs from where the link points, not from the link's own directory, so each prefix
+	// the path walks before a `..` is checked too.
+	const climbsThroughLink = (): boolean => {
+		let walked = path.isAbsolute(target) ? "/" : candidateBase(base);
+		for (const segment of target.split("/")) {
+			if (segment === ".." && throughLink(walked, true)) return true;
+			walked = path.join(walked, segment);
+		}
+		return false;
+	};
+	if (inScratch && (throughLink(abs) || climbsThroughLink()))
+		return `${DELETE_PATH_REASON_PREFIX}unresolved: ${target} below a link this command creates`;
 	return inScratch ? null : `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
 }
 
@@ -487,7 +501,21 @@ function stableTempDir(): string | null {
 	return value;
 }
 
+/**
+ * Row 261: a TMPDIR rebinding the reading below misses because quotes or escapes split its words (`T''MPDIR=.`,
+ * `\\declare`), or a `trap` or `coproc` that may assign it later. It only ever withholds the expansion.
+ */
+function quotedTempDirRebinding(command: string): boolean {
+	const plain = command.replace(/['"\\]/gu, "");
+	const names = plain.match(/\bTMPDIR\b/gu)?.length ?? 0;
+	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
+	return (
+		names > references || TEMP_DIR_ASSIGNERS.test(plain) || /(?:^|[\s;&|(){}`])(?:trap|coproc)(?=[\s;&|)]|$)/u.test(plain)
+	);
+}
+
 function hasStableTempDirReferences(command: string): boolean {
+	if (quotedTempDirRebinding(command)) return false;
 	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
 	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
@@ -693,6 +721,7 @@ function deleteEventReasons(
 	event: Extract<CommandPathEvent, { kind: "delete" }>,
 	bases: ShellBases,
 	scratchRoots: ReadonlyArray<string> | undefined,
+	throughLink?: (abs: string, follows: boolean) => boolean,
 ): string[] {
 	if (event.scope === "input") return [`${DELETE_PATH_REASON_PREFIX}unresolved: operands from input`];
 	if (event.scope === "remote") return [`${DELETE_PATH_REASON_PREFIX}remote: ${event.target}`];
@@ -716,13 +745,26 @@ function deleteEventReasons(
 		scope = "children";
 	}
 	if (!path.isAbsolute(target) && bases === null) return [`${DELETE_PATH_REASON_PREFIX}unresolved: ${raw}`];
+	// A delete goes through a link it names when the path ends in `/` or `/.`, expands a glob below it, or is a find
+	// root; a bare link name removes only the link.
+	const follows =
+		scope === "children" || event.scope === "children" || event.findRoot !== undefined || /\/\.?$/u.test(expanded);
+	const through =
+		throughLink === undefined ? undefined : (abs: string, always?: boolean) => throughLink(abs, always ?? follows);
 	const from = path.isAbsolute(target) ? [undefined] : (bases ?? []);
 	const reasons = new Set<string>();
 	for (const base of from) {
-		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? []);
+		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? [], through);
 		if (reason !== null) reasons.add(reason);
 	}
 	return [...reasons];
+}
+
+/** Where a link a command plants lands, as written and through the real path of its directory today. */
+function linkForms(link: string, base: string): string[] {
+	const lexical = path.resolve(base, link);
+	const real = canonicalizeRawPath(link, base);
+	return real === null || real === lexical ? [lexical] : [lexical, real];
 }
 
 function walkPathReasons(
@@ -739,6 +781,11 @@ function walkPathReasons(
 	// after it would otherwise resolve from the workspace it already left.
 	let escaped = false;
 	const escapedSubshells: boolean[] = [];
+	// Links the command plants before a delete, resolved from every base; `unknownLink` once one cannot be placed.
+	const planted: string[] = [];
+	let unknownLink = false;
+	const throughLink = (abs: string, follows: boolean): boolean =>
+		unknownLink || planted.some((link) => (follows || abs !== link) && isSameOrDescendant(abs, link));
 	for (const [index, event] of walk.entries()) {
 		if (event.kind === "subshell") {
 			if (event.open) {
@@ -752,6 +799,18 @@ function walkPathReasons(
 		}
 		if (event.kind === "write") {
 			const target = event.target;
+			// A write into the workspace's own .git (config, hooks) runs as code the next time git runs (row 261).
+			const gitDirs = [path.resolve(process.cwd()), canonicalizePath(path.resolve(process.cwd()))]
+				.filter((root): root is string => root !== null)
+				.map((root) => path.join(root, ".git"));
+			const expandedWrite = expandShellHome(target);
+			if (expandedWrite !== null && !isDynamicShellPath(expandedWrite)) {
+				const from = path.isAbsolute(expandedWrite) ? ["/"] : (bases ?? [process.cwd()]).map(candidateBase);
+				for (const base of from) {
+					const abs = path.resolve(base, expandedWrite);
+					if (gitDirs.some((git) => isUnderPrefix(abs, git))) writeReasons.add(`bash-write-target: git-metadata: ${abs}`);
+				}
+			}
 			// `> $HOME/x`, `> ${OUT}`, and `tee {a,b}` land where the shell says.
 			if (isDynamicShellPath(target) && !target.startsWith("/dev/")) {
 				writeReasons.add(`write-path-unknown-base: ${target}`);
@@ -770,6 +829,14 @@ function walkPathReasons(
 		}
 		if (event.kind === "link") {
 			for (const reason of linkReasons(event, bases)) writeReasons.add(reason);
+			if (!event.symbolic) continue;
+			for (const link of event.links ?? [""]) {
+				const expanded = expandShellHome(link);
+				if (expanded === null || expanded === "" || isDynamicShellPath(expanded)) unknownLink = true;
+				else if (path.isAbsolute(expanded)) planted.push(...linkForms(expanded, "/"));
+				else if (bases === null) unknownLink = true;
+				else for (const base of bases) planted.push(...linkForms(expanded, candidateBase(base)));
+			}
 			continue;
 		}
 		if (event.kind === "delete") {
@@ -781,7 +848,7 @@ function walkPathReasons(
 				!event.target.startsWith("~")
 			)
 				writeReasons.add(`${DELETE_PATH_REASON_PREFIX}outside-workspace: ${event.target} after a cd out of the workspace`);
-			for (const reason of deleteEventReasons(event, bases, scratchRoots)) writeReasons.add(reason);
+			for (const reason of deleteEventReasons(event, bases, scratchRoots, throughLink)) writeReasons.add(reason);
 			continue;
 		}
 		const target = event.target;

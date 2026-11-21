@@ -90,6 +90,7 @@ import {
 import {
 	bareInlineShellScript,
 	commandArgumentSegments,
+	declaredWrapperReadings,
 	decodedLocaleQuoting,
 	extractCommandCdScopedTargets,
 	extractCommandDeleteTargets,
@@ -170,6 +171,7 @@ import {
 	yoloFloorScriptRuns,
 	yoloFloorShellScript,
 	yoloFloorTrustGrant,
+	yoloFloorWorkspaceGitHit,
 } from "./yolo-floor.js";
 
 export type SafetyPolicySource =
@@ -1084,6 +1086,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const memo = createPathWalkMemo();
 		return skillMutationReason(trees.roots, mutationCandidates(targets, callCwd, command, memo), memo) !== null;
 	};
+	/**
+	 * The workspace `.git` floor over a command as written, then over its scratch projection (`$TMPDIR` spelled out),
+	 * which only adds placeable paths: a hit in either reading holds (row 261).
+	 */
+	const workspaceGitHit = (command: string, callCwd: string): YoloFloorHit | null => {
+		const written = yoloFloorWorkspaceGitHit(command, callCwd, cwd);
+		if (written !== null) return written;
+		const projected = resolveScratchDeleteOperands(command).command;
+		return projected === command ? null : yoloFloorWorkspaceGitHit(projected, callCwd, cwd);
+	};
 	const floorMatch = (hit: YoloFloorHit, actionClass = "system_modify") => ({
 		match: { ruleId: hit.ruleId, reason: hit.reason, actionClass, block: true } satisfies DamageControlMatch,
 		source: "builtin-classifier" as const,
@@ -1100,7 +1112,15 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		callCwd: string,
 		trees: ClioOwnedTrees,
 		rawText = false,
+		gitOnly = false,
 	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
+		if (gitOnly) {
+			for (const candidate of commands) {
+				const git = workspaceGitHit(candidate, callCwd);
+				if (git !== null) return floorMatch(git);
+			}
+			return null;
+		}
 		const text = matchSourcedRule(texts, floorRules);
 		if (text !== null) return text;
 		const command = commands[0] ?? "";
@@ -1109,6 +1129,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (executable !== null) return floorMatch(executable);
 			const deleted = yoloFloorDeleteHit(candidate, callCwd, cwd);
 			if (deleted !== null) return floorMatch(deleted);
+			// Relative deletes resolve from the call's directory and every cd landing, whatever separates them (row 261).
+			const git = workspaceGitHit(candidate, callCwd);
+			if (git !== null) return floorMatch(git);
 		}
 		if (invokesTrustMutation(command, rawText)) {
 			return floorMatch({
@@ -1133,16 +1156,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return null;
 	};
 	/** One script line against the floor, from every directory the scan places it in. */
-	const floorLine = (trees: ClioOwnedTrees) => (raw: string, read: ScriptLine, callCwd: string) => {
-		// A here-document body or a comment is data the script carries, not a command.
-		if (read.data) return null;
-		const texts = read.expanded === raw ? [raw] : [read.expanded, raw];
-		for (const base of read.bases ?? [callCwd]) {
-			const hit = commandFloorHit(texts, texts, base, trees);
-			if (hit !== null) return hit;
-		}
-		return null;
-	};
+	const floorLine =
+		(trees: ClioOwnedTrees, gitOnly = false) =>
+		(raw: string, read: ScriptLine, callCwd: string) => {
+			// A here-document body or a comment is data the script carries, not a command.
+			if (read.data) return null;
+			const texts = read.expanded === raw ? [raw] : [read.expanded, raw];
+			for (const base of read.bases ?? [callCwd]) {
+				const hit = commandFloorHit(texts, texts, base, trees, false, gitOnly);
+				if (hit !== null) return hit;
+			}
+			return null;
+		};
 	/**
 	 * Reads of Clio's own credential store are floor at both autonomy levels:
 	 * no task needs Clio's provider tokens, and yolo used to read them. Typed
@@ -1204,12 +1229,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	 * The floor for one call (#407), at yolo and at the operator's default: the
 	 * command's own text and targets, reads of Clio's credential store, then
 	 * each shell script the call runs by literal path, read line by line. A
-	 * script the scan cannot read through runs.
+	 * script the scan cannot read through runs. `gitOnly` reads the command and its scripts for the workspace `.git`
+	 * rule alone, for a call judged without the operator's scope, and leaves what it cannot read to the caller.
 	 */
 	const floorBlock = (
 		call: ClassifierCall,
 		callCwd: string,
 		originalCommand: string | null,
+		gitOnly = false,
 	): Omit<
 		SafetyPolicyDecision,
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
@@ -1238,9 +1265,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				(text): text is string => text !== null,
 			);
 			const commands = [...new Set([command, ...decoded])];
-			const hit = commandFloorHit([...new Set([...commands, ...shellCommandSegments(command)])], commands, callCwd, trees);
+			const hit = commandFloorHit(
+				[...new Set([...commands, ...shellCommandSegments(command)])],
+				commands,
+				callCwd,
+				trees,
+				false,
+				gitOnly,
+			);
 			if (hit !== null) return held(hit);
-		} else if (clioOwnedMutation(call, callCwd, null, trees)) {
+		} else if (!gitOnly && clioOwnedMutation(call, callCwd, null, trees)) {
 			return held(
 				floorMatch({
 					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
@@ -1249,9 +1283,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			);
 		}
 		const floorCall = command === originalCommand ? call : { ...call, args: { ...call.args, command } };
-		const credentials = credentialReadHit(floorCall, callCwd, command);
+		const credentials = gitOnly ? null : credentialReadHit(floorCall, callCwd, command);
 		if (credentials !== null) return held(floorMatch(credentials, "read"));
-		const raw = command === null ? null : yoloFloorRawCandidates(command);
+		const raw = command === null || gitOnly ? null : yoloFloorRawCandidates(command);
 		if (raw?.overflow === true) {
 			return held(
 				floorMatch({
@@ -1280,7 +1314,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				);
 			}
 		}
-		const line = floorLine(trees);
+		const line = floorLine(trees, gitOnly);
 		const scriptHit = (scan: ScriptHit | null) =>
 			scan === null ? null : held(scan, [`script ${scan.file} line ${scan.line}: ${scan.text.slice(0, 200)}`]);
 		const budgets: ScriptBudget[] = [];
@@ -1330,6 +1364,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (run.sourced) home = false;
 			}
 		}
+		if (gitOnly) return null;
 		// No copy the scan could read refuses, but a sourced name was looked up before the bash tool's PATH was known.
 		if (budgets.some((budget) => budget.pathPending)) {
 			return {
@@ -2089,13 +2124,117 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		});
 	};
 
+	/**
+	 * The workspace `.git` floor rule (row 261) holds at every level, so a call judged without the operator's scope (a
+	 * worker, a grant, a bare evaluation) meets it too; a call that already blocks keeps its own reason.
+	 */
+	const unscopedWorkspaceGit = (
+		rawCall: ClassifierCall,
+		normal: SafetyPolicyDecision,
+		posture: string | undefined,
+	): SafetyPolicyDecision => {
+		if (normal.kind === "block" || (rawCall.tool !== ToolNames.Bash && rawCall.tool !== ToolNames.RunScript))
+			return normal;
+		const call = normalizeCallPaths(rawCall);
+		const { callCwd, judgedCommand } = commandUnderJudgment(call);
+		// The scoped floor's own reading, the scripts the call runs included, narrowed to the `.git` rule.
+		const floor = floorBlock(call, callCwd, judgedCommand, true);
+		if (floor === null || floor.ruleId !== YOLO_FLOOR_RULE_IDS.workspaceGit) return normal;
+		return gateDecision("block", baseDecision(call, normal.classification, callCwd, posture, judgedCommand), floor);
+	};
+
 	const evaluateScoped = (
 		rawCall: ClassifierCall,
 		posture: string | undefined,
 		scope: OperatorScope | undefined,
 	): SafetyPolicyDecision => {
+		const decision = evaluateScopedReading(rawCall, posture, scope);
+		const command = rawCall.tool === ToolNames.Bash ? commandArg(rawCall.args) : null;
+		if (command === null || decision.kind === "block") return decision;
+		// FX-46: a declared validation wrapper runs the rest of its line, so what it runs is judged as if written bare,
+		// and the strictest reading stands; readings at the same verdict merge. An undeclared script stays opaque.
+		const { callCwd } = commandUnderJudgment(normalizeCallPaths(rawCall));
+		let result = decision;
+		for (const inner of declaredWrapperReadings(command, callCwd)) {
+			const through = evaluateScopedReading({ ...rawCall, args: { ...rawCall.args, command: inner } }, posture, scope);
+			result = mergedWrapperReading(result, through, inner);
+			if (result.kind === "block") break;
+		}
+		return result;
+	};
+
+	/**
+	 * The call as judged so far (`current`, the command as written first) merged with a wrapper-stripped reading, never
+	 * looser than either (row 261): the stricter verdict names the call (its rule, reason code and match). On a tie the
+	 * reading already standing keeps its classification, and a stripped reading names the call only by a rule the standing
+	 * one lacks, never by a code admission treats more kindly (`snapshot-recoverable`). Reasons are the union; a snapshot requirement and an unrecognized command from
+	 * either reading stay, as does a test runner's consent. The sandbox is the standing reading's on a tie, since one
+	 * added to an allow would let admission run it unasked, and on an escalation the stricter reading's, or the standing
+	 * one's when it names none, the read-only box first.
+	 */
+	const mergedWrapperReading = (
+		current: SafetyPolicyDecision,
+		through: SafetyPolicyDecision,
+		inner: string,
+	): SafetyPolicyDecision => {
+		const rank = (kind: SafetyPolicyDecision["kind"]) => (kind === "block" ? 2 : kind === "ask" ? 1 : 0);
+		const escalates = rank(through.kind) > rank(current.kind);
+		const own = escalates ? through : current;
+		const other = escalates ? current : through;
+		const note = `a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`;
+		const reasons = [...new Set([...(escalates ? [note] : []), ...own.reasons, ...other.reasons])];
+		const boxes = escalates ? [through.shellSandbox, current.shellSandbox] : [current.shellSandbox];
+		const present = boxes.filter((box) => box !== undefined);
+		const shellSandbox = present.find((box) => box.readOnly === true) ?? present[0];
+		const rest: SafetyPolicyDecision = { ...own };
+		delete rest.shellSandbox;
+		delete rest.execRecognition;
+		// On a tie the standing reading keeps its classification; the stripped one names the call only when it names a
+		// rule the standing one does not (a damage-control or path match), or the standing code is one admission runs
+		// unasked, and never with such a code itself.
+		const kindly = (reading: SafetyPolicyDecision) =>
+			reading.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE || reading.reasonCode === SCRATCH_DISPOSABLE_REASON_CODE;
+		const specific = (reading: SafetyPolicyDecision) =>
+			reading.match !== undefined || reading.reasonCode.includes("damage-control:");
+		const renames =
+			!escalates &&
+			through.kind === current.kind &&
+			!kindly(through) &&
+			(kindly(current) || (specific(through) && !specific(current)));
+		if (renames) {
+			delete rest.ruleId;
+			delete rest.match;
+			rest.reasonCode = through.reasonCode;
+			if (through.ruleId !== undefined) rest.ruleId = through.ruleId;
+			if (through.match !== undefined) rest.match = through.match;
+		}
+		const execRecognition =
+			current.execRecognition === "unrecognized" || through.execRecognition === "unrecognized"
+				? ("unrecognized" as const)
+				: own.execRecognition;
+		return {
+			...rest,
+			...(shellSandbox !== undefined ? { shellSandbox } : {}),
+			...(execRecognition !== undefined ? { execRecognition } : {}),
+			...(current.command !== undefined ? { command: current.command } : {}),
+			...(current.recoverable === true || through.recoverable === true ? { recoverable: true as const } : {}),
+			...(current.runsWorkspaceCode === true || through.runsWorkspaceCode === true
+				? { runsWorkspaceCode: true as const }
+				: {}),
+			reasons,
+		};
+	};
+
+	const evaluateScopedReading = (
+		rawCall: ClassifierCall,
+		posture: string | undefined,
+		scope: OperatorScope | undefined,
+	): SafetyPolicyDecision => {
 		if (scope?.level === "default") return evaluateOperatorDefault(rawCall, posture, scope);
-		const decision = scope === undefined ? evaluateCall(rawCall, posture) : evaluateTrueYolo(rawCall, posture, scope);
+		const decision =
+			scope === undefined
+				? unscopedWorkspaceGit(rawCall, evaluateCall(rawCall, posture), posture)
+				: evaluateTrueYolo(rawCall, posture, scope);
 		// A command the operator's yolo admitted under `safety.sandbox: required`
 		// runs in the main-session sandbox, whatever stage allowed it (#419, #407).
 		if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed") return decision;
@@ -2309,7 +2448,7 @@ function stripQuotes(token: string): string {
  * zero-access path appearing anywhere in the command is the signal.
  */
 function bashPathTokenCandidates(command: string): string[] {
-	command = withoutDataHeredocBodies(command, "stdin-only");
+	command = withoutDataHeredocBodies(command, "stdin-only", "rails");
 	const candidates: string[] = [];
 	// `sh -c 'cat .env'` is one whitespace-bearing token below, skipped as prose,
 	// yet recognition judges exactly that inner script. Scan it as its own command.
@@ -2505,7 +2644,7 @@ const ROLE_PREFIX_WRAPPERS: ReadonlySet<string> = new Set([
  * with their roots so their walk can be judged.
  */
 function bashOperandRoles(command: string): BashOperandRoles {
-	command = withoutDataHeredocBodies(command, "stdin-only");
+	command = withoutDataHeredocBodies(command, "stdin-only", "rails");
 	const roles: BashOperandRoles = { reads: [], pathOperands: new Set(), writes: [], searches: [] };
 	const inner = inlineShellScript(command);
 	if (inner !== null && inner !== command) {
@@ -4483,9 +4622,14 @@ function deletesNeedingSnapshot(command: string, workspace: string): string[] {
 function deletesOnlyScratch(command: string, roots: ReadonlyArray<string>): boolean {
 	let deletes = 0;
 	for (const walk of extractCommandPathWalks(command)) {
+		// A link planted first may lead a later scratch path anywhere (row 261).
+		let linked = false;
 		for (const event of walk) {
+			if (event.kind === "link" && event.symbolic) linked = true;
 			if (event.kind !== "delete" || event.scope === "input" || event.scope === "remote") continue;
-			if (!path.isAbsolute(event.target)) return false;
+			// A delete a row 261 reading adds (an env, xargs or here-document body the base walk skipped) never makes a
+			// call scratch-only, so it cannot drop the snapshot a discard beside it needs.
+			if (linked || event.added === true || !path.isAbsolute(event.target)) return false;
 			const resolved = canonicalizeRawPath(event.target, "/");
 			if (resolved === null || !roots.some((root) => resolved !== root && isUnderOrSame(resolved, root))) return false;
 			deletes += 1;

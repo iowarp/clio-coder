@@ -773,10 +773,37 @@ function cdTarget(segment: ReadonlyArray<string>): string | null {
  * a function definition, or with CDPATH named.
  */
 export type CommandPathEvent =
-	| { kind: "cd"; target: string; unmodeled: boolean }
+	| {
+			kind: "cd";
+			target: string;
+			unmodeled: boolean;
+	  }
 	| { kind: "write"; target: string }
-	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[]; origin: LinkOrigin }
-	| { kind: "delete"; target: string; scope: DeleteScope; findRoot?: FindRootFilter }
+	| {
+			kind: "link";
+			symbolic: boolean;
+			sources: string[];
+			linkDirs: string[];
+			origin: LinkOrigin;
+			/** Where each link itself may land, as written; absent when the command reads them from input. */
+			links?: string[];
+			/** `mv`: the sources leave where they were. */
+			moved?: boolean;
+	  }
+	| {
+			kind: "delete";
+			target: string;
+			scope: DeleteScope;
+			findRoot?: FindRootFilter;
+			/** A find root's whole argument list, so a reader can tell what its expression may select. */
+			expression?: string[];
+			/**
+			 * A delete a row 261 reading found where the b1c4855bf walk found none (a here-document body it dropped, an
+			 * `env -S` string, an env spelled as a path, `xargs rm` input). It only ever adds judgment: scratch placement
+			 * never counts it.
+			 */
+			added?: true;
+	  }
 	| { kind: "subshell"; open: boolean };
 
 /**
@@ -822,6 +849,9 @@ interface CommandPathWalkState {
 	heredocSeen: boolean;
 	/** Whether a top-level here-document counts, or only one inside a substitution or `sh -c`. */
 	topLevelHeredocs: boolean;
+	/** The words of the segment before the current one, and of the one piped into it, if any. */
+	lastArgv: string[];
+	pipedFrom: string[] | null;
 }
 
 /** Words that open a loop whose condition and body may run more than once; `done` closes it. */
@@ -856,6 +886,8 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
 		caseSeen: false,
 		heredocSeen: false,
 		topLevelHeredocs,
+		lastArgv: [],
+		pipedFrom: null,
 	};
 	collectPathWalk(command, 0, walk);
 	return walk.caseSeen ? walk.events.filter((event) => event.kind !== "subshell") : walk.events;
@@ -875,21 +907,32 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
  * TypeScript body is not a redirect. A body that may feed a shell or an
  * unknown command is still read as commands, and so is one whose
  * file a later command names, since that command may run it, or a script
- * file a step such as `make` may run without naming it.
+ * file a step such as `make` may run without naming it. The safety rails (`reader` "rails") further keep a body as
+ * commands unless {@link heredocDataTrusted}; the finish contract reads it as b1c4855bf did ("base").
  */
-export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
+export function extractCommandPathWalks(command: string, reader: HeredocReader = "rails"): CommandPathEvent[][] {
 	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
 	if (withoutBodies === command) return [extractCommandPathWalk(command)];
 	const removedAll = !scanShellLike(withoutBodies).some((token) => token.operator && token.value === "<<");
-	if (removedAll && dataOutputs !== null && !mayRunHeredocOutputs(withoutBodies, dataOutputs))
+	const baseStrips = removedAll && dataOutputs !== null && !mayRunHeredocOutputs(withoutBodies, dataOutputs);
+	if (baseStrips && (reader === "base" || heredocDataTrusted(withoutBodies, dataOutputs ?? [])))
 		return [extractCommandPathWalk(withoutBodies)];
-	return [extractCommandPathWalk(command, !removedAll), extractCommandPathWalk(withoutBodies)];
+	const full = extractCommandPathWalk(command, !removedAll);
+	const stripped = extractCommandPathWalk(withoutBodies);
+	if (baseStrips) {
+		// Row 261: the base reading dropped these bodies, so a delete only they hold is this reading's own addition.
+		const seen = new Set(stripped.flatMap((event) => (event.kind === "delete" ? [event.target] : [])));
+		for (const event of full) if (event.kind === "delete" && !seen.has(event.target)) event.added = true;
+	}
+	return [full, stripped];
 }
 
 /** Commands that copy a here-document to their output as text and run none of it. */
 const HEREDOC_DATA_CONSUMERS: ReadonlySet<string> = new Set(["cat", "tee"]);
 const HEREDOC_NON_READERS: ReadonlySet<string> = new Set([":", "true", "false", "echo", "printf", "pwd"]);
 type HeredocDataMode = "all" | "stdin-only";
+/** Who reads a here-document: the safety rails, or a reader that keeps b1c4855bf's reading (row 261). */
+type HeredocReader = "rails" | "base";
 
 /** XR-43: only direct commands with known stdin semantics can make a body inert without copying it. */
 function isHeredocStdinData(head: ReadonlyArray<ShellToken>): boolean {
@@ -1026,6 +1069,148 @@ function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): 
 	return false;
 }
 
+/** Command words that can redefine a command, set a variable, or run text as code. */
+const HEREDOC_REDEFINERS: ReadonlySet<string> = new Set([
+	"alias",
+	"unalias",
+	"shopt",
+	"function",
+	"source",
+	".",
+	"eval",
+	"enable",
+	"hash",
+	"builtin",
+	"command",
+	"exec",
+	"trap",
+	"export",
+	"declare",
+	"typeset",
+	"readonly",
+	"local",
+	"read",
+	"mapfile",
+	"readarray",
+	"unset",
+	"coproc",
+]);
+/** What may run after a here-document is copied into a file: readers that run no file and write none. */
+const HEREDOC_INERT_READERS: ReadonlySet<string> = new Set([
+	"cat",
+	"tee",
+	"echo",
+	"printf",
+	"mkdir",
+	"ls",
+	"wc",
+	"head",
+	"tail",
+	"grep",
+	"diff",
+	"cmp",
+	"stat",
+	"true",
+	"false",
+	":",
+	"pwd",
+	"test",
+	"[",
+]);
+
+/** Variables whose value changes what a later command word runs or how a line splits. */
+const HEREDOC_DANGEROUS_NAMES =
+	/^(?:PATH|BASH_ENV|ENV|IFS|CDPATH|SHELLOPTS|BASHOPTS|PROMPT_COMMAND|BASH_FUNC_.*|LD_PRELOAD|LD_LIBRARY_PATH)$/u;
+/** Words before a command that run nothing themselves: grouping, negation and the reserved words around a command. */
+const HEREDOC_LEADING_WORDS: ReadonlySet<string> = new Set([
+	"{",
+	"}",
+	"!",
+	"if",
+	"then",
+	"else",
+	"elif",
+	"fi",
+	"do",
+	"done",
+	"while",
+	"until",
+	"time",
+]);
+/** Declaring words that only set the plain variables they name. */
+const HEREDOC_SETTERS: ReadonlySet<string> = new Set(["export", "declare", "typeset", "local", "readonly"]);
+
+/**
+ * Whether the rest of a call (`text`, its quoted here-document bodies removed) is read in full, so the bodies it feeds
+ * stay data (row 261): an allow-list that only ever keeps a body read as commands, applied on top of the older checks.
+ * Every step's command word is written plainly, holds no `$` or backtick, and cannot redefine a command or run text
+ * ({@link HEREDOC_REDEFINERS}; `export` and its kin only of plain names, none that steers lookup or splitting); no
+ * step opens a subshell or defines a function, and no word is an ANSI-C string. When a body is copied into files
+ * (`outputs`), none lands in `.git` or `.husky`, and every step after the first copy is a pure reader
+ * ({@link HEREDOC_INERT_READERS}) with no `$`, backtick or substitution, named unlike any copy, writing nowhere but those
+ * copies, `/dev/null` or another descriptor; a copy named with `$` is trusted only when nothing runs after it.
+ */
+function heredocDataTrusted(text: string, outputs: ReadonlyArray<string>): boolean {
+	if (outputs.some((output) => output.split("/").some((part) => part.startsWith(".git") || part === ".husky")))
+		return false;
+	const written = new Set(outputs);
+	const names = new Set(outputs.map((output) => basenameToken(output)));
+	const tokens = scanShellLike(text);
+	if (tokens.some((token) => token.unterminated === true || token.hiddenContent === true)) return false;
+	if (tokens.some((token) => token.operator && (token.value === "(" || token.value === ")"))) return false;
+	let copied = false;
+	for (const segment of splitSegments(tokens)) {
+		const words = segment.filter(
+			(token, index) =>
+				!token.operator &&
+				!(segment[index - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[index - 1]?.value ?? "")),
+		);
+		const targets = segment.flatMap((token, index) =>
+			token.operator && SHELL_WRITE_REDIRECTIONS.has(token.value) ? [segment[index + 1]?.value ?? ""] : [],
+		);
+		const raw = (token: ShellToken): string => text.slice(token.start, token.end);
+		// Read past what runs nothing itself, braces, `!`, reserved words and assignments, to the command (r261f-2).
+		let at = 0;
+		for (; at < words.length; at += 1) {
+			const word = words[at] as ShellToken;
+			const assignment = /^([A-Za-z_]\w*)\+?=/u.exec(raw(word));
+			if (assignment !== null) {
+				if (HEREDOC_DANGEROUS_NAMES.test(assignment[1] ?? "")) return false;
+				continue;
+			}
+			if (raw(word) !== word.value || !HEREDOC_LEADING_WORDS.has(word.value)) break;
+		}
+		const head = words[at];
+		const args = words.slice(at + 1);
+		if (head !== undefined) {
+			if (raw(head) !== head.value || /[$`]/u.test(head.value)) return false;
+			if (HEREDOC_SETTERS.has(head.value)) {
+				for (const word of args) {
+					if (word.value.startsWith("-")) continue;
+					const name = /^([A-Za-z_]\w*)(?:\+?=|$)/u.exec(raw(word));
+					if (name === null || HEREDOC_DANGEROUS_NAMES.test(name[1] ?? "")) return false;
+				}
+			} else if (HEREDOC_REDEFINERS.has(head.value)) return false;
+			if (head.value === "printf" && words.some((word) => word.value.startsWith("-v"))) return false;
+		}
+		const copies =
+			targets.some((target) => written.has(target)) ||
+			(head?.value === "tee" && args.some((word) => written.has(word.value)));
+		if (copied && head !== undefined) {
+			// After a copy nothing may run it, rewrite it elsewhere, or be named like it.
+			if (segment.some((token) => /[$`]/u.test(raw(token)) || (token.substitutions?.length ?? 0) > 0)) return false;
+			if (outputs.some((output) => /[$`]/u.test(output))) return false;
+			if (!HEREDOC_INERT_READERS.has(head.value) || names.has(basenameToken(head.value))) return false;
+			if (targets.some((target) => !written.has(target) && target !== "/dev/null" && !/^(?:\d+-?|-)$/u.test(target)))
+				return false;
+			if (head.value === "tee" && args.some((word) => !word.value.startsWith("-") && !written.has(word.value)))
+				return false;
+		}
+		if (copies) copied = true;
+	}
+	return true;
+}
+
 /** A redefined recipient need not treat stdin as data, even when its original command did. */
 function mayRedefineHeredocCopier(command: string): boolean {
 	return /\bPATH=|\b(?:alias|function|source|eval|enable|hash)\b|\(\s*\)|(?:^|[\s;&|])\.[ \t]/u.test(command);
@@ -1050,9 +1235,14 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
  * command may redefine the recipient. The floor needs every body to be known
  * data, including copies by `cat` or `tee` whose output is run separately
  * (SF-5, SF-6). The secret rail leaves file copies and ambiguous readers in
- * place, but can omit known stdin data before them (XR-43).
+ * place, but can omit known stdin data before them (XR-43). Only the safety rails (`reader` "rails") also require
+ * {@link heredocDataTrusted}; every other reader, such as a check's exit scope, keeps b1c4855bf's reading (row 261).
  */
-export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode = "all"): string {
+export function withoutDataHeredocBodies(
+	command: string,
+	mode: HeredocDataMode = "all",
+	reader: HeredocReader = "base",
+): string {
 	if (!command.includes("<<")) return command;
 	const { text, dataOutputs } = removeHeredocBodies(command, false, mode);
 	if (text === command) return command;
@@ -1061,7 +1251,9 @@ export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode 
 		(dataOutputs === null || scanShellLike(text).some((token) => token.operator && token.value === "<<"))
 	)
 		return command;
-	return mayRedefineHeredocCopier(text) ? command : text;
+	return mayRedefineHeredocCopier(text) || (reader === "rails" && !heredocDataTrusted(text, dataOutputs ?? []))
+		? command
+		: text;
 }
 
 /**
@@ -1173,6 +1365,7 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
 			collectSegmentPathEvents(segment, depth, walk);
 			segment = [];
+			walk.pipedFrom = token.value === "|" ? walk.lastArgv : null;
 			// `name()` defines a function whose body may run any number of times.
 			const next = tokens[index + 1];
 			if (token.value === "(" && next?.operator === true && next.value === ")") walk.functionSeen = true;
@@ -1189,11 +1382,19 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 
 function collectChildScript(script: string, depth: number, walk: CommandPathWalkState): void {
 	if (depth >= INNER_SHELL_MAX_DEPTH) return;
+	const saved = { lastArgv: walk.lastArgv, pipedFrom: walk.pipedFrom };
+	const fresh = (): void => {
+		walk.lastArgv = [];
+		walk.pipedFrom = null;
+	};
 	walk.events.push({ kind: "subshell", open: true });
+	fresh();
 	collectPathWalk(script, depth + 1, walk);
 	// A body line can hide a later command from the walk above, as a lone quote does.
 	const withoutBodies = withoutHeredocBodies(script);
+	fresh();
 	if (withoutBodies !== script) collectPathWalk(withoutBodies, depth + 1, walk);
+	Object.assign(walk, saved);
 	// A here-document body can move where the scanner thinks a substitution
 	// ends, so the script may hold commands of the parent: keep its cds.
 	if (!walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
@@ -1211,26 +1412,166 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 		if (LOOP_WORDS.has(word)) walk.loopDepth += 1;
 		if (word === "case") walk.caseSeen = true;
 	}
+	const unmodeled = walk.loopDepth > 0 || walk.functionSeen || walk.cdpath || walk.heredocSeen;
+	// `env -C DIR cmd` runs cmd in DIR, and `env -S 'cmd args'` runs the words of its string (row 261); cmd, a shell's
+	// `-c` script included, runs inside DIR, so the subshell closes after it.
+	const env = envInvocation(argv);
+	const chdirs = env?.chdirs ?? [];
+	if (chdirs.length > 0) {
+		walk.events.push({ kind: "subshell", open: true });
+		for (const target of chdirs) walk.events.push({ kind: "cd", target, unmodeled });
+	}
 	const writes: string[] = [];
 	collectRedirectTargets(segment, writes);
 	collectInvokedWriteTargets(argv, writes);
 	collectInPlaceEditTargets(argv, writes);
 	for (const target of writes.filter(isInterestingWriteTarget)) walk.events.push({ kind: "write", target });
 	collectLinkEvents(argv, walk.events);
+	const deletesFrom = walk.events.length;
 	collectDeleteEvents(argv, walk.events);
-	const cd = cdTarget(argv);
-	if (cd !== null) {
-		walk.events.push({
-			kind: "cd",
-			target: cd,
-			unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath || walk.heredocSeen,
-		});
+	const addedFrom = walk.events.length;
+	// An env spelled as a path (`/usr/bin/env`) or with clustered options (`env -iC ..`) hides the command it runs from
+	// the readers above, so it is read again from where env starts it (r261f-1).
+	const hidden =
+		env !== null &&
+		env.split === undefined &&
+		env.commandIndex < argv.length &&
+		env.commandIndex !== commandTokenIndex(argv)
+			? argv.slice(env.commandIndex)
+			: null;
+	if (hidden !== null) {
+		collectLinkEvents(hidden, walk.events);
+		collectDeleteEvents(hidden, walk.events);
 	}
+	// `xargs rm` removes what the stage piped into it prints: an echo's or printf's words, or a find's matches.
+	if (
+		walk.pipedFrom !== null &&
+		walk.events.slice(deletesFrom).some((event) => event.kind === "delete" && event.scope === "input")
+	)
+		walk.events.push(...pipedDeletes(walk.pipedFrom));
+	if (env?.split !== undefined) collectChildScript(env.split, depth, walk);
+	const hiddenScript = hidden === null ? null : segmentShellScript(hidden);
+	if (typeof hiddenScript === "string") collectChildScript(hiddenScript, depth, walk);
+	// What these readings add never counts toward a scratch-only call (r261e-4).
+	for (const event of walk.events.slice(addedFrom)) if (event.kind === "delete") event.added = true;
+	const cd = cdTarget(argv);
+	// `HOME=x cd` lands in x, which nothing here places (r261f-5).
+	const homeSet = cd !== null && cd.startsWith("~") && argv.some((word) => word.startsWith("HOME="));
+	if (cd !== null) walk.events.push({ kind: "cd", target: cd, unmodeled: unmodeled || homeSet });
+	walk.lastArgv = argv;
 	const script = segmentShellScript(argv);
 	if (typeof script === "string") collectChildScript(script, depth, walk);
+	if (chdirs.length > 0 && !walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
 	// The body starts on the next line, so this segment's own cd is real.
 	if ((depth > 0 || walk.topLevelHeredocs) && segment.some((token) => token.operator && token.value === "<<"))
 		walk.heredocSeen = true;
+}
+
+/** Prefixes that run the command after them unchanged in the same directory, read past to find an `env`. */
+const ENV_PREFIXES: ReadonlySet<string> = new Set([
+	"!",
+	"command",
+	"builtin",
+	"exec",
+	"nohup",
+	"time",
+	"nice",
+	"timeout",
+	"stdbuf",
+	"ionice",
+	"setsid",
+	"chrt",
+	"taskset",
+	"unbuffer",
+]);
+
+/**
+ * What an `env` does besides setting variables: `-C DIR` (`--chdir`) runs the command in DIR, and `-S STR`
+ * (`--split-string`) runs the words of STR followed by the rest. Read past leading assignments and the prefixes that
+ * run what follows (`command`, `!`, `timeout 5`, `nice -n 5`), and through nested `env`s, whose chdirs apply in turn.
+ * A prefix's options and number-like values are skipped without knowing which take one. `commandIndex` is where the
+ * command env runs stands. Null when no env stands there.
+ */
+function envInvocation(argv: ReadonlyArray<string>): { chdirs: string[]; split?: string; commandIndex: number } | null {
+	const out: { chdirs: string[]; split?: string } = { chdirs: [] };
+	let index = 0;
+	let found = false;
+	for (let hop = 0; hop < 16 && index < argv.length; hop += 1) {
+		while (index < argv.length && /^[A-Za-z_]\w*=/u.test(argv[index] ?? "")) index += 1;
+		const name = basenameToken(argv[index]);
+		if (ENV_PREFIXES.has(name)) {
+			index += 1;
+			while (index < argv.length && /^(?:-.*|[\d.]+[smhd]?)$/u.test(argv[index] ?? "")) index += 1;
+			continue;
+		}
+		if (name !== "env") break;
+		found = true;
+		for (index += 1; index < argv.length; index += 1) {
+			const word = argv[index] ?? "";
+			if (word === "--") {
+				index += 1;
+				break;
+			}
+			if (word.startsWith("--")) {
+				const eq = word.indexOf("=");
+				const option = eq === -1 ? word : word.slice(0, eq);
+				const takes = option === "--chdir" || option === "--split-string" || option === "--unset";
+				const value = eq !== -1 ? word.slice(eq + 1) : takes ? argv[++index] : undefined;
+				if (option === "--chdir" && value !== undefined) out.chdirs.push(value);
+				if (option === "--split-string" && value !== undefined) out.split = value;
+				if (out.split !== undefined) break;
+				continue;
+			}
+			if (word.startsWith("-") && word !== "-") {
+				for (let at = 1; at < word.length; at += 1) {
+					const flag = word[at] as string;
+					if (!"uCS".includes(flag)) continue;
+					const rest = word.slice(at + 1);
+					const value = rest.length > 0 ? rest : argv[++index];
+					if (flag === "C" && value !== undefined) out.chdirs.push(value);
+					if (flag === "S" && value !== undefined) out.split = value;
+					break;
+				}
+				if (out.split !== undefined) {
+					index += 1;
+					break;
+				}
+				continue;
+			}
+			if (/^[A-Za-z_]\w*=/u.test(word)) continue;
+			break;
+		}
+		if (out.split !== undefined) break;
+	}
+	if (!found) return null;
+	if (out.split !== undefined) {
+		const rest = argv.slice(index).map((word) => `'${word.replaceAll("'", `'\\''`)}'`);
+		out.split = [out.split, ...rest].join(" ");
+	}
+	return { ...out, commandIndex: index };
+}
+
+/**
+ * The deletes `xargs rm` makes of a piped stage: each literal word an echo or printf prints, a printf's format string
+ * included (its `\n` and conversions read as separators), or a find's roots. `printf -v` prints nothing.
+ */
+function pipedDeletes(producer: ReadonlyArray<string>): CommandPathEvent[] {
+	const index = commandTokenIndex(producer);
+	if (index === null) return [];
+	const name = basenameToken(producer[index]);
+	if (name === "find") return findRootDeletes(producer.slice(index + 1));
+	if (name !== "echo" && name !== "printf") return [];
+	let words = producer.slice(index + 1);
+	if (name === "echo") while (/^-[neE]+$/u.test(words[0] ?? "")) words = words.slice(1);
+	else {
+		if (words[0]?.startsWith("-v") === true) return [];
+		if (words[0] === "--") words = words.slice(1);
+	}
+	return words
+		.map((word) => word.replace(/\\[nrtv0]|%[-#0 +']*\d*(?:\.\d+)?[a-zA-Z%]/gu, " "))
+		.flatMap((word) => word.split(/\s+/u))
+		.filter((word) => word !== "")
+		.map((target) => ({ kind: "delete", target, scope: "path" }) as CommandPathEvent);
 }
 
 /** Commands that run the command after them, possibly with options and arguments of their own. */
@@ -1404,14 +1745,19 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 	if (!symbolic && !hard && !copied) return;
 	let sources = operands;
 	let linkDirs = ["."];
+	const named = (dir: string) => (source: string) => path.posix.join(dir, path.posix.basename(source));
+	let links = operands.map(named("."));
 	if (targetDirectory !== null) {
 		linkDirs = [targetDirectory];
+		links = operands.map(named(targetDirectory));
 		out.push({ kind: "write", target: targetDirectory });
 	} else if (operands.length > 1) {
 		const destination = operands.at(-1) as string;
 		sources = operands.slice(0, -1);
 		const parent = path.posix.dirname(destination);
 		linkDirs = noTargetDirectory ? [parent] : [parent, destination];
+		// The destination is the link, or a directory the links go into.
+		links = noTargetDirectory ? [destination] : [destination, ...sources.map(named(destination))];
 	}
 	const origin: LinkOrigin = found.fromInput ? "input" : copied ? "copied" : "text";
 	if (origin === "input") {
@@ -1424,7 +1770,16 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 		});
 		return;
 	}
-	if (sources.length > 0) out.push({ kind: "link", symbolic: symbolic || copied, sources, linkDirs, origin });
+	if (sources.length > 0)
+		out.push({
+			kind: "link",
+			symbolic: symbolic || copied,
+			sources,
+			linkDirs,
+			origin,
+			links,
+			...(executable === "mv" ? { moved: true } : {}),
+		});
 }
 
 /**
@@ -3593,7 +3948,13 @@ function findTestMatchesAll(test: string, value: string | undefined): boolean {
 
 function findRootDeletes(args: ReadonlyArray<string>): CommandPathEvent[] {
 	const findRoot: FindRootFilter = findExpressionFilters(args) ? "filtered" : "unfiltered";
-	return findRoots(args).map((target) => ({ kind: "delete", target, scope: "children", findRoot }));
+	return findRoots(args).map((target) => ({
+		kind: "delete",
+		target,
+		scope: "children",
+		findRoot,
+		expression: [...args],
+	}));
 }
 
 function findRoots(args: ReadonlyArray<string>): string[] {
@@ -4791,11 +5152,11 @@ export function validationWrappersInForce(): ReadonlyArray<string> {
  * What a declared wrapper word runs: the file it names by path from the working directory, or the first match for a
  * bare name on PATH, links resolved; null when it names no file this can resolve (a variable, `~`, a glob, none found).
  */
-function resolvedWrapperTarget(word: string): string | null {
+function resolvedWrapperTarget(word: string, cwd: string = process.cwd()): string | null {
 	if (/[~$`*?[\]{}]/u.test(word)) return null;
 	const normalized = word.replace(/\\/gu, "/");
 	const candidates = normalized.includes("/")
-		? [path.resolve(process.cwd(), normalized)]
+		? [path.resolve(cwd, normalized)]
 		: (process.env.PATH ?? "")
 				.split(path.delimiter)
 				.filter((directory) => directory !== "")
@@ -4815,7 +5176,7 @@ function resolvedWrapperTarget(word: string): string | null {
  * The word must resolve to a file whose real name the shared list does not refuse, so a link to `rm` or a word naming
  * no file is no wrapper; a refused entry never matches, whatever the settings say.
  */
-function isValidationWrapper(word: string): boolean {
+function isValidationWrapper(word: string, cwd?: string): boolean {
 	const entries = validationWrappers();
 	if (entries.length === 0) return false;
 	const name = basenameToken(word);
@@ -4828,7 +5189,7 @@ function isValidationWrapper(word: string): boolean {
 		return spelled === wanted || (!wanted.startsWith("/") && spelled.endsWith(`/${wanted}`));
 	});
 	if (!declared) return false;
-	const target = resolvedWrapperTarget(word);
+	const target = resolvedWrapperTarget(word, cwd);
 	return target !== null && !isRefusedValidationWrapper(target);
 }
 
@@ -4921,11 +5282,119 @@ function checkBehindWrapper(
 	for (let hop = 0; hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
 		const word = argv[current];
 		if (word === undefined || !isValidationWrapper(word)) break;
-		const next = builtinCommandIndex(argv, pastWrapperOptions(argv, current));
+		const next = pastDeclaredWrapper(argv, current);
 		if (next === null) return null;
 		current = next;
 	}
 	return current !== index && isCheck(basenameToken(argv[current]), argv.slice(current + 1)) ? current : null;
+}
+
+/**
+ * The shared transparent-prefix reader for a declared wrapper (FX-44, FX-46): the command word past the declared
+ * wrapper standing at `index`, its leading options and the built-in prefixes after it, as `timeout` or `nice` is read
+ * through; null when no declared wrapper stands there or nothing follows it. An undeclared script stays opaque.
+ */
+function pastDeclaredWrapper(argv: ReadonlyArray<string>, index: number): number | null {
+	const word = argv[index];
+	if (word === undefined || !isValidationWrapper(word)) return null;
+	return builtinCommandIndex(argv, pastWrapperOptions(argv, index));
+}
+
+/** `text` with each span replaced by spaces, so offsets and every other character stay where they were. */
+function blankedSpans(text: string, spans: ReadonlyArray<{ start: number; end: number }>): string {
+	let out = text;
+	for (const { start, end } of [...spans].sort((left, right) => right.start - left.start))
+		out = `${out.slice(0, start)}${" ".repeat(end - start)}${out.slice(end)}`;
+	return out;
+}
+
+/** More candidate command starts than this behind one wrapper are not tried; the last one tried stands for the rest. */
+const WRAPPER_START_CANDIDATES = 8;
+
+/**
+ * Where the command behind a declared wrapper at `index` may start (r261f-3). Nothing here knows the wrapper's options,
+ * so each separate option may take the next plain word as its value or not: every plain word after an option is a
+ * candidate, up to the first plain word no option precedes. `-s 1 -q rm -rf .git` may run `1`, `rm` or `.git`.
+ */
+function wrapperCommandStarts(argv: ReadonlyArray<string>, index: number): number[] {
+	const starts: number[] = [];
+	let valueNext = false;
+	for (let at = index + 1; at < argv.length; at += 1) {
+		const word = argv[at] as string;
+		if (word === "--") {
+			starts.push(at + 1);
+			break;
+		}
+		if (word.startsWith("-") && word !== "-") {
+			valueNext = !word.includes("=");
+			continue;
+		}
+		starts.push(at);
+		if (!valueNext) break;
+		valueNext = false;
+	}
+	return starts.length > 0 ? starts : [argv.length];
+}
+
+/** A word that may stand as a command word in a nested script (`sh -c '...'`, `$(...)`), with the plain words after it. */
+const NESTED_COMMAND_WORD = /(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+[^\s'"();&|`<>]+)*)/gu;
+
+/**
+ * The readings of a command with its declared validation wrappers blanked out, so the rails read what they run (FX-46):
+ * `scripts/test-slot.sh rm -rf .git` reads as `rm -rf .git`. A wrapper at a top-level command position is blanked with
+ * its leading options up to each place its command may start ({@link wrapperCommandStarts}), one reading per
+ * candidate; redirections between them stay. A wrapper word anywhere else, inside `sh -c '...'` or a substitution, is
+ * blanked as text the same way. A word is a wrapper by the call's own working directory. Empty when no declared
+ * wrapper stands anywhere. Admission judges every reading beside the command as written and merges them, so a reading
+ * only tightens.
+ */
+export function declaredWrapperReadings(command: string, cwd: string = process.cwd()): string[] {
+	const entries = validationWrappers();
+	if (entries.length === 0) return [];
+	const names = new Set(entries.map((entry) => basenameToken(entry.replace(/\\/gu, "/"))));
+	const readings = new Set<string>();
+	const segments = splitSegments(scanShellLike(command, true));
+	const nested = [...command.matchAll(NESTED_COMMAND_WORD)].flatMap((match) => {
+		const word = match[2] ?? "";
+		if (!names.has(basenameToken(word.replace(/\\/gu, "/"))) || !isValidationWrapper(word, cwd)) return [];
+		const start = match.index + (match[1] ?? "").length;
+		const tail = match[3] ?? "";
+		const after = [...tail.matchAll(/\S+/gu)].map((rest) => ({ value: rest[0], at: start + word.length + rest.index }));
+		const end = start + word.length + tail.length;
+		const starts = wrapperCommandStarts([word, ...after.map((rest) => rest.value)], 0);
+		return [{ start, ends: starts.map((at) => after[at - 1]?.at ?? end) }];
+	});
+	for (let rank = 0; rank < WRAPPER_START_CANDIDATES; rank += 1) {
+		let more = false;
+		const blanks: Array<{ start: number; end: number }> = [];
+		for (const segment of segments) {
+			// Words only: a redirection operator and its target are not argv, and stay in the reading.
+			const words = segment.filter(
+				(token, at) =>
+					!token.operator && !(segment[at - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[at - 1]?.value ?? "")),
+			);
+			const argv = words.map((token) => token.value);
+			let index = builtinCommandIndex(argv);
+			for (let hop = 0; index !== null && hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
+				const word = argv[index];
+				if (word === undefined || !isValidationWrapper(word, cwd)) break;
+				const starts = wrapperCommandStarts(argv, index);
+				if (starts.length > rank + 1) more = true;
+				const start = starts[Math.min(rank, starts.length - 1)] as number;
+				for (const token of words.slice(index, start)) blanks.push({ start: token.start, end: token.end });
+				index = builtinCommandIndex(argv, start);
+			}
+		}
+		if (blanks.length > 0) readings.add(blankedSpans(command, blanks));
+		const spans = nested.map(({ start, ends }) => {
+			if (ends.length > rank + 1) more = true;
+			return { start, end: ends[Math.min(rank, ends.length - 1)] as number };
+		});
+		if (spans.length > 0) readings.add(blankedSpans(command, spans));
+		if (!more) break;
+	}
+	readings.delete(command);
+	return [...readings];
 }
 
 /**
