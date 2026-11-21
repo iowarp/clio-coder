@@ -296,7 +296,7 @@ async function runTerminate(args: ReadonlyArray<string>): Promise<number> {
 		}
 		const why = owner === "gone" ? "pid gone" : `stale heartbeat ${age}`;
 		const released = await releaseSession(view, why);
-		const freed = `freed ${released.capacityLeases} capacity lease(s), ${released.reservations} reservation(s), ${released.stateLocks.length} state lock(s), ${released.fleetLocks.length} fleet lock(s), ${released.checkoutLeases.length} checkout lease(s)`;
+		const freed = `freed ${released.capacityLeases} capacity lease(s), ${released.reservations} reservation(s), ${released.stateLocks.length} state lock(s), ${released.checkoutLeases.length} checkout lease(s)`;
 		if (released.refused !== undefined) {
 			return emit({ ...base, action: "refused", message: released.refused, released }, json, 2);
 		}
@@ -388,7 +388,6 @@ interface ReleaseResult {
 	capacityLeases: number;
 	reservations: number;
 	stateLocks: string[];
-	fleetLocks: string[];
 	checkoutLeases: string[];
 	endedAtStamped: boolean;
 	failed: string[];
@@ -409,7 +408,6 @@ async function releaseSession(view: LiveSessionView, reason: string): Promise<Re
 		capacityLeases: 0,
 		reservations: 0,
 		stateLocks: [],
-		fleetLocks: [],
 		checkoutLeases: [],
 		endedAtStamped: false,
 		failed: [],
@@ -465,16 +463,6 @@ async function releaseSession(view: LiveSessionView, reason: string): Promise<Re
 	});
 	await step("reservations", () => {
 		result.reservations = expireDispatchReservationsOwnedBy(owner);
-	});
-	await step("fleet locks", () => {
-		result.fleetLocks = removeOwnedRecords(join(stateDir, "fleet-locks"), (value) => {
-			const lock = value as { host?: unknown; processOwner?: { pid?: unknown; processBirthToken?: unknown } };
-			return (
-				lock.host === owner.host &&
-				lock.processOwner?.pid === owner.pid &&
-				lock.processOwner.processBirthToken === owner.birth
-			);
-		});
 	});
 	// Checkout leases carry no host. A pid plus its start tick does not recur
 	// across hosts in practice, and owner.birth is never null here.

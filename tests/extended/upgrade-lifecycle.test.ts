@@ -20,6 +20,7 @@ const MIGRATION_IDS = [
 	"2026-10-31-remove-old-telemetry",
 	"2026-11-02-approvals-to-config",
 	"2026-11-07-remove-copilot-consent",
+	"2026-11-21-retire-fleet-locks",
 ] as const;
 
 const installation = (kind: Installation["kind"]): Installation => ({
@@ -152,7 +153,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			const { code, stdout } = await upgrade(temp, []);
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
-			match(stdout, /10 migrations applied/u);
+			match(stdout, /11 migrations applied/u);
 		} finally {
 			temp.cleanup();
 		}

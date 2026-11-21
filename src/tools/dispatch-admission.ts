@@ -23,15 +23,15 @@ import {
 import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { operatorNamedChecks } from "../domains/dispatch/operator-checks.js";
-import {
-	confineGrantOnlyWriters,
-	overlappingWriteRootsWarning,
-	parallelWriterConflict,
-} from "../domains/dispatch/parallel-writers.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { planCardLimitsUnderTimeout } from "../domains/dispatch/run-limits.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
+import {
+	confineGrantOnlyWriters,
+	overlappingWriteRootsWarning,
+	writerSetConflict,
+} from "../domains/dispatch/writer-set.js";
 import {
 	dispatchRequestsFromArgs,
 	maxOutputBytesArg,
@@ -826,7 +826,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		});
 		if (mode === "parallel" && args.writers !== 1) {
 			const specs = deps.getAgentSpecs();
-			const conflict = parallelWriterConflict(parsed.requests, specs);
+			const conflict = writerSetConflict(parsed.requests, specs);
 			if (conflict !== null && !confineGrantOnlyWriters(parsed.requests, specs)) return shapeRejection(args, conflict);
 			announceOverlappingWriteRoots(deps, args, parsed.requests, parsed.positions);
 		}

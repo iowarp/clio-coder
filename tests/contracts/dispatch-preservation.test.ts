@@ -1,4 +1,4 @@
-import { match, ok, strictEqual, throws } from "node:assert/strict";
+import { match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -16,8 +16,8 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { processBirthToken } from "../../src/core/process-identity.js";
-import { acquireCheckoutWriterLease } from "../../src/domains/dispatch/checkout-writer-lease.js";
 import { workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
+import { joinWriterSet, WriterSetBusyError } from "../../src/domains/dispatch/writer-set.js";
 import {
 	claimCompeteGroup,
 	cleanupCompeteGroup,
@@ -102,17 +102,17 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 		intent: roots ? { write_roots: roots } : { expected_outputs: ["src/out.ts"] },
 	});
 	try {
-		match(String(prepare([writer(), writer()])), /parallel_writer_conflict/);
+		match(String(prepare([writer(), writer()])), /writer_set_conflict/);
 		// Row 146: builders that declare nothing to write run read-only instead of refusing the batch.
 		strictEqual(prepare([0, 1].map(() => ({ agent: "coder", task: "Explain the cache split" }))), undefined);
 		// Verification recipes run checks in the tree, so a parallel review sent to
 		// them stays refused; the refusal names the read-only recipes that can take it.
 		const review = (agent: string) => ({ agent, task: "Review src/a.ts for bugs" });
 		const refusal = String(prepare([review("verifier"), review("verifier")]));
-		match(refusal, /parallel_writer_conflict/);
+		match(refusal, /writer_set_conflict/);
 		match(refusal, /dispatch read-only recipes instead: scout\./);
 		strictEqual(prepare([review("scout"), review("scout")]), undefined);
-		match(String(prepare([writer(["src/"]), writer(["src/nested/"])])), /parallel_writer_conflict/);
+		match(String(prepare([writer(["src/"]), writer(["src/nested/"])])), /writer_set_conflict/);
 		strictEqual(prepare([writer(["src/"]), writer(["docs/"])]), undefined);
 		// Writers that only hold a store grant are confined to it rather than refused.
 		strictEqual(
@@ -122,7 +122,7 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 			]),
 			undefined,
 		);
-		match(String(prepare([{ ...writer(), tags: ["fleet"] }, writer()])), /parallel_writer_conflict/);
+		match(String(prepare([{ ...writer(), tags: ["fleet"] }, writer()])), /writer_set_conflict/);
 		strictEqual(prepare([writer(), { agent: "scout", task: "Inspect sources" }]), undefined);
 		strictEqual(prepare([writer(), writer()], { writers: 1 }), undefined);
 		match(String(prepare([writer(), writer()], { writers: 1, detach: true })), /cannot combine with detach: true/);
@@ -135,47 +135,50 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 		);
 		mkdirSync(join(root, "src"));
 		symlinkSync("src", join(root, "alias"));
-		match(String(prepare([writer(["src/"]), writer(["alias/new/"])])), /parallel_writer_conflict/);
+		match(String(prepare([writer(["src/"]), writer(["alias/new/"])])), /writer_set_conflict/);
 	} finally {
 		process.chdir(previous);
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-test("the writer lease refuses an overlapping writer from another dispatch call until the live one releases", () => {
+test("an overlapping writer from another dispatch call waits for the live writer set and gives up at its deadline", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
 	const src = join(root, "src");
-	const holder = (group: string, roots: string[] | null, isolated = false) => ({
+	const member = (group: string, roots: string[] | null, isolated = false) => ({
 		group,
 		roots,
 		isolated,
 		agentId: "coder",
 	});
 	try {
-		const detached = acquireCheckoutWriterLease({ checkout: root, holder: holder("call-1", [src]) });
+		const detached = await joinWriterSet({ checkout: root, member: member("call-1", [src]) });
 		detached.bindRun("run-detached");
-		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", [join(root, "docs")]) }).release();
-		throws(
-			() => acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", [join(src, "nested")]) }),
+		(await joinWriterSet({ checkout: root, member: member("call-2", [join(root, "docs")]) })).release();
+		await rejects(
+			joinWriterSet({ deadlineAt: 0, checkout: root, member: member("call-2", [join(src, "nested")]) }),
 			(error: unknown) =>
 				error instanceof Error &&
 				error.message ===
-					`checkout_writer_conflict: coder would write ${root} while run run-detached (coder, started by an earlier dispatch call) is still live there; its write roots are ${src}, this request's are ${join(src, "nested")}. Wait for it with monitor(mode="wait", run_id="run-detached"), declare disjoint intent.write_roots on both dispatches, or use worktree: true.`,
+					`writer_set_busy: coder waited 0 s for run run-detached (coder, roots ${src}) in this process to finish writing in ${root}, and its run's deadline passed first. Wait for that work to settle, declare disjoint intent.write_roots, or use worktree: true.`,
 		);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null) }), /are undeclared\./u);
+		await rejects(
+			joinWriterSet({ deadlineAt: 0, checkout: root, member: member("call-2", null) }),
+			/writer_set_busy: coder waited 0 s for run run-detached/u,
+		);
 		// Siblings and retries of one call, worktree runs, and holderless read-only runs pass.
-		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-1", null) }).release();
-		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null, true) }).release();
-		acquireCheckoutWriterLease({ checkout: root }).release();
+		(await joinWriterSet({ checkout: root, member: member("call-1", null) })).release();
+		(await joinWriterSet({ checkout: root, member: member("call-2", null, true) })).release();
+		(await joinWriterSet({ checkout: root })).release();
 		detached.release();
-		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null) }).release();
+		(await joinWriterSet({ checkout: root, member: member("call-2", null) })).release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
 test("a writer lease held on another host, or by a zombie, is judged by host and reaping", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
-	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
-	const lease = acquireCheckoutWriterLease({ checkout: root, holder });
+	const member = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const lease = await joinWriterSet({ checkout: root, member });
 	const path = lease.path;
 	lease.release();
 	const record = (host: string, pid: number) =>
@@ -195,7 +198,10 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 	const child = spawn("sh", ["-c", "sleep 0 & echo $!; exec sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
 	try {
 		record("other-node.invalid", 999_999_999);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /held by pid 999999999 on host other-node/u);
+		await rejects(
+			joinWriterSet({ deadlineAt: 0, checkout: root, member }),
+			/writer set of pid 999999999 on host other-node/u,
+		);
 		const zombie = Number((await once(child.stdout, "data"))[0].toString().trim());
 		for (let i = 0; i < 200 && !readFileSync(`/proc/${zombie}/stat`, "utf8").includes(") Z"); i++) {
 			await new Promise((resolve) => setTimeout(resolve, 10));
@@ -213,7 +219,7 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 				heartbeatExpiresMs: 120_000,
 			}),
 		);
-		acquireCheckoutWriterLease({ checkout: root, holder }).release();
+		(await joinWriterSet({ checkout: root, member })).release();
 	} finally {
 		child.kill("SIGKILL");
 		rmSync(root, { recursive: true, force: true });
@@ -239,10 +245,10 @@ function writeLeaseRecord(
 	);
 	utimesSync(path, writtenAt / 1000, writtenAt / 1000);
 }
-test("another host's writer lease is honored until its heartbeat lapses, never by a local pid check", () => {
+test("another host's writer lease is honored until its heartbeat lapses, never by a local pid check", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
-	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
-	const first = acquireCheckoutWriterLease({ checkout: root, holder });
+	const member = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const first = await joinWriterSet({ checkout: root, member });
 	const path = first.path;
 	first.release();
 	// The pid is dead here; on another host that proves nothing.
@@ -254,9 +260,12 @@ test("another host's writer lease is honored until its heartbeat lapses, never b
 		);
 	try {
 		foreign(60_000);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /held by pid 999999999 on host other-node/u);
+		await rejects(
+			joinWriterSet({ deadlineAt: 0, checkout: root, member }),
+			/writer set of pid 999999999 on host other-node/u,
+		);
 		foreign(121_000);
-		const taken = acquireCheckoutWriterLease({ checkout: root, holder });
+		const taken = await joinWriterSet({ checkout: root, member });
 		const record = JSON.parse(readFileSync(path, "utf8"));
 		strictEqual(record.host, hostname());
 		strictEqual(record.pid, process.pid);
@@ -265,10 +274,10 @@ test("another host's writer lease is honored until its heartbeat lapses, never b
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-test("another host's writer lease ages on the shared filesystem's clock, not on either host's", () => {
+test("another host's writer lease ages on the shared filesystem's clock, not on either host's", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
-	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
-	const first = acquireCheckoutWriterLease({ checkout: root, holder });
+	const member = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const first = await joinWriterSet({ checkout: root, member });
 	const path = first.path;
 	first.release();
 	const foreign = (writtenAgoMs: number, holderClockSkewMs: number) =>
@@ -281,18 +290,18 @@ test("another host's writer lease ages on the shared filesystem's clock, not on 
 	try {
 		// A holder whose clock runs 200 s behind this one, beating now, still holds the checkout.
 		foreign(5_000, -200_000);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /on host other-node/u);
+		await rejects(joinWriterSet({ deadlineAt: 0, checkout: root, member }), /on host other-node/u);
 		// A holder whose clock runs 500 s ahead, silent for 121 s, is gone.
 		foreign(121_000, 500_000);
-		acquireCheckoutWriterLease({ checkout: root, holder }).release();
+		(await joinWriterSet({ checkout: root, member })).release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-test("a local writer lease whose pid now names a different process is stale", () => {
+test("a local writer lease whose pid now names a different process is stale", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
-	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
-	const first = acquireCheckoutWriterLease({ checkout: root, holder });
+	const member = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const first = await joinWriterSet({ checkout: root, member });
 	const path = first.path;
 	first.release();
 	// process.ppid is alive; the recorded start time is not its own.
@@ -302,22 +311,22 @@ test("a local writer lease whose pid now names a different process is stale", ()
 	const pidOnly = { birthToken: (pid: number) => `pid-${pid}`, tokenProvesDeath: false, alive: () => true };
 	try {
 		local(`${processBirthToken(process.ppid)}0`, 0);
-		acquireCheckoutWriterLease({ checkout: root, holder }).release();
+		(await joinWriterSet({ checkout: root, member })).release();
 		local(`pid-${process.ppid}`, 0);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, probe: pidOnly }), /held by pid/u);
+		await rejects(joinWriterSet({ deadlineAt: 0, checkout: root, member, probe: pidOnly }), /writer set of pid/u);
 		local(`pid-${process.ppid}`, 121_000);
-		acquireCheckoutWriterLease({ checkout: root, holder, probe: pidOnly }).release();
+		(await joinWriterSet({ checkout: root, member, probe: pidOnly })).release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-test("a held writer lease beats while it is held and stops when released", (t) => {
+test("a held writer lease beats while it is held and stops when released", async (t) => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
-	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const member = { group: "g", roots: null, isolated: false, agentId: "coder" };
 	const startMs = Date.parse("2026-01-01T12:00:00.000Z");
 	t.mock.timers.enable({ apis: ["setInterval", "Date"], now: startMs });
 	try {
-		const lease = acquireCheckoutWriterLease({ checkout: root, holder });
+		const lease = await joinWriterSet({ checkout: root, member });
 		const beat = () => JSON.parse(readFileSync(lease.path, "utf8"));
 		strictEqual(beat().heartbeatAt, new Date(startMs).toISOString());
 		strictEqual(beat().heartbeatExpiresMs, 120_000);
@@ -331,19 +340,106 @@ test("a held writer lease beats while it is held and stops when released", (t) =
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-test("a holderless read-only lease neither refuses nor is refused by another live process (#420)", () => {
+test("a read-only join with no member neither waits nor is waited on by another live process (#420)", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
 	const other = { pid: process.ppid, processBirthToken: processBirthToken(process.ppid) ?? "unknown" };
 	try {
-		const readOnly = acquireCheckoutWriterLease({ checkout: root });
-		const writer = acquireCheckoutWriterLease({
+		const readOnly = await joinWriterSet({ checkout: root });
+		const writer = await joinWriterSet({
 			checkout: root,
 			...other,
-			holder: { group: "other", roots: null, isolated: false, agentId: "coder" },
+			member: { group: "other", roots: null, isolated: false, agentId: "coder" },
 		});
-		acquireCheckoutWriterLease({ checkout: root }).release();
+		(await joinWriterSet({ checkout: root })).release();
 		writer.release();
 		readOnly.release();
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a writer queued behind an overlapping set in this process starts when that set settles", async () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-set-")));
+	const member = (group: string) => ({ group, roots: null, isolated: false, agentId: "coder" });
+	try {
+		const first = await joinWriterSet({ checkout: root, member: member("call-1") });
+		const queued: string[] = [];
+		let started = false;
+		const second = joinWriterSet({
+			checkout: root,
+			member: member("call-2"),
+			deadlineAt: Date.now() + 30_000,
+			pollMs: 60_000,
+			onQueued: (waitingOn) => queued.push(waitingOn),
+		}).then((lease) => {
+			started = true;
+			return lease;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(started, false);
+		strictEqual(queued.length, 1);
+		// The release wakes the waiter at once; it does not wait out the poll interval.
+		first.release();
+		(await second).release();
+		strictEqual(started, true);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a writer queued behind another process's writer set starts when that process releases it", async () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-set-")));
+	// The parent process stands in for a second TUI: its record holds the checkout.
+	const other = { pid: process.ppid, processBirthToken: processBirthToken(process.ppid) ?? "unknown" };
+	try {
+		const busy = await joinWriterSet({
+			checkout: root,
+			...other,
+			member: { group: "other-tui", roots: null, isolated: false, agentId: "coder" },
+		});
+		const queued: string[] = [];
+		const second = joinWriterSet({
+			checkout: root,
+			member: { group: "this-tui", roots: null, isolated: false, agentId: "coder" },
+			deadlineAt: Date.now() + 30_000,
+			pollMs: 10,
+			onQueued: (waitingOn) => queued.push(waitingOn),
+		});
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		match(queued[0] ?? "", new RegExp(`writer set of pid ${process.ppid}`, "u"));
+		busy.release();
+		const lease = await second;
+		strictEqual(JSON.parse(readFileSync(lease.path, "utf8")).pid, process.pid);
+		lease.release();
+		ok(!existsSync(lease.path));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a fleet holds the writer set for its own steps and queues only another fleet", async () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-set-")));
+	const fleet = (id: string) => ({
+		group: id,
+		roots: null,
+		isolated: false,
+		agentId: "fleet",
+		runId: id,
+		fleet: true as const,
+	});
+	try {
+		const held = await joinWriterSet({ checkout: root, member: fleet("root-1") });
+		(
+			await joinWriterSet({ checkout: root, member: { group: "step-1", roots: null, isolated: false, agentId: "coder" } })
+		).release();
+		await rejects(
+			joinWriterSet({ checkout: root, member: fleet("root-2"), deadlineAt: 0 }),
+			(error: unknown) =>
+				error instanceof WriterSetBusyError && error.checkout === root && /fleet root-1/u.test(error.message),
+		);
+		const stop = new AbortController();
+		const waiting = joinWriterSet({ checkout: root, member: fleet("root-2"), signal: stop.signal, pollMs: 60_000 });
+		stop.abort();
+		await rejects(waiting, (error: unknown) => error instanceof Error && error.name === "AbortError");
+		held.release();
+		(await joinWriterSet({ checkout: root, member: fleet("root-2") })).release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

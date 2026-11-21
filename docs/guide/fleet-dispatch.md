@@ -715,7 +715,7 @@ task worktree (`worktree: true`) or run host verification checks (`intent.verifi
 | Topology | Invocation | Semantics |
 | --- | --- | --- |
 | Singular | `task: "..."` | One assignment, with optional separate `briefing`. |
-| Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. Writers sharing a checkout need disjoint `write_roots`, `worktree: true` or `writers: 1`; overlapping roots are refused as `parallel_writer_conflict`, and in a batch of two or more a builder that declares no write roots, no expected outputs and no checks runs read-only instead ([The normalize stage](#the-normalize-stage)). Worktree tasks whose `intent.write_roots` overlap (equal, or one inside the other) still start, with one `write_roots_overlap` warning per call naming each pair and the roots they share; their merges may collide. |
+| Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. Writers sharing a checkout need disjoint `write_roots`, `worktree: true` or `writers: 1`; overlapping roots are refused as `writer_set_conflict`, and in a batch of two or more a builder that declares no write roots, no expected outputs and no checks runs read-only instead ([The normalize stage](#the-normalize-stage)). Worktree tasks whose `intent.write_roots` overlap (equal, or one inside the other) still start, with one `write_roots_overlap` warning per call naming each pair and the roots they share; their merges may collide. |
 | Sequential | `mode: "sequential"` | One at a time in request order. A timeout or abort stops the remaining tasks and reports `stopped after N/M task(s)`. |
 | Pipeline | `mode: "pipeline"` | Each step receives the previous step's output as data. The chain halts at the first failed step, or at a step whose conforming report records `quality=fail`, and reports how many later steps were skipped. |
 | Detached | `detach: true` | Parallel mode only. Return logical assignment ids and a batch id immediately; collect later. |
@@ -760,7 +760,7 @@ Some shapes a model sends name admissible work in a non-canonical form. Before t
 | --- | --- |
 | No typed `intent`, and the task or briefing names an absolute path equal to or under the run's `cwd`, or a leading-slash workspace path | The path is read workspace-relative. Only a path outside the workspace is still refused as `legacy_scope_path_absolute`, and a closed quoted token is read literally. |
 | `intent.write_roots: []` | The task declares no writes, so it runs on the read-only surface and changes no files; `verification: []` beside it asks for no checks. A batch-level `write_roots: []` is a no-write ceiling: members inheriting it run read-only, and a member that declares write roots is refused as `intent_scope_widening`. |
-| A builder recipe in a parallel batch of two or more, without `writers: 1`, that declares no write roots (`.` counts as one), no expected outputs and no checks | It runs read-only as an explorer instead of meeting `parallel_writer_conflict`. |
+| A builder recipe in a parallel batch of two or more, without `writers: 1`, that declares no write roots (`.` counts as one), no expected outputs and no checks | It runs read-only as an explorer instead of meeting `writer_set_conflict`. |
 | `detach: true` with an outside read root | The root's approval is asked before the batch detaches, and the run starts detached once approved. A detach that cannot run (not parallel, a review gate, or `timeout_ms`) is refused before any approval is asked. |
 | `gateway(op="call", capability="dispatch")` | The gateway forwards the call to the direct `dispatch` tool and adds its own notice line. |
 
@@ -780,14 +780,17 @@ concurrent. Waiting writers follow the plan's declared step order and then the
 request order. Agent ledger claims remain advisory and do not enforce the
 token.
 
-### Checkout writer lease
+### Writer set
 
-A `workspace-edit` recipe in a Git checkout acquires a process-owned lease under the CLIO Coder state
-directory before it runs. Its key is the canonical checkout path (the source checkout
+A checkout has one writer set at a time (DESIGN 4.5). A `workspace-edit` recipe in a Git checkout joins it before
+it runs, and a fleet run joins it for its whole run; its own steps never wait on it. The set's cross-process record
+is process-owned and lives under the CLIO Coder state directory. Its key is the canonical checkout path (the source checkout
 for a `worktree: true` writer), and its record contains the
 owner host, pid, process birth token, acquisition time, and a heartbeat the holder
-refreshes every 15 seconds. A live sibling process
-causes admission to fail with `checkout_writer_lease_held` and the holder pid.
+refreshes every 15 seconds. A writer from a live sibling process, or one
+whose roots overlap a live writer from another dispatch call in this process, queues: it starts as soon as the set
+empties, and fails with `writer_set_busy`, naming what it waited on, only when its run's deadline passes first
+(the run wall clock, `fleet.limits.runTimeoutMs`, counts the queue time).
 A dead owner is reclaimed, and so is a pid that now names a different process
 (its start time differs from the recorded one; where no start time can be read,
 the lapsed heartbeat decides, so on macOS and Windows a holder whose process
@@ -1227,7 +1230,7 @@ the local node or drop `tags`. A run that declares write roots gets each granted
 directory and its records directory added to them.
 In a parallel batch, a writer that holds a grant and
 declares no write roots is confined to its granted store directories, so several such
-writers can run side by side without `parallel_writer_conflict`; declare
+writers can run side by side without `writer_set_conflict`; declare
 `intent.write_roots` if that worker must also edit the workspace.
 
 Verification values are declared check ids, never shell commands. Admission
@@ -1681,16 +1684,17 @@ process running it is gone). This journal belongs to the
 whole fleet; individual worker transcripts use `fleet view`. Source:
 `src/cli/fleet-events.ts` and `src/domains/dispatch/fleet-event-journal.ts`.
 
-### Why a second fleet run is refused
+### Why a second fleet run waits
 
-Every fleet executor takes one cross-process lock for its Git checkout before
-dispatching. Subdirectories share the checkout lock; linked worktrees have
-their own. The lock lives under `<stateDir>/fleet-locks/`. A live holder refuses
-the second run with `this run was refused and nothing was dispatched` in the
-message; the CLI exits 1. Dead local owners are reclaimed. A lock from another
-host is reclaimed after 150 seconds without a refresh; holders refresh every
-30 seconds. The lock is scoped to one user's state directory. Source:
-`src/domains/dispatch/fleet-workspace-lock.ts`.
+Every fleet executor joins its Git checkout's writer set before dispatching.
+Subdirectories share the checkout's set; linked worktrees have their own. A
+second fleet, in this process or another, queues behind it with a `queued behind`
+notice and starts when the first settles; it fails with `writer_set_busy` (the
+CLI exits 1) only when `fleet.limits.runTimeoutMs` passes first. Dead local
+owners are taken over. A record from another host is taken over after 120
+seconds without a refresh; owners refresh every 15 seconds. The set is scoped
+to one user's state directory, and `clio-coder upgrade` removes the retired
+`<stateDir>/fleet-locks/` directory. Source: `src/domains/dispatch/writer-set.ts`.
 
 #### Converting an older installation
 

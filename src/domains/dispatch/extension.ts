@@ -340,7 +340,6 @@ import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFrom
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
-import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	AbortReason,
 	DispatchAdmissionObserver,
@@ -464,7 +463,6 @@ import {
 	runStatusForOutcome,
 } from "./outcome.js";
 import { dispatchOwnership, owningSessionPhrase, sessionAncestorIds } from "./ownership.js";
-import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
@@ -645,6 +643,7 @@ import {
 	writeRootRequestDetail,
 	writeRootRequestFromEntries,
 } from "./write-root-requests.js";
+import { canonicalWriteRoots, joinWriterSet, type WriterSetLease } from "./writer-set.js";
 
 /**
  * What a running worker has spent, as its own call telemetry folds it. Absent until the first frame reaches the
@@ -11217,7 +11216,7 @@ export function createDispatchBundle(
 			runWallMs: req.runWallMs ?? wallClock.wallMs,
 		};
 		let createdWorktree: DispatchRequest["taskWorktree"];
-		let writerLease: CheckoutWriterLease | undefined;
+		let writerLease: WriterSetLease | undefined;
 		const writerRecipe = agents.get(req.agentId);
 		if (writerRecipe !== null && normalizeAgentSpec(writerRecipe).capabilityClass === "workspace-edit") {
 			const checkout = req.taskWorktree?.root ?? gitCheckoutRoot(req.cwd ?? process.cwd());
@@ -11225,9 +11224,16 @@ export function createDispatchBundle(
 				const roots = canonicalWriteRoots(req);
 				const runId = req.runIdHint ?? req.lineage?.rootRunId;
 				try {
-					writerLease = acquireCheckoutWriterLease({
+					// A writer that would overlap a live set queues behind it until its run's deadline (DESIGN 4.5).
+					writerLease = await joinWriterSet({
 						checkout,
-						...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
+						deadlineAt: wallClock.deadlineAt,
+						...(preparation?.signal !== undefined ? { signal: preparation.signal } : {}),
+						onQueued: (waitingOn) =>
+							reportDispatchDiagnostic(
+								`writer set for ${req.agentId}`,
+								new Error(`queued behind ${waitingOn}; it starts when that settles`),
+							),
 						// A read-only run writes nothing, so it carries no holder: the envelope's one definition of read-only.
 						...(requestedWriteNone({
 							readOnly: req.readOnly,
@@ -11236,7 +11242,7 @@ export function createDispatchBundle(
 						})
 							? {}
 							: {
-									holder: {
+									member: {
 										// One dispatch call's requests, and their retries, share a group.
 										group: req.parentToolCallId ?? req.lineage?.rootRunId ?? req.runIdHint ?? newRunId(),
 										roots: roots.length > 0 ? roots : null,

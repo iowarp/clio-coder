@@ -368,6 +368,7 @@ targets:
 			OLD_TELEMETRY_MIGRATION_ID,
 			"2026-11-02-approvals-to-config",
 			"2026-11-07-remove-copilot-consent",
+			"2026-11-21-retire-fleet-locks",
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -407,7 +408,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
@@ -488,6 +489,31 @@ targets:
 		strictEqual(linked.reports?.[id]?.attention.length, 1);
 		ok(lstatSync(consent).isSymbolicLink());
 		strictEqual(readFileSync(kept, "utf8"), "kept\n");
+	});
+
+	it("retires the fleet workspace locks, and leaves a directory holding anything else", async () => {
+		const id = "2026-11-21-retire-fleet-locks";
+		const locks = join(stateDir, "fleet-locks");
+		const manifest = join(scratch.dir, "config", "migrations.json");
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((other) => other !== id);
+		mkdirSync(locks, { recursive: true });
+		writeFileSync(join(locks, "a.json"), "{}\n", "utf8");
+		writeFileSync(manifest, `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const first = await runPending(stateDir);
+		deepStrictEqual(first.applied, [id]);
+		strictEqual(first.reports?.[id]?.attention.length, 0);
+		strictEqual(existsSync(locks), false);
+
+		mkdirSync(locks, { recursive: true });
+		writeFileSync(join(locks, "b.json"), "{}\n", "utf8");
+		writeFileSync(join(locks, "notes.txt"), "kept\n", "utf8");
+		writeFileSync(manifest, `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const kept = await runPending(stateDir);
+		strictEqual(kept.reports?.[id]?.attention.length, 1);
+		strictEqual(existsSync(join(locks, "b.json")), false);
+		strictEqual(readFileSync(join(locks, "notes.txt"), "utf8"), "kept\n");
 	});
 
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {

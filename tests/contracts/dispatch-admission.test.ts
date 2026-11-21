@@ -32,7 +32,6 @@ import {
 	architectPlanOutsideWriteRoots,
 	classifyDispatchIntentCompatibility,
 } from "../../src/domains/dispatch/intent-compatibility.js";
-import { parallelWriterConflict } from "../../src/domains/dispatch/parallel-writers.js";
 import {
 	declaredScopeReplacementNotice,
 	inferredScopeParentTokenNotice,
@@ -44,6 +43,7 @@ import {
 	validateJobSpec,
 } from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import { writerSetConflict } from "../../src/domains/dispatch/writer-set.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -928,7 +928,7 @@ describe("dispatch admission boundary", () => {
 			declared.requests.map((request) => request.readOnly),
 			[true, true, true],
 		);
-		strictEqual(parallelWriterConflict(declared.requests, specs), null);
+		strictEqual(writerSetConflict(declared.requests, specs), null);
 		strictEqual(declared.notices.length, 3);
 		match(
 			declared.notices[0] ?? "",
@@ -974,7 +974,7 @@ describe("dispatch admission boundary", () => {
 				[false, "builder"],
 			],
 		);
-		strictEqual(parallelWriterConflict(builders.requests, specs), null);
+		strictEqual(writerSetConflict(builders.requests, specs), null);
 		match(
 			builders.notices.join("\n"),
 			/task 2 \(debugger\) runs read-only as an explorer: a builder in a parallel batch with no intent\.write_roots/u,
@@ -1034,7 +1034,7 @@ describe("dispatch admission boundary", () => {
 			{ auto, resolveIntent },
 		);
 		ok(writers.ok);
-		match(String(parallelWriterConflict(writers.requests, specs)), /withhold bash and verify .* worktree: true/u);
+		match(String(writerSetConflict(writers.requests, specs)), /withhold bash and verify .* worktree: true/u);
 	});
 
 	it("resolves the plan artifact's legacy scope against the dispatch cwd, not the process cwd", () => {
