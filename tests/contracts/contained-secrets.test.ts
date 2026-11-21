@@ -1,15 +1,17 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runBashCommand } from "../../src/core/bash-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { buildBwrapInvocation } from "../../src/core/sandbox/bwrap.js";
 import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
 import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
 import { withMountAliases } from "../../src/core/sandbox/mount-aliases.js";
 import { discoverSecretMasks } from "../../src/core/sandbox/secret-files.js";
+import { signalSandboxPayload } from "../../src/core/sandbox/signal.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -158,6 +160,149 @@ test("a secret an enclosing sandbox already bound /dev/null over gains no aliase
 	];
 	// The real file's second mount is still an alias; the device's other binds are not.
 	deepStrictEqual(withMountAliases(masks, mountinfo), [...masks, { path: join(root, "b", "secret"), kind: "file" }]);
+});
+
+// C-38: on WSL2 every home secret also had a /dev/null bind under /mnt/wslg/distro, a second mount of the root.
+test("a second mount of the root holding no run root is masked once as a directory instead of per secret", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-mount-rootview-")));
+	const distro = join(root, "distro");
+	mkdirSync(join(distro, "home", "u"), { recursive: true });
+	const mountinfo = join(root, "mountinfo");
+	writeFileSync(
+		mountinfo,
+		["1 0 8:48 / / rw - ext4 /dev/sdd rw", `40 1 8:48 / ${distro} rw - ext4 /dev/sdd rw`].join("\n"),
+	);
+	const secret = join(root, "secret.json");
+	writeFileSync(secret, "{}");
+	mkdirSync(join(distro, root), { recursive: true });
+	writeFileSync(join(distro, secret), "{}");
+	const masks = [{ path: secret, kind: "file" as const }];
+	deepStrictEqual(withMountAliases(masks, mountinfo, ["/w"]), [...masks, { path: distro, kind: "directory" }]);
+	// A view that holds a run root stays visible, and each secret in it keeps its own mask.
+	deepStrictEqual(withMountAliases(masks, mountinfo, [join(distro, "home", "u")]), [
+		...masks,
+		{ path: join(distro, secret), kind: "file" },
+	]);
+});
+
+// Row 262: a host program renaming a file over a masked path while bwrap starts aborts the launch.
+function fakeBwrap(root: string): string {
+	const fake = join(root, "bwrap");
+	// Stands in for bwrap: MODE picks the outcome, attempts are counted in a file, the command after "--" really runs.
+	writeFileSync(
+		fake,
+		[
+			"#!/bin/sh",
+			`n=$(cat ${root}/count 2>/dev/null || echo 0); n=$((n + 1)); echo $n > ${root}/count`,
+			'status() { if [ -e /proc/$$/fd/8 ]; then echo "$1" >&8; fi; }',
+			'case $MODE in race*) if [ "$n" = 1 ]; then echo "bwrap: Can\'t bind mount /oldroot/dev/null on /newroot/x: Unable to find /newroot/x in mount table" >&2; exit 1; fi ;; esac',
+			'if [ "$MODE" = chdir ]; then echo "bwrap: Can\'t chdir to /nope: No such file or directory" >&2; exit 1; fi',
+			`status '{ "child-pid": 2 }'`,
+			'while [ "$1" != -- ]; do shift; done; shift',
+			'if [ "$MODE" = signal ]; then setsid "$@" 8>&- & wait $!; else "$@" 8>&-; fi',
+			"code=$?",
+			`status '{ "exit-code": '"$code"' }'`,
+			"exit $code",
+		].join("\n"),
+		{ mode: 0o755 },
+	);
+	return fake;
+}
+
+const fakeSpec = (root: string, script: string, masked = true) => ({
+	command: { argv: ["/bin/sh", "-c", script] },
+	cwd: root,
+	writableRoots: [],
+	network: true,
+	maskedPaths: masked ? [{ path: "/x", kind: "file" as const }] : [],
+});
+
+test("a masked launch runs again once, silently, only when a mask mount failed before the command started", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-bwrap-retry-")));
+	const fake = fakeBwrap(root);
+	const script = "echo payload ran; echo payload-err >&2; case $MODE in *fail*) exit 1 ;; esac";
+	const launch = (mode: string, masked = true) => {
+		writeFileSync(join(root, "count"), "0");
+		const { file, args } = buildBwrapInvocation(fakeSpec(root, script, masked), fake);
+		const result = spawnSync(file, args, { encoding: "utf8", env: { ...process.env, MODE: mode } });
+		return { ...result, attempts: readFileSync(join(root, "count"), "utf8").trim() };
+	};
+	// A recovered race shows the caller only the command's own output: no bwrap line, no notice.
+	const race = launch("race");
+	strictEqual(race.status, 0, race.stderr);
+	strictEqual(race.attempts, "2");
+	strictEqual(race.stdout, "payload ran\n");
+	strictEqual(race.stderr, "payload-err\n");
+	// A check that really fails after a recovered race reads as its own failure, never as "bwrap:" unavailability.
+	const raceFail = launch("racefail");
+	strictEqual(raceFail.status, 1);
+	strictEqual(raceFail.stderr, "payload-err\n");
+	// The command started and exited 1: bwrap's exit-code record says so, and it never runs twice.
+	const fails = launch("fail");
+	strictEqual(fails.status, 1);
+	strictEqual(fails.attempts, "1");
+	strictEqual(fails.stderr, "payload-err\n");
+	// Any other setup failure is not the race: one attempt, bwrap's message passed on once.
+	const chdir = launch("chdir");
+	strictEqual(chdir.status, 1);
+	strictEqual(chdir.attempts, "1");
+	strictEqual(chdir.stderr, "bwrap: Can't chdir to /nope: No such file or directory\n");
+	// Without a mask there is nothing to race, so bwrap runs alone and a setup failure stands.
+	strictEqual(buildBwrapInvocation(fakeSpec(root, script, false), fake).file, fake);
+	strictEqual(launch("race", false).status, 1);
+});
+
+test("a masked launch's command group sits one level below the launcher when /bin/sh is bash", async (t) => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-bwrap-depth-")));
+	const fake = fakeBwrap(root);
+	const ready = join(root, "ready");
+	const script = `trap 'echo got-term > ${root}/term; exit 0' TERM; echo $$ > ${ready}; while :; do sleep 0.05; done`;
+	const { args } = buildBwrapInvocation(fakeSpec(root, script), fake);
+	// bash run as sh keeps a forked process for a command substitution unless the launcher execs bwrap there.
+	const child = spawn("/bin/bash", args, { argv0: "sh", stdio: "ignore", env: { ...process.env, MODE: "signal" } });
+	const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+	t.after(() => {
+		try {
+			process.kill(-Number(readFileSync(ready, "utf8")), "SIGKILL");
+		} catch {}
+		child.kill("SIGKILL");
+	});
+	for (let i = 0; i < 400 && !existsSync(ready); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+	ok(existsSync(ready), "the command started");
+	ok(child.pid !== undefined && signalSandboxPayload(child.pid, "SIGTERM"), "the command's group was found");
+	strictEqual(await exited, 0);
+	strictEqual(readFileSync(join(root, "term"), "utf8"), "got-term\n");
+});
+
+test("under bwrap a masked launch's timeout and abort still reach the command through the launcher shell", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const isolated = await isolateClioEnv("clio-masked-launch-signal-");
+	t.after(() => isolated.restore());
+	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-masked-launch-")));
+	writeFileSync(join(cwd, ".env"), "API=fake\n");
+	const shellSandbox = mainSandboxPolicy({ workspace: cwd, scratchRoots: [] });
+	const plan = planMainSandboxSpawn(shellSandbox, { argv: ["/bin/true"] }, cwd);
+	ok(plan.kind === "sandboxed" && plan.file === "/bin/sh", "a launch with masks goes through the launcher");
+	const command = (marker: string) =>
+		`trap 'echo got-term > ${marker}; exit 0' TERM; echo ready; while :; do sleep 0.1; done`;
+	const timedOut = await runBashCommand(command(join(cwd, "timeout.txt")), { cwd, shellSandbox, timeoutMs: 3000 });
+	strictEqual(timedOut.timedOut, true);
+	ok(existsSync(join(cwd, "timeout.txt")), "the timeout's SIGTERM reached the command");
+	const controller = new AbortController();
+	const aborted = await runBashCommand(command(join(cwd, "abort.txt")), {
+		cwd,
+		shellSandbox,
+		signal: controller.signal,
+		onOutput: (_target, text) => {
+			if (text.includes("ready")) controller.abort();
+		},
+	});
+	strictEqual(aborted.aborted, true);
+	ok(existsSync(join(cwd, "abort.txt")), "the abort's SIGTERM reached the command");
 });
 
 test("task worktrees nested in a checkout past the walk budget leave its .env and their own secrets masked", () => {
