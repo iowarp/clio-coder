@@ -16,6 +16,7 @@ import type { SessionContract, SessionMeta } from "../../src/domains/session/con
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { IN_RUN_CONTINUATION_ENTRY } from "../../src/domains/session/entries.js";
 import { acpUsageSums } from "../../src/engine/acp/adapter.js";
+import { commandResultLines } from "../../src/engine/acp/command-result.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -715,6 +716,7 @@ test("ACP resume and load of the session the process already hosts serve it, and
 
 test("ACP replay parts two assistant messages of one turn on one blank line, as the live stream does", async () => {
 	// bt-session-res J9: live sent "files.\n\nDone:", replay sent "files." and "Done:" with nothing between them.
+	// ACP-5: a steer the run drained stays inside the prompt it answered, live and on replay, and the run's outcome names it.
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const message = (turnId: string, parentTurnId: string, payload: unknown): SessionEntry => ({
 		kind: "message",
@@ -728,13 +730,29 @@ test("ACP replay parts two assistant messages of one turn on one blank line, as 
 		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "list files" },
 		message("a1", "u1", { content: [{ type: "text", text: "Plan: read the files." }], stopReason: "toolUse" }),
 		message("a2", "a1", { content: [{ type: "thinking", thinking: "no text here" }], stopReason: "toolUse" }),
-		message("a3", "a2", {
+		{
+			kind: "message",
+			role: "user",
+			turnId: "s1",
+			parentTurnId: "a2",
+			timestamp,
+			payload: { text: "count them too", queued: "steer" },
+		},
+		message("a3", "s1", {
 			content: [
 				{ type: "text", text: "Done:" },
 				{ type: "text", text: "two files." },
 			],
 			stopReason: "stop",
 		}),
+		{
+			kind: "custom",
+			customType: "turnOutcome",
+			turnId: "o1",
+			parentTurnId: "a3",
+			timestamp,
+			data: { version: 1, turnId: "s1", stopReason: "length" },
+		} as SessionEntry,
 		{ kind: "message", role: "user", turnId: "u2", parentTurnId: "a3", timestamp, payload: "again" },
 		message("a4", "u2", { content: [{ type: "text", text: "Same." }], stopReason: "stop" }),
 	]);
@@ -742,14 +760,24 @@ test("ACP replay parts two assistant messages of one turn on one blank line, as 
 		await peer.call("initialize", { protocolVersion: 1 });
 		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
 		const byTurn = new Map<number, string>();
+		const userByTurn = new Map<number, string[]>();
+		const stopByTurn = new Map<number, string | undefined>();
 		for (const params of peer.updates) {
 			const update = params.update as { sessionUpdate?: string; content?: { text: string } };
+			const replay = (params._meta as Record<string, { turn?: number; stopReason?: string }> | undefined)?.[
+				"clio-coder/replay"
+			];
+			const turn = replay?.turn ?? 0;
+			stopByTurn.set(turn, replay?.stopReason);
+			if (update.sessionUpdate === "user_message_chunk")
+				userByTurn.set(turn, [...(userByTurn.get(turn) ?? []), update.content?.text ?? ""]);
 			if (update.sessionUpdate !== "agent_message_chunk") continue;
-			const turn = (params._meta as Record<string, { turn?: number }> | undefined)?.["clio-coder/replay"]?.turn ?? 0;
 			byTurn.set(turn, (byTurn.get(turn) ?? "") + (update.content?.text ?? ""));
 		}
 		// One separator between messages, the block separator unchanged, and none carried into the next turn.
 		deepStrictEqual([...byTurn.values()], ["Plan: read the files.\n\nDone:\n\ntwo files.", "Same."]);
+		deepStrictEqual([...userByTurn.values()], [["list files", "count them too"], ["again"]]);
+		deepStrictEqual([...stopByTurn.values()], ["max_tokens", "end_turn"]);
 	} finally {
 		await peer.stop();
 	}
@@ -1402,8 +1430,10 @@ test("ACP advertises only slash commands executable from a prompt", async () => 
 
 test("a slash command's failure line crosses a prompt once, as reply text, not again as its result", async () => {
 	// bt-session-res J10: `/context compact` failed and the line went out as a notice chunk and again as the result.
+	// ACP-5: a line past the result's line bound is cut there, so the cut form must still match the whole notice line.
 	const failure =
 		"[/context compact] failed; context unchanged at 9.6K tokens. The summary call failed: Connection error.: bad port. /context compact tries again; /model picks another route to summarize on.";
+	const detail = `provider said: ${"upstream refused the request; ".repeat(60).trimEnd()}`;
 	let emit: (event: unknown) => void = () => {};
 	const commands: AcpCommandControl = {
 		catalog: () => ({
@@ -1412,8 +1442,11 @@ test("a slash command's failure line crosses a prompt once, as reply text, not a
 		}),
 		invoke: () => {
 			// The host hears the chat loop's notice and answers with it, as the orchestrator's runCompact does.
-			emit({ type: "notice", surface: "transcript", level: "error", text: failure });
-			return { level: "error", lines: [failure, "Run /doctor if it keeps failing."] };
+			emit({ type: "notice", surface: "transcript", level: "error", text: `${failure}\n${detail}` });
+			return {
+				level: "error",
+				lines: [...commandResultLines(`${failure}\n${detail}`), "Run /doctor if it keeps failing."],
+			};
 		},
 		injectsUserTurn: () => false,
 		capability: {},
@@ -1432,6 +1465,9 @@ test("a slash command's failure line crosses a prompt once, as reply text, not a
 			.map((params) => (params.update as { content: { text: string } }).content.text)
 			.join("");
 		strictEqual(reply.split(failure).length - 1, 1, reply);
+		ok(Buffer.byteLength(detail) > 1024);
+		strictEqual(reply.split(detail).length - 1, 1, reply);
+		ok(!reply.includes("…[truncated]"), reply);
 		// A result line no notice carried still answers.
 		ok(reply.includes("Run /doctor if it keeps failing."), reply);
 	} finally {

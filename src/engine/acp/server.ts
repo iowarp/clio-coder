@@ -176,6 +176,7 @@ import {
 	budgetBlockFrame,
 	budgetBlockReplayFrame,
 } from "./budget-notice.js";
+import { commandResultLines } from "./command-result.js";
 import type { AcpCommandCatalog, AcpCommandControl, AcpConsentAsk } from "./commands.js";
 import { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
@@ -1557,15 +1558,6 @@ function assistantTextTail(message: unknown, streamed: number): string {
 	return tail;
 }
 
-/** A notice's lines as a command result holds them: no carriage returns, no trailing blanks, no empty lines. */
-function commandResultLines(text: string): string[] {
-	return text
-		.replace(/\r/gu, "")
-		.split("\n")
-		.map((line) => line.trimEnd())
-		.filter((line) => line.length > 0);
-}
-
 /** A failed load. A format error says how to fix it, less the session's path: an ACP message carries none. */
 function loadFailure(error: unknown): AcpRequestError {
 	const message = acpErrorMessage(
@@ -2051,7 +2043,11 @@ function handleChatEvent(
 				return;
 			}
 			const shown = safeStoredString(event.text, ACP_MAX_CHUNK_BYTES - 2);
-			if (active.commandNoticeLines) for (const line of commandResultLines(shown)) active.commandNoticeLines.add(line);
+			// The notice crosses on one line (a control character becomes a space) while the result holds its lines apart,
+			// each cut to the result's line bound: when the notice carried its whole text, its lines are kept as the result
+			// holds them, so a long or multi-line notice still matches the result lines that repeat it.
+			if (active.commandNoticeLines && shown === safeStoredString(event.text, Number.MAX_SAFE_INTEGER))
+				for (const line of commandResultLines(event.text)) active.commandNoticeLines.add(line);
 			sendUpdate(
 				transport,
 				sessionId,
@@ -2646,6 +2642,15 @@ function prepareAcpReplay(
 					current.userTurnId = entry.turnId;
 					current.stopReason = "error";
 				}
+				continue;
+			}
+			// A queued message the engine drained into the running run (a steer between tool batches, a follow-up at its end)
+			// arrived inside the prompt that run answered: live that prompt never ended for it, so replay keeps it in the
+			// same turn, and the run's outcome names it as the turn's last user message (ACP-5 J9).
+			if (current !== null && (payload?.queued === "steer" || payload?.queued === "follow-up")) {
+				current.userTurnId = entry.turnId;
+				current.stopReason = "error";
+				replayMessageChunks(current.frames, "user_message_chunk", replayTextBlocks(entry).text);
 				continue;
 			}
 			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
