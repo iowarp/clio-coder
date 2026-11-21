@@ -89,9 +89,28 @@ export const COUNCIL_JUDGE_PROMPT = [
  */
 export const COUNCIL_VOTE_MEMBER_DIRECTIVE = [
 	"This council round is a vote. Do the work the task asks for, then cast one ballot on it.",
-	`The verdict is a short comparable token the other members can match exactly, such as "yes", "no", "keep", or the name of an option you were given. It must be a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} bytes and is lower-cased before the tally. Anything longer is reasoning: put that in text, along with the evidence behind it.`,
+	`The verdict is your answer as a short comparable token the other members can match exactly, such as the name of the choice you make. It must be a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} bytes and is lower-cased before the tally. Anything longer is reasoning: put that in text, along with the evidence behind it.`,
 	"Your recipe's own result shape does not apply to this run. The council reads the ballot and nothing else.",
 	`End with a JSON object only: ${COUNCIL_BALLOT_SHAPE}`,
+].join("\n");
+
+/**
+ * The persona of a vote member seated as the council's default recipe, which
+ * is every `/poll` participant. That recipe is a code scout whose body demands
+ * its own findings report "even when the handoff asks for prose", so a voter
+ * under it held two contradictory terminal shapes: on the Copilot seat 12 of 31
+ * gpt-6-luna ballots came back as findings first and needed a repair round, and
+ * gpt-6.1-sol and gpt-6-astra exhausted both repairs and lost their votes
+ * (FL-23). A voter has no persona to preserve, so the coordinator writes this
+ * one, pinned by {@link isBoundedGateRolePrompt} like the reviewer, judge and
+ * synthesis prompts. A council that names its agent keeps that recipe's body
+ * and the directive's precedence line.
+ */
+export const COUNCIL_VOTER_PROMPT = [
+	"You are one voter in a council vote, read-only.",
+	"Answer the question in the task from your own judgment, independently of the other voters. Read or search the workspace only when the question is about it.",
+	"You cannot modify anything.",
+	`End with a JSON object only: ${COUNCIL_BALLOT_SHAPE}. The verdict is your own answer, never the placeholder.`,
 ].join("\n");
 
 /**
@@ -214,5 +233,6 @@ export function isBoundedGateRolePrompt(input: {
 	if (input.role === "reviewer") return input.systemPrompt === REVIEWER_GATE_PROMPT;
 	if (input.role === "judge") return input.systemPrompt === JUDGE_GATE_PROMPT;
 	if (input.role === "synthesis") return input.systemPrompt === COUNCIL_JUDGE_PROMPT;
+	if (input.role === "member") return input.systemPrompt === COUNCIL_VOTER_PROMPT;
 	return false;
 }
