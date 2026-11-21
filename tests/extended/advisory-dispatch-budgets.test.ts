@@ -11,6 +11,11 @@ import { createAdmissionQueue } from "../../src/domains/dispatch/admission-queue
 import {
 	budgetLimitWords,
 	cloneRunToolBudgetEnvelope,
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+	readRecordedBudgetEnvelope,
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
@@ -65,6 +70,31 @@ it("main overrides recipe recommendations and baseline, with truthful immutable 
 		effective: { toolCalls: 2, synthesis: false, hardCap: 3 },
 	};
 	equal(cloneRunToolBudgetEnvelope(enforced), undefined);
+	// A pre-M12a scout envelope as its journal and receipt recorded it: live input refuses it, run history reads it as
+	// recorded and shows its budget block in the words it ran under.
+	const recorded = JSON.parse(
+		'{"version":1,"enforcement":{"classification":"native-per-tool","perTool":"enforced","clioControls":["tool-calls","read-reserve","synthesis","attempt-cap"]},"policy":{"recipeId":"scout","default":{"toolCalls":18,"readReserve":4,"synthesis":true},"maximum":{"toolCalls":18,"readReserve":4},"exact":true},"request":null,"effective":{"mode":"enforced","toolCalls":36,"readReserve":4,"synthesis":true,"hardCap":300},"reasons":[{"code":"read-only-research-synthesis","detail":"native read-only research enters final synthesis after 36 observed tool calls"}]}',
+	);
+	equal(cloneRunToolBudgetEnvelope(recorded), undefined);
+	const history = readRecordedBudgetEnvelope(recorded);
+	ok(history !== undefined);
+	deepStrictEqual(history, recorded);
+	deepStrictEqual(
+		[
+			formatBudgetPolicy(history),
+			formatBudgetRequest(history),
+			formatEffectiveBudget(history),
+			formatBudgetReasons(history),
+			budgetLimitWords(history),
+		],
+		[
+			"scout recipe default 18/4; read-only research allowance 36/4, synthesis=on",
+			"recipe default",
+			"36/4, lifetime cap 300, synthesis=on; native per-tool enforced",
+			"read-only-research-synthesis",
+			"answers after 36 tool calls; Clio stops it at 300",
+		],
+	);
 });
 
 for (const synthesis of [false, true]) {

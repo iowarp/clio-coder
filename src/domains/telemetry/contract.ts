@@ -23,7 +23,7 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { PreimageData, PreimageEventName } from "../../core/telemetry/events.js";
 import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { AgentAudience } from "../agents/spec.js";
-import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
+import type { RecordedRunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
@@ -64,7 +64,7 @@ export interface TelemetryRunSummary {
 	rootRequestOrigin?: DispatchRequestOrigin;
 	endpoint?: { key: string; label: string; limit: number };
 	taskSummary?: string;
-	budget?: RunToolBudgetEnvelope;
+	budget?: RecordedRunToolBudgetEnvelope;
 	node?: string;
 	gate?: { role: string; cycle: number };
 	council?: { group: string; label: string; color?: string; round: number };

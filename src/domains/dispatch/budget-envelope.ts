@@ -228,19 +228,22 @@ export function workerBudgetFromEnvelope(envelope: RunToolBudgetEnvelope): RunTo
 	return { ...effective, ceiling: Math.max(floor, limit) };
 }
 
-export function formatBudgetPolicy(envelope: RunToolBudgetEnvelope): string {
+export function formatBudgetPolicy(envelope: RecordedRunToolBudgetEnvelope): string {
+	if (isRetiredBudgetEnvelope(envelope)) return retiredBudgetPolicy(envelope);
 	const policy = envelope.policy;
 	return `${policy.recipeId} advisory default ${policy.default.toolCalls}, recommended max ${policy.maximum.toolCalls}`;
 }
 
-export function formatBudgetRequest(envelope: RunToolBudgetEnvelope): string {
+export function formatBudgetRequest(envelope: RecordedRunToolBudgetEnvelope): string {
+	if (isRetiredBudgetEnvelope(envelope)) return retiredBudgetRequest(envelope);
 	const request = envelope.request;
 	if (request === null) return "recipe default";
 	const ceiling = request.retryRevision;
 	return `${request.toolCalls} advisory${ceiling ? `, retry/revision estimate ${ceiling.toolCalls}` : ""}`;
 }
 
-export function formatEffectiveBudget(envelope: RunToolBudgetEnvelope): string {
+export function formatEffectiveBudget(envelope: RecordedRunToolBudgetEnvelope): string {
+	if (isRetiredBudgetEnvelope(envelope)) return retiredEffectiveBudget(envelope);
 	const budget = envelope.effective;
 	const revision = budget.revision ? `, result revision ${budget.revision.toolCalls}` : "";
 	const enforcement =
@@ -250,7 +253,7 @@ export function formatEffectiveBudget(envelope: RunToolBudgetEnvelope): string {
 	return `${budget.toolCalls}${revision}, advisory baseline ${budget.hardCap}${budget.ceiling === undefined ? "" : `, worker ceiling ${budget.ceiling}`}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
 }
 
-export function formatBudgetReasons(envelope: RunToolBudgetEnvelope): string {
+export function formatBudgetReasons(envelope: RecordedRunToolBudgetEnvelope): string {
 	return envelope.reasons.length === 0 ? "none" : envelope.reasons.map((reason) => reason.code).join(",");
 }
 
@@ -387,11 +390,13 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 /**
  * The run's tool-call limit as a person reads it: how many calls it was planned for and where Clio stops it. The
  * recipe policy, the request and the reason codes stay in `/view` and `clio-coder fleet view`, which keep them whole.
+ * A pre-M12 envelope read from a journal is worded as it was recorded.
  */
-export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
+export function budgetLimitWords(envelope: RecordedRunToolBudgetEnvelope): string {
 	if (envelope.enforcement.classification === "external-one-shot") {
 		return "one launch; Clio cannot count its tool calls, so its time and output limits bound it";
 	}
+	if (isRetiredBudgetEnvelope(envelope)) return retiredBudgetLimitWords(envelope);
 	const budget = workerBudgetFromEnvelope(envelope);
 	const codes = new Set(envelope.reasons.map((reason) => reason.code));
 	// Growth is worded from the revision the run holds after the cap, never from the reason codes the estimate
@@ -407,5 +412,250 @@ export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 		budget.toolCalls === stop
 			? `Clio stops it at ${stop} tool calls`
 			: `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${stop}`;
+	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
+}
+
+/** One phase as a pre-M12 run recorded it, read reserve included. */
+export interface RetiredBudgetPhase {
+	readonly toolCalls: number;
+	readonly readReserve: number;
+}
+
+/**
+ * A budget envelope as a run admitted before fleet M12 recorded it in its journal: an enforced research phase or an
+ * advisory one, both with a read reserve. Persisted run history is immutable, so readers render it as recorded;
+ * nothing admits, enforces or emits this shape.
+ */
+export interface RetiredRunToolBudgetEnvelope {
+	readonly version: 1;
+	readonly enforcement: {
+		readonly classification: "native-per-tool" | "external-one-shot";
+		readonly perTool: "enforced" | "advisory" | "unobserved-not-enforced";
+		readonly clioControls: ReadonlyArray<string>;
+	};
+	readonly policy: {
+		readonly recipeId: string;
+		readonly default: RetiredBudgetPhase & { readonly synthesis: boolean };
+		readonly maximum: RetiredBudgetPhase;
+		readonly exact: boolean;
+	};
+	readonly request: (RetiredBudgetPhase & { readonly retryRevision?: RetiredBudgetPhase }) | null;
+	readonly effective: RetiredBudgetPhase & {
+		/** Absent in the oldest records, which ran enforced. */
+		readonly mode?: "advisory" | "enforced";
+		readonly synthesis: boolean;
+		readonly hardCap: number;
+		readonly ceiling?: number;
+		readonly revision?: RetiredBudgetPhase;
+	};
+	readonly reasons: ReadonlyArray<{ readonly code: string; readonly detail: string }>;
+}
+
+/** A budget envelope a journal holds: the current shape, or the pre-M12 shape read as recorded. */
+export type RecordedRunToolBudgetEnvelope = RunToolBudgetEnvelope | RetiredRunToolBudgetEnvelope;
+
+function isRetiredBudgetEnvelope(envelope: RecordedRunToolBudgetEnvelope): envelope is RetiredRunToolBudgetEnvelope {
+	return "readReserve" in envelope.effective;
+}
+
+const RETIRED_BUDGET_REASON_CODES: ReadonlySet<string> = new Set([
+	...BUDGET_REASON_CODES,
+	"read-reserve-unavailable-clamp",
+	"read-reserve-cap-clamp",
+	"retry-growth-denied",
+	"revision-growth-denied",
+	"read-only-research-synthesis",
+]);
+
+function retiredPhase(value: unknown): RetiredBudgetPhase | null {
+	if (!isRecord(value) || Object.keys(value).some((key) => key !== "toolCalls" && key !== "readReserve")) return null;
+	const { toolCalls, readReserve } = value;
+	if (typeof toolCalls !== "number" || !Number.isSafeInteger(toolCalls) || toolCalls <= 0) return null;
+	if (typeof readReserve !== "number" || !Number.isSafeInteger(readReserve) || readReserve < 0) return null;
+	return { toolCalls, readReserve };
+}
+
+function retiredInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/** The pre-M12 shape, checked field by field and copied; any other value is not an envelope. */
+function cloneRetiredBudgetEnvelope(value: unknown): RetiredRunToolBudgetEnvelope | undefined {
+	if (!isRecord(value) || value.version !== 1 || !isRecord(value.policy) || !isRecord(value.effective)) return undefined;
+	const { policy, effective } = value;
+	if (typeof policy.recipeId !== "string" || policy.recipeId.length === 0 || typeof policy.exact !== "boolean")
+		return undefined;
+	const defaultPhase = retiredPhase(
+		isRecord(policy.default) ? { toolCalls: policy.default.toolCalls, readReserve: policy.default.readReserve } : null,
+	);
+	const maximum = retiredPhase(policy.maximum);
+	const effectivePhase = retiredPhase({ toolCalls: effective.toolCalls, readReserve: effective.readReserve });
+	if (
+		defaultPhase === null ||
+		maximum === null ||
+		effectivePhase === null ||
+		!isRecord(policy.default) ||
+		typeof policy.default.synthesis !== "boolean" ||
+		typeof effective.synthesis !== "boolean" ||
+		!retiredInteger(effective.hardCap) ||
+		(effective.mode !== undefined && effective.mode !== "advisory" && effective.mode !== "enforced") ||
+		(effective.ceiling !== undefined && !retiredInteger(effective.ceiling)) ||
+		!Array.isArray(value.reasons)
+	)
+		return undefined;
+	const revision = effective.revision === undefined ? undefined : retiredPhase(effective.revision);
+	if (revision === null) return undefined;
+	let request: RetiredRunToolBudgetEnvelope["request"] = null;
+	if (value.request !== null) {
+		if (!isRecord(value.request)) return undefined;
+		const phase = retiredPhase({ toolCalls: value.request.toolCalls, readReserve: value.request.readReserve });
+		const retryRevision =
+			value.request.retryRevision === undefined ? undefined : retiredPhase(value.request.retryRevision);
+		if (phase === null || retryRevision === null) return undefined;
+		request = { ...phase, ...(retryRevision === undefined ? {} : { retryRevision }) };
+	}
+	const reasons: { code: string; detail: string }[] = [];
+	for (const reason of value.reasons) {
+		if (
+			!isRecord(reason) ||
+			typeof reason.code !== "string" ||
+			!RETIRED_BUDGET_REASON_CODES.has(reason.code) ||
+			typeof reason.detail !== "string"
+		)
+			return undefined;
+		reasons.push({ code: reason.code, detail: reason.detail });
+	}
+	// The oldest records carry no enforcement block; they ran native and enforced.
+	const recorded = value.enforcement;
+	const enforcement: RetiredRunToolBudgetEnvelope["enforcement"] | null =
+		recorded === undefined
+			? { classification: "native-per-tool", perTool: "enforced", clioControls: [] }
+			: isRecord(recorded) &&
+					(recorded.classification === "native-per-tool" || recorded.classification === "external-one-shot") &&
+					(recorded.perTool === "enforced" ||
+						recorded.perTool === "advisory" ||
+						recorded.perTool === "unobserved-not-enforced") &&
+					Array.isArray(recorded.clioControls) &&
+					recorded.clioControls.every((control) => typeof control === "string")
+				? {
+						classification: recorded.classification,
+						perTool: recorded.perTool,
+						clioControls: [...(recorded.clioControls as string[])],
+					}
+				: null;
+	if (enforcement === null) return undefined;
+	return structuredClone({
+		version: 1,
+		enforcement,
+		policy: {
+			recipeId: policy.recipeId,
+			default: { ...defaultPhase, synthesis: policy.default.synthesis },
+			maximum,
+			exact: policy.exact,
+		},
+		request,
+		effective: {
+			...(effective.mode === undefined ? {} : { mode: effective.mode }),
+			...effectivePhase,
+			synthesis: effective.synthesis,
+			hardCap: effective.hardCap,
+			...(effective.ceiling === undefined ? {} : { ceiling: effective.ceiling as number }),
+			...(revision === undefined ? {} : { revision }),
+		},
+		reasons,
+	});
+}
+
+/**
+ * Read an envelope from immutable run history (a journal). The current shape comes first; a pre-M12 envelope is
+ * returned as recorded, for display only. Live input never takes this path: it reads through
+ * {@link cloneRunToolBudgetEnvelope}, which refuses the retired shape.
+ */
+export function readRecordedBudgetEnvelope(value: unknown): RecordedRunToolBudgetEnvelope | undefined {
+	return cloneRunToolBudgetEnvelope(value) ?? cloneRetiredBudgetEnvelope(value);
+}
+
+/** The advisory ceiling a pre-M12 run derived from its recorded policy; an enforced run stops at its cap. */
+function retiredWorkerBudget(envelope: RetiredRunToolBudgetEnvelope): RetiredRunToolBudgetEnvelope["effective"] {
+	const effective = envelope.effective;
+	if (effective.mode !== "advisory") return effective;
+	const floor = Math.max(effective.toolCalls, effective.revision?.toolCalls ?? 0);
+	const limit = envelope.policy.exact
+		? effective.hardCap
+		: Math.min(envelope.policy.maximum.toolCalls, effective.hardCap);
+	return { ...effective, ceiling: Math.max(floor, limit) };
+}
+
+/** The recipe-policy words a pre-M12 run was shown, from its recorded envelope. */
+function retiredBudgetPolicy(envelope: RetiredRunToolBudgetEnvelope): string {
+	const policy = envelope.policy;
+	if (envelope.effective.mode === "advisory")
+		return `${policy.recipeId} advisory default ${policy.default.toolCalls}/${policy.default.readReserve}, recommended max ${policy.maximum.toolCalls}/${policy.maximum.readReserve}`;
+	const range = policy.exact
+		? `exact ${policy.default.toolCalls}/${policy.default.readReserve}`
+		: `default ${policy.default.toolCalls}/${policy.default.readReserve}, max ${policy.maximum.toolCalls}/${policy.maximum.readReserve}`;
+	const allowance = envelope.reasons.some((reason) => reason.code === "read-only-research-synthesis")
+		? envelope.effective
+		: undefined;
+	if (allowance !== undefined && allowance.toolCalls !== policy.default.toolCalls) {
+		const authored = policy.exact
+			? `recipe default ${policy.default.toolCalls}/${policy.default.readReserve}`
+			: `recipe ${range}`;
+		return `${policy.recipeId} ${authored}; read-only research allowance ${allowance.toolCalls}/${allowance.readReserve}, synthesis=${policy.default.synthesis ? "on" : "off"}`;
+	}
+	return `${policy.recipeId} ${range}, synthesis=${policy.default.synthesis ? "on" : "off"}`;
+}
+
+/** The request words a pre-M12 run was shown, from its recorded envelope. */
+function retiredBudgetRequest(envelope: RetiredRunToolBudgetEnvelope): string {
+	const request = envelope.request;
+	if (request === null) return "recipe default";
+	const ceiling = request.retryRevision;
+	if (envelope.effective.mode === "advisory")
+		return `${request.toolCalls}/${request.readReserve} advisory${ceiling ? `, retry/revision estimate ${ceiling.toolCalls}/${ceiling.readReserve}` : ""}`;
+	return ceiling === undefined
+		? `${request.toolCalls}/${request.readReserve}, no retry/revision growth`
+		: `${request.toolCalls}/${request.readReserve}, retry/revision ceiling ${ceiling.toolCalls}/${ceiling.readReserve}`;
+}
+
+/** The effective-envelope words a pre-M12 run was shown, from its recorded envelope. */
+function retiredEffectiveBudget(envelope: RetiredRunToolBudgetEnvelope): string {
+	const budget = envelope.effective;
+	const revision = budget.revision
+		? `, result revision ${budget.revision.toolCalls}/${budget.revision.readReserve}`
+		: "";
+	const enforcement =
+		envelope.enforcement.classification === "external-one-shot"
+			? "external one-shot; per-tool unobserved/not enforced"
+			: envelope.enforcement.perTool === "advisory"
+				? "native per-tool observed/advisory"
+				: "native per-tool enforced";
+	return `${budget.toolCalls}/${budget.readReserve}${revision}, ${budget.mode === "advisory" ? "advisory baseline" : "lifetime cap"} ${budget.hardCap}${budget.ceiling === undefined ? "" : `, worker ceiling ${budget.ceiling}`}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
+}
+
+/** The limit words a pre-M12 run was shown, from its recorded envelope. */
+function retiredBudgetLimitWords(envelope: RetiredRunToolBudgetEnvelope): string {
+	const budget = retiredWorkerBudget(envelope);
+	const advisory = budget.mode === "advisory";
+	const revision = budget.revision;
+	const notes = [
+		...(envelope.reasons.some((reason) => reason.code === "global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
+		...(revision === undefined
+			? []
+			: [
+					revision.toolCalls > budget.toolCalls
+						? `about ${revision.toolCalls} if it has to redo its answer`
+						: "more reads if it has to redo its answer",
+				]),
+	];
+	const stop = advisory ? (budget.ceiling ?? budget.hardCap) : budget.hardCap;
+	const limit =
+		advisory && budget.toolCalls === stop
+			? `Clio stops it at ${stop} tool calls`
+			: advisory
+				? `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${stop}`
+				: budget.synthesis
+					? `answers after ${budget.toolCalls} tool calls; Clio stops it at ${budget.hardCap}`
+					: `Clio stops it at ${budget.hardCap} tool calls`;
 	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
 }

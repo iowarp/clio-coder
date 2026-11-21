@@ -3,7 +3,7 @@ import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto
 import { factRef } from "../core/telemetry/dto.js";
 import { parseCouncilReport } from "../domains/agents/index.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
-import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
+import type { RecordedRunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
 import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
 import {
@@ -134,7 +134,7 @@ export interface DispatchBoardRow {
 	/** Sanitized, one-line summary of the task assigned to this run. */
 	taskSummary?: string;
 	/** Immutable budget admission provenance for this run. */
-	budget?: RunToolBudgetEnvelope;
+	budget?: RecordedRunToolBudgetEnvelope;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
 	telemetry?: RunTelemetryV1 | null;

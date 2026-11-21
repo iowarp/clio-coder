@@ -39,7 +39,7 @@ import {
 	observedWikiSources,
 	wikiSourcesMatch,
 } from "../domains/context/wiki/source-content.js";
-import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
+import { formatEffectiveBudget, readRecordedBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule, DISPATCH_INTENT_PATH_LIST_CAP } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
@@ -355,9 +355,10 @@ function dispatchUsage(
 	// A receipt from a peer that settled no spend reads as unknown, never as zero (#434).
 	const spend = spendOf(receipt);
 	const { pricing } = spend;
+	const budget = readRecordedBudgetEnvelope(receipt.budget);
 	return (
 		`; run=${runId}; tokens: ${usageDetail(spend, cacheReadText(spend, cache))}; cost=${renderPricing(pricing)} (priced by ${renderPricedBy(pricing)})` +
-		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "") +
+		(budget ? `; budget=${formatEffectiveBudget(budget)}` : "") +
 		breakdown
 	);
 }

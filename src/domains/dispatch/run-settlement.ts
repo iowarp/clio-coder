@@ -26,6 +26,7 @@ import {
 	formatBudgetReasons,
 	formatBudgetRequest,
 	formatEffectiveBudget,
+	readRecordedBudgetEnvelope,
 } from "./budget-envelope.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
 import { deriveEnvelopePhaseDurations } from "./phase-timing.js";
@@ -74,6 +75,20 @@ function diagnostic(value: string | null | undefined): string | null {
 	if (value === null || value === undefined || value === "") return null;
 	const redacted = redactSecretString(value);
 	return redacted.length <= DIAGNOSTIC_CHARS ? redacted : `${redacted.slice(0, DIAGNOSTIC_CHARS - 1)}…`;
+}
+
+/** The receipt's budget as run.settled words it; a receipt sealed before fleet M12 is worded as it was recorded. */
+function budgetWordsOf(
+	value: unknown,
+): { policy: string; requested: string; effective: string; reasons: string } | null {
+	const budget = readRecordedBudgetEnvelope(value);
+	if (budget === undefined) return null;
+	return {
+		policy: diagnostic(formatBudgetPolicy(budget)) ?? "",
+		requested: diagnostic(formatBudgetRequest(budget)) ?? "",
+		effective: diagnostic(formatEffectiveBudget(budget)) ?? "",
+		reasons: diagnostic(formatBudgetReasons(budget)) ?? "",
+	};
 }
 
 /**
@@ -376,14 +391,7 @@ export function settleFinishedRun(
 						suggestedAgentId: receipt.capabilityMismatch.suggestedAgentId,
 					}
 				: null,
-			budget: receipt.budget
-				? {
-						policy: diagnostic(formatBudgetPolicy(receipt.budget)) ?? "",
-						requested: diagnostic(formatBudgetRequest(receipt.budget)) ?? "",
-						effective: diagnostic(formatEffectiveBudget(receipt.budget)) ?? "",
-						reasons: diagnostic(formatBudgetReasons(receipt.budget)) ?? "",
-					}
-				: null,
+			budget: budgetWordsOf(receipt.budget),
 			context: contextOf(receipt),
 			upstream: {
 				responseModelIds: diagnostic(runResponseModelIdObservationLabel(receipt)),

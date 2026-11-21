@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { sumFactSums } from "../core/telemetry/pricing.js";
 import { renderCountSum, renderDurationSum, renderUsdSum } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
+import type { RecordedRunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import type { CapacityDrain } from "../domains/dispatch/capacity-lease.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 
@@ -38,7 +38,7 @@ type Displayed = { display: string };
 interface RunningRow {
 	runId: string;
 	agentId: string;
-	budget: RunToolBudgetEnvelope | null;
+	budget: RecordedRunToolBudgetEnvelope | null;
 	runtimeKind: RunEnvelope["runtimeKind"];
 	outcomePhase: RunEnvelope["status"];
 	heartbeat: "alive" | "stale" | "dead";
@@ -194,8 +194,8 @@ async function writeStatusText(out: StatusWriter, snapshot: StatusSnapshot): Pro
 			out.write(
 				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${row.elapsed.display}  ${row.usd.display}\n`,
 			);
-			const budget = row.budget;
-			if (budget !== null && budgets !== null) {
+			const budget = row.budget === null || budgets === null ? undefined : budgets.readRecordedBudgetEnvelope(row.budget);
+			if (budget !== undefined && budgets !== null) {
 				out.write(`    recipe policy: ${budgets.formatBudgetPolicy(budget)}\n`);
 				out.write(`    requested envelope: ${budgets.formatBudgetRequest(budget)}\n`);
 				out.write(`    effective envelope: ${budgets.formatEffectiveBudget(budget)}\n`);
