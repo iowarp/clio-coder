@@ -490,15 +490,15 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		evaluate(input) {
 			if (input.sessionId !== undefined) enterSession(input.sessionId);
 			if (input.hook === "turn_start") {
-				// An in-run continuation of the same user turn keeps measuring it: its read streak runs on (X4).
-				const continued =
-					input.metadata?.requestContinuation === true && userTurnId !== null && input.metadata.userTurnId === userTurnId;
-				const exploration = active.exploration;
+				// turn_start names its user turn in metadata (turn-middleware's turnStartInput), a test host perhaps in turnId.
+				const started =
+					input.turnId ?? (typeof input.metadata?.userTurnId === "string" ? input.metadata.userTurnId : undefined);
+				// An in-run continuation of the same user turn has not ended it: its firings stay open and its measure runs on.
+				if (input.metadata?.requestContinuation === true && userTurnId !== null && started === userTurnId) return [];
 				// A turn that ended without a turn_end hook still ended; what it carried settles before this one starts.
 				endTurn();
 				active = emptyTurn(previousClarificationStreak);
-				if (continued) active = { ...active, exploration };
-				userTurnId = input.turnId ?? (continued ? userTurnId : null);
+				userTurnId = started ?? null;
 				assistantTurnId = null;
 				dispatched = false;
 				return [];

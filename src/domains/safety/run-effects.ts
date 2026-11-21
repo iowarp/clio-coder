@@ -395,6 +395,16 @@ export function callChangesTree(
 }
 
 /**
+ * The main session's {@link callChangesTree} for the read-streak rule: the operator's configured scratch roots, read
+ * from `settings` at each call, count as scratch as a worker's do.
+ */
+export function sessionChangesTree(
+	settings: () => { safety: { scratchRoots: ReadonlyArray<string> } },
+): (toolName: string, args: Record<string, unknown> | undefined, cwd: string) => boolean {
+	return (toolName, args, cwd) => callChangesTree(toolName, args, cwd, { scratchRoots: settings().safety.scratchRoots });
+}
+
+/**
  * Fold a run's tool calls into its observed effects. A call's effects land only
  * when its result comes back clean: a blocked write and a red command are not
  * evidence that the workspace changed or that a check passed.

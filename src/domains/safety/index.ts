@@ -55,7 +55,7 @@ export {
 	type RigorSource,
 	resolveRigor,
 } from "./rigor.js";
-export { callChangesTree } from "./run-effects.js";
+export { callChangesTree, sessionChangesTree } from "./run-effects.js";
 export {
 	describeValidationContract,
 	loadValidationContract,

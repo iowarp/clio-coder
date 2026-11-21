@@ -198,7 +198,6 @@ import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot
 import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } from "../domains/safety/hook-drift.js";
 import type { AutonomyLevel, FlowRestrictionSet } from "../domains/safety/index.js";
 import {
-	callChangesTree,
 	EMPTY_INFORMATION_FLOW_POLICY,
 	flowUnmediatedAgentRefusal,
 	isFlowRestrictionSet,
@@ -208,6 +207,7 @@ import {
 	resolveModelDestination,
 	resolveRigor,
 	SafetyDomainModule,
+	sessionChangesTree,
 } from "../domains/safety/index.js";
 import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { createInternalGitPolicy } from "../domains/safety/internal-git-policy.js";
@@ -2575,7 +2575,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middlewareRegistrar.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
 	for (const registration of createExplorationNudgeRegistrations({
 		workspaceRoot: memoryWorkspaceRoot,
-		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(getCurrentSettings) },
 		readStreakObserver: turnOutcomeCollector,
 	}))
 		middlewareRegistrar.registerHook(registration);

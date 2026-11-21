@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { ownerTelemetryContext } from "../../src/core/telemetry/context.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newCallId } from "../../src/core/telemetry/ids.js";
@@ -10,13 +11,14 @@ import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createUnbackedWorkerClaimRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
+import { nextFiringId } from "../../src/domains/middleware/fired-record.js";
 import { createExplorationNudgeRegistrations, createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import {
-	callChangesTree,
 	createRunEffectsRecorder,
 	recordToolExecutionEffects,
+	sessionChangesTree,
 } from "../../src/domains/safety/run-effects.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -542,12 +544,18 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 			mkdirSync(join(scratch.dir, area));
 			writeFileSync(join(scratch.dir, area, "notes.md"), "notes\n");
 		}
+		// An operator scratch root inside the workspace: a write there is no edit either.
+		const scratchRoot = join(scratch.dir, "scratch");
+		mkdirSync(scratchRoot);
 		const middleware = createMiddlewareBundle({
 			registrations: [
 				collector,
 				...createExplorationNudgeRegistrations({
 					workspaceRoot: () => scratch.dir,
-					readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+					readStreak: {
+						repeatsAsRead: callRepeatsAsRead,
+						changesTree: sessionChangesTree(() => ({ safety: { scratchRoots: [scratchRoot] } })),
+					},
 					readStreakObserver: collector,
 				}),
 			],
@@ -581,9 +589,9 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 		};
 		const reads = (count: number) => Array.from({ length: count }, () => ({ name: "read" }));
 		const firingOf = (ruleId: string, nth = 0) => fired.filter((row) => row.ruleId === ruleId)[nth]?.firingId ?? "";
+		// turn_start names its user turn in metadata only, as turn-middleware sends it.
 		hook({
 			hook: "turn_start",
-			turnId: "u1",
 			metadata: { userTurnId: "u1", turnOrigin: "operator", activeToolNames: "read,edit,tasks,ask_user,dispatch" },
 		});
 		// Ten reads across three areas draw the scout note; the dispatch the model starts after it acts on it.
@@ -610,11 +618,14 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 		strictEqual(settled.get(firingOf("nudge.read-streak", 1)), undefined, "nine reads after the note");
 		round(reads(1));
 		strictEqual(settled.get(firingOf("nudge.read-streak", 1))?.outcome, "ignored", "ten reads after the note");
-		// Read forty draws the second note. A write outside the workspace is not the edit it asks for, and the in-run
-		// continuation of the same user turn ends the note's scope, moot, but not the turn's measure.
+		// Read forty draws the second note. Writes outside the workspace or in a scratch root are not the edit it asks
+		// for; the in-run continuation of the same user turn leaves the note open and the turn's measure running, and
+		// the turn's end leaves the note moot.
 		const lastCarried = round(reads(5));
 		round([{ name: "write", args: { path: join(dirname(scratch.dir), "x4-outside.txt"), content: "x" } }]);
-		hook({ hook: "turn_start", turnId: "u1", metadata: { userTurnId: "u1", requestContinuation: true } });
+		round([{ name: "write", args: { path: join(scratchRoot, "x4-scratch.txt"), content: "x" } }]);
+		hook({ hook: "turn_start", metadata: { userTurnId: "u1", requestContinuation: true } });
+		strictEqual(settled.get(firingOf("nudge.read-streak", 3)), undefined, "open across the continuation");
 		hook({ hook: "turn_end", turnId: "a1", metadata: { userTurnId: "u1" } });
 
 		const outcome = (firingId: string) => settled.get(firingId);
@@ -647,11 +658,33 @@ it("exploration notes settle acted, ignored and moot, and the turn records its r
 		strictEqual(settled.size, 5, "every exploration firing settles once");
 		deepStrictEqual(collector.take("u1").exploration, { maxReadStreak: 40, serialRounds: 5, notes: 4 });
 		// A message handed to the run mid-turn files its own user turn: the streak and the turn's measure restart there.
-		hook({ hook: "turn_start", turnId: "u5", metadata: { userTurnId: "u5", turnOrigin: "operator" } });
+		hook({ hook: "turn_start", metadata: { userTurnId: "u5", turnOrigin: "operator" } });
 		round(reads(5), "u5");
 		round(reads(5), "u5");
 		round(reads(3), "u6");
 		deepStrictEqual(collector.take("u5", "u6").exploration, { maxReadStreak: 3, serialRounds: 0, notes: 0 });
+		// A continuation before any tool call knows its user turn from turn_start alone: a firing its first request
+		// carried stays open across it and settles when the turn ends.
+		hook({ hook: "turn_start", metadata: { userTurnId: "u7", turnOrigin: "operator" } });
+		const opening = nextFiringId();
+		hub.emit(
+			"middleware.fired",
+			{
+				firingId: opening,
+				hook: "turn_start",
+				phase: "sync",
+				ruleId: "nudge.x4-opening",
+				effects: ["inject_reminder"],
+				severity: "info",
+				evidence: "count:x4@turn",
+			},
+			ownerTelemetryContext({ sessionId }),
+		);
+		collector.requestSent(newCallId(), [opening]);
+		hook({ hook: "turn_start", metadata: { userTurnId: "u7", requestContinuation: true } });
+		strictEqual(settled.get(opening), undefined, "the continuation did not end u7");
+		hook({ hook: "turn_end", turnId: "a7", metadata: { userTurnId: "u7" } });
+		strictEqual(settled.get(opening)?.outcome, "ignored");
 
 		// A worker settles its one thrash note itself, under its run: ten reads after the request that carried it.
 		const run = { sessionId: "x4-parent", runId: "run-x4", agent: { role: "worker" as const, id: "run-x4" } };
