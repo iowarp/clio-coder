@@ -28,7 +28,10 @@ import {
 	browserGrantedHosts,
 	browserOutwardHosts,
 	browserToolSurface,
+	browserUngrantedEndpoint,
+	grantBrowserEndpoint,
 	grantBrowserHosts,
+	normalizeBrowserEndpoint,
 	prepareBrowserArguments,
 } from "./surface.js";
 
@@ -84,6 +87,7 @@ function formatBrowserReply(op: BrowserOp, reply: BrowserReply, notes: ReadonlyA
 		`browser ${op}${facts ? ` page ${facts.page}` : ""}${facts?.status !== undefined ? ` · HTTP ${facts.status}` : ""}${reply.ok ? "" : " · FAILED"}`,
 	);
 	if (reply.closed) head.push(reply.closed === "session" ? "session closed" : "page closed");
+	if (reply.attached) head.push(`attached to ${reply.attached} (${reply.pages?.length ?? 0} page(s))`);
 	for (const note of notes) head.push(note);
 	if (reply.actions && reply.actions.length > 0) {
 		head.push(`actions (${reply.actions.length}):`);
@@ -96,7 +100,7 @@ function formatBrowserReply(op: BrowserOp, reply: BrowserReply, notes: ReadonlyA
 	const body: string[] = [];
 	if (!reply.ok) body.push(`error: ${reply.error}`);
 	if (facts) body.push(`url: ${facts.url}`, `title: ${facts.title}`);
-	if (reply.pages && reply.pages.length > 1)
+	if (reply.pages && (reply.pages.length > 1 || reply.attached))
 		body.push(`pages: ${reply.pages.map((p) => `${p.page} ${p.url}`).join(" | ")}`);
 	if (reply.value !== undefined) body.push(`value: ${reply.value}`);
 	if (reply.logs && reply.logs.length > 0) {
@@ -168,6 +172,8 @@ async function withImages(
 
 export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 	const sessions = new BrowserSessions();
+	/** The endpoint each session's driver is attached to, for close's wording. */
+	const attached = new Map<string, string>();
 	return {
 		...browserToolSurface,
 		closeSessions: () => sessions.closeAll(),
@@ -189,6 +195,16 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 			}
 			if (op === "run" && str(args, "script") === undefined && str(args, "file") === undefined)
 				return { kind: "error", message: "browser run: give script (Playwright JavaScript) or file" };
+			const endpoint = op === "attach" ? normalizeBrowserEndpoint(args.endpoint) : null;
+			if (op === "attach") {
+				if (endpoint === null)
+					return {
+						kind: "error",
+						message: "browser attach: endpoint takes a port (9222), host:port, or an http or ws DevTools URL",
+					};
+				const refusal = options?.flowAdmitsUrl?.(endpoint.url);
+				if (refusal) return { kind: "error", message: `browser attach: ${refusal}` };
+			}
 
 			const notes: string[] = [];
 			let component = resolveBrowserComponent();
@@ -210,6 +226,9 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 			// Admission already confirmed these hosts for this call.
 			const newHosts = browserOutwardHosts(args, options?.sessionId);
 			if (newHosts.length > 0) grantBrowserHosts(options?.sessionId, newHosts);
+			const newEndpoint = browserUngrantedEndpoint(args, options?.sessionId);
+			if (newEndpoint !== undefined) grantBrowserEndpoint(options?.sessionId, newEndpoint);
+			for (const key of [...attached.keys()]) if (key !== sessionId) attached.delete(key);
 			let started: Awaited<ReturnType<BrowserSessions["worker"]>>;
 			try {
 				started = await sessions.worker({
@@ -225,8 +244,10 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 					message: `browser: the session did not start: ${error instanceof Error ? error.message : String(error)}`,
 				};
 			}
-			if (started.restarted)
+			if (started.restarted) {
+				attached.delete(sessionId);
 				notes.push("the session restarted because this call runs under a different sandbox policy; earlier pages are gone");
+			}
 
 			const timeoutMs =
 				op === "run"
@@ -251,6 +272,10 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 							},
 							call,
 						);
+						break;
+					case "attach":
+						reply = await started.worker.request({ op: "attach", endpoint: (endpoint as { url: string }).url }, call);
+						if (reply.ok) attached.set(sessionId, (endpoint as { url: string }).url);
 						break;
 					case "run":
 						reply = await started.worker.request(
@@ -279,8 +304,16 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 						break;
 					case "close":
 						if (page === undefined) {
+							const from = attached.get(sessionId);
+							attached.delete(sessionId);
 							await sessions.close(sessionId);
-							return { kind: "ok", output: "browser close: session closed; its pages and profile are gone" };
+							return {
+								kind: "ok",
+								output:
+									from !== undefined
+										? `browser close: detached from ${from}; the tabs Clio opened there are closed, the browser and its other tabs keep running`
+										: "browser close: session closed; its pages and profile are gone",
+							};
 						}
 						reply = await started.worker.request({ op: "close", page }, call);
 						break;

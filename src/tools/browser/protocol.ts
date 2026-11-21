@@ -32,6 +32,14 @@ export interface BrowserOpenRequest {
 	grantHosts?: string[];
 }
 
+/** Drive a browser someone else started, over its CDP endpoint, instead of the session's own headless one. */
+export interface BrowserAttachRequest {
+	op: "attach";
+	id: number;
+	/** An http(s) endpoint the browser's /json/version answers on, or its ws(s) DevTools URL. */
+	endpoint: string;
+}
+
 export interface BrowserRunRequest {
 	op: "run";
 	id: number;
@@ -66,6 +74,7 @@ export interface BrowserCancelRequest {
 export type BrowserRequest =
 	| BrowserInit
 	| BrowserOpenRequest
+	| BrowserAttachRequest
 	| BrowserRunRequest
 	| BrowserLookRequest
 	| BrowserCloseRequest
@@ -131,6 +140,8 @@ export interface BrowserReplyBody {
 	events?: BrowserEventDelta;
 	closed?: "page" | "session";
 	engine?: string;
+	/** The CDP endpoint the session is attached to, on attach. */
+	attached?: string;
 }
 
 export type BrowserReply =

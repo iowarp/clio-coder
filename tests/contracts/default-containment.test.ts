@@ -46,7 +46,13 @@ import {
 } from "../../src/domains/workspace-snapshots/store.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
-import { browserOutwardHosts, browserToolSurface, grantBrowserHosts } from "../../src/tools/browser/surface.js";
+import {
+	browserOutwardHosts,
+	browserToolSurface,
+	browserUngrantedEndpoint,
+	grantBrowserEndpoint,
+	grantBrowserHosts,
+} from "../../src/tools/browser/surface.js";
 import { editTool } from "../../src/tools/edit.js";
 import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
 import { createRunScriptTool } from "../../src/tools/run-script.js";
@@ -236,6 +242,59 @@ test("a browser host granted beyond loopback lasts for its session: another sess
 			{ sessionId: "A", asked: false, kind: "ok" },
 			{ sessionId: "B", asked: true, kind: "ok" },
 			{ sessionId: "A", asked: true, kind: "ok" },
+		],
+	);
+});
+
+test("a browser attach asks once per CDP endpoint per session, whatever spelling names it", async (t) => {
+	const home = await isolateClioEnv("clio-contained-browser-attach-");
+	t.after(() => home.restore());
+	const pkg = join(componentInstallDir("browser", PLAYWRIGHT_CORE_VERSION), "node_modules", "playwright-core");
+	mkdirSync(pkg, { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "playwright-core", main: "index.js" }));
+	writeFileSync(join(pkg, "index.js"), "");
+	mkdirSync(join(pkg, "..", "..", "browsers", "chromium_headless_shell-1"), { recursive: true });
+	const { registry } = defaultSession(
+		workspace("clio-contained-browser-attach-"),
+		{ sandbox: true, snapshots: false },
+		{ operatorAttends: () => true },
+	);
+	registry.register({
+		...browserToolSurface,
+		run: async (args, options) => {
+			const grant = browserUngrantedEndpoint(args, options?.sessionId);
+			if (grant !== undefined) grantBrowserEndpoint(options?.sessionId, grant);
+			return { kind: "ok", output: "" };
+		},
+	});
+	const cards: Array<{ requestId: string; actionClass: ActionClass; ruleId: string | undefined }> = [];
+	registry.onPermissionRequired((_call, decision, meta) =>
+		cards.push({
+			requestId: meta.requestId,
+			actionClass: decision.classification.actionClass,
+			ruleId: decision.kind === "ask" ? decision.confirmationRuleId : undefined,
+		}),
+	);
+	const attachIn = async (sessionId: string, endpoint: string) => {
+		const before = cards.length;
+		const pending = registry.invoke({ tool: ToolNames.Browser, args: { op: "attach", endpoint } }, { sessionId });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const card = cards.length > before ? cards.at(-1) : undefined;
+		if (card) await registry.resumeParkedCalls({ ...card, requestedBy: "contract-operator" });
+		return { endpoint, asked: card?.ruleId ?? false, kind: (await pending).kind };
+	};
+	deepStrictEqual(
+		[
+			await attachIn("A", "9222"),
+			await attachIn("A", "http://127.0.0.1:9222/json/version"),
+			await attachIn("A", "127.0.0.1:9339"),
+			await attachIn("B", "9222"),
+		],
+		[
+			{ endpoint: "9222", asked: "browser-attach-endpoint", kind: "ok" },
+			{ endpoint: "http://127.0.0.1:9222/json/version", asked: false, kind: "ok" },
+			{ endpoint: "127.0.0.1:9339", asked: "browser-attach-endpoint", kind: "ok" },
+			{ endpoint: "9222", asked: "browser-attach-endpoint", kind: "ok" },
 		],
 	);
 });

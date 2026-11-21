@@ -14,6 +14,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { format } from "node:util";
 import type {
+	BrowserAttachRequest,
 	BrowserConsoleRecord,
 	BrowserEventDelta,
 	BrowserInit,
@@ -211,13 +212,41 @@ let shotCount = 0;
 let snapshotCount = 0;
 const grantedHosts = new Set<string>();
 const blockedHosts = new Set<string>();
+/** The CDP endpoint of a browser someone else started that the session drives instead of its own. */
+let attachedTo: string | undefined;
+/** An attached browser that went away (the person closed it), named in the next "no page" error. */
+let lostAttach: string | undefined;
+/** Pages Clio opened in an attached browser; releasing it closes these and leaves the person's own. */
+const ownPages = new Set<Any>();
+
+function playwrightChromium(): Promise<Any> {
+	if (!init) throw new Error("driver not initialised");
+	process.env.PLAYWRIGHT_BROWSERS_PATH = init.browsersPath;
+	return import(pathToFileURL(init.playwrightEntry).href).then((playwright) => ({
+		chromium: playwright.chromium ?? playwright.default?.chromium,
+		version: playwright.default?.version ?? "",
+	}));
+}
+
+/** Loopback and granted hosts only: a page cannot make the browser reach anything else. */
+function routeGranted(route: Any): unknown {
+	let host = "";
+	try {
+		const url = new URL(route.request().url());
+		if (url.protocol !== "http:" && url.protocol !== "https:") return route.continue();
+		host = url.hostname;
+	} catch {
+		return route.continue();
+	}
+	if (isLoopbackHost(host) || grantedHosts.has(host.toLowerCase())) return route.continue();
+	blockedHosts.add(host);
+	return route.abort("blockedbyclient");
+}
 
 async function ensureContext(): Promise<void> {
 	if (context) return;
 	if (!init) throw new Error("driver not initialised");
-	process.env.PLAYWRIGHT_BROWSERS_PATH = init.browsersPath;
-	const playwright = await import(pathToFileURL(init.playwrightEntry).href);
-	const chromium = playwright.chromium ?? playwright.default?.chromium;
+	const { chromium, version } = await playwrightChromium();
 	try {
 		browser = await chromium.launch({
 			headless: true,
@@ -227,45 +256,52 @@ async function ensureContext(): Promise<void> {
 	} catch (error) {
 		throw new Error(`the browser did not start: ${clip(error instanceof Error ? error.message : error, 600)}`);
 	}
-	engine = `playwright-core ${playwright.default?.version ?? ""} ${browser.version()}`.replace(/\s+/gu, " ").trim();
+	engine = `playwright-core ${version} ${browser.version()}`.replace(/\s+/gu, " ").trim();
 	context = await browser.newContext({ viewport: init.viewport });
 	context.setDefaultTimeout(ACTION_TIMEOUT_MS);
 	context.setDefaultNavigationTimeout(ACTION_TIMEOUT_MS);
-	// Loopback and granted hosts only: a page cannot make the browser reach anything else.
-	await context.route("**/*", (route: Any) => {
-		let host = "";
-		try {
-			const url = new URL(route.request().url());
-			if (url.protocol !== "http:" && url.protocol !== "https:") return route.continue();
-			host = url.hostname;
-		} catch {
-			return route.continue();
-		}
-		if (isLoopbackHost(host) || grantedHosts.has(host.toLowerCase())) return route.continue();
-		blockedHosts.add(host);
-		return route.abort("blockedbyclient");
+	await context.route("**/*", routeGranted);
+}
+
+/** Let go of the current browser: an attached one keeps running with the person's pages; the session's own closes. */
+async function releaseBrowser(): Promise<void> {
+	const [current, currentContext, wasAttached, opened] = [browser, context, attachedTo !== undefined, [...ownPages]];
+	browser = undefined;
+	context = undefined;
+	attachedTo = undefined;
+	ownPages.clear();
+	pages.clear();
+	currentPage = undefined;
+	if (wasAttached) {
+		for (const page of opened) await page.close().catch(() => {});
+	} else await currentContext?.close().catch(() => {});
+	// For a browser reached over CDP this only disconnects.
+	await current?.close().catch(() => {});
+}
+
+function recordConsole(id: string, m: Any): void {
+	const level = m.type();
+	const text = String(m.text());
+	// A failed resource is already a request record.
+	if (level === "error" && text.startsWith("Failed to load resource:")) return;
+	const loc = m.location?.() ?? {};
+	push({
+		page: id,
+		kind: "console",
+		level,
+		text: clip(text),
+		...(loc.url ? { url: redact(loc.url) } : {}),
+		...(loc.lineNumber ? { line: Number(loc.lineNumber) + 1 } : {}),
 	});
 }
 
-function attach(id: string, page: Any): void {
-	page.on("console", (m: Any) => {
-		const level = m.type();
-		const text = String(m.text());
-		// A failed resource is already a request record.
-		if (level === "error" && text.startsWith("Failed to load resource:")) return;
-		const loc = m.location?.() ?? {};
-		push({
-			page: id,
-			kind: "console",
-			level,
-			text: clip(text),
-			...(loc.url ? { url: redact(loc.url) } : {}),
-			...(loc.lineNumber ? { line: Number(loc.lineNumber) + 1 } : {}),
-		});
-	});
-	page.on("pageerror", (e: Any) =>
-		push({ page: id, kind: "exception", text: clip(e?.message ?? e), ...frameOf(e?.stack) }),
-	);
+function recordError(id: string, e: Any): void {
+	push({ page: id, kind: "exception", text: clip(e?.message ?? e), ...frameOf(e?.stack) });
+}
+
+function listen(id: string, page: Any): void {
+	page.on("console", (m: Any) => recordConsole(id, m));
+	page.on("pageerror", (e: Any) => recordError(id, e));
 	page.on("requestfailed", (r: Any) => {
 		const errorText = String(r.failure()?.errorText ?? "failed");
 		if (errorText === "net::ERR_ABORTED") {
@@ -305,7 +341,10 @@ function attach(id: string, page: Any): void {
 
 function pageFor(id: string | undefined): { id: string; page: Any } {
 	const key = id ?? currentPage;
-	if (key === undefined) throw new Error("no page is open; call browser open with a url first");
+	if (key === undefined)
+		throw new Error(
+			`no page is open; call browser open with a url, or attach, first${lostAttach ? ` (the attached browser at ${lostAttach} disconnected)` : ""}`,
+		);
 	const page = pages.get(key);
 	if (!page) throw new Error(`no page ${key}; open pages: ${[...pages.keys()].join(", ") || "none"}`);
 	currentPage = key;
@@ -604,8 +643,9 @@ async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
 			throw new Error(`${MAX_PAGES} pages are open; close one (browser close with page) or reuse one with page`);
 		id = id !== undefined && /^[\w.-]{1,40}$/u.test(id) ? id : `p${nextPage++}`;
 		page = await context.newPage();
+		if (attachedTo !== undefined) ownPages.add(page);
 		pages.set(id, page);
-		attach(id, page);
+		listen(id, page);
 	}
 	currentPage = id;
 	if (request.viewport) await page.setViewportSize(request.viewport);
@@ -640,6 +680,90 @@ async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
 		: { id: request.id, ok: true, ...body };
 }
 
+/**
+ * A page the attached browser already had. Playwright buffers the console messages and errors the browser replayed
+ * when Clio connected, so what the page logged before the attach becomes records too; then it is followed as any page.
+ */
+async function adopt(page: Any): Promise<string> {
+	const id = `p${nextPage++}`;
+	pages.set(id, page);
+	for (const m of (await page.consoleMessages?.().catch(() => [])) ?? []) recordConsole(id, m);
+	for (const e of (await page.pageErrors?.().catch(() => [])) ?? []) recordError(id, e);
+	listen(id, page);
+	return id;
+}
+
+/**
+ * Drive the browser behind a CDP endpoint instead of the session's own: its pages become session pages, and `open`
+ * makes new tabs in it. Attaching again to the same endpoint picks up tabs opened since; another endpoint, or `open`
+ * after the browser went away, lets go of the current one first.
+ */
+async function attachTo(request: BrowserAttachRequest): Promise<BrowserReply> {
+	if (attachedTo !== request.endpoint) {
+		await releaseBrowser();
+		const { chromium } = await playwrightChromium();
+		const hint =
+			"The browser must be running with --remote-debugging-port=<port> (a Tauri debug build on Windows: WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9339), and this session must reach that port.";
+		// Playwright retries a refused http endpoint until its timeout; one direct probe fails fast instead.
+		if (/^https?:/u.test(request.endpoint)) {
+			const probe = await fetch(`${request.endpoint}/json/version`, { signal: AbortSignal.timeout(5_000) }).then(
+				(response) => (response.ok ? "" : `HTTP ${response.status}`),
+				(error: unknown) =>
+					String((error as { cause?: { code?: string } })?.cause?.code ?? (error as Error)?.message ?? error),
+			);
+			if (probe !== "")
+				throw new Error(`could not attach to ${request.endpoint}: no DevTools endpoint answers there (${probe}). ${hint}`);
+		}
+		let connected: Any;
+		try {
+			connected = await chromium.connectOverCDP(request.endpoint, { timeout: ACTION_TIMEOUT_MS });
+		} catch (error) {
+			const message = error instanceof Error ? (error.message.split("\n")[0] ?? "") : String(error);
+			throw new Error(`could not attach to ${request.endpoint}: ${clip(message.replace(/\.+$/u, ""), 600)}. ${hint}`);
+		}
+		const defaultContext = connected.contexts()[0];
+		if (!defaultContext) {
+			await connected.close().catch(() => {});
+			throw new Error(`${request.endpoint} offers no browser context to drive`);
+		}
+		browser = connected;
+		context = defaultContext;
+		attachedTo = request.endpoint;
+		lostAttach = undefined;
+		engine = `attached ${connected.version()}`;
+		context.setDefaultTimeout(ACTION_TIMEOUT_MS);
+		context.setDefaultNavigationTimeout(ACTION_TIMEOUT_MS);
+		connected.on("disconnected", () => {
+			if (browser !== connected) return;
+			lostAttach = request.endpoint;
+			browser = undefined;
+			context = undefined;
+			attachedTo = undefined;
+			ownPages.clear();
+			pages.clear();
+			currentPage = undefined;
+		});
+	}
+	const known = new Set(pages.values());
+	const adopted: string[] = [];
+	for (const page of (browser.contexts() as Any[]).flatMap((c: Any) => c.pages() as Any[]))
+		if (!known.has(page)) adopted.push(await adopt(page));
+	if (currentPage === undefined)
+		currentPage =
+			adopted.find((key) => !/^(?:about:blank$|chrome:|devtools:)/u.test(pages.get(key)?.url() ?? "")) ?? adopted[0];
+	const listed = await Promise.all([...pages.entries()].map(([key, p]) => facts(key, p)));
+	const current = listed.find((f) => f.page === currentPage);
+	return {
+		id: request.id,
+		ok: true,
+		attached: request.endpoint,
+		engine,
+		...(current ? { pageFacts: current } : {}),
+		pages: listed,
+		events: takeDelta(),
+	};
+}
+
 async function look(request: BrowserLookRequest): Promise<BrowserReply> {
 	const { id, page } = pageFor(request.page);
 	const body: BrowserReplyBody = { pageFacts: await facts(id, page) };
@@ -651,8 +775,7 @@ async function look(request: BrowserLookRequest): Promise<BrowserReply> {
 }
 
 async function shutdown(code: number): Promise<never> {
-	await context?.close().catch(() => {});
-	await browser?.close().catch(() => {});
+	await releaseBrowser();
 	process.exit(code);
 }
 
@@ -674,6 +797,9 @@ async function handle(request: BrowserRequest): Promise<void> {
 				return;
 			case "open":
 				send(await open(request));
+				return;
+			case "attach":
+				send(await attachTo(request));
 				return;
 			case "run":
 				send(await run(request));
