@@ -145,7 +145,7 @@ export function protectedArtifactMutationBlockReason(
 	if (toolName !== ToolNames.Bash) return null;
 	const command = typeof args?.command === "string" && args.command.length > 0 ? args.command : null;
 	if (command === null) return null;
-	const classification = classifyDestructiveCommand(command, state.artifacts);
+	const classification = classifyDestructiveCommand(command, state.artifacts, callRunsElsewhere(args?.cwd));
 	if (classification.kind === "benign") return null;
 	const affected = classification.matches.map((match) => match.artifactPath).join(", ");
 	return `protected artifact blocked: ${classification.operation} would affect ${affected}`;
@@ -173,9 +173,20 @@ function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): b
 	return false;
 }
 
+/**
+ * Whether a bash call's own `cwd` puts the shell somewhere other than the directory relative command paths are
+ * judged from: then a path the command names lands elsewhere, as after a cd (M-27).
+ */
+function callRunsElsewhere(cwd: unknown): boolean {
+	if (typeof cwd !== "string" || cwd.length === 0) return false;
+	const here = normalizePathKey(process.cwd());
+	return here === null || normalizePathKey(cwd) !== here;
+}
+
 function classifyDestructiveCommand(
 	command: string,
 	protectedArtifacts: ReadonlyArray<ProtectedArtifact>,
+	runsElsewhere = false,
 ): DestructiveCommandClassification {
 	const artifacts = normalizedArtifacts(protectedArtifacts);
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
@@ -186,7 +197,7 @@ function classifyDestructiveCommand(
 	const segments = splitSegments(scanned).flatMap((tokens) => [tokens, ...substitutionSegments(tokens, 0)]);
 	// M-27: a hard reset is judged by what it rewrites only while every step before it leaves git's state alone.
 	let priorReads = resetShapeHolds(text, scanned);
-	let moved = false;
+	let moved = runsElsewhere;
 	for (const tokens of segments) {
 		const segment = shellCommandArguments(tokens);
 		const redirect = classifyRedirect(tokens, artifacts);
@@ -3854,8 +3865,9 @@ function classifyGitOperation(
 		const clean = cleanReading(rest);
 		if (clean.dryRun || !clean.ignored) return { kind: "benign", matches: [] };
 		const reason = "git clean -x or -X can delete protected artifacts";
+		// No pathspec, a magic one (`:!src`, `:/`, `:(top)`), a cd or the call's own cwd, or a global option: every path.
 		const matches =
-			clean.paths.length === 0 || reading.moved || at > 0
+			clean.paths.length === 0 || clean.paths.some((spec) => spec.startsWith(":")) || reading.moved || at > 0
 				? artifacts.map(({ artifact }) => ({ artifactPath: artifact.path, commandPath: ".", reason }))
 				: matchesForPaths(clean.paths, artifacts, "intersects", reason);
 		if (matches.length > 0) return { kind: "destructive", operation: "git_clean", matches };

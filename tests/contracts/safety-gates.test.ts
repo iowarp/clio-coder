@@ -1408,11 +1408,18 @@ describe("safety gate boundary", () => {
 			"git reset --hard $(echo HEAD~1)",
 			"git clean -fdx",
 			"git clean -fdX",
+			"git clean -fdx ':!src'",
+			"git clean -fdx :/",
 			"git clean -xfd records",
 			"git -C . clean -fdx",
 			"cd build && git clean -fdx .",
 		])
 			strictEqual(refused("records/log", command), true, command);
+		// The call's own cwd moves a relative pathspec as a cd does: `records` from .clio-coder is .clio-coder/records.
+		const inCwd = (cwd: string, command: string) =>
+			protectedArtifactMutationBlockReason(at(".clio-coder/records"), ToolNames.Bash, { command, cwd }) !== null;
+		strictEqual(inCwd(".clio-coder", "git clean -fdx records"), true);
+		strictEqual(inCwd(".", "git clean -fdx records"), false);
 		// A tracked record the target deletes, an uncommitted edit, and a staged record the reset drops all refuse.
 		strictEqual(refused("desk", "git reset --hard HEAD~1"), true);
 		strictEqual(refused("desk", "git reset --hard"), false);
