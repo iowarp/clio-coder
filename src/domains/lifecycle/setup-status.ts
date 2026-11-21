@@ -26,8 +26,11 @@ export type Missing =
 	 * runtime read would steer the operator's real key there.
 	 */
 	| { kind: "credential"; target: string; provider: string; projectUrl?: string }
-	/** The target names the environment variable its key comes from, and it is not set. */
-	| { kind: "env"; target: string; variable: string }
+	/**
+	 * The target names the environment variable its key comes from, and it is not set. `projectFile` is the project
+	 * settings file that declares the target, when a caller that read the layers knows it.
+	 */
+	| { kind: "env"; target: string; variable: string; projectFile?: string }
 	| { kind: "unreachable"; target: string; url: string; detail: string }
 	/** With `model` the endpoint does not offer it; without one the target has no chat model at all. */
 	| { kind: "model"; target: string; model?: string }
@@ -156,7 +159,7 @@ export function describeMissing(
 			return { sentence: options.inSession ? `${sentence} (or press Enter on /config)` : sentence, command };
 		}
 		case "env":
-			return { sentence: unsetKeyVariableSentence(missing.target, missing.variable) };
+			return { sentence: unsetKeyVariableSentence(missing.target, missing.variable, missing.projectFile) };
 		case "unreachable":
 			return {
 				sentence: `${missing.target} at ${missing.url} did not answer (${missing.detail}). Start the server, or change the address with /config.`,

@@ -596,48 +596,75 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 	it("a run stopped at the wall with a tool call in flight after handback says it wrote no report", {
 		timeout: 20_000,
 	}, async () => {
-		const repo = checkout();
-		const bundle = makeDispatchBundle(dispatchStubContext(), {
-			spawnWorker: () => {
-				partial(repo);
-				return {
-					pid: null,
-					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
-					promise: Promise.resolve({ exitCode: 1, signal: "SIGTERM" }),
-					events: (async function* () {
-						yield { type: "clio_coder_tool_start", payload: { tool: "bash", toolCallId: "call-sleep" } };
-						yield {
-							type: "clio_coder_run_outcome",
-							payload: {
-								outcomeCode: "worker_run_timeout",
-								detail: "worker_run_timeout: the run reached 85% of its 120 s wall clock and handed back its report",
-							},
-						};
-						yield {
-							type: "clio_coder_run_outcome",
-							payload: {
-								outcomeCode: "worker_final_output_missing",
-								detail: "worker loop ended without a final assistant output (stopReason=aborted)",
-							},
-						};
-					})(),
-					abort() {},
-				};
-			},
-		});
-		await bundle.extension.start();
-		try {
-			const run = await bundle.contract.dispatch(coder(repo));
-			const receipt = await run.finalPromise;
-			equal(receipt.outcome, "timed_out");
-			const detail = receipt.outcomeDetail ?? "";
-			ok(!/handed back its report/u.test(detail), `the detail claims a report that never came: ${detail}`);
-			ok(!/conflicting trusted outcome codes/u.test(detail), `handback then no report is one story: ${detail}`);
-			match(detail, /1 tool call \(bash\) still running/u);
-			match(detail, /before it wrote a report/u);
-		} finally {
-			await bundle.extension.stop?.();
-			rmSync(repo, { recursive: true, force: true });
+		// The host's deadline abort is a stop; a worker that exits on its own after the handback is described by its exit.
+		for (const shape of ["host-timeout", "crash"] as const) {
+			const repo = checkout();
+			let stopped: (value: { exitCode: number | null; signal: NodeJS.Signals | null }) => void = () => {};
+			const exited = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+				stopped = resolve;
+			});
+			let handedBack: () => void = () => {};
+			const atHandback = new Promise<void>((resolve) => {
+				handedBack = resolve;
+			});
+			const bundle = makeDispatchBundle(dispatchStubContext(), {
+				spawnWorker: () => {
+					partial(repo);
+					return {
+						pid: null,
+						heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+						promise: shape === "crash" ? Promise.resolve({ exitCode: 1, signal: "SIGTERM" as const }) : exited,
+						events: (async function* () {
+							yield { type: "clio_coder_tool_start", payload: { tool: "bash", toolCallId: "call-sleep" } };
+							yield {
+								type: "clio_coder_run_outcome",
+								payload: {
+									outcomeCode: "worker_run_timeout",
+									detail: "worker_run_timeout: the run reached 85% of its 120 s wall clock and handed back its report",
+								},
+							};
+							if (shape === "host-timeout") {
+								handedBack();
+								await exited;
+								return;
+							}
+							yield {
+								type: "clio_coder_run_outcome",
+								payload: {
+									outcomeCode: "worker_final_output_missing",
+									detail: "worker loop ended without a final assistant output (stopReason=aborted)",
+								},
+							};
+						})(),
+						abort() {
+							stopped({ exitCode: null, signal: "SIGTERM" });
+						},
+					};
+				},
+			});
+			await bundle.extension.start();
+			try {
+				const run = await bundle.contract.dispatch(coder(repo));
+				if (shape === "host-timeout") {
+					await atHandback;
+					bundle.contract.abort(run.runId, { cause: "timeout", detail: "timed out: run wall clock reached" });
+				}
+				const receipt = await run.finalPromise;
+				equal(receipt.outcome, "timed_out", shape);
+				const detail = receipt.outcomeDetail ?? "";
+				ok(!/handed back its report/u.test(detail), `the detail claims a report that never came: ${detail}`);
+				ok(!/conflicting trusted outcome codes/u.test(detail), `handback then no report is one story: ${detail}`);
+				if (shape === "host-timeout") {
+					match(detail, /reached the wall clock with 1 tool call \(bash\) still running before it wrote a report/u);
+					match(detail, /the host stopped it with SIGTERM, so it handed back no report/u);
+				} else {
+					match(detail, /it exited \(exit code 1, signal SIGTERM\) before it wrote a report, so it handed back no report/u);
+					ok(!/host stopped|reached the wall clock/u.test(detail), `the host never stopped this run: ${detail}`);
+				}
+			} finally {
+				await bundle.extension.stop?.();
+				rmSync(repo, { recursive: true, force: true });
+			}
 		}
 	});
 

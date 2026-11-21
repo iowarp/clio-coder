@@ -153,6 +153,7 @@ export const INSTALLER_OWNED_ENTRIES = [
 	"versions",
 	"launchers",
 	"launcher.cjs",
+	// Where launchers before 0.8.5 kept their receipts; removed with the root, never read.
 	".active",
 	".installer-owner",
 	"install.json",

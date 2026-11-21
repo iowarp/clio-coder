@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS, type OutputStyle } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
@@ -2388,6 +2389,7 @@ describe("Pi TUI compatibility", () => {
 		const noop = (): void => undefined;
 		const liveEdge = (): void => returnToLiveEdge(tui);
 		const runtime = createInteractiveSlashRuntime({
+			bus: createTelemetryHub(),
 			io: { stdout: noop, stderr: noop },
 			chat: { isStreaming: () => false, submit: async () => undefined },
 			chatPanel: { appendReplayBlock: noop, appendUser: noop },

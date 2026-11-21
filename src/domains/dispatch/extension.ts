@@ -10310,6 +10310,8 @@ export function createDispatchBundle(
 						? wallHandbackOutcomeDetail({
 								reported: hasDurableFinalOutput(outputCapture.snapshot()),
 								unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+								hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+								exitCode: result.exitCode ?? null,
 								signal: result.signal ?? null,
 							})
 						: undefined;
@@ -10672,7 +10674,7 @@ export function createDispatchBundle(
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
 							detailNotes.push(
-								`its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`clio-coder fleet land ${req.taskWorktree.branch}\` applies it if you accept the failed check`,
+								`its work is committed on the preserved branch ${req.taskWorktree.branch}, \`clio-coder fleet land ${req.taskWorktree.branch}\` previews the merge and \`clio-coder fleet land ${req.taskWorktree.branch} --yes\` lands it if you accept the failed check`,
 							);
 							failureMessage = notedDetail() ?? failureMessage;
 						}
