@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import type { MemoryDeliveryMode, MemoryLessonsMode, MemorySurfaceSettings } from "../../core/defaults.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { neutralizeFraming } from "../../core/reminder-framing.js";
@@ -59,7 +61,7 @@ import {
 	type TaskMemoryTelemetryTrigger,
 	taskMemoryBankDelta,
 } from "./memory-events.js";
-import { fixPairOf, type MemoryNoteArgs, type MemoryNoteEvidence } from "./notes.js";
+import { exercisesWork, fixPairOf, type MemoryNoteArgs, type MemoryNoteEvidence } from "./notes.js";
 import { sharesInvocationTarget } from "./recipes.js";
 import { lessonsForTask } from "./relevance.js";
 import type { MemoryRestorationInput } from "./restoration.js";
@@ -260,6 +262,17 @@ const KEPT_LESSONS_FOR_PASS = 10;
 const SUBMITTED_CONTENT_LIMIT = 128;
 const TURN_LOG_CALL_MAX_CHARS = 300;
 const VERIFIED_COMMAND_LIMIT = 256;
+/** Line ranges kept per read path, and paths kept, for binding a `memory_note` quote to what a read showed. */
+const SHOWN_READS_PER_PATH = 8;
+const SHOWN_READ_PATHS = 256;
+
+/** One read's shown physical lines, 1-based and inclusive, and the file's size and mtime when it was read. */
+interface ShownRead {
+	start: number;
+	end: number;
+	bytes: number;
+	mtimeMs: number;
+}
 const TURN_LOG_READ_EXCERPT_CHARS = 240;
 
 /** Reasons that mean the model never produced a usable answer, so the bank it left says nothing. */
@@ -576,7 +589,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 */
 	const observedReads = new Map<string, string[]>();
 	/** The last lone failed shell invocation per command subject, waiting for a success that fixes it. */
-	const failedForFix = new Map<string, CommandSegment>();
+	const failedForFix = new Map<string, { segment: CommandSegment; step: number }>();
+	/**
+	 * The line ranges each successful read showed, with the file's size and mtime as the read saw them, per path. A
+	 * `memory_note` quote is checked against exactly these lines while the file is unchanged.
+	 */
+	const shownReads = new Map<string, ShownRead[]>();
 	/** Fix pairs since the last side lesson pass, and in the whole scope. */
 	let fixPairsSinceLessonPass = 0;
 	let fixPairsInScope = 0;
@@ -764,22 +782,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					return {
 						refused: `\`${args.command}\` has not succeeded from the workspace root in this session; run it first, or leave command out`,
 					};
+				if (!exercisesWork(ran))
+					return {
+						refused: `\`${args.command}\` is a help, version or always-succeeding command, so it is no evidence; leave command out`,
+					};
 				return { kind: "command", segment: ran };
 			}
-			if (args.path !== undefined) {
-				const path = repositoryRelativePath(args.path, [root]);
-				const excerpts = path === null ? [] : (observedReads.get(path) ?? []);
-				const excerpt = excerpts.at(-1);
-				if (path === null || excerpt === undefined)
-					return { refused: `${args.path} was not read in this session; read it first, or leave path out` };
-				// A backticked span of the note the read showed is the quote; otherwise the excerpt the read showed.
-				const collapse = (text: string) => text.replace(/\s+/gu, " ").trim();
-				const quoted = [...args.note.matchAll(/`([^`\n]{8,})`/gu)]
-					.map((match) => collapse(match[1] ?? ""))
-					.filter((span) => excerpts.some((seen) => collapse(seen).includes(span)))
-					.sort((a, b) => b.length - a.length)[0];
-				return { kind: "source", path, quote: quoted ?? excerpt };
-			}
+			if (args.path !== undefined) return shownQuote(args.note, args.path, root);
 			return null;
 		},
 		fixPairCount: () => fixPairsInScope,
@@ -1238,19 +1247,29 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// A failed chain does not say which segment failed, so only a lone invocation is a failed pattern.
 		const segments = atWorkspaceRoot(root, at) ? commandSegments(command, root, at) : [];
 		const [segment] = segments;
-		if (segments.length !== 1 || segment === undefined) return;
+		if (segments.length !== 1 || segment === undefined || !exercisesWork(segment)) return;
 		const subject = commandSubject(segment.argv, root);
 		if (subject === null) return;
 		failedForFix.delete(subject.key);
-		failedForFix.set(subject.key, segment);
+		failedForFix.set(subject.key, { segment, step: toolStep });
 		if (failedForFix.size > VERIFIED_COMMAND_LIMIT) failedForFix.delete(failedForFix.keys().next().value ?? subject.key);
 	}
 
-	/** A succeeded segment closes its subject's waiting failure: by succeeding itself, or as the fix of a pair. */
+	/**
+	 * A succeeded segment closes its subject's waiting failure: by succeeding itself, or as the fix of a pair. A help,
+	 * version or trivial call closes nothing. A workspace change since the failure voids it, as it voids a repeated
+	 * failure's annotation: the edit, not the options, may be what fixed it.
+	 */
 	function pairFix(segment: CommandSegment): void {
+		if (!exercisesWork(segment)) return;
 		const subject = commandSubject(segment.argv, workspaceRoot());
-		const failed = subject === null ? undefined : failedForFix.get(subject.key);
-		if (subject === null || failed === undefined) return;
+		const waiting = subject === null ? undefined : failedForFix.get(subject.key);
+		if (subject === null || waiting === undefined) return;
+		if (waiting.step <= lastWorkspaceChangeStep) {
+			failedForFix.delete(subject.key);
+			return;
+		}
+		const failed = waiting.segment;
 		if (failed.key !== segment.key && !fixPairOf(failed, segment)) return;
 		failedForFix.delete(subject.key);
 		if (failed.key === segment.key || lessonsMode() === "off") return;
@@ -1371,6 +1390,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		succeededSegments.clear();
 		observedReads.clear();
 		failedForFix.clear();
+		shownReads.clear();
 		fixPairsSinceLessonPass = 0;
 		fixPairsInScope = 0;
 		turnSequence = 0;
@@ -1900,6 +1920,58 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			}
 	}
 
+	/** Keep the lines a read showed, from the read tool's own range and file identity; a partial line shows no line. */
+	function recordShownRead(path: string, details: Readonly<Record<string, unknown>> | undefined): void {
+		const range = details?.readRange as { startLine?: unknown; endLine?: unknown; partialLine?: unknown } | undefined;
+		const file = details?.file as { bytes?: unknown; mtimeMs?: unknown } | undefined;
+		const { startLine: start, endLine: end } = range ?? {};
+		if (typeof start !== "number" || typeof end !== "number" || end < start || range?.partialLine === true) return;
+		if (typeof file?.bytes !== "number" || typeof file.mtimeMs !== "number") return;
+		const ranges = shownReads.get(path) ?? [];
+		shownReads.delete(path);
+		ranges.push({ start, end, bytes: file.bytes, mtimeMs: file.mtimeMs });
+		if (ranges.length > SHOWN_READS_PER_PATH) ranges.splice(0, ranges.length - SHOWN_READS_PER_PATH);
+		shownReads.set(path, ranges);
+		if (shownReads.size > SHOWN_READ_PATHS) shownReads.delete(shownReads.keys().next().value ?? path);
+	}
+
+	/**
+	 * The quote a `memory_note` path binds: the note's longest backticked span, after every backticked span other than
+	 * the path itself was found in lines a read of that file showed in this session, with the file unchanged since. A
+	 * span the session never saw refuses the note; nothing is ever substituted for it. Only the quote is hashed.
+	 */
+	function shownQuote(note: string, pathArg: string, root: string): MemoryNoteEvidence | { refused: string } {
+		const path = repositoryRelativePath(pathArg, [root]);
+		const shown = path === null ? [] : (shownReads.get(path) ?? []);
+		if (path === null || shown.length === 0)
+			return { refused: `${pathArg} was not read in this session; read it first, or leave path out` };
+		let size: { bytes: number; mtimeMs: number } | null = null;
+		try {
+			const info = statSync(resolve(root, path));
+			size = { bytes: info.size, mtimeMs: info.mtimeMs };
+		} catch {
+			size = null;
+		}
+		const content = size === null ? null : readInsideRoot(root, path);
+		const current = shown.filter((read) => read.bytes === size?.bytes && read.mtimeMs === size.mtimeMs);
+		if (content === null || current.length === 0)
+			return { refused: `${path} changed since this session read it; read it again first` };
+		const lines = content.split("\n");
+		const seen = current.map((read) => collapseWhitespace(lines.slice(read.start - 1, read.end).join("\n")));
+		const spans = [...note.matchAll(/`([^`\n]+)`/gu)]
+			.map((match) => collapseWhitespace(match[1] ?? ""))
+			.filter((span) => span.length > 0 && span !== path && span !== collapseWhitespace(pathArg));
+		if (spans.length === 0)
+			return { refused: `quote in backticks the text from ${path} the note relies on, as the read showed it` };
+		const unseen = spans.find((span) => !seen.some((text) => text.includes(span)));
+		if (unseen !== undefined)
+			return {
+				refused: `\`${unseen}\` is not in the lines of ${path} this session read; quote only what the read showed`,
+			};
+		const quote = [...spans].sort((a, b) => b.length - a.length)[0] ?? "";
+		return { kind: "source", path, quote };
+	}
+
 	function observeBeforeTool(input: MiddlewareHookInput): void {
 		const prepared = prepareToolStep(input);
 		if (prepared === null) return;
@@ -1959,6 +2031,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (readPath !== null) {
 			recordObservedRead(observedReads, readPath, readExcerpt);
 			noteReadEvidence(readPath, readExcerpt, root);
+			recordShownRead(readPath, input.toolResultDetails);
 		}
 		const excerpt =
 			outcome === "error"

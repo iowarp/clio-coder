@@ -56,11 +56,13 @@ export function createMemoryNoteTool(deps: MemoryNoteDeps): ToolSpec {
 					...(appliesWhen !== undefined ? { appliesWhen } : {}),
 				});
 				const verb = written.created ? "Noted" : "Already noted";
-				return {
-					kind: "ok",
-					output: `${verb} [${written.id}], unverified, ${EVIDENCE_TEXT[written.evidence]}.`,
-					details: { ...written },
-				};
+				const output =
+					written.standing === "note"
+						? `${verb} [${written.id}], unverified, ${EVIDENCE_TEXT[written.evidence]}.`
+						: written.standing === "lesson"
+							? `[${written.id}] is already a kept lesson for this claim; it is unchanged.`
+							: `[${written.id}] holds this claim and the operator rejected it; it is unchanged.`;
+				return { kind: "ok", output, details: { ...written } };
 			} catch (err) {
 				return { kind: "error", message: `memory_note: ${err instanceof Error ? err.message : String(err)}` };
 			}

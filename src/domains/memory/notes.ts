@@ -9,7 +9,13 @@
 
 import { createHash } from "node:crypto";
 import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
-import { type CommandSegment, parseSourceEvidenceRef, sourceEvidenceRef } from "./command-evidence.js";
+import {
+	type CommandSegment,
+	diagnosticInvocation,
+	parseSourceEvidenceRef,
+	sourceEvidenceRef,
+	trivialInvocation,
+} from "./command-evidence.js";
 import { recordClaimSession } from "./guardian-gate.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { claimCommand, claimNote, claimPathRefusal } from "./promotion.js";
@@ -39,24 +45,47 @@ export interface MemoryNoteWritten {
 	/** False when the store already held this claim; the session's words are then a revision or nothing. */
 	created: boolean;
 	evidence: "command" | "source" | "none";
+	/** What the record is now: an unverified note, a lesson already, or a claim the operator rejected (left as it is). */
+	standing: "note" | "lesson" | "operator-rejected";
 }
 
 /**
- * A failed call and a later success pair as a fix when they run the same program with the same operands and the
- * same environment assignments, and differ only in their options: an option added, removed or changed. Anything
- * else, a different subcommand, script or operand, is two commands and pairs as nothing. A pair can still be a
- * coincidence (a network that came back), which is why it only ever files a note.
+ * A segment whose success could have been a failure and exercises what a note would be about: not a help, usage or
+ * version request, and not a program that exits 0 whatever the repository holds (`ls`, `echo`, `true`). Only such a
+ * segment is command evidence for a note or either side of a fix pair.
+ */
+export function exercisesWork(segment: CommandSegment): boolean {
+	return !diagnosticInvocation(segment) && !trivialInvocation(segment);
+}
+
+function standingOf(record: MemoryRecord): MemoryNoteWritten["standing"] {
+	if (record.rejectedAt !== undefined) return "operator-rejected";
+	return record.approved ? "lesson" : "note";
+}
+
+/** A note's free text, redacted as every stored lesson is and with its whitespace collapsed. */
+function redactedNoteText(text: string): string {
+	return redactSecretsPreservingMarkers(text, createRedactionTally()).replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * A failed call and a later success pair as a fix when they run the same program with the same operands, in order,
+ * and the same environment assignments, and differ in the set of their bare options: one added or removed. A word
+ * carrying a value (`-k=test_a`, `--filter=b`) selects what runs, so it is an operand, and a different value is a
+ * different command; the same options in another order are the same command. A help, version or trivial call is
+ * never either side. A pair can still be a coincidence (a network that came back), which is why it only ever files a
+ * note.
  */
 export function fixPairOf(failed: CommandSegment, fixed: CommandSegment): boolean {
-	if (failed.key === fixed.key) return false;
+	if (failed.key === fixed.key || !exercisesWork(failed) || !exercisesWork(fixed)) return false;
 	if (JSON.stringify(failed.assignments) !== JSON.stringify(fixed.assignments)) return false;
 	const [failedProgram, ...failedRest] = failed.argv;
 	const [fixedProgram, ...fixedRest] = fixed.argv;
 	if (failedProgram === undefined || failedProgram !== fixedProgram) return false;
-	const operands = (words: readonly string[]) => words.filter((word) => !word.startsWith("-"));
-	if (JSON.stringify(operands(failedRest)) !== JSON.stringify(operands(fixedRest))) return false;
-	// Only option words remain to differ, and they do, since the keys differ.
-	return true;
+	const bareOption = (word: string) => word.startsWith("-") && !word.includes("=");
+	const operands = (words: readonly string[]) => JSON.stringify(words.filter((word) => !bareOption(word)));
+	const options = (words: readonly string[]) => JSON.stringify([...new Set(words.filter(bareOption))].sort());
+	return operands(failedRest) === operands(fixedRest) && options(failedRest) !== options(fixedRest);
 }
 
 /**
@@ -99,10 +128,14 @@ export async function writeAgentNote(
 	const words = input.args.note.replace(/\s+/gu, " ").trim();
 	if (words.length === 0) throw new Error("note is required");
 	if (words.length > MEMORY_NOTE_MAX_CHARS) throw new Error(`note is longer than ${MEMORY_NOTE_MAX_CHARS} characters`);
-	const appliesWhen = input.args.appliesWhen?.trim() ? [input.args.appliesWhen.trim()] : [];
+	// Every free-text field is redacted as the lesson is, on every path, before it is hashed or stored.
+	const condition = input.args.appliesWhen === undefined ? "" : redactedNoteText(input.args.appliesWhen);
+	const appliesWhen = condition.length > 0 ? [condition] : [];
 	const at = (input.now ?? new Date()).toISOString();
 	const evidence = input.evidence;
 	if (evidence?.kind === "command") {
+		if (!exercisesWork(evidence.segment))
+			throw new Error("a help, version or always-succeeding command is no evidence for a note");
 		const command = claimCommand(evidence.segment);
 		if (command === null) throw new Error("that command cannot be stored as evidence");
 		// The note names its command, so a reminder and a reader see what it recommends.
@@ -119,7 +152,12 @@ export async function writeAgentNote(
 			now: new Date(at),
 		});
 		if (result.record === null) throw new Error("the store did not keep the note");
-		return { id: result.record.id, created: result.created, evidence: "command" };
+		return {
+			id: result.record.id,
+			created: result.created,
+			evidence: "command",
+			standing: standingOf(result.record),
+		};
 	}
 	if (evidence?.kind === "source") {
 		// The same span hash a quoted source ref carries, so delivery checks it as it checks any other.
@@ -137,9 +175,14 @@ export async function writeAgentNote(
 			...(appliesWhen.length > 0 ? { appliesWhen } : {}),
 		});
 		const result = await insertMemoryRecordIfAbsent(dataDir, record);
-		return { id: result.record.id, created: result.created, evidence: "source" };
+		return {
+			id: result.record.id,
+			created: result.created,
+			evidence: "source",
+			standing: standingOf(result.record),
+		};
 	}
-	const lesson = redactSecretsPreservingMarkers(words, createRedactionTally()).replace(/\s+/gu, " ").trim();
+	const lesson = redactedNoteText(words);
 	const digest = createHash("sha256")
 		.update(JSON.stringify(["agent-note", repository.key, input.sessionId, lesson, appliesWhen]))
 		.digest("hex")
@@ -168,5 +211,5 @@ export async function writeAgentNote(
 		"agent note",
 	);
 	const result = await insertMemoryRecordIfAbsent(dataDir, record);
-	return { id: result.record.id, created: result.created, evidence: "none" };
+	return { id: result.record.id, created: result.created, evidence: "none", standing: standingOf(result.record) };
 }

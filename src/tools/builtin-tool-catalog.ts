@@ -216,7 +216,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		],
 	},
 	[ToolNames.MemoryRecall]: {
-		objective: "Recall task memory and approved durable memory that matches a query, without writing memory.",
+		objective: "Recall task memory, durable lessons and unverified notes that match a query, without writing memory.",
 		uiLabel: "Memory",
 		resultSizePolicy: {
 			kind: "bounded",

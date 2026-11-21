@@ -63,7 +63,7 @@ import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { memorySectionBlocks } from "./prompt-section.js";
 import { readDemotedMemoryIds } from "./recall-use.js";
 import { memoryRouteJson } from "./secret-text.js";
-import { loadMemoryRecordsSync } from "./store.js";
+import { loadMemoryRecordsSync, memoryStorePath } from "./store.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import {
@@ -71,7 +71,7 @@ import {
 	TaskMemoryEndpointBusyError,
 	TaskMemoryEndpointPreemptedError,
 } from "./task-memory-policy.js";
-import type { MemoryRepositoryIdentity } from "./types.js";
+import type { MemoryRecord, MemoryRepositoryIdentity } from "./types.js";
 
 export interface MemoryRuntimeInfrastructure {
 	stateDir(): string;
@@ -310,6 +310,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	#noteWrites: Promise<void> = Promise.resolve();
 	/** Fix notes this session may be shown: those in the store when it first asked, never one a peer wrote since. */
 	#notesBaseline: { session: string | undefined; ids: Set<string> } | null = null;
+	/** The store's fix notes as last read, keyed by the store file's identity and the repository. */
+	#fixNoteCache: { key: string; pairs: ReadonlyArray<readonly [MemoryRecord, KeptLesson]> } | null = null;
 	/** The lessons this session may be reminded of: those it could see when it began, plus operator approvals since. */
 	#deliveryBaseline: { session: string | undefined; revisions: Set<string> } | null = null;
 
@@ -409,24 +411,49 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			if (repository === null) return [];
 			const session = infra.currentSession?.()?.id;
 			const demoted = this.delivery.demoted();
-			const notes = loadMemoryRecordsSync(infra.dataDir()).filter(
+			const notes = this.#fixNoteCandidates(infra.dataDir(), repository).filter(
+				([record]) => record.provenance?.sourceSessionId !== session && !demoted.has(record.id),
+			);
+			if (this.#notesBaseline === null || this.#notesBaseline.session !== session)
+				this.#notesBaseline = { session, ids: new Set(notes.map(([record]) => record.id)) };
+			const baseline = this.#notesBaseline.ids;
+			return notes.filter(([record]) => baseline.has(record.id)).map(([, lesson]) => lesson);
+		} catch {
+			return []; /* An unreadable store surfaces nothing; the session continues without it. */
+		}
+	}
+
+	/**
+	 * The repository's undecided, uncontradicted fix notes with their projections, read and projected again only when
+	 * the store file's identity changes, as `createKeptLessonSource` reads lessons: a failed call costs a stat.
+	 */
+	#fixNoteCandidates(
+		dataDir: string,
+		repository: MemoryRepositoryIdentity,
+	): ReadonlyArray<readonly [MemoryRecord, KeptLesson]> {
+		const path = memoryStorePath(dataDir);
+		let stamp = "missing";
+		try {
+			const info = statSync(path);
+			stamp = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`;
+		} catch {
+			/* A missing store has no notes; the stamp still keys the empty read. */
+		}
+		const key = JSON.stringify([path, stamp, repository.kind, repository.key]);
+		if (this.#fixNoteCache?.key === key) return this.#fixNoteCache.pairs;
+		const pairs = loadMemoryRecordsSync(dataDir)
+			.filter(
 				(record) =>
 					!record.approved &&
 					record.rejectedAt === undefined &&
 					(record.regressions?.length ?? 0) === 0 &&
 					record.scope === "repo" &&
 					sameRepository(record.repository, repository) &&
-					record.claim?.kind === "fix" &&
-					record.provenance?.sourceSessionId !== session &&
-					!demoted.has(record.id),
-			);
-			if (this.#notesBaseline === null || this.#notesBaseline.session !== session)
-				this.#notesBaseline = { session, ids: new Set(notes.map((record) => record.id)) };
-			const baseline = this.#notesBaseline.ids;
-			return notes.filter((record) => baseline.has(record.id)).map(projectKeptLesson);
-		} catch {
-			return []; /* An unreadable store surfaces nothing; the session continues without it. */
-		}
+					record.claim?.kind === "fix",
+			)
+			.map((record) => [record, projectKeptLesson(record)] as const);
+		this.#fixNoteCache = { key, pairs };
+		return pairs;
 	}
 
 	/** Rules capture's pair, filed as a fix note under this session (DESIGN 4.4). Best effort, never awaited by a turn. */
