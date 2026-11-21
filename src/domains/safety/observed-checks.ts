@@ -11,6 +11,7 @@ import {
 	type SessionVerifier,
 	validationCheckId,
 } from "./finish-contract.js";
+import { validationWrappersInForce } from "./protected-artifacts.js";
 import { checkOutputReader, gitRunsConfiguredHelpers } from "./run-effects.js";
 
 /**
@@ -222,7 +223,16 @@ export function createStandingChecks(): typeof standingChecks {
 		const run = currentRun(entries);
 		const root = path.resolve(workspaceRoot);
 		const declared = declaredVerifierCommands(root, sessionVerifiers);
-		const key = JSON.stringify([run, root, scratchRoots, tmpdir(), process.env.HOME, process.env.TMPDIR, declared]);
+		const key = JSON.stringify([
+			run,
+			root,
+			scratchRoots,
+			tmpdir(),
+			process.env.HOME,
+			process.env.TMPDIR,
+			declared,
+			validationWrappersInForce(),
+		]);
 		if (run === null) cache = undefined;
 		else if (cache?.key !== key)
 			cache = { key, gitHelpers: gitRunsConfiguredHelpers(root), gitAnswers: new Map(), readings: new Map() };

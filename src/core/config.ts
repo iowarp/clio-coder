@@ -18,6 +18,7 @@ import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS, YOLO_CONFINEMENTS } from "../domains/safety/autonomy.js";
 import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
+import { validationWrapperProblem } from "../domains/safety/validation-wrappers.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
@@ -2458,6 +2459,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"sandboxPassEnv",
 				"sandboxUnixSockets",
 				"snapshots",
+				"validationWrappers",
 				"unattendedAfterSeconds",
 				"yoloAccepted",
 				"yoloConfinement",
@@ -2497,6 +2499,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						const valid = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
 						if (!valid) issues.add("safety.sandboxPassEnv", `${name}: not an environment variable name`);
 						return valid;
+					});
+				}
+			}
+			if ("validationWrappers" in safety) {
+				const parsed = expectStringArray(issues, "safety.validationWrappers", safety.validationWrappers);
+				if (parsed !== undefined) {
+					settings.safety.validationWrappers = parsed.filter((entry) => {
+						const problem = validationWrapperProblem(entry);
+						if (problem !== null) issues.add("safety.validationWrappers", `${JSON.stringify(entry)}: ${problem}`);
+						return problem === null;
 					});
 				}
 			}

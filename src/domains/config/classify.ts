@@ -70,6 +70,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"safety.sandboxUnixSockets",
 	// The main registry asks on every mutating call whether to snapshot.
 	"safety.snapshots",
+	// The safety domain's shell reader reads it from the live snapshot at every check reading, so the next one observes
+	// a change; a running worker keeps the list it started with.
+	"safety.validationWrappers",
 	// Each permission card and ask_user round reads it when it starts waiting,
 	// so the next one observes a change; a running countdown keeps its window.
 	"safety.unattendedAfterSeconds",
