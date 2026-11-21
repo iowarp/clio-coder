@@ -24,6 +24,9 @@ export const HANDBACK_CONTEXT_SHARE: Readonly<Record<RunRole, number>> = {
 /** Share of the usable window past which a run that changed nothing is told once to write now or report. */
 export const HANDBACK_NOTE_SHARE = 0.7;
 
+/** Share of a run's wall clock at which its next round is the handback round (DESIGN 4.5, fleet M8). */
+export const WALL_HANDBACK_SHARE = 0.85;
+
 /** What a batch shares, and what a lone run gets. */
 export const ANSWER_BUDGET_BYTES = 12_000;
 /** No run's answer budget is smaller than this, however large its batch. */

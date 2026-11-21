@@ -149,7 +149,14 @@ it("names withheld checks in the dispatch result and the worker's own prompt (CL
 				heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 				abort() {},
 				events: (async function* () {
-					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: "edited" } };
+					// A typed report over zero calls leaves change-or-declared unmet; with no other model it is not retried.
+					const content = JSON.stringify({
+						completion: { state: "done", limitations: [], unverified: [] },
+						mutatedPaths: [],
+						validations: [],
+						summary: "edited",
+					});
+					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
 				})(),
 			};
 		},
@@ -239,7 +246,12 @@ it("places unconfined rooted coders in their own worktrees with bash and verify,
 						message: {
 							role: "assistant",
 							stopReason: "stop",
-							content: JSON.stringify({ mutatedPaths: edits, validations: [], summary: `edited ${own}` }),
+							content: JSON.stringify({
+								completion: { state: "done", limitations: [], unverified: [] },
+								mutatedPaths: edits,
+								validations: [],
+								summary: `edited ${own}`,
+							}),
 						},
 					};
 				})(),

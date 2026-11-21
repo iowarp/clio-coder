@@ -27,6 +27,7 @@ const DELIVERED =
 	"The supplied evidence shows the spacing parser reads one unit at a time (src/parse.ts:12). It offers no source lines for compound strings, so none are cited. No files were changed.";
 const report = (summary?: string, passed = true) =>
 	JSON.stringify({
+		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [],
 		validations: [{ name: "source review", passed, evidence: "Read the supplied task evidence; no command ran." }],
 		...(summary === undefined ? {} : { summary }),

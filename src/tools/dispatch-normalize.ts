@@ -21,8 +21,8 @@
 
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
-import { canonicalWriteRoots } from "../domains/dispatch/parallel-writers.js";
 import { relativizeWorkspaceAbsoluteTokens } from "../domains/dispatch/path-scope.js";
+import { canonicalWriteRoots } from "../domains/dispatch/writer-set.js";
 import { dispatchTaskArgs } from "./dispatch-arguments.js";
 import type { DispatchMode } from "./dispatch-types.js";
 

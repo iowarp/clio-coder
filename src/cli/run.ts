@@ -1240,17 +1240,15 @@ function shadowStandInCommand(parsed: RunCliArgs, standIn: string): string {
 
 /**
  * A dispatched run's exit status. Exit codes the result passes to the shell unchanged are 0, 2, the worker's
- * permission-required code and the session cost ceiling; every other failure is 1. Async because the verifier
- * reader and the worker contract load only once a dispatched run has settled.
+ * permission-required code and the session cost ceiling; every other failure is 1. Async because the worker contract
+ * loads only once a dispatched run has settled.
  */
 export async function mapExitCode(r: RunResult): Promise<number> {
-	const { verifierVerdict } = await import("./run-output.js");
 	const { WORKER_EXIT_PERMISSION_REQUIRED } = await import("../worker/spec-contract.js");
-	// A verifier that reported a failed verdict makes `run --agent verifier ... && deploy` stop, though its run succeeded.
-	if (r.exitCode === 0 && verifierVerdict(r)?.verdict === "fail") return 1;
-	// So does a check the run saw fail after its last edit, which seals quality `fail` (bt-27); a baseline red from
-	// before any edit seals no failure (x1-5).
-	if (r.exitCode === 0 && r.quality.resultContract?.quality === "fail") return 1;
+	// The run's assurance is the one value read here (fleet design 4.8): a compromised result (a verifier's failed
+	// verdict, a check the run saw fail after its last edit, a validation claimed and never run) makes
+	// `run --agent ... && deploy` stop, though its run succeeded. A baseline red from before any edit seals no failure.
+	if (r.exitCode === 0 && r.verdict?.assurance === "compromised") return 1;
 	const passThrough = new Set([0, 2, WORKER_EXIT_PERMISSION_REQUIRED, SESSION_COST_CEILING_EXIT_CODE]);
 	return passThrough.has(r.exitCode) ? r.exitCode : 1;
 }

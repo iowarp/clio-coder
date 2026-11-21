@@ -306,6 +306,16 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 		// something and nothing changed, under an exit code that says success.
 		if (!landed && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
 	}
+	// DESIGN 4.5 (fleet M8): a builder a bound stopped names the tree it left, from the host's measured delta.
+	const changes = run.delivered?.checkoutChanges;
+	if (
+		run.facts.outcome !== "succeeded" &&
+		(run.delivered?.worktree ?? null) === null &&
+		changes !== undefined &&
+		changes !== null &&
+		changes.changedPaths.length > 0
+	)
+		labels.push(...boundedPathField("changed", { count: changes.changedPaths.length, paths: changes.changedPaths }));
 	// A timed-out ask is always denied. Without its cause, a refused call read as a policy or routing refusal (bt-11 t).
 	const timedOut = run.facts.escalations?.timedOut ?? 0;
 	if (timedOut > 0) {

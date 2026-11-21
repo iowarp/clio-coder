@@ -13,6 +13,7 @@ import type { AgentProduct } from "../domains/agents/spec.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import type { WorkerEnvelope } from "../domains/dispatch/envelope.js";
 import type { RunRole } from "../domains/dispatch/obligation.js";
+import type { RunLimits } from "../domains/dispatch/run-limits.js";
 import type { MiddlewareEffectKind, MiddlewareHook, MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
@@ -50,11 +51,13 @@ import {
  * dispatch; a worker reads both.
  * Versions 10 and 11 replace allowedTools, readOnly and writeRoots with the sealed capability envelope (`envelope`,
  * fleet M7): the worker reads its tools, write mode and roots from it alone, so an older worker refuses the document.
- * 11 carries extension hooks, 10 does not.
+ * Versions 11 and 12 add the sealed run limits (`limits`, fleet M8): the worker takes its wall clock, handback
+ * shares, response bound, tool ceiling and refusal limit from it, so an older worker refuses the document.
+ * 12 carries extension hooks, 11 does not.
  */
-export const WORKER_SPEC_VERSION = 11;
+export const WORKER_SPEC_VERSION = 12;
 /** The version of a spec without extension hooks. */
-export const WORKER_SPEC_HOOKLESS_VERSION = 10;
+export const WORKER_SPEC_HOOKLESS_VERSION = 11;
 /** Every spec version this worker reads, lowest first. */
 export const WORKER_SPEC_VERSIONS: ReadonlyArray<number> = [WORKER_SPEC_HOOKLESS_VERSION, WORKER_SPEC_VERSION];
 export type WorkerSpecVersion = typeof WORKER_SPEC_HOOKLESS_VERSION | typeof WORKER_SPEC_VERSION;
@@ -81,6 +84,15 @@ export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
  * The orchestrator's outcome resolver maps it to failed/permission_required.
  */
 export const WORKER_EXIT_PERMISSION_REQUIRED = 3;
+
+/**
+ * Execute refusals a non-interactive worker absorbs before its run ends. The
+ * model reads each refusal as a tool result and may take another route; a
+ * model that keeps proposing commands nobody can approve is stuck, and the
+ * limit turns that loop into a typed permission_required outcome. Sealed per
+ * run as `limits.refusals` (fleet M8).
+ */
+export const WORKER_REFUSAL_LIMIT = 3;
 
 /** Leads every refusal-limit reason, so dispatch can tell the cap from an ordinary refusal. */
 export const WORKER_REFUSAL_LIMIT_PREFIX = "permission refusal limit reached:";
@@ -204,6 +216,8 @@ interface WorkerSpecFields {
 	 * a trailing slash, subtrees keep one), and `write.commandsBounded` whether the run's commands are bound to them.
 	 */
 	envelope: WorkerEnvelope;
+	/** What stops the run, in the units that bind (DESIGN 4.5, fleet M8); `tools.ceiling` agrees with the budget. */
+	limits: RunLimits;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	/** The dispatching session's extension tool hooks; each matching call waits for the orchestrator to run it. */
 	extensionHooks?: ReadonlyArray<WorkerExtensionHook>;
@@ -279,7 +293,7 @@ export interface WorkerTaskWorktree {
 	ownerToken: string;
 }
 
-/** Current wire shape. Every document carries its concrete admitted budget. */
+/** Current wire shape. Every document carries its concrete admitted budget and its sealed run limits. */
 export type CurrentWorkerSpec = WorkerSpecFields & {
 	specVersion: WorkerSpecVersion;
 	budget: WorkerBudget;
@@ -663,6 +677,47 @@ const ENVELOPE_WITHHELD_REASONS = [
 	"judge-unseated",
 	"main-route-unavailable",
 ] as const;
+
+function positiveNumber(value: unknown, source: string): number {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+		throw new Error(`${source} must be a positive finite number`);
+	return value;
+}
+
+function shareOf(value: unknown, source: string): number {
+	const share = positiveNumber(value, source);
+	if (share > 1) throw new Error(`${source} must be at most 1`);
+	return share;
+}
+
+/** Strict shape of the sealed run limits, and their agreement with the budget's tool ceiling (fleet M8). */
+function validateRunLimits(value: unknown, budget: WorkerBudget): void {
+	const limits = readRecord(value, "WorkerSpec.limits");
+	exactKeys(limits, ["version", "context", "time", "tools", "retries", "refusals", "depth"], "WorkerSpec.limits");
+	if (limits.version !== 1) throw new Error("WorkerSpec.limits.version must be 1");
+	if (limits.depth !== 1) throw new Error("WorkerSpec.limits.depth must be 1: workers never dispatch");
+	const context = readRecord(limits.context, "WorkerSpec.limits.context");
+	exactKeys(context, ["workShare", "noteShare"], "WorkerSpec.limits.context");
+	shareOf(context.workShare, "WorkerSpec.limits.context.workShare");
+	shareOf(context.noteShare, "WorkerSpec.limits.context.noteShare");
+	const time = readRecord(limits.time, "WorkerSpec.limits.time");
+	exactKeys(time, ["wallMs", "deadlineAt", "handbackAt", "responseMs"], "WorkerSpec.limits.time");
+	positiveNumber(time.wallMs, "WorkerSpec.limits.time.wallMs");
+	const deadlineAt = positiveNumber(time.deadlineAt, "WorkerSpec.limits.time.deadlineAt");
+	const handbackAt = positiveNumber(time.handbackAt, "WorkerSpec.limits.time.handbackAt");
+	if (handbackAt > deadlineAt) throw new Error("WorkerSpec.limits.time.handbackAt must not be after deadlineAt");
+	positiveNumber(time.responseMs, "WorkerSpec.limits.time.responseMs");
+	const tools = readRecord(limits.tools, "WorkerSpec.limits.tools");
+	exactKeys(tools, ["ceiling"], "WorkerSpec.limits.tools");
+	if (tools.ceiling !== (budget.ceiling ?? budget.hardCap))
+		throw new Error("WorkerSpec.limits.tools.ceiling must equal the budget's ceiling");
+	const retries = readRecord(limits.retries, "WorkerSpec.limits.retries");
+	exactKeys(retries, ["max"], "WorkerSpec.limits.retries");
+	if (!Number.isSafeInteger(retries.max) || (retries.max as number) < 0)
+		throw new Error("WorkerSpec.limits.retries.max must be a non-negative integer");
+	if (!Number.isSafeInteger(limits.refusals) || (limits.refusals as number) < 1)
+		throw new Error("WorkerSpec.limits.refusals must be a positive integer");
+}
 
 /** Strict shape and seal of the envelope; its agreement with the permit is checked with the permit. */
 function validateWorkerEnvelope(value: unknown): void {
@@ -1298,6 +1353,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 	}
 	validateWorkerBudget(spec.budget);
+	validateRunLimits(spec.limits, spec.budget as WorkerBudget);
 	validateProtectedModels(spec.protectedModels);
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);

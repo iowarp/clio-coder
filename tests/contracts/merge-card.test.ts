@@ -1,8 +1,14 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { test } from "node:test";
+import { mapExitCode } from "../../src/cli/run.js";
+import { validateResultContract } from "../../src/domains/agents/result-contract.js";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
-import { validationClause } from "../../src/domains/evidence/trust-projection.js";
+import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
+import { receiptAssurance } from "../../src/domains/dispatch/run-settlement.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
+import { trustVerdict, validationClause } from "../../src/domains/evidence/trust-projection.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { settledRunTrust } from "../harness/settled-run.js";
@@ -164,4 +170,50 @@ test("a confirmed baseline failure is explained by the shared validation project
 	}).validationGrounding;
 	strictEqual(validationGrounding.state, "unknown");
 	match(validationClause({ validationGrounding }), /also failed on task base; change validation unknown/);
+});
+
+test("host verification passed and the worker's own check failed: merge, exit code and card agree (M9)", async () => {
+	// The worker edits, then sees its own `npm test` fail on the final tree; the host's declared check passes.
+	const recorder = createRunEffectsRecorder(process.cwd());
+	recorder.start("fix", "edit", { path: "src/a.ts" });
+	recorder.finish("fix", false);
+	recorder.start("red", "bash", { command: "npm test" });
+	recorder.checkOutcome("red", "error");
+	recorder.finish("red", true);
+	const contract = { kind: "mutation-report" } as const;
+	const output = JSON.stringify({
+		completion: { state: "done", limitations: [], unverified: [] },
+		mutatedPaths: ["src/a.ts"],
+		validations: [{ name: "npm test", passed: false, evidence: "exit 1" }],
+	});
+	const resultContract = validateResultContract({
+		contract,
+		output,
+		cwd: process.cwd(),
+		networkAllowed: false,
+		filesystem: { readFile: () => "" },
+		observedRunEffects: recorder.snapshot(),
+	});
+	const draft = {
+		...fixtureReceiptDraft(fixtureEnvelope()),
+		quality: { ...fixtureReceiptDraft(fixtureEnvelope()).quality, resultContract },
+		hostVerification: {
+			status: "verified" as const,
+			checks: [
+				{ check: "lint", argv: ["npm", "run", "lint"], cwd: ".", exitCode: 0, durationMs: 10, memo: false, outputTail: "" },
+			],
+		},
+	};
+	// One assurance, read by every consumer (DESIGN 4.8).
+	const assurance = receiptAssurance(draft);
+	strictEqual(assurance, "compromised");
+	strictEqual(trustVerdict(settledRunTrust(draft)), assurance);
+	match(
+		mergeWithheldDetail({ assurance, contract, output, branch: INPUT.branch }) ?? "",
+		/^merge withheld: the worker's own report lists a failing validation \(npm test\)/u,
+	);
+	strictEqual(await mapExitCode({ exitCode: 0, verdict: { assurance } } as unknown as RunResult), 1);
+	const { ask, asked } = scripted([pick("Keep branch")]);
+	await askMergeCard({ ask }, { ...INPUT, workerFailedChecks: ["npm test"], hostVerification: draft.hostVerification });
+	match(asked[0]?.question ?? "", /Worker-reported check 'npm test'/u);
 });

@@ -648,6 +648,12 @@ export interface ToolInvokeOptions {
 	supportsImages?: boolean;
 	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
 	contextWindow?: number;
+	/**
+	 * Dispatched workers only (DESIGN 4.5): the run's observation pool, keyed by `runId` instead of a turn and sized from
+	 * the usable window's work share; `resultCapBytes` caps one result at what the work share has left.
+	 * `runObservationPool` in `observation.ts` sizes it.
+	 */
+	observationRunPool?: { limitBytes: number; resultCapBytes: number };
 	/** Trusted model the call runs on, as tool hooks receive it; the worker's own model in a worker. */
 	model?: ModelRunInfo;
 	signal?: AbortSignal;

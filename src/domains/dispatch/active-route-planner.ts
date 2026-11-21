@@ -45,6 +45,8 @@ export function routeValidationProjection(
 		// task features routing reads.
 		routingFeatures,
 		assignmentDeadlineAt,
+		// The run's wall clock is stamped by dispatch beside its deadline (M8), never model-authored.
+		runWallMs,
 		// Orchestrator-minted, never model-authored: the ledger reference is
 		// stripped before validation for the same reason the reservation is.
 		ledger,
@@ -99,6 +101,7 @@ export function routeValidationProjection(
 			...(routeAttemptDecision !== undefined ? { routeAttemptDecision } : {}),
 			...(routingFeatures !== undefined ? { routingFeatures } : {}),
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
+			...(runWallMs !== undefined ? { runWallMs } : {}),
 			...(ledger !== undefined ? { ledger } : {}),
 			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
 			...(decisionRefs !== undefined ? { decisionRefs } : {}),
