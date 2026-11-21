@@ -700,9 +700,10 @@ function completeRun(
 ): CompletedRun {
 	const envelope = deps.dispatch.getRun(receipt.runId);
 	const failedAttempts = earlierFailedAttempts((id) => deps.dispatch.getRun(id), envelope?.lineage ?? receipt.lineage);
-	// The sealed permit carries the envelope's write mode (M7). A receipt with no permit ceiling never ran a worker
-	// under one, so it changed nothing.
-	const readOnly = receipt.safety?.permit?.ceiling?.readOnly ?? true;
+	// The sealed envelope's write mode is the one definition of read-only (M7). An ACP receipt has no envelope, only
+	// the record-only permit it states; a receipt with neither never ran a worker, so it changed nothing.
+	const mode = receipt.safety?.envelope?.write.mode;
+	const readOnly = mode !== undefined ? mode === "none" : (receipt.safety?.permit?.ceiling?.readOnly ?? true);
 	return {
 		readOnly,
 		receipt,

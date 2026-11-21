@@ -1375,7 +1375,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		registry,
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 		telemetry,
-		allowedTools: activeWorkerTools,
+		envelopeTools: activeWorkerTools,
 		agentId: input.agentId,
 		includeInteractiveTools: false,
 		invokeOptions: (toolCallId) => ({

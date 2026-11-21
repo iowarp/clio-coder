@@ -214,7 +214,7 @@ async function main(): Promise<number> {
 	setAutonomousCommitProcess(true);
 	// Every child this worker spawns through bash-exec or safe-exec runs under
 	// the dispatch-chosen OS sandbox from here on (decision Q8).
-	configureWorkerProcessSandbox(spec.sandbox);
+	configureWorkerProcessSandbox(spec.sandbox, spec.envelope.sandbox.confinesWrites);
 	// The dispatching session's own workers may write its dev extension folders; another session's may not.
 	if (spec.devRootOwner !== undefined) adoptDevRootOwner(spec.devRootOwner);
 	const attribution = withManagedGitCommitAttributionEnvironment(process.env, {

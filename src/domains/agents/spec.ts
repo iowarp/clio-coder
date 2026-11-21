@@ -6,10 +6,11 @@ import {
 	type ToolName,
 	ToolNames,
 } from "../../core/tool-names.js";
-import { type ActionClass, classify } from "../safety/action-classifier.js";
+import { classify } from "../safety/action-classifier.js";
 import { type WorkerPermissionDeclaration, workerPermissionDeclarationErrors } from "../safety/worker-permit.js";
 import type { AgentBudget, AgentRecipe, AgentToolRequirement } from "./recipe.js";
 import type { ResultContract } from "./result-contract.js";
+import { capabilityClassExcludes } from "./role-class.js";
 
 export type AgentCategory =
 	| "explore"
@@ -160,14 +161,6 @@ export function isAgentProjectContextTier(value: unknown): value is AgentProject
 
 export function isAgentProduct(value: unknown): value is AgentProduct {
 	return includes(AGENT_PRODUCTS, value);
-}
-
-function actionClassesForTools(tools: ReadonlyArray<ToolName>): ReadonlySet<ActionClass> {
-	const actions = new Set<ActionClass>();
-	// An MCP name carries no class until dispatch admission resolves its
-	// server's trust; the permit ceiling then applies the class table to it.
-	for (const tool of tools) if (!isMcpToolName(tool)) actions.add(classify({ tool }).actionClass);
-	return actions;
 }
 
 function normalizeTools(recipe: AgentRecipe): ReadonlyArray<ToolName> {
@@ -364,7 +357,6 @@ export function isShadowAgent(spec: AgentSpec): boolean {
 
 export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	const errors: string[] = [];
-	const actions = actionClassesForTools(spec.tools);
 	const requiredGroups = spec.toolRequirements.required.map((requirement) =>
 		typeof requirement === "string" ? [requirement] : requirement.anyOf,
 	);
@@ -392,45 +384,12 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	) {
 		errors.push(`orchestration agent '${spec.id}' must require dispatch when it is declared`);
 	}
-	if (spec.capabilityClass === "read-only") {
-		for (const action of actions) {
-			if (action === "read") continue;
-			const offending = spec.tools.filter((tool) => classify({ tool }).actionClass === action).join(", ");
-			errors.push(`read-only agent '${spec.id}' requests ${action} tools (${offending})`);
-		}
-	}
-	if (spec.capabilityClass === "artifact-write") {
-		for (const tool of spec.tools) {
-			const action = classify({ tool }).actionClass;
-			if (
-				action === "execute" ||
-				action === "dispatch" ||
-				action === "system_modify" ||
-				action === "destructive" ||
-				action === "git_destructive"
-			) {
-				errors.push(`artifact-write agent '${spec.id}' requests ${action} tool '${tool}'`);
-			}
-			if (action === "write" && tool !== ToolNames.Artifact) {
-				errors.push(`artifact-write agent '${spec.id}' can only write terminal artifacts; got '${tool}'`);
-			}
-		}
-	}
-	if (spec.capabilityClass === "verification") {
-		for (const tool of spec.tools) {
-			const action = classify({ tool }).actionClass;
-			if (
-				action === "write" ||
-				action === "dispatch" ||
-				action === "system_modify" ||
-				action === "destructive" ||
-				action === "git_destructive"
-			) {
-				errors.push(`verification agent '${spec.id}' must not request ${action} tool '${tool}'`);
-			}
-			if (tool === ToolNames.Bash)
-				errors.push(`verification agent '${spec.id}' must use typed validation tools, not bash`);
-		}
+	// One ceiling for every class: the role class table the permit and the envelope also read.
+	for (const tool of spec.tools) {
+		// An MCP name carries no class until dispatch admission resolves its server's trust; the permit applies it then.
+		if (isMcpToolName(tool)) continue;
+		const reason = capabilityClassExcludes(spec.capabilityClass, tool, classify({ tool }).actionClass);
+		if (reason !== null) errors.push(`${spec.capabilityClass} agent '${spec.id}' ${reason}`);
 	}
 	if (spec.capabilityClass !== "orchestration" && spec.tools.includes(ToolNames.Dispatch)) {
 		errors.push(`agent '${spec.id}' exposes dispatch without orchestration capability`);

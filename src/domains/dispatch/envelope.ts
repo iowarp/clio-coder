@@ -28,9 +28,9 @@ import {
 } from "../../core/tool-names.js";
 import { directSurfaceNames, withGatewayForCapabilities } from "../../tools/surface.js";
 import { type WorkerStaticHeadInput, workerEnvelopeDigest, workerStaticHead } from "../../worker/protocol.js";
+import { roleExcludes, roleRemedy, toolActionClass } from "../agents/role-class.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
-import { classify } from "../safety/action-classifier.js";
-import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
+import { toolEscapesWriteRoots } from "../safety/policy-engine.js";
 import type { WorkerMcpAttestation, WorkerPermitAllowance } from "../safety/worker-permit.js";
 import type { GateTopologyRole } from "./execution-role.js";
 import { type RunRole, resolveRunRole } from "./obligation.js";
@@ -182,44 +182,15 @@ export function placedInWorktree(input: Parameters<typeof resolveWriteMode>[0]):
 	return !input.worktree && resolveWriteMode(input) === "worktree";
 }
 
-/** Tool kinds a role ceiling admits beyond read-class tools. */
-const ROLE_EXTRA_TOOLS: Record<RunRole, ReadonlySet<string> | "all"> = {
-	builder: "all",
-	explorer: new Set(),
-	judge: new Set(),
-	seat: new Set(),
-	// A checker and a reviewer run declared checks through typed verification; neither holds a shell or a write tool.
-	checker: new Set([ToolNames.Verify]),
-	reviewer: new Set([ToolNames.Verify]),
-};
-
-/** The role class table's remedy for a tool the role does not hold. */
-const ROLE_REMEDY: Record<RunRole, string | undefined> = {
-	builder: undefined,
-	explorer: "an explorer changes nothing; dispatch with a write scope to run as a builder",
-	checker: "a checker runs declared checks through verify and changes nothing",
-	reviewer: "a reviewer judges from evidence and declared checks and changes nothing",
-	judge: "a judge chooses from the evidence it is given",
-	seat: "a council seat answers from reads",
-};
-
-function toolActionClass(tool: string, mcp: WorkerMcpAttestation | undefined): string {
-	if (isMcpToolName(tool)) {
-		return mcp?.tools.find((entry) => `mcp_${entry.serverId}__${entry.tool}` === tool)?.actionClass ?? "unknown";
-	}
-	return classify({ tool }).actionClass;
-}
-
-function roleAdmits(role: RunRole, tool: string, mcp: WorkerMcpAttestation | undefined): boolean {
-	const extra = ROLE_EXTRA_TOOLS[role];
-	if (extra === "all") return true;
-	// The gateway carries no authority of its own; what it reaches is filtered by name.
-	if (tool === ToolNames.Gateway) return true;
-	return extra.has(tool) || toolActionClass(tool, mcp) === "read";
+function toolAction(tool: string, mcp: WorkerMcpAttestation | undefined): string {
+	if (!isMcpToolName(tool)) return toolActionClass(tool);
+	return mcp?.tools.find((entry) => `mcp_${entry.serverId}__${entry.tool}` === tool)?.actionClass ?? "unknown";
 }
 
 export interface EnvelopeInput {
 	role: RunRole;
+	/** The recipe's class, which narrows the role's row (an artifact writer builds only artifacts). */
+	capabilityClass: AgentCapabilityClass | string | null;
 	/** The recipe's declared tools. */
 	recipeTools: ReadonlyArray<ToolName>;
 	/** The recipe's tools after the request's tool profile, as admission attested them. */
@@ -297,8 +268,8 @@ export function resolveWorkerEnvelope(input: EnvelopeInput): WorkerEnvelope {
 		// Never a worker capability: no worker runtime mediates them, and a solo run has no board.
 		if (tool === ToolNames.AskUser || tool === ToolNames.Consult) continue;
 		if (tool === ToolNames.Ledger && !input.ledger) continue;
-		if (!roleAdmits(input.role, tool, input.mcp)) {
-			take(tool, "role", ROLE_REMEDY[input.role]);
+		if (roleExcludes(input.role, input.capabilityClass, tool, toolAction(tool, input.mcp)) !== null) {
+			take(tool, "role", roleRemedy(input.role, input.capabilityClass));
 			continue;
 		}
 		if (input.denied.has(tool)) {
@@ -415,8 +386,8 @@ export function withStaticHead(envelope: WorkerEnvelope, head: WorkerStaticHeadI
 }
 
 function commandEscapesRoots(tool: string, mcp: WorkerMcpAttestation | undefined, harness: boolean): boolean {
-	if (WRITE_ROOT_REFUSED_TOOLS.has(tool) || harness) return true;
-	return isMcpToolName(tool) && toolActionClass(tool, mcp) === "execute";
+	if (toolEscapesWriteRoots(tool) || harness) return true;
+	return isMcpToolName(tool) && toolAction(tool, mcp) === "execute";
 }
 
 /**

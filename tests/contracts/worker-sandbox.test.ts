@@ -38,6 +38,7 @@ test("a worker granted any network tool, web_read included, gets shell network (
 	const network = (tools: ToolName[]) =>
 		resolveWorkerEnvelope({
 			role: "builder",
+			capabilityClass: "workspace-edit",
 			recipeTools: tools,
 			profiledTools: tools,
 			denied: new Set(),

@@ -680,20 +680,16 @@ function rgConfigReasons(command: string): string[] {
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
 /**
- * Tools write-root confinement refuses by name, whatever their arguments: they
- * run a project script, a shell, or an unconfined child, so no lexical check
- * can bound where they write. Exported because a run that declares write roots
- * must not be *offered* them: a tool that is guaranteed to be refused is a
- * budget the model spends learning it cannot use it, and the refusal reads to
- * the model as a mistake it should retry. The class-based check below still
- * catches anything that classifies as execute or dispatch at call time.
+ * Whether a tool escapes write-root confinement whatever its arguments: by its
+ * own class it runs a project script, a shell, or an unconfined child, so no
+ * lexical check can bound where it writes. The envelope reads the same test to
+ * withhold such a tool from a run whose roots nothing binds (fleet M7), and the
+ * class of the call itself is checked again below.
  */
-export const WRITE_ROOT_REFUSED_TOOLS: ReadonlySet<string> = new Set<string>([
-	ToolNames.Bash,
-	ToolNames.Verify,
-	ToolNames.RunScript,
-	ToolNames.Dispatch,
-]);
+export function toolEscapesWriteRoots(tool: string): boolean {
+	const action = classify({ tool }).actionClass;
+	return action === "execute" || action === "dispatch";
+}
 
 // Write-class tools (action class "write"). bash is execute class and runs its
 // own loop, so it is not covered by the lexical write-root containment below.
@@ -733,7 +729,7 @@ function isWriteConfinementEscape(call: ClassifierCall, actionClass: string, osC
 	// Under the OS sandbox a command's writes land only in the bound roots, so
 	// running one is no escape. A dispatched child is not bound by them.
 	if (osConfined && call.tool !== ToolNames.Dispatch && actionClass !== "dispatch") return false;
-	if (WRITE_ROOT_REFUSED_TOOLS.has(call.tool)) return true;
+	if (toolEscapesWriteRoots(call.tool)) return true;
 	return actionClass === "execute" || actionClass === "dispatch";
 }
 

@@ -383,7 +383,7 @@ describe("harness extension executable capabilities", () => {
 					.digest("hex"),
 			);
 			equal(
-				attestedToolSignature({ allowedTools, toolsSupported: true, agentId: "coder", task: request.task }),
+				attestedToolSignature({ allowedTools: surface, toolsSupported: true, agentId: "coder", task: request.task }),
 				toolSignatureOf(surface),
 			);
 			disableExtension("fixture", { cwd: data.cwd, scope: "user" });

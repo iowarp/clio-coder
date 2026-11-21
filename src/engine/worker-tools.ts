@@ -36,7 +36,7 @@ import {
 } from "../domains/safety/protected-artifacts.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
-import { effectiveToolNames, wireParameterSchema } from "../tools/agent-tools.js";
+import { envelopeSurfaceNames, wireParameterSchema } from "../tools/agent-tools.js";
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
 import type { McpCapabilitySource } from "../tools/gateway/index.js";
 import { registerHarnessExtensionTools } from "../tools/harness-extensions.js";
@@ -279,13 +279,8 @@ export function attestedToolNames(input: AttestedToolIdentityInput): string[] {
 			return resolveSafety().decisions;
 		},
 	});
-	const names = effectiveToolNames({
-		registry,
-		allowedTools: input.toolsSupported ? input.allowedTools : [],
-		includeInteractiveTools: false,
-		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
-		...(input.task !== undefined ? { task: input.task } : {}),
-	});
+	// The envelope's names this build serves, as resolveAgentTools attaches them: no second narrowing (fleet M7).
+	const names = envelopeSurfaceNames(registry, input.allowedTools);
 	// The registry projection attaches `gateway` for any gateway-placed
 	// capability it admits. An external agent loop is never offered it, and
 	// dispatch admission leaves it off that surface, so the worker must too or

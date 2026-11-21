@@ -33,12 +33,10 @@
 
 import { type DispatchJob, dispatchJobRecipe, dispatchJobWrites } from "../agents/dispatch-jobs.js";
 import type { ResultContract } from "../agents/result-contract.js";
+import { capabilityClassWritesNothing } from "../agents/role-class.js";
 import type { AgentCapabilityClass, AgentSpec } from "../agents/spec.js";
 import { type AgentTaskType, asksForMutation, classifyAgentTask } from "./agent-candidates.js";
 import type { DispatchIntent } from "./intent.js";
-
-/** Capability classes that cannot change the workspace, whatever the task says. */
-const READ_ONLY_CAPABILITY_CLASSES: ReadonlySet<AgentCapabilityClass> = new Set(["read-only", "verification"]);
 
 /**
  * Read-shaped corroboration independent of the classifier's ordered scan.
@@ -112,7 +110,7 @@ export interface CapabilityMismatchInput {
 /** The job table's recipe for a writing job, else its implement recipe, when installed and able to write. */
 function suggestedSpecialist(job: DispatchJob, specs: ReadonlyArray<AgentSpec>): string | null {
 	const canMutate = new Set(
-		specs.filter((spec) => !READ_ONLY_CAPABILITY_CLASSES.has(spec.capabilityClass)).map((spec) => spec.id),
+		specs.filter((spec) => !capabilityClassWritesNothing(spec.capabilityClass)).map((spec) => spec.id),
 	);
 	for (const id of [dispatchJobRecipe(job), dispatchJobRecipe("implement")]) {
 		if (canMutate.has(id)) return id;
@@ -125,7 +123,7 @@ function suggestedSpecialist(job: DispatchJob, specs: ReadonlyArray<AgentSpec>):
  * means the recipe can do the work, or the task never asked it to.
  */
 export function assessCapabilityMismatch(input: CapabilityMismatchInput): CapabilityMismatch | null {
-	if (!READ_ONLY_CAPABILITY_CLASSES.has(input.capabilityClass)) return null;
+	if (!capabilityClassWritesNothing(input.capabilityClass)) return null;
 	if (input.intent && input.intent.writeRoots.length === 0 && input.intent.expectedOutputs.length === 0) return null;
 	const features = classifyAgentTask(input.task);
 	if (

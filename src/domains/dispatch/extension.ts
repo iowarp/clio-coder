@@ -2806,6 +2806,7 @@ function resolveDispatchEnvelopeStage(input: {
 	);
 	const envelopeInput: Omit<EnvelopeInput, "permitDigest" | "approval"> = {
 		role,
+		capabilityClass: spec.capabilityClass,
 		recipeTools: (recipe.tools ?? []) as ReadonlyArray<ToolName>,
 		profiledTools: admission.allowedTools,
 		denied: deniedToolNames(req),
@@ -11174,8 +11175,12 @@ export function createDispatchBundle(
 					writerLease = acquireCheckoutWriterLease({
 						checkout,
 						...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
-						// A read-only run writes nothing, so it carries no holder.
-						...(req.readOnly === true
+						// A read-only run writes nothing, so it carries no holder: the envelope's one definition of read-only.
+						...(requestedWriteNone({
+							readOnly: req.readOnly,
+							capabilityClass: agents.listSpecs().find((spec) => spec.id === req.agentId)?.capabilityClass ?? null,
+							hoareContract: false,
+						})
 							? {}
 							: {
 									holder: {
