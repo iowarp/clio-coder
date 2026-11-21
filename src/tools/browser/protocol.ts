@@ -104,6 +104,8 @@ export interface BrowserEventDelta {
 	failedRequests: BrowserRequestRecord[];
 	/** Records past the per-kind cap. */
 	dropped: number;
+	/** Hosts the session's route refused since the previous call: not loopback and not granted. */
+	blockedHosts?: string[];
 }
 
 export interface BrowserShot {

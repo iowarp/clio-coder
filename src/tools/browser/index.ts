@@ -79,6 +79,22 @@ function eventLines(events: BrowserEventDelta | undefined): string[] {
 	return lines;
 }
 
+/**
+ * Hosts the session's route refused during this call, stated above the untrusted banner with the exact grant that
+ * admits them, so neither the agent nor the operator meets a silently aborted request. Hostnames come from the URL
+ * parser and are held to the hostname alphabet before Clio repeats them.
+ */
+function blockedGrant(events: BrowserEventDelta | undefined): { hosts: string[]; grant: string; line: string } | null {
+	const hosts = (events?.blockedHosts ?? []).filter((host) => /^[a-z\d.\-[\]:]{1,253}$/u.test(host));
+	if (hosts.length === 0) return null;
+	const grant = `browser open with allow_hosts ${JSON.stringify(hosts)}`;
+	return {
+		hosts,
+		grant,
+		line: `blocked: ${hosts.join(", ")} not granted to this browser session; to admit: ${grant} (give page and its url to reload that page under the grant)`,
+	};
+}
+
 /** Text first: what Clio ran above the banner, everything the page supplied under it. */
 function formatBrowserReply(op: BrowserOp, reply: BrowserReply, notes: ReadonlyArray<string> = []): string {
 	const head: string[] = [];
@@ -88,6 +104,8 @@ function formatBrowserReply(op: BrowserOp, reply: BrowserReply, notes: ReadonlyA
 	);
 	if (reply.closed) head.push(reply.closed === "session" ? "session closed" : "page closed");
 	if (reply.attached) head.push(`attached to ${reply.attached} (${reply.pages?.length ?? 0} page(s))`);
+	const blocked = blockedGrant(reply.events);
+	if (blocked !== null) head.push(blocked.line);
 	for (const note of notes) head.push(note);
 	if (reply.actions && reply.actions.length > 0) {
 		head.push(`actions (${reply.actions.length}):`);
@@ -322,10 +340,12 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 				return { kind: "error", message: `browser ${op}: ${error instanceof Error ? error.message : String(error)}` };
 			}
 			const output = formatBrowserReply(op, reply, notes);
+			const blocked = blockedGrant(reply.events);
 			const details: Record<string, unknown> = {
 				op,
 				...(reply.pageFacts ? { page: reply.pageFacts.page } : {}),
 				...(reply.shots && reply.shots.length > 0 ? { shots: reply.shots.map((shot) => shot.path) } : {}),
+				...(blocked !== null ? { blockedHosts: blocked.hosts, blockedGrant: blocked.grant } : {}),
 				...(reply.ok ? {} : { failed: true }),
 				...(!reply.ok && reply.cancelled ? { cancelled: true } : {}),
 				...(!reply.ok && reply.timedOut ? { timedOut: true } : {}),

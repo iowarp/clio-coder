@@ -176,11 +176,14 @@ function takeDelta(): BrowserEventDelta {
 		}
 	}
 	reportedSeq = seq;
+	const blocked = [...newlyBlocked];
+	newlyBlocked.clear();
 	return {
 		console: [...consoleMap.values()],
 		exceptions: [...exceptionMap.values()],
 		failedRequests: [...requestMap.values()],
 		dropped,
+		...(blocked.length > 0 ? { blockedHosts: blocked } : {}),
 	};
 }
 
@@ -212,6 +215,8 @@ let shotCount = 0;
 let snapshotCount = 0;
 const grantedHosts = new Set<string>();
 const blockedHosts = new Set<string>();
+/** Hosts the route refused since the last reply, drained into its event delta. */
+const newlyBlocked = new Set<string>();
 /** The CDP endpoint of a browser someone else started that the session drives instead of its own. */
 let attachedTo: string | undefined;
 /** An attached browser that went away (the person closed it), named in the next "no page" error. */
@@ -240,6 +245,7 @@ function routeGranted(route: Any): unknown {
 	}
 	if (isLoopbackHost(host) || grantedHosts.has(host.toLowerCase())) return route.continue();
 	blockedHosts.add(host);
+	newlyBlocked.add(host.toLowerCase());
 	return route.abort("blockedbyclient");
 }
 
@@ -319,7 +325,7 @@ function listen(id: string, page: Any): void {
 			url: redact(r.url()),
 			error:
 				errorText.startsWith("net::ERR_BLOCKED_BY_CLIENT") && blockedHosts.has(host)
-					? `blocked: ${host} is not granted to this browser session (open a URL on it to ask for it)`
+					? `blocked: ${host} is not granted to this browser session; browser open with allow_hosts ${JSON.stringify([host.toLowerCase()])} admits it`
 					: clip(errorText),
 			resource: r.resourceType(),
 		});
