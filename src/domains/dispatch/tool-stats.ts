@@ -51,6 +51,37 @@ export function recordToolCompletion(inFlight: Map<string, number>, payload: Too
 	else inFlight.set(payload.tool, count - 1);
 }
 
+/** One call that started and has not finished: its tool and the redacted, bounded object its start event named. */
+export interface InFlightCall {
+	tool: string;
+	object?: string;
+}
+
+/**
+ * Track a start by its call id, with the descriptor object the tool-admission seam composed (already redacted and
+ * bounded), so a host stop can name what was running (M-37). A start without an id cannot be matched to its finish.
+ */
+export function recordCallStart(
+	calls: Map<string, InFlightCall>,
+	payload: { tool?: string; toolCallId?: string; action?: unknown },
+): void {
+	if (typeof payload.tool !== "string" || typeof payload.toolCallId !== "string") return;
+	const action = payload.action;
+	const object =
+		typeof action === "object" && action !== null && typeof (action as { object?: unknown }).object === "string"
+			? (action as { object: string }).object.trim()
+			: "";
+	const truncated = typeof action === "object" && action !== null && (action as { truncated?: unknown }).truncated;
+	calls.set(payload.toolCallId, {
+		tool: payload.tool,
+		...(object.length > 0 ? { object: truncated === true ? `${object}…` : object } : {}),
+	});
+}
+
+export function recordCallFinish(calls: Map<string, InFlightCall>, payload: { toolCallId?: string }): void {
+	if (typeof payload.toolCallId === "string") calls.delete(payload.toolCallId);
+}
+
 export function snapshotUnfinishedTools(inFlight: ReadonlyMap<string, number>): Array<{ tool: string; count: number }> {
 	return [...inFlight.entries()]
 		.filter(([, count]) => count > 0)
