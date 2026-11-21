@@ -96,7 +96,11 @@ export function createProfileKnowledgeBase(options: ProfileKnowledgeBaseOptions 
 	let overlays: ModelCatalogOverlays | null = null;
 	try {
 		overlays = new ModelCatalogOverlays(options.overlayRoots ?? resolveModelCatalogOverlayRoots());
-		for (const problem of overlays.problems()) onError(`model catalog overlay skipped: ${problem}`);
+		// One line per skipped file; `clio-coder doctor` shows the whole message.
+		for (const { path, message } of overlays.problems()) {
+			const first = (message.split("\n", 1)[0] ?? "").trim().replace(/:$/u, "");
+			onError(`model catalog overlay skipped: ${path}: ${first}`);
+		}
 	} catch (err) {
 		onError(`model catalog overlays disabled: ${err instanceof Error ? err.message : String(err)}`);
 	}

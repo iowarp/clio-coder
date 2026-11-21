@@ -111,6 +111,7 @@ Supported effect kinds:
 | `require_tool` | Require a specific tool on the next provider round. | `before_tool`, `after_tool`, `turn_start` |
 | `lock_tools` | Set tool choice to `none`, so the next provider rounds answer in text only, until the next submitted turn. | `before_tool`, `after_tool`, `turn_start` |
 | `notify_operator` | Show the operator a tip or info notice, keyed by the effect `key`. The model does not see it. | `turn_start`, `turn_end` |
+| `request_approval` | Ask the operator before the call runs, with the effect's `reason` on the card. When no `block_tool` decided the call and it carries no approval yet, the registry hands it to the route every admission ask takes (safety judge, contained-yolo and no-listener refusals, park on the approval card); once released it runs on the effects its before_tool stage already produced, so its hooks do not run twice. A call an extension rewrote is refused instead. | `before_tool` |
 
 An effect returned at any other hook is dropped. `on_compaction` applies none. A user-defined hook whose event cannot apply the effect it produces is refused at load with an issue naming the events that can, so its `hook.ran` record never reports an effect that was dropped. A `prompt` hook produces `inject_reminder`, a `command` hook produces `annotate_tool_result` or, with `as: reminder`, `inject_reminder`, and an `effect` hook produces its declared kind.
 

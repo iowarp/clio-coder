@@ -108,3 +108,44 @@ test("a content-less running tool update keeps the last partial output", { timeo
 	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
 	assert.deepEqual(partials.slice(-2), ["partial output", "partial output"]);
 });
+
+test("a tool result's images land on item.images, bounded and allow-listed, and their bytes stay out of rawOutput", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "tool-images", lanes: false });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	h.supervisor.startTurn(session.id, "Take a screenshot");
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
+	const tools = h.supervisor.get(session.id).timeline.filter((item) => item.kind === "tool");
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+	const content = tools.find((item) => item.toolCallId === "shot-1");
+	// The SVG, the oversize block and the non-base64 one are dropped; only a local file link is kept.
+	assert.deepEqual(content?.images, [{ mimeType: "image/png", data: png }]);
+	assert.deepEqual(content?.imageLinks, [{ path: "/work/shots/shot.png", name: "shot.png" }]);
+	// Without the strip the megabyte block would turn the record into a 32 KiB snippet.
+	assert.equal(content?.rawOutput?.truncated, undefined);
+	const blocks = content?.rawOutput?.content as Array<{ content: unknown }>;
+	assert.deepEqual(
+		blocks.slice(1, 5).map((block) => block.content),
+		["image/png", "image/svg+xml", "image/png", "image/jpeg"].map((mimeType) => ({
+			type: "image",
+			mimeType,
+			omitted: true,
+		})),
+	);
+	const result = tools.find((item) => item.toolCallId === "shot-2");
+	assert.deepEqual(result?.images, [{ mimeType: "image/webp", data: png }]);
+	assert.equal(result?.imageLinks, undefined);
+	assert.deepEqual(result?.rawOutput, {
+		result: {
+			content: [
+				{ type: "text", text: "captured" },
+				{ type: "image", mimeType: "image/webp", omitted: true },
+			],
+		},
+		isError: false,
+	});
+	assert.ok(!JSON.stringify(tools.map((item) => item.rawOutput)).includes(png));
+});

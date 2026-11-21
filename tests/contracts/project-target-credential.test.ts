@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { readLayeredSettings, readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { bootAuthStatus } from "../../src/domains/providers/auth/boot-status.js";
+import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { type RuntimeAuthMetadata, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import { runCli } from "../harness/headless-run.js";
 import { closeServer } from "../harness/openai-compat-fixture.js";
@@ -104,6 +105,55 @@ test("a project targets list that drops a user-only target warns against the pro
 	throws(() => readStrictLayeredSettings(workspace), /safety\.review\.target: unknown target 'ghost'/);
 });
 
+test("a trusted project target that names its key variable is sent that variable and nothing else", async (t) => {
+	const home = await isolateClioEnv("clio-project-named-key-");
+	const saved = { team: process.env.TEAM_KEY, openai: process.env.OPENAI_API_KEY };
+	t.after(() => {
+		for (const [name, value] of [
+			["TEAM_KEY", saved.team],
+			["OPENAI_API_KEY", saved.openai],
+		] as const) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+		home.restore();
+	});
+	const workspace = join(home.dir, "workspace");
+	mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+	writeFileSync(
+		join(workspace, ".clio-coder", "settings.yaml"),
+		"targets:\n  - id: team\n    runtime: openai\n    url: https://llm.team.example.org/v1\n    auth: { apiKeyEnvVar: TEAM_KEY }\n",
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	const target = readLayeredSettings(workspace).settings.targets.find((entry) => entry.id === "team");
+	ok(target);
+	const openai: RuntimeAuthMetadata = {
+		id: "openai",
+		tier: "cloud",
+		auth: "api-key",
+		credentialsEnvVar: "OPENAI_API_KEY",
+	};
+	const authTarget = resolveAuthTarget(target, openai);
+	strictEqual(authTarget.credentialRefusal, undefined);
+	const auth = openAuthStorage();
+	auth.setApiKey("openai", "sk-stored-canary");
+	process.env.OPENAI_API_KEY = "sk-env-canary";
+	delete process.env.TEAM_KEY;
+	// Unset, the operator's own openai key never stands in for the variable the project named.
+	const unset = await auth.resolveForTarget(authTarget);
+	strictEqual(unset.available, false);
+	strictEqual(unset.apiKey, undefined);
+	strictEqual(bootAuthStatus(target, openai).available, false);
+	process.env.TEAM_KEY = "team-secret";
+	const set = await auth.resolveForTarget(authTarget);
+	strictEqual(set.apiKey, "team-secret");
+	strictEqual(set.detail, "TEAM_KEY");
+	strictEqual(auth.statusForTarget(authTarget).available, true);
+	strictEqual(bootAuthStatus(target, openai).available, true);
+});
+
 // The stub listens on one of this host's non-loopback addresses, the case a loopback-only check would miss.
 function hostAddress(): string | undefined {
 	for (const entries of Object.values(networkInterfaces())) {
@@ -149,4 +199,55 @@ test("a trusted project's chat target URL never receives the environment API key
 	);
 	strictEqual(run.code, 1, run.stdout + run.stderr);
 	match(run.stdout + run.stderr, /does not send your stored or environment openai credential to a URL a project chose/);
+});
+
+test("a trusted project target whose named key is unset is refused before any request, in run and doctor", {
+	timeout: 60_000,
+}, async (t) => {
+	const home = await isolateClioEnv("clio-project-named-key-unset-");
+	t.after(() => home.restore());
+	const requests: string[] = [];
+	const server = createServer((request, response) => {
+		requests.push(`${request.method} ${request.url}`);
+		request.resume();
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify({ object: "list", data: [{ id: "mock-model", object: "model" }] }));
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => closeServer(server));
+	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+	const workspace = join(home.dir, "workspace");
+	mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+	writeFileSync(
+		join(workspace, ".clio-coder", "settings.yaml"),
+		`targets:\n  - id: team\n    runtime: openai-compat\n    url: ${url}\n    defaultModel: mock-model\n    auth: { apiKeyEnvVar: TEAM_KEY }\nchat:\n  target: team\n  model: mock-model\n`,
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test", NO_COLOR: "1" };
+	delete env.TEAM_KEY;
+	const named = /target team reads its key from \$TEAM_KEY, which is not set/;
+
+	const run = await runCli(["--no-context-files", "--no-skills", "run", "--no-delegate", "say hi"], {
+		env,
+		cwd: workspace,
+	});
+	const runText = run.stdout + run.stderr;
+	strictEqual(requests.length, 0, `requests reached the project URL: ${requests.join(", ")}`);
+	strictEqual(run.code, 1, runText);
+	match(runText, named);
+	ok(!runText.includes("auth login"), runText);
+
+	const doctor = await runCli(["doctor"], { env, cwd: workspace });
+	const row = (doctor.stdout + doctor.stderr).split("\n").find((line) => /\bconnection team\b/.test(line));
+	strictEqual(requests.length, 0, `doctor reached the project URL: ${requests.join(", ")}`);
+	ok(row, doctor.stdout + doctor.stderr);
+	match(row, named);
+	// The chat row names the two fixes, the shell and the project file, in one sentence: no `.; next:` and no configure.
+	const chat = (doctor.stdout + doctor.stderr).split("\n").find((line) => /^\S+\s+chat\s/.test(line));
+	strictEqual(
+		chat,
+		`WARN chat                   target 'team', model 'mock-model'; target team reads its key from $TEAM_KEY, which is not set in this shell; set it with \`export TEAM_KEY=<key>\`, or fix auth.apiKeyEnvVar on target team in ${join(workspace, ".clio-coder", "settings.yaml")}.`,
+	);
 });

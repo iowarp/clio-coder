@@ -28,7 +28,8 @@ import {
 } from "../../core/owner-only-acl.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { relativePathEscapes } from "../../core/path-containment.js";
-import { readLayeredSettings } from "../../core/settings-layers.js";
+import { unsetKeyVariableSentence } from "../../core/project-target-urls.js";
+import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../../core/settings-layers.js";
 import {
 	type RetiredSettingsRemoval,
 	removeRetiredSettingsKeys,
@@ -999,7 +1000,8 @@ export function formatDoctorReport(findings: DoctorFinding[]): string {
 /** Keep CLI, JSON and in-session warnings actionable even when an optional check only supplies a diagnosis. */
 export function withDoctorCommand(finding: DoctorFinding): DoctorFinding {
 	if (finding.ok && finding.level !== "warn" && finding.level !== "error") return finding;
-	if (/`(?:clio-coder(?:`| [^`<>]+`)|pnpm [^`]+`|chmod [^`]+`)/.test(finding.detail)) return finding;
+	if (/`(?:clio-coder(?:`| [^`<>]+`)|pnpm [^`]+`|chmod [^`]+`|export [A-Za-z_]\w*=[^`]+`)/.test(finding.detail))
+		return finding;
 	const name = finding.name;
 	const command = /^(?:settings|credentials|repair|state metadata|.* dir$|installation files)/.test(name)
 		? "clio-coder doctor --fix"
@@ -1014,7 +1016,8 @@ export function withDoctorCommand(finding: DoctorFinding): DoctorFinding {
 						: /^(?:install method|engine runtime|node version)/.test(name)
 							? "clio-coder upgrade"
 							: "clio-coder config inspect --json";
-	return { ...finding, detail: `${finding.detail}; next: \`${command}\`` };
+	// A detail that ends its sentence loses the period, so the join never reads `.; next:`.
+	return { ...finding, detail: `${finding.detail.replace(/\.$/u, "")}; next: \`${command}\`` };
 }
 
 /**
@@ -1380,8 +1383,10 @@ export async function runDoctorModelChecks(
 ): Promise<DoctorFinding[]> {
 	const proposals: Array<{ row: DoctorFinding; repair: SettingsScalarRepair }> = [];
 	let settings: ReturnType<typeof readSettings>;
+	let sources: Record<string, SettingsOrigin>;
 	try {
-		settings = readSettings();
+		// The targets a session in this directory runs, a trusted project's included; an untrusted one adds none.
+		({ settings, sources } = readLayeredSettings(process.cwd()));
 	} catch {
 		return [];
 	}
@@ -1431,6 +1436,7 @@ export async function runDoctorModelChecks(
 			const active = targetIsActive(settings, target.id);
 			const requiredCredential = targetRequiresAuth(target, runtime);
 			let credentialAvailable = !requiredCredential;
+			let projectKeyUnset: string | null = null;
 			let credentialDetail = requiredCredential
 				? "required credential not found"
 				: ["aws-sdk", "vertex-adc", "claude-cli"].includes(runtime.auth)
@@ -1439,12 +1445,16 @@ export async function runDoctorModelChecks(
 						? `sign-in is the \`${runtime.externalLogin}\` the runtime reads; Clio stores no credential`
 						: "no credential required";
 			try {
-				const status = openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), {
+				const authTarget = resolveAuthTarget(target, runtime);
+				const status = openAuthStorage().statusForTarget(authTarget, {
 					includeFallback: false,
 				});
 				credentialAvailable = !requiredCredential || status.available;
 				const stored = openAuthStorage().get(status.providerId);
-				if (status.source === "stored-oauth" && stored?.type === "oauth" && stored.expires <= Date.now()) {
+				if (requiredCredential && !status.available && authTarget.projectKeyEnvVar) {
+					projectKeyUnset = authTarget.projectKeyEnvVar;
+					credentialDetail = `required credential not found: ${unsetKeyVariableSentence(target.id, authTarget.projectKeyEnvVar).replace(/\.$/u, "")}; this project sends only that variable to ${target.url ?? "its url"}`;
+				} else if (status.source === "stored-oauth" && stored?.type === "oauth" && stored.expires <= Date.now()) {
 					credentialAvailable = !requiredCredential;
 					credentialDetail = `stored sign-in expired; operator sign-in required: run \`clio-coder auth login ${target.id}\``;
 				} else if (status.available && status.source !== "not-required")
@@ -1456,49 +1466,57 @@ export async function runDoctorModelChecks(
 				credentialAvailable = false;
 				credentialDetail = `credential status unreadable: ${error instanceof Error ? error.message : String(error)}`;
 			}
-			const observation = await probeAdvertisedModels(target, runtime);
+			// The project's URL gets no request until the variable it named is set, the passive check included.
+			const observation = projectKeyUnset !== null ? null : await probeAdvertisedModels(target, runtime);
 			observations.set(target.id, observation);
 			const where = target.url ?? `${runtime.displayName} provider endpoint`;
 			const connection: DoctorFinding =
-				observation === null
+				projectKeyUnset !== null
 					? {
-							ok: credentialAvailable || !active,
-							...(credentialAvailable ? { level: "info" as const } : !active ? { level: "warn" as const } : {}),
+							ok: !active,
+							...(!active ? { level: "warn" as const } : {}),
 							name: `connection ${target.id}`,
-							detail: `${credentialDetail}; ${
-								runtime.kind !== "http" && typeof runtime.probe === "function"
-									? "standard doctor does not run this runtime’s subprocess check; endpoint reachability is not verified"
-									: `${runtime.id} exposes no passive endpoint check, so reachability is not verified until a request`
-							}. No generation was attempted.`,
+							detail: `${credentialDetail}, so no request was sent. Set ${projectKeyUnset}, then rerun \`clio-coder doctor\`.`,
 						}
-					: observation.probe.ok
+					: observation === null
 						? {
 								ok: credentialAvailable || !active,
-								...(!credentialAvailable && !active ? { level: "warn" as const } : {}),
+								...(credentialAvailable ? { level: "info" as const } : !active ? { level: "warn" as const } : {}),
 								name: `connection ${target.id}`,
-								detail: `${runtime.id === "alcf" ? "ALCF catalog reachable; configured inference URL not checked" : `${where} reachable`}${
-									observation.probe.latencyMs === undefined ? "" : ` in ${observation.probe.latencyMs}ms`
-								}; ${credentialDetail}; passive metadata only, no generation was attempted${
-									observation.advertised.length > 0
-										? `; ${observation.advertised.length} models read live`
-										: "; no model list returned"
-								}`,
+								detail: `${credentialDetail}; ${
+									runtime.kind !== "http" && typeof runtime.probe === "function"
+										? "standard doctor does not run this runtime’s subprocess check; endpoint reachability is not verified"
+										: `${runtime.id} exposes no passive endpoint check, so reachability is not verified until a request`
+								}. No generation was attempted.`,
 							}
-						: runtime.id === "copilot-sdk" &&
-								observation.probe.failureKind === "authentication" &&
-								options.copilotKeychainLogin !== undefined
+						: observation.probe.ok
 							? {
-									ok: true,
-									level: "warn" as const,
+									ok: credentialAvailable || !active,
+									...(!credentialAvailable && !active ? { level: "warn" as const } : {}),
 									name: `connection ${target.id}`,
-									detail: `${where} was checked with the keychain closed and saw no login; ${copilotKeychainOnlyDetail(options.copilotKeychainLogin)}. This was a passive metadata check; no generation was attempted.`,
+									detail: `${runtime.id === "alcf" ? "ALCF catalog reachable; configured inference URL not checked" : `${where} reachable`}${
+										observation.probe.latencyMs === undefined ? "" : ` in ${observation.probe.latencyMs}ms`
+									}; ${credentialDetail}; passive metadata only, no generation was attempted${
+										observation.advertised.length > 0
+											? `; ${observation.advertised.length} models read live`
+											: "; no model list returned"
+									}`,
 								}
-							: {
-									ok: !active,
-									...(!active ? { level: "warn" as const } : {}),
-									name: `connection ${target.id}`,
-									detail: `${where} was not verified: ${observation.probe.error ?? "no reply"}. ${credentialDetail}. This was a passive metadata check; no generation was attempted.`,
-								};
+							: runtime.id === "copilot-sdk" &&
+									observation.probe.failureKind === "authentication" &&
+									options.copilotKeychainLogin !== undefined
+								? {
+										ok: true,
+										level: "warn" as const,
+										name: `connection ${target.id}`,
+										detail: `${where} was checked with the keychain closed and saw no login; ${copilotKeychainOnlyDetail(options.copilotKeychainLogin)}. This was a passive metadata check; no generation was attempted.`,
+									}
+								: {
+										ok: !active,
+										...(!active ? { level: "warn" as const } : {}),
+										name: `connection ${target.id}`,
+										detail: `${where} was not verified: ${observation.probe.error ?? "no reply"}. ${credentialDetail}. This was a passive metadata check; no generation was attempted.`,
+									};
 			const cache = (observation?.cacheAdvisories ?? []).map(
 				(detail): DoctorFinding => ({ ok: true, level: "warn", name: `cache ${target.id}`, detail }),
 			);
@@ -1582,7 +1600,8 @@ export async function runDoctorModelChecks(
 			};
 			for (const entry of missing) {
 				const to = nearestModelId(entry.model, advertised);
-				if (to) {
+				// A model a project layer chose is the project's to change; --fix writes only the user's settings.
+				if (to && !settingsSourceFor(sources, entry.path ?? entry.role).startsWith("project")) {
 					row.detail += ` Proposed ${entry.role}: '${entry.model}' -> '${to}'; confirmation required.`;
 					proposals.push({ row, repair: { path: entry.path ?? entry.role, from: entry.model, to } });
 				}
@@ -1789,11 +1808,11 @@ function modelCatalogOverlayFindings(workspaceRoot: string): DoctorFinding[] {
 	return [
 		loaded,
 		...overlays.problems().map(
-			(problem): DoctorFinding => ({
+			({ path, message }): DoctorFinding => ({
 				ok: true,
 				level: "warn",
 				name: "model catalog file",
-				detail: `${problem}; this file is skipped, the other overlay files still apply; fix or remove it, then rerun \`clio-coder doctor\``,
+				detail: `${path}: ${message}; this file is skipped, the other overlay files still apply; fix or remove it, then rerun \`clio-coder doctor\``,
 			}),
 		),
 	];

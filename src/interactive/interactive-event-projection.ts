@@ -425,11 +425,21 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			const event = payload as ConfigReloadFailedPayload | null | undefined;
 			if (!event || typeof event !== "object" || !("message" in event)) return;
 			// The domain already folded this to one line with a remedy; the frame
-			// only ever sees a notice, never an error object or a stack.
+			// only ever sees a notice, never an error object or a stack. The footer
+			// clamps from the right in a narrow pane, so it leads with the failing
+			// key; the transcript keeps the whole line once per failure (M-25).
 			if (typeof event.message === "string" && event.message.length > 0) {
-				deps.notify("error", `[config] settings reload rejected: ${event.message}`, "config:reload-failed", 0);
+				const failure = event as Extract<ConfigReloadFailedPayload, { message: string }>;
+				const headline = typeof failure.headline === "string" && failure.headline ? failure.headline : failure.message;
+				deps.notify("error", `${headline} · [config] settings reload rejected`, "config:reload-failed", 0);
+				const keys = Array.isArray(failure.keys) && failure.keys.length > 0 ? failure.keys.join(", ") : "none named";
+				deps.appendTranscriptNotice(
+					"error",
+					`[config] settings reload rejected; this session keeps its last good settings. File: ${failure.file}. Key: ${keys}. Error: ${failure.message}`,
+				);
 			} else if (event.message === null) {
 				deps.dismissNotification("config:reload-failed");
+				deps.appendTranscriptNotice("info", "[config] settings reload accepted; the earlier rejection is cleared.");
 			}
 			deps.refreshFooter();
 			deps.requestRender();

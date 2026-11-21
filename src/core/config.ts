@@ -227,6 +227,40 @@ export function formatSettingsFailure(error: unknown): string {
 	return foldToOneLine(error instanceof Error ? error.message : String(error));
 }
 
+/** A rejected settings reload, in the parts each live surface needs. */
+export interface SettingsReloadFailure {
+	/** The whole {@link formatSettingsFailure} line. */
+	message: string;
+	/** The failing key and its error, or the failure kind when no key is at fault. */
+	headline: string;
+	file: string;
+	keys: string[];
+}
+
+/**
+ * {@link formatSettingsFailure} with the failing key split out. The full line
+ * leads with its kind and remedy, which is right for doctor, but a footer in a
+ * narrow pane clamps it to `[config] settings…` and loses the key (M-25). The
+ * headline is the part a clamp must keep, so it names the key first.
+ */
+export function settingsReloadFailure(error: unknown): SettingsReloadFailure {
+	const message = formatSettingsFailure(error);
+	const file = settingsPath();
+	if (!(error instanceof SettingsValidationError) || error.issues.length === 0)
+		return { message, headline: message, file, keys: [] };
+	const kind = issuesKind(error.issues);
+	const first = error.issues[0];
+	if (kind !== "schema" || first === undefined)
+		return { message, headline: settingsFailureHeadline(kind), file, keys: [] };
+	const more = error.issues.length > 1 ? ` (+${error.issues.length - 1} more)` : "";
+	return {
+		message,
+		headline: `${first.path}: ${first.message}${more}`,
+		file,
+		keys: error.issues.map((issue) => issue.path),
+	};
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

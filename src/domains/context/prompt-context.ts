@@ -1,10 +1,12 @@
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { clioUserHandbookPath, USER_HANDBOOK_MAX_BYTES } from "../../core/user-handbook.js";
 import { detectProjectTypeHint } from "../session/workspace/project-type.js";
 import {
 	loadProjectClioMd,
 	type ParsedClioMd,
 	renderProjectContextFragment,
 	renderProjectTypeFragment,
+	renderUserContextFragment,
 } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
 import type { CompiledProjectHandbook } from "./compiled-handbook.js";
@@ -32,6 +34,37 @@ function codewikiArtifactPresent(cwd: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+type UserHandbookRead = { text: string } | { error: string } | null;
+const userHandbookReads = new Map<string, UserHandbookRead>();
+
+/**
+ * The user handbook as this process first read it. The read is kept for the
+ * process's life, so the prompt prefix it feeds stays byte-identical across
+ * every turn and dispatch of a session; an edit applies from the next start.
+ */
+function readUserHandbook(file: string): UserHandbookRead {
+	const cached = userHandbookReads.get(file);
+	if (cached !== undefined) return cached;
+	let read: UserHandbookRead;
+	try {
+		const stat = statSync(file);
+		if (!stat.isFile()) read = { error: "not a regular file" };
+		else if (stat.size > USER_HANDBOOK_MAX_BYTES)
+			read = { error: `larger than ${USER_HANDBOOK_MAX_BYTES} bytes; shorten it to load it` };
+		else {
+			const text = readFileSync(file, "utf8").trim();
+			read = text.length > 0 ? { text } : null;
+		}
+	} catch (error) {
+		read =
+			(error as NodeJS.ErrnoException).code === "ENOENT"
+				? null
+				: { error: error instanceof Error ? error.message : String(error) };
+	}
+	userHandbookReads.set(file, read);
+	return read;
 }
 
 export interface PromptContextOptions {
@@ -62,6 +95,13 @@ export function renderPromptContext(cwd: string, options: PromptContextOptions =
 	};
 	const warnings: string[] = [];
 	let orientationObservedAt: string | undefined;
+	// The operator's own standing instructions come first; every project handbook after them is more specific.
+	const userHandbookPath = clioUserHandbookPath();
+	const userHandbook = readUserHandbook(userHandbookPath);
+	if (userHandbook !== null && "text" in userHandbook)
+		pieces.push(renderUserContextFragment(userHandbook.text, userHandbookPath));
+	else if (userHandbook !== null)
+		warnings.push(`clio-coder: user handbook ${userHandbookPath} ignored: ${userHandbook.error}`);
 	const loadedClioMd = loadProjectClioMd(cwd);
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
 	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.source, file.path));

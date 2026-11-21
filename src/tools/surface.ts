@@ -100,6 +100,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Consult]: "direct",
 	[ToolNames.MemoryNote]: "direct",
 	[ToolNames.Vision]: "gateway",
+	[ToolNames.Browser]: "gateway",
 	[ToolNames.WebRead]: "gateway",
 	[ToolNames.WebFetch]: "gateway",
 	[ToolNames.AskUser]: "direct",

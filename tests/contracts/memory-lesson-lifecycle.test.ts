@@ -314,6 +314,73 @@ test("a closed session's flow label restricts it from any branch, not only the a
 	strictEqual(review([...abandoned, label, ...active]), null);
 });
 
+test("a task that ends on finish is a completed lesson source when its turn wrote the reply finish declares", () => {
+	const at = "2026-11-21T10:00:00.000Z";
+	const message = (turnId: string, role: string, payload: unknown) => ({
+		kind: "message",
+		turnId,
+		timestamp: at,
+		role,
+		payload,
+	});
+	const work = [
+		message("u1", "user", { text: "run the check" }),
+		message("c1", "tool_call", { toolCallId: "c1", name: "bash", args: { command: "node scripts/check.mjs" } }),
+		message("r1", "tool_result", {
+			toolCallId: "c1",
+			outcome: "ok",
+			result: { content: [{ type: "text", text: "done" }], details: { kind: "ok", outcome: "success", exitCode: 0 } },
+		}),
+	];
+	const finishCall = (text: string) =>
+		message("a2", "assistant", {
+			text,
+			content: [
+				...(text ? [{ type: "text", text }] : []),
+				{ type: "toolCall", id: "f1", name: "finish", arguments: { state: "done" } },
+			],
+			stopReason: "toolUse",
+		});
+	// What the host appends once finish ends the turn: no provider message, an empty synthesized row.
+	const declared = [
+		message("c2", "tool_call", { toolCallId: "f1", name: "finish", args: { state: "done" } }),
+		message("r2", "tool_result", {
+			toolCallId: "f1",
+			toolName: "finish",
+			outcome: "ok",
+			result: {
+				content: [{ type: "text", text: "completion declared: done\n" }],
+				details: { kind: "ok" },
+				terminate: true,
+			},
+		}),
+		message("a3", "assistant", {
+			text: "",
+			stopReason: "stop",
+			terminalToolResult: true,
+			toolCallId: "f1",
+			toolName: "finish",
+		}),
+	];
+	const review = (entries: Array<{ turnId: string }>) =>
+		closedSessionLessonSource(
+			entries
+				.map((entry, index) => JSON.stringify({ ...entry, parentTurnId: entries[index - 1]?.turnId ?? null }))
+				.join("\n"),
+			"ledger",
+			"closed",
+			"/repo",
+		);
+	ok(review([...work, finishCall("The check passed."), ...declared]), "reply text and finish in one response");
+	const replied = message("a1", "assistant", {
+		text: "The check passed.",
+		content: [{ type: "text", text: "The check passed." }],
+		stopReason: "stop",
+	});
+	ok(review([...work, replied, finishCall(""), ...declared]), "the pinned finish round declares the reply before it");
+	strictEqual(review([...work, finishCall(""), ...declared]), null, "a bare finish with no reply in its turn");
+});
+
 test("a flow-restricted session files no lesson at scope end, and a clean one still does", async () => {
 	const root = mkdtempSync(join(tmpdir(), "memory-flow-"));
 	try {
