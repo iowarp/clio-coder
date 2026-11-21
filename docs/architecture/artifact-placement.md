@@ -114,6 +114,7 @@ problem.
 | `memory/observations/<sessionId>/` | Source-linked continuity notes of one session, one immutable JSON batch per file (at most 64 read), that compaction can offer in place of raw history ([observation-store.ts](../../src/domains/memory/observation-store.ts)) |
 | `memory/history-candidates/` | Lesson candidates saved for filing that an interrupted process or a failed store write left pending; a later process replays and removes them ([lesson-feedback.ts](../../src/domains/memory/lesson-feedback.ts)) |
 | `memory/recall-use-v1.json` | Per-record recall and use counts that demote memory a session keeps carrying unused ([recall-use.ts](../../src/domains/memory/recall-use.ts)) |
+| `memory/delivery-unsettled-v1.json` | Per-lesson sessions that were reminded of a lesson since its last verdict; three in a row return it to the notes ([delivery-ledger.ts](../../src/domains/memory/delivery-ledger.ts)) |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch; tool offloads are `0600` files in `0700` directories |
 | `reports/` | Reports to the maintainers: `drafts/<id>.json` with the rendered Markdown beside it, `bundles/` for kept diagnostic bundles, `crashes/` for crash records, `shares.json` for share receipts, and the `offers.json`, `reply-check.json` and `outbox.json` ledgers. Drafts are written mode `0600`. |
 | `interviews/` | Interview transcripts |

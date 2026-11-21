@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { commandName, wrappedCommand } from "../../core/command-words.js";
+import { sameDirectory, withoutLeadingCdTo } from "../../core/leading-cd.js";
 import { shellLikeChain, shellLikeInvocation } from "../../core/shell-argv.js";
 
 export interface SimpleInvocation {
@@ -179,24 +180,25 @@ export interface CommandSegment {
  * neither a leading `cd` nor a `cwd` can be judged, so both refuse.
  *
  * Exactly three rewrites reach the key, each leaving what ran unchanged: the
- * leading `cd <root> &&` is dropped, `corepack <manager>` is unwrapped, and a
- * package manager's output-only flags are dropped. A path is never replaced.
+ * leading `cd <root> &&` or `cd <root>;` is dropped (the shared reader in
+ * core/leading-cd.ts, XR-9), `corepack <manager>` is unwrapped, and a package
+ * manager's output-only flags are dropped. A path is never replaced.
  */
 export function commandSegments(command: string, workspaceRoot?: string, cwd?: string): CommandSegment[] {
 	if (!atWorkspaceRoot(workspaceRoot, cwd)) return [];
-	const chain = commandChain(command);
+	const atRoot = withoutLeadingCdTo(command, workspaceRoot);
+	const chain = commandChain(atRoot);
 	if (chain === null) {
 		// One simple invocation is its own receipt even under a word that refuses a chain (`command node x.mjs`), but
 		// never one that negates, re-parses, replaces or changes the shell's state: `! a` exits 0 when `a` fails.
-		const simple = simpleInvocation(command);
+		const simple = simpleInvocation(atRoot);
 		if (simple === null || shellControlInvocation(simple.argv)) return [];
 		const argv = identityArgv(simple.argv);
-		const text = withoutHarmlessRedirection(command);
+		const text = withoutHarmlessRedirection(atRoot);
 		return [{ assignments: simple.assignments, argv, text, key: segmentKey(simple.assignments, argv) }];
 	}
-	if (chain.cwd !== null) {
-		if (workspaceRoot === undefined || !sameDirectory(resolve(workspaceRoot, chain.cwd), workspaceRoot)) return [];
-	}
+	// The one cd to the root is gone; any cd left moves the rest somewhere a lesson written at the root does not name.
+	if (chain.cwd !== null) return [];
 	return chain.segments.map((segment) => {
 		const argv = identityArgv(segment.argv);
 		return { assignments: segment.assignments, argv, text: segment.text, key: segmentKey(segment.assignments, argv) };
@@ -327,14 +329,6 @@ function canonicalPath(path: string): string {
 			rest.push(basename(current));
 			current = parent;
 		}
-	}
-}
-
-function sameDirectory(left: string, right: string): boolean {
-	try {
-		return realpathSync(left) === realpathSync(right);
-	} catch {
-		return false; /* A directory that does not exist is not the root. */
 	}
 }
 

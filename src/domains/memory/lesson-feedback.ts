@@ -17,6 +17,7 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from "nod
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { recordUnsettled } from "./delivery-ledger.js";
 import { type MemoryGateOutcome, recordMemoryObservations } from "./guardian-gate.js";
 import type { MemoryDeliveryOutcome, MemoryKnowledgeReview } from "./intervention.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
@@ -495,6 +496,15 @@ export class MemoryLessonFeedback {
 
 	/** Nobody reviews these by hand any more, so a gate change is told to the operator. */
 	#reportGate(result: MemoryGateOutcome): void {
+		// Deliveries and verdicts feed delivery's unsettled-session ledger, never the records (DESIGN 4.4, MD5).
+		if (result.observed.length > 0) {
+			try {
+				const stateDir = this.#ports.stateDir();
+				this.#track(recordUnsettled(stateDir, result.observed).catch(this.#storeFailure("delivery ledger not recorded")));
+			} catch (error) {
+				this.#storeFailure("delivery ledger not recorded")(error);
+			}
+		}
 		for (const record of result.approved) {
 			this.#ports.notice(`Memory: kept a repository lesson (${record.id}): ${record.lesson}`);
 			this.#ports.event?.("lesson-approved", { id: record.id, by: record.approval?.by ?? null });
