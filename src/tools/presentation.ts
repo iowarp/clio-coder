@@ -68,6 +68,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Data]: FOLDED,
 	[ToolNames.Store]: FOLDED,
 	[ToolNames.MemoryRecall]: FOLDED,
+	[ToolNames.MemoryNote]: FOLDED,
 	[ToolNames.Write]: FOLDED_WITH_DIFF,
 	[ToolNames.Edit]: FOLDED_WITH_DIFF,
 	[ToolNames.Bash]: FOLDED,
@@ -516,6 +517,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		verbs: ["recalling", "recalled"],
 		object: (args) => plain(text(args, "query")),
 		consumes: ["query", "limit"],
+	},
+	[ToolNames.MemoryNote]: {
+		class: "observe",
+		verbs: ["noting", "noted"],
+		object: (args) => plain(text(args, "note")),
+		consumes: ["note", "command", "path", "applies_when"],
 	},
 	[ToolNames.CredentialPresent]: {
 		class: "observe",

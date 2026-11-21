@@ -567,7 +567,13 @@ async function closedSessionRuntime(source: CompletedLessonSource, complete: () 
 		stateDir: () => stateDir,
 		dataDir: () => dataDir,
 		cwd: () => cwd,
-		settings: () => ({ enabled: true, surfaces: { observe: "off" }, maxOutputTokens: 512, timeoutMs: 5000 }),
+		// Completion retention is the side author's opt-in (DESIGN 4.4, MD6).
+		settings: () => ({
+			enabled: true,
+			surfaces: { observe: "off", lessons: "side" },
+			maxOutputTokens: 512,
+			timeoutMs: 5000,
+		}),
 		lessonSource: () => null,
 		closedLessonSource: (sessionId) => (sessionId === scope.sessionId ? { scope, source } : null),
 		source: () => null,

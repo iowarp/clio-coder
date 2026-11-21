@@ -2334,6 +2334,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				};
 			},
 		},
+		...memoryOwner.noteTool(),
 		getSettings: () => getCurrentSettings(),
 		getRouteProvenance: routeProvenance,
 		termination,

@@ -416,7 +416,12 @@ export function claimNote(input: {
 		evidenceRefs: [`session:${input.sessionId}`, evidence],
 		appliesWhen: [
 			`repository:${input.repository.kind}:${input.repository.key}`,
-			...new Set((input.appliesWhen ?? []).map((item) => item.trim()).filter((item) => item.length > 0)),
+			// A condition is the note's words too, so it is redacted exactly as the lesson is.
+			...new Set(
+				(input.appliesWhen ?? [])
+					.map((item) => redactSecretsPreservingMarkers(item, createRedactionTally()).replace(/\s+/gu, " ").trim())
+					.filter((item) => item.length > 0),
+			),
 		],
 		avoidWhen: [],
 		confidence: 0.6,
