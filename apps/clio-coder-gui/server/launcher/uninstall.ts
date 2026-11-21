@@ -26,7 +26,9 @@ export async function prepareGuiUninstall(
 	const directories = new Set([join(options.stateDir, "gui/background")]);
 	const desktop = options.backgroundOnly ? { status: "absent" as const } : await launcherStatus(options.desktopPrefix);
 	if (desktop.status === "conflict")
-		throw new Error("Desktop launcher ownership could not be verified; uninstall stopped before removing Clio state.");
+		throw new Error(
+			"Desktop launcher ownership could not be verified; uninstall stopped before removing CLIO Coder state.",
+		);
 	if (desktop.status !== "absent") {
 		// launcherStatus has checked the digest and regenerated the entry from this manifest.
 		const manifest = JSON.parse((await contents(desktop.manifest)) ?? "null");
@@ -36,7 +38,9 @@ export async function prepareGuiUninstall(
 		// A launcher a previous native version wrote names that version's dist/gui/server.js.
 		const entryRoot = entry.endsWith(join("dist", "gui", "server.js")) ? dirname(dirname(dirname(entry))) : null;
 		if (!candidates.includes(entry) && !(entryRoot !== null && (await sameInstallation(entryRoot, root))))
-			throw new Error("Desktop launcher belongs to another installation; uninstall stopped before removing Clio state.");
+			throw new Error(
+				"Desktop launcher belongs to another installation; uninstall stopped before removing CLIO Coder state.",
+			);
 		if (manifest.launch.background) directories.add(manifest.launch.background);
 	}
 	const backgrounds: Array<NonNullable<Awaited<ReturnType<typeof backgroundRemoval>>>> = [];

@@ -792,7 +792,7 @@
 					"pause": 0.5
 				},
 				{
-					"type": "/settings fleet",
+					"type": "/settings workers",
 					"delay": 20
 				},
 				{

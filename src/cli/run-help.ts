@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--output-format text|json|stream-json] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>" [-]\n   or: clio-coder run [flags] -\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--output-format text|json|stream-json] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id> [--continue <runId>]] [--] "<task>" [-]\n   or: clio-coder run [flags] -\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -49,7 +49,8 @@ Flags:
                             exit 2 when another process holds it open
   --continue                append this turn to the most recent session for this cwd; after a yolo
                             autonomous-cap (exit 4), judge-streak (exit 3) or exploration_stalled (exit 1) stop it
-                            resumes with a fresh window
+                            resumes with a fresh window; with --agent, --continue <runId> continues that ACP
+                            delegation in its peer's session
   --fork                    with --resume or --continue: branch a new session from that one's last committed
                             turn and run there; the parent is read, never written, and may be open elsewhere
   --name <text>             name this run's session (the new, resumed or forked one)

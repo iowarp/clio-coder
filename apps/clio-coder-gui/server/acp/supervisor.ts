@@ -67,6 +67,7 @@ import {
 } from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
 import { TelemetryQuota, TelemetryUpdate } from "../../contracts/telemetry.js";
+import { isTranscriptNoticeKey, TRANSCRIPT_NOTICE_KIND } from "../../contracts/transcript-notice.js";
 import { SessionUsage } from "../../contracts/usage.js";
 import type { AcpSafeSettingsPatch as SafeSettingsPatch } from "../../contracts/wire.js";
 import {
@@ -1157,6 +1158,27 @@ export class Supervisor {
 			if (content.type !== "text" || typeof content.text !== "string")
 				throw new FrameFault("non-text chunk", "ACP message is not a text chunk.");
 			if (kind === "agent_message_chunk" && meta[ACP_NOTICE_META_KEY] !== undefined) {
+				// A yolo continuation is part of the turn it continues, so it stands in that turn's transcript.
+				if (isTranscriptNoticeKey(record(meta[ACP_NOTICE_META_KEY]).key)) {
+					this.publish({
+						type: "turn.tool",
+						payload: {
+							resource: entry.id,
+							revision: this.revision(entry.id),
+							item: {
+								id: `${entry.turnId}:notice:${randomUUID()}`,
+								turnId: entry.turnId,
+								sequence: 0,
+								kind: "notice",
+								toolKind: TRANSCRIPT_NOTICE_KIND,
+								text: boundedText(content.text, 16384).trim(),
+								status: "completed",
+								origin,
+							},
+						},
+					});
+					return;
+				}
 				this.notice(entry, content.text);
 				// A ceiling stop also stands as state until the turn moves again, so the
 				// banner can offer the raise while the request is parked (#424).
@@ -1325,7 +1347,8 @@ export class Supervisor {
 	): Promise<Static<S>> {
 		const raw = await this.active(id).client.request(method, params, timeoutMs),
 			value = Value.Clean(schema, raw);
-		if (!Value.Check(schema, value)) throw new AppProblem("upstream_acp", "Clio returned an invalid control response.");
+		if (!Value.Check(schema, value))
+			throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid control response.");
 		return value;
 	}
 	settings(id: string, patch?: SafeSettingsPatch) {
@@ -1365,13 +1388,14 @@ export class Supervisor {
 		if (!client.capabilities.targets?.list)
 			throw new AppProblem("unsupported", "This CLIO Coder build does not expose target inventory.");
 		const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
-		if (!Value.Check(AcpTargetList, raw)) throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
+		if (!Value.Check(AcpTargetList, raw))
+			throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target list.");
 		const projected = Value.Clean(SessionTargets, {
 			targets: raw.targets,
 			truncated: record(raw._meta)[ACP_TRUNCATED_META_KEY] === true,
 		});
 		if (!Value.Check(SessionTargets, projected))
-			throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
+			throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid target list.");
 		return projected;
 	}
 	probe(id: string, targetId: string) {
@@ -1475,11 +1499,11 @@ export class Supervisor {
 				if (entry.turnId !== turnId) return;
 				const outcome = Value.Clean(ShellOutcome, structuredClone(raw));
 				if (!Value.Check(ShellOutcome, outcome))
-					throw new AppProblem("upstream_acp", "Clio returned an invalid shell result.");
+					throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid shell result.");
 				const note = outcome.timedOut
 					? `The line was stopped at its ${Math.round(shell.timeoutMs / 1000)} s limit.`
 					: outcome.unlabeled
-						? "The output was kept out of Clio's context because its information-flow label could not be recorded."
+						? "The output was kept out of CLIO Coder's context because its information-flow label could not be recorded."
 						: null;
 				if (note !== null)
 					this.publish({
@@ -1865,7 +1889,7 @@ export class Supervisor {
 			if (raw.status === "committed") await this.settleMove(entry, id, raw);
 			const value = Value.Clean(HandoffCommitted, raw);
 			if (!Value.Check(HandoffCommitted, value))
-				throw new AppProblem("upstream_acp", "Clio returned an invalid handoff result.");
+				throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid handoff result.");
 			return value;
 		} finally {
 			delete entry.rebase;

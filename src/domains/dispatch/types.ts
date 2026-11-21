@@ -458,6 +458,11 @@ export interface RunEnvelope {
 	/** Semantic role this attempt's route statistics belong to. */
 	executionRole: ExecutionRole;
 	agentAudience?: AgentAudience;
+	/**
+	 * The peer session an ACP delegation ran in, recorded when it settles, so a later `continue_run` can reopen it.
+	 * `nonResumable` is the peer's own word that the session cannot take another turn.
+	 */
+	acpSession?: { sessionId: string; nonResumable?: { reason: string } };
 	requestOrigin?: DispatchRequestOrigin;
 	/** Who asked for the work this attempt continues. Display only: policy reads requestOrigin. */
 	rootRequestOrigin?: DispatchRequestOrigin;
@@ -629,6 +634,16 @@ export interface RunResultDelegation {
 	/** Present when agent-managed governance ran under the operator's trustedUnmediated opt-in. */
 	trustedUnmediated?: true;
 	toolCallLog: DelegationToolCallLogEntry[];
+	/** How the run opened its peer session: a new one, or an earlier one reopened by `session/resume` or `session/load`. */
+	opened: "new" | "resume" | "load";
+	/** Peer updates a `session/load` replayed as history and Clio kept out of this run's events. */
+	replayedUpdates?: number;
+	/** The window the peer session stayed open after its prompt returned, for background work that outlived it. */
+	postSettle?: { waitedMs: number; updates: number; ended: "idle" | "cap" | "aborted" };
+	/** The earlier run this one continued; `freshReason` says why it opened a new session instead of that one. */
+	continuedFrom?: { runId: string; acpSessionId: string; freshReason?: string };
+	/** The peer marked this run's session unable to take another turn. */
+	nonResumable?: { reason: string };
 }
 
 export interface RunResultSafetySummary {

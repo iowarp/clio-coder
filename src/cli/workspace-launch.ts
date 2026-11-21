@@ -137,6 +137,18 @@ async function vendoredHerdr(): Promise<{ binaryPath: string; version: string } 
 }
 
 /**
+ * The line a failed workspace leaves in the operator's terminal. The pane that printed the cause is gone, so its
+ * last stderr lines are repeated here; without them, the way to see the output names the plain boot.
+ */
+export function workspaceExitNotice(exitCode: number, failure: string | undefined): string {
+	const head = `CLIO Coder workspace ended with exit code ${exitCode}`;
+	if (failure !== undefined) return `${head}:\n${failure.replace(/^/gmu, "  ")}\n`;
+	// A signal exit is the launcher's own hangup or a kill, not a boot failure with output to find.
+	if (exitCode >= 128) return `${head}.\n`;
+	return `${head}. Its output closed with the pane; run clio-coder --with-panes to start in this terminal and see it.\n`;
+}
+
+/**
  * Open the private pane host when this boot is eligible. Returns the process
  * exit code when the terminal was handed over and has come back, or null when
  * the caller should boot Clio here.
@@ -181,7 +193,7 @@ export async function maybeLaunchWorkspace(
 	}
 	// The pane that printed the exit summary is gone; this is the terminal the operator reads.
 	if (result.exitSummary !== null) process.stdout.write(result.exitSummary);
-	if (result.exitCode !== 0) process.stderr.write(`CLIO Coder workspace ended with exit code ${result.exitCode}.\n`);
+	if (result.exitCode !== 0) process.stderr.write(workspaceExitNotice(result.exitCode, result.failure));
 	if (result.workspaceLeftRunning) {
 		process.stdout.write("CLIO Coder workspaces are still open. Run `clio-coder` to return to them.\n");
 	}

@@ -2,7 +2,6 @@ import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:as
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resolveSettingsArea, SETTINGS_AREAS, settingsPlacementForRow } from "../../src/core/settings-areas.js";
-import { resolveSettingsSection, SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	buildSettingItems,
@@ -69,25 +68,36 @@ test("every existing settings control has exactly one home and canonical persist
 		strictEqual(byId.get(id)?.section, home, id);
 });
 
-test("slash links use the same canonical areas and keep previous section names resolving", () => {
+test("slash links use the same canonical areas configure and the GUI use, and no other word", () => {
 	for (const area of SETTINGS_AREAS) {
-		for (const name of [area.id, ...area.aliases]) {
-			strictEqual(resolveSettingsArea(name), area.id, name);
-			deepStrictEqual(parseSlashCommand(`/settings ${name}`), { kind: "settings", area: area.id });
-		}
+		strictEqual(resolveSettingsArea(area.id), area.id, area.id);
+		deepStrictEqual(parseSlashCommand(`/settings ${area.id}`), { kind: "settings", area: area.id });
 	}
-	for (const name of ["", "permanent", "models,chat", "diagnostics-extra"])
-		strictEqual(resolveSettingsArea(name), undefined);
-	// configure and the GUI still share the eight-section navigation under its own names.
-	for (const section of SETTINGS_SECTIONS) {
-		for (const name of [section.id, ...section.aliases]) {
-			strictEqual(resolveSettingsSection(name), section.id, name);
-			ok(resolveSettingsArea(name) !== undefined, `previous section name '${name}' no longer opens an area`);
-		}
+	for (const name of [
+		"",
+		"permanent",
+		"models,chat",
+		"diagnostics-extra",
+		"targets",
+		"fleet",
+		"interface",
+		"integrations",
+		"connections",
+		"orchestrator",
+		"model",
+		"thinking",
+		"retry",
+		"agents",
+		"panes",
+		"skills",
+		"permissions",
+		"diagnostics",
+		"pinned",
+	]) {
+		strictEqual(resolveSettingsArea(name), undefined, name);
+		if (name) strictEqual(parseSlashCommand(`/settings ${name}`).kind, "usage-error", name);
 	}
-	// Model choice moved out of Chat into Models; only retry stayed in Chat.
-	for (const name of ["orchestrator", "models", "model", "thinking"]) strictEqual(resolveSettingsArea(name), "models");
-	strictEqual(resolveSettingsArea("retry"), "chat");
+	deepStrictEqual(parseSlashCommand("/login"), { kind: "settings", area: "models" });
 	strictEqual(parseSlashCommand("/settings chat model-picker").kind, "usage-error");
 });
 
@@ -113,9 +123,9 @@ test("every area renders within narrow and wide terminals, and headings are skip
 			);
 		}
 	}
-	center.setSelection("orchestrator", 0);
+	center.setSelection("models", 0);
 	strictEqual(center.getSelection().section, "models");
-	center.setSelection("retry", 0);
+	center.setSelection("chat", 0);
 	strictEqual(center.getSelection().section, "chat");
 	center.handleInput("\x1b");
 	strictEqual(center.getSelection().depth, "sections");

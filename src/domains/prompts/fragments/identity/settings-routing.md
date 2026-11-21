@@ -25,9 +25,9 @@ timing: session-owned routing and restart-required settings need you to exit and
 start a new CLIO Coder session; live settings apply automatically or on the next
 request/dispatch. The operator can run `/reload` to re-read settings, library resources and extension runtimes, or `/restart` to restart into this session and workspace. Do not claim a save from a preview or a denied/cancelled apply.
 
-For operator setup, create the profile in `/settings fleet` → Profiles, then
-assign the agent in `/settings agents` → Agent routes. These are two separate
-edits. `clio-coder configure --section fleet` opens global configuration; it
+For operator setup, create the profile in `/settings workers` → Profiles, then
+assign the agent in `/settings workers` → Agent routes. These are two separate
+edits. `clio-coder configure --section workers` opens global configuration; it
 does not accept an agent-binding flag or a combined JSON argument.
 The interactive settings UI offers "Apply and save for this project", backed by
 updateProjectLocalSettings and its trust checks. No model tool exposes that

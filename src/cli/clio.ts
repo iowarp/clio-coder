@@ -129,11 +129,12 @@ export async function runClioCommand(
 		// shutdown ends the process itself, so the exit event is the one place
 		// every clean path passes through. Registered before the first early return (a refused
 		// home, a declined folder, an unusable route), or the launcher stays attached to the pane's shell.
-		const { clearWorkspaceExit, hostedInWorkspace, markWorkspaceExit } = await import(
+		const { captureFailureForLauncher, clearWorkspaceExit, hostedInWorkspace, markWorkspaceExit } = await import(
 			"../domains/mux/workspace/exit-marker.js"
 		);
 		if (hostedInWorkspace()) {
 			clearWorkspaceExit();
+			captureFailureForLauncher();
 			process.once("exit", (code) => {
 				if (!isRestartHandoff()) markWorkspaceExit(process.env, code);
 			});

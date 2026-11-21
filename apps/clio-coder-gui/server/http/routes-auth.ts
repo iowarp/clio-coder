@@ -20,16 +20,15 @@ export function authRoutes(
 	register(app, hub, routes.authClients, ({ body }, context) => {
 		const authorization = context.req.header("authorization");
 		const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-		// The challenge is spent whatever the proof, so each one admits at most one guess. The proof is
-		// checked with this listener's own port, so a proof a squatter relays from the other port is refused.
-		const answer =
-			!bearer &&
-			body.ticket === undefined &&
-			body.challenge !== undefined &&
-			body.proof !== undefined &&
-			clients.redeemChallenge(body.challenge)
-				? answerLaunchProof(launch.token, body.challenge, body.proof, Number(new URL(launch.origin()).port))
-				: null;
+		// A valid proof spends its challenge, so a captured one opens nothing again. The proof is checked with
+		// this listener's own port, so a proof a squatter relays from the other port is refused.
+		const { challenge, proof } = body;
+		let answer: string | null = null;
+		if (!bearer && body.ticket === undefined && challenge !== undefined && proof !== undefined)
+			clients.redeemChallenge(challenge, () => {
+				answer = answerLaunchProof(launch.token, challenge, proof, Number(new URL(launch.origin()).port));
+				return answer !== null;
+			});
 		const admitted = bearer
 			? // A live credential is a window of this browser opening its own client, which buys nothing it lacks.
 				clients.authenticate(bearer) !== null

@@ -119,7 +119,7 @@ export type WorkspaceLaunchResult =
 	 * is the summary the Clio in the pane printed on a clean quit, for the
 	 * caller to print in the operator's terminal now that the pane is gone.
 	 */
-	| { status: "closed"; exitCode: number; workspaceLeftRunning: boolean; exitSummary: string | null }
+	| { status: "closed"; exitCode: number; workspaceLeftRunning: boolean; exitSummary: string | null; failure?: string }
 	/** Nothing was handed over; boot Clio in this terminal instead. */
 	| { status: "fallback"; reason: string };
 
@@ -779,6 +779,7 @@ async function attachWorkspace(
 		exitCode: signalExitCode ?? markedExit?.exitCode ?? (clioQuit || workspaceGone ? 0 : exitCode),
 		workspaceLeftRunning,
 		exitSummary,
+		...(markedExit?.failure !== undefined ? { failure: markedExit.failure } : {}),
 	};
 }
 

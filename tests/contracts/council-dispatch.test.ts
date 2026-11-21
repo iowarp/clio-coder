@@ -209,6 +209,87 @@ test("a vote task that lists options gets a neutral verdict placeholder; others 
 	match(polled, /exactly one of the options listed above, verbatim: a \| b \| c/u);
 });
 
+test("a poll seat votes under the bounded voter prompt and no ballot example carries an answer token (FL-23)", async () => {
+	const { COUNCIL_VOTE_MEMBER_DIRECTIVE, COUNCIL_VOTER_PROMPT, isBoundedGateRolePrompt } = await import(
+		"../../src/domains/dispatch/gate-role-prompts.js"
+	);
+	const { resultContractReminder, resultContractShape, validateResultContract } = await import(
+		"../../src/domains/agents/result-contract.js"
+	);
+	const { buildPollDispatchArgs } = await import("../../src/session-control/poll.js");
+	const seated: DispatchRequest[] = [];
+	const tool = createDispatchTool({
+		dispatch: {
+			preview: (request: DispatchRequest) => ({
+				agentId: request.agentId,
+				targetId: request.target,
+				wireModelId: "m",
+				runtimeId: "openai-compat",
+				node: { id: "local", kind: "local" },
+				routeApproval: null,
+			}),
+			costCeilingUsd: () => 0,
+			dispatch: async (request: DispatchRequest) => {
+				seated.push(request);
+				const runId = `run-${seated.length}-${request.council?.label}`;
+				const receipt = {
+					...fixtureReceiptDraft(fixtureEnvelope(runId)),
+					agentId: request.agentId,
+					...(request.council ? { council: request.council } : {}),
+					...(request.gate ? { gate: request.gate } : {}),
+				} as RunResultDraft;
+				// Two spellings of one answer; the tally must count them together.
+				const verdict = seated.length === 1 ? "Spaces-only" : "spaces only";
+				const ballot = JSON.stringify({ verdict, text: "PEP 8" });
+				const events = (async function* () {
+					yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: ballot }] } };
+				})();
+				return { runId, events, finalPromise: Promise.resolve(receipt) };
+			},
+			abort() {},
+			getRun: () => undefined,
+		} as unknown as DispatchContract,
+		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAutonomy: () => "yolo",
+	});
+	const built = buildPollDispatchArgs({ participants: 2, question: "Tabs or spaces?" }, { target: "mini" });
+	if (!built.ok) throw new Error(built.reason);
+	const result = await tool.run(built.args, {} as never);
+	strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+	strictEqual(seated.length, 2);
+	for (const request of seated) {
+		// The scout's findings persona demands its own report shape; a voter seated on it votes under the coordinator's prompt.
+		strictEqual(request.systemPrompt, COUNCIL_VOTER_PROMPT);
+		ok(
+			isBoundedGateRolePrompt({
+				role: request.gate?.role,
+				readOnly: request.readOnly,
+				systemPrompt: request.systemPrompt,
+			}),
+		);
+	}
+	deepStrictEqual((result.details as { council?: CouncilReport }).council?.synthesis, {
+		kind: "vote",
+		verdict: "spaces only",
+		tally: { "spaces only": 2 },
+	});
+	// Neither the directive, the reminder nor the repair shape shows an answer a member could copy.
+	const contract = { kind: "council-ballot" } as const;
+	for (const text of [COUNCIL_VOTE_MEMBER_DIRECTIVE, COUNCIL_VOTER_PROMPT, resultContractReminder(contract) ?? ""]) {
+		doesNotMatch(text, /"yes"|"no"|"keep"/u);
+	}
+	match(resultContractShape(contract), /^\{"verdict":"<your answer as one short token>","text":/u);
+	const copied = validateResultContract({
+		contract,
+		output: '{"verdict":"<your answer as one short token>","text":"x"}',
+		cwd: process.cwd(),
+		networkAllowed: false,
+		filesystem: { readFile: () => null },
+	});
+	strictEqual(copied.conformance, "fail");
+	match(copied.reason ?? "", /copies the placeholder/u);
+});
+
 test("/poll refuses a choice its ballot could not carry verbatim", async () => {
 	const { parseSlashCommand } = await import("../../src/session-control/slash-commands.js");
 	const { councilBallotContract } = await import("../../src/domains/dispatch/gate-role-prompts.js");

@@ -14,16 +14,16 @@ export function promptAdmissionDetail(reason: unknown): string {
 		case "target-not-configured":
 		case "target-unknown":
 		case "target-not-found":
-			return "Clio did not start this turn because its selected target is not configured or available. Check the conversation route and connection settings before retrying.";
+			return "CLIO Coder did not start this turn because its selected target is not configured or available. Check the conversation route and connection settings before retrying.";
 		case "model-not-configured":
-			return "Clio did not start this turn because its session model is not configured. Choose an available model in the conversation controls before retrying.";
+			return "CLIO Coder did not start this turn because its session model is not configured. Choose an available model in the conversation controls before retrying.";
 		case "runtime-not-registered":
 		case "chat-unsupported":
 		case "streaming-unsupported":
-			return "Clio did not start this turn because its selected runtime cannot serve this conversation. Check the connection runtime and choose a supported target before retrying.";
+			return "CLIO Coder did not start this turn because its selected runtime cannot serve this conversation. Check the connection runtime and choose a supported target before retrying.";
 		case "context-window-exceeded":
-			return "Clio did not start this turn because the request exceeds the model's context window. Compact the conversation or reduce the request before retrying.";
+			return "CLIO Coder did not start this turn because the request exceeds the model's context window. Compact the conversation or reduce the request before retrying.";
 		default:
-			return "Clio did not start this turn. Check the conversation route and session trace before retrying. (prompt_not_admitted)";
+			return "CLIO Coder did not start this turn. Check the conversation route and session trace before retrying. (prompt_not_admitted)";
 	}
 }

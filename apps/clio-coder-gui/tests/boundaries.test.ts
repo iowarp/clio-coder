@@ -79,7 +79,7 @@ const adapters = new Set([
 	"src/core/settings-layers.ts",
 	"src/core/project-target-urls.ts",
 	"src/core/settings-controls.ts",
-	"src/core/settings-navigation.ts",
+	"src/core/settings-areas.ts",
 	"src/core/config.ts",
 	"src/domains/config/classify.ts",
 	"src/domains/providers/registry.ts",

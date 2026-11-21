@@ -38,10 +38,7 @@ import {
 	THINKING_LEVELS,
 } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath, resolveMemoryRoute } from "../../core/session-routing.js";
-import type {
-	SettingsAreaId as SettingsSectionId,
-	SettingsAreaName as SettingsSectionName,
-} from "../../core/settings-areas.js";
+import type { SettingsAreaId as SettingsSectionId } from "../../core/settings-areas.js";
 import {
 	resolveSettingsArea,
 	SETTINGS_AREAS as SETTINGS_SECTIONS,
@@ -1056,7 +1053,7 @@ function settingItem(id: EditableSettingId, currentValue: string, options: Setti
  */
 function groupHeader(
 	id: GroupHeaderId,
-	section: SettingsSectionName,
+	section: SettingsSectionId,
 	label: string,
 	description: string,
 ): SettingsCenterItem {
@@ -1065,7 +1062,7 @@ function groupHeader(
 		label,
 		currentValue: "",
 		description,
-		section: resolveSettingsArea(section) ?? "advanced",
+		section,
 		configPath: id,
 		affordance: "group heading",
 		scope: "live",
@@ -2974,7 +2971,7 @@ export class SettingsCenter implements Component {
 		};
 	}
 
-	setSelection(sectionName: SettingsSectionName, rowIndex: number, lane: SettingsCenterLane = "rows"): void {
+	setSelection(sectionName: SettingsSectionId, rowIndex: number, lane: SettingsCenterLane = "rows"): void {
 		const sectionId = resolveSettingsArea(sectionName) ?? SETTINGS_SECTIONS[0].id;
 		if (this.sections().some((section) => section.id === sectionId)) this.selectedSectionId = sectionId;
 		const section = this.currentSection();
@@ -4087,7 +4084,7 @@ export interface OpenSettingsOverlayDeps {
 	notice?: (level: SettingsNoticeLevel, text: string, key?: string) => void;
 	onClose: () => void;
 	/** Open focused on this section (deep link from `/settings <section>`). */
-	section?: SettingsSectionName;
+	section?: SettingsSectionId;
 	/** Optional semantic row anchor for command deep links. */
 	rowId?: SettingsCenterRowId;
 	getFleetNodes?: BuildSettingItemsOptions["getFleetNodes"];

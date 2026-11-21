@@ -11,7 +11,7 @@ import type { SendChatTest } from "../../src/cli/chat-test.js";
 import { runConfigureCommand } from "../../src/cli/configure.js";
 import type { ConfigureWizardHost } from "../../src/cli/configure-host.js";
 import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
-import { SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
+import { SHARED_SETTINGS_AREAS } from "../../src/core/settings-areas.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { COPILOT_SDK_VERSION } from "../../src/domains/lifecycle/copilot-sdk-install.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
@@ -121,6 +121,15 @@ integrations:
  * writes the prompt, so a write ending in ": " is the cue that the next line is
  * wanted.
  */
+/** The number the plain menu of top-menu entry `area` gives the first entry whose label contains `label`, as an answer line. */
+async function menuNumber(env: Record<string, string>, area: number, label: string): Promise<string> {
+	const shown = await captureConfigure([], env, [`${area}\n`, "b\n", "q\n"]);
+	const line = shown.stdout.split("\n").find((text) => /\d+\. /u.test(text) && text.includes(label));
+	const number = line?.match(/(\d+)\. /u)?.[1];
+	if (!number) throw new Error(`No "${label}" entry in menu ${area}:\n${shown.stdout}`);
+	return `${number}\n`;
+}
+
 async function captureConfigure(
 	argv: ReadonlyArray<string>,
 	extraEnv: Record<string, string> = {},
@@ -1301,14 +1310,15 @@ describe("contracts/configure-sections", () => {
 
 	it("renders every section's current values from settings.yaml", async () => {
 		const expected: ReadonlyArray<readonly [string, RegExp]> = [
-			["targets", /test-target\s+openai-compat/u],
+			["models", /test-target\s+openai-compat/u],
 			["models", /Chat model\s+mock-model/u],
-			["chat", /Chat thinking\s+low/u],
-			["fleet", /Concurrency limit\s+auto/u],
-			["permissions", /Autonomy level\s+default/u],
-			["panes", /TUI mode\s+regular/u],
-			["skills", /Trust project imports\s+untrusted/u],
-			["diagnostics", /Config dir\s+\S/u],
+			["models", /Chat thinking\s+low/u],
+			["chat", /TUI mode\s+regular/u],
+			["workers", /Concurrency limit\s+auto/u],
+			["safety", /Autonomy level\s+default/u],
+			["workspace", /Startup layout\s+\S/u],
+			["workspace", /Trust project imports\s+untrusted/u],
+			["advanced", /Config dir\s+\S/u],
 		];
 		for (const [section, pattern] of expected) {
 			const testEnv = isolatedEnv();
@@ -1323,28 +1333,50 @@ describe("contracts/configure-sections", () => {
 		}
 	});
 
-	it("accepts a section by its canonical name or a listed alias, and nothing else", async () => {
+	it("accepts a section only by its area id, and nothing else", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			for (const name of ["permissions", "autonomy", "safety"]) {
+			for (const name of ["safety", " Safety "]) {
 				const res = await captureConfigure(["--section", name], testEnv.env, []);
 				strictEqual(res.code, 0, `${name}: ${res.stderr}`);
-				match(res.stdout, /Permissions & Limits/u);
+				match(res.stdout, /Safety and limits/u);
 			}
 			// Substring matching used to accept anything containing "perm", so
-			// `--section permanent` silently opened this screen.
-			for (const name of ["permanent", "models,chat", "", "diagnostics-extra"]) {
+			// `--section permanent` silently opened this screen. Old section names and the words that
+			// used to open an area, and the removed Diagnostics screen, open nothing either.
+			for (const name of [
+				"permanent",
+				"models,chat",
+				"",
+				"diagnostics-extra",
+				"recent",
+				"targets",
+				"target",
+				"connections",
+				"orchestrator",
+				"fleet",
+				"interface",
+				"appearance",
+				"integrations",
+				"permissions",
+				"autonomy",
+				"panes",
+				"skills",
+				"diagnostics",
+				"doctor",
+				"diag",
+			]) {
 				const res = await captureConfigure(["--section", name], testEnv.env, []);
 				strictEqual(res.code, 2, `${name} must be rejected`);
 				match(res.stderr, /unknown section/u);
-				match(res.stderr, /targets, chat, fleet, context, safety, interface, integrations, advanced/u);
+				match(res.stderr, /models, chat, workers, context, safety, workspace, advanced/u);
 			}
 		} finally {
 			testEnv.cleanup();
 		}
 	});
 
-	it("lists all eight sections on the top menu and leaves on q with exit 0", async () => {
+	it("lists all seven areas on the top menu and leaves on q with exit 0", async () => {
 		const testEnv = isolatedEnv();
 		try {
 			const res = await captureConfigure([], testEnv.env, ["q\n"]);
@@ -1353,13 +1385,12 @@ describe("contracts/configure-sections", () => {
 			strictEqual(res.code, 0, res.stderr);
 			strictEqual(res.stderr, "", "leaving the menu is not an error");
 			for (const title of [
-				"Connections",
-				"Chat",
-				"Fleet",
-				"Context & Memory",
-				"Permissions & Limits",
-				"Appearance",
-				"Integrations",
+				"Models",
+				"Chat and display",
+				"Workers",
+				"Context and memory",
+				"Safety and limits",
+				"Workspace",
 				"Advanced",
 			]) {
 				ok(res.stdout.includes(title), `${title} missing from the top menu`);
@@ -1372,8 +1403,9 @@ describe("contracts/configure-sections", () => {
 	it("writes an edited setting through to settings.yaml", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			// Top menu -> Chat -> chat thinking level -> high -> back -> quit.
-			const res = await captureConfigure([], testEnv.env, ["2\n", "2\n", "high\n", "Save\n", "b\n", "q\n"]);
+			// Top menu -> Models -> chat thinking level -> high -> back -> quit.
+			const thinking = await menuNumber(testEnv.env, 1, "Thinking level");
+			const res = await captureConfigure([], testEnv.env, ["1\n", thinking, "high\n", "Save\n", "b\n", "q\n"]);
 			strictEqual(res.code, 0, res.stderr);
 			match(res.stdout, /Thinking level saved/u);
 			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: high/u);
@@ -1385,7 +1417,8 @@ describe("contracts/configure-sections", () => {
 	it("leaves a setting alone, and says so, when the answer is not one of its values", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			const res = await captureConfigure([], testEnv.env, ["2\n", "2\n", "sideways\n", "b\n", "q\n"]);
+			const thinking = await menuNumber(testEnv.env, 1, "Thinking level");
+			const res = await captureConfigure([], testEnv.env, ["1\n", thinking, "sideways\n", "b\n", "q\n"]);
 			strictEqual(res.code, 0, res.stderr);
 			match(res.stdout, /Choose one of/u);
 			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: low/u);
@@ -1394,19 +1427,18 @@ describe("contracts/configure-sections", () => {
 		}
 	});
 
-	it("shares section names with the TUI and keeps unrelated controls out of each overview", async () => {
+	it("shares area names with the TUI and keeps unrelated controls out of each overview", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			for (const section of SETTINGS_SECTIONS) {
-				const result = await captureConfigure(["--section", section.id], testEnv.env, []);
+			for (const area of SHARED_SETTINGS_AREAS) {
+				const result = await captureConfigure(["--section", area.id], testEnv.env, []);
 				strictEqual(result.code, 0, result.stderr);
-				ok(result.stdout.includes(section.label), section.id);
+				ok(result.stdout.includes(area.label), area.id);
 			}
 			for (const [section, absent] of [
-				["chat", ["Smooth streaming", "Fleet thinking", "Auto-compaction"]],
-				["fleet", ["Worker permissions", "Startup layout"]],
-				["interface", ["Git commit attribution", "Worker profiles"]],
-				["targets", ["Chat thinking", "Session cost limit"]],
+				["models", ["Smooth streaming", "Fleet thinking", "Auto-compaction", "Session cost limit"]],
+				["workers", ["Worker permissions", "Startup layout"]],
+				["chat", ["Git commit attribution", "Worker profiles", "Chat thinking"]],
 			] as const) {
 				const result = await captureConfigure(["--section", section], testEnv.env, []);
 				for (const label of absent) ok(!result.stdout.includes(label), `${label} leaked into ${section}`);
@@ -1417,11 +1449,11 @@ describe("contracts/configure-sections", () => {
 	});
 
 	it("moved controls save only their own setting from the new menu location", async () => {
-		for (const [inputs, path, value] of [
-			[["6\n", "7\n", "on\n", "b\n", "q\n"], ["interface", "smoothStreaming"], "on"],
-			// Fleet thinking is item 4 behind Turn preparation (4c13e0757) and node preference (d045ba49f).
-			[["3\n", "4\n", "high\n", "Save\n", "b\n", "q\n"], ["fleet", "default", "thinkingLevel"], "high"],
-			[["7\n", "3\n", "b\n", "q\n"], ["integrations", "git", "commitAttribution"], false],
+		// Top menu: 2 is Chat and display, 3 Workers, 6 Workspace; each control is found by its menu label.
+		for (const [area, label, answers, path, value] of [
+			[2, "Smooth streaming", ["on\n"], ["interface", "smoothStreaming"], "on"],
+			[3, "Default worker · Default thinking level", ["high\n", "Save\n"], ["fleet", "default", "thinkingLevel"], "high"],
+			[6, "Git · Credit in Git commits", [], ["integrations", "git", "commitAttribution"], false],
 		] as const) {
 			const testEnv = isolatedEnv();
 			try {
@@ -1429,7 +1461,8 @@ describe("contracts/configure-sections", () => {
 				let cursor = expected;
 				for (const key of path.slice(0, -1)) cursor = cursor[key];
 				cursor[path.at(-1) as string] = value;
-				const result = await captureConfigure([], testEnv.env, inputs);
+				const item = await menuNumber(testEnv.env, area, label);
+				const result = await captureConfigure([], testEnv.env, [`${area}\n`, item, ...answers, "b\n", "q\n"]);
 				strictEqual(result.code, 0, result.stderr);
 				deepStrictEqual(parse(readFileSync(testEnv.settingsFile, "utf8")), expected);
 			} finally {

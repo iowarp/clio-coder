@@ -8,6 +8,7 @@ import type { UserTask } from "../../domains/user-tasks/store.js";
 import type { DispatchPlanView } from "../../tools/dispatch-plan.js";
 import type { AgentMessage } from "../types.js";
 import { ACP_MAX_JOBS } from "./runtime.js";
+import type { ACP_V1_TOOL_CALL_STATUSES } from "./upstream-schema.js";
 
 /**
  * ACP extensibility reserves `_meta` for non-spec data. Clio namespaces its
@@ -303,7 +304,11 @@ export type AcpToolKind =
 	| "other";
 
 /** ACP v1 `ToolCallStatus` closed enum (schema v1.23.0). */
-export type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+/**
+ * A tool call status CLIO Coder sends, held to the pinned upstream v1 list: v1 has no `cancelled`, so a cancelled call
+ * goes out as `failed` with the reason in its content.
+ */
+export type AcpToolCallStatus = (typeof ACP_V1_TOOL_CALL_STATUSES)[number];
 
 export interface AcpJsonRpcRequest {
 	jsonrpc: "2.0";
@@ -456,6 +461,13 @@ export type AcpDelegationFailureCode =
 	| "acp_thinking_unavailable"
 	| "acp_transport_error";
 
+/** How a post-settle window ran: how long it held the session, the updates it took, and why it closed. */
+export interface AcpPostSettle {
+	waitedMs: number;
+	updates: number;
+	ended: "idle" | "cap" | "aborted";
+}
+
 export interface AcpDelegationResult {
 	messages: AgentMessage[];
 	exitCode: number;
@@ -471,6 +483,12 @@ export interface AcpDelegationResult {
 	failureCode?: AcpDelegationFailureCode;
 	delegation: {
 		acpSessionId: string | null;
+		/** How the peer session opened: a new one, or an earlier one reopened by `session/resume` or `session/load`. */
+		opened: "new" | "resume" | "load";
+		/** History updates a `session/load` replayed before it answered, kept out of the run's events. */
+		replayedUpdates?: number;
+		/** The window the session stayed open after the prompt returned for the peer's background work. */
+		postSettle?: AcpPostSettle;
 		/** The peer session cannot take another turn; a later turn starts a fresh session. */
 		nonResumable?: { reason: string };
 		selectedModelId?: string;

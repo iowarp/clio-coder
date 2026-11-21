@@ -33,6 +33,7 @@ import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { planCardLimitsUnderTimeout } from "../domains/dispatch/run-limits.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import {
+	councilVoterPersona,
 	dispatchRequestsFromArgs,
 	maxOutputBytesArg,
 	prepareDispatchArguments,
@@ -992,6 +993,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										task: renderCouncilVoteMemberTask(base.task),
 										resultContractOverride: councilBallotContract(base.task),
+										...councilVoterPersona(member.agent ?? base.agentId),
 									}
 								: {}),
 							target: member.target,

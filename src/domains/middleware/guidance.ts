@@ -226,7 +226,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 		feature: "agent-routes",
 		score: (turn) => (harnessQuestionTopics(turn.prompt).includes("agents") ? 2 : used(turn, "dispatch") > 0 ? 1 : 0),
 		text: () =>
-			"Give each job its best model: /settings agents binds every agent, from context init and the wiki writer to coder and tester, to its own profile, so your local GPUs and subscriptions each take the work they do best.",
+			"Give each job its best model: /settings workers binds every agent, from context init and the wiki writer to coder and tester, to its own profile, so your local GPUs and subscriptions each take the work they do best.",
 	},
 	{
 		id: "output-style",

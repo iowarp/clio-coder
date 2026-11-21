@@ -4,7 +4,7 @@ import { lstatSync, mkdirSync, mkdtempSync, realpathSync, renameSync, writeFileS
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { readSettings } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { buildBwrapInvocation } from "../../src/core/sandbox/bwrap.js";
@@ -402,6 +402,34 @@ async function listen(server: Server, target: string | { host: string; port: num
 	await new Promise<void>((resolve) => server.listen(target, resolve));
 }
 
+/** Linux `sun_path` holds 108 bytes with its terminating NUL. */
+const UNIX_SOCKET_PATH_BYTES = 107;
+
+/**
+ * Listen on a unix socket this test makes itself, or skip the row naming why this process cannot: a run inside a
+ * contained command inherits that sandbox's AF_UNIX filter (EPERM), and a path past `sun_path` cannot be bound at all.
+ * Either is the environment, not the sandbox under test, so the row is counted as skipped with its reason.
+ */
+async function listenUnixOrSkip(t: TestContext, server: Server, path: string): Promise<boolean> {
+	const bytes = Buffer.byteLength(path, "utf8");
+	if (bytes > UNIX_SOCKET_PATH_BYTES) {
+		t.skip(
+			`the fixture socket path is ${bytes} bytes, past the ${UNIX_SOCKET_PATH_BYTES}-byte unix socket limit; run with a shorter TMPDIR`,
+		);
+		return false;
+	}
+	const failure = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
+		server.once("error", resolve);
+		server.listen(path, () => resolve(null));
+	});
+	if (failure === null) return true;
+	if (failure.code !== "EPERM") throw failure;
+	t.skip(
+		"this test process cannot bind a unix socket (EPERM): it runs inside a sandbox, such as a contained CLIO Coder command, whose filter refuses AF_UNIX; run the file from an unsandboxed shell",
+	);
+	return false;
+}
+
 test("under bwrap a contained command cannot open a unix socket but keeps socketpair and TCP; allow reopens it", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {
@@ -422,12 +450,12 @@ test("under bwrap a contained command cannot open a unix socket but keeps socket
 	const socketPath = join(socketDir, "l.sock");
 	const unixServer = createServer((socket) => socket.end());
 	const tcpServer = createServer((socket) => socket.end());
-	await listen(unixServer, socketPath);
-	await listen(tcpServer, { host: "127.0.0.1", port: 0 });
 	t.after(() => {
 		unixServer.close();
 		tcpServer.close();
 	});
+	if (!(await listenUnixOrSkip(t, unixServer, socketPath))) return;
+	await listen(tcpServer, { host: "127.0.0.1", port: 0 });
 	const address = tcpServer.address();
 	assert.ok(address !== null && typeof address === "object");
 	const argv = [python, "-c", PROBE, socketPath, String(address.port)];
@@ -499,6 +527,14 @@ test("under bwrap a contained command can neither read nor add to the login's se
 		t.skip("keyctl is not installed");
 		return;
 	}
+	// The row needs a session keyring of its own; a sandbox whose filter refuses keyctl (a contained command) has none.
+	const joined = spawnSync("keyctl", ["session", "-", "true"], { encoding: "utf8" });
+	if (joined.status !== 0 && /Operation not permitted/u.test(joined.stderr)) {
+		t.skip(
+			"this test process cannot join a session keyring (EPERM): it runs inside a sandbox, such as a contained CLIO Coder command, whose filter refuses keyctl; run the file from an unsandboxed shell",
+		);
+		return;
+	}
 	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-keyring-")));
 	// A fresh session keyring for this test holds a key, as pam_keyinit leaves a login's.
 	const keyed = (file: string, args: string[]): Promise<string> =>
@@ -548,12 +584,12 @@ test("under bwrap owned masks the operator's own sockets and leaves a system dae
 	const own = join(scratch, "own.sock");
 	const server = createServer((socket) => socket.end());
 	const tcpServer = createServer((socket) => socket.end());
-	await listen(server, own);
-	await listen(tcpServer, { host: "127.0.0.1", port: 0 });
 	t.after(() => {
 		server.close();
 		tcpServer.close();
 	});
+	if (!(await listenUnixOrSkip(t, server, own))) return;
+	await listen(tcpServer, { host: "127.0.0.1", port: 0 });
 	const address = tcpServer.address();
 	assert.ok(address !== null && typeof address === "object");
 	const policy = mainSandboxPolicy({ workspace, scratchRoots: [scratch], unixSockets: "owned" });
@@ -602,11 +638,11 @@ test("socket discovery finds the pane host's socket and a home daemon's past a l
 	const daemon = join(daemonDir, "herdr.sock");
 	const paneHost = join(elsewhere, "host.sock");
 	const servers = [createServer(), createServer()];
-	await listen(servers[0] as Server, daemon);
-	await listen(servers[1] as Server, paneHost);
 	t.after(() => {
 		for (const server of servers) server.close();
 	});
+	if (!(await listenUnixOrSkip(t, servers[0] as Server, daemon))) return;
+	if (!(await listenUnixOrSkip(t, servers[1] as Server, paneHost))) return;
 	const launch = unixSocketLaunch(
 		"owned",
 		availability,
