@@ -672,7 +672,7 @@ function braceSequence(body: string): string[] | null {
 }
 
 /** Brace alternatives and sequences as bash expands them before globbing; null for too many words or a nesting. */
-function expandBraces(word: string, depth = 0): string[] | null {
+export function expandBraces(word: string, depth = 0): string[] | null {
 	if (depth > 8) return null;
 	for (const match of word.matchAll(/\{([^{}]*)\}/gu)) {
 		const body = match[1] ?? "";
@@ -701,7 +701,7 @@ const GLOB_SEGMENT = /[*?[]/u;
  * dotglob off (a leading dot is matched only by a leading dot), or as find's -name matches it with `dotglob`.
  * A glob the reader cannot translate matches anything.
  */
-function segmentNames(segment: string, name: string, dotglob = false): boolean {
+export function segmentNames(segment: string, name: string, dotglob = false): boolean {
 	if (!GLOB_SEGMENT.test(segment)) return segment === name;
 	if (!dotglob && name.startsWith(".") && !segment.startsWith(".")) return false;
 	let source = "";
