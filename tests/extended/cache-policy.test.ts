@@ -484,6 +484,13 @@ test("a Codex turn sends back the backend's x-codex-turn-state on its later requ
 	await send([task], "another-session");
 	// The turn's first token holds for the turn; the next turn and another conversation start without one.
 	deepStrictEqual(sent, [null, "state-1", "state-1", null, null]);
+	// A warm ends on the assistant's message: it opens the next turn without the last turn's token, and the token it
+	// is issued travels with that turn's requests.
+	const answer = { ...call, content: [{ type: "text", text: "Done." }], stopReason: "stop" };
+	const history = [task, call, result, answer];
+	await send(history);
+	await send([...history, { role: "user", content: "Again", timestamp: 5 }]);
+	deepStrictEqual(sent.slice(5), [null, "state-6"]);
 });
 
 test("native compaction on Codex sends the pinned prompt layer as its own item, as the turns do", async () => {

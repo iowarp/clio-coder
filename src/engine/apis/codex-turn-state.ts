@@ -14,6 +14,8 @@ function record(value: unknown): value is Payload {
 interface TurnState {
 	turn: string;
 	token?: string;
+	/** A `generate: false` warm: it opens the next turn, so its token belongs to that turn's first request. */
+	warm?: boolean;
 }
 
 const states = new Map<string, TurnState>();
@@ -58,8 +60,8 @@ function eventValue(event: unknown): string | undefined {
  * WebSocket), and each later request of that turn sends it back; a new turn starts without one, so a token never
  * crosses a turn. The token is opaque and never logged; a request without one is ordinary, never a failure.
  *
- * Over SSE it travels as the request header. On the WebSocket it belongs in `client_metadata`, which Pi compares
- * with the previous request's body to decide on a delta frame; that replay waits on Pi ignoring the field.
+ * It travels as the request header; on the WebSocket, `responses-websocket.ts` moves it into the frame's
+ * `client_metadata`, which its delta decision ignores.
  */
 export function withCodexTurnState<T extends StreamOptions | SimpleStreamOptions>(
 	model: Model<Api>,
@@ -68,11 +70,16 @@ export function withCodexTurnState<T extends StreamOptions | SimpleStreamOptions
 ): T | undefined {
 	const sessionId = options?.cacheRetention === "none" ? undefined : options?.sessionId;
 	if (model.api !== "openai-codex-responses" || !sessionId) return options;
-	const turn = turnOf(context);
-	if (turn === undefined) return options;
+	const opened = turnOf(context);
+	if (opened === undefined) return options;
+	// Only a warm ends on the assistant's message: a turn's requests end on the prompt or on a tool result.
+	const warm = context.messages.at(-1)?.role === "assistant";
+	const turn = warm ? `warm:${opened}` : opened;
 	let state = states.get(sessionId);
 	if (state?.turn !== turn) {
-		state = { turn };
+		// As native Codex prewarms inside the turn it opens, the warm's token carries into that turn's first request.
+		const carried = !warm && state?.warm === true ? state.token : undefined;
+		state = { turn, ...(warm ? { warm: true } : {}), ...(carried !== undefined ? { token: carried } : {}) };
 		states.delete(sessionId);
 		states.set(sessionId, state);
 		if (states.size > MAX_SESSIONS) {
