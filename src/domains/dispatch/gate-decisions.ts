@@ -125,7 +125,8 @@ function citedPacketIds(checks: ReadonlyArray<GateCheck>): string[] {
 	return [...new Set(checks.flatMap((check) => check.cites ?? []))];
 }
 
-function citesDetail(checks: ReadonlyArray<GateCheck>): string {
+/** The packet ids a verdict's checks cite, as a decision's detail records them (M10). */
+export function verdictCitesDetail(checks: ReadonlyArray<GateCheck>): string {
 	const cited = citedPacketIds(checks);
 	return cited.length === 0 ? "cites=none" : `cites=${cited.join(",")}`;
 }
@@ -197,7 +198,7 @@ export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDeci
 			needsDecision: `review gate produced no structured verdict in cycle ${input.cycle}: ${parsed.reason}`,
 		};
 	}
-	const facts = `obligation=cited-evidence:${input.reviewer.obligationUnmet ? "unmet" : "met"}; ${citesDetail(parsed.result.checks)}`;
+	const facts = `obligation=cited-evidence:${input.reviewer.obligationUnmet ? "unmet" : "met"}; ${verdictCitesDetail(parsed.result.checks)}`;
 	// A pass the reviewer never looked behind is a broken gate, not a verdict.
 	if (parsed.result.verdict === "pass" && input.reviewer.obligationUnmet) {
 		const reason = "the reviewer passed the work without inspecting it: obligation cited-evidence unmet";
@@ -221,7 +222,7 @@ export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDeci
 		draft: {
 			...base,
 			outcome: "revise",
-			detail: `reviewer reported ${failed.length} failed check(s); ${citesDetail(parsed.result.checks)}`,
+			detail: `reviewer reported ${failed.length} failed check(s); ${verdictCitesDetail(parsed.result.checks)}`,
 		},
 		verdict: null,
 		findings: JSON.stringify({

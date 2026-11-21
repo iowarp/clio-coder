@@ -534,7 +534,10 @@ for (const { pick, cites } of [
 				JSON.stringify(result).slice(0, 3000),
 			);
 			if (!cites) match(decision?.detail ?? "", /obligation cited-evidence unmet: the verdict cites no item/u);
-			if (cites && pick === 1) strictEqual(decision?.winner?.index, 1);
+			if (cites && pick === 1) {
+				strictEqual(decision?.winner?.index, 1);
+				strictEqual(decision?.detail, "cites=s1.check.unit,s1.diff");
+			}
 		} finally {
 			await bundle.extension.stop?.();
 			process.chdir(previousCwd);

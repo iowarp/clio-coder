@@ -60,6 +60,7 @@ import {
 	reviewerInspectionOf,
 	stagePendingGateDecision,
 	stagePendingGateOutput,
+	verdictCitesDetail,
 } from "../domains/dispatch/gate-decisions.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
@@ -1668,6 +1669,7 @@ async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void>
 					subject: pickedSubject,
 					branch: pickedBranch,
 				},
+				...(judged?.ok === true ? { detail: verdictCitesDetail(judged.result.checks) } : {}),
 			};
 		} else {
 			// A judge that left its cited-evidence obligation unmet exhausts the gate; the operator decides (M10).
@@ -2207,6 +2209,7 @@ async function runCompete(
 					decider: subjectRef(judgeReceipt),
 					correlation: competeCorrelation(candidateRuns, judgeReceipt),
 					winner: winnerRef,
+					detail: verdictCitesDetail(judged.result.checks),
 				},
 				judgeRun.pendingGate,
 			);
