@@ -14,6 +14,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
+import { EXPLORATION_TOOL_NAMES } from "../core/read-only-calls.js";
 import { systemReminderBlock } from "../core/reminder-framing.js";
 import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
@@ -81,6 +82,7 @@ import {
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	RESULT_CONTRACT_REPAIR_TOOL,
 	type ResultContract,
+	resultContractEvidenceShortfall,
 	resultContractReminder,
 	resultContractRepairMessages,
 	resultContractRepairUserMessage,
@@ -1160,6 +1162,25 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let toolExecutionsStarted = 0;
 	let zeroToolRepairQueued = false;
 	let resultContractRevisionActive = false;
+	// M-31: whether the last terminal handoff arrived while work tools were still open, captured before the handoff
+	// locks them, and whether a repair reopened the read tools so the run can gather the evidence its result lacked.
+	let handoffFromOpenWork = false;
+	let evidenceRepairActive = false;
+	const readToolsAdmitted = activeWorkerTools.filter((tool) => EXPLORATION_TOOL_NAMES.has(tool));
+	/**
+	 * A rejected result the run can still ground by reading: work tools were open when it arrived, the envelope admits
+	 * a read-class tool, and either nothing has executed yet or the refusal names missing evidence. Withdrawing the
+	 * tools there leaves the model nothing to answer with but an empty result (M-31). A mutation report keeps its own
+	 * revision path, and a refusal about the result's form after evidence exists keeps the final-only repair.
+	 */
+	const evidenceRepairFor = (reason: string, workOpen: boolean): boolean =>
+		workOpen &&
+		!mutationResult &&
+		readToolsAdmitted.length > 0 &&
+		refusalReportRound === null &&
+		(toolExecutionsStarted === 0 || resultContractEvidenceShortfall(reason));
+	const evidenceRepairInstruction = (reason: string, resubmit: string): string =>
+		`${reason} No evidence backs this result yet. First read the inputs the assignment names with the admitted read tools (${readToolsAdmitted.join(", ")}); only read-class calls run during this repair. Then ${resubmit}, citing only lines you read.`;
 	let acceptedHelperResult: StructuredHelperResult | null = null;
 	let helperTerminalPhase = false;
 	let helperExposedThisRound = false;
@@ -1529,6 +1550,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
 			if (refusalReportRound !== null && toolCall.name !== INTERNAL_HELPER_RESULT_TOOL)
 				return { block: true, reason: WORKER_REFUSAL_REPORT_BLOCK };
+			// The evidence repair reopened reading, not the whole work surface (M-31).
+			if (
+				evidenceRepairActive &&
+				toolCall.name !== INTERNAL_HELPER_RESULT_TOOL &&
+				!callRepeatsAsRead(toolCall.name, toolCall.arguments, () => undefined)
+			)
+				return {
+					block: true,
+					reason: "Only read-class tools run during this evidence repair. Read the inputs, then submit the result.",
+				};
 			if (helperSchema === null) return undefined;
 			if (acceptedHelperResult !== null || workerBoundFailure !== null)
 				return { block: true, reason: "The helper result is sealed.", terminate: true };
@@ -1811,7 +1842,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					const protocol =
 						codexToolChanges && resultContractRevisionActive && !helperTerminalRequest
 							? "The host-authorized bounded revision phase is active. Work tools may run within its remaining allowance. Earlier work-closed instructions resume when the terminal handoff begins again."
-							: (systemPrompt ?? "").slice(basePrompt.length);
+							: codexToolChanges && evidenceRepairActive && !helperTerminalRequest
+								? "The host reopened the read-class tools for an evidence repair. Read the inputs the assignment names, then begin the terminal handoff again."
+								: (systemPrompt ?? "").slice(basePrompt.length);
 					// Codex can append declarations but cannot replay removals without
 					// collapsing them into the leading item. Execution remains gated by
 					// beforeToolCall even though the work declarations stay in history (#423).
@@ -2080,6 +2113,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				);
 	synthesisTimer?.unref();
 	const repairHelperResult = (reason: string): void => {
+		const workOpen = handoffFromOpenWork || (!synthesisToolLock && !helperTerminalPhase);
+		handoffFromOpenWork = false;
 		if (!input.resultContract || acceptedHelperResult !== null || workerBoundFailure !== null) return;
 		if (refusalReportRound !== null) return;
 		helperTerminalPhase = true;
@@ -2095,6 +2130,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// #425: rejected sibling handoffs share one repair request; queuing it is not running it.
 		if (resultContractRepairsQueued > resultContractRepairsStarted) return;
 		resultContractRepairsQueued += 1;
+		// M-31: a result rejected for missing evidence, or before anything ran, is repaired by reading. The round keeps
+		// the work phase's declarations and request shape, so the cached prefix survives; admission narrows it to reads.
+		const readFirst = evidenceRepairFor(reason, workOpen);
+		if (readFirst) {
+			evidenceRepairActive = true;
+			helperTerminalPhase = false;
+			synthesisToolLock = false;
+		}
 		// Only semantic failures may spend the preauthorized revision allowance after terminal lock.
 		if (helperSemanticFailure && !resultContractRevisionActive && workerBudget.revision !== undefined) {
 			resultContractRevisionActive = loopGuardRegistration.extendWorkerToolCallPhase(workerBudget.revision);
@@ -2106,8 +2149,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 		}
 		const revisionToolsAvailable = !synthesisToolLock;
-		const instruction =
-			helperForcedChoiceAvailable && !revisionToolsAvailable
+		const instruction = readFirst
+			? evidenceRepairInstruction(reason, `submit the result again with ${INTERNAL_HELPER_RESULT_TOOL}`)
+			: helperForcedChoiceAvailable && !revisionToolsAvailable
 				? `${reason} Work tools remain disabled. Repair the result by calling ${INTERNAL_HELPER_RESULT_TOOL} exactly once, alone, with the complete result object. Do not emit prose.`
 				: reason;
 		for (const message of resultContractRepairMessages(
@@ -2132,7 +2176,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							],
 						}
 					: message;
-			agent.followUp(repairMessage as unknown as AgentMessage);
+			// A reopened round continues on the rejected handoff's tool result, so its instruction rides the steering
+			// queue, which lands before that request; a follow-up would wait for the run to stop (M-31).
+			if (readFirst) agent.steer(repairMessage as unknown as AgentMessage);
+			else agent.followUp(repairMessage as unknown as AgentMessage);
 		}
 	};
 	const unsubscribe = agent.subscribe(async (event) => {
@@ -2215,6 +2262,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
 			const calls = event.message.content.filter((block) => block.type === "toolCall");
 			if (calls.some((call) => call.name === INTERNAL_HELPER_RESULT_TOOL)) {
+				handoffFromOpenWork = !synthesisToolLock && !helperTerminalPhase;
 				helperTerminalPhase = true;
 				synthesisToolLock = true;
 				if (calls.length !== 1)
@@ -2464,11 +2512,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				if (zeroToolViolation !== null || resultContractRepairsStarted < RESULT_CONTRACT_REPAIR_LIMIT) {
 					if (zeroToolViolation !== null) zeroToolRepairQueued = true;
 					else resultContractRepairsQueued += 1;
+					// M-31: missing evidence is repaired by reading, so it never takes the final-only route below.
+					const readFirst = zeroToolViolation === null && evidenceRepairFor(violation, !synthesisToolLock);
+					if (readFirst) evidenceRepairActive = true;
 					// A finished answer in prose needs no more work, only its form. Where
 					// the runtime can bind that form, the repair round goes final-only so
 					// the schema can ride it; tools there would keep it unconstrained, and
 					// the revision allowance stays unspent.
 					const constrainedRepair =
+						!readFirst &&
 						contractResponseFormat !== undefined &&
 						zeroToolViolation === null &&
 						finishedReplyWithoutJsonResult(event.message);
@@ -2487,7 +2539,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					}
 					if (constrainedRepair) synthesisToolLock = true;
 					const revisionToolsAvailable =
-						(workerBudget.mode === "advisory" || resultContractRevisionActive) && !synthesisToolLock;
+						readFirst || ((workerBudget.mode === "advisory" || resultContractRevisionActive) && !synthesisToolLock);
 					// Legacy enforced budgets need preauthorized growth to retain repair tools.
 					if (!revisionToolsAvailable) synthesisToolLock = true;
 					// Active revision retains the paired tool exchange. Final-only
@@ -2500,7 +2552,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					// the result a real tool_call_id for strict endpoints (#62).
 					const repairInput = {
 						contract,
-						reason: violation,
+						reason: readFirst ? evidenceRepairInstruction(violation, "emit the required result again") : violation,
 						attempt: zeroToolViolation !== null ? 1 : resultContractRepairsQueued,
 						anchors: observedReadAnchors(),
 						toolsAvailable: revisionToolsAvailable,
