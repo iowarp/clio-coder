@@ -311,6 +311,21 @@ test("idle reload is deferred and revalidated instead of interrupting active wor
 	ok(f.runtime.commands()[0]?.available);
 });
 
+test("startup reload keeps the boot hook generation; a later reload commits a new one (C-34)", async (t) => {
+	const f = await fixture(t);
+	let commits = 0;
+	const runtime = new OperatorExtensionRuntime({
+		context: () => ({ workspace: f.cwd, sessionId: "clio-coder-session-one", mode: "interactive" }),
+		isIdle: () => true,
+		commitHooks: () => ({ status: "committed", generation: ++commits }),
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	equal(commits, 0, "boot already published the hook generation, so startup publishes no second one");
+	equal((await runtime.reload()).status, "committed");
+	equal(commits, 1);
+});
+
 test("real import failure and missing/undeclared handlers report degraded readiness", async (t) => {
 	const f = await fixture(t, 'throw new Error("synthetic import failure")');
 	const result = await f.runtime.reload();
