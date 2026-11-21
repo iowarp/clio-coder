@@ -315,6 +315,13 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		};
 		strictEqual(advisory(tsc("tsc-1", 2)), FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE);
 		strictEqual(advisory(tsc("tsc-1", 2), tsc("tsc-2", 0)), FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
+		// With no pass beside it, the advisory names the red that ran after the edit, never "ran no check" (CLI-P54).
+		const red = assessFinishContract({
+			sessionEntries: [...mutationWindow(), ...tsc("tsc-1", 2), assistantMessage("assistant-1", "Done.")],
+			assistantTurnId: "assistant-1",
+			workspaceRoot: root,
+		});
+		strictEqual(red.kind === "engage" && red.message.endsWith(" Failed after the edit: npx tsc --noEmit."), true);
 	});
 
 	it("retains explicitly requested check scope and limitations without turning unknown coverage into a gate", async () => {

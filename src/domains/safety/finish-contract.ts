@@ -50,6 +50,12 @@ export const FINISH_CONTRACT_RUN_CHECKS_PREFIX = " Run checks: ";
  */
 export const FINISH_CONTRACT_RAN_CHANGED_PREFIX = " Ran after the edit: ";
 
+/**
+ * Appended last for checks that ran after the last change and came back red, as the fold seals them. They left no
+ * passing evidence, so the change stays unverified, but the footer must say a check ran and failed (CLI-P54).
+ */
+export const FINISH_CONTRACT_FAILED_AFTER_EDIT_PREFIX = " Failed after the edit: ";
+
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
 	"[CLIO Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
 
@@ -307,10 +313,15 @@ export function standingFailedCheck(input: FinishContractInput): boolean {
 }
 
 function checkFailedSinceLastChange(input: FinishContractInput, scope: AssessmentScope): boolean {
-	if (input.workspaceRoot === undefined) return false;
+	return failingSinceLastChange(input, scope).length > 0;
+}
+
+/** The checks whose last outcome since the last change is red. */
+function failingSinceLastChange(input: FinishContractInput, scope: AssessmentScope): ReadonlyArray<string> {
+	if (input.workspaceRoot === undefined) return [];
 	// Only a failed result can seal a red, so an all-green window skips the replay's reads.
-	if (!capabilityEntries(scope.window).some(failedResult)) return false;
-	return scope.facts().failing.length > 0;
+	if (!capabilityEntries(scope.window).some(failedResult)) return [];
+	return scope.facts().failing;
 }
 
 function failedResult(entry: unknown): boolean {
@@ -458,10 +469,11 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 		return ids.length > 0 ? `${prefix}${ids.join(", ")}.` : "";
 	};
 	const ran = changedFilesRunAfterEdit(window, mutatedPaths, input.workspaceRoot);
+	const failed = failingSinceLastChange(input, scope);
 	return {
 		kind: "engage",
 		reason: "unvalidated_mutation",
-		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}`,
+		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}${failed.length > 0 ? `${FINISH_CONTRACT_FAILED_AFTER_EDIT_PREFIX}${failed.join(", ")}.` : ""}`,
 		evidence: [],
 		mutatedPaths,
 	};
