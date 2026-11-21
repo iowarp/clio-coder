@@ -213,6 +213,7 @@ export function withResolvedPlanTaskPin(
 		agentSelection: _agentSelection,
 		routeApproval: _approval,
 		assignmentDeadlineAt: _deadline,
+		runWallMs: _wall,
 		executionRole: _executionRole,
 		...base
 	} = request;

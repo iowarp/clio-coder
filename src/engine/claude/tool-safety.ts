@@ -11,14 +11,10 @@ import type { RejectionMessage } from "../../domains/safety/rejection-feedback.j
 import { MAIN_GRANTS_UNAVAILABLE_REASON } from "../../domains/safety/worker-permit.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
 import { toolCallFacts } from "../../tools/agent-tools.js";
+import { WORKER_REFUSAL_LIMIT } from "../../worker/spec-contract.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import type { WorkerRefusal } from "../worker-refusals.js";
-import {
-	describeWorkerRefusal,
-	formatWorkerRefusal,
-	WORKER_REFUSAL_LIMIT,
-	workerRefusalLimitReason,
-} from "../worker-refusals.js";
+import { describeWorkerRefusal, formatWorkerRefusal, workerRefusalLimitReason } from "../worker-refusals.js";
 
 export interface MappedClaudeToolCall {
 	claudeToolName: string;

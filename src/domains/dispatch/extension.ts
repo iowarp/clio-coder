@@ -172,6 +172,7 @@ import {
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
+	WORKER_REFUSAL_LIMIT,
 	WORKER_REFUSAL_LIMIT_PREFIX,
 	WORKER_SPEC_HOOKLESS_VERSION,
 	type WorkerBudget,
@@ -525,7 +526,7 @@ import {
 	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
-import { planCardLimits } from "./run-limits.js";
+import { planCardLimits, resolveRunLimits, resolveRunWall, runWallCapMs, wallClockMessage } from "./run-limits.js";
 import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
@@ -1474,6 +1475,8 @@ function reportDispatchDiagnostic(scope: string, error: unknown): void {
 const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	// The same restricted context meets the same target on every attempt.
 	"information_flow_blocked",
+	// The wall clock moved the run to handback; whatever it hit after that, it seals timed_out (fleet M8).
+	"worker_run_timeout",
 	"worker_context_exhausted",
 	"worker_turn_timeout",
 	"worker_output_cap_exhausted",
@@ -2136,6 +2139,8 @@ export interface WorkerDynamicContext {
 	ledgerAssignments?: ReadonlyArray<LedgerAssignment>;
 	/** The run's answer budget; the worker is told it so it writes to fit (M3). */
 	answerBudgetBytes?: number;
+	/** The run's wall clock; the worker is told it so it reports before the wall (M8). */
+	wallClockMs?: number;
 	/** Selects the handbook audience with the capability class; never tier policy. */
 	capabilityClass?: AgentCapabilityClass | null;
 	/** Recipe id, which names the handbook audience for built-in roles. */
@@ -2355,6 +2360,10 @@ export function buildDynamicPromptMessages(
 	if (dynamicContext.answerBudgetBytes !== undefined) {
 		const body = answerBudgetMessage(dynamicContext.answerBudgetBytes);
 		messages.push({ id: "dispatch-answer-budget", body, contentHash: sha256(body) });
+	}
+	if (dynamicContext.wallClockMs !== undefined) {
+		const body = wallClockMessage(dynamicContext.wallClockMs);
+		messages.push({ id: "dispatch-wall-clock", body, contentHash: sha256(body) });
 	}
 	if (req.briefing !== undefined) {
 		const body = [
@@ -3721,6 +3730,26 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	);
 	const settings = input.settings ?? config?.get();
 	const readOnly = input.envelope.write.mode === "none";
+	// DESIGN 4.5: what stops this run, sealed once. Dispatch stamped the wall clock; a direct builder resolves it here.
+	const limitSettings = settings ?? DEFAULT_SETTINGS;
+	const wall =
+		input.req.runWallMs !== undefined && input.req.assignmentDeadlineAt !== undefined
+			? { wallMs: input.req.runWallMs, deadlineAt: input.req.assignmentDeadlineAt }
+			: resolveRunWall({
+					capMs: runWallCapMs(limitSettings.fleet.limits, input.req.requestOrigin),
+					...(input.recipe?.budget?.timeoutMs !== undefined ? { recipeMs: input.recipe.budget.timeoutMs } : {}),
+					startedAt: Date.now(),
+					...(input.req.assignmentDeadlineAt !== undefined ? { deadlineAt: input.req.assignmentDeadlineAt } : {}),
+				});
+	const limits = resolveRunLimits({
+		role: input.role,
+		wallMs: wall.wallMs,
+		deadlineAt: wall.deadlineAt,
+		responseSeconds: limitSettings.safety.limits.workerResponseSeconds,
+		toolCeiling: input.budget.ceiling ?? input.budget.hardCap,
+		maxRetries: limitSettings.fleet.retry.maxRetries,
+		refusals: WORKER_REFUSAL_LIMIT,
+	});
 	const spec: WorkerSpec = {
 		...(input.req.runIdHint
 			? {
@@ -3752,6 +3781,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		envelope: input.envelope,
 		...(input.req.ledger !== undefined ? { ledger: input.req.ledger } : {}),
 		budget: input.budget,
+		limits,
 		middlewareSnapshot: input.middlewareSnapshot,
 		permit: input.permit,
 		...(input.flowPolicy !== undefined ? { flowPolicy: structuredClone(input.flowPolicy) } : {}),
@@ -6049,10 +6079,13 @@ export function createDispatchBundle(
 		}
 	}
 
-	/** Explicit deadlines outlive queue admission and use the ordinary truthful abort path. */
-	function watchAssignmentDeadline(run: ActiveRun, callerDeadlineAt?: number): void {
+	/**
+	 * Every run's deadline (its wall clock, or an earlier one the call set) outlives queue admission and the caller, so a
+	 * detached run is stopped too; it seals timed_out through the ordinary abort path (DESIGN 4.5).
+	 */
+	function watchAssignmentDeadline(run: ActiveRun): void {
 		const deadlineAt = run.req.assignmentDeadlineAt;
-		if (deadlineAt === undefined || (callerDeadlineAt !== undefined && deadlineAt >= callerDeadlineAt)) return;
+		if (deadlineAt === undefined) return;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let settled = false;
 		const check = (): void => {
@@ -6793,6 +6826,7 @@ export function createDispatchBundle(
 		const dynamicContext: WorkerDynamicContext = {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
 			answerBudgetBytes,
+			...(req.runWallMs !== undefined ? { wallClockMs: req.runWallMs } : {}),
 			capabilityClass: spec.capabilityClass,
 			agentId: recipe.id,
 			workingContextPaths: pathScope.workingContextPaths,
@@ -7238,7 +7272,6 @@ export function createDispatchBundle(
 		routeDecision: RouteDecisionV1,
 		probeClaims: ProbeClaim[],
 		observer?: DispatchAdmissionObserver,
-		callerDeadlineAt?: number,
 		hostRun?: DispatchPreparationOptions["hostRun"],
 		signal?: AbortSignal,
 	): Promise<{
@@ -8168,7 +8201,7 @@ export function createDispatchBundle(
 		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
-		watchAssignmentDeadline(activeRun, callerDeadlineAt);
+		watchAssignmentDeadline(activeRun);
 		// The handle goes out once the running row is durable, as it did with the
 		// sync writer: a sibling session's steer reads ownership from runs.json,
 		// and without the row it fell through to the assignment and let a foreign
@@ -8302,7 +8335,6 @@ export function createDispatchBundle(
 				routeObservation.decision,
 				probeClaims,
 				observer,
-				preparation?.deadlineAt,
 				hostRun,
 				preparation?.signal,
 			);
@@ -10184,6 +10216,12 @@ export function createDispatchBundle(
 				// The worker's own reason is what separates a model that cannot
 				// meet a grounding rule from a prompt that asks for the impossible.
 				const outcomeCodeDetail = outcomeCode === null ? undefined : trustedOutcomeDetails.get(outcomeCode);
+				// DESIGN 4.5 (fleet M8): a run its wall clock moved to handback seals timed_out with the report it wrote.
+				if (outcomeCode === "worker_run_timeout" && (finalOutcome === "succeeded" || finalOutcome === "failed")) {
+					finalOutcome = "timed_out";
+					finalDetail = outcomeCodeDetail ?? "worker_run_timeout: the run reached its wall clock";
+					failureMessage = finalDetail;
+				}
 				if (outcomeCodeDetail !== undefined && finalOutcome === "failed") {
 					finalDetail = [finalDetail, outcomeCodeDetail].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
@@ -11068,7 +11106,7 @@ export function createDispatchBundle(
 
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
-		watchAssignmentDeadline(activeRun, preparation?.deadlineAt);
+		watchAssignmentDeadline(activeRun);
 		// Same as the ACP path: return the handle once the running row is durable (#428).
 		await runningRowPersisted;
 
@@ -11161,13 +11199,23 @@ export function createDispatchBundle(
 		// join the original writer group through lineage.rootRunId (#434).
 		if (placedInOwnWorktree(req)) req = { ...req, worktree: true };
 		if (req.runIdHint === undefined && req.worktree !== true) req = { ...req, runIdHint: newRunId() };
-		let prepared =
-			preparation?.deadlineAt === undefined
-				? req
-				: {
-						...req,
-						assignmentDeadlineAt: Math.min(req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY, preparation.deadlineAt),
-					};
+		// DESIGN 4.5: every run has a wall clock from this call, so time queued for a slot counts; a retry keeps its root's.
+		const wallRecipe = agents.get(req.agentId);
+		const recipeWallMs = wallRecipe === null ? undefined : normalizeAgentSpec(wallRecipe).budget.timeoutMs;
+		const wallClock = resolveRunWall({
+			capMs: runWallCapMs((getEffectiveSettings() ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
+			...(recipeWallMs !== undefined ? { recipeMs: recipeWallMs } : {}),
+			startedAt: now(),
+			deadlineAt: Math.min(
+				req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY,
+				preparation?.deadlineAt ?? Number.POSITIVE_INFINITY,
+			),
+		});
+		let prepared: DispatchRequest = {
+			...req,
+			assignmentDeadlineAt: wallClock.deadlineAt,
+			runWallMs: req.runWallMs ?? wallClock.wallMs,
+		};
 		let createdWorktree: DispatchRequest["taskWorktree"];
 		let writerLease: CheckoutWriterLease | undefined;
 		const writerRecipe = agents.get(req.agentId);
@@ -11569,6 +11617,11 @@ export function createDispatchBundle(
 				budget,
 				nativeWorker: target.runtime.kind === "http",
 				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
+				wallMs: resolveRunWall({
+					capMs: runWallCapMs((settings ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
+					...(agentSpec.budget.timeoutMs !== undefined ? { recipeMs: agentSpec.budget.timeoutMs } : {}),
+					startedAt: 0,
+				}).wallMs,
 			}),
 			writes: writeModeLine(stage.envelope.write),
 			...(stage.envelope.withheld.length > 0 ? { withheld: withheldLines(stage.envelope.withheld) } : {}),

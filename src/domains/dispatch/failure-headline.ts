@@ -30,6 +30,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	worker_tool_call_cap_exhausted: "hit the tool-call limit",
 	worker_context_exhausted: "ran out of context",
 	worker_turn_timeout: "timed out",
+	worker_run_timeout: "reached its wall clock",
 	worker_output_cap_exhausted: "hit the output limit",
 	loop_guard_tools_disabled_exhausted: "stopped for repeating calls",
 	exploration_stalled: "kept reading without deciding",

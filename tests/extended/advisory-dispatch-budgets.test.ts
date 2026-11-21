@@ -465,7 +465,8 @@ describe("dispatch advisory admission and explicit authority", () => {
 			const run = await bundle.contract.dispatch({ ...request, assignmentDeadlineAt: Date.now() + 500 });
 			const receipt = await run.finalPromise;
 			equal(aborts, 1);
-			equal(receipt.outcome, "canceled");
+			// A deadline is a bound, not an operator action: it seals timed_out (DESIGN 4.5, M8).
+			equal(receipt.outcome, "timed_out");
 			match(receipt.outcomeDetail ?? "", /explicit assignment deadline/u);
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope);

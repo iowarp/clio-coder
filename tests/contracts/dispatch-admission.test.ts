@@ -290,7 +290,7 @@ describe("dispatch admission boundary", () => {
 		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
 		match(
 			unpriced,
-			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; Clio stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 600 s, and the run stops at its 1800000 ms wall clock; Clio stops it at 300 tool calls/u,
 		);
 		// The approval card's Plan rows carry the same limits text the plan signs, once when both workers share it.
 		const card = readDispatchPlan(unpriced);

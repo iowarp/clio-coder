@@ -1979,6 +1979,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"limits",
 				[
 					["toolCallsPerRun", 1],
+					["runTimeoutMs", 1],
 					["internalRunTimeoutMs", 1],
 				],
 			],

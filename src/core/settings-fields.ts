@@ -212,6 +212,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"root",
 	"rosters",
 	"routeCooldownMs",
+	"runTimeoutMs",
 	"routing",
 	"runtime",
 	"runtimePlugins",

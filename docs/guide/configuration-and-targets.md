@@ -238,6 +238,7 @@ explains worker route selection.
 | `fleet.retry.breakerThreshold` | `1` | next dispatch |
 | `fleet.worktrees.root` | `disk` | next dispatch |
 | `fleet.limits.toolCallsPerRun` | `300` | next dispatch; a project layer can only tighten it |
+| `fleet.limits.runTimeoutMs` | `1800000` | next dispatch; a project layer can only tighten it |
 | `fleet.limits.internalRunTimeoutMs` | `2700000` | next dispatch; a project layer can only tighten it |
 | `fleet.history.maxRuns` | `1000` | next dispatch |
 | `fleet.history.journal` | `true` | next dispatch |

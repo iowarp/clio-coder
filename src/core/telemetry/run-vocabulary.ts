@@ -19,6 +19,8 @@ export const RUN_OUTCOME_CODES = [
 	"worker_tool_call_cap_exhausted",
 	"worker_context_exhausted",
 	"worker_turn_timeout",
+	/** The run's wall clock moved it to its handback round (fleet M8); the run seals timed_out. */
+	"worker_run_timeout",
 	"worker_output_cap_exhausted",
 	"loop_guard_tools_disabled_exhausted",
 	/** The read-streak decision gate refused two rounds of reads after every note (exploration design X7). */

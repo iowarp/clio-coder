@@ -863,12 +863,6 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			if (reviewResult.review !== undefined) {
 				return shapeRejection(args, "dispatch: detach cannot combine with a review gate; run gated dispatch attached");
 			}
-			if (timeoutMsArg(args) !== undefined) {
-				return shapeRejection(
-					args,
-					'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
-				);
-			}
 		}
 		const snapshotFields = {
 			requests: parsed.requests,
