@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { it } from "node:test";
 import { mapExitCode } from "../../src/cli/run.js";
+import { validateSettings } from "../../src/core/config.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import {
 	parseVerifierResult,
@@ -1456,6 +1457,7 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		"/usr/bin/env CI=1 npm test",
 		"time -p npm test",
 		"/usr/bin/time -v npm test",
+		"/usr/bin/corepack pnpm test",
 	]) {
 		const call = read(command);
 		deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
@@ -1490,35 +1492,58 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 	}
 	deepStrictEqual(extractCommandDeleteTargets("timeout 5 rm -rf build"), ["build"]);
 	// FX-44: a declared wrapper, by path tail or basename, is read through to the check it runs, and the whole command's
-	// exit is that check's; an undeclared script, a wrapper running no check, echo and printf stay unvalidated.
-	setValidationWrappers([".mine/bin/test-slot.sh", "ci.sh", "echo", "unlink"]);
+	// exit is that check's; an undeclared script, a wrapper running no check, echo and printf stay unvalidated. The
+	// wrapper is a program of the repository's that may write, so its call is a change its own check judged, never pure.
+	const wrappers = mkdtempSync(join(tmpdir(), "clio-wrappers-"));
+	mkdirSync(join(wrappers, ".mine", "bin"), { recursive: true });
+	mkdirSync(join(wrappers, "scripts"));
+	mkdirSync(join(wrappers, "real"));
+	for (const file of [".mine/bin/test-slot.sh", "scripts/ci.sh", "scripts/run-node", "real/rm"])
+		writeFileSync(join(wrappers, file), "#!/bin/sh\n");
+	symlinkSync(join(wrappers, "real", "rm"), join(wrappers, "scripts", "wrap.sh"));
+	const slot = join(wrappers, ".mine", "bin", "test-slot.sh");
+	const ci = join(wrappers, "scripts", "ci.sh");
+	setValidationWrappers([".mine/bin/test-slot.sh", "ci.sh", "run-node", "wrap.sh", "echo", "unlink"]);
 	try {
 		for (const command of [
-			"/repo/.mine/bin/test-slot.sh corepack pnpm -s run test:file tests/a.test.ts",
-			"./scripts/ci.sh --quiet -- timeout 300 npm test",
+			`${slot} corepack pnpm -s run test:file tests/a.test.ts`,
+			`${ci} --quiet -- timeout 300 npm test`,
+			// A wrapper that writes before its check still stands for that check, and its write is a change.
+			`${join(wrappers, "scripts", "run-node")} --eval="require('fs').writeFileSync('a.txt','x')" npm test`,
 		]) {
 			const call = read(command);
-			deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
+			deepStrictEqual([call.verdict, call.shape, call.changesTree], ["check", "after-change", true], command);
+			strictEqual(settleCheckCall(call, false, "ok", true).settled, true, command);
 			strictEqual(settleCheckCall(call, true, "error", true).settled, true, command);
 			strictEqual(gate(command), "ok/validation_evidence", command);
 		}
-		strictEqual(read("./scripts/ci.sh npm test").check, "npm test");
+		strictEqual(read(`${ci} npm test`).check, "npm test");
 		for (const command of [
 			"test-slot.sh npm test",
-			"ci.sh ls",
-			"ci.sh echo npm test",
+			`${ci} ls`,
+			`${ci} echo npm test`,
 			"echo npm test",
 			"printf npm test",
 			// A declared entry the shared list refuses (a file writer, a shell, true, xargs) never stands for a check.
 			"unlink pytest",
+			// What runs is the file a word resolves to: a link to rm, or a word naming no file, is no wrapper.
+			`${join(wrappers, "scripts", "wrap.sh")} -rf pnpm test`,
+			`${join(wrappers, "scripts", "missing", "ci.sh")} npm test`,
 		])
 			strictEqual(gate(command), "engage/unvalidated_mutation", command);
 	} finally {
 		setValidationWrappers([]);
 	}
-	strictEqual(gate("./scripts/ci.sh npm test"), "engage/unvalidated_mutation");
+	strictEqual(gate(`${ci} npm test`), "engage/unvalidated_mutation");
 	// `command -v` only resolves the names after it, so it runs no check.
 	strictEqual(gate("command -v npm test"), "engage/unvalidated_mutation");
+	// Settings refuse an entry naming an interpreter, a shell or a writer, and keep a script.
+	const settings = validateSettings({ version: 2, safety: { validationWrappers: ["node", "scripts/ci.sh"] } });
+	deepStrictEqual(settings.settings.safety.validationWrappers, ["scripts/ci.sh"]);
+	deepStrictEqual(
+		settings.issues.map((issue) => issue.path),
+		["safety.validationWrappers"],
+	);
 	// The safety domain reads the list from live settings and leaves none behind when it stops.
 	const safety = createSafetyBundle({
 		bus: { subscribe: () => () => {}, emit: () => {} },
@@ -1529,11 +1554,12 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 	} as unknown as DomainContext);
 	try {
 		await safety.extension.start();
-		strictEqual(gate("ci.sh npm test"), "ok/validation_evidence");
+		strictEqual(gate(`${ci} npm test`), "ok/validation_evidence");
 		await safety.extension.stop?.();
-		strictEqual(gate("ci.sh npm test"), "engage/unvalidated_mutation");
+		strictEqual(gate(`${ci} npm test`), "engage/unvalidated_mutation");
 	} finally {
 		setValidationWrappers([]);
+		rmSync(wrappers, { recursive: true, force: true });
 	}
 });
 

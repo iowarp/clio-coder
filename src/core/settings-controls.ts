@@ -751,7 +751,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.validationWrappers": [
 		"Validation wrappers",
-		"Wrapper scripts that run a check with the words after them, such as a test-slot or CI launcher: a path matches that script, a bare name its basename. A command starting with one counts as the check it runs, so a finish after it is not assessed as unvalidated. A file writer, a shell, echo, true, xargs and similar words are refused.",
+		"Wrapper scripts that run a check with the words after them, such as a test-slot or CI launcher: a path matches that script, a bare name its basename. A command starting with one counts as the check it runs, so a finish after it is not assessed as unvalidated; the run still counts as a change, since the wrapper may write. A file writer, a shell, an interpreter, echo, cat, xargs and similar words are refused.",
 	],
 	"fleet.keepPeerInstructionFiles": [
 		"Peers that keep their own instruction files",

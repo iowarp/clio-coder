@@ -753,8 +753,10 @@ export interface SafetySettings {
 	 * a bare name matches the script's basename. The wrapper and its leading
 	 * options are skipped, so `scripts/test-slot.sh pnpm run test:file x`
 	 * counts as the check it runs; the whole command's exit still decides the
-	 * result. A file writer, a shell, or a word that runs no check of its words
-	 * (echo, printf, true, xargs, command) is never a wrapper.
+	 * result, and the call still counts as a change, since the wrapper may write.
+	 * The word must resolve to a file. A file writer, a shell, an interpreter, or
+	 * a word that runs no check of its words (echo, printf, true, xargs, command,
+	 * cat) is never a wrapper.
 	 */
 	validationWrappers: string[];
 	/**
