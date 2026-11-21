@@ -773,6 +773,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				collectedDetachedBatch: state.turnCollectedDetachedBatch,
 				turnMode: state.currentTurnConstraints?.mode ?? "",
 				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
+				// An unattended turn's one pinned `finish` round is spent: the stalled-turn nudge does not fall back to prose (MD14).
+				...(state.finishRoundSpent ? { finishRoundSpent: true } : {}),
 				...turnOriginMetadata(state.currentTurnOrigin),
 				...(state.turnCompletion !== null ? { completionState: state.turnCompletion.state } : {}),
 				// Metadata carries scalars, so the declaration's `remaining` items ride one per line (memory design MD14).
@@ -868,7 +870,19 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				effect.severity !== "hard-block" &&
 				(effect.fact !== undefined || (pairedReminderPersists(effect) && voiced.has(effect.message)));
 			if (declaredTurn) announceAssessment(effects);
-			let yieldedToFinish = false;
+			// The stalled-turn nudge yields only when nothing else carries the turn on: another continuation, already asked or
+			// asked in this pass, goes out instead of the pinned round, so the nudge then takes its own path (MD14).
+			const otherContinuation =
+				state.continuation.requested ||
+				effects.some(
+					(effect) =>
+						effect.kind === "request_continuation" &&
+						effect.message !== STALLED_TURN_REQUEST_CONTINUATION_MESSAGE &&
+						!sealedOnly(effect) &&
+						turnAllowsContinuation(state.currentTurnConstraints) &&
+						(effect.toolFree === true || !(state.synthesisToolLock || state.toolBudgetLock)),
+				);
+			let yieldedToFinish: string | null = null;
 			for (const effect of effects) {
 				if (sealedOnly(effect)) continue;
 				if (effect.kind === "inject_reminder") {
@@ -890,11 +904,13 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				if (
 					effect.kind === "request_continuation" &&
 					effect.message === STALLED_TURN_REQUEST_CONTINUATION_MESSAGE &&
+					!declaredTurn &&
+					!otherContinuation &&
 					turnAllowsContinuation(state.currentTurnConstraints) &&
 					pinFinishRound?.() === true
 				) {
-					yieldedToFinish = true;
 					const firingId = firings.get(effect);
+					yieldedToFinish = firingId ?? "";
 					if (firingId !== undefined) armed.add(firingId);
 					enter(effect, true);
 					continue;
@@ -917,9 +933,18 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);
 			}
+			// The yielded firing is armed only for the pinned round: if a continuation was asked after all, that request is not
+			// the round's, and the firing never enters it.
+			if (yieldedToFinish !== null && state.continuation.requested) {
+				if (yieldedToFinish !== "") {
+					armed.delete(yieldedToFinish);
+					entered.delete(yieldedToFinish);
+				}
+				yieldedToFinish = null;
+			}
 			// A declared turn, a locked request or a spent nudge left these firings nothing to carry.
 			suppressUnentered(firings, entered);
-			return yieldedToFinish;
+			return yieldedToFinish !== null;
 		},
 
 		/**

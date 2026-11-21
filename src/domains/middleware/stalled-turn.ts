@@ -163,7 +163,9 @@ export const STALLED_TURN_RULE_DEFINITION: MiddlewareRuleDefinition = {
 			note: "the reply announced an action without running it",
 		},
 	],
-	predicate: shouldRequestStalledTurnContinuation,
+	// Once an unattended turn's pinned `finish` round is spent, the prose nudge ("waiting for the user") is not its
+	// fallback: nothing fires (memory design MD14).
+	predicate: (input) => input.metadata?.finishRoundSpent !== true && shouldRequestStalledTurnContinuation(input),
 };
 
 // "run /skill X or say skip", "Suggested skill: /skill x", "want me to use

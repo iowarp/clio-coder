@@ -22,8 +22,10 @@ import { headForRedaction } from "../evidence/redact.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
-import { callVerdict } from "../safety/check-classifier.js";
+import { checkSpeaksForCall } from "../safety/check-classifier.js";
+import { declaredVerifierCommands } from "../safety/finish-contract.js";
 import { hashToolCall } from "../safety/loop-detector.js";
+import { callChangesTree } from "../safety/run-effects.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
@@ -605,7 +607,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let armsSinceLessonPass = 0;
 	let armsInScope = 0;
 	/** A check passed in this operator turn: a declared `done` beside it is the third side arm (DESIGN 4.4, MD14). */
-	let checkedThisTurn = false;
+	/**
+	 * The step of this operator turn's last passed check, and of the session's last change of the tree: a declared
+	 * `done` beside a check no change came after is the third side arm (DESIGN 4.4, MD14).
+	 */
+	let checkStepThisTurn = 0;
+	let lastTreeChangeStep = 0;
 	/** Operator turns in this scope, and the one the last side lesson pass ran in: at most one pass per turn. */
 	let turnSequence = 0;
 	let lessonPassTurn = -1;
@@ -870,7 +877,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							operatorAskedRepeat = false;
 							turnLog.length = 0;
 							turnSequence += 1;
-							checkedThisTurn = false;
+							checkStepThisTurn = 0;
 						}
 						if (input.text?.trim()) {
 							// Bounded first: this runs synchronously at turn start on a prompt of any length.
@@ -1266,11 +1273,51 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (state !== "done" && state !== "partly_done" && state !== "not_done") return;
 		const remaining = input.metadata?.completionRemaining;
 		const items = typeof remaining === "string" ? remaining.split("\n").filter((item) => item.length > 0) : [];
-		deps.bank.updateStatus(`declared ${state}${items.length > 0 ? `; remaining: ${items.join("; ")}` : ""}`);
-		if (state !== "done" || !checkedThisTurn || lessonsMode() !== "side") return;
-		checkedThisTurn = false;
+		// The model's own words reach the bank, its file and a restored context only through the memory route's redaction.
+		const open = items.length > 0 ? redactForMemoryRoute(headForRedaction(items.join("; "), 4_096)) : "";
+		deps.bank.updateStatus(`declared ${state}${open.length > 0 ? `; remaining: ${open}` : ""}`);
+		if (state !== "done" || checkStepThisTurn <= lastTreeChangeStep || lessonsMode() !== "side") return;
+		checkStepThisTurn = 0;
 		armsSinceLessonPass += 1;
 		armsInScope += 1;
+	}
+
+	/**
+	 * A call that settled ok and ran a check that speaks for it (the safety domain's reader) is this turn's latest check;
+	 * any other call that changed the tree, a shell mutation included, is the latest change. A chain's steps count each
+	 * as its own call, in order.
+	 */
+	function noteCheckOrChange(
+		toolName: string,
+		rawArgs: Record<string, unknown> | undefined,
+		details: MiddlewareHookInput["toolResultDetails"],
+		settledOk: boolean,
+		actionClass: string | undefined,
+	): void {
+		const children = gatewayChainReceipts(toolName, { details });
+		if (children.length > 0) {
+			for (const child of children) {
+				const childDetails = isPlainRecord(child.result.details) ? child.result.details : {};
+				const settled =
+					child.admission.outcome === "ok" && child.admission.decision === "allowed" && childDetails.kind === "ok";
+				noteCheckOrChange(child.capability, child.args, childDetails, settled, undefined);
+			}
+			return;
+		}
+		const call = effectiveToolCall(toolName, rawArgs, details);
+		const args = call.args === undefined ? undefined : { ...call.args };
+		const root = workspaceRoot();
+		const bashPassed = call.toolName !== ToolNames.Bash || successfulShellReceipt(settledOk, details);
+		if (
+			settledOk &&
+			bashPassed &&
+			checkSpeaksForCall(call.toolName, args, root, () => declaredVerifierCommands(root, undefined))
+		) {
+			checkStepThisTurn = toolStep;
+			return;
+		}
+		if ((settledOk && WORKSPACE_CHANGING_CLASSES.has(String(actionClass))) || callChangesTree(call.toolName, args, root))
+			lastTreeChangeStep = toolStep;
 	}
 
 	/** A lone shell invocation failed from the workspace root: it waits for a success that fixes it. */
@@ -1427,7 +1474,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		shownReads.clear();
 		armsSinceLessonPass = 0;
 		armsInScope = 0;
-		checkedThisTurn = false;
+		checkStepThisTurn = 0;
+		lastTreeChangeStep = 0;
 		turnSequence = 0;
 		lessonPassTurn = -1;
 		trajectory.length = 0;
@@ -2053,7 +2101,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
 		if (command !== null && successfulShellReceipt(input.metadata?.resultKind === "ok", input.toolResultDetails))
 			rememberSucceededCommand(command, input.toolArgs?.cwd);
-		if (outcome === "ok" && passedCheck(input)) checkedThisTurn = true;
+		noteCheckOrChange(
+			input.toolName ?? "",
+			input.toolArgs,
+			input.toolResultDetails,
+			input.metadata?.resultKind === "ok",
+			String(input.metadata?.actionClass),
+		);
 		const root = workspaceRoot();
 		const readPath =
 			prepared.toolName === ToolNames.Read && outcome === "ok" && typeof input.toolArgs?.path === "string"
@@ -2637,13 +2691,6 @@ function channelCarries(
 		case "durable_lesson_task":
 			return commandEvidence(lesson) || lesson.approval === "operator";
 	}
-}
-
-/** A settled ok call that ran a check and passed it: a verify run, or a shell check that exited zero. */
-function passedCheck(input: MiddlewareHookInput): boolean {
-	const call = effectiveToolCall(input.toolName ?? "", input.toolArgs, input.toolResultDetails);
-	if (callVerdict(call.toolName, call.args === undefined ? undefined : { ...call.args }) !== "check") return false;
-	return call.toolName !== ToolNames.Bash || successfulShellReceipt(true, input.toolResultDetails);
 }
 
 function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {

@@ -410,6 +410,7 @@ export type TurnMiddlewareState = TurnStateView<
 	| "continuation"
 	| "currentTurnConstraints"
 	| "currentTurnOrigin"
+	| "finishRoundSpent"
 	| "lastTurnId"
 	| "synthesisToolLock"
 	| "toolBudgetLock"

@@ -13,7 +13,8 @@ import {
 	type ReadStreakStep,
 	SCOUT_NUDGE_REGISTRATION_ID,
 } from "../domains/middleware/index.js";
-import { callVerdict } from "../domains/safety/check-classifier.js";
+import { checkSpeaksForCall } from "../domains/safety/check-classifier.js";
+import { declaredVerifierCommands } from "../domains/safety/finish-contract.js";
 import { FINISH_CONTRACT_REGISTRATION_ID } from "../domains/safety/finish-contract-registration.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
@@ -158,9 +159,17 @@ function callFact(
 		const unfinished = state === "partly_done" || state === "not_done";
 		return { kind: "declaration", progress: true, check: false, unfinished };
 	}
-	if (toolName === ToolNames.Limitation) return { kind: "receipt", progress: false, check: true, unfinished: false };
-	const check = callVerdict(toolName, args === undefined ? undefined : { ...args }) === "check";
+	// MD12's progress rule, unchanged for every surface: a `verify` receipt or any non-read call, a limitation included.
 	const progress = toolName === ToolNames.Verify || !isReadOnlyCall(toolName, args);
+	// The finish gate's own fact: a limitation, or a check whose exit speaks for it (a declared one or one behind a
+	// declared wrapper included); a shell exit other than zero passed nothing.
+	const exited = typeof details?.exitCode === "number" ? details.exitCode : 0;
+	const check =
+		toolName === ToolNames.Limitation ||
+		(exited === 0 &&
+			checkSpeaksForCall(toolName, args === undefined ? undefined : { ...args }, process.cwd(), () =>
+				declaredVerifierCommands(process.cwd(), undefined),
+			));
 	if (!progress && !check) return null;
 	return { kind: "receipt", progress, check, unfinished: false };
 }
