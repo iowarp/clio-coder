@@ -717,6 +717,7 @@ describe("a sweep check judges one run per call", () => {
 				compare: "twice",
 				tolerance: { absolute: 0.01 },
 			},
+			{ kind: "browser", url: "http://127.0.0.1:5173/" },
 		]) {
 			const parsed = parseProjectVerifierCatalogText(catalog({ ...base, ...fields }), root);
 			ok(!parsed.ok && parsed.reason.endsWith(`kind '${fields.kind}' does not accept runs`), JSON.stringify(parsed));

@@ -435,7 +435,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	return result;
 }
 
-const CHECK_KINDS: ReadonlySet<string> = new Set(["command", "numeric-compare", "perf-budget", "reproduce"]);
+const CHECK_KINDS: ReadonlySet<string> = new Set(["command", "numeric-compare", "perf-budget", "reproduce", "browser"]);
 
 type ToolSettledFacets = Pick<ToolSettled, "fileExt" | "checkKind" | "skill" | "capabilities">;
 
