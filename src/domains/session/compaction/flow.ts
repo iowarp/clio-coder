@@ -470,7 +470,13 @@ export async function runCompactionFlow(
 			kind: "compactionSummary",
 			...(result.callIds === undefined ? {} : { callIds: result.callIds }),
 			turnId: randomUUID(),
-			parentTurnId: result.checkpointParentTurnId ?? result.firstKeptTurnId ?? null,
+			// A checkpoint hangs from the path's newest message, as native and step checkpoints do, so /tree shows it
+			// after the suffix it kept rather than as a sibling branch of that suffix (CTX-12). Which path replays it
+			// keys on firstKeptTurnId, never on this parent.
+			parentTurnId:
+				result.checkpointParentTurnId ??
+				[...entries].reverse().find((candidate) => candidate.kind === "message")?.turnId ??
+				null,
 			summary: result.summary,
 			...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
 			...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
