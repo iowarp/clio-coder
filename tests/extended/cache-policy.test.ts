@@ -288,7 +288,7 @@ test("the main thread's public Responses request marks the pinned prompt layer w
 	const send = async (
 		modelId: string,
 		scope: "main" | "side",
-		cacheRetention?: "none" | "short",
+		cacheRetention?: "none" | "short" | "long",
 		prefixHash = hash,
 	): Promise<Body> => {
 		const model = openai.synthesizeModel(
@@ -323,6 +323,13 @@ test("the main thread's public Responses request marks the pinned prompt layer w
 			{ type: "input_text", text: pinned, prompt_cache_breakpoint: { mode: "explicit" } },
 			{ type: "input_text", text: tail },
 		]);
+		// Long retention keeps the install-wide span 12 hours; the conversation keeps the request's 30 minutes (OI-7).
+		const long = await send("gpt-6-luna", "main", "long");
+		deepStrictEqual(long.prompt_cache_options, { ttl: "30m" });
+		deepStrictEqual((long.input[0]?.content as Array<Record<string, unknown>>)[0]?.prompt_cache_breakpoint, {
+			mode: "explicit",
+			ttl: "12h",
+		});
 		const side = await send("gpt-6-luna", "side");
 		strictEqual(side.input[0]?.content, pinned + tail, "workers and side calls keep Pi's request");
 		deepStrictEqual({ ...main.input[0], content: side.input[0]?.content }, side.input[0]);

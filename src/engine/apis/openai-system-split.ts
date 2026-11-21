@@ -34,8 +34,12 @@ function leadingText(item: Payload): string | null {
  * first input item is not the system prompt starting with the pinned layer, when caching is off (Pi sends
  * `mode: "explicit"` with no breakpoint for retention none, and a mark would turn writes back on), or when the
  * request already holds its explicit marks.
+ *
+ * Under long retention the pinned mark asks for the 12-hour lifetime (OI-7): Pi maps long to `ttl: "30m"`, the API's
+ * default, on these models, so long changed nothing. Only the install-wide span is written at the 12-hour rate
+ * (2.5x input against 1.25x); the conversation after it keeps the request's 30 minutes.
  */
-export function splitOpenAISystem(payload: unknown, prefix: PinnedPromptPrefix): unknown {
+export function splitOpenAISystem(payload: unknown, prefix: PinnedPromptPrefix, longRetention = false): unknown {
 	if (!record(payload) || !Array.isArray(payload.input) || !Number.isSafeInteger(prefix.chars) || prefix.chars <= 0) {
 		return payload;
 	}
@@ -54,7 +58,11 @@ export function splitOpenAISystem(payload: unknown, prefix: PinnedPromptPrefix):
 			{
 				...message,
 				content: [
-					{ type: "input_text", text: pinned, prompt_cache_breakpoint: { mode: "explicit" } },
+					{
+						type: "input_text",
+						text: pinned,
+						prompt_cache_breakpoint: { mode: "explicit", ...(longRetention ? { ttl: "12h" } : {}) },
+					},
 					{ type: "input_text", text: text.slice(prefix.chars) },
 				],
 			},

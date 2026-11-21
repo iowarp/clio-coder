@@ -66,6 +66,7 @@ export function instrumentProviderCall<T extends StreamOptions>(
 	if (clioCoderPinnedPrefix !== undefined) {
 		// Clio's compiler metadata never reaches Pi or a provider option surface (#423).
 		effective = providerOptions as T;
+		const longRetention = effective?.cacheRetention === "long";
 		// Only the main thread splits; workers, side calls and any other API keep the request Pi built.
 		const split =
 			scope !== "main"
@@ -75,7 +76,7 @@ export function instrumentProviderCall<T extends StreamOptions>(
 					: model.api === "openai-codex-responses"
 						? splitCodexInstructions
 						: model.api === "openai-responses" && explicitPromptCacheMode(model)
-							? splitOpenAISystem
+							? (payload: unknown, prefix: PinnedPromptPrefix) => splitOpenAISystem(payload, prefix, longRetention)
 							: undefined;
 		if (split !== undefined) {
 			const onPayload = effective.onPayload;
