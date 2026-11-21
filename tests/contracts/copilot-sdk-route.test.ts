@@ -2145,8 +2145,12 @@ test("a locked Copilot worker round keeps the session's reasoning effort and too
 			() => {},
 		);
 		strictEqual((await worker.promise).exitCode, 0);
-		strictEqual(fake().sessions.length, sessionsBefore + 1, "the locked round continues the work session");
-		const session = fake().sessions.at(-1) as unknown as {
+		// Count only this worker's model: an earlier test's side call leaves a spare (PV-2) that may open in this window.
+		const created = fake()
+			.sessions.slice(sessionsBefore)
+			.filter((entry) => entry.config.model === "locked-levels");
+		strictEqual(created.length, 1, "the locked round continues the work session");
+		const session = created[0] as unknown as {
 			config: { reasoningEffort?: string; tools?: Array<{ name: string }> };
 			switches?: unknown[];
 			tools: Map<string, unknown>;
