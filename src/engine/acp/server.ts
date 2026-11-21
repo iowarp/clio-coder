@@ -945,9 +945,10 @@ function toolCallContent(text: string): Array<{ type: "content"; content: { type
 const ACP_MAX_TOOL_IMAGE_CHARS = 256 * 1024;
 
 /**
- * A settled tool call's content: its text, the result's images as ACP image blocks (at most
- * {@link ACP_MAX_PROMPT_IMAGES}, within {@link ACP_MAX_TOOL_IMAGE_CHARS}), and each screenshot file it names as a
- * `resource_link`, so a client sees a screenshot even when the model's route took no image.
+ * A settled tool call's content: its text, the result's images as ACP image blocks (its inline images, or on a route
+ * that took no image the display copies in `details.displayImages`; at most {@link ACP_MAX_PROMPT_IMAGES}, within
+ * {@link ACP_MAX_TOOL_IMAGE_CHARS}), and each screenshot file it names as a `resource_link`, so a client sees a
+ * screenshot on every route.
  */
 function toolResultContent(
 	output: string,
@@ -980,17 +981,28 @@ function toolResultContent(
 	return content;
 }
 
-/** A result for `rawOutput` with image data left out: the image travels once, as a content block. */
+/**
+ * A result for `rawOutput` with image data left out: the image travels once, as a content block. Inline image blocks
+ * and the `details.displayImages` copies both keep only their MIME type and `omitted: true`.
+ */
 function withoutImageData(result: unknown): unknown {
-	if (!isRecord(result) || !Array.isArray(result.content)) return result;
-	if (!result.content.some((block) => isRecord(block) && block.type === "image")) return result;
+	if (!isRecord(result)) return result;
+	const omitted = (block: unknown) => ({
+		type: "image",
+		...(isRecord(block) && typeof block.mimeType === "string" ? { mimeType: block.mimeType } : {}),
+		omitted: true,
+	});
+	const content = Array.isArray(result.content) ? result.content : [];
+	const inline = content.some((block) => isRecord(block) && block.type === "image");
+	const details = isRecord(result.details) ? result.details : null;
+	const copies = details !== null && Array.isArray(details.displayImages) ? details.displayImages : null;
+	if (!inline && copies === null) return result;
 	return {
 		...result,
-		content: result.content.map((block) =>
-			isRecord(block) && block.type === "image"
-				? { type: "image", ...(typeof block.mimeType === "string" ? { mimeType: block.mimeType } : {}), omitted: true }
-				: block,
-		),
+		...(inline
+			? { content: content.map((block) => (isRecord(block) && block.type === "image" ? omitted(block) : block)) }
+			: {}),
+		...(details !== null && copies !== null ? { details: { ...details, displayImages: copies.map(omitted) } } : {}),
 	};
 }
 

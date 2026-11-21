@@ -1,7 +1,7 @@
 /**
  * What a tool row draws for the images a call returned: a browser screenshot
- * the agent took, or the path of one when the route takes no images. Pure: the
- * card renders the result and decides nothing.
+ * the agent took (a bounded display copy when the route takes no images) and
+ * the path of its file. Pure: the card renders the result and decides nothing.
  *
  * The server already bounds and allow-lists the field (supervisor.ts
  * `toolImages`); this module checks again, because a data URL built from a

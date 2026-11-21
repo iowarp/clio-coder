@@ -209,7 +209,7 @@ function toolImages(content: unknown): ToolImage[] {
 	return images;
 }
 
-/** Screenshot paths sent as `resource_link` entries when the route takes no images: local `file:` URIs only. */
+/** Screenshot file paths sent as `resource_link` entries beside the image blocks: local `file:` URIs only. */
 function toolImageLinks(content: unknown): Array<{ path: string; name: string }> {
 	if (!Array.isArray(content)) return [];
 	const links: Array<{ path: string; name: string }> = [];

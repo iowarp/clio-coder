@@ -1,7 +1,12 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { ACP_MAX_RAW_DIFF_BYTES, ACP_MAX_RAW_RECORD_BYTES, ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
+import { browserResultWithShots } from "../../src/tools/browser/index.js";
 import { generateDiffString } from "../../src/tools/edit-diff.js";
 import { fakeTransport } from "../harness/acp-fake-transport.js";
 
@@ -172,5 +177,52 @@ describe("contracts/acp shows a tool's screenshots to the client", () => {
 			},
 		]);
 		ok(!JSON.stringify(terminal.rawOutput).includes(png), "the image bytes travel once, in content");
+	});
+
+	it("shows a text-only route's screenshot as an image block beside its link while the model sees no image", async () => {
+		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+		const dir = mkdtempSync(join(tmpdir(), "acp-shot-"));
+		try {
+			const file = join(dir, "001-look-1280x800.png");
+			writeFileSync(file, Buffer.from(png, "base64"));
+			const shaped = await browserResultWithShots(
+				`browser look page p1\nscreenshots:\n  ${file} (1280x800)`,
+				[file],
+				{ op: "look", shots: [file] },
+				{ supportsImages: false },
+			);
+			ok(shaped.kind === "ok");
+			strictEqual(shaped.images?.length ?? 0, 0, "a text-only route's model context carries no image");
+			// The agent's projection of a registry result (tools/agent-tools.ts projectToolResult).
+			const result = { content: [{ type: "text", text: shaped.output }], details: shaped.details };
+			const peer = fakeTransport();
+			const chat = scriptedChat((emit) => {
+				emit({ type: "tool_execution_start", toolCallId: "call-shot", toolName: "browser", args: { op: "look" } });
+				emit({ type: "tool_execution_end", toolCallId: "call-shot", toolName: "browser", result, isError: false });
+			});
+			const served = serveClioAcpAgent({ transport: peer.transport, chat, cwd: process.cwd() });
+			await peer.call("initialize", { protocolVersion: 1 });
+			const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+			await peer.call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "look" }] });
+			peer.transport.close();
+			strictEqual(await served, 0);
+			const terminal = peer.notifications
+				.filter((entry) => entry.method === "session/update")
+				.map((entry) => (entry.params as { update: Record<string, unknown> }).update)
+				.find((update) => update.sessionUpdate === "tool_call_update" && update.status === "completed");
+			ok(terminal !== undefined, "the turn produced no terminal tool_call_update");
+			const content = (terminal.content as Array<{ content: Record<string, unknown> }>).map((entry) => entry.content);
+			deepStrictEqual(
+				content.map((block) => block.type),
+				["text", "image", "resource_link"],
+			);
+			const image = content[1] ?? {};
+			strictEqual(image.mimeType, "image/png");
+			ok(typeof image.data === "string" && image.data.length > 0, "the display copy carries its bytes");
+			strictEqual(content[2]?.uri, pathToFileURL(file).href);
+			ok(!JSON.stringify(terminal.rawOutput).includes(image.data as string), "the image bytes travel once, in content");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
