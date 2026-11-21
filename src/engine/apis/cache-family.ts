@@ -22,11 +22,19 @@ export interface CacheFamilyInput {
 }
 
 /**
- * APIs whose backend routes a request to its prefix cache by the session id Pi sends, as measured: the Codex
- * `session-id` header. Anthropic, Copilot and the chat-completions engines look a prefix up by its content alone.
- * The public Responses API takes `prompt_cache_key` as a routing hint too, but it is unmeasured here and stays out.
+ * APIs whose backend routes a request to its prefix cache by the session id Pi sends, as measured. Pi sends that id as
+ * both the `session-id` header and the body `prompt_cache_key` on Codex and on the public Responses API alike, so a
+ * content-derived id reaches whichever of the two a backend routes by. Anthropic, Copilot and the chat-completions
+ * engines look a prefix up by its content alone.
+ *
+ * The public Responses API, measured through Pi's own `openai-responses` request against the Codex subscription
+ * backend (gpt-6-luna, 2026-11-21, no API key exists to reach api.openai.com), 3 trials of a writer and an identical
+ * reader 6 s later, about 6,212 prompt tokens: a random id per request, today's worker id, read 0 of 3; one
+ * content-derived id read 6,016 in 3 of 3; the header alone read 6,016 in 3 of 3; the body key alone, header varied,
+ * read 6,016 in 1 of 3. This backend routes by the header and Pi sends it to api.openai.com too, while OpenAI documents
+ * `prompt_cache_key` as the routing input there; the shared id serves either.
  */
-const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-responses"]);
+const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-responses", "openai-responses"]);
 
 /**
  * The session id workers with one stable head and lane take on a session-routed API, or undefined where the id plays
