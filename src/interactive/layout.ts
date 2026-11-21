@@ -6,7 +6,7 @@ import { fitRails, railsFolded, railsRoom } from "./rails-budget.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
-/** A transcript that can hand over its settled prefix and live tail separately. */
+/** A transcript that can hand over its rows as pieces it promises never to mutate. */
 export interface TranscriptComponent extends Component {
 	renderRegions?(width: number): ChatPanelRegions;
 }
@@ -105,18 +105,39 @@ export interface FullscreenLayout {
 	transcript: ScrollView;
 }
 
-/** One document array, and the transcript prefix it already holds at a row. */
+/**
+ * Write a transcript's pieces into `out` from `row`, skipping each piece `held` names at the same row: the buffer
+ * still holds those rows. A piece new at a row it replaced skips the leading rows its producer vouches for. Returns
+ * the row after the last piece and what the buffer holds now, by the row each piece starts at.
+ */
+function writePieces(
+	pieces: readonly (readonly string[])[],
+	start: number,
+	held: ReadonlyMap<number, readonly string[]> | undefined,
+	write: (rows: readonly string[], from: number, at: number) => void,
+): { row: number; holds: Map<number, readonly string[]> } {
+	const holds = new Map<number, readonly string[]>();
+	let row = start;
+	for (const piece of pieces) {
+		const before = held?.get(row);
+		holds.set(row, piece);
+		if (before !== piece) write(piece, before === undefined ? 0 : keptRows(piece, before), row);
+		row += piece.length;
+	}
+	return { row, holds };
+}
+
+/** One document array, and the transcript pieces it holds by the row each starts at. */
 interface DocumentSlot {
 	rows: string[];
-	prefix: readonly string[] | null;
-	prefixAt: number;
+	holds: Map<number, readonly string[]>;
 }
 
 /**
  * Fullscreen's scrollable document. A composer-only frame returns the same
  * array, and a frame whose content changed returns a different one. The arrays
- * come from a small pool and each remembers which settled prefix it holds, so a
- * streamed token writes only the header and the tail instead of copying every
+ * come from a small pool and each remembers which transcript pieces it holds, so a
+ * streamed token writes only the header and the pieces that changed instead of copying every
  * historical row into a new array, which at 24,000 rows was garbage enough for
  * a 12 to 15 ms p99. The last two arrays returned stay intact, which is what a
  * reader of the previous frame relies on: the current layout until the next one
@@ -134,7 +155,7 @@ function transcriptDocument(
 	// True while the document is the banner alone: the launchpad before the first turn.
 	let bannerOnly = true;
 	let renderedSkinEpoch = skinEpoch();
-	const pool: DocumentSlot[] = Array.from({ length: 3 }, () => ({ rows: [], prefix: null, prefixAt: -1 }));
+	const pool: DocumentSlot[] = Array.from({ length: 3 }, () => ({ rows: [], holds: new Map() }));
 	let turn = 0;
 	const compose = (slot: DocumentSlot, regions: ChatPanelRegions | undefined, whole: readonly string[]): string[] => {
 		const out = slot.rows;
@@ -143,21 +164,23 @@ function transcriptDocument(
 			for (const line of from) out[row++] = line;
 		};
 		write(header);
-		const tail = regions?.tail ?? [];
-		bannerOnly = whole.length + tail.length === 0;
+		bannerOnly = (regions?.rows ?? whole.length) === 0;
 		if (bannerOnly) {
-			slot.prefix = null;
+			slot.holds = new Map();
 		} else {
 			out[row++] = "";
-			// Only the panel promises an array it never mutates; any other chat is copied every time.
-			if (regions !== undefined && slot.prefix === whole && slot.prefixAt === row) {
-				row += whole.length;
+			if (regions !== undefined) {
+				// Only the panel promises arrays it never mutates; any other chat is copied every time. The slot last
+				// held a frame three frames back, so a piece rendered since is written whole.
+				const written = writePieces(regions.pieces, row, slot.holds, (rows, _kept, at) => {
+					for (let index = 0; index < rows.length; index += 1) out[at + index] = rows[index] as string;
+				});
+				row = written.row;
+				slot.holds = written.holds;
 			} else {
-				slot.prefix = regions === undefined ? null : whole;
-				slot.prefixAt = row;
+				slot.holds = new Map();
 				write(whole);
 			}
-			write(tail);
 			out[row++] = "";
 		}
 		out.length = row;
@@ -208,7 +231,7 @@ function transcriptDocument(
 				source = nextSource;
 				header = nextHeader.slice();
 				turn = (turn + 1) % pool.length;
-				lines = compose(pool[turn] as DocumentSlot, regions, regions?.prefix ?? (nextSource as string[]));
+				lines = compose(pool[turn] as DocumentSlot, regions, regions === undefined ? (nextSource as string[]) : []);
 			}
 			return bottomAnchored(lines);
 		},
@@ -318,15 +341,10 @@ class RegularRoot implements Component {
 	 */
 	private readonly out: string[] = [];
 	/**
-	 * The transcript prefix the buffer already holds and the row it starts at.
-	 * While the panel hands back the same prefix at the same row, those rows are
-	 * still in place and a frame writes only what follows them.
+	 * The transcript pieces the buffer holds, by the row each starts at. A piece the panel hands back at the same row
+	 * is still in place, so a frame writes only the pieces that changed.
 	 */
-	private heldPrefix: readonly string[] | null = null;
-	private heldPrefixAt = -1;
-	/** The transcript tail the buffer holds after the prefix, and the row it starts at. */
-	private heldTail: readonly string[] | undefined;
-	private heldTailAt = -1;
+	private heldPieces: ReadonlyMap<number, readonly string[]> | undefined;
 	private renderedSkinEpoch = skinEpoch();
 	/** The width the buffer's rows were measured against: at that width, a row already in place is known to fit. */
 	private heldWidth = -1;
@@ -380,29 +398,21 @@ class RegularRoot implements Component {
 		};
 		write(this.parts.banner.render(width));
 		const regions = this.parts.chat.renderRegions?.(width);
-		let tail: readonly string[] | undefined;
+		let holds: ReadonlyMap<number, readonly string[]> | undefined;
 		if (regions !== undefined) {
-			if (regions.prefix.length + regions.tail.length > 0) {
+			if (regions.rows > 0) {
 				put("");
-				if (sameWidth && regions.prefix === this.heldPrefix && row === this.heldPrefixAt) {
-					row += regions.prefix.length;
-				} else {
-					this.heldPrefix = regions.prefix;
-					this.heldPrefixAt = row;
-					write(regions.prefix);
-				}
-				// The tail rows its panel vouches for are already in place, so a streaming reply writes only its end.
-				const kept = sameWidth && row === this.heldTailAt ? keptRows(regions.tail, this.heldTail) : 0;
-				tail = regions.tail;
-				this.heldTailAt = row;
-				row += kept;
-				write(regions.tail, kept);
+				// A held piece's rows are in place at a width they were measured against; a streaming reply's piece writes
+				// only the rows after those its panel vouches for.
+				const written = writePieces(regions.pieces, row, sameWidth ? this.heldPieces : undefined, (rows, kept, at) => {
+					row = at + kept;
+					write(rows, kept);
+				});
+				row = written.row;
+				holds = written.holds;
 				put("");
-			} else {
-				this.heldPrefix = null;
 			}
 		} else {
-			this.heldPrefix = null;
 			const chat = this.parts.chat.render(width);
 			if (chat.length > 0) {
 				put("");
@@ -420,8 +430,7 @@ class RegularRoot implements Component {
 			write(editor);
 			write(footer);
 		}
-		this.heldTail = tail;
-		if (tail === undefined) this.heldTailAt = -1;
+		this.heldPieces = holds;
 		out.length = row;
 		this.keptRowCount = Math.min(firstChanged < 0 ? row : firstChanged, previousLength);
 		return out;
@@ -433,8 +442,7 @@ class RegularRoot implements Component {
 
 	invalidate(): void {
 		this.heldWidth = -1;
-		this.heldPrefix = null;
-		this.heldTail = undefined;
+		this.heldPieces = undefined;
 		this.parts.banner.invalidate();
 		this.parts.chat.invalidate();
 		this.parts.workspace?.invalidate();

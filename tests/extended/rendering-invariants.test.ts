@@ -814,7 +814,7 @@ describe("streamed answers settle in place", () => {
 		}
 	});
 
-	it("streams against one settled prefix array and keeps the regular root equal to the frame", () => {
+	it("streams against one settled run array and keeps the regular root equal to the frame", () => {
 		const panel = createChatPanel({ now: () => 0 });
 		for (let turn = 0; turn < 3; turn += 1) {
 			panel.appendUser(`Question ${turn}.`);
@@ -840,17 +840,17 @@ describe("streamed answers settle in place", () => {
 		deepStrictEqual(root.render(80), expected());
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: " " } as never);
 		const first = panel.renderRegions(80);
-		ok(first.prefix.length > 0, "settled turns form the frozen prefix");
-		ok(first.tail.length > 0, "the streaming answer renders after the prefix");
+		ok(first.pieces.length > 1, "settled turns form a run ahead of the streaming answer");
+		ok((first.pieces.at(-1)?.length ?? 0) > 0, "the streaming answer renders after the run");
 		deepStrictEqual(root.render(80), expected());
 		for (let at = 40; at < 200; at += 8) {
 			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: STREAMED_ANSWER.slice(at, at + 8) } as never);
 			const frame = panel.renderRegions(80);
-			// The settled rows are the same array every streamed frame; only the tail is new.
-			strictEqual(frame.prefix, first.prefix);
+			// The settled rows are the same array every streamed frame; only the answer's pieces are new.
+			strictEqual(frame.pieces[0], first.pieces[0]);
 			deepStrictEqual(root.render(80), expected());
 		}
-		// A taller banner moves the prefix down a row: the root rewrites it rather than trusting stale rows.
+		// A taller banner moves the run down a row: the root rewrites it rather than trusting stale rows.
 		banner.setText("banner\nsecond banner row");
 		banner.invalidate();
 		deepStrictEqual(root.render(80), expected());
@@ -859,11 +859,11 @@ describe("streamed answers settle in place", () => {
 		deepStrictEqual(root.render(80), expected());
 		settleAnswer(panel, STREAMED_ANSWER.slice(0, 200));
 		deepStrictEqual(root.render(80), expected());
-		// The frame after a settle serves the grown freeze, which now covers the answer.
+		// The frame after a settle serves the grown run, which now covers the answer.
 		panel.appendUser("Next question.");
 		const settled = panel.renderRegions(80);
-		ok(settled.prefix.length > first.prefix.length, "a settled entry extends the freeze");
-		deepStrictEqual([...settled.prefix, ...settled.tail], panel.render(80));
+		ok((settled.pieces[0]?.length ?? 0) > (first.pieces[0]?.length ?? 0), "a settled entry joins the run");
+		deepStrictEqual(settled.pieces.flat(), panel.render(80));
 		deepStrictEqual(root.render(80), expected());
 	});
 
@@ -2173,8 +2173,8 @@ describe("Pi TUI compatibility", () => {
 		const rows = Array.from({ length: 40 }, (_, i) => `\x1b[1mrow ${i}\x1b[22m ${"w".repeat(70 + (i % 9))}`);
 		const chat = {
 			render: () => rows,
-			// A settled turn hands back a new prefix array of the same rows.
-			renderRegions: () => ({ prefix: rows.slice(), tail: [] }),
+			// A settled turn hands back a new run array of the same rows.
+			renderRegions: () => ({ pieces: [rows.slice()], rows: rows.length }),
 			invalidate() {},
 		};
 		const parts = () => ({
@@ -2210,7 +2210,11 @@ describe("Pi TUI compatibility", () => {
 		const prefix = Array.from({ length: 80 }, (_, i) => `\x1b[36mTranscript ${i}\x1b[39m ${"x".repeat(55)}`);
 		const parts = (draft: string) => ({
 			banner: new Text("banner", 0, 0),
-			chat: { render: () => prefix, renderRegions: () => ({ prefix, tail: ["reply"] }), invalidate() {} },
+			chat: {
+				render: () => prefix,
+				renderRegions: () => ({ pieces: [prefix, ["reply"]], rows: prefix.length + 1 }),
+				invalidate() {},
+			},
 			editor: new Text(draft, 0, 0),
 			footer: new Text("footer", 0, 0),
 		});
