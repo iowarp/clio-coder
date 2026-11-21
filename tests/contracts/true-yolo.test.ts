@@ -643,6 +643,11 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(verdict(command, "yolo"), gitFloor, command);
 		strictEqual(engine.evaluate(bash(command), "yolo").kind, "block", command);
 	}
+	// r261f-5: a cd with HOME set on its own line lands in that HOME, whichever directory the call starts in.
+	mkdirSync(join(cwd, "src"), { recursive: true });
+	const fromSrc = { tool: ToolNames.Bash, args: { command: `HOME=${cwd} cd && rm -rf .git`, cwd: join(cwd, "src") } };
+	strictEqual(engine.evaluate(fromSrc, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:yolo-floor-workspace-git");
+	strictEqual(engine.evaluate(fromSrc, "default", contained).reasonCode, "yolo-floor:yolo-floor-workspace-git");
 	// A delete inside .git keeps its ordinary review. Row 261 bounce: a glob followed by `..` or a brace sequence that
 	// cannot name the workspace .git does not hit, and a bare link name removes only the link.
 	for (const command of [

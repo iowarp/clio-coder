@@ -1444,7 +1444,9 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	// What these readings add never counts toward a scratch-only call (r261e-4).
 	for (const event of walk.events.slice(addedFrom)) if (event.kind === "delete") event.added = true;
 	const cd = cdTarget(argv);
-	if (cd !== null) walk.events.push({ kind: "cd", target: cd, unmodeled });
+	// `HOME=x cd` lands in x, which nothing here places (r261f-5).
+	const homeSet = cd !== null && cd.startsWith("~") && argv.some((word) => word.startsWith("HOME="));
+	if (cd !== null) walk.events.push({ kind: "cd", target: cd, unmodeled: unmodeled || homeSet });
 	walk.lastArgv = argv;
 	const script = segmentShellScript(argv);
 	if (typeof script === "string") collectChildScript(script, depth, walk);
