@@ -16,6 +16,7 @@ import {
 	WORKER_EVENT_QUEUE_HARD_BYTES,
 } from "../../src/domains/dispatch/worker-protocol.js";
 import { type SpawnedWorker, spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
+import { INTERNAL_HELPER_RESULT_TOOL } from "../../src/engine/worker-tools.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -117,10 +118,19 @@ describe("a call refused before it reached a tool", () => {
 		{ type: "message_end", message: { role: "assistant", stopReason: "stop", content: "Read a." } },
 	];
 
-	async function receiptFor(events: unknown[]) {
+	async function receiptFor(events: unknown[], progressed: unknown[] = []) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = 0;
-		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+		const context = dispatchStubContext({ settings });
+		const emit = context.bus.emit.bind(context.bus);
+		context.bus = {
+			...context.bus,
+			emit: (name, payload, ...rest) => {
+				if (name === "run.progressed") progressed.push((payload as { event?: unknown }).event);
+				return emit(name, payload, ...rest);
+			},
+		};
+		const bundle = makeDispatchBundle(context, {
 			heartbeatIntervalMs: 3_600_000,
 			spawnWorker: () => {
 				const worker: SpawnedWorker = {
@@ -167,6 +177,27 @@ describe("a call refused before it reached a tool", () => {
 		equal(edit?.errors, 1);
 		equal(receipt.toolStats.find((stat) => stat.tool === "read")?.count, 1);
 		equal(receipt.toolCalls, 2);
+	});
+
+	it("never downgrades the write record for the result submission, while an unknown tool still does (C-14)", async () => {
+		const call = (toolCallId: string, toolName: string) => [
+			{ type: "tool_execution_start", toolCallId, toolName, args: { summary: "done" } },
+			{ type: "tool_execution_end", toolCallId, toolName, isError: false, result: {} },
+		];
+		const progressed: unknown[] = [];
+		await receiptFor(
+			[...call("submit-1", INTERNAL_HELPER_RESULT_TOOL), ...call("mcp-1", "mcp__fixture__sync"), ...readCall],
+			progressed,
+		);
+		deepStrictEqual(
+			progressed.filter((event) => (event as { type?: string }).type === "clio_coder_write_record_downgraded"),
+			[
+				{
+					type: "clio_coder_write_record_downgraded",
+					payload: { reason: "opaque_tool_succeeded", tool: "mcp__fixture__sync", toolCallId: "mcp-1" },
+				},
+			],
+		);
 	});
 
 	it("leaves a call the output token limit cut off out of the tool stats (bt-23 #5)", async () => {

@@ -1324,6 +1324,9 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 			recorder.checkOutcome(id, outcome, event.payload.unresolved === true);
 		return;
 	}
+	// The result submission is the worker's handoff to this process, never a workspace capability, so it neither
+	// writes nor opens the write record; any other unknown name stays opaque (C-14).
+	if (event.toolName === INTERNAL_HELPER_RESULT_TOOL || event.tool === INTERNAL_HELPER_RESULT_TOOL) return;
 	if (typeof event.type === "string") recordToolExecutionEffects(recorder, { ...event, type: event.type });
 }
 
