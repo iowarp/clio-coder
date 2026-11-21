@@ -102,6 +102,56 @@ test("the judge reads a store replace as a plain line, never as admission's mark
 	match(prompts[0] ?? "", /\{"op":"put","tag":"fleet","path":"out\/v3\.csv"\}/u);
 });
 
+test("the judge reads an approval scoped under $TMPDIR against the session's resolved temp directory (M-2)", async () => {
+	const temp = realpathSync(mkdtempSync(join(tmpdir(), "clio-judge-tmpdir-")));
+	const prompts: string[] = [];
+	let operator = "Asked: run runlive.sh and its reruns against fixture projects under $TMPDIR";
+	const judge = createSafetyJudge({
+		config: () => ({
+			...CONFIG,
+			roots: { workspace: "/work/space", scratch: [temp, "/var/tmp"], temp: { root: temp, env: temp } },
+		}),
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		operatorMessages: () => [operator],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const review = () =>
+		judge.review({
+			tool: ToolNames.Bash,
+			args: { command: `bash scripts/runlive.sh ${temp}/projB && ls $TMPDIR/projC/../../outside` },
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "execute", reasons: [] },
+				confirmationRuleId: "bash-unrecognized",
+				rejection: { short: "asks", detail: "asks", hints: [] },
+			},
+			approvalAuthority: "operator",
+		});
+	await review();
+	const user = prompts[0] ?? "";
+	ok(user.indexOf("</operator-messages>") < user.indexOf("<session-paths>"), user);
+	ok(user.includes(`- $TMPDIR is ${temp}, a scratch root`), user);
+	ok(user.includes("- the other scratch roots are /var/tmp"), user);
+	ok(
+		user.includes(
+			`operator-named scope: an operator message names $TMPDIR, which is ${temp} in this session, and the call's path ${temp}/projB is under it`,
+		),
+		user,
+	);
+	// A `..` that climbs out of the temp directory is not under it.
+	doesNotMatch(user, /outside is under it/u);
+	// Without $TMPDIR in the operator's words the paths are still shown, but no scope is computed.
+	operator = "Asked: run runlive.sh once";
+	await review();
+	match(prompts[1] ?? "", /<session-paths>/u);
+	doesNotMatch(prompts[1] ?? "", /operator-named scope/u);
+});
+
 test("a write to an outside path the operator spelled reaches the judge as an operator-named path, not shared config", async () => {
 	const prompts: Array<{ system: string; user: string }> = [];
 	const report = join(realpathSync(tmpdir()), "lanes", "bt-chain.txt");
