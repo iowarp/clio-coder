@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, 
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioConfigDir } from "../../src/core/xdg.js";
+import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { loadMcpServerConfig } from "../../src/domains/gateway/mcp/index.js";
 import {
 	applyInteropAdoption,
@@ -285,7 +286,7 @@ describe("interop discovery and adoption", () => {
 		strictEqual(plan.entries.length, 2);
 		ok(plan.entries.every((entry) => entry.action === "skip"));
 	});
-	it("maps stdio MCP servers into Clio's user mcp.yaml and names what it does not migrate", () => {
+	it("maps stdio MCP servers and user instructions into Clio config and names what it does not migrate", () => {
 		file(
 			".claude.json",
 			JSON.stringify({
@@ -307,9 +308,18 @@ describe("interop discovery and adoption", () => {
 		ok(entry("mcp", "remote")?.reason.includes("stdio servers only"));
 		ok(entry("mcp", "expand")?.reason.includes("expands environment variables"));
 		ok(entry("hook", "PreToolUse")?.reason.startsWith("Not migrated"));
-		ok(entry("instructions", "CLAUDE.md")?.reason.startsWith("Not migrated"));
+		strictEqual(entry("instructions", "CLAUDE.md")?.action, "install");
+		ok(renderInteropAdoptionPlan(plan).includes("  | Prefer small diffs."));
 		ok(!renderInteropAdoptionPlan(plan).includes("never-show-this"));
-		deepStrictEqual(applyInteropAdoption(plan, true), { installed: ["mcp:files"], diagnostics: [] });
+		deepStrictEqual(applyInteropAdoption(plan, true), {
+			installed: ["mcp:files", "instructions:CLAUDE.md"],
+			diagnostics: [],
+		});
+		const context = renderPromptContext(cwd).text;
+		ok(
+			context.includes("<user-context") && context.includes("Prefer small diffs."),
+			"the user handbook reaches the prompt",
+		);
 		const codex = planInteropAdoption({ host: "codex", inventory: inventory("codex"), cwd });
 		deepStrictEqual(applyInteropAdoption(codex, true).installed, ["mcp:docs"]);
 		const configFile = path.join(clioConfigDir(), "mcp.yaml");
@@ -324,6 +334,9 @@ describe("interop discovery and adoption", () => {
 		);
 		const again = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
 		ok(again.entries.find((item) => item.item.name === "Files")?.reason.startsWith("Already declared"));
+		ok(again.entries.find((item) => item.item.name === "CLAUDE.md")?.reason.startsWith("Already adopted"));
+		const handbook = readFileSync(path.join(clioConfigDir(), "CLIO-CODER.md"), "utf8");
+		ok(handbook.includes("Prefer small diffs.") && handbook.includes("<!-- clio-coder:end claude-code CLAUDE.md -->"));
 	});
 	it("requires approval, keeps origins and pins, skips duplicates and does not change the source", () => {
 		const source = file(".claude/skills/example/SKILL.md", skill);

@@ -18,13 +18,23 @@ import { normalizedSkillHash } from "../resources/skills/content-hash.js";
 import { loadSkills } from "../resources/skills/loader.js";
 import { detectForeignPlugin, type ForeignResourceOutcome, projectForeignPlugin } from "./foreign.js";
 import { installInteropPackage } from "./install.js";
+import { applyInstructionsAdoption, planInstructionsAdoption } from "./instructions-adopt.js";
 import { inventoryText } from "./inventory.js";
 import { type AdoptedMcpServer, applyMcpAdoption, mapForeignMcpServer, mcpDestinationConflict } from "./mcp-adopt.js";
 import { digest, projectAgent, projectPrompt, projectSkill, prose, safeName, tree } from "./projection.js";
 import type { InteropAgentId, InteropInventory, InteropInventoryItem } from "./types.js";
 
-export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin" | "mcp";
-export const ADOPTION_KINDS: ReadonlyArray<AdoptionKind> = ["skill", "agent", "prompt", "plugin", "mcp"];
+export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin" | "mcp" | "instructions";
+export const ADOPTION_KINDS: ReadonlyArray<AdoptionKind> = [
+	"skill",
+	"agent",
+	"prompt",
+	"plugin",
+	"mcp",
+	"instructions",
+];
+/** Kinds that install as library packages; the rest write a Clio config file. */
+type PackageAdoptionKind = Exclude<AdoptionKind, "mcp" | "instructions">;
 /** Whether an inventory kind has an adoption path; the rest are listed with the reason they are not migrated. */
 export function isAdoptableKind(kind: string): kind is AdoptionKind {
 	return (ADOPTION_KINDS as ReadonlyArray<string>).includes(kind);
@@ -380,14 +390,11 @@ export function unmetRequirements(
  * Why a resource Clio inventories is not migrated. One seam per kind whose
  * migration waits on a product decision, so the ruling replaces a function
  * and not the planner: hooks need a hook contract Clio does not have yet
- * (stdin payload, blocking exit code), user instruction files need a
- * user-level handbook Clio does not load.
+ * (stdin payload, blocking exit code).
  */
 function unportedReason(item: InteropInventoryItem): string {
 	if (item.kind === "hook")
 		return "Not migrated: Clio command hooks get no stdin payload, cannot block on an exit code and stop at 5 s; port this hook by hand into .clio-coder/hooks.yaml.";
-	if (item.kind === "instructions")
-		return "Not migrated: Clio loads no user-level handbook. Project CLAUDE.md and AGENTS.md already reach Clio through the compiled handbook or `clio-coder context init --adopt`.";
 	return `Not adoptable: ${item.kind} is executable configuration or unsupported presentation data.`;
 }
 
@@ -469,6 +476,26 @@ export function planInteropAdoption(input: {
 		}
 		if (input.kind && item.kind !== input.kind) {
 			skip(`Excluded by --kind ${input.kind}.`);
+			continue;
+		}
+		if (item.kind === "instructions") {
+			const adoption = planInstructionsAdoption(item, input.host);
+			if (!adoption.ok) {
+				skip(adoption.reason);
+				continue;
+			}
+			plan.entries.push({
+				item,
+				action: "install",
+				id: `instructions:${item.name}`,
+				destination: adoption.destination,
+				digest: adoption.digest,
+				files: { [item.name]: adoption.section },
+				reason: adoption.replaces
+					? "Replaces the section adopted earlier from this file in your user handbook."
+					: "Copied into your user handbook, which CLIO Coder loads ahead of project handbooks from the next session.",
+				...(adoption.notes.length ? { unsupported: adoption.notes } : {}),
+			});
 			continue;
 		}
 		if (item.kind === "mcp") {
@@ -587,6 +614,10 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			`${entry.action.toUpperCase()} ${entry.item.kind} ${entry.item.name} (${entry.item.scope})`,
 			`  Source: ${entry.item.path}`,
 			...(entry.destination ? [`  Destination: ${entry.destination}`, `  SHA-256: ${entry.digest}`] : []),
+			// The approval covers exactly this text, so all of it is shown.
+			...(entry.item.kind === "instructions" && entry.files
+				? Object.values(entry.files).flatMap((text) => text.split("\n").map((line) => `  | ${line}`))
+				: []),
 			...(entry.server
 				? [
 						`  Server ${entry.server.id}: ${[entry.server.command, ...entry.server.args].join(" ")}`,
@@ -637,6 +668,16 @@ export function applyInteropAdoption(
 	}
 	for (const entry of plan.entries) {
 		if (entry.action !== "install" || !entry.id) continue;
+		if (entry.item.kind === "instructions") {
+			try {
+				const written = entry.digest ? applyInstructionsAdoption(entry.item, plan.host, entry.digest) : undefined;
+				if (written?.ok) result.installed.push(entry.id);
+				else result.diagnostics.push(`${entry.item.name}: ${written?.reason ?? "no reviewed digest"}`);
+			} catch (error) {
+				result.diagnostics.push(`${entry.item.name}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			continue;
+		}
 		if (entry.item.kind === "mcp") {
 			const written = entry.digest
 				? (() => {
@@ -673,7 +714,7 @@ export function applyInteropAdoption(
 				throw new Error(candidate.diagnostics.map((d) => d.message).join("; "));
 			const installed = installInteropPackage({
 				sourcePath: staging,
-				kind: entry.item.kind as Exclude<AdoptionKind, "mcp">,
+				kind: entry.item.kind as PackageAdoptionKind,
 				trust: adoptedPackageTrust(entry.item),
 				cwd: plan.cwd,
 				scope: plan.scope,
