@@ -67,14 +67,8 @@ test("real built CLI streams through HTTP; E3 records one, two, three ACP child 
 	);
 	assert.ok(snapshot.timeline.some((item) => item.provenance?.some((agent) => agent.role === "orchestrator")));
 	assert.ok(fixture.provider.requests.length > 0);
-	assert.deepEqual(Object.keys(snapshot.turns.at(-1)?.usage ?? {}).sort(), [
-		"cacheRead",
-		"cacheWrite",
-		"costUsd",
-		"input",
-		"output",
-		"reasoning",
-	]);
+	// A turn's usage is the read model's quantities (#434), never raw provider fields.
+	assert.deepEqual(Object.keys(snapshot.turns.at(-1)?.usage ?? {}), ["quantities"]);
 	await server.post(`/api/sessions/${id}/close`);
 	const history = await json(
 		await server.request(`/api/workspaces/${workspace.id}/sessions`),

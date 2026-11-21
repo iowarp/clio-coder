@@ -285,7 +285,7 @@ export const routes = {
 	system: defineRoute({
 		...get,
 		response: SystemReport,
-		summary: "Read-only doctor findings and the four resolved Clio paths",
+		summary: "Read-only doctor findings and the four resolved CLIO Coder paths",
 		...runtimeRoutes.system,
 	}),
 	interop: defineRoute({
@@ -504,7 +504,7 @@ export const routes = {
 		...post,
 		params: Type.Object({ id: Id, runId: Id }, { additionalProperties: false }),
 		response: Accepted,
-		summary: "Recheck record integrity against its run through Clio",
+		summary: "Recheck record integrity against its run through CLIO Coder",
 		...runtimeRoutes.runRecordVerify,
 	}),
 	fleetRoots: defineRoute({
@@ -744,7 +744,7 @@ export const routes = {
 		params: operationParams,
 		body: DecisionSupersedeRequest,
 		response: DecisionSuperseded,
-		summary: "Mark a decision superseded; a correction also returns the request that tells Clio Coder",
+		summary: "Mark a decision superseded; a correction also returns the request that tells CLIO Coder",
 		...runtimeRoutes.supersedeDecision,
 	}),
 	proposeMemory: defineRoute({
@@ -849,7 +849,7 @@ export const routes = {
 		...get,
 		params: operationParams,
 		response: ContextLedger,
-		summary: "The context window as Clio Coder accounts for it",
+		summary: "The context window as CLIO Coder accounts for it",
 		...runtimeRoutes.sessionContext,
 	}),
 	sessionContextStatus: defineRoute({
@@ -1270,7 +1270,7 @@ export const routes = {
 		summary: "The fold rule, value and contributing calls behind one quantity's reference",
 		...runtimeRoutes.telemetryExplain,
 	}),
-	meta: defineRoute({ ...get, response: Meta, summary: "Application and Clio versions", ...runtimeRoutes.meta }),
+	meta: defineRoute({ ...get, response: Meta, summary: "Application and CLIO Coder versions", ...runtimeRoutes.meta }),
 	openapi: defineRoute({
 		...get,
 		response: Type.Record(Type.String(), Type.Unknown()),

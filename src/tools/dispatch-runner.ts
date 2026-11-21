@@ -18,6 +18,7 @@ import {
 	COUNCIL_SEAT_NOT_RUN_WORDS,
 	type CouncilReport,
 	type CouncilReportMember,
+	councilVerdictKey,
 	isCouncilSeatNotRun,
 } from "../domains/agents/result-contract.js";
 import type { BriefingNotice, BriefingPart, BuiltBriefing } from "../domains/context/index.js";
@@ -118,6 +119,7 @@ import {
 	settleRecoveredCompeteDecision,
 } from "./compete-worktrees.js";
 import type { DispatchAdmissionState } from "./dispatch-admission.js";
+import { councilVoterPersona } from "./dispatch-arguments.js";
 import { describeDispatchPlan, RESOLVED_DISPATCH_PLAN_ARGUMENT, withResolvedPlanTaskPin } from "./dispatch-plan.js";
 import {
 	createDispatchRunEventRegistry,
@@ -2536,18 +2538,18 @@ function councilScopeIntent(base: DispatchRequest): DispatchIntent {
 }
 
 /**
- * The verdict a council answer casts, lower-cased.
+ * The verdict a council answer casts, under its tally key.
  *
- * A tally groups by the exact string, so folding case is the difference
- * between two members who both said yes agreeing and splitting into a
- * `no_majority` the operator has to read past. Folding happens here, at the one
- * place a verdict is ever read, so the reported member verdict and the tally
- * key can never disagree.
+ * A tally groups by the exact string, so folding case and separators is the
+ * difference between two members who gave one answer agreeing and splitting
+ * into a `no_majority` the operator has to read past. Folding happens here, at
+ * the one place a verdict is ever read, so the reported member verdict and the
+ * tally key can never disagree.
  */
 function councilVerdict(text: string): string | undefined {
 	const parsed = parseJsonObjectPayload(text);
 	return parsed.ok && typeof parsed.value.verdict === "string" && parsed.value.verdict.trim().length > 0
-		? parsed.value.verdict.trim().toLowerCase()
+		? councilVerdictKey(parsed.value.verdict)
 		: undefined;
 }
 
@@ -2713,6 +2715,7 @@ async function runCouncil(
 						? {
 								task: voteTask,
 								resultContractOverride: councilBallotContract(base.task),
+								...councilVoterPersona(member.agent ?? base.agentId),
 							}
 						: {}),
 					target: member.target,

@@ -27,7 +27,8 @@ const record = (value: unknown): Record<string, unknown> =>
 
 export function projectTelemetryValue<S extends TSchema>(schema: S, value: unknown): Static<S> {
 	const projected = Value.Clean(schema, structuredClone(value));
-	if (!Value.Check(schema, projected)) throw new AppProblem("upstream_acp", "Clio returned invalid session telemetry.");
+	if (!Value.Check(schema, projected))
+		throw new AppProblem("upstream_acp", "CLIO Coder returned invalid session telemetry.");
 	return projected as Static<S>;
 }
 
@@ -62,7 +63,7 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 		};
 	}
 	if (update.sessionUpdate === "plan") {
-		if (!Array.isArray(update.entries)) throw new AppProblem("upstream_acp", "Clio returned invalid plan entries.");
+		if (!Array.isArray(update.entries)) throw new AppProblem("upstream_acp", "CLIO Coder returned invalid plan entries.");
 		const cancelled = record(meta[ACP_PLAN_META_KEY]).cancelled;
 		return {
 			plan: projectTelemetryValue(SessionPlan, {

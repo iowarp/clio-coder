@@ -308,8 +308,79 @@ function agy(request) {
 	}
 }
 
+// reopen-resume, reopen-load and reopen-none: a plain peer reopening an earlier session the way it advertises.
+const reopenKind = typeof mode === "string" && mode.startsWith("reopen-") ? mode.slice("reopen-".length) : null;
+function reopenPeer(request) {
+	if (request.id === undefined) return;
+	appendFileSync(process.argv[3], `${JSON.stringify(request)}\n`);
+	const sessionId = request.params?.sessionId ?? "fresh-session";
+	const update = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+	const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+	if (request.method === "initialize") {
+		const agentCapabilities =
+			reopenKind === "resume"
+				? { loadSession: true, sessionCapabilities: { resume: {} } }
+				: reopenKind === "load"
+					? { loadSession: true }
+					: {};
+		reply({ protocolVersion: 1, agentCapabilities, agentInfo: { name: "reopen-fixture", version: "1.0.0" } });
+	} else if (request.method === "session/load") {
+		// The history a load streams back before it answers.
+		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "earlier answer" } });
+		update({
+			sessionUpdate: "tool_call",
+			toolCallId: "old-1",
+			kind: "read",
+			status: "completed",
+			rawInput: { path: "a" },
+		});
+		reply({});
+	} else if (request.method === "session/new") reply({ sessionId: "fresh-session" });
+	else if (request.method === "session/prompt") {
+		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `continued ${sessionId}` } });
+		reply({ stopReason: "end_turn" });
+	} else reply({});
+}
+
+// post-settle: a prompt that answers while the peer still reports work in progress, which it settles 300 ms later.
+// argv[3] "complete" leaves a v1 tool call in progress, "state" reports v2 running state with background work and then
+// idle, "done" settles its call before it answers, and "hang" never settles.
+function postSettlePeer(request) {
+	if (request.id === undefined) return;
+	const sessionId = "settle-session";
+	const scenario = process.argv[3];
+	const update = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+	const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+	if (request.method === "initialize")
+		reply({ protocolVersion: 1, agentInfo: { name: "settle-fixture", version: "1.0.0" } });
+	else if (request.method === "session/new") reply({ sessionId });
+	else if (request.method === "session/prompt") {
+		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "started the build." } });
+		if (scenario === "state")
+			update({ sessionUpdate: "state_update", state: "running", background: [{ type: "terminal", terminalId: "t1" }] });
+		else
+			update({ sessionUpdate: "tool_call", toolCallId: "bg-1", kind: "execute", status: "in_progress", title: "make" });
+		if (scenario === "done") update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", status: "completed" });
+		reply({ stopReason: "end_turn" });
+		if (scenario === "complete" || scenario === "state")
+			void setTimeout(300).then(() => {
+				update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: " background done" } });
+				if (scenario === "state") update({ sessionUpdate: "state_update", state: "idle", background: [] });
+				else update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", status: "completed" });
+			});
+	} else reply({});
+}
+
 for await (const line of createInterface({ input: process.stdin })) {
 	const request = JSON.parse(line);
+	if (mode === "post-settle") {
+		postSettlePeer(request);
+		continue;
+	}
+	if (reopenKind !== null) {
+		reopenPeer(request);
+		continue;
+	}
 	if (mode === "cancel-connect") appendFileSync(process.argv[3], `${request.method}\n`);
 	if (mode === "agy") {
 		agy(request);

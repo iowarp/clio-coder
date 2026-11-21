@@ -33,7 +33,8 @@ of starting a private server when the background app cannot be used.
 --token-stdin takes the launch token from the first line of stdin; the app on
 another machine starts this one that way to drive it over SSH.
 
-On Linux with a systemd user session, background install keeps the app at a
+On Linux with a systemd user session, on macOS through a launchd agent and on
+native Windows through a logon task, background install keeps the app at a
 stable address from login, so the browser can install it as an app. That
 address is 127.0.0.1:4343, or 127.0.0.1:7373 while another program holds 4343;
 --port pins a different one. Background restart loads a newly installed
@@ -46,8 +47,8 @@ sign-in entry on Windows. The shortcut wakes WSL, starts the app and brings
 its window to the front, opening a Chrome or Edge app window only when none
 is open; the sign-in entry only wakes WSL and starts it. clio-coder gui
 focuses the open window the same way, and --path then shows that page in it.
-macOS and native Windows run the private server only; Windows prints the link
-instead of opening it. Your CLI, terminal interface, headless runs, and
+On native Windows clio-coder gui prints the link instead of opening it unless
+--open is given. Your CLI, terminal interface, headless runs, and
 graphical app use the same CLIO Coder runtime, configuration and sessions, and
 the graphical app lists every project the terminal interface has worked in.
 `;

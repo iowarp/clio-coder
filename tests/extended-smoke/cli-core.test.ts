@@ -387,12 +387,13 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 		const scratch = home();
 		const firstRun = home("clio-coder-first-run-cancel-");
 		try {
-			const untouched = await runCli(["doctor", "--json"], { env: scratch.env });
+			// From the scratch home, not the checkout: a worktree's own `.clio-coder/settings.local.yaml` is not this row's (ACP-H6).
+			const untouched = await runCli(["doctor", "--json"], { env: scratch.env, cwd: scratch.root });
 			strictEqual(untouched.code, 0, untouched.stderr);
 			strictEqual(JSON.parse(untouched.stdout).ok, true);
 			strictEqual(readdirSync(scratch.root).length, 0, "read-only doctor must leave a fresh home empty");
 
-			const fixed = await runCli(["doctor", "--fix", "--json"], { env: scratch.env });
+			const fixed = await runCli(["doctor", "--fix", "--json"], { env: scratch.env, cwd: scratch.root });
 			strictEqual(fixed.code, 0, fixed.stderr);
 			const fixedReport = JSON.parse(fixed.stdout) as {
 				fix: boolean;
@@ -471,7 +472,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			);
 			strictEqual(configured.code, 0, configured.stdout + configured.stderr);
 
-			const doctor = await runCli(["doctor", "--json"], { env: scratch.env });
+			const doctor = await runCli(["doctor", "--json"], { env: scratch.env, cwd: scratch.root });
 			strictEqual(doctor.code, 0, doctor.stdout + doctor.stderr);
 			strictEqual(JSON.parse(doctor.stdout).ok, true);
 

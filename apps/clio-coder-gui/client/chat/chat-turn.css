@@ -568,6 +568,15 @@
 	color: var(--ink-muted);
 }
 
+/* A notice about the turn's own flow (a yolo continuation), at the point it happened. */
+.chat-notice {
+	margin: 0;
+	padding: 5px 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+
 /* Health facts rendered at the point in the conversation they happened. */
 .turn-health,
 .session-health__rows {

@@ -163,7 +163,7 @@ test("a failing route names the repair surface without spilling provider diagnos
 		}),
 		80,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
 	ok(!lines.join("\n").includes("ECONNREFUSED"), "raw provider error should not crowd the welcome");
 });
 
@@ -174,15 +174,15 @@ test("the route repair action fits at 60 columns", () => {
 		}),
 		60,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
 });
 
-test("at 40 columns the route fault remains visible and its cut is marked", () => {
+test("at 32 columns the route fault remains visible and its cut is marked", () => {
 	const lines = rows(
 		banner({
 			statuses: [status({ available: false, reason: "refused", health: health("down", "ECONNREFUSED 127.0.0.1:1234") })],
 		}),
-		40,
+		32,
 	);
 	ok(actionLine(lines).includes("route unavailable"), actionLine(lines));
 	ok(actionLine(lines).includes("…"), "a cut must be marked");
@@ -221,7 +221,7 @@ test("a target id absent from the list directs the operator to route settings", 
 		banner({ statuses: [status({ target: { id: "other", defaultModel: "m", runtime: "lmstudio", wireModels: [] } })] }),
 		80,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
 });
 
 test("project configuration that is not applied leads the action row and stays on the session header", () => {
@@ -270,7 +270,7 @@ test("route faults outrank project-context guidance", () => {
 		}),
 		80,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
 	ok(!actionLine(lines).includes("/context init"), actionLine(lines));
 });
 
@@ -310,7 +310,7 @@ test("a hostile provider reason cannot style, clear, or retitle the terminal", (
 	ok(!raw.includes("PWNED"), "OSC payload text survived");
 	const visible = lines.map((line) => stripTerminalSequences(line));
 	ok(controlFreeLines(visible), `control byte survived: ${JSON.stringify(visible)}`);
-	ok(actionLine(visible).includes("route unavailable · /settings targets"), actionLine(visible));
+	ok(actionLine(visible).includes("route unavailable · /settings models"), actionLine(visible));
 	ok(!visible.join("\n").includes("upstream 502"), "provider diagnostics should stay out of the welcome");
 });
 
