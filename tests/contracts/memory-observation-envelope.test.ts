@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { foldProjection } from "../../src/domains/context/fold/pressure.js";
 import type { ObservationSource, ObservationSourceUnit } from "../../src/domains/memory/contract.js";
 import { pruneOrphanedObservations } from "../../src/domains/memory/observation-store.js";
@@ -364,6 +365,17 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		turn(5);
 		await runtime.runIdleStep();
 		strictEqual(calls, 3, "the stop holds for the session");
+		// C-32: a final settlement with nothing decided journals no reminder-outcomes row.
+		const recorded: string[] = [];
+		const stop = telemetryHub().subscribe("memory.observation_recorded", (payload) => {
+			recorded.push(payload.event);
+		});
+		registration.reset();
+		stop();
+		deepStrictEqual(
+			recorded.filter((event) => event === "reminder-outcomes"),
+			[],
+		);
 	} finally {
 		runtime.dispose();
 		rmSync(dir, { recursive: true, force: true });
