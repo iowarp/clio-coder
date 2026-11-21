@@ -1,10 +1,13 @@
-import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual, throws } from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { afterEach, beforeEach, it } from "node:test";
 import { dispatchAdmissionFindings } from "../../src/cli/doctor-dispatch-admission.js";
 import { withStateFileLockSync } from "../../src/core/state-file-lock.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
+import { AdmissionLockBusyError } from "../../src/domains/dispatch/admission-error.js";
 import {
 	acquireCapacityLease,
 	type CapacityLimits,
@@ -23,6 +26,7 @@ import {
 	releaseDispatchReservation,
 	releaseDispatchReservationMemberAsync,
 	rollbackDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 	transferDispatchReservationToLeaseUnsafe,
 } from "../../src/domains/dispatch/reservation-store.js";
 import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
@@ -37,8 +41,9 @@ afterEach(() => env.restore());
 const endpointKey = "http://127.0.0.1:8080";
 const limits: CapacityLimits = { global: 1, nodes: { local: 1 }, endpoints: { [endpointKey]: 1 } };
 
-function reserve(waves = [0, 1], cap = limits) {
+function reserve(waves = [0, 1], cap = limits, lockTimeoutMs?: number) {
 	return createDispatchReservation({
+		...(lockTimeoutMs !== undefined ? { lockTimeoutMs } : {}),
 		topology: "pipeline",
 		tasks: waves.map((wave, index) => ({
 			memberId: `task-${index + 1}`,
@@ -399,6 +404,44 @@ it("drops invalid settled admission records on boot and refuses only an invalid 
 	strictEqual(dispatchAdmissionFindings()[0]?.ok, false);
 	strictEqual(dispatchAdmissionFindings({ fix: true })[0]?.ok, true);
 	deepStrictEqual(readCapacityStateUnsafe().reservations, []);
+});
+
+it("boot never waits on a live admission lock holder; the first plan admission refuses typed, then runs the deferred sweep (M-35)", async (t) => {
+	// A plan whose owner died inside its lifetime: only the startup sweep expires it, and it holds the one slot.
+	const orphan = reserve([0]);
+	const state = readCapacityStateUnsafe();
+	const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+	for (const record of state.reservations) if (record.ownerId === orphan.ownerId) record.ownerPid = deadPid;
+	writeCapacityStateUnsafe(state);
+	const holder = spawn("sleep", ["600"], { stdio: "ignore" });
+	t.after(() => holder.kill("SIGKILL"));
+	await once(holder, "spawn");
+	const lockPath = `${capacityStateLockPath()}.lock`;
+	writeFileSync(lockPath, JSON.stringify({ host: hostname(), pid: holder.pid }));
+
+	strictEqual(sweepDispatchReservationsAtStartup(), "deferred");
+	strictEqual(getDispatchReservation(orphan.ownerId)?.status, "active");
+	let refusal: unknown;
+	throws(() => {
+		try {
+			reserve([0], limits, 50);
+		} catch (error) {
+			refusal = error;
+			throw error;
+		}
+	});
+	ok(refusal instanceof AdmissionLockBusyError);
+	match(refusal.message, /^dispatch: admission denied: the shared admission store is busy; timed out after 50ms/);
+	match(
+		refusal.message,
+		new RegExp(`held by pid ${holder.pid} on ${hostname()} \\(sleep 600\\); wait for it to finish or stop that process`),
+	);
+	doesNotMatch(refusal.message, /delete/);
+
+	rmSync(lockPath);
+	const next = reserve([0]);
+	strictEqual(getDispatchReservation(orphan.ownerId)?.status, "expired");
+	releaseDispatchReservation(next.ownerId);
 });
 
 it("counts another host's loopback endpoint lease only when it runs on a named node", () => {

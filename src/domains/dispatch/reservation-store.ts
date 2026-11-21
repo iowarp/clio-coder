@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { processBirthToken, processIdentityAlive } from "../../core/process-identity.js";
-import { withStateFileLockSection, withStateFileLockSync } from "../../core/state-file-lock.js";
+import {
+	tryWithStateFileLockSync,
+	withStateFileLockSection,
+	withStateFileLockSync,
+} from "../../core/state-file-lock.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { AcquireCapacityLeaseInput } from "./capacity-lease.js";
 import {
@@ -20,6 +24,7 @@ import {
 	readCapacityStateUnsafe,
 	updateCapacityStateAsync,
 	validReservationRecord,
+	withAdmissionLockSync,
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
 import { COUNCIL_MIN_MEMBERS } from "./gate-role-prompts.js";
@@ -301,11 +306,14 @@ export function createDispatchReservation(input: {
 	capacity: ReservationCapacitySnapshot;
 	nowMs?: number;
 	ttlMs?: number;
+	/** Lock acquisition budget; the default is the store-wide one. */
+	lockTimeoutMs?: number;
 }): DispatchReservationRecord {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
+	const lock = input.lockTimeoutMs !== undefined ? { timeoutMs: input.lockTimeoutMs } : {};
+	return withAdmissionLockSync(() => {
 		const nowMs = input.nowMs ?? Date.now();
 		const state = readCapacityStateUnsafe();
-		const records = expireRecords(parseReservations(state.reservations), nowMs, false);
+		const records = expireRecords(parseReservations(state.reservations), nowMs, takeStartupSweep());
 		const drain = activeCapacityDrainUnsafe(state, nowMs);
 		if (drain !== null) {
 			replaceReservations(state, records);
@@ -340,7 +348,7 @@ export function createDispatchReservation(input: {
 		replaceReservations(state, [record, ...records]);
 		writeCapacityStateUnsafe(state);
 		return copyRecord(record);
-	});
+	}, lock);
 }
 
 interface ReservationTransferInput {
@@ -655,19 +663,46 @@ export function expireDispatchReservationsOwnedBy(owner: { host: string; pid: nu
 }
 
 export function cleanupDispatchReservations(options?: { startup?: boolean; nowMs?: number }): number {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		// Boot passes through here under the lock, so it is where invalid settled records leave the file.
-		const { state, dropped } = readCapacityStateRepairUnsafe();
-		const records = parseReservations(state.reservations);
-		const before = records.filter((record) => record.status === "active").length;
-		expireRecords(records, options?.nowMs ?? Date.now(), options?.startup === true);
-		const after = records.filter((record) => record.status === "active").length;
-		if (before !== after || dropped > 0) {
-			replaceReservations(state, records);
-			writeCapacityStateUnsafe(state);
-		}
-		return before - after;
-	});
+	return withStateFileLockSync(capacityStateLockPath(), () =>
+		sweepReservationsUnsafe(options?.startup === true, options?.nowMs ?? Date.now()),
+	);
+}
+
+function sweepReservationsUnsafe(startup: boolean, nowMs: number): number {
+	// The startup sweep runs under the lock, so it is where invalid settled records leave the file.
+	const { state, dropped } = readCapacityStateRepairUnsafe();
+	const records = parseReservations(state.reservations);
+	const before = records.filter((record) => record.status === "active").length;
+	expireRecords(records, nowMs, startup);
+	const after = records.filter((record) => record.status === "active").length;
+	if (before !== after || dropped > 0) {
+		replaceReservations(state, records);
+		writeCapacityStateUnsafe(state);
+	}
+	return before - after;
+}
+
+/** Set while boot's startup sweep waits for the admission lock; the next plan admission runs it under its own lock. */
+let startupSweepPending = false;
+
+function takeStartupSweep(): boolean {
+	const pending = startupSweepPending;
+	startupSweepPending = false;
+	return pending;
+}
+
+/**
+ * Boot's reservation sweep (M-35). It never waits for the admission lock: another process may hold it for as long as
+ * its section takes, and domain load must not stall or fail on that. A free lock sweeps now; a held one leaves the
+ * sweep to the next plan admission, which takes the lock anyway, after a lock-free read of the store (writers rename
+ * it into place) still refuses a damaged one as the locked sweep would.
+ */
+export function sweepDispatchReservationsAtStartup(nowMs = Date.now()): "swept" | "deferred" {
+	const attempt = tryWithStateFileLockSync(capacityStateLockPath(), () => sweepReservationsUnsafe(true, nowMs));
+	startupSweepPending = !attempt.held;
+	if (attempt.held) return "swept";
+	parseReservations(readCapacityStateRepairUnsafe(nowMs).state.reservations);
+	return "deferred";
 }
 
 /**
