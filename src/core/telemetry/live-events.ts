@@ -796,7 +796,7 @@ export type ForeignRunObservedPayload =
 
 /** Published on `approval.foreign_changed`: an operator-visible ask another Clio process holds, raised or settled. */
 export type ForeignApprovalChangedPayload =
-	| { kind: "requested"; request: PermissionRequestedPayload }
+	| { kind: "requested"; request: PermissionRequestedPayload; refusal?: string }
 	| { kind: "resolved"; resolved: PermissionResolvedPayload };
 
 // ---------------------------------------------------------------------------

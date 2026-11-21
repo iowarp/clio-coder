@@ -515,3 +515,52 @@ test("the settle window paints once when it ends, restarts for a replacing card,
 		mock.timers.reset();
 	}
 });
+
+test("an open worker card leaves when another Clio process answered its ask, and only then (M11)", () => {
+	const bus = createTelemetryHub();
+	const notices: string[] = [];
+	let state: OverlayState = "closed";
+	const lifecycle: OverlayPermissionLifecycle = createOverlayPermissionLifecycle({
+		bus,
+		dispatch: {},
+		getAutonomy: () => "default",
+		getOverlayState: () => state,
+		openPermissionOverlay: () => {
+			if (state === "permission-confirm") return false;
+			state = "permission-confirm";
+			return true;
+		},
+		closeOverlay: () => {
+			if (state !== "permission-confirm") return;
+			state = "closed";
+			lifecycle.onPermissionOverlayClosed();
+		},
+		appendNotice: (_level, text) => {
+			notices.push(text);
+		},
+		applyApprovalState: () => {},
+		requestRender: () => {},
+		stopActiveTurn: () => {},
+	});
+	try {
+		const ask = { tool: "bash", actionClass: "execute", origin: "worker:run-x", requestedBy: "run-x", agentId: "coder" };
+		bus.emit("approval.requested", { ...ask, requestId: "grant-1", escalation: true, timeoutMs: 60_000 });
+		strictEqual(state, "permission-confirm");
+		// Another decider's resolution, such as this process's main agent, leaves the card to its own answer.
+		bus.emit("approval.resolved", { status: "granted", requestId: "grant-1", origin: "worker:run-x", decidedBy: "main" });
+		strictEqual(state, "permission-confirm");
+		bus.emit("approval.resolved", {
+			status: "granted",
+			requestId: "grant-1",
+			origin: "worker:run-x",
+			decidedBy: "operator:another-process",
+		});
+		strictEqual(state, "closed");
+		ok(
+			notices.some((text) => /answered in another Clio session/u.test(text)),
+			notices.join("\n"),
+		);
+	} finally {
+		lifecycle.dispose();
+	}
+});

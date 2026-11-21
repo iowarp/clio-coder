@@ -6,19 +6,22 @@
  *
  * - Owner side, in every process that dispatches. A run that starts here gets its owner record. An operator-visible
  *   worker ask raised here gets a grant record, and while any is pending a poll takes answers other processes wrote
- *   and applies each through `resolve`, the same path this process's own permission card uses. The resolution the
- *   card receives is written back, so the asking process sees the ask leave.
+ *   and applies each through `resolve`, the same path this process's own permission card uses, naming the process that
+ *   answered. A refused answer leaves the ask pending under a fresh nonce with the refusal, so the answering side shows
+ *   its card again. The resolution the card receives is written back, so the asking process sees the ask leave.
  * - Viewer side, only where a person can answer (`follow`). Runs the ledger shows live that another process owns, in
  *   this project, are followed: the owner record gives the row its identity, the feed is the progress source, and the
  *   run's grant records become cards. They reach this process's surfaces on two live-only topics,
  *   `run.foreign_observed` and `approval.foreign_changed`, never on the topics this process's own runs use, so no
- *   foreign run is journaled, recorded in this session or written to a feed a second time.
+ *   foreign run is journaled, recorded in this session or written to a feed a second time. A cancel of a followed run
+ *   becomes the run's durable cancel request, which its owner takes and seals `canceled`.
  *
  * A record whose owner died is no live run and no ask: `ownerState` probes the pid and birth token the way the
  * capacity lease does, and a followed run whose owner is gone ends `dead` with its asks withdrawn.
  */
 
-import { closeSync, constants, openSync, readSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
 	type OwnerIdentity,
 	ownerIdentity,
@@ -26,6 +29,7 @@ import {
 	ownerState,
 	type RecordedOwner,
 } from "../../core/process-identity.js";
+import { canonicalProjectRoot } from "../../core/project-root.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	DispatchStartedPayload,
@@ -35,11 +39,15 @@ import type {
 	PermissionResolvedPayload,
 } from "../../core/telemetry/live-events.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { writeRunCancelRequest } from "./cancel-requests.js";
 import {
 	type GrantRecordBinding,
 	type GrantRequestRecord,
+	RUN_GRANTS_DIR,
 	readGrantRequestRecords,
 	readRunOwnerRecord,
+	refuseGrantAnswerRecord,
+	removeGrantAnswer,
 	resolveGrantRequestRecord,
 	takeGrantAnswer,
 	writeGrantAnswerRecord,
@@ -55,16 +63,24 @@ export const CROSS_PROCESS_POLL_MS = 500;
 /** Bytes one poll folds from one foreign feed, so a backlog cannot stall a frame. */
 const FEED_READ_MAX_BYTES = 256 * 1024;
 
+/** The process that answered an ask through its run's grant records. */
+export type ForeignAnswerOrigin = Pick<RecordedOwner, "pid" | "host">;
+
 export interface CrossProcessFleetDeps {
 	bus: Pick<TelemetryHub, "emit" | "subscribe">;
 	stateDir?: () => string;
 	cwd?: string;
+	/** The project this process works in; defaults to the canonical project root of `cwd`. */
+	projectRoot?: string;
 	/** Runs this process drives; their rows and asks reach this process's surfaces directly. */
 	isLocalRun(runId: string): boolean;
 	/** The grant broker's binding for an ask it holds, null for one it does not. */
 	grantBinding(requestId: string): { attempt: number; argDigest: string } | null;
-	/** Apply an answer from another process through this process's own answer path. Throws when it is refused. */
-	resolve(runId: string, requestId: string, decision: "approve" | "deny"): void;
+	/**
+	 * Apply an answer another process gave through this process's own answer path, naming who answered so the
+	 * resolution says so. Throws when the answer is refused.
+	 */
+	resolve(runId: string, requestId: string, decision: "approve" | "deny", answeredBy: ForeignAnswerOrigin): void;
 	/** Follow other processes' runs and asks; set where a person can answer. */
 	follow: boolean;
 	/** Tests drive `poll` themselves. */
@@ -72,13 +88,18 @@ export interface CrossProcessFleetDeps {
 	owner?: (owner: RecordedOwner) => "alive" | "gone" | "unknown";
 	/** The identity this process writes into its records; a test stands in for a second process with it. */
 	self?: OwnerIdentity;
+	/** Epoch ms, for how long a recorded ask has been waiting. */
+	now?: () => number;
 }
 
 export interface CrossProcessFleet {
 	/** Answer an ask another process holds. False when no live foreign ask has that id. */
 	answerForeign(runId: string, requestId: string, decision: "approve" | "deny"): boolean;
-	/** Whether a live ask with this id is held by another process. */
-	isForeignAsk(requestId: string): boolean;
+	/**
+	 * Cancel a run another process owns and this process follows: its durable cancel request, which the owner takes
+	 * and seals `canceled`. False when this process does not follow the run.
+	 */
+	cancelForeign(runId: string, reason: string | null): boolean;
 	poll(): void;
 	dispose(): void;
 }
@@ -124,13 +145,37 @@ interface FollowedRun {
 	agentId: string;
 	owner: RecordedOwner;
 	offset: number;
+	/** The feed's next bytes continue a line too long to fold, which is skipped up to its end. */
+	skippingLine: boolean;
+	/** The grants directory's change stamp at the last read; its records are read again only when it moves. */
+	grantsStamp: string | null;
+	/**
+	 * Whether that stamp was already older than {@link GRANTS_STAMP_SETTLE_MS} when it was read. Directory times are
+	 * as coarse as a kernel tick, so a write in the same tick as the last read leaves the stamp unchanged; only a stamp
+	 * that had settled before it was read proves nothing changed since (the racy-git rule).
+	 */
+	grantsStampSettled: boolean;
 	asks: Map<string, GrantRequestRecord>;
+}
+
+/** How old a grants directory's stamp must be before an unchanged stamp lets a poll skip re-reading its records. */
+const GRANTS_STAMP_SETTLE_MS = 2_000;
+
+function directoryStamp(path: string): { stamp: string; mtimeMs: number } | null {
+	try {
+		const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+		return stat === undefined ? null : { stamp: `${stat.mtimeNs}:${stat.ctimeNs}`, mtimeMs: Number(stat.mtimeMs) };
+	} catch {
+		return null;
+	}
 }
 
 export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProcessFleet {
 	const stateDir = deps.stateDir ?? clioStateDir;
 	const cwd = deps.cwd ?? process.cwd();
+	const projectRoot = deps.projectRoot ?? canonicalProjectRoot(cwd);
 	const probe = deps.owner ?? ownerState;
+	const now = deps.now ?? Date.now;
 	const self = (): OwnerIdentity => deps.self ?? ownerIdentity();
 	const unsubscribes: Array<() => void> = [];
 	let timer: ReturnType<typeof setInterval> | null = null;
@@ -154,19 +199,32 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 
 	const takeAnswers = (): void => {
 		for (const record of [...ownAsks.values()]) {
-			const decision = takeGrantAnswer(stateDir(), record);
-			if (decision === null) continue;
+			const answer = takeGrantAnswer(stateDir(), record);
+			if (answer === null) continue;
 			try {
-				deps.resolve(record.runId, record.requestId, decision);
-			} catch {
-				// Refused (expired, run ended, session changed): its own resolution, if any, settles the record.
+				deps.resolve(record.runId, record.requestId, answer.decision, {
+					pid: answer.answeredBy.pid,
+					host: answer.answeredBy.host,
+				});
+			} catch (error) {
+				// Still pending here means nothing settled it: the answering side is told why and may answer again.
+				if (ownAsks.get(record.requestId) !== record) continue;
+				const reason = error instanceof Error ? error.message : String(error);
+				ownAsks.set(record.requestId, refuseGrantAnswerRecord(stateDir(), record, reason));
 			}
 		}
 	};
 
+	const settleOwnAsk = (record: GrantRequestRecord, resolved: PermissionResolvedPayload): void => {
+		ownAsks.delete(record.requestId);
+		resolveGrantRequestRecord(stateDir(), record, resolved);
+		// An answer another process wrote after this one settled, such as when this process's own card answered first.
+		removeGrantAnswer(stateDir(), record);
+	};
+
 	unsubscribes.push(
 		deps.bus.subscribe("run.started", (payload: DispatchStartedPayload) => {
-			if (typeof payload?.runId === "string") writeRunOwnerRecord(stateDir(), payload, cwd, self());
+			if (typeof payload?.runId === "string") writeRunOwnerRecord(stateDir(), payload, { cwd, projectRoot }, self());
 		}),
 		deps.bus.subscribe("approval.requested", (payload: PermissionRequestedPayload) => {
 			if (payload?.escalation !== true || typeof payload.requestId !== "string") return;
@@ -191,8 +249,7 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 		deps.bus.subscribe("approval.resolved", (payload: PermissionResolvedPayload) => {
 			const record = typeof payload?.requestId === "string" ? ownAsks.get(payload.requestId) : undefined;
 			if (record === undefined) return;
-			ownAsks.delete(record.requestId);
-			resolveGrantRequestRecord(stateDir(), record, payload);
+			settleOwnAsk(record, payload);
 			stopTimerWhenIdle();
 		}),
 		...(["run.completed", "run.failed"] as const).map((topic) =>
@@ -200,8 +257,7 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 				// A run that ended with an ask still recorded pending withdrew it; the record says so for any viewer.
 				for (const record of [...ownAsks.values()]) {
 					if (record.runId !== payload?.runId) continue;
-					ownAsks.delete(record.requestId);
-					resolveGrantRequestRecord(stateDir(), record, {
+					settleOwnAsk(record, {
 						status: "denied",
 						requestId: record.requestId,
 						requestedBy: record.runId,
@@ -229,6 +285,20 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 		deps.bus.emit("approval.foreign_changed", payload);
 	};
 
+	/** The ask as the card shows it: the time it has already waited off its window, and why a last answer was refused. */
+	const presentedRequest = (record: GrantRequestRecord): PermissionRequestedPayload => {
+		const request = record.request;
+		const created = Date.parse(record.createdAt);
+		const waited = Number.isFinite(created) ? Math.max(0, now() - created) : 0;
+		return {
+			...request,
+			...(request.timeoutMs !== undefined ? { timeoutMs: Math.max(1, request.timeoutMs - waited) } : {}),
+			...(record.lastRefusal !== undefined
+				? { summary: `Your answer was refused: ${record.lastRefusal.reason}. ${request.summary ?? ""}`.trim() }
+				: {}),
+		};
+	};
+
 	const withdrawAsk = (record: GrantRequestRecord, resolved: PermissionResolvedPayload): void => {
 		foreignAsks.delete(record.requestId);
 		emitAsk({ kind: "resolved", resolved });
@@ -253,27 +323,49 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 
 	/** Fold what the run's feed gained since the last poll; true when its terminal row was read. */
 	const readFeed = (run: FollowedRun): boolean => {
-		const path = runFeedPath(run.runId, stateDir());
 		let handle: number;
 		try {
-			handle = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+			handle = openSync(runFeedPath(run.runId, stateDir()), constants.O_RDONLY | constants.O_NOFOLLOW);
 		} catch {
 			return false;
 		}
 		let text = "";
 		try {
-			const size = statSync(path).size;
-			if (size < run.offset) run.offset = 0;
+			const size = fstatSync(handle).size;
+			if (size < run.offset) {
+				run.offset = 0;
+				run.skippingLine = false;
+			}
 			const length = Math.min(FEED_READ_MAX_BYTES, size - run.offset);
 			if (length <= 0) return false;
 			const chunk = Buffer.alloc(length);
-			const count = readSync(handle, chunk, 0, length, run.offset);
-			const bytes = chunk.subarray(0, count);
+			let bytes = chunk.subarray(0, readSync(handle, chunk, 0, length, run.offset));
+			let consumed = 0;
+			if (run.skippingLine) {
+				// The rest of a line too long to fold: drop it through its newline, or the whole chunk when it goes on.
+				const newline = bytes.indexOf(0x0a);
+				if (newline < 0) {
+					run.offset += bytes.length;
+					return false;
+				}
+				consumed = newline + 1;
+				bytes = bytes.subarray(consumed);
+				run.skippingLine = false;
+			}
 			// Only whole lines are consumed; a partial one is the writer mid-append and is read again next poll.
 			const end = bytes.lastIndexOf(0x0a);
-			if (end < 0) return false;
+			if (end < 0) {
+				// A full read with no line end is one line over the fold bound: skip it rather than wait on it forever.
+				if (consumed + bytes.length >= FEED_READ_MAX_BYTES) {
+					run.offset += consumed + bytes.length;
+					run.skippingLine = true;
+				} else {
+					run.offset += consumed;
+				}
+				return false;
+			}
 			text = bytes.subarray(0, end + 1).toString("utf8");
-			run.offset += end + 1;
+			run.offset += consumed + end + 1;
 		} catch {
 			return false;
 		} finally {
@@ -293,18 +385,48 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 	};
 
 	const readAsks = (run: FollowedRun): void => {
+		const stamp = directoryStamp(join(stateDir(), "runs", run.runId, RUN_GRANTS_DIR));
+		if (stamp === null || (stamp.stamp === run.grantsStamp && run.grantsStampSettled)) return;
+		run.grantsStamp = stamp.stamp;
+		run.grantsStampSettled = now() - stamp.mtimeMs > GRANTS_STAMP_SETTLE_MS;
 		for (const record of readGrantRequestRecords(stateDir(), run.runId)) {
 			const known = run.asks.get(record.requestId);
 			run.asks.set(record.requestId, record);
 			if (record.state === "pending") {
-				if (known !== undefined) continue;
+				// A record seen before shows again only when the owner refused an answer, which re-mints its nonce.
+				if (known !== undefined && known.nonce === record.nonce) continue;
 				foreignAsks.set(record.requestId, record);
-				emitAsk({ kind: "requested", request: record.request });
+				emitAsk({
+					kind: "requested",
+					request: presentedRequest(record),
+					...(known !== undefined && record.lastRefusal !== undefined ? { refusal: record.lastRefusal.reason } : {}),
+				});
 				continue;
 			}
 			if (foreignAsks.has(record.requestId)) {
 				withdrawAsk(record, record.resolved ?? { status: "denied", requestId: record.requestId, decidedBy: "revoked" });
 			}
+		}
+	};
+
+	const skipPartialLine = (run: FollowedRun, size: number): void => {
+		try {
+			const handle = openSync(runFeedPath(run.runId, stateDir()), constants.O_RDONLY | constants.O_NOFOLLOW);
+			try {
+				const chunk = Buffer.alloc(Math.min(64 * 1024, size - run.offset));
+				const count = readSync(handle, chunk, 0, chunk.length, run.offset);
+				const newline = chunk.subarray(0, count).indexOf(0x0a);
+				if (newline < 0) {
+					run.offset += count;
+					run.skippingLine = true;
+				} else {
+					run.offset += newline + 1;
+				}
+			} finally {
+				closeSync(handle);
+			}
+		} catch {
+			run.offset = size;
 		}
 	};
 
@@ -318,7 +440,7 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 			const record = readRunOwnerRecord(stateDir(), row.id);
 			// No owner record yet: the owner has not published its start, or predates this record.
 			if (record === null) continue;
-			if (ownerIsThisProcess(record.owner) || record.owner.pid === deps.self?.pid || record.cwd !== cwd) {
+			if (ownerIsThisProcess(record.owner) || record.projectRoot !== projectRoot) {
 				settled.add(row.id);
 				continue;
 			}
@@ -338,6 +460,9 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 				agentId: record.started.agentId,
 				owner: record.owner,
 				offset: Math.max(0, size - RUN_FEED_READ_TAIL_BYTES),
+				skippingLine: false,
+				grantsStamp: null,
+				grantsStampSettled: false,
 				asks: new Map(),
 			};
 			if (run.offset > 0) skipPartialLine(run, size);
@@ -356,22 +481,6 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 				const row = ledger.runs.find((candidate) => candidate.id === run.runId);
 				endRun(run, row?.outcome ?? (row?.status === "completed" ? "succeeded" : "failed"), null);
 			}
-		}
-	};
-
-	const skipPartialLine = (run: FollowedRun, size: number): void => {
-		try {
-			const handle = openSync(runFeedPath(run.runId, stateDir()), constants.O_RDONLY | constants.O_NOFOLLOW);
-			try {
-				const chunk = Buffer.alloc(Math.min(64 * 1024, size - run.offset));
-				const count = readSync(handle, chunk, 0, chunk.length, run.offset);
-				const newline = chunk.subarray(0, count).indexOf(0x0a);
-				run.offset = newline < 0 ? size : run.offset + newline + 1;
-			} finally {
-				closeSync(handle);
-			}
-		} catch {
-			run.offset = size;
 		}
 	};
 
@@ -403,7 +512,11 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 			}
 			return true;
 		},
-		isForeignAsk: (requestId) => foreignAsks.has(requestId),
+		cancelForeign(runId, reason) {
+			if (!followed.has(runId)) return false;
+			writeRunCancelRequest(runId, reason ?? `canceled from another Clio session (pid ${process.pid})`);
+			return true;
+		},
 		poll,
 		dispose() {
 			disposed = true;

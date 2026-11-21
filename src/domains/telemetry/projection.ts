@@ -557,6 +557,8 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 	function onForeignObserved(payload: ForeignRunObservedPayload): void {
 		if (payload.kind === "started") {
 			onStarted(payload.run);
+			const entry = runs.get(payload.run.runId);
+			if (entry !== undefined) entry.foreign = true;
 			return;
 		}
 		if (payload.kind === "progressed") {

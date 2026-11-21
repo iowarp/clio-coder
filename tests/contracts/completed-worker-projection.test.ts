@@ -1,19 +1,25 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { canonicalProjectRoot } from "../../src/core/project-root.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchCompletedPayload } from "../../src/core/telemetry/live-events.js";
 import { unobservedRunUsageFacts } from "../../src/core/telemetry/pricing.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { takeRunCancelRequest } from "../../src/domains/dispatch/cancel-requests.js";
 import { createCrossProcessFleet } from "../../src/domains/dispatch/cross-process-fleet.js";
 import { writeRunOwnerRecord } from "../../src/domains/dispatch/run-directory-records.js";
 import { appendRunFeed } from "../../src/domains/dispatch/run-feed.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { TelemetryRunReaders } from "../../src/domains/telemetry/contract.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
-import { createDispatchBoardStore } from "../../src/interactive/dispatch-board.js";
+import {
+	createDispatchBoardStore,
+	isDispatchBoardRowCancellable,
+	isDispatchBoardRowSteerable,
+} from "../../src/interactive/dispatch-board.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { settledRunTrust } from "../harness/settled-run.js";
@@ -97,10 +103,14 @@ test("a live run another Clio process owns becomes a board row fed from its run 
 	const store = createDispatchBoardStore(projection);
 	const owner = { host: hostname(), pid: 2_000_011, birthToken: "owner-birth", pidNs: null, bootId: null };
 	let ownerAlive = true;
+	// The viewer runs in a subdirectory of the owner's project; the project root, not the cwd, scopes what it follows.
+	const project = join(env.dir, "proj");
+	mkdirSync(join(project, ".git"), { recursive: true });
+	mkdirSync(join(project, "sub"));
 	const viewer = createCrossProcessFleet({
 		bus,
 		stateDir: clioStateDir,
-		cwd: env.dir,
+		cwd: join(project, "sub"),
 		isLocalRun: () => false,
 		grantBinding: () => null,
 		resolve: () => {},
@@ -124,7 +134,9 @@ test("a live run another Clio process owns becomes a board row fed from its run 
 			assignmentId: "run-f",
 			attempt: 0,
 		};
-		assert.ok(writeRunOwnerRecord(stateDir, started, env.dir, owner));
+		assert.ok(
+			writeRunOwnerRecord(stateDir, started, { cwd: project, projectRoot: canonicalProjectRoot(project) }, owner),
+		);
 		appendRunFeed("run-f", { kind: "open", runId: "run-f", agentId: "scout" });
 		appendRunFeed("run-f", {
 			kind: "event",
@@ -140,6 +152,19 @@ test("a live run another Clio process owns becomes a board row fed from its run 
 		assert.equal(row?.agentId, "scout");
 		assert.equal(row?.status, "running");
 		assert.equal(projection.snapshot().runs[0]?.progress?.currentAction?.tool, "read");
+		// Another process's worker takes no steering from here, and a cancel goes to its owner as a durable request.
+		assert.equal(row?.foreign, true);
+		assert.equal(row !== undefined && isDispatchBoardRowSteerable(row), false);
+		assert.equal(row !== undefined && isDispatchBoardRowCancellable(row), true);
+		assert.equal(viewer.cancelForeign("run-unknown", null), false);
+		assert.ok(viewer.cancelForeign("run-f", "stop it"));
+		assert.equal(takeRunCancelRequest("run-f")?.reason, "stop it");
+		// A feed line over the fold bound is skipped, not waited on: the row after it still lands.
+		appendRunFeed("run-f", { kind: "event", type: "clio_coder_run_outcome", detail: "x".repeat(300 * 1024) });
+		appendRunFeed("run-f", { kind: "event", type: "clio_coder_tool_start", tool: "grep", callId: "c2" });
+		viewer.poll();
+		viewer.poll();
+		assert.equal(projection.snapshot().runs[0]?.progress?.currentAction?.tool, "grep");
 		ownerAlive = false;
 		viewer.poll();
 		assert.equal(projection.snapshot().runs[0]?.status, "dead");

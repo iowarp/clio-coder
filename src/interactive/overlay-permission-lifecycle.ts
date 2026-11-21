@@ -721,6 +721,11 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	// it settles there, whoever answered, it leaves this one.
 	const unsubscribeForeignWorker = deps.bus.subscribe("approval.foreign_changed", (change) => {
 		if (change.kind === "requested") {
+			// The owner refused the answer given here and still holds the ask: it shows again, saying why.
+			if (change.refusal !== undefined && typeof change.request.requestId === "string") {
+				announcedWorkerRequestIds.delete(change.request.requestId);
+				expiredWorkerRequestIds.delete(change.request.requestId);
+			}
 			onWorkerRequested(change.request);
 			return;
 		}
@@ -741,10 +746,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") {
 			// A held ask its owner answered leaves silently; this session never showed it.
 			if (foreignWorkers.delete(payload.requestId)) dropWorkerCountdown(payload.requestId);
-			// Answered somewhere else, such as another Clio process on this state directory through the run's grant
-			// records: a card still open for it here leaves. A card answered here already left, so this finds nothing.
-			const requestId = payload.requestId;
-			withdrawWorkers((entry) => entry.requestId === requestId, "answered");
+			// Answered by another Clio process on this state directory through the run's grant records: a card still open
+			// for it here leaves and says so.
+			if (payload.decidedBy === "operator:another-process") {
+				const requestId = payload.requestId;
+				withdrawWorkers((entry) => entry.requestId === requestId, "answered");
+			}
 			return;
 		}
 		const fallback = payload.fallback === "fail" ? "fail" : "deny";

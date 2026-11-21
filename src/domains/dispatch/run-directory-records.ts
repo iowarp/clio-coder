@@ -20,7 +20,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { type OwnerIdentity, ownerIdentity, type RecordedOwner } from "../../core/process-identity.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -96,8 +96,10 @@ export interface RunOwnerRecord {
 	v: typeof RECORD_VERSION;
 	runId: string;
 	owner: RecordedOwner;
-	/** The owning process's working directory; a viewer shows only the runs of its own project. */
+	/** The owning process's working directory. */
 	cwd: string;
+	/** The project the owner works in; a viewer shows only the runs of its own project, from any of its subdirectories. */
+	projectRoot: string;
 	startedAt: string;
 	started: DispatchStartedPayload;
 }
@@ -106,7 +108,7 @@ export interface RunOwnerRecord {
 export function writeRunOwnerRecord(
 	stateDir: string,
 	started: DispatchStartedPayload,
-	cwd: string = process.cwd(),
+	location: { cwd: string; projectRoot: string },
 	owner: OwnerIdentity = ownerIdentity(),
 ): boolean {
 	if (!isSafeId(started.runId)) return false;
@@ -114,7 +116,8 @@ export function writeRunOwnerRecord(
 		v: RECORD_VERSION,
 		runId: started.runId,
 		owner,
-		cwd,
+		cwd: location.cwd,
+		projectRoot: location.projectRoot,
 		startedAt: new Date().toISOString(),
 		started,
 	};
@@ -127,13 +130,14 @@ export function readRunOwnerRecord(stateDir: string, runId: string): RunOwnerRec
 	if (value === null || value.v !== RECORD_VERSION || value.runId !== runId) return null;
 	const owner = recordedOwner(value.owner);
 	const started = value.started as Partial<DispatchStartedPayload> | undefined;
-	if (owner === null || typeof value.cwd !== "string" || typeof started?.agentId !== "string") return null;
-	if (started.runId !== runId) return null;
+	if (owner === null || typeof value.cwd !== "string" || typeof value.projectRoot !== "string") return null;
+	if (typeof started?.agentId !== "string" || started.runId !== runId) return null;
 	return {
 		v: RECORD_VERSION,
 		runId,
 		owner,
 		cwd: value.cwd,
+		projectRoot: value.projectRoot,
 		startedAt: typeof value.startedAt === "string" ? value.startedAt : "",
 		started: started as DispatchStartedPayload,
 	};
@@ -162,6 +166,8 @@ export interface GrantRequestRecord extends GrantRecordBinding {
 	state: "pending" | "resolved";
 	request: PermissionRequestedPayload;
 	resolved?: PermissionResolvedPayload;
+	/** The owner refused the last answer another process gave; the ask stays pending under a fresh nonce. */
+	lastRefusal?: { at: string; reason: string };
 }
 
 export interface GrantAnswerRecord extends GrantRecordBinding {
@@ -209,6 +215,24 @@ export function resolveGrantRequestRecord(
 	return next;
 }
 
+/**
+ * The owner refused an answer another process gave (its session changed, the run is ending): the ask stays pending
+ * under a fresh nonce, so the refused answer can never apply, and says why, so a viewer shows its card again.
+ */
+export function refuseGrantAnswerRecord(
+	stateDir: string,
+	record: GrantRequestRecord,
+	reason: string,
+): GrantRequestRecord {
+	const next: GrantRequestRecord = {
+		...record,
+		nonce: randomBytes(16).toString("hex"),
+		lastRefusal: { at: new Date().toISOString(), reason: reason.slice(0, 500) },
+	};
+	writeRecord(stateDir, record.runId, `${RUN_GRANTS_DIR}/${record.requestId}.json`, next);
+	return next;
+}
+
 function bindingOf(value: Record<string, unknown>): GrantRecordBinding | null {
 	const { requestId, runId, attempt, argDigest, nonce } = value;
 	if (typeof requestId !== "string" || typeof runId !== "string" || typeof nonce !== "string") return null;
@@ -249,6 +273,7 @@ export function readGrantRequestRecords(stateDir: string, runId: string): GrantR
 			...(typeof value.resolved === "object" && value.resolved !== null
 				? { resolved: value.resolved as PermissionResolvedPayload }
 				: {}),
+			...(lastRefusalOf(value.lastRefusal) ?? {}),
 		});
 	}
 	return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -277,20 +302,32 @@ export function writeGrantAnswerRecord(
 }
 
 /**
- * Take the answer waiting for one of this process's asks: read it, remove it, and return its decision only when it
- * echoes the record's binding exactly. A mismatched answer is removed and ignored, so it cannot apply later.
+ * Take the answer waiting for one of this process's asks. The answer file is first renamed to a name private to this
+ * process, so an answer written while it is read lands as a new file for the next poll instead of being removed unread.
+ * The decision and who gave it come back only when the answer echoes the record's binding exactly; a mismatched answer
+ * is removed and ignored, so it cannot apply later.
  */
-export function takeGrantAnswer(stateDir: string, record: GrantRecordBinding): "approve" | "deny" | null {
+export function takeGrantAnswer(
+	stateDir: string,
+	record: GrantRecordBinding,
+): { decision: "approve" | "deny"; answeredBy: RecordedOwner } | null {
 	const path = grantPath(stateDir, record.runId, record.requestId, true);
-	const value = readObject(path);
-	if (value === null) return null;
+	const taken = `${path.slice(0, -".json".length)}.${process.pid}.take`;
 	try {
-		rmSync(path, { force: true });
+		renameSync(path, taken);
 	} catch {
-		// A leftover answer is retried on the next poll and matched again against the same nonce.
+		return null;
 	}
+	const value = readObject(taken);
+	try {
+		rmSync(taken, { force: true });
+	} catch {
+		// A private leftover is never read again: the next answer arrives under the public name.
+	}
+	if (value === null || value.v !== RECORD_VERSION) return null;
 	const binding = bindingOf(value);
-	if (value.v !== RECORD_VERSION || binding === null) return null;
+	const answeredBy = recordedOwner(value.answeredBy);
+	if (binding === null || answeredBy === null) return null;
 	const matches =
 		binding.requestId === record.requestId &&
 		binding.runId === record.runId &&
@@ -298,5 +335,20 @@ export function takeGrantAnswer(stateDir: string, record: GrantRecordBinding): "
 		binding.argDigest === record.argDigest &&
 		binding.nonce === record.nonce;
 	if (!matches) return null;
-	return value.decision === "approve" || value.decision === "deny" ? value.decision : null;
+	return value.decision === "approve" || value.decision === "deny" ? { decision: value.decision, answeredBy } : null;
+}
+
+/** Remove an answer left for an ask that settled another way, such as the owner's own card answering first. */
+export function removeGrantAnswer(stateDir: string, record: GrantRecordBinding): void {
+	try {
+		rmSync(grantPath(stateDir, record.runId, record.requestId, true), { force: true });
+	} catch {
+		// Nothing applies it: the record it answers is no longer pending.
+	}
+}
+
+function lastRefusalOf(value: unknown): { lastRefusal: { at: string; reason: string } } | null {
+	if (typeof value !== "object" || value === null) return null;
+	const { at, reason } = value as Record<string, unknown>;
+	return typeof at === "string" && typeof reason === "string" ? { lastRefusal: { at, reason } } : null;
 }

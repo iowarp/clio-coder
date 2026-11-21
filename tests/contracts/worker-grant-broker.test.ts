@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
@@ -525,111 +525,218 @@ describe("worker grant binding", () => {
 });
 
 describe("cross-process grant records (M11)", () => {
+	const digest = "a".repeat(64);
+	const host = hostname();
+	const ownerSelf = { host, pid: 2_000_001, birthToken: "owner-birth", pidNs: null, bootId: null };
+	const viewerSelf = { host, pid: 2_000_002, birthToken: "viewer-birth", pidNs: null, bootId: null };
+
+	/** An owner and a viewer process on one state directory; `refuse` makes the owner's answer path throw. */
+	function crossProcessPair(stateDir: string, cwd: string) {
+		const state = { ownerAlive: true, refuse: null as string | null };
+		const ownerBus = createTelemetryHub();
+		const viewerBus = createTelemetryHub();
+		const applied: Array<{ runId: string; requestId: string; decision: string; answeredBy: { pid: number } }> = [];
+		const owner = createCrossProcessFleet({
+			bus: ownerBus,
+			stateDir: () => stateDir,
+			cwd,
+			projectRoot: cwd,
+			isLocalRun: (runId) => runId === "run-x",
+			grantBinding: (requestId) => (requestId === "grant-1" ? { attempt: 0, argDigest: digest } : null),
+			resolve: (runId, requestId, decision, answeredBy) => {
+				if (state.refuse !== null) throw new Error(state.refuse);
+				applied.push({ runId, requestId, decision, answeredBy });
+				ownerBus.emit("approval.resolved", {
+					status: "granted",
+					requestId,
+					origin: `worker:${runId}`,
+					decidedBy: "operator:another-process",
+				});
+			},
+			follow: false,
+			timers: false,
+			self: ownerSelf,
+		});
+		const viewer = createCrossProcessFleet({
+			bus: viewerBus,
+			stateDir: () => stateDir,
+			cwd,
+			projectRoot: cwd,
+			isLocalRun: () => false,
+			grantBinding: () => null,
+			resolve: () => {
+				throw new Error("the viewer holds no ask");
+			},
+			follow: true,
+			timers: false,
+			self: viewerSelf,
+			owner: (recorded) => (recorded.pid !== ownerSelf.pid || state.ownerAlive ? "alive" : "gone"),
+		});
+		const changes: ForeignApprovalChangedPayload[] = [];
+		viewerBus.subscribe("approval.foreign_changed", (change) => {
+			changes.push(change);
+		});
+		writeFileSync(join(stateDir, "runs.json"), JSON.stringify([{ ...fixtureEnvelope("run-x"), status: "running" }]));
+		ownerBus.emit("run.started", {
+			runId: "run-x",
+			agentId: "coder",
+			targetId: "t",
+			wireModelId: "m",
+			runtimeId: "r",
+			runtimeKind: "subprocess",
+			requestOrigin: "agent",
+			pid: null,
+			assignmentId: "run-x",
+			attempt: 0,
+		});
+		const ask = (requestId: string): void => {
+			ownerBus.emit("approval.requested", {
+				tool: "bash",
+				actionClass: "execute",
+				requestId,
+				origin: "worker:run-x",
+				requestedBy: "run-x",
+				agentId: "coder",
+				summary: "bash ./mark.sh",
+				escalation: true,
+				timeoutMs: 60_000,
+			});
+		};
+		const answerPath = (requestId: string): string =>
+			join(stateDir, "runs", "run-x", "grants", `${requestId}.answer.json`);
+		const dispose = (): void => {
+			owner.dispose();
+			viewer.dispose();
+		};
+		return { state, ownerBus, owner, viewer, applied, changes, ask, answerPath, dispose };
+	}
+
 	it("carries a held ask to a second process through its run directory, applies only a bound answer, and withdraws a dead owner's ask", async () => {
 		const env = await isolateClioEnv("clio-cross-grant-");
 		try {
 			const stateDir = clioStateDir();
-			const host = hostname();
-			const ownerSelf = { host, pid: 2_000_001, birthToken: "owner-birth", pidNs: null, bootId: null };
-			const viewerSelf = { host, pid: 2_000_002, birthToken: "viewer-birth", pidNs: null, bootId: null };
-			let ownerAlive = true;
-			const ownerBus = createTelemetryHub();
-			const viewerBus = createTelemetryHub();
-			const applied: Array<[string, string, string]> = [];
-			const digest = "a".repeat(64);
-			const owner = createCrossProcessFleet({
-				bus: ownerBus,
-				stateDir: () => stateDir,
-				cwd: env.dir,
-				isLocalRun: (runId) => runId === "run-x",
-				grantBinding: (requestId) => (requestId === "grant-1" ? { attempt: 0, argDigest: digest } : null),
-				resolve: (runId, requestId, decision) => {
-					applied.push([runId, requestId, decision]);
-					ownerBus.emit("approval.resolved", {
-						status: "granted",
-						requestId,
-						origin: `worker:${runId}`,
-						decidedBy: "operator",
-					});
-				},
-				follow: false,
-				timers: false,
-				self: ownerSelf,
-			});
-			const viewer = createCrossProcessFleet({
-				bus: viewerBus,
-				stateDir: () => stateDir,
-				cwd: env.dir,
-				isLocalRun: () => false,
-				grantBinding: () => null,
-				resolve: () => {
-					throw new Error("the viewer holds no ask");
-				},
-				follow: true,
-				timers: false,
-				self: viewerSelf,
-				owner: (recorded) => (recorded.pid !== ownerSelf.pid || ownerAlive ? "alive" : "gone"),
-			});
-			const changes: ForeignApprovalChangedPayload[] = [];
-			viewerBus.subscribe("approval.foreign_changed", (change) => {
-				changes.push(change);
-			});
-			writeFileSync(join(stateDir, "runs.json"), JSON.stringify([{ ...fixtureEnvelope("run-x"), status: "running" }]));
-			ownerBus.emit("run.started", {
-				runId: "run-x",
-				agentId: "coder",
-				targetId: "t",
-				wireModelId: "m",
-				runtimeId: "r",
-				runtimeKind: "subprocess",
-				requestOrigin: "agent",
-				pid: null,
-				assignmentId: "run-x",
-				attempt: 0,
-			});
-			const ask = (requestId: string): void => {
-				ownerBus.emit("approval.requested", {
-					tool: "bash",
-					actionClass: "execute",
-					requestId,
-					origin: "worker:run-x",
-					requestedBy: "run-x",
-					agentId: "coder",
-					escalation: true,
-					timeoutMs: 60_000,
-				});
-			};
-			ask("grant-1");
+			const pair = crossProcessPair(stateDir, env.dir);
+			pair.ask("grant-1");
 			const record = JSON.parse(readFileSync(join(stateDir, "runs", "run-x", "grants", "grant-1.json"), "utf8"));
 			deepStrictEqual(
 				[record.state, record.attempt, record.argDigest, record.owner.pid],
 				["pending", 0, digest, ownerSelf.pid],
 			);
-			viewer.poll();
+			pair.viewer.poll();
 			deepStrictEqual(
-				changes.map((change) => [change.kind, change.kind === "requested" ? change.request.requestId : null]),
+				pair.changes.map((change) => [change.kind, change.kind === "requested" ? change.request.requestId : null]),
 				[["requested", "grant-1"]],
 			);
 			// An answer that does not echo the record's nonce is taken and dropped, never applied.
 			const forged = { requestId: "grant-1", runId: "run-x", attempt: 0, argDigest: digest, nonce: "forged" };
 			ok(writeGrantAnswerRecord(stateDir, forged, "approve"));
-			owner.poll();
-			deepStrictEqual(applied, []);
-			ok(viewer.answerForeign("run-x", "grant-1", "approve"));
-			owner.poll();
-			deepStrictEqual(applied, [["run-x", "grant-1", "approve"]]);
-			viewer.poll();
-			strictEqual(changes[1]?.kind === "resolved" ? changes[1].resolved.status : null, "granted");
+			pair.owner.poll();
+			strictEqual(pair.applied.length, 0);
+			ok(pair.viewer.answerForeign("run-x", "grant-1", "approve"));
+			pair.owner.poll();
+			deepStrictEqual(
+				pair.applied.map((entry) => [entry.runId, entry.requestId, entry.decision]),
+				[["run-x", "grant-1", "approve"]],
+			);
+			pair.viewer.poll();
+			strictEqual(pair.changes[1]?.kind === "resolved" ? pair.changes[1].resolved.status : null, "granted");
 			// The owner dies holding a second ask: the viewer withdraws it and will not answer it.
-			ask("grant-2");
-			viewer.poll();
-			strictEqual(changes[2]?.kind, "requested");
-			ownerAlive = false;
-			viewer.poll();
-			strictEqual(changes[3]?.kind === "resolved" ? changes[3].resolved.decidedBy : null, "revoked");
-			strictEqual(viewer.answerForeign("run-x", "grant-2", "approve"), false);
-			owner.dispose();
-			viewer.dispose();
+			pair.ask("grant-2");
+			pair.viewer.poll();
+			strictEqual(pair.changes[2]?.kind, "requested");
+			pair.state.ownerAlive = false;
+			pair.viewer.poll();
+			strictEqual(pair.changes[3]?.kind === "resolved" ? pair.changes[3].resolved.decidedBy : null, "revoked");
+			strictEqual(pair.viewer.answerForeign("run-x", "grant-2", "approve"), false);
+			pair.dispose();
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("names the process that answered when the owner applies a cross-process answer", async () => {
+		const env = await isolateClioEnv("clio-cross-origin-");
+		try {
+			const pair = crossProcessPair(clioStateDir(), env.dir);
+			pair.ask("grant-1");
+			pair.viewer.poll();
+			ok(pair.viewer.answerForeign("run-x", "grant-1", "deny"));
+			pair.owner.poll();
+			deepStrictEqual(
+				pair.applied.map((entry) => [entry.decision, entry.answeredBy]),
+				[["deny", { pid: viewerSelf.pid, host }]],
+			);
+			pair.dispose();
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("takes an answer through a private name, applies one written after a take, and drops one left when the owner answered first", async () => {
+		const env = await isolateClioEnv("clio-cross-take-");
+		try {
+			const stateDir = clioStateDir();
+			const pair = crossProcessPair(stateDir, env.dir);
+			pair.ask("grant-2");
+			pair.viewer.poll();
+			// The owner's own card answers first; the viewer's answer lands after and must never apply.
+			ok(pair.viewer.answerForeign("run-x", "grant-2", "approve"));
+			pair.ownerBus.emit("approval.resolved", {
+				status: "denied",
+				requestId: "grant-2",
+				origin: "worker:run-x",
+				decidedBy: "operator",
+			});
+			strictEqual(existsSync(pair.answerPath("grant-2")), false);
+			pair.owner.poll();
+			strictEqual(pair.applied.length, 0);
+			// A take with nothing waiting leaves no private file behind, and the next answer still applies.
+			pair.ask("grant-3");
+			pair.owner.poll();
+			pair.viewer.poll();
+			ok(pair.viewer.answerForeign("run-x", "grant-3", "approve"));
+			pair.owner.poll();
+			deepStrictEqual(
+				pair.applied.map((entry) => entry.requestId),
+				["grant-3"],
+			);
+			const grants = readdirSync(join(stateDir, "runs", "run-x", "grants"));
+			deepStrictEqual(
+				grants.filter((name) => !/^grant-\d\.json$/u.test(name)),
+				[],
+			);
+			pair.dispose();
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("keeps a refused answer's ask pending under a fresh nonce and shows it again with the refusal", async () => {
+		const env = await isolateClioEnv("clio-cross-refuse-");
+		try {
+			const stateDir = clioStateDir();
+			const pair = crossProcessPair(stateDir, env.dir);
+			pair.ask("grant-1");
+			pair.viewer.poll();
+			ok(pair.viewer.answerForeign("run-x", "grant-1", "approve"));
+			pair.state.refuse = "the ask is held by session s-2";
+			pair.owner.poll();
+			strictEqual(pair.applied.length, 0);
+			const record = JSON.parse(readFileSync(join(stateDir, "runs", "run-x", "grants", "grant-1.json"), "utf8"));
+			deepStrictEqual([record.state, record.lastRefusal?.reason], ["pending", "the ask is held by session s-2"]);
+			pair.viewer.poll();
+			const again = pair.changes[1];
+			strictEqual(again?.kind === "requested" ? again.refusal : null, "the ask is held by session s-2");
+			ok(again?.kind === "requested" && again.request.summary?.startsWith("Your answer was refused"));
+			// The refused answer's nonce is retired: answering again binds to the new record and applies.
+			pair.state.refuse = null;
+			ok(pair.viewer.answerForeign("run-x", "grant-1", "approve"));
+			pair.owner.poll();
+			deepStrictEqual(
+				pair.applied.map((entry) => entry.requestId),
+				["grant-1"],
+			);
+			pair.dispose();
 		} finally {
 			env.restore();
 		}
