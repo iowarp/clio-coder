@@ -14,7 +14,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { type CanonicalCheckout, canonicalCheckout, linkedWorktreeRoots } from "../../core/project-root.js";
+import { type CanonicalCheckout, canonicalCheckout } from "../../core/project-root.js";
 import { fsyncDirectory, safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { containsInstructionMarkers } from "../../core/untrusted-content.js";
@@ -687,8 +687,6 @@ export interface ClaimsLogRead {
 	disputes: ClaimDisputeRecord[];
 	/** Claims imported from another project; inferred, never edge-forming. */
 	imports: ClaimImportRecord[];
-	/** Logs of linked worktrees written before worktrees folded into the main checkout, read through, never rewritten. */
-	legacy: string[];
 	/** Lines that are not a JSON object, such as a line torn by a crash. */
 	unreadable: number;
 	/**
@@ -1002,7 +1000,6 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		hypothesisTests: [],
 		disputes: [],
 		imports: [],
-		legacy: [],
 		unreadable: 0,
 		mismatched: 0,
 		unknownVersion: 0,
@@ -1114,41 +1111,9 @@ function readLog(projectRoot: string): ClaimsLogRead {
 	return parseClaimsLog(text, projectRoot);
 }
 
-/**
- * Every record in a project's log, oldest first. A missing log reads as empty.
- *
- * Before linked worktrees folded into their main checkout (#406), each worktree kept a log under its own root. Those
- * logs are read through after the project's own records, so a lane's earlier claims stay visible from the checkout it
- * merges into; they are never rewritten, and appends never derive edges against them.
- */
+/** Every record in a project's log, oldest first. A missing log reads as empty. */
 export function readClaims(projectRoot: string): ClaimsLogRead {
-	const read = readLog(projectRoot);
-	for (const worktree of linkedWorktreeRoots(projectRoot)) {
-		if (!existsSync(claimsLogPath(worktree))) continue;
-		let legacy: ClaimsLogRead;
-		try {
-			legacy = readLog(worktree);
-		} catch {
-			// An unreadable legacy log hides only its own history.
-			continue;
-		}
-		read.legacy.push(legacy.path);
-		const known = new Set(read.records.map((claim) => claim.id));
-		read.records.push(...legacy.records.filter((claim) => !known.has(claim.id)));
-		read.edges.push(...legacy.edges);
-		read.regressions.push(...legacy.regressions);
-		read.hypotheses.push(...legacy.hypotheses);
-		read.checkStarts.push(...legacy.checkStarts);
-		read.hypothesisTests.push(...legacy.hypothesisTests);
-		read.disputes.push(...legacy.disputes);
-		read.imports.push(...legacy.imports);
-		read.unreadable += legacy.unreadable;
-		read.mismatched += legacy.mismatched;
-		read.unknownVersion += legacy.unknownVersion;
-		read.unlinked += legacy.unlinked;
-		read.duplicates += legacy.duplicates;
-	}
-	return read;
+	return readLog(projectRoot);
 }
 
 /** What makes two inferred records one: a dispute's id, an import's origin and original claim (not its import time). */

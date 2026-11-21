@@ -28,7 +28,6 @@ import {
 	commandSegments,
 	diagnosticInvocation,
 	identityArgv,
-	legacyCommandHash,
 	receiptVouches,
 	type SimpleInvocation,
 	segmentKeyRef,
@@ -204,28 +203,18 @@ function backtickedSpans(text: string): string[] {
 }
 
 /**
- * The evidence keys a record's `command:` and `command-claimed:` refs name. A ref written before segment keys
- * hashed the command's text; it is resolved by finding the quoted span with that hash and running the span through
- * `commandSegment`, the same function every new ref comes from, so a rejection recorded under an old ref still
- * meets a rewording under a new one. A legacy ref no quoted span resolves stays its own hash, equal only to itself.
+ * The evidence keys a record's `command:` and `command-claimed:` refs name: the segment key, or for a command with
+ * no evidence identity its text hash, equal only to itself.
  */
-export function commandRefKeys(text: string, refs: readonly string[]): Set<string> {
+export function commandRefKeys(refs: readonly string[]): Set<string> {
 	const keys = new Set<string>();
-	let spans: string[] | null = null;
 	for (const ref of refs) {
 		const hash = ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)
 			? ref.slice(COMMAND_EVIDENCE_REF_PREFIX.length)
 			: ref.startsWith(COMMAND_CLAIM_REF_PREFIX)
 				? ref.slice(COMMAND_CLAIM_REF_PREFIX.length)
 				: null;
-		if (hash === null) continue;
-		if (segmentKeyRef(hash)) {
-			keys.add(hash);
-			continue;
-		}
-		spans ??= backtickedSpans(text);
-		const span = spans.find((candidate) => legacyCommandHash(candidate) === hash);
-		keys.add((span === undefined ? undefined : commandSegment(span)?.key) ?? `legacy:${hash}`);
+		if (hash !== null) keys.add(segmentKeyRef(hash) ? hash : `text:${hash}`);
 	}
 	return keys;
 }
@@ -260,10 +249,7 @@ const PROHIBITED_BEFORE =
 
 export function lessonCommands(text: string, evidenceRefs: readonly string[] = [], root?: string): LessonCommands {
 	const spans = lessonSubject(text).commands.filter((span) => realCommand(span, root));
-	const declared = commandRefKeys(
-		text,
-		evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)),
-	);
+	const declared = commandRefKeys(evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)));
 	const recommended: string[] = [];
 	const examples: string[] = [];
 	for (const span of spans) {

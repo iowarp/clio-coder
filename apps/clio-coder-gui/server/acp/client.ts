@@ -155,7 +155,7 @@ export function acpProblem(error: unknown) {
 		if (modelSelection)
 			return new AppProblem(
 				"validation",
-				"Clio did not change the conversation route because the requested model is not declared for this target. Choose an available model or update targets[].wireModels in settings.yaml, then restart the ACP session.",
+				"CLIO Coder did not change the conversation route because the requested model is not declared for this target. Choose an available model or update targets[].wireModels in settings.yaml, then restart the ACP session.",
 				undefined,
 				undefined,
 				{ modelSelection },
@@ -163,14 +163,14 @@ export function acpProblem(error: unknown) {
 		if (code === "prompt_not_admitted" && record(detail).reason === "authentication-required")
 			return new AppProblem(
 				"upstream_acp",
-				"Clio cannot access credentials for the selected target. Connect it with clio-coder auth login <target> in a terminal, then close and reopen this session. Background apps use Clio's saved credentials; terminal-only API keys are unavailable after login or restart.",
+				"CLIO Coder cannot access credentials for the selected target. Connect it with clio-coder auth login <target> in a terminal, then close and reopen this session. Background apps use CLIO Coder's saved credentials; terminal-only API keys are unavailable after login or restart.",
 			);
 		if (code === "prompt_not_admitted")
 			return new AppProblem("upstream_acp", promptAdmissionDetail(record(detail).reason));
 		if (code === "turn_failed")
 			return new AppProblem(
 				"upstream_acp",
-				"Clio could not complete this turn. Probe the selected target and check this session's trace for the cause, then retry. (turn_failed)",
+				"CLIO Coder could not complete this turn. Probe the selected target and check this session's trace for the cause, then retry. (turn_failed)",
 			);
 		if (code === "prompt_active" || code === "shell_active")
 			return new AppProblem(
@@ -180,7 +180,7 @@ export function acpProblem(error: unknown) {
 					: "A turn is already running in this task. Wait for it or stop it before changing the conversation.",
 			);
 		if (code === "shell_failed")
-			return new AppProblem("upstream_acp", "Clio could not run or record that shell line. (shell_failed)");
+			return new AppProblem("upstream_acp", "CLIO Coder could not run or record that shell line. (shell_failed)");
 		if (code === "unknown_command")
 			return new AppProblem(
 				"upstream_acp",
@@ -193,12 +193,12 @@ export function acpProblem(error: unknown) {
 			);
 		return new AppProblem(
 			"upstream_acp",
-			`Clio ACP refused the request (${typeof code === "string" && /^[a-z_]{1,80}$/.test(code) ? code : "protocol_error"}).`,
+			`CLIO Coder ACP refused the request (${typeof code === "string" && /^[a-z_]{1,80}$/.test(code) ? code : "protocol_error"}).`,
 		);
 	}
 	if (error instanceof AcpTimeoutError)
-		return new AppProblem("unavailable", "Clio ACP did not respond before its deadline.");
-	return new AppProblem("upstream_acp", "Clio ACP process is unavailable.");
+		return new AppProblem("unavailable", "CLIO Coder ACP did not respond before its deadline.");
+	return new AppProblem("upstream_acp", "CLIO Coder ACP process is unavailable.");
 }
 type AutonomyLevel = "default" | "yolo";
 type AutonomySource = "settings" | "session";
@@ -267,7 +267,7 @@ export class AcpClient {
 			},
 		});
 		if (!Value.Check(Initialize, result))
-			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid initialize response.");
+			throw new AppProblem("upstream_acp", "CLIO Coder ACP returned an invalid initialize response.");
 		this.capabilities = readCapabilities(result);
 		this.resumable = stableCapability(record(record(record(result).agentCapabilities).sessionCapabilities).resume);
 	}
@@ -300,7 +300,7 @@ export class AcpClient {
 			return sessionId;
 		}
 		if (!Value.Check(NewSession, result))
-			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid session identity.");
+			throw new AppProblem("upstream_acp", "CLIO Coder ACP returned an invalid session identity.");
 		if (described) this.modeDescriptions.set(result.sessionId, described);
 		if (typeof mode === "string") this.rememberReported(result.sessionId, mode, "settings");
 		return result.sessionId;
@@ -372,7 +372,7 @@ export class AcpClient {
 			if (this.modes.get(sessionId) === previous) this.rememberMode(sessionId, level, "session");
 		}
 		const current = this.modes.get(sessionId);
-		if (!current) throw new AppProblem("upstream_acp", "Clio did not provide a session mode.");
+		if (!current) throw new AppProblem("upstream_acp", "CLIO Coder did not provide a session mode.");
 		return current;
 	}
 	async setConfig(sessionId: string, body: SetConfigOption) {
@@ -415,9 +415,9 @@ export class AcpClient {
 		);
 		const projected = Value.Clean(PromptResult, result);
 		if (!Value.Check(PromptResult, projected))
-			throw new AppProblem("upstream_acp", "Clio ACP returned invalid turn usage or stop reason.");
+			throw new AppProblem("upstream_acp", "CLIO Coder ACP returned invalid turn usage or stop reason.");
 		const usage = Value.Clean(Usage, projected._meta[ACP_USAGE_META_KEY]);
-		if (!Value.Check(Usage, usage)) throw new AppProblem("upstream_acp", "Clio ACP returned invalid turn usage.");
+		if (!Value.Check(Usage, usage)) throw new AppProblem("upstream_acp", "CLIO Coder ACP returned invalid turn usage.");
 		return {
 			stopReason: projected.stopReason,
 			usage,

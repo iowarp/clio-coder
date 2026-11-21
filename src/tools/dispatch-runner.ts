@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
@@ -17,6 +18,7 @@ import {
 	COUNCIL_SEAT_NOT_RUN_WORDS,
 	type CouncilReport,
 	type CouncilReportMember,
+	councilVerdictKey,
 	isCouncilSeatNotRun,
 } from "../domains/agents/result-contract.js";
 import type { BriefingNotice, BriefingPart, BuiltBriefing } from "../domains/context/index.js";
@@ -117,6 +119,7 @@ import {
 	settleRecoveredCompeteDecision,
 } from "./compete-worktrees.js";
 import type { DispatchAdmissionState } from "./dispatch-admission.js";
+import { councilVoterPersona } from "./dispatch-arguments.js";
 import { describeDispatchPlan, RESOLVED_DISPATCH_PLAN_ARGUMENT, withResolvedPlanTaskPin } from "./dispatch-plan.js";
 import {
 	createDispatchRunEventRegistry,
@@ -565,6 +568,20 @@ function operatorUnavailableLine(receipt: RunResult): string | null {
 }
 
 /**
+ * Declared expected outputs absent on disk once the run settled. A worker whose contract puts its document elsewhere
+ * (an architect plan under .clio-coder/artifacts) names the path it wrote in its answer, and the caller moves the file
+ * where the task wanted it instead of searching for it (row 295).
+ */
+function unwrittenExpectedOutputsLine(receipt: RunResult): string | null {
+	const outputs = receipt.intent?.expectedOutputs ?? [];
+	const roots = [receipt.worktree?.path, receipt.reproducibility?.cwd].filter((root) => root !== undefined);
+	if (outputs.length === 0 || roots.length === 0) return null;
+	const missing = outputs.filter((output) => !roots.some((root) => existsSync(resolvePath(root, output))));
+	if (missing.length === 0) return null;
+	return `expected_outputs ${receipt.runId}: not written ${JSON.stringify(missing)}; its answer names what it wrote, so move or write these where the task needs them`;
+}
+
+/**
  * When the host feed recorded calls that errored or were refused, one line with its counts. A worker has reported a
  * malformed attempt the feed never saw and more denials than happened, and the parent repeated the worker's account
  * (bt-23).
@@ -827,6 +844,7 @@ export function formatDispatchOutput(
 					...routeWarningLines(run.receipt),
 					operatorUnavailableLine(run.receipt),
 					attemptFactsLine(run.receipt),
+					unwrittenExpectedOutputsLine(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),
@@ -2520,18 +2538,18 @@ function councilScopeIntent(base: DispatchRequest): DispatchIntent {
 }
 
 /**
- * The verdict a council answer casts, lower-cased.
+ * The verdict a council answer casts, under its tally key.
  *
- * A tally groups by the exact string, so folding case is the difference
- * between two members who both said yes agreeing and splitting into a
- * `no_majority` the operator has to read past. Folding happens here, at the one
- * place a verdict is ever read, so the reported member verdict and the tally
- * key can never disagree.
+ * A tally groups by the exact string, so folding case and separators is the
+ * difference between two members who gave one answer agreeing and splitting
+ * into a `no_majority` the operator has to read past. Folding happens here, at
+ * the one place a verdict is ever read, so the reported member verdict and the
+ * tally key can never disagree.
  */
 function councilVerdict(text: string): string | undefined {
 	const parsed = parseJsonObjectPayload(text);
 	return parsed.ok && typeof parsed.value.verdict === "string" && parsed.value.verdict.trim().length > 0
-		? parsed.value.verdict.trim().toLowerCase()
+		? councilVerdictKey(parsed.value.verdict)
 		: undefined;
 }
 
@@ -2697,6 +2715,7 @@ async function runCouncil(
 						? {
 								task: voteTask,
 								resultContractOverride: councilBallotContract(base.task),
+								...councilVoterPersona(member.agent ?? base.agentId),
 							}
 						: {}),
 					target: member.target,

@@ -35,7 +35,7 @@ export function register<R extends Route>(app: Hono, hub: EventHub, route: R, ha
 			if (expectedEpoch !== undefined && expectedEpoch !== hub.epoch)
 				throw new AppProblem(
 					"conflict",
-					"The command was not admitted because its server epoch is no longer current. Refresh Clio's state before trying again.",
+					"The command was not admitted because its server epoch is no longer current. Refresh CLIO Coder's state before trying again.",
 				);
 		}
 		const query: Record<string, unknown> = {};

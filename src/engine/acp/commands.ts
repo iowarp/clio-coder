@@ -47,6 +47,7 @@ import {
 	parseSlashCommand,
 } from "../../session-control/slash-commands.js";
 import type { CommandArgsSpec, CommandFlagSpec, CommandPositionalSpec } from "../../session-control/slash-spec.js";
+import { bounded, commandResultLines } from "./command-result.js";
 import { AcpRequestError } from "./errors.js";
 import { ACP_COMMANDS_INVOKE_METHOD, ACP_COMMANDS_LIST_METHOD, ACP_COMMANDS_META_KEY } from "./types.js";
 
@@ -67,21 +68,6 @@ const ACP_MAX_COMMAND_SUBCOMMANDS = 16;
 const ACP_MAX_COMMAND_ARGV = 32;
 const ACP_MAX_COMMAND_ARGV_BYTES = 4096;
 const ACP_MAX_COMMAND_RESULT_LINES = 200;
-const ACP_MAX_COMMAND_RESULT_LINE_BYTES = 1024;
-
-const ACP_TRUNCATION_SUFFIX = "…[truncated]";
-
-/** UTF-8-safe prefix; `Buffer.write` stops before a partial sequence, so no lone surrogate escapes. */
-function bounded(value: string, maxBytes: number): string {
-	if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-	const budget = maxBytes - Buffer.byteLength(ACP_TRUNCATION_SUFFIX, "utf8");
-	if (budget <= 0) {
-		const flat = Buffer.allocUnsafe(maxBytes);
-		return flat.toString("utf8", 0, flat.write(value, 0, maxBytes, "utf8"));
-	}
-	const buffer = Buffer.allocUnsafe(budget);
-	return `${buffer.toString("utf8", 0, buffer.write(value, 0, budget, "utf8"))}${ACP_TRUNCATION_SUFFIX}`;
-}
 
 /**
  * How a command behaves once it is running, beyond its return value. Both
@@ -523,14 +509,12 @@ export function invokeAcpCommand(
 	let rank = 0;
 	let truncated = false;
 	const push = (text: string): void => {
-		for (const raw of text.replace(/\r/gu, "").split("\n")) {
-			const trimmed = raw.trimEnd();
-			if (trimmed.length === 0) continue;
+		for (const line of commandResultLines(text)) {
 			if (lines.length >= ACP_MAX_COMMAND_RESULT_LINES) {
 				truncated = true;
 				return;
 			}
-			lines.push(bounded(trimmed, ACP_MAX_COMMAND_RESULT_LINE_BYTES));
+			lines.push(line);
 		}
 	};
 	const notice = (next: NoticeLevel, text: string): void => {

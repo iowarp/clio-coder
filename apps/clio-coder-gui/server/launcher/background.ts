@@ -47,6 +47,8 @@ const serverReport = (meta: unknown) => ({
 });
 const sameLaunch = (left: BackgroundConfig["launch"], right: BackgroundConfig["launch"]) =>
 	left.node === right.node && left.loader === right.loader && left.entry === right.entry && left.icon === right.icon;
+/** The XDG desktop entry is a Linux launcher; macOS and Windows open the app with clio-coder gui. */
+const desktopLaunchers = () => process.platform === "linux";
 const NATIVE_PACKAGE_SUFFIX = join("lib", "node_modules", "@iowarp", "clio-coder");
 /**
  * The install root of a package that scripts/install.sh or install.ps1 put at
@@ -121,24 +123,26 @@ async function withPublishLock<T>(directory: string, publish: () => Promise<T>):
 		await unlink(lock).catch(() => undefined);
 	}
 }
+/** `keptUnit` is the verified unit text left in place; without it the unit is rendered and written anew. */
 async function publishOwned(
 	directory: string,
 	config: BackgroundConfig,
 	files: Files,
 	replace: boolean,
-	unitChanged = true,
+	keptUnit?: string,
 ) {
-	return withPublishLock(directory, () => publishOwnedUnlocked(directory, config, files, replace, unitChanged));
+	return withPublishLock(directory, () => publishOwnedUnlocked(directory, config, files, replace, keptUnit));
 }
 async function publishOwnedUnlocked(
 	directory: string,
 	config: BackgroundConfig,
 	files: Files,
 	replace: boolean,
-	unitChanged = true,
+	keptUnit?: string,
 ) {
+	const unitChanged = keptUnit === undefined;
 	const configText = `${JSON.stringify(config, null, 2)}\n`,
-		unit = backgroundUnit(config, directory);
+		unit = keptUnit ?? backgroundUnit(config, directory);
 	const staging = await mkdtemp(join(dirname(directory), ".clio-coder-background-"));
 	try {
 		await writeFile(join(staging, "server.json"), configText, { flag: "wx", mode: 0o600 });
@@ -194,8 +198,10 @@ async function ownedOnce(directory: string) {
 		)
 			throw new Error("Ownership mismatch");
 		const config = await readBackgroundConfig(files.config);
-		if (unit !== backgroundUnit(config, directory)) throw new Error("Unit does not match configuration");
-		return { status: "installed" as const, files, config, legacy: owner.v === 1 };
+		// An earlier version rendered the unit differently (0.8.4 named the product "Clio Coder"). The manifest still
+		// proves it ours, so it is outdated rather than foreign, and every path that publishes rewrites it.
+		const outdated = unit !== backgroundUnit(config, directory);
+		return { status: "installed" as const, files, config, unit, outdated, legacy: owner.v === 1 };
 	} catch {
 		throw new Error(
 			"Background files are incomplete, modified or not private; ownership could not be verified. No files were changed.",
@@ -213,8 +219,9 @@ export async function rotateBackgroundToken(configFile: string): Promise<Backgro
 	if (state.status !== "installed" || state.files.config !== resolve(configFile))
 		throw new Error("Persistent mode starts only from a verified background setup. No files were changed.");
 	const config = { ...state.config, token: randomBytes(32).toString("base64url") };
-	// The token is not in the unit; leaving its file alone keeps the service manager from seeing a change.
-	await publishOwned(directory, config, state.files, true, false);
+	// The token is not in the unit; leaving its file alone keeps the service manager from seeing a change, and the
+	// manifest blesses the verified text on disk, which an outdated unit keeps until a repair rewrites it.
+	await publishOwned(directory, config, state.files, true, state.unit);
 	return config;
 }
 /** The launch token the app published last: one it starts rotates it, so a launcher waits on the file's. */
@@ -235,6 +242,7 @@ async function serviceState(files: Files, control: Control) {
 	return values;
 }
 async function desktopOwned(config: BackgroundConfig, directory: string) {
+	if (!desktopLaunchers()) return false;
 	const state = await launcherStatus(config.desktopPrefix);
 	if (state.status === "absent") return false;
 	if (
@@ -260,7 +268,8 @@ export async function installBackground(
 	if (
 		!info.isDirectory() ||
 		(await realpath(directory)) !== directory ||
-		(info.mode & 0o077) !== 0 ||
+		// Windows keeps a user's files private through the profile's ACLs, not mode bits.
+		(process.platform !== "win32" && (info.mode & 0o077) !== 0) ||
 		(process.getuid && info.uid !== process.getuid())
 	)
 		throw new Error("Background directory must be a private, canonical directory owned by this user.");
@@ -285,7 +294,9 @@ export async function installBackground(
 					([key, value]) => proposed.roots[key as keyof typeof proposed.roots] !== value,
 				)
 			)
-				throw new Error("Background handover requires the same Clio data roots. Run: clio-coder gui background status");
+				throw new Error(
+					"Background handover requires the same CLIO Coder data roots. Run: clio-coder gui background status",
+				);
 			await assertWindowsLauncherRemovable(directory);
 		}
 		launchMoved = foreign || !sameLaunch(state.config.launch, proposed.launch);
@@ -299,11 +310,11 @@ export async function installBackground(
 		config = launchMoved ? { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch } : state.config;
 	}
 	const desktopConfig = state.status === "installed" ? state.config : config;
-	const desktop = await launcherStatus(config.desktopPrefix);
+	const desktop = desktopLaunchers() ? await launcherStatus(config.desktopPrefix) : { status: "absent" as const };
 	const hasDesktop = desktop.status === "absent" ? false : await desktopOwned(desktopConfig, directory);
 	if (launchMoved && hasDesktop) await uninstallLauncher(config.desktopPrefix);
 	if (state.status === "absent") await publishOwned(directory, config, files, false);
-	else if (launchMoved) {
+	else if (launchMoved || state.outdated) {
 		await publishOwned(directory, config, files, true);
 		await control("reload", files.unit, files.unitFile);
 	}
@@ -311,7 +322,7 @@ export async function installBackground(
 	if (launchMoved) await control("restart", files.unit, files.unitFile);
 	// The app falls back to its second port while another program holds the first; report where it listens.
 	const port = serverReport(await ready(config.port, config.token, currentToken(files))).port ?? config.port;
-	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
+	if (desktopLaunchers()) await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
 	return { status: "installed", unit: files.unit, origin: `http://127.0.0.1:${port}`, directory };
 }
 export async function backgroundStatus(
@@ -331,6 +342,7 @@ export async function backgroundStatus(
 		unit: state.files.unit,
 		port,
 		configuredPort: state.config.port,
+		definition: state.outdated ? ("outdated" as const) : ("current" as const),
 		origin: `http://127.0.0.1:${port}`,
 		active: service.ActiveState ?? "unknown",
 		enabled: service.UnitFileState ?? "unknown",
@@ -351,7 +363,13 @@ export async function inspectBackground(directory: string, launch: LaunchPaths, 
 	const foreign = !(await sameInstallation(state.config.packageRoot, config.packageRoot));
 	const moved = !sameLaunch(state.config.launch, config.launch);
 	let status = await backgroundStatus(directory);
-	const needsRepair = foreign || moved || status.desktop === "absent" || status.windows === "absent" || !status.ready;
+	const needsRepair =
+		foreign ||
+		moved ||
+		state.outdated ||
+		(desktopLaunchers() && status.desktop === "absent") ||
+		status.windows === "absent" ||
+		!status.ready;
 	if (fix && needsRepair) {
 		await installBackground(directory, config, undefined, undefined, { handover: true });
 		await installWindowsLauncher(directory, { ...config.launch, background: directory });
@@ -376,7 +394,7 @@ export async function inspectBackground(directory: string, launch: LaunchPaths, 
 			name: "GUI background",
 			detail:
 				!fix && needsRepair
-					? `${foreign ? `owned by ${state.config.packageRoot}; handover available` : "service or launchers need repair"}; run \`clio-coder doctor --fix\``
+					? `${foreign ? `owned by ${state.config.packageRoot}; handover available` : state.outdated ? "service definition is from an earlier version" : "service or launchers need repair"}; run \`clio-coder doctor --fix\``
 					: `${fix && needsRepair ? "repaired; " : ""}${status.origin}; launchers resolve the current address; run \`clio-coder gui\` to renew the browser connection`,
 		},
 	];
@@ -393,17 +411,17 @@ async function pinCurrentLaunch(
 		throw new Error(
 			"Background setup belongs to another installation and its launch paths were left unchanged. Finish active work, then run: clio-coder gui background install --handover",
 		);
-	if (sameLaunch(state.config.launch, proposed.launch)) return state;
+	if (sameLaunch(state.config.launch, proposed.launch) && !state.outdated) return state;
 	await serviceState(state.files, control);
 	const hasDesktop = await desktopOwned(state.config, directory);
 	if (hasDesktop) await uninstallLauncher(state.config.desktopPrefix);
 	const config = { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch };
 	await publishOwned(directory, config, state.files, true);
 	await control("reload", state.files.unit, state.files.unitFile);
-	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
+	if (desktopLaunchers()) await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
 	if ((await windowsLauncherStatus(directory)) === "installed")
 		await installWindowsLauncher(directory, { ...config.launch, background: directory });
-	return { ...state, config };
+	return { ...state, config, unit: backgroundUnit(config, directory), outdated: false };
 }
 async function startOwned(state: Installed, control: Control, ready: Ready, action: "start" | "restart" = "start") {
 	await serviceState(state.files, control);
@@ -593,7 +611,7 @@ export async function backgroundRemoval(directory: string, packageRoot: string, 
 	if (state.status === "absent") return null;
 	// Reset and uninstall both call this before they delete anything, so the refusal names neither.
 	if (!(await sameInstallation(state.config.packageRoot, packageRoot)))
-		throw new Error("Background service belongs to another installation; Clio state was left unchanged.");
+		throw new Error("Background service belongs to another installation; CLIO Coder state was left unchanged.");
 	await serviceState(state.files, control);
 	await desktopOwned(state.config, directory);
 	await assertWindowsLauncherRemovable(directory);

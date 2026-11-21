@@ -14,8 +14,8 @@
  * rewrites reach it, each leaving what ran unchanged, and no path is ever
  * replaced. A record that carries a `command:` evidence ref names its
  * recommended command by that key; `lessonCommands` in lesson-evidence reads
- * it back, resolving a ref written before the key existed through the same
- * function, and falls back to conservative wording rules for older records.
+ * it back, and falls back to conservative wording rules for a record without
+ * one.
  */
 
 import { createHash } from "node:crypto";
@@ -386,7 +386,7 @@ export function trivialInvocation(invocation: SimpleInvocation): boolean {
 	return false;
 }
 
-/** Whitespace-collapsed text: what refs hashed before evidence identity, and what a quoted span is hashed over. */
+/** Whitespace-collapsed text: what a command without evidence identity, and a quoted span, is hashed over. */
 function collapsedText(text: string): string {
 	return text.replace(/\s+/gu, " ").trim();
 }
@@ -394,12 +394,15 @@ function collapsedText(text: string): string {
 export const COMMAND_EVIDENCE_REF_PREFIX = "command:";
 export const COMMAND_CLAIM_REF_PREFIX = "command-claimed:";
 
-/** The hash a ref carried before evidence identity: 16 hex characters of the whitespace-collapsed text. */
-export function legacyCommandHash(command: string): string {
+/**
+ * The hash a ref carries for a command that is not one segment and so has no evidence identity: 16 hex characters of
+ * the whitespace-collapsed text. It vouches for nothing; it only names the command.
+ */
+export function commandTextHash(command: string): string {
 	return createHash("sha256").update(collapsedText(command)).digest("hex").slice(0, 16);
 }
 
-/** Whether a ref's hash is a segment key, as opposed to a legacy text hash. */
+/** Whether a ref's hash is a segment key, as opposed to a text hash. */
 export function segmentKeyRef(hash: string): boolean {
 	return /^[0-9a-f]{64}$/u.test(hash);
 }
@@ -409,7 +412,7 @@ export function segmentKeyRef(hash: string): boolean {
  * command that is not one segment has no evidence identity and keeps its text hash, which vouches for nothing.
  */
 export function commandEvidenceRef(command: string): string {
-	return `${COMMAND_EVIDENCE_REF_PREFIX}${commandSegment(command)?.key ?? legacyCommandHash(command)}`;
+	return `${COMMAND_EVIDENCE_REF_PREFIX}${commandSegment(command)?.key ?? commandTextHash(command)}`;
 }
 
 /**
@@ -439,12 +442,9 @@ export function sourceEvidenceRef(path: string, quote: string): string {
 	return `source:${source.path}#${source.spanHash}`;
 }
 
-/**
- * A `source:` ref read back, or null. A ref written before the full hash carries the first 16 hex characters of the
- * same digest, so a legacy hash is a prefix of the full one.
- */
+/** A `source:` ref read back, or null. */
 export function parseSourceEvidenceRef(ref: string): SourceEvidence | null {
-	const match = /^source:(.+)#([0-9a-f]{16}|[0-9a-f]{64})$/u.exec(ref);
+	const match = /^source:(.+)#([0-9a-f]{64})$/u.exec(ref);
 	return match === null ? null : { path: match[1] ?? "", spanHash: match[2] ?? "" };
 }
 

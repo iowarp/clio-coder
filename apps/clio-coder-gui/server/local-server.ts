@@ -343,6 +343,6 @@ export async function waitForLocalServer(
 		await setTimeout(200);
 	}
 	throw new Error(
-		`Clio did not become ready on port ${listenPorts(port).join(" or ")}. Check clio-coder gui background status; another application may be using those ports.`,
+		`CLIO Coder did not become ready on port ${listenPorts(port).join(" or ")}. Check clio-coder gui background status; another application may be using those ports.`,
 	);
 }

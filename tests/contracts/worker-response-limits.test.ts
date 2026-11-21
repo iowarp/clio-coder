@@ -556,3 +556,37 @@ test("response deadline starts after local residency finishes", async (t) => {
 		finishLoad();
 	}
 });
+
+test("a worker turn that ends on a terminal artifact seals the document and its path as the final answer", () => {
+	const capture = createWorkerOutputCapture();
+	const preamble = {
+		role: "assistant",
+		stopReason: "toolUse",
+		content: [{ type: "toolCall", id: "a1", name: "gateway" }],
+	};
+	capture.observe({ type: "message_end", message: preamble });
+	capture.observe({
+		type: "tool_execution_start",
+		toolCallId: "a1",
+		toolName: "gateway",
+		args: { op: "call", capability: "artifact", args: { kind: "plan", content: "# Plan\n\n1. Add the flag." } },
+	});
+	strictEqual(capture.snapshot(), undefined, "an unsettled artifact call is no answer");
+	capture.observe({
+		type: "tool_execution_end",
+		toolCallId: "a1",
+		toolName: "gateway",
+		isError: false,
+		result: {
+			content: [{ type: "text", text: "wrote plan artifact (24B) to .clio-coder/artifacts/PLAN.md" }],
+			details: { kind: "ok", paths: ["/w/.clio-coder/artifacts/PLAN.md"], capability: "artifact" },
+			terminate: true,
+		},
+	});
+	deepStrictEqual(capture.snapshot(), {
+		state: "final",
+		text: "wrote plan artifact (24B) to .clio-coder/artifacts/PLAN.md\n\n# Plan\n\n1. Add the flag.",
+		bytes: 84,
+		truncated: false,
+	});
+});

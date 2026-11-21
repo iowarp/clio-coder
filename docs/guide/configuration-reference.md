@@ -6,9 +6,9 @@ This page is a map to the implemented configuration surface. Source defines the 
 
 ## Settings keys
 
-`clio-coder configure --settings` and GUI Settings use eight sections: **Connections → Chat → Fleet → Context & Memory → Permissions & Limits → Appearance → Integrations → Advanced**. TUI `/settings` uses Recent & Pinned plus seven areas: Models, Chat and display, Workers, Context and memory, Safety and limits, Workspace, and Advanced ([`settings-areas.ts`](../../src/core/settings-areas.ts)). Names describe what the settings change; YAML paths remain the version-2 schema below. For example, Connections manages `targets`, Appearance manages `interface.*`, and Permissions & Limits includes `fleet.permissions.*` and external-agent tool governance. See the [Settings Center walkthrough](configuration-and-targets.md#settings-center) for navigation, model inheritance, and save scopes.
+`clio-coder configure --settings`, GUI Settings and TUI `/settings` share seven areas: **Models → Chat and display → Workers → Context and memory → Safety and limits → Workspace → Advanced** ([`settings-areas.ts`](../../src/core/settings-areas.ts)); the TUI adds Recent & Pinned in front. Names describe what the settings change; YAML paths remain the version-2 schema below. For example, Models manages `targets`, Chat and display manages most of `interface.*`, and Safety and limits includes `fleet.permissions.*` and external-agent tool governance. See the [Settings Center walkthrough](configuration-and-targets.md#settings-center) for navigation, model inheritance, and save scopes.
 
-Section names and ownership come from [`settings-navigation.ts`](../../src/core/settings-navigation.ts). Control labels, descriptions, and ordering come from [`settings-controls.ts`](../../src/core/settings-controls.ts). UI adapters should consume these catalogs instead of deriving headings from schema roots or maintaining a separate list of names.
+Area names and ownership come from [`settings-areas.ts`](../../src/core/settings-areas.ts). Control labels, descriptions, and ordering come from [`settings-controls.ts`](../../src/core/settings-controls.ts). UI adapters should consume these catalogs instead of deriving headings from schema roots or maintaining a separate list of names.
 
 Settings use one strict version-2 schema. Unknown keys and invalid values are errors; omitted keys take compiled defaults. Objects merge by key, while arrays and scalar values replace the lower layer.
 
@@ -226,7 +226,6 @@ These schema keys are absent from `DEFAULT_SETTINGS` because an unset value sele
 | `fleet.default.node` | `local` or a `fleet.nodes[].id`. Accepted and displayed as Default worker location, but placement does not read it. Use `fleet.defaultNode` or `fleet.profiles.<name>.node` to select a node. | next turn |
 | `context.compaction.model` | Model pattern for a dedicated summarizer; unset uses the chat model. An explicit pattern must resolve uniquely or compaction fails visibly. | next turn |
 | `context.compaction.systemPrompt` | Path to a nonempty UTF-8 prompt file of at most 65,536 bytes, resolved relative to the session workspace at compaction time; unset uses the built-in instructions. | next turn |
-| `context.memory.observations.enabled` | Boolean. `true` turns `context.memory.surfaces.observe` on when that key is unset. | next turn |
 | `safety.review.target` | Target id for the reviewer; unset uses the chat target. An id that is not in `targets` is an error. | hot reload |
 | `safety.review.cadenceToolCalls` | Integer at least 1. Also review after this many tool calls inside a turn; unset reviews only at turn end. | hot reload |
 
@@ -239,14 +238,14 @@ These schema keys are absent from `DEFAULT_SETTINGS` because an unset value sele
 | Session controls | `/settings`, `/model`, and `/thinking` change the active session where supported. `/config` runs the configure flow and applies the saved routing to the session. |
 | CLI options | Run-specific values such as `--target`, `--model`, and turn constraints. |
 
-The schema, validation, migration paths, and user settings path are in [`src/core/config.ts`](../../src/core/config.ts). Layering and project-file merge behavior are in [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts). Settings control groups are defined in [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts) and [`src/core/settings-navigation.ts`](../../src/core/settings-navigation.ts).
+The schema, validation, migration paths, and user settings path are in [`src/core/config.ts`](../../src/core/config.ts). Layering and project-file merge behavior are in [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts). Settings control groups are defined in [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts) and [`src/core/settings-areas.ts`](../../src/core/settings-areas.ts).
 
 | Need to inspect | Source of truth |
 | --- | --- |
 | Setting names, types, defaults, enums | [`src/core/defaults.ts`](../../src/core/defaults.ts) and [`src/core/config.ts`](../../src/core/config.ts) |
 | Effect timing | [`src/domains/config/classify.ts`](../../src/domains/config/classify.ts) |
 | Project settings precedence and secret filtering | [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts) |
-| Settings UI sections and editable controls | [`src/core/settings-navigation.ts`](../../src/core/settings-navigation.ts), [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts) |
+| Settings UI areas and editable controls | [`src/core/settings-areas.ts`](../../src/core/settings-areas.ts), [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts) |
 | Target and provider settings | [`src/domains/providers/`](../../src/domains/providers/registry.ts) |
 | CLI flags and accepted values | [`src/cli/args.ts`](../../src/cli/args.ts), then `clio-coder <command> --help` |
 | Environment variables | [Environment variable reference](environment-variables.md) and their cited read sites |

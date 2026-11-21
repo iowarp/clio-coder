@@ -289,11 +289,10 @@ export interface HandoffSeedFlowDeps {
  */
 export function admitHandoffSeedFlow(
 	deps: HandoffSeedFlowDeps,
-	sourceSessionId: string | null,
+	sourceSessionId: string,
 ): { refusal: string } | { ruleIds: ReadonlyArray<string> } {
 	let labels: FlowRestrictionSet | null;
 	try {
-		if (sourceSessionId === null) throw new Error("the snapshot names no source session");
 		labels = deps.ledger.restrictionsOf(sourceSessionId);
 	} catch (error) {
 		if (!deps.hasSourceRules()) return { ruleIds: [] };

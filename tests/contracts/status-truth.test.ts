@@ -1482,20 +1482,21 @@ test("a key on a worker card holds that ask, restarts the ones queued behind it,
 	lifecycle.dispose();
 });
 
-test("a fork never answers its parent's worker ask; the card returns when the parent is current again", () => {
+test("a session that no longer holds a worker's ask never answers it; the card returns when its holder is current", () => {
 	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	const opened: string[] = [];
 	const answered: string[] = [];
-	let current = "session-f";
+	// The fork session-f adopted the parent's ask (bt-11), so the parent, resumed, only sees it.
+	let current = "session-p";
 	let state: OverlayState = "closed";
 	const lifecycle = createOverlayPermissionLifecycle({
 		bus,
 		dispatch: {
 			workerPermissionRefusal: (runId) =>
-				current === "session-p"
+				current === "session-f"
 					? null
-					: `run '${runId}' belongs to session session-p, which this session was forked from; /resume session-p to answer it`,
+					: `the ask is held by session session-f (run '${runId}'); only that session can answer it. /resume session-f to answer it`,
 			resolveWorkerPermission: (_runId, requestId, decision) => {
 				answered.push(`${requestId}:${decision}`);
 			},
@@ -1531,16 +1532,16 @@ test("a fork never answers its parent's worker ask; the card returns when the pa
 		fallback: "deny",
 		escalation: true,
 	});
-	deepStrictEqual(opened, [], "the fork's card never offers the parent's ask");
+	deepStrictEqual(opened, [], "the parent's card never offers the ask the fork holds");
 	strictEqual(notices.length, 1);
-	match(notices[0] ?? "", /coder's bash call needs approval, but run 'run-p' belongs to session session-p, which/u);
-	match(notices[0] ?? "", /\/resume session-p to answer it\. Unanswered, it is denied when its window ends\./u);
+	match(notices[0] ?? "", /coder's bash call needs approval, but the ask is held by session session-f \(run 'run-p'\)/u);
+	match(notices[0] ?? "", /\/resume session-f to answer it\. Unanswered, it is denied when its window ends\./u);
 	lifecycle.cancel();
-	deepStrictEqual(answered, [], "no key in the fork reaches the parent's worker");
+	deepStrictEqual(answered, [], "no key in the parent reaches the ask the fork holds");
 
-	current = "session-p";
-	bus.emit("session.reattached", { sessionId: "session-p", via: "resume", at: 0 } as never);
-	deepStrictEqual(opened, ["bash"], "the parent, current again, gets the card");
+	current = "session-f";
+	bus.emit("session.reattached", { sessionId: "session-f", via: "resume", at: 0 } as never);
+	deepStrictEqual(opened, ["bash"], "the fork, current again, gets the card");
 	lifecycle.confirm();
 	deepStrictEqual(answered, ["ask-p:approve"]);
 	lifecycle.dispose();
@@ -1567,7 +1568,7 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		);
 	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
 	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
-	// A fork cannot answer its parent's ask (bt-11 l): the worker reads as running and the ask as the parent's.
+	// A session that does not hold the ask cannot answer it (bt-11 l): the worker reads as running and the ask as its holder's.
 	Object.assign(progress, { approvalWindow: { ...progress.approvalWindow, owner: "session-p" } });
 	match(facts(100) ?? "", /^coder running · approval held by session session-p · denied in 1:59/u);
 	strictEqual((facts(100) ?? "").includes("your approval"), false);

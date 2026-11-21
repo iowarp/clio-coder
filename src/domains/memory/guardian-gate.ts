@@ -153,12 +153,12 @@ export function evaluateMemoryGate(record: MemoryRecord, store: ReadonlyArray<Me
 /**
  * A decided record speaks for its claim and its command. When an approved or
  * operator-rejected record of the same repository has the same claim identity
- * (two records of one claim survive from stores written before claims), or
+ * (two records of one claim, which `clio-coder memory consolidate` merges), or
  * carries one of this record's `command:` refs under any claim (a fix claim
  * recommending a command the operator rejected as a plain command), which
  * should stand is the operator's call, so this one waits as a pending note. A stored record's unverified `command-claimed:`
  * ref counts as its claim here, and both sides compare evidence identities, so
- * a ref written before identity existed and a spelling such as
+ * a spelling such as
  * `corepack pnpm -s test` against `pnpm test` meet as one command.
  */
 function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<MemoryRecord>): boolean {
@@ -182,7 +182,7 @@ function commandKeys(record: MemoryRecord, verifiedOnly: boolean): Set<string> {
 	const refs = verifiedOnly
 		? record.evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX))
 		: record.evidenceRefs;
-	return commandRefKeys(record.lesson, refs);
+	return commandRefKeys(refs);
 }
 
 /** Apply the same verdict whether observations arrive separately or with a new evidence-backed proposal. */
@@ -205,22 +205,6 @@ export function applyMemoryGate(
 }
 
 /**
- * Legacy reader, on the first mutation of a record written before delivery
- * counters: its `delivered` observations become `deliveredCount` and
- * `lastDeliveredAt`, so the count survives and the window holds verdicts only.
- * A record already migrated is left as it is.
- */
-function migrateLegacyDeliveries(record: MemoryRecord): void {
-	const delivered = (record.observations ?? []).filter((item) => item.kind === "delivered");
-	if (delivered.length === 0) return;
-	record.deliveredCount = (record.deliveredCount ?? 0) + delivered.length;
-	for (const item of delivered)
-		if (record.lastDeliveredAt === undefined || item.at > record.lastDeliveredAt) record.lastDeliveredAt = item.at;
-	record.observations = (record.observations ?? []).filter((item) => item.kind !== "delivered");
-	if (record.observations.length === 0) Reflect.deleteProperty(record, "observations");
-}
-
-/**
  * Add one observation to a record already cloned for this mutation. A delivery
  * is counted; a verdict joins the window scoped to the record's current
  * revision, once per session, kind and revision, and the window keeps its
@@ -231,7 +215,6 @@ export function observeMemoryRecord(
 	input: { sessionId: string; kind: MemoryObservationKind } & MemoryVerdictScope,
 	at: string,
 ): void {
-	migrateLegacyDeliveries(record);
 	if (input.kind === "delivered") {
 		record.deliveredCount = (record.deliveredCount ?? 0) + 1;
 		if (record.lastDeliveredAt === undefined || at > record.lastDeliveredAt) record.lastDeliveredAt = at;

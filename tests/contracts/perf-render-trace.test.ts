@@ -145,13 +145,17 @@ test("an 80-column streaming answer changes only the live tail after long settle
 	frame();
 	panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: " first" } as never);
 	frame();
-	const prefixRows = panel.renderRegions(80).prefix.length;
+	// Every piece before the streaming answer's is settled rows the frame hands on.
+	const prefixRows = panel
+		.renderRegions(80)
+		.pieces.slice(0, -1)
+		.reduce((rows, piece) => rows + piece.length, 0);
 	ok(prefixRows > 100, `the settled transcript has a long frozen prefix: ${prefixRows} rows`);
 	for (let tick = 0; tick < 8; tick++) {
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: ` word${tick}` } as never);
 		const changed = frame();
 		ok((trace.snapshotInputWedge().frames.at(-1)?.panel?.entriesRendered ?? -1) <= 1);
-		const tailRows = panel.renderRegions(80).tail.length;
+		const tailRows = panel.renderRegions(80).pieces.at(-1)?.length ?? 0;
 		ok(changed <= tailRows + 4, `${changed} rows changed, with ${tailRows} tail rows`);
 		ok(changed < prefixRows, "settled prefix rows are not counted");
 	}
@@ -268,8 +272,9 @@ test("a delta in a live turn of many settled messages renders only the live mess
 	panel.renderRegions(80);
 	for (let tick = 0; tick < 4; tick++) {
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: ` word${tick}` } as never);
-		const { prefix, tail } = panel.renderRegions(80);
+		const { pieces, rows } = panel.renderRegions(80);
+		const tail = pieces.at(-1)?.length ?? 0;
 		ok(segments <= 4, `${segments} segments rendered for one delta`);
-		ok(tail.length <= 8, `${tail.length} tail rows, after a frozen prefix of ${prefix.length}`);
+		ok(tail <= 8, `${tail} open rows, after ${rows - tail} settled rows`);
 	}
 });

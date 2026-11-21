@@ -1887,7 +1887,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
-		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
+		removeQueuedMirrorEntry: (text) => {
+			const entry = queues.acknowledgeInjected(text);
+			return entry === null
+				? undefined
+				: { kind: entry.kind, ...(entry.origin !== undefined ? { origin: entry.origin } : {}) };
+		},
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
 		telemetry: deps.telemetry,

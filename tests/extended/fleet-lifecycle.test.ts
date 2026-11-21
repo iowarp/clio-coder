@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
-import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
+import { compileExecutionPlan, executionPlanIdentityHash } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import { rememberSessionFleetNode } from "../../src/domains/dispatch/fleet-placement-preference.js";
 import {
@@ -210,6 +210,7 @@ describe("fleet lifecycle boundary", () => {
 			cwd: "/workspace/release",
 			fleet: "release",
 			planHash: plan.hash,
+			planIdentityHash: executionPlanIdentityHash(plan),
 			stepIds: plan.steps.map(({ id }) => id),
 			planSteps: structuredClone([...plan.steps]),
 			vars: { channel: "stable" },
@@ -375,7 +376,7 @@ describe("fleet lifecycle boundary", () => {
 		strictEqual(read.errors[0]?.message, "pending gate decision telemetry context invalid");
 	});
 
-	it("creates canonical task and compete refs while retaining exact legacy cleanup ownership", async () => {
+	it("creates canonical task and compete refs and refuses claims in the retired spelling", async () => {
 		scratch = await newScratchClioHome("clio-coder-git-naming-");
 		const root = join(scratch, "repository");
 		initGitRepository(root);
@@ -385,15 +386,11 @@ describe("fleet lifecycle boundary", () => {
 		const taskMarkerPath = `${task.path}.task-owner.json`;
 		const taskMarker = JSON.parse(readFileSync(taskMarkerPath, "utf8")) as Record<string, unknown>;
 		strictEqual(taskMarker.kind, "clio-coder-task-worktree");
-		const legacyTaskBranch = "clio/task/naming-task";
-		git(task.path, "branch", "-m", legacyTaskBranch);
-		writeFileSync(
-			taskMarkerPath,
-			`${JSON.stringify({ ...taskMarker, kind: "clio-task-worktree", branch: legacyTaskBranch }, null, 2)}\n`,
-			"utf8",
-		);
-		cleanupTaskWorktree({ ...task, branch: legacyTaskBranch }, true);
-		strictEqual(git(root, "branch", "--list", legacyTaskBranch), "");
+		writeFileSync(taskMarkerPath, `${JSON.stringify({ ...taskMarker, kind: "clio-task-worktree" }, null, 2)}\n`, "utf8");
+		throws(() => cleanupTaskWorktree(task, true), /ownership facts do not match/);
+		writeFileSync(taskMarkerPath, `${JSON.stringify(taskMarker, null, 2)}\n`, "utf8");
+		cleanupTaskWorktree(task, true);
+		strictEqual(git(root, "branch", "--list", task.branch), "");
 
 		const ownership = claimCompeteGroup(root, "naming-group");
 		const manifestPath = join(ownership.directory, ".clio-coder-compete-owner.json");
@@ -401,14 +398,14 @@ describe("fleet lifecycle boundary", () => {
 		strictEqual(manifest.kind, "clio-coder-compete-group");
 		const candidate = await createCandidateWorktreeMapped(ownership, 1, git(root, "rev-parse", "HEAD"));
 		strictEqual(candidate.branch, "clio-coder/compete/naming-group/1");
-		const legacyCompeteBranch = "clio/compete/naming-group/1";
-		git(candidate.path, "branch", "-m", legacyCompeteBranch);
 		writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, kind: "clio-compete-group" }, null, 2)}\n`, "utf8");
-		const legacyOwnership = loadCompeteGroup(root, "naming-group");
-		if (legacyOwnership === null) throw new Error("legacy compete ownership was not accepted");
-		await removeCandidateWorktreeMapped(legacyOwnership, { ...candidate, branch: legacyCompeteBranch }, true);
-		strictEqual(git(root, "branch", "--list", legacyCompeteBranch), "");
-		cleanupCompeteGroup(markCompeteGroupCleanupReady(legacyOwnership));
+		strictEqual(loadCompeteGroup(root, "naming-group"), null, "a manifest in the retired spelling is not a claim");
+		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+		const current = loadCompeteGroup(root, "naming-group");
+		if (current === null) throw new Error("current compete ownership was not accepted");
+		await removeCandidateWorktreeMapped(current, candidate, true);
+		strictEqual(git(root, "branch", "--list", candidate.branch), "");
+		cleanupCompeteGroup(markCompeteGroupCleanupReady(current));
 	});
 
 	it("invalidates recorded eligibility when any connection fact changes", async () => {

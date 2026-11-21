@@ -3363,8 +3363,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "settings",
 		rank: 1,
 		aliases: [
-			{ name: "login", args: "connections" },
-			{ name: "config", args: "connections" },
+			{ name: "login", args: "models" },
+			{ name: "config", args: "models" },
 		],
 		acp: false,
 		description: "Open interactive settings",

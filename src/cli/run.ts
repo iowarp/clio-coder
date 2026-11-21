@@ -928,6 +928,7 @@ async function runDispatch(
 	if (parsed.target) dispatchReq.target = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
+	if (parsed.continueRunId !== undefined) dispatchReq.continueRunId = parsed.continueRunId;
 	if (parsed.toolProfile) dispatchReq.toolProfile = parsed.toolProfile;
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
 	if (noSkills) dispatchReq.noSkills = true;

@@ -393,7 +393,7 @@ test("a seed from a restricted source labels a session of its own, so resuming a
 				: (fake.written.get(id) ?? []);
 		},
 	});
-	const admit = (source: string | null, hasSourceRules = true) =>
+	const admit = (source: string, hasSourceRules = true) =>
 		admitHandoffSeedFlow(
 			{
 				ledger,
@@ -407,7 +407,6 @@ test("a seed from a restricted source labels a session of its own, so resuming a
 	deepStrictEqual(admit("clean"), { ruleIds: [] });
 	strictEqual(fake.session.current(), null, "a clean source opens no session");
 	match(("refusal" in admit("gone") && (admit("gone") as { refusal: string }).refusal) || "", /session not found: gone/);
-	match(("refusal" in admit(null) && (admit(null) as { refusal: string }).refusal) || "", /names no source session/);
 	deepStrictEqual(admit("gone", false), { ruleIds: [] });
 
 	deepStrictEqual(admit("labeled"), { ruleIds: ["secrets"] });

@@ -414,9 +414,7 @@ tabs. Opening the view does not activate memory (`src/interactive/memory-overlay
 `context.memory.enabled` is on lets background memory prepare source-linked
 notes that the existing compactor can use in place of the history they cover.
 These continuity notes are separate from reusable lessons and preserve source
-references; they do not approve a durable record.
-`context.memory.observations.enabled: true` turns the surface on when
-`surfaces.observe` is unset. Source:
+references; they do not approve a durable record. Source:
 `src/domains/memory/observations.ts` and `src/domains/memory/runtime.ts`.
 
 Preparation is sized so a session that never nears compaction pays little:
@@ -571,7 +569,7 @@ Each memory surface has one switch under `context.memory.surfaces`. A change app
 | `context.memory.surfaces.correct` | `rules` | `rules`, `model` | In-session correction after repeated failures. `rules` keeps the repeated-failure annotation and makes no model call. `model` adds a model step on two consecutive tool errors or a loop signal. |
 | `context.memory.surfaces.bank` | `rules` | `rules`, `model` | Task-bank maintenance. `rules` writes procedural entries from failures and knowledge from your statements. `model` adds a model step every `context.memory.cadenceToolCalls` tools. |
 | `context.memory.surfaces.history` | `off` | `off`, `on` | Reviewing this repository's earlier sessions for lessons while the session is idle. Set `on` to turn it on. `clio-coder memory consolidate` is the separate model-free pass. |
-| `context.memory.surfaces.observe` | `off` | `off`, `on` | Preparing observation notes for a predicted compaction. `context.memory.observations.enabled: true` turns it on when this key is unset. |
+| `context.memory.surfaces.observe` | `off` | `off`, `on` | Preparing observation notes for a predicted compaction. |
 
 ## Trigger semantics
 
@@ -760,14 +758,6 @@ label and reaches every later route. `clio-coder memory propose --from-evidence`
 carries a label or its dispatching session does. Text recorded before the label can still be
 filed or gain evidence: history review stops at the label, and a retention already
 running, an interrupted one for a task finished before the label or a record already filed holds only what came before it. See [Information flow](information-flow.md).
-
-Releases before 0.6.8 could file a restricted session's lessons with no label. The first boot of 0.6.8 or later
-checks the store once, before the first prompt compiles and with memory on or off. It rejects a record whose
-source session took a label at or before the record was filed. In a repository whose project declares source rules
-it also rejects a record whose source session is gone, unreadable or never recorded. One notice gives the count.
-A rejected record stays on disk and reaches no route: review it with `clio-coder memory list` and restore one with
-`clio-coder memory approve <id>`. A marker at `<stateDir>/memory/flow-sweep-v1.json` keeps the check from running
-again, and a boot that cannot finish it continues normally and tries again next time.
 
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its
@@ -967,7 +957,7 @@ clio-coder models --target chat-target
 clio-coder
 ```
 
-Then inspect `/settings targets`, `/settings`, and `/memory`. Local co-residency still
+Then inspect `/settings models`, `/settings`, and `/memory`. Local co-residency still
 matters: the background model, action model, their KV caches, and parallel slots
 must fit the target's available memory. Increase `context.memory.timeoutMs` for
 a deliberately slow local route; lowering `context.memory.maxOutputTokens`
@@ -1002,9 +992,9 @@ never reviewed becomes eligible for `memory prune --stale` after 30 days. When t
 store reaches its 500-record cap, unpromoted notes make room, those without
 evidence before evidence-backed ones and then the one observed longest ago
 first. A lesson and a record you approved or rejected are never evicted. An
-invalid record is moved to `records.invalid.json` with one notice instead of
-disabling memory, and `clio-coder memory list` reports how many records were set
-aside. The repository
+invalid record, including one in a shape older builds wrote, is skipped with one
+notice instead of disabling memory and is dropped by the next store write;
+`clio-coder memory list` reports how many records were set aside. The repository
 a lesson belongs to is the repository root plus its root commit, and a linked
 worktree shares it only when the main repository registers that worktree; see
 [Repository-scoped identity](../architecture/evidence-and-memory.md#repository-scoped-identity).
@@ -1062,10 +1052,8 @@ the source session, its evidence reference, the runtime ID and redaction facts.
 Ordinary turns receive no snapshot. The skill writes the handoff to
 `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md`, an ignored project path;
 private status and secret-shaped values do not cross the export boundary. The
-parser also accepts the older `clio-task-memory` fence language and `version: 1`
-snapshots in handoff files written by earlier builds. Version 1 snapshots seed
-a bank unless the project declares information-flow source rules, and cannot be
-promoted, because they carry no source provenance.
+parser reads only the `clio-coder-task-memory` fence with a `version: 2`
+snapshot; any other handoff block is ignored.
 `clio-coder context reset` removes `.clio-coder/handoffs/`.
 
 When `/resume` restores a session with an id different from the previous one,

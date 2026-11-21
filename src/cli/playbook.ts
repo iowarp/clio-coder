@@ -18,7 +18,6 @@ import {
 	type PlaybookStep,
 } from "../domains/agents/index.js";
 import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
-import { convertWorkspaceForCommand } from "./workspace-conversion.js";
 
 const HELP = `clio-coder playbook <subcommand>
 
@@ -126,7 +125,6 @@ export async function runPlaybookCommand(args: ReadonlyArray<string>): Promise<n
 		process.stderr.write(HELP);
 		return 2;
 	}
-	await convertWorkspaceForCommand();
 	switch (sub) {
 		case "list":
 			return runList(args.slice(1));

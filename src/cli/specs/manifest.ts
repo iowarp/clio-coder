@@ -426,7 +426,7 @@ export const RUN_FLAGS: ReadonlyArray<ManifestFlag> = [
 	{ name: "--no-delegate", value: "boolean", appliesTo: main },
 	{ name: "--on-permission", value: ["deny", "fail"], appliesTo: main },
 	{ name: "--resume", aliases: ["-r"], value: "string", appliesTo: main, placement: "both" },
-	{ name: "--continue", value: "boolean", appliesTo: main, placement: "both" },
+	{ name: "--continue", value: "boolean", placement: "both" },
 	{ name: "--fork", value: "boolean", appliesTo: main, placement: "both" },
 	{ name: "--name", value: "string", appliesTo: main },
 	{ name: "--verify", value: "string", repeatable: true, appliesTo: main },

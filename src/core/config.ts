@@ -2111,7 +2111,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					issues.unknownKeys("context.memory", memory, [
 						"enabled",
 						"sideShare",
-						"observations",
 						"surfaces",
 						"target",
 						"model",
@@ -2128,18 +2127,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("sideShare" in memory) {
 						const parsed = expectNumber(issues, "context.memory.sideShare", memory.sideShare, { min: 0 });
 						if (parsed !== undefined) settings.context.memory.sideShare = parsed;
-					}
-					if ("observations" in memory) {
-						if (!isPlainObject(memory.observations)) issues.add("context.memory.observations", "expected a map");
-						else {
-							issues.unknownKeys("context.memory.observations", memory.observations, ["enabled"]);
-							if ("enabled" in memory.observations) {
-								const parsed = expectBoolean(issues, "context.memory.observations.enabled", memory.observations.enabled);
-								// The switch moved to `surfaces.observe`. Files written before the move keep working: the old key
-								// sets the surface, and an explicit `surfaces.observe`, parsed below, wins over it.
-								if (parsed !== undefined) settings.context.memory.surfaces.observe = parsed ? "on" : "off";
-							}
-						}
 					}
 					if ("surfaces" in memory) {
 						if (!isPlainObject(memory.surfaces))

@@ -147,8 +147,7 @@ export interface FleetResumeStepDiff {
 
 export type FleetResumeRefusal =
 	| { ok: false; reason: "fleet-name"; priorFleet: string; currentFleet: string }
-	/** `priorCwd` is null for a record written before roots recorded their workspace. */
-	| { ok: false; reason: "workspace"; priorCwd: string | null; currentCwd: string }
+	| { ok: false; reason: "workspace"; priorCwd: string; currentCwd: string }
 	| { ok: false; reason: "running"; pid: number }
 	| { ok: false; reason: "vars" }
 	| {
@@ -200,10 +199,8 @@ export function planFleetResume(
 	}
 	// The plan hash holds no absolute path, so without this a same-named fleet
 	// in another project would replay that project's successful prefix here.
-	// Roots have recorded their workspace since 0.5.4; an older record cannot
-	// prove where it ran and is refused rather than guessed.
-	if (record.cwd === undefined || canonicalPath(record.cwd) !== canonicalPath(workspaceRoot)) {
-		return { ok: false, reason: "workspace", priorCwd: record.cwd ?? null, currentCwd: workspaceRoot };
+	if (canonicalPath(record.cwd) !== canonicalPath(workspaceRoot)) {
+		return { ok: false, reason: "workspace", priorCwd: record.cwd, currentCwd: workspaceRoot };
 	}
 	// A root still executing would race its own resume over one workspace. A
 	// null endedAt alone is not that proof: a crashed root never stamps it, and
@@ -218,12 +215,11 @@ export function planFleetResume(
 	}
 	if (sortedVars(record.vars) !== sortedVars(vars)) return { ok: false, reason: "vars" };
 	// Endpoint limits and the foreground count are bound into `hash` at route
-	// preflight, so a busier endpoint must not read as a changed plan. A record
-	// written before the identity hash existed still compares the bound hash.
-	const priorHash = record.planIdentityHash ?? record.planHash;
-	const currentHash = record.planIdentityHash !== undefined ? executionPlanIdentityHash(plan) : plan.hash;
+	// preflight, so a busier endpoint must not read as a changed plan.
+	const priorHash = record.planIdentityHash;
+	const currentHash = executionPlanIdentityHash(plan);
 	if (priorHash !== currentHash) {
-		const priorSteps = record.planSteps ?? record.stepIds;
+		const priorSteps = record.planSteps;
 		const width = Math.max(priorSteps.length, plan.steps.length);
 		const diff: FleetResumeStepDiff[] = [];
 		for (let index = 0; index < width; index += 1) {

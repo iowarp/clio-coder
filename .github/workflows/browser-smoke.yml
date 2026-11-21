@@ -36,6 +36,19 @@ jobs:
       # The fixture harness runs the checkout's CLI from source, so the smoke needs no root build.
       - name: Drive the GUI in the runner's Chrome
         run: pnpm --filter @iowarp/clio-coder-gui smoke:browser --chrome /usr/bin/google-chrome --out "$RUNNER_TEMP/browser-smoke"
+      # --check fails on a behavior that must hold (draft kept, scroll held, live edge, whole answer, no page error);
+      # frame, input and paint timings vary by runner and are kept as figures in the uploaded report.
+      - name: Stream turns while typing and scrolling, checking what must not regress
+        run: pnpm --filter @iowarp/clio-coder-gui perf --client dist/client --chrome /usr/bin/google-chrome --out "$RUNNER_TEMP/gui-perf" --label stream --check
+      - name: Resume and page back through a 200-turn conversation
+        run: pnpm --filter @iowarp/clio-coder-gui perf --client dist/client --chrome /usr/bin/google-chrome --out "$RUNNER_TEMP/gui-perf" --label history --history 200 --page-back --check
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gui-perf-output
+          path: ${{ runner.temp }}/gui-perf
+          if-no-files-found: ignore
+          retention-days: 14
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -44,3 +57,24 @@ jobs:
           path: ${{ runner.temp }}/browser-smoke
           if-no-files-found: ignore
           retention-days: 14
+
+  gui-api-smoke:
+    name: gui api smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The app's server drives the built CLI as its ACP child, against a local OpenAI-compatible fixture.
+      - run: pnpm run build
+      - name: Open, stream, reload, configure and delete a conversation through the HTTP API
+        run: pnpm --filter @iowarp/clio-coder-gui test:acp-real

@@ -34,6 +34,14 @@ export interface SerializeConversationOptions {
 	messageMaxChars?: number;
 	/** An assistant message follows these entries on the path, so a call already read every tool result in them. */
 	assistantFollows?: boolean;
+	/** Signature skeletons of code reads by tool-result turn id (`codeReadSkeletons`), used only for a body over the cap. */
+	skeletons?: ReadonlyMap<string, CodeReadSkeleton>;
+}
+
+export interface CodeReadSkeleton {
+	text: string;
+	/** Function bodies the skeleton reduced to a marker line. */
+	bodies: number;
 }
 
 export interface PreparedBranchEntries {
@@ -47,13 +55,27 @@ export interface PreparedBranchEntries {
  * Keeps a body's head and tail around the omission marker, so a value near the
  * end of a long read reaches the summarizer as well as its opening does.
  */
-function truncate(text: string, max: number, seen: boolean): string {
-	if (text.length <= max) return text;
-	const read = seen
+function readNote(seen: boolean): string {
+	return seen
 		? "the assistant read this result in full"
 		: "clipped before the assistant read it, so a narrow re-read is expected";
+}
+
+function truncate(text: string, max: number, seen: boolean): string {
+	if (text.length <= max) return text;
+	const read = readNote(seen);
 	const head = Math.ceil(max / 2);
 	return `${text.slice(0, head)}\n\n[... ${text.length - max} more characters not shown here; ${read}]\n\n${text.slice(text.length - (max - head))}`;
+}
+
+/**
+ * A code read over the cap goes to the summarizer as its signatures (CTX-17): every declaration a later turn may name
+ * survives, where a head-and-tail clip kept the bodies at both ends and dropped every signature between them. A
+ * skeleton still over the cap is clipped the same way.
+ */
+function signaturesOnly(skeleton: CodeReadSkeleton, max: number, seen: boolean): string {
+	const bodies = `${skeleton.bodies} function bod${skeleton.bodies === 1 ? "y" : "ies"}`;
+	return `[Signatures only: ${bodies} omitted to fit the summary; ${readNote(seen)}]\n${truncate(skeleton.text, max, seen)}`;
 }
 
 /** Keeps a message's head and tail around an omission marker; the ledger keeps the raw turn. */
@@ -200,9 +222,13 @@ export function serializeConversation(
 					parts.push(`[Assistant tool calls]: ${toolCallText(entry, messageMax).trim()}`);
 					break;
 				}
-				case "tool_result":
-					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), bodyMax, index < seenBefore)}`);
+				case "tool_result": {
+					const body = toolResultText(entry).trim();
+					const skeleton = body.length > bodyMax ? options.skeletons?.get(entry.turnId) : undefined;
+					const seen = index < seenBefore;
+					parts.push(`[Tool result]: ${skeleton ? signaturesOnly(skeleton, bodyMax, seen) : truncate(body, bodyMax, seen)}`);
 					break;
+				}
 				case "system":
 					if (text.length === 0) break;
 					parts.push(`[System]: ${text}`);
@@ -243,4 +269,47 @@ export function serializeConversation(
 		// the accepted note is never regenerated from summarizer prose.
 	}
 	return parts.join("\n\n");
+}
+
+/**
+ * Skeletons of the code reads among `entries` whose body is longer than `minChars`, keyed by tool-result turn id, for
+ * `serializeConversation`'s `skeletons`. A read is a `read` call, direct or through the gateway, whose path names a
+ * language with a vendored grammar; any other result, and any read the parser cannot skeletonize, has no entry and
+ * keeps the plain clip. The parser loads on first use, never at boot.
+ */
+export async function codeReadSkeletons(
+	entries: ReadonlyArray<SessionEntry>,
+	minChars: number,
+): Promise<ReadonlyMap<string, CodeReadSkeleton>> {
+	const paths = new Map<string, string>();
+	const note = (id: unknown, name: unknown, args: unknown) => {
+		if (typeof id !== "string" || typeof name !== "string") return;
+		const call = displayToolCall(name, args);
+		const path = payloadObject(call.args)?.path;
+		if (call.toolName === "read" && typeof path === "string" && path.length > 0) paths.set(id, path);
+	};
+	for (const entry of entries) {
+		if (entry.kind !== "message") continue;
+		if (entry.role === "assistant")
+			for (const block of assistantToolCalls(entry))
+				note(block.id, block.name, block.arguments ?? block.args ?? block.input);
+		if (entry.role === "tool_call") {
+			const obj = payloadObject(entry.payload);
+			if (obj) note(obj.toolCallId, obj.name ?? obj.toolName, toolCallArguments(obj));
+		}
+	}
+	const reads = entries.flatMap((entry) => {
+		if (entry.kind !== "message" || entry.role !== "tool_result") return [];
+		const path = paths.get(String(payloadObject(entry.payload)?.toolCallId));
+		const body = toolResultText(entry).trim();
+		return path !== undefined && body.length > minChars ? [{ turnId: entry.turnId, path, body }] : [];
+	});
+	const skeletons = new Map<string, CodeReadSkeleton>();
+	if (reads.length === 0) return skeletons;
+	const { codeSkeleton } = await import("../../context/codewiki/tree-sitter.js");
+	for (const read of reads) {
+		const skeleton = await codeSkeleton(read.path, read.body);
+		if (skeleton) skeletons.set(read.turnId, skeleton);
+	}
+	return skeletons;
 }
