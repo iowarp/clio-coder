@@ -13712,6 +13712,10 @@
 																"const": "agent"
 															},
 															{
+																"type": "string",
+																"const": "operator-message"
+															},
+															{
 																"type": "null"
 															}
 														]
