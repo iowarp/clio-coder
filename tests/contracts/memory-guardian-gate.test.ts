@@ -302,6 +302,18 @@ describe("memory guardian gate", () => {
 		const inside = `node ${join(repo, "fixture.mjs")} --mode native`;
 		const subdirectory = { kind: "canonical-path" as const, key: join(repo, "sub") };
 		strictEqual(deliver({ ...bound, id: "mem-00000000000000b4", ...lesson(inside), repository: subdirectory }), null);
+		// Only the reader's scratch roots go unjudged: a program under /tmp, and a scratch parameter inside the checkout,
+		// are refused at delivery as at write.
+		const scratchProgram = "/tmp/session-a/run-check.sh --mode native";
+		const program = { kind: "command" as const, command: pattern(scratchProgram) };
+		ok(
+			deliver({ ...bound, id: "mem-00000000000000b5", ...lesson(scratchProgram), claim: program })?.includes(
+				"outside its repository checkout",
+			),
+		);
+		const intoCheckout = `node fixture.mjs --out ${join(repo, "out.txt")}`;
+		const checkoutParameter = { kind: "command" as const, command: pattern(intoCheckout, 3) };
+		ok(deliver({ ...bound, id: "mem-00000000000000b6", ...lesson(intoCheckout), claim: checkoutParameter }) !== null);
 
 		// The legacy reader: a store written before claims is read as it is, and its first mutation keeps the count.
 		const legacyDir = scratch();
