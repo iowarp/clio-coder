@@ -203,6 +203,7 @@ import {
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import { createHostInserts } from "./host-inserts.js";
 import { loopGuardContinuationDetail, TOOL_LOCK_RESET_DETAIL } from "./loop-guard-interrupt.js";
+import { withSettledHistory } from "./message-list-digest.js";
 import { createMessagePath } from "./message-path.js";
 import { continuityContextFromSession, continuityRenderTime } from "./model-session-replay.js";
 import type { NoticeSource } from "./notice-source.js";
@@ -3871,16 +3872,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					});
 
 				let turnSnapshot = captureTurnSnapshot("pending");
-				let admission = context.refreshLiveBudget(submittedText);
 				// The window-fit gate reads the A4 count, so a request Pi's clamp would refuse compacts first.
-				const fitInput = (view: typeof admission): number | null =>
+				const fitInput = (view: LiveBudgetView): number | null =>
 					view.inputTokens === null
 						? null
 						: (context.overflowFitTokens?.(agentRuntime, submittedText, view.inputTokens) ?? view.inputTokens);
+				// The publication and the fit count read one history, so the second matches the first's check by identity (SC-6).
+				const admit = (): { view: LiveBudgetView; input: number | null } =>
+					withSettledHistory(() => {
+						const view = context.refreshLiveBudget(submittedText);
+						return { view, input: fitInput(view) };
+					});
+				const first = admit();
+				let admission = first.view;
 				// The output reserve shrinks as input grows, so it is resolved at the count the gate chose.
 				const fitReserve = (input: number | null): number | null =>
 					input === null ? null : resolveFitOutputReserve(agentRuntime, input);
-				const firstInput = fitInput(admission);
+				const firstInput = first.input;
 				if (
 					admission.effectiveWindow !== null &&
 					!requestFits(firstInput, fitReserve(firstInput), admission.effectiveWindow)
@@ -3927,8 +3935,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					if (!admissionCurrent()) return;
 					submittedText = composeSubmittedText();
-					admission = context.refreshLiveBudget(submittedText);
-					const admittedInput = fitInput(admission);
+					const admitted = admit();
+					admission = admitted.view;
+					const admittedInput = admitted.input;
 					const admittedReserve = fitReserve(admittedInput);
 					if (
 						admission.effectiveWindow !== null &&
