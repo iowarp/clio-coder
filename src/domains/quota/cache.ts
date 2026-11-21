@@ -68,6 +68,14 @@ interface MissEntry {
 	holdMs: number;
 }
 
+/** A failed read of an endpoint several adapters share, which holds that endpoint for all of them. */
+interface EndpointHold {
+	storedAtMs: number;
+	holdMs: number;
+	message: string | null;
+	retryAfterSeconds: number | null;
+}
+
 export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 	const ttlMs = options.ttlMs ?? DEFAULT_QUOTA_CACHE_TTL_MS;
 	const now = options.now ?? Date.now;
@@ -75,8 +83,81 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 	// Failed reads are held too. Without this, every read of a provider without credentials fetched and journaled
 	// again, and a surface that re-reads on each journal update polled in a closed loop.
 	const misses = new Map<string, MissEntry>();
+	// Adapters on one endpoint (anthropic-max and claude-code both read Anthropic's usage endpoint) poll one at a
+	// time, and a failure holds the endpoint for every one of them: both used to send a request together and both
+	// drew a 429.
+	const endpointHolds = new Map<string, EndpointHold>();
+	const endpointLanes = new Map<string, Promise<unknown>>();
 
 	const fresh = (entry: CacheEntry | undefined): boolean => entry !== undefined && now() - entry.storedAtMs < ttlMs;
+	const missAnswer = (cached: CacheEntry | undefined, snapshot: UsageSnapshot): UsageSnapshot =>
+		cached === undefined
+			? snapshot
+			: { ...cached.snapshot, stale: true, message: snapshot.message ?? cached.snapshot.message ?? null };
+
+	const resolveOne = async (provider: QuotaProvider): Promise<UsageSnapshot> => {
+		const cached = entries.get(provider.id);
+		if (fresh(cached) && cached !== undefined) return cached.snapshot;
+		const miss = misses.get(provider.id);
+		if (miss !== undefined && now() - miss.storedAtMs < miss.holdMs) {
+			// A missing credential holds until one appears; detect() is a local credential read, so a login (in
+			// this process or another) is picked up on the next read without spending a usage request.
+			if (miss.status !== "no_credentials") return miss.answer;
+			const detected = await provider.detect().catch(() => false);
+			if (!detected) return miss.answer;
+		}
+		const endpoint = provider.endpoint;
+		const hold = endpoint === undefined ? undefined : endpointHolds.get(endpoint);
+		if (hold !== undefined && now() - hold.storedAtMs < hold.holdMs) {
+			const remainingMs = hold.holdMs - (now() - hold.storedAtMs);
+			const answer = missAnswer(cached, {
+				providerId: provider.id,
+				displayName: provider.displayName,
+				status: "error",
+				windows: [],
+				message: hold.message,
+				retryAfterSeconds: hold.retryAfterSeconds === null ? null : Math.ceil(remainingMs / 1000),
+				fetchedAt: null,
+			});
+			misses.set(provider.id, { answer, status: "error", storedAtMs: now(), holdMs: remainingMs });
+			return answer;
+		}
+
+		const snapshot = await provider.fetch();
+		noteQuotaRead(snapshot, ttlMs, now());
+		journalPolledQuota(
+			snapshot.status !== "ok" && cached
+				? {
+						...cached.snapshot,
+						...snapshot,
+						windows: cached.snapshot.windows,
+						credits: cached.snapshot.credits ?? null,
+						plan: cached.snapshot.plan ?? null,
+						stale: true,
+					}
+				: snapshot,
+			now(),
+		);
+		if (snapshot.status === "ok") {
+			misses.delete(provider.id);
+			entries.set(provider.id, { snapshot, storedAtMs: now() });
+			if (endpoint !== undefined) endpointHolds.delete(endpoint);
+			return snapshot;
+		}
+		const answer = missAnswer(cached, snapshot);
+		const holdMs = snapshot.status === "no_credentials" ? ttlMs : failureHoldMs(ttlMs, snapshot.retryAfterSeconds);
+		misses.set(provider.id, { answer, status: snapshot.status, storedAtMs: now(), holdMs });
+		// An expired token or a missing credential belongs to one adapter; any other failure is the endpoint's.
+		if (endpoint !== undefined && snapshot.status === "error") {
+			endpointHolds.set(endpoint, {
+				storedAtMs: now(),
+				holdMs,
+				message: snapshot.message ?? null,
+				retryAfterSeconds: snapshot.retryAfterSeconds ?? null,
+			});
+		}
+		return answer;
+	};
 
 	return {
 		read(providerId) {
@@ -99,6 +180,7 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 			if (providerId === undefined) {
 				entries.clear();
 				misses.clear();
+				endpointHolds.clear();
 			} else {
 				entries.delete(providerId);
 				misses.delete(providerId);
@@ -106,48 +188,16 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 		},
 
 		async resolve(provider) {
-			const cached = entries.get(provider.id);
-			if (fresh(cached) && cached !== undefined) return cached.snapshot;
-			const miss = misses.get(provider.id);
-			if (miss !== undefined && now() - miss.storedAtMs < miss.holdMs) {
-				// A missing credential holds until one appears; detect() is a local credential read, so a login (in
-				// this process or another) is picked up on the next read without spending a usage request.
-				if (miss.status !== "no_credentials") return miss.answer;
-				const detected = await provider.detect().catch(() => false);
-				if (!detected) return miss.answer;
-			}
-
-			const snapshot = await provider.fetch();
-			noteQuotaRead(snapshot, ttlMs, now());
-			journalPolledQuota(
-				snapshot.status !== "ok" && cached
-					? {
-							...cached.snapshot,
-							...snapshot,
-							windows: cached.snapshot.windows,
-							credits: cached.snapshot.credits ?? null,
-							plan: cached.snapshot.plan ?? null,
-							stale: true,
-						}
-					: snapshot,
-				now(),
-			);
-			if (snapshot.status === "ok") {
-				misses.delete(provider.id);
-				entries.set(provider.id, { snapshot, storedAtMs: now() });
-				return snapshot;
-			}
-			const answer =
-				cached === undefined
-					? snapshot
-					: { ...cached.snapshot, stale: true, message: snapshot.message ?? cached.snapshot.message ?? null };
-			misses.set(provider.id, {
-				answer,
-				status: snapshot.status,
-				storedAtMs: now(),
-				holdMs: snapshot.status === "no_credentials" ? ttlMs : failureHoldMs(ttlMs, snapshot.retryAfterSeconds),
+			const endpoint = provider.endpoint;
+			if (endpoint === undefined) return resolveOne(provider);
+			const previous = endpointLanes.get(endpoint) ?? Promise.resolve();
+			const turn = previous.then(() => resolveOne(provider));
+			const settled = turn.catch(() => undefined);
+			endpointLanes.set(endpoint, settled);
+			void settled.then(() => {
+				if (endpointLanes.get(endpoint) === settled) endpointLanes.delete(endpoint);
 			});
-			return answer;
+			return turn;
 		},
 	};
 }

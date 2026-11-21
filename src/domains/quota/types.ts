@@ -64,6 +64,11 @@ export interface UsageSnapshot {
 export interface QuotaProvider {
 	id: string;
 	displayName: string;
+	/**
+	 * The usage endpoint this adapter reads, when another adapter reads the same one. The cache polls adapters that
+	 * share an endpoint one at a time, and a failed read holds the endpoint for all of them.
+	 */
+	endpoint?: string;
 	/** True when usable credentials are present, without spending a network call. */
 	detect(): Promise<boolean>;
 	/** Read current usage, reporting failure as a snapshot status rather than throwing. */

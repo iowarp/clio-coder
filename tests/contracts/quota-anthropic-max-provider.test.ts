@@ -7,6 +7,8 @@ import {
 	parseStoredAnthropicCredential,
 } from "../../src/domains/quota/anthropic-max-provider.js";
 import { ANTHROPIC_OAUTH_BETA, ANTHROPIC_USAGE_URL } from "../../src/domains/quota/anthropic-usage.js";
+import { createClaudeCodeQuotaProvider } from "../../src/domains/quota/claude-code-provider.js";
+import { createQuotaService } from "../../src/domains/quota/service.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -136,6 +138,33 @@ it("carries Retry-After through from a rate-limited usage read", async () => {
 	assert.equal(snapshot.status, "error");
 	assert.equal(snapshot.message, "HTTP 429");
 	assert.equal(snapshot.retryAfterSeconds, 17);
+});
+
+it("polls the two Anthropic adapters one at a time, and one 429 holds their shared endpoint for both (C-19)", async () => {
+	const { fetch, calls } = stubFetch(() => new Response("", { status: 429, headers: { "Retry-After": "300" } }));
+	const claudeCode = createClaudeCodeQuotaProvider({
+		fetch,
+		now: () => NOW,
+		readCredentials: async () => ({
+			accessToken: "sk-ant-oat-claude-code",
+			subscriptionType: null,
+			expiresAtMs: null,
+			refreshTokenExpiresAtMs: null,
+			hasRefreshToken: true,
+		}),
+	});
+	const service = createQuotaService({ providers: [provider(fetch), claudeCode], includeLocal: false });
+
+	const rows = await service.read();
+
+	assert.equal(calls.length, 1, "one refresh sends one request into the rate limit, not one per adapter");
+	assert.deepEqual(
+		rows.map((row) => [row.providerId, row.status, row.message]),
+		[
+			["anthropic-max", "error", "HTTP 429"],
+			["claude-code", "error", "HTTP 429"],
+		],
+	);
 });
 
 it("accepts only a stored oauth credential with a usable access token", () => {
