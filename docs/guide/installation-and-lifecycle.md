@@ -376,10 +376,10 @@ The `origin` in the report from `gui background install` names the port the app
 actually listens on, which is `7373` while another program holds `4343`.
 
 On Linux the background app starts at login and appears in the app menu; under
-WSL it also adds a Start Menu shortcut and a sign-in entry on Windows. macOS and
-native Windows have no background service. On macOS the default offer is silent,
-and an explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
-`the desktop app runs as a login service on Linux only; start it here with: clio-coder gui`.
+WSL it also adds a Start Menu shortcut and a sign-in entry on Windows. On macOS it
+starts at login as a launchd agent. Elsewhere the default offer is silent, and an
+explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
+`the desktop app runs as a login service on Linux and macOS only; start it here with: clio-coder gui`.
 `install.ps1` has no GUI parameter. Both installers end with
 `Desktop app: clio-coder gui`, which starts a private server for that terminal.
 [The graphical application](gui.md) covers the app itself.

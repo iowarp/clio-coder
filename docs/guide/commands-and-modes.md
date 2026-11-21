@@ -195,7 +195,7 @@ session CLIO Coder is already inside. The pane contracts are in
 
 | Subcommand | Effect |
 | --- | --- |
-| `gui background install [--handover] [--open] [--port <1-65535>]` | Install the optional login service on Linux with a systemd user session. `--handover` takes over a verified idle service that another installation owns and keeps its address and credentials. The stable address is `127.0.0.1:4343`, or `127.0.0.1:7373` while another program holds it; `--port` replaces 4343 as the first choice. |
+| `gui background install [--handover] [--open] [--port <1-65535>]` | Install the optional login service: a systemd user unit on Linux, a launchd agent on macOS, a Task Scheduler logon task on Windows. `--handover` takes over a verified idle service that another installation owns and keeps its address and credentials. The stable address is `127.0.0.1:4343`, or `127.0.0.1:7373` while another program holds it; `--port` replaces 4343 as the first choice. |
 | `gui background status\|start\|open\|stop\|uninstall` | Inspect, start, open or stop the service, or remove it together with its login, desktop and Windows entries. |
 | `gui background restart [--if-idle]` | Load a newly installed version; `--if-idle` leaves the service alone while work or a conversation is open. |
 | `gui launcher install\|status\|uninstall` | Manage a desktop entry. |

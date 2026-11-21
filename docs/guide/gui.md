@@ -30,7 +30,7 @@ clio-coder gui launcher install|status|uninstall
 
 A bare `clio-coder gui` picks between two kinds of server:
 
-- **The background app**, when this installation has one installed (Linux only). `gui` starts the service if it is stopped, waits for it to answer (up to 15 seconds), prints the launch link, opens the app when a browser opens (under WSL an app window that is already open is focused and, when `--path` names a page, shown that page, see [One app window](#one-app-window)) and returns the terminal. If the running app reports a different CLIO Coder version and is idle, `gui` restarts it first. If the app is busy, `gui` prints a line naming both versions and the command that restarts it.
+- **The background app**, when this installation has one installed (Linux, macOS or Windows). `gui` starts the service if it is stopped, waits for it to answer (up to 15 seconds), prints the launch link, opens the app when a browser opens (under WSL an app window that is already open is focused and, when `--path` names a page, shown that page, see [One app window](#one-app-window)) and returns the terminal. If the running app reports a different CLIO Coder version and is idle, `gui` restarts it first. If the app is busy, `gui` prints a line naming both versions and the command that restarts it.
 - **A private server** for this terminal. It listens on `127.0.0.1` on a free port, prints its launch link on stdout and runs until Ctrl+C. SIGINT, SIGTERM and SIGHUP (the terminal closing) close the server, stop every owned ACP child and exit.
 
 `gui` falls back to a private server with a printed reason when the background app's files cannot be verified, when the background app belongs to another CLIO Coder installation, or when the service manager will not start it. It changes nothing in those cases.
@@ -54,7 +54,7 @@ Launch output is one link on stdout. A private server prints `[clio-coder:gui] h
 
 ## Background app
 
-`gui background` keeps one server at a stable address from login so the browser can install the application as a standalone window and stay signed in. It needs Linux with a systemd user session. Any other platform exits 1 with `Background setup currently requires Linux with a systemd user session.` WSL counts as Linux when the distribution runs systemd. Native Windows and macOS services are not available: both run the private server only.
+`gui background` keeps one server at a stable address from login so the browser can install the application as a standalone window and stay signed in. It is a per-user service: a systemd user unit on Linux (WSL counts when the distribution runs systemd), a launchd LaunchAgent in `~/Library/LaunchAgents` on macOS, and a Task Scheduler logon task under `\CLIO Coder\` on native Windows, started through `conhost.exe --headless` so no console window opens. Any other platform prints an `unavailable` report; `status`, `stop` and `uninstall` exit 0 there and the other subcommands exit 2.
 
 | Subcommand | Behavior |
 | --- | --- |
@@ -79,7 +79,7 @@ All service files live in `<state>/gui/background/` unless `--directory` says ot
 | File | Content |
 | --- | --- |
 | `server.json` | Mode 0600. Port, a 43-character random launch token that every start of the app replaces, CLIO Coder's four directory roots, the package root, the `PATH` at install time, the Node and entry paths, and the desktop prefix. |
-| `clio-coder-gui-<12 hex>.service` | The systemd user unit. The hex is the first 12 characters of the SHA-256 of the directory path. |
+| `clio-coder-gui-<12 hex>.service` | The systemd user unit on Linux; `ai.iowarp.clio-coder-gui.<12 hex>.plist` on macOS, copied into `~/Library/LaunchAgents` on enable; `clio-coder-gui-<12 hex>.task.json`, the logon task's command, on Windows. The hex is the first 12 characters of the SHA-256 of the directory path. |
 | `owner.json` | Ownership record holding hashes of the config and unit. Every later command verifies it and refuses to touch files that do not match. |
 | `windows.json` | Present only under WSL. Records the Windows shortcut paths and hashes. |
 
@@ -180,9 +180,9 @@ A new task's child may report a health fact, such as a local model server that i
 
 | Option | Effect |
 | --- | --- |
-| `--gui` or `CLIO_CODER_INSTALL_GUI=1` | Runs `clio-coder gui background install --handover` without asking. On macOS and other non-Linux systems it warns that the login service is Linux only and names `clio-coder gui`. |
+| `--gui` or `CLIO_CODER_INSTALL_GUI=1` | Runs `clio-coder gui background install --handover` without asking. On systems other than Linux and macOS it warns that the login service is Linux and macOS only and names `clio-coder gui`. |
 | `--no-gui` or `CLIO_CODER_INSTALL_GUI=0` | Skips the step. |
-| neither (default `ask`) | Asks `Add the Clio Coder desktop app? ... [Y/n]` only when stdout is a terminal and `/dev/tty` is readable. Otherwise skips silently, and always skips silently off Linux. |
+| neither (default `ask`) | Asks `Add the Clio Coder desktop app? ... [Y/n]` only when stdout is a terminal and `/dev/tty` is readable. Otherwise skips silently, and always skips silently off Linux and macOS. |
 
 `CLIO_CODER_INSTALL_GUI` takes `1` or `0`. A value other than those and the default `ask` fails the installer with `CLIO_CODER_INSTALL_GUI must be 1 or 0`. The step is skipped when `gui background status` already reports `installed`. The installer does not echo the command's JSON. The installer runs `gui background install --handover --json`, so an idle background app that another installation set up is transferred to this one, as [Background app](#background-app) describes. It states the outcome in one line, with Start Menu wording when the report shows the Windows shortcut installed under WSL, warns `Windows desktop setup failed: <reason>; run clio-coder doctor --fix` when the WSL shortcut step failed, and adds a reminder to save shell-only provider keys with `clio-coder auth login <target>`. If the install fails (no systemd user session, or a background app that is still busy, for example) the installer warns `the desktop app was not set up. Retry with: clio-coder doctor --fix (verified service handover waits until active work finishes)`.
 
