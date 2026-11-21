@@ -17,12 +17,35 @@ import { bareSkillIdentity, bareSkillManifest } from "../resources/skills/bare-s
 import { normalizedSkillHash } from "../resources/skills/content-hash.js";
 import { loadSkills } from "../resources/skills/loader.js";
 import { detectForeignPlugin, type ForeignResourceOutcome, projectForeignPlugin } from "./foreign.js";
+import {
+	applyHookAdoption,
+	hookDestinationConflict,
+	mapForeignHooks,
+	type PortedHookDeclaration,
+} from "./hooks-adopt.js";
 import { installInteropPackage } from "./install.js";
+import { applyInstructionsAdoption, planInstructionsAdoption } from "./instructions-adopt.js";
 import { inventoryText } from "./inventory.js";
+import { type AdoptedMcpServer, applyMcpAdoption, mapForeignMcpServer, mcpDestinationConflict } from "./mcp-adopt.js";
 import { digest, projectAgent, projectPrompt, projectSkill, prose, safeName, tree } from "./projection.js";
 import type { InteropAgentId, InteropInventory, InteropInventoryItem } from "./types.js";
 
-export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin";
+export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin" | "mcp" | "hook" | "instructions";
+export const ADOPTION_KINDS: ReadonlyArray<AdoptionKind> = [
+	"skill",
+	"agent",
+	"prompt",
+	"plugin",
+	"mcp",
+	"hook",
+	"instructions",
+];
+/** Kinds that install as library packages; the rest write a Clio config file. */
+type PackageAdoptionKind = Exclude<AdoptionKind, "mcp" | "hook" | "instructions">;
+/** Whether an inventory kind has an adoption path; the rest are listed with the reason they are not migrated. */
+export function isAdoptableKind(kind: string): kind is AdoptionKind {
+	return (ADOPTION_KINDS as ReadonlyArray<string>).includes(kind);
+}
 export interface InteropAdoptionEntry {
 	item: InteropInventoryItem;
 	action: "install" | "skip";
@@ -40,6 +63,10 @@ export interface InteropAdoptionEntry {
 	unsupported?: string[];
 	/** Immutable bytes reviewed by the operator. Never serialized by the CLI. */
 	files?: Readonly<Record<string, string>>;
+	/** The reviewed MCP server; its env values are never serialized or printed, only its keys. */
+	server?: AdoptedMcpServer;
+	/** The reviewed Clio hook declarations a foreign event ports to. */
+	hooks?: PortedHookDeclaration[];
 }
 export interface InteropAdoptionPlan {
 	host: InteropAgentId;
@@ -309,7 +336,7 @@ function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdo
 			host,
 			source: item.path,
 			sourceScope: item.scope,
-			untrusted: true,
+			untrusted: adoptedPackageTrust(item) === "foreign",
 			...(value.format ? { format: value.format } : {}),
 		},
 	};
@@ -366,6 +393,23 @@ export function unmetRequirements(
 	};
 	for (const ref of requirements) visit(ref);
 	return [...problems];
+}
+
+/** Why a resource Clio inventories has no adoption path. */
+function unportedReason(item: InteropInventoryItem): string {
+	return `Not adoptable: ${item.kind} is executable configuration or unsupported presentation data.`;
+}
+
+/**
+ * The trust an adopted package installs with. Content read from the
+ * operator's own home (~/.claude, ~/.codex and their peers) is theirs, and
+ * the reviewed plan is the consent, so it works at once. A repository's
+ * agent directories are someone else's writing: those stay foreign behind
+ * integrations.projectResources.trustProjectImports, whatever scope they
+ * are adopted into. The install record keeps the interop origin either way.
+ */
+function adoptedPackageTrust(item: InteropInventoryItem): "trusted" | "foreign" {
+	return item.scope === "user" ? "trusted" : "foreign";
 }
 
 export function planInteropAdoption(input: {
@@ -428,12 +472,100 @@ export function planInteropAdoption(input: {
 		const skip = (reason: string): void => {
 			plan.entries.push({ item, action: "skip", reason });
 		};
-		if (!["skill", "agent", "prompt", "plugin"].includes(item.kind)) {
-			skip(`Not adoptable: ${item.kind} is executable configuration or unsupported presentation data.`);
+		if (!isAdoptableKind(item.kind)) {
+			skip(unportedReason(item));
 			continue;
 		}
 		if (input.kind && item.kind !== input.kind) {
 			skip(`Excluded by --kind ${input.kind}.`);
+			continue;
+		}
+		if (item.kind === "hook") {
+			if (item.plugin) {
+				skip("Declared by a plugin; plugin hooks are never activated by adoption.");
+				continue;
+			}
+			const mapping = mapForeignHooks(item, input.host, cwd);
+			if (!mapping.ok) {
+				skip(mapping.reason);
+				continue;
+			}
+			const key = `hook:${mapping.destination}:${item.name}`;
+			const conflict = planned.has(key)
+				? `Hook ids for ${item.name} are already planned from another source.`
+				: hookDestinationConflict(mapping.hooks, mapping.destination);
+			if (conflict !== null) {
+				skip(conflict);
+				continue;
+			}
+			planned.add(key);
+			plan.entries.push({
+				item,
+				action: "install",
+				id: `hook:${item.name}`,
+				destination: mapping.destination,
+				digest: mapping.digest,
+				hooks: mapping.hooks,
+				reason:
+					item.scope === "project"
+						? "Ported into the project hooks file; it runs only after `clio-coder config trust hooks` approves the changed file."
+						: "Ported into your Clio hooks file: the same shell command, the event as JSON on stdin, exit 2 blocks.",
+				...(mapping.notes.length ? { unsupported: mapping.notes } : {}),
+			});
+			continue;
+		}
+		if (item.kind === "instructions") {
+			const adoption = planInstructionsAdoption(item, input.host);
+			if (!adoption.ok) {
+				skip(adoption.reason);
+				continue;
+			}
+			plan.entries.push({
+				item,
+				action: "install",
+				id: `instructions:${item.name}`,
+				destination: adoption.destination,
+				digest: adoption.digest,
+				files: { [item.name]: adoption.section },
+				reason: adoption.replaces
+					? "Replaces the section adopted earlier from this file in your user handbook."
+					: "Copied into your user handbook, which CLIO Coder loads ahead of project handbooks from the next session.",
+				...(adoption.notes.length ? { unsupported: adoption.notes } : {}),
+			});
+			continue;
+		}
+		if (item.kind === "mcp") {
+			if (item.plugin) {
+				skip("Declared by a plugin; it arrives with that plugin's package, under plugin MCP trust.");
+				continue;
+			}
+			const mapping = mapForeignMcpServer(item, cwd);
+			if (!mapping.ok) {
+				skip(mapping.reason);
+				continue;
+			}
+			const key = `mcp:${mapping.destination}:${mapping.server.id}`;
+			const conflict = planned.has(key)
+				? `Server id collision: ${mapping.server.id} is already planned from another source.`
+				: mcpDestinationConflict(mapping.server, mapping.destination);
+			if (conflict !== null) {
+				skip(conflict);
+				continue;
+			}
+			planned.add(key);
+			plan.entries.push({
+				item,
+				action: "install",
+				id: mapping.server.id,
+				destination: mapping.destination,
+				digest: mapping.digest,
+				server: mapping.server,
+				reason:
+					item.scope === "project"
+						? `Declared in the project MCP config; it launches only after \`clio-coder mcp trust ${mapping.server.id}\`.`
+						: "Declared in your Clio MCP config, which Clio trusts as your own; it gets no network grant unless you add `network: true`.",
+				...(mapping.omittedFields.length ? { unsupported: mapping.omittedFields.map((f) => `field ${f}`) } : {}),
+			});
 			continue;
 		}
 		if (item.plugin && !input.kind && planned.has(item.plugin)) {
@@ -518,6 +650,22 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			`${entry.action.toUpperCase()} ${entry.item.kind} ${entry.item.name} (${entry.item.scope})`,
 			`  Source: ${entry.item.path}`,
 			...(entry.destination ? [`  Destination: ${entry.destination}`, `  SHA-256: ${entry.digest}`] : []),
+			...(entry.hooks ?? []).map(
+				(hook) =>
+					`  Hook ${hook.id}: ${String(hook.on)}${Array.isArray(hook.tools) ? ` [${hook.tools.join(", ")}]` : ""}${hook.once ? " once per session" : ""} runs ${hook.argv.slice(2).join(" ")}`,
+			),
+			// The approval covers exactly this text, so all of it is shown.
+			...(entry.item.kind === "instructions" && entry.files
+				? Object.values(entry.files).flatMap((text) => text.split("\n").map((line) => `  | ${line}`))
+				: []),
+			...(entry.server
+				? [
+						`  Server ${entry.server.id}: ${[entry.server.command, ...entry.server.args].join(" ")}`,
+						...(Object.keys(entry.server.env).length
+							? [`  Env (values copied, not shown): ${Object.keys(entry.server.env).sort().join(", ")}`]
+							: []),
+					]
+				: []),
 			`  ${entry.reason}`,
 			...(entry.format && entry.format !== "portable"
 				? [`  Format: ${entry.format} (normalized to a portable Clio package)`]
@@ -527,7 +675,14 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			...(entry.unsupported ?? []).map((feature) => `  UNSUPPORTED ${feature}`),
 			...(entry.omitted ?? []).map((file) => `  SKIP ${file}: executable, host-specific, or non-text data.`),
 		]),
-		"Foreign resources remain untrusted until the project-import trust setting is enabled.",
+		...(plan.entries.some(
+			(entry) =>
+				entry.action === "install" && entry.item.scope === "project" && adoptedPackageTrust(entry.item) === "foreign",
+		)
+			? [
+					"Packages adopted from a project directory stay inactive until integrations.projectResources.trustProjectImports is on; packages from your own home are trusted.",
+				]
+			: []),
 		"Host files are never changed. Approval applies only to the displayed content.",
 	].join("\n");
 }
@@ -552,7 +707,42 @@ export function applyInteropAdoption(
 		return result;
 	}
 	for (const entry of plan.entries) {
-		if (entry.action !== "install" || !entry.files || !entry.id) continue;
+		if (entry.action !== "install" || !entry.id) continue;
+		if (entry.item.kind === "hook") {
+			try {
+				const written = entry.digest ? applyHookAdoption(entry.item, plan.host, plan.cwd, entry.digest) : undefined;
+				if (written?.ok) result.installed.push(entry.id);
+				else result.diagnostics.push(`${entry.item.name}: ${written?.reason ?? "no reviewed digest"}`);
+			} catch (error) {
+				result.diagnostics.push(`${entry.item.name}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			continue;
+		}
+		if (entry.item.kind === "instructions") {
+			try {
+				const written = entry.digest ? applyInstructionsAdoption(entry.item, plan.host, entry.digest) : undefined;
+				if (written?.ok) result.installed.push(entry.id);
+				else result.diagnostics.push(`${entry.item.name}: ${written?.reason ?? "no reviewed digest"}`);
+			} catch (error) {
+				result.diagnostics.push(`${entry.item.name}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			continue;
+		}
+		if (entry.item.kind === "mcp") {
+			const written = entry.digest
+				? (() => {
+						try {
+							return applyMcpAdoption(entry.item, plan.cwd, entry.digest as string);
+						} catch (error) {
+							return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
+						}
+					})()
+				: undefined;
+			if (written?.ok) result.installed.push(`mcp:${written.id}`);
+			else result.diagnostics.push(`${entry.item.name}: ${written?.reason ?? "no reviewed digest"}`);
+			continue;
+		}
+		if (!entry.files) continue;
 		let staging: string | undefined;
 		try {
 			const current = prepared(entry.item, plan.host);
@@ -574,8 +764,8 @@ export function applyInteropAdoption(
 				throw new Error(candidate.diagnostics.map((d) => d.message).join("; "));
 			const installed = installInteropPackage({
 				sourcePath: staging,
-				kind: entry.item.kind as AdoptionKind,
-				trust: "foreign",
+				kind: entry.item.kind as PackageAdoptionKind,
+				trust: adoptedPackageTrust(entry.item),
 				cwd: plan.cwd,
 				scope: plan.scope,
 				expectedId: entry.id,

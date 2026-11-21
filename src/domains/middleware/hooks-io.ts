@@ -3,6 +3,8 @@
  * runner. Hooks live in dedicated, secrets-free files so they stay out of the
  * strict settings schema:
  *
+ *   - `<config>/hooks.yaml`           the operator's own hooks (origin "user"),
+ *     trusted by authorship like the user `mcp.yaml`,
  *   - `.clio-coder/hooks.yaml`        committed project hooks (origin "project"),
  *   - `.clio-coder/hooks.local.yaml`  gitignored local hooks (origin "project.local"),
  *   - `<extensionRoot>/hooks.yaml`  hooks shipped by an installed extension.
@@ -19,6 +21,8 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
 	gitCommitAttributionEnabled,
@@ -31,6 +35,7 @@ import {
 	type ProjectSurfaceSnapshot,
 	projectSurfaceTrustNotice,
 } from "../../core/workspace-trust.js";
+import { clioConfigDir } from "../../core/xdg.js";
 import {
 	type HookReceiptSink,
 	loadUserHooks,
@@ -45,6 +50,8 @@ import {
 import type { MiddlewareHookRegistration } from "./runtime.js";
 
 const COMMAND_OUTPUT_MAX_BYTES = 1024 * 1024;
+/** The operator's own hooks file in Clio's config directory. */
+export const USER_HOOKS_FILENAME = "hooks.yaml";
 
 export interface HookFileIssue {
 	source: UserHookSource;
@@ -80,6 +87,8 @@ export interface ReadHookSourcesOptions {
 	cwd: string;
 	/** Captured extension declarations; absent means no extension hooks. */
 	capturedSources?: CapturedHookSourceSet;
+	/** Directory holding the user `hooks.yaml`; Clio's config directory when unset. */
+	configDir?: string;
 }
 
 function readBatch(
@@ -125,6 +134,22 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 			continue;
 		}
 		batches.push({ source, declarations: entry.declarations });
+	}
+
+	const userFile = path.join(options.configDir ?? clioConfigDir(), USER_HOOKS_FILENAME);
+	let userText: string | null = null;
+	try {
+		userText = readFileSync(userFile, "utf8");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT")
+			fileIssues.push({
+				source: { origin: "user", sourcePath: userFile },
+				message: `failed to read ${userFile}: ${err instanceof Error ? err.message : String(err)}`,
+			});
+	}
+	if (userText !== null) {
+		const batch = readBatch({ origin: "user", sourcePath: userFile }, userFile, userText, fileIssues);
+		if (batch) batches.push(batch);
 	}
 
 	const projectSurface = captureProjectSurface(options.cwd, "hooks");
@@ -225,6 +250,7 @@ export function spawnSyncCommandRunner(): UserHookCommandRunner {
 		const result = spawnSync(command ?? "", args, {
 			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 			timeout: options.timeoutMs,
+			...(options.input !== undefined ? { input: options.input } : {}),
 			maxBuffer: COMMAND_OUTPUT_MAX_BYTES,
 			encoding: "utf8",
 			shell: false,

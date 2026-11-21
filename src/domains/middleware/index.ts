@@ -36,6 +36,7 @@ export {
 } from "./dispatch-nudge.js";
 export type { MiddlewareBundle, MiddlewareBundleOptions, MiddlewareDomain } from "./extension.js";
 export { createEnvHookBudgetTracker, createMiddlewareBundle, createMiddlewareDomain } from "./extension.js";
+export { dialectToolNames, isUserHookDialect, type UserHookDialect } from "./hook-dialect.js";
 export type {
 	HookReceipt,
 	HookReceiptExtension,
@@ -58,6 +59,7 @@ export {
 	normalizeUserHook,
 	USER_HOOK_COMMAND_OUTPUT_MAX_CHARS,
 	USER_HOOK_COMMAND_TIMEOUT_DEFAULT_MS,
+	USER_HOOK_COMMAND_TIMEOUT_MAX_MS,
 	USER_HOOK_ORIGIN_ORDER,
 	USER_HOOK_PROMPT_MAX_CHARS,
 	userHookToRegistration,
@@ -71,6 +73,7 @@ export {
 	type HookFileIssue,
 	readHookSources,
 	spawnSyncCommandRunner,
+	USER_HOOKS_FILENAME,
 } from "./hooks-io.js";
 export { MiddlewareManifest } from "./manifest.js";
 export {
