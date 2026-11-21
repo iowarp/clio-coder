@@ -615,6 +615,39 @@ describe("claims lifecycle (#406)", () => {
 		}
 	});
 
+	it("item 4: pruning a superseder keeps the edge that says the cited claim it superseded is superseded (f-mem)", async () => {
+		const env = await isolateClioEnv("clio-claims-life-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const first = claimAt(project, true, "a".repeat(40), "2026-11-06T00:00:00.000Z");
+			const second = claimAt(project, true, "b".repeat(40), "2026-11-06T00:01:00.000Z");
+			const third = claimAt(project, true, "c".repeat(40), "2026-11-08T00:00:00.000Z");
+			for (const claim of [first, second, third]) await appendClaims([claim]);
+			const status = () => {
+				const read = readClaims(project);
+				return claimStatuses(read.records, read.edges).get(first.id);
+			};
+			assert.equal(status(), "superseded");
+			// A memory record cites the first claim, so only the second (superseded by the third) is pruned.
+			const result = await compactClaimsLog(project, {
+				pruneSupersededBefore: new Date("2026-11-07T00:00:00.000Z"),
+				cited: new Set([first.id]),
+			});
+			assert.deepEqual([result.prunedClaims, result.prunedEdges], [1, 1]);
+			assert.deepEqual(
+				readClaims(project)
+					.records.map((claim) => claim.id)
+					.sort(),
+				[first.id, third.id].sort(),
+			);
+			assert.equal(status(), "superseded", "the kept claim still reads as superseded");
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("item 4: the offers file is trimmed to recent offers once it outgrows its bound", async () => {
 		const env = await isolateClioEnv("clio-claims-life-");
 		try {
