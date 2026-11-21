@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { backgroundCapability } from "../contracts/launch-capability.js";
 import {
 	background,
 	backgroundStatus,
@@ -30,6 +31,14 @@ import {
 } from "../server/launcher/background-config.js";
 import { desktopEntry } from "../server/launcher/desktop-entry.js";
 import { launcherStatus } from "../server/launcher/install.js";
+import {
+	agentCopy,
+	launchdCalls,
+	launchdStatus,
+	parseTaskSpec,
+	taskStatus,
+	windowsArgument,
+} from "../server/launcher/service-model.js";
 import { findLocalServer } from "../server/local-server.js";
 import { serverOptions } from "../server/options.js";
 import { autoOpenBrowser, type controlService, serviceCommand } from "../server/process-policy.js";
@@ -174,25 +183,64 @@ test("background preparation is atomic and refuses foreign services, linked cred
 	);
 });
 
-test("background setup on a host without systemd reports it unavailable instead of failing", async (t) => {
+test("background setup is a launchd agent on macOS and a logon task on Windows; other hosts report it unavailable", async (t) => {
 	const lines: string[] = [];
 	t.mock.method(console, "log", (line: string) => lines.push(line));
 	const exitCode = process.exitCode;
 	t.after(() => {
 		process.exitCode = exitCode;
 	});
-	for (const [platform, command, code] of [
-		["darwin", "status", undefined],
-		["win32", "uninstall", undefined],
-		["darwin", "install", 2],
+	for (const [command, code] of [
+		["status", undefined],
+		["uninstall", undefined],
+		["install", 2],
 	] as const) {
 		process.exitCode = undefined;
-		await background([command], launch, platform);
-		assert.equal(process.exitCode, code, `${platform} ${command}`);
+		await background([command], launch, "aix");
+		assert.equal(process.exitCode, code, `aix ${command}`);
 		const report = JSON.parse(lines.pop() ?? "{}");
 		assert.equal(report.status, "unavailable");
-		assert.match(report.reason, new RegExp(`not available on ${platform === "darwin" ? "macOS" : "Windows"}`));
+		assert.match(report.reason, /launchd \(macOS\) or Task Scheduler \(Windows\), so it is not available on aix/);
 	}
+	assert.ok(backgroundCapability("darwin-arm64").available && backgroundCapability("win32-x64").available);
+	const config = await newBackgroundConfig(4317, { node: process.execPath, entry: launch.entry }, "/desktop");
+	// macOS: a LaunchAgent whose arguments are XML-escaped, never shell-parsed.
+	const mac = backgroundPaths("/Users/a & b/background", "darwin");
+	assert.match(mac.unit, /^ai\.iowarp\.clio-coder-gui\.[a-f0-9]{12}$/);
+	assert.equal(mac.unitFile, `/Users/a & b/background/${mac.unit}.plist`);
+	const plist = backgroundUnit(config, mac.directory, "darwin");
+	assert.ok(plist.includes(`<string>${mac.unit}</string>`));
+	assert.ok(plist.includes("<string>/Users/a &amp; b/background/server.json</string>"));
+	assert.ok(plist.includes("<key>RunAtLoad</key>\n\t<true/>") && plist.includes("<integer>63</integer>"));
+	assert.deepEqual(launchdCalls("stop", mac.unit, "/agent.plist", 501), [
+		{ argv: ["bootout", `gui/501/${mac.unit}`], tolerate: true },
+	]);
+	assert.equal(agentCopy(plist, plist, mac.unit), "same");
+	assert.equal(agentCopy(plist.replace("server.json", "old.json"), plist, mac.unit), "stale");
+	assert.equal(agentCopy("<plist>someone else</plist>", plist, mac.unit), "different");
+	assert.equal(
+		launchdStatus("\tpath = /agent.plist\n\tstate = running\n\tpid = 812\n", "same", mac.unitFile, "/agent.plist"),
+		`FragmentPath=${mac.unitFile}\nActiveState=active\nUnitFileState=enabled\nMainPID=812\n`,
+	);
+	assert.match(launchdStatus(null, "different", mac.unitFile, "/agent.plist"), /^FragmentPath=\/agent\.plist\n/);
+	assert.match(launchdStatus(null, "absent", mac.unitFile, "/agent.plist"), /^FragmentPath=\nActiveState=inactive/);
+	// Windows: a logon task whose command line follows CommandLineToArgvW quoting.
+	assert.equal(windowsArgument("C:\\Program Files\\nodejs\\node.exe"), '"C:\\Program Files\\nodejs\\node.exe"');
+	assert.equal(windowsArgument('say "hi" \\'), '"say \\"hi\\" \\\\"');
+	assert.equal(windowsArgument("C:\\plain"), "C:\\plain");
+	const win = backgroundPaths("/background", "win32");
+	const spec = parseTaskSpec(backgroundUnit(config, win.directory, "win32"));
+	assert.equal(spec.name, win.unit);
+	assert.equal(spec.execute, "conhost.exe");
+	assert.ok(spec.arguments.startsWith("--headless "));
+	const shown = (state: number, execute = spec.execute) =>
+		taskStatus(JSON.stringify({ state, enabled: true, execute, arguments: spec.arguments }), spec, win.unitFile);
+	assert.equal(shown(4), `FragmentPath=${win.unitFile}\nActiveState=active\nUnitFileState=enabled\nMainPID=0\n`);
+	assert.match(
+		shown(3, "other.exe"),
+		/^FragmentPath=task:\\CLIO Coder\\clio-coder-gui-[a-f0-9]{12}\nActiveState=inactive/,
+	);
+	assert.match(taskStatus("{}", spec, win.unitFile), /^FragmentPath=\nActiveState=inactive\nUnitFileState=disabled/);
 });
 
 test("persistent mode cannot accidentally become transient and service control accepts only fixed Clio units", () => {
@@ -326,7 +374,7 @@ test("a bare launch reuses only this installation's verified background app and 
 	assert.equal(foreign.kind, "unavailable");
 	assert.match((foreign as { reason: string }).reason, /another CLIO Coder installation/);
 	assert.equal(calls.length, before, "Another installation's service is never touched");
-	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready, "darwin"), { kind: "absent" });
+	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready, "aix"), { kind: "absent" });
 	failStart = true;
 	const failed = await preferBackground(directory, config.packageRoot, control, ready);
 	assert.deepEqual(failed, { kind: "unavailable", reason: "Background service start failed." });

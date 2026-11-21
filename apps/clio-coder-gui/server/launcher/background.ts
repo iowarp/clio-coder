@@ -47,6 +47,8 @@ const serverReport = (meta: unknown) => ({
 });
 const sameLaunch = (left: BackgroundConfig["launch"], right: BackgroundConfig["launch"]) =>
 	left.node === right.node && left.loader === right.loader && left.entry === right.entry && left.icon === right.icon;
+/** The XDG desktop entry is a Linux launcher; macOS and Windows open the app with clio-coder gui. */
+const desktopLaunchers = () => process.platform === "linux";
 const NATIVE_PACKAGE_SUFFIX = join("lib", "node_modules", "@iowarp", "clio-coder");
 /**
  * The install root of a package that scripts/install.sh or install.ps1 put at
@@ -235,6 +237,7 @@ async function serviceState(files: Files, control: Control) {
 	return values;
 }
 async function desktopOwned(config: BackgroundConfig, directory: string) {
+	if (!desktopLaunchers()) return false;
 	const state = await launcherStatus(config.desktopPrefix);
 	if (state.status === "absent") return false;
 	if (
@@ -260,7 +263,8 @@ export async function installBackground(
 	if (
 		!info.isDirectory() ||
 		(await realpath(directory)) !== directory ||
-		(info.mode & 0o077) !== 0 ||
+		// Windows keeps a user's files private through the profile's ACLs, not mode bits.
+		(process.platform !== "win32" && (info.mode & 0o077) !== 0) ||
 		(process.getuid && info.uid !== process.getuid())
 	)
 		throw new Error("Background directory must be a private, canonical directory owned by this user.");
@@ -299,7 +303,7 @@ export async function installBackground(
 		config = launchMoved ? { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch } : state.config;
 	}
 	const desktopConfig = state.status === "installed" ? state.config : config;
-	const desktop = await launcherStatus(config.desktopPrefix);
+	const desktop = desktopLaunchers() ? await launcherStatus(config.desktopPrefix) : { status: "absent" as const };
 	const hasDesktop = desktop.status === "absent" ? false : await desktopOwned(desktopConfig, directory);
 	if (launchMoved && hasDesktop) await uninstallLauncher(config.desktopPrefix);
 	if (state.status === "absent") await publishOwned(directory, config, files, false);
@@ -311,7 +315,7 @@ export async function installBackground(
 	if (launchMoved) await control("restart", files.unit, files.unitFile);
 	// The app falls back to its second port while another program holds the first; report where it listens.
 	const port = serverReport(await ready(config.port, config.token, currentToken(files))).port ?? config.port;
-	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
+	if (desktopLaunchers()) await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
 	return { status: "installed", unit: files.unit, origin: `http://127.0.0.1:${port}`, directory };
 }
 export async function backgroundStatus(
@@ -351,7 +355,12 @@ export async function inspectBackground(directory: string, launch: LaunchPaths, 
 	const foreign = !(await sameInstallation(state.config.packageRoot, config.packageRoot));
 	const moved = !sameLaunch(state.config.launch, config.launch);
 	let status = await backgroundStatus(directory);
-	const needsRepair = foreign || moved || status.desktop === "absent" || status.windows === "absent" || !status.ready;
+	const needsRepair =
+		foreign ||
+		moved ||
+		(desktopLaunchers() && status.desktop === "absent") ||
+		status.windows === "absent" ||
+		!status.ready;
 	if (fix && needsRepair) {
 		await installBackground(directory, config, undefined, undefined, { handover: true });
 		await installWindowsLauncher(directory, { ...config.launch, background: directory });
@@ -400,7 +409,7 @@ async function pinCurrentLaunch(
 	const config = { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch };
 	await publishOwned(directory, config, state.files, true);
 	await control("reload", state.files.unit, state.files.unitFile);
-	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
+	if (desktopLaunchers()) await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
 	if ((await windowsLauncherStatus(directory)) === "installed")
 		await installWindowsLauncher(directory, { ...config.launch, background: directory });
 	return { ...state, config };

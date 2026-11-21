@@ -21,9 +21,11 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 test("/config opens Settings on Connections while /settings retains its areas", () => {
 	deepStrictEqual(parseSlashCommand("/config"), { kind: "settings", area: "models" });
 	strictEqual(parseSlashCommand("/config targets").kind, "usage-error");
-	for (const area of ["", "targets", "chat", "interface"]) {
+	for (const area of ["", "models", "connections", "chat", "workspace"]) {
 		strictEqual(parseSlashCommand(`/settings ${area}`.trim()).kind, "settings");
 	}
+	for (const retired of ["targets", "fleet", "interface", "integrations"])
+		strictEqual(parseSlashCommand(`/settings ${retired}`).kind, "usage-error", retired);
 });
 
 test("Add target is an actionable in-TUI wizard (#385)", () => {
@@ -273,7 +275,7 @@ test("Settings mounts Add and Edit as docked prompts and tears them down with it
 				throw new Error("No Save was requested");
 			},
 			onClose() {},
-			section: "targets",
+			section: "models",
 			rowId,
 		});
 		const frame = dockTop(tui)?.frame as unknown as Component;
@@ -419,7 +421,7 @@ test("Remove target saved globally drops the key the target owned and keeps the 
 			},
 			notice: (_level, text) => void notices.push(text),
 			onClose() {},
-			section: "targets",
+			section: "models",
 			rowId: `targets.${targetId}`,
 		});
 		const frame = dockTop(tui)?.frame as unknown as Component;

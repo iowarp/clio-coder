@@ -1,18 +1,14 @@
 import { SettingsValidationError, validateSettings } from "../../../../../src/core/config.js";
+import { SHARED_SETTINGS_AREAS, settingsPlacementForPath } from "../../../../../src/core/settings-areas.js";
 import {
 	applyControlValue,
-	orderedSectionControls,
+	orderedAreaControls,
 	type SettingControl as RootControl,
 	SETTINGS_LABELS_BY_ID,
 	SETTINGS_VALUE_HELP_BY_ID,
 	settingsV2PathForRow,
 } from "../../../../../src/core/settings-controls.js";
 import { readLayeredSettings, updateLayeredSettings } from "../../../../../src/core/settings-layers.js";
-import {
-	SETTINGS_SECTIONS,
-	settingsGroupForPath,
-	settingsSectionForPath,
-} from "../../../../../src/core/settings-navigation.js";
 import { settingsChangeKind } from "../../../../../src/domains/config/classify.js";
 import { getRuntimeRegistry } from "../../../../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../../../../src/domains/providers/runtimes/builtins.js";
@@ -185,9 +181,7 @@ function plainIssue(label: string, message: string): string {
 export function readSettingsControls(cwd: string): SettingsControls {
 	const layered = readLayeredSettings(cwd);
 	const targets = layered.settings.targets.map((target) => target.id);
-	const controls = SETTINGS_SECTIONS.flatMap((section) =>
-		orderedSectionControls(section.id).map((entry) => entry.control),
-	)
+	const controls = SHARED_SETTINGS_AREAS.flatMap((area) => orderedAreaControls(area.id).map((entry) => entry.control))
 		.filter((control) => !hidden(control.path))
 		.map((control): SettingControl => {
 			// Exact leaf only: a parent object is also recorded as a source, and it does not set absent children.
@@ -210,10 +204,11 @@ export function readSettingsControls(cwd: string): SettingsControls {
 					: control.path === "fleet.default.node"
 						? ["local", ...layered.settings.fleet.nodes.map((node) => node.id)]
 						: undefined;
+			const placement = settingsPlacementForPath(control.path);
 			return {
 				path: control.path,
-				section: settingsSectionForPath(control.path),
-				group: settingsGroupForPath(control.path),
+				section: placement.area,
+				group: placement.group,
 				label: control.label,
 				description: control.description,
 				...(control.help ? { help: control.help } : {}),
@@ -235,7 +230,7 @@ export function readSettingsControls(cwd: string): SettingsControls {
 			};
 		});
 	return {
-		sections: SETTINGS_SECTIONS.map(({ id, label, description }) => ({ id, label, description })),
+		sections: SHARED_SETTINGS_AREAS.map(({ id, label, description }) => ({ id, label, description })),
 		controls,
 		userFile: layered.layers.find((layer) => layer.origin === "user")?.path ?? "",
 	};

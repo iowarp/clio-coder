@@ -957,7 +957,7 @@ clio-coder models --target chat-target
 clio-coder
 ```
 
-Then inspect `/settings targets`, `/settings`, and `/memory`. Local co-residency still
+Then inspect `/settings connections`, `/settings`, and `/memory`. Local co-residency still
 matters: the background model, action model, their KV caches, and parallel slots
 must fit the target's available memory. Increase `context.memory.timeoutMs` for
 a deliberately slow local route; lowering `context.memory.maxOutputTokens`

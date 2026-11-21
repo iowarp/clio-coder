@@ -52,7 +52,7 @@ Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifie
 | `Other Clio Coder processes of this install are running; nothing was replaced` (exit `75`) | Live sessions hold package lease | Quit listed `<pid>@<host>` processes and rerun, or use `/upgrade` in a session. |
 | `clio-coder: the update is still running after 120 s; see <log>` (exit `75`) | Concurrent package-manager update took `> 120` s | Wait for completion and inspect `<log>`. |
 | `[install] error: CLIO_CODER_INSTALL_GUI must be 1 or 0, got '<value>'` | Invalid `CLIO_CODER_INSTALL_GUI` | Set `1`, `0`, or unset for prompt. |
-| `[install] warning: the desktop app runs as a login service on Linux only; start it here with: clio-coder gui` | `--gui` / `CLIO_CODER_INSTALL_GUI=1` on non-Linux | Run `clio-coder gui` in your session. |
+| `[install] warning: the desktop app runs as a login service on Linux and macOS only; start it here with: clio-coder gui` | `--gui` / `CLIO_CODER_INSTALL_GUI=1` on another system | Run `clio-coder gui` in your session. |
 | `[install] warning: the desktop app was not set up. Retry with: clio-coder doctor --fix` | Missing systemd user session or active background service handover | Finish active work, ensure a systemd user session exists, run `clio-coder doctor --fix`. |
 | `[install] error: no installer manifest at <root>/install.json; nothing to roll back` | `--rollback` on non-installer root | Pass the matching `--install-dir` or reinstall. |
 | `This install is pinned to <version> since <date> (<origin>); release with clio-coder upgrade --channel <channel>. Upgrade and background updates leave it there.` | Pinned by `--version` or `--package` | Run the printed installer command (`--version <channel> --auto-update`) to unpin. |
