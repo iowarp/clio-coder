@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { sandboxCacheFinding, stateStorageFinding } from "../../src/cli/doctor-state-size.js";
-import { holdSandboxCacheLease } from "../../src/core/sandbox/sandbox-cache.js";
+import { holdSandboxCacheLease, pruneSandboxCache } from "../../src/core/sandbox/sandbox-cache.js";
 
 describe("doctor state storage", () => {
 	it("reads a fresh home without a state root as empty, not broken", () => {
@@ -48,6 +48,11 @@ describe("doctor state storage", () => {
 			const leasedDir = join(root, "leased", "sandbox-cache");
 			fill(leasedDir);
 			holdSandboxCacheLease(leasedDir);
+			strictEqual(
+				(await pruneSandboxCache({ capBytes: 1, cacheDir: leasedDir })).beforeBytes,
+				null,
+				"no walk when leased",
+			);
 			const skipped = await sandboxCacheFinding({ cacheDir: leasedDir, capGiB, fix: true });
 			strictEqual(skipped.level, "warn");
 			strictEqual(skipped.detail.includes("1 running process may use it"), true, skipped.detail);

@@ -144,15 +144,20 @@ export interface SandboxCacheMeasure {
 	unreadable: number;
 }
 
-/** The cache's size; null when it does not exist yet. Throws when it is not a real directory or cannot be listed. */
-export async function measureSandboxCache(cacheDir: string = sandboxCacheDir()): Promise<SandboxCacheMeasure | null> {
+/** Whether the cache exists; throws when something other than a real directory is in its place. */
+async function cacheDirExists(cacheDir: string): Promise<boolean> {
 	try {
-		const stats = await lstat(cacheDir);
-		if (!stats.isDirectory()) throw new Error(`${cacheDir} is not a directory`);
+		if (!(await lstat(cacheDir)).isDirectory()) throw new Error(`${cacheDir} is not a directory`);
+		return true;
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
 		throw error;
 	}
+}
+
+/** The cache's size; null when it does not exist yet. Throws when it is not a real directory or cannot be listed. */
+export async function measureSandboxCache(cacheDir: string = sandboxCacheDir()): Promise<SandboxCacheMeasure | null> {
+	if (!(await cacheDirExists(cacheDir))) return null;
 	const entries = await cacheEntries(cacheDir);
 	return {
 		cacheDir,
@@ -166,7 +171,8 @@ export type SandboxCacheSkip = "in-use" | "leases-unreadable" | "busy" | "stoppe
 export interface SandboxCachePruneResult {
 	cacheDir: string;
 	capBytes: number;
-	/** Null when the cache does not exist. */
+	exists: boolean;
+	/** Null when the cache does not exist, or when a live lease stopped the prune before it measured anything. */
 	beforeBytes: number | null;
 	afterBytes: number | null;
 	removed: Array<{ name: string; bytes: number }>;
@@ -180,8 +186,10 @@ export interface SandboxCachePruneResult {
 /**
  * Remove the least recently used top-level tool directories until the cache
  * fits `capBytes`, unless a process may be using it. One pruner at a time; a
- * second one returns `busy` without waiting. Leases are read again before
- * each removal, so a command that starts mid-prune stops it.
+ * second one returns `busy` without waiting. Leases are read first, before
+ * the tree is walked, so a home that always has a session open costs a
+ * directory listing, not a walk of the whole cache; they are read again
+ * before each removal, so a command that starts mid-prune stops it.
  */
 export async function pruneSandboxCache(options: {
 	capBytes: number;
@@ -192,6 +200,7 @@ export async function pruneSandboxCache(options: {
 	const result: SandboxCachePruneResult = {
 		cacheDir,
 		capBytes: options.capBytes,
+		exists: false,
 		beforeBytes: null,
 		afterBytes: null,
 		removed: [],
@@ -199,8 +208,9 @@ export async function pruneSandboxCache(options: {
 		skipped: null,
 		liveLeases: 0,
 	};
-	const exists = await measureSandboxCache(cacheDir);
-	if (exists === null) return result;
+	if (!(await cacheDirExists(cacheDir))) return result;
+	result.exists = true;
+	if (!(await nobodyUses(result))) return result;
 	try {
 		await withStateFileLock(path.join(leaseDir(cacheDir), ".prune"), () => pruneLocked(result, options.stopped), {
 			timeoutMs: 0,
@@ -209,8 +219,6 @@ export async function pruneSandboxCache(options: {
 	} catch (error) {
 		if (!(error instanceof StateFileLockTimeoutError)) throw error;
 		result.skipped = "busy";
-		result.beforeBytes = exists.bytes;
-		result.afterBytes = exists.bytes;
 	}
 	return result;
 }
@@ -295,7 +303,7 @@ export async function pruneSandboxCacheDaily(options: {
 		cacheDir,
 		...(options.stopped !== undefined ? { stopped: options.stopped } : {}),
 	});
-	if (result.beforeBytes === null || result.skipped !== null) return result;
+	if (!result.exists || result.skipped !== null) return result;
 	await writeFile(stamp, `${nowMs}\n`).catch(() => {});
 	return result;
 }

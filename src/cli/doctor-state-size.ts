@@ -138,8 +138,9 @@ export async function sandboxCacheFinding(options: SandboxCacheFindingOptions = 
 	try {
 		if (options.fix === true && capBytes > 0) {
 			const result = await pruneSandboxCache({ capBytes, cacheDir });
-			if (result.afterBytes === null) return { ok: true, name, detail: `${cacheDir} not created yet` };
-			bytes = result.afterBytes;
+			if (!result.exists) return { ok: true, name, detail: `${cacheDir} not created yet` };
+			// A live lease stops the prune before it walks the tree; doctor runs on demand, so it measures for the row.
+			bytes = result.afterBytes ?? (await measureSandboxCache(cacheDir))?.bytes ?? 0;
 			outcome = pruneOutcome(result);
 		} else {
 			const measured = await measureSandboxCache(cacheDir);
