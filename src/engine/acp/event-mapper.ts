@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { ToolNames } from "../../core/tool-names.js";
 import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { AgentEvent, AgentMessage } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
@@ -46,11 +47,14 @@ export interface AcpEventMapperOptions {
 	normalizeToolCall?: (toolCall: AcpToolCallUpdate) => AcpToolCallUpdate;
 }
 
-function hasToolInput(toolCall: AcpToolCallUpdate): boolean {
-	return (
-		(isRecord(toolCall.rawInput) && Object.keys(toolCall.rawInput).length > 0) ||
-		(Array.isArray(toolCall.locations) && toolCall.locations.length > 0)
-	);
+/** A tool frame as the merge keeps it: ACP's fields plus a peer's own tool `name` and `args` (agy sends both). */
+type MergedToolCall = AcpToolCallUpdate & { name?: string; args?: Record<string, unknown> };
+
+/** Whether a mapped call names what it acts on yet: a known Clio tool with its target, or bash with its command. */
+function resolvesCall(mapped: ReturnType<typeof mapAcpToolCall>): boolean {
+	if (!mapped.known || mapped.validationError !== undefined) return false;
+	if (mapped.tool !== ToolNames.Bash) return true;
+	return typeof mapped.args.command === "string" && mapped.args.command.trim().length > 0;
 }
 
 export class AcpEventMapper {
@@ -64,7 +68,7 @@ export class AcpEventMapper {
 	/** ACP updates may omit kind after the first frame; titles can change. */
 	private readonly toolKinds = new Map<string, string>();
 	/** Each open call's frames merged so far, since a peer may send its input only on a later update. */
-	private readonly toolCalls = new Map<string, AcpToolCallUpdate>();
+	private readonly toolCalls = new Map<string, MergedToolCall>();
 	/** The Clio tool name each call's `tool_execution_start` carried, which its end repeats. */
 	private readonly executionNames = new Map<string, string>();
 
@@ -175,18 +179,20 @@ export class AcpEventMapper {
 		const merged = this.mergeToolCall(toolCallId, update);
 		// The execution events feed the finish contract and run effects, which judge Clio tools, so they carry the
 		// mapped Clio call (edit and its path, bash and its command), never the peer's display title or raw input.
-		// They wait for the call's input, which a peer may send only on a later frame (C-15).
-		if (this.toolStarts.has(toolCallId) && !this.executionNames.has(toolCallId) && (settling || hasToolInput(merged))) {
-			const normalized = this.options.normalizeToolCall?.(merged) ?? merged;
-			const mapped = mapAcpToolCall(normalized, this.options.cwd ?? process.cwd());
-			const toolName = mapped.known ? mapped.tool : "unknown";
-			this.executionNames.set(toolCallId, toolName);
-			out.push({
-				type: "tool_execution_start",
-				toolCallId,
-				toolName,
-				args: mapped.known ? mapped.args : {},
-			} as unknown as AgentEvent);
+		// The start waits until the mapping names a target or command, which a peer may send only on a later frame,
+		// and a call first seen settled still gets its start before its end (C-15).
+		if (!this.executionNames.has(toolCallId)) {
+			const mapped = this.mapCall(merged);
+			if (settling || resolvesCall(mapped)) {
+				const toolName = mapped.known ? mapped.tool : "unknown";
+				this.executionNames.set(toolCallId, toolName);
+				out.push({
+					type: "tool_execution_start",
+					toolCallId,
+					toolName,
+					args: mapped.known ? mapped.args : {},
+				} as unknown as AgentEvent);
+			}
 		}
 		if (settling) {
 			const startedAtClock = this.toolStarts.get(toolCallId) ?? performance.now();
@@ -219,14 +225,36 @@ export class AcpEventMapper {
 		return out;
 	}
 
-	/** The call's frames so far: the first kind stands, and a later title, input or locations replaces an earlier one. */
-	private mergeToolCall(toolCallId: string, update: AcpToolCallUpdate): AcpToolCallUpdate {
+	/**
+	 * The Clio call a merged frame amounts to: through the peer's shim (agy's `run_command` and `run_workflow` become
+	 * the command they run), then the mediator's mapping, reading a peer's `args` when it sent no `rawInput`, as the
+	 * shim does.
+	 */
+	private mapCall(merged: MergedToolCall): ReturnType<typeof mapAcpToolCall> {
+		const normalized: MergedToolCall = this.options.normalizeToolCall?.(merged) ?? merged;
+		const input =
+			isRecord(normalized.rawInput) && Object.keys(normalized.rawInput).length > 0
+				? normalized
+				: isRecord(normalized.args)
+					? { ...normalized, rawInput: normalized.args }
+					: normalized;
+		return mapAcpToolCall(input, this.options.cwd ?? process.cwd());
+	}
+
+	/**
+	 * The call's frames so far: the first kind and tool name stand, and a later title, input, args or locations
+	 * replaces an earlier one.
+	 */
+	private mergeToolCall(toolCallId: string, update: MergedToolCall): MergedToolCall {
 		const prior = this.toolCalls.get(toolCallId) ?? {};
-		const merged: AcpToolCallUpdate = { ...prior, toolCallId };
+		const merged: MergedToolCall = { ...prior, toolCallId };
 		const kind = prior.kind ?? update.kind;
 		if (kind !== undefined) merged.kind = kind;
+		const name = prior.name ?? (typeof update.name === "string" ? update.name : undefined);
+		if (name !== undefined) merged.name = name;
 		if (update.title !== undefined) merged.title = update.title;
 		if (isRecord(update.rawInput)) merged.rawInput = update.rawInput;
+		if (isRecord(update.args)) merged.args = update.args;
 		if (Array.isArray(update.locations)) merged.locations = update.locations;
 		this.toolCalls.set(toolCallId, merged);
 		return merged;

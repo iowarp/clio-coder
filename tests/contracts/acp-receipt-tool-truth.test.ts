@@ -8,6 +8,9 @@ import type { DomainContractMap, DomainName } from "../../src/core/domain-loader
 import type { DispatchBundleOptions } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { createAntigravityShims } from "../../src/engine/acp/antigravity-shims.js";
+import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
+import type { AcpToolCallUpdate } from "../../src/engine/acp/types.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -92,13 +95,21 @@ require("node:readline").createInterface({input: process.stdin}).on("line", (lin
     update({sessionUpdate: "tool_call", toolCallId: "e1", kind: "edit", title: "Updating the sum helper", status: "in_progress",
       locations: [{path: cwd + "/lib/math.js"}], rawInput: {TargetFile: cwd + "/lib/math.js", ReplacementContent: "x"}});
     update({sessionUpdate: "tool_call_update", toolCallId: "e1", status: "completed"});
+    // Input that names no target yet, then the frame that does: two paths, so the call maps to {paths}.
+    update({sessionUpdate: "tool_call", toolCallId: "e2", kind: "edit", title: "Splitting it", status: "pending", rawInput: {}});
+    update({sessionUpdate: "tool_call_update", toolCallId: "e2", status: "in_progress",
+      locations: [{path: cwd + "/lib/b.js"}, {path: cwd + "/lib/c.js"}]});
+    update({sessionUpdate: "tool_call_update", toolCallId: "e2", status: "completed"});
+    // A call first seen settled.
+    update({sessionUpdate: "tool_call", toolCallId: "x1", kind: "execute", title: "echo", status: "completed",
+      rawInput: {command: "echo PONG > " + cwd + "/pong.txt"}});
     update({sessionUpdate: "agent_message_chunk", content: {type: "text", text: "Edited lib/math.js."}});
     send({id: request.id, result: {stopReason: "end_turn"}});
   }
 });
 `;
 
-it("hands the finish contract the mapped Clio tool and path of an ACP edit, not the peer's title (C-15)", async () => {
+it("hands the finish contract the mapped Clio tool, paths and commands of ACP calls, not the peer's title (C-15)", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	settings.integrations.externalAgents.entries = [
@@ -132,12 +143,32 @@ it("hands the finish contract the mapped Clio tool and path of an ACP edit, not 
 		});
 		await run.finalPromise;
 		deepStrictEqual(
-			audits.map((audit) => audit.mutatedPaths),
-			[[join(cwd, "lib/math.js")]],
+			audits.map((audit) => [...audit.mutatedPaths].sort()),
+			[["lib/b.js", "lib/c.js", "lib/math.js", "pong.txt"].map((path) => join(cwd, path))],
 		);
 	} finally {
 		await bundle.extension.stop?.();
 	}
+	// agy names its own tool and sends its input as `args`; the shim's command must reach the mapping across frames.
+	const agy = createAntigravityShims({ command: "agy", launchArgs: [], toolGovernance: "clio-coder-policy" });
+	const mapper = new AcpEventMapper({
+		cwd,
+		normalizeToolCall: (toolCall) => (agy.toolRequest({ toolCall }) as { toolCall: AcpToolCallUpdate }).toolCall,
+	});
+	const starts = [
+		{ toolCallId: "r1", name: "run_command", args: { CommandLine: "npm test", Cwd: cwd } },
+		{ toolCallId: "w1", name: "run_workflow", args: { Script: "print(1)" } },
+	].flatMap(({ toolCallId, name, args }) => [
+		...mapper.mapUpdate({ update: { sessionUpdate: "tool_call", toolCallId, name, kind: "execute", status: "pending" } }),
+		...mapper.mapUpdate({ update: { sessionUpdate: "tool_call_update", toolCallId, status: "in_progress", args } }),
+	]);
+	deepStrictEqual(
+		starts.filter((event) => event.type === "tool_execution_start").map((event) => (event as { args?: unknown }).args),
+		[
+			{ command: `cd ${cwd} && npm test`, cwd },
+			{ command: "python3 -c 'print(1)'", cwd },
+		],
+	);
 });
 
 // One native and one ACP run, each sealed and each failing finalization, against a
