@@ -246,7 +246,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultDisposition: BASH_DEFAULT_RESULT_DISPOSITION,
 	},
 	[ToolNames.Git]: {
-		objective: "Git through fixed argv: inspect with status, diff, log, or show; stage and record with add or commit.",
+		objective:
+			'Typed git, not argv: inspect with {op:"log",limit,stat}, {op:"diff",rev,path}, {op:"show",rev} or status; stage and record with add or commit.',
 		uiLabel: "Git",
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
 		examples: [
