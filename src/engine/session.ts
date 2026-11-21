@@ -759,6 +759,21 @@ export function recordedSessionIds(stateDir: string): Set<string> | null {
 	return ids;
 }
 
+/**
+ * Whether `sessionId` is recorded under `stateDir` now: a fresh look at its directory in each workspace, for a caller
+ * about to delete what an older `recordedSessionIds` listing called orphaned. True when the root cannot be read.
+ */
+export function sessionRecorded(stateDir: string, sessionId: string): boolean {
+	const root = join(stateDir, "sessions");
+	try {
+		for (const workspace of readdirSync(root, { withFileTypes: true }))
+			if (workspace.isDirectory() && existsSync(join(root, workspace.name, sessionId))) return true;
+	} catch {
+		return true;
+	}
+	return false;
+}
+
 const APPEND_FSYNC_DEBOUNCE_MS = 500;
 /** See isFenced in createWriter. */
 const FENCE_PROBE_REUSE_MS = 1_000;

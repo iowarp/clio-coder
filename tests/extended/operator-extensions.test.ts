@@ -1,9 +1,10 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { syncBuiltinESMExports } from "node:module";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { type TestContext, test } from "node:test";
+import { mock, type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { PackageActivity } from "../../src/core/package-activity.js";
 import {
@@ -15,11 +16,13 @@ import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { SandboxAvailability } from "../../src/core/sandbox/types.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import { extensionDockPaths } from "../../src/domains/extensions/dock-frame.js";
 import { envelopeLines } from "../../src/domains/extensions/envelope-review.js";
 import type { ExtensionRuntimeDeclarationV2 } from "../../src/domains/extensions/manifest-v2.js";
 import { extensionInvocation, promptRefs } from "../../src/domains/extensions/operator-commands.js";
 import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
+import { pinnedContextFile } from "../../src/domains/extensions/pinned-context.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
 import { readOnlyRuntimeDeclaration } from "../../src/domains/extensions/runtime-sandbox.js";
@@ -341,6 +344,29 @@ test("a session host's startup prunes per-session extension state only of sessio
 	for (const name of ["kept.json", "gone.json", "gone.json.bak", "current.json", "notes.txt"])
 		writeFileSync(path.join(sessions, name), "{}");
 	writeFileSync(path.join(stateDir, "extensions", "lab_status.v1", "store.json"), "{}");
+	// Pins and dock files name their session by hash; one of a deleted session that left nothing else must go too.
+	const pinned = (id: string) => pinnedContextFile(stateDir, id);
+	const docked = (id: string | null) => extensionDockPaths(stateDir, id);
+	mkdirSync(path.dirname(pinned("kept")), { recursive: true });
+	mkdirSync(path.dirname(docked(null).frameFile), { recursive: true });
+	const hashedKept = [pinned("kept"), docked("kept").frameFile, docked("current").tapFile, docked(null).frameFile];
+	const hashedGone = [pinned("pin-only"), docked("pin-only").frameFile, docked("pin-only").tapFile];
+	for (const file of [...hashedKept, ...hashedGone]) writeFileSync(file, "{}");
+	// Another process creates session "racer" and writes its state the moment this host has read the recorded sessions.
+	const realReaddir = fs.readdirSync;
+	let raced = false;
+	mock.method(fs, "readdirSync", (...args: Parameters<typeof fs.readdirSync>) => {
+		const listed = realReaddir(...args);
+		if (!raced && path.resolve(String(args[0])) === path.join(stateDir, "sessions", "workspace-hash")) {
+			raced = true;
+			mkdirSync(path.join(stateDir, "sessions", "workspace-hash", "racer"));
+			writeFileSync(path.join(workspaces, "racer.json"), "null\n");
+			writeFileSync(path.join(sessions, "racer.json"), "{}");
+			writeFileSync(pinned("racer"), "{}");
+		}
+		return listed;
+	});
+	syncBuiltinESMExports();
 	const runtime = new OperatorExtensions({
 		context: () => ({ workspace: cwd, sessionId: "current", mode: "interactive" }),
 		isIdle: () => true,
@@ -348,9 +374,18 @@ test("a session host's startup prunes per-session extension state only of sessio
 		stateDir: () => stateDir,
 	});
 	t.after(() => runtime.dispose());
-	equal((await runtime.reload("startup")).status, "committed");
-	deepStrictEqual(readdirSync(workspaces).sort(), ["current.json", "kept.json"]);
-	deepStrictEqual(readdirSync(sessions).sort(), ["current.json", "kept.json", "notes.txt"]);
+	try {
+		equal((await runtime.reload("startup")).status, "committed");
+	} finally {
+		mock.restoreAll();
+		syncBuiltinESMExports();
+	}
+	ok(raced);
+	deepStrictEqual(readdirSync(workspaces).sort(), ["current.json", "kept.json", "racer.json"]);
+	deepStrictEqual(readdirSync(sessions).sort(), ["current.json", "kept.json", "notes.txt", "racer.json"]);
+	ok(existsSync(pinned("racer")), "a session created while the host pruned keeps its state");
+	for (const file of hashedKept) ok(existsSync(file), `${path.basename(file)} belongs to a live session`);
+	for (const file of hashedGone) ok(!existsSync(file), `${path.basename(file)} is an orphan`);
 	ok(
 		existsSync(path.join(stateDir, "extensions", "lab_status.v1", "store.json")),
 		"the shared store is not per-session",
