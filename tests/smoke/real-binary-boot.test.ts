@@ -229,12 +229,13 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const env = home.env;
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
-			match(first.output, /10 migrations applied/u);
+			match(first.output, /11 migrations applied/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
 			const manifest = JSON.parse(readFileSync(join(home.root, "config", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
 				"2026-09-01-settings-v2",
 				"2026-11-21-retired-settings",
+				"2026-11-21-memory-observe-switch",
 				"2026-09-01-retire-panes-knobs",
 				"2026-10-06-playbooks-and-packages",
 				"2026-10-07-acp-adapters",

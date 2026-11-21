@@ -361,6 +361,7 @@ targets:
 		deepStrictEqual(ids, [
 			SETTINGS_V2_MIGRATION_ID,
 			"2026-11-21-retired-settings",
+			"2026-11-21-memory-observe-switch",
 			retiredPanes,
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
@@ -414,7 +415,7 @@ targets:
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
 		strictEqual(current?.ok, true);
 		strictEqual(current?.level, undefined);
-		ok(current?.detail.includes("already satisfy 3 unrecorded"));
+		ok(current?.detail.includes("already satisfy 4 unrecorded"));
 		strictEqual(readFileSync(manifest, "utf8"), recorded);
 		strictEqual(readFileSync(settingsFile, "utf8"), "version: 2\n");
 		for (const settings of ["version: 1\n", "version: 2\npanes: { agents: off }\n", "version: [\n"]) {

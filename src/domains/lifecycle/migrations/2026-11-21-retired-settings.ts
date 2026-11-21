@@ -9,8 +9,9 @@ import type { Migration, MigrationReport } from "./index.js";
  * Rewrites what the settings validator used to tolerate at read time, so it no
  * longer has to: version-2 keys retired without a replacement
  * (`SETTINGS_V1_RETIRED_PATHS`), the turn-control workflows `init` once wrote,
- * the older `interface.exitSummary` and `interface.outputDetail` spellings and
- * a version-2 `fleet.nodes[].clioEntry`. Each change is reported, the previous
+ * the older `interface.exitSummary` and `interface.outputDetail` spellings,
+ * a version-2 `fleet.nodes[].clioEntry` and `context.memory.observations.enabled`,
+ * the old switch of `context.memory.surfaces.observe`. Each change is reported, the previous
  * file is kept beside it, and only the user file is touched: project layers are
  * the repository's.
  */
@@ -25,6 +26,10 @@ const RETIRED_VALUE_SPELLINGS: ReadonlyArray<{ path: readonly Segment[]; values:
 	{ path: ["interface", "exitSummary"], values: { full: "standard" } },
 	{ path: ["interface", "outputDetail"], values: { minimal: "compact", default: "standard", verbose: "detailed" } },
 ];
+
+/** The memory observation switch before it moved to `context.memory.surfaces.observe`. */
+const OBSERVATIONS_PATH: readonly Segment[] = ["context", "memory", "observations"];
+const OBSERVE_PATH: readonly Segment[] = ["context", "memory", "surfaces", "observe"];
 
 interface RetiredSettingsRewrite {
 	changed: string[];
@@ -149,6 +154,24 @@ function rewriteRetiredSettings(doc: Document): RetiredSettingsRewrite {
 			result.changed.push(`Renamed ${from} to ${to}.`);
 		});
 	}
+
+	const observations = doc.getIn(OBSERVATIONS_PATH, true);
+	if (observations !== undefined) {
+		const enabled = isMap(observations) ? observations.get("enabled", true) : undefined;
+		if (isAlias(observations) || isAlias(enabled) || (isScalar(enabled) && enabled.anchor !== undefined))
+			unreachable(OBSERVATIONS_PATH, "is the old switch of context.memory.surfaces.observe");
+		else if (isScalar(enabled) && typeof enabled.value === "boolean") {
+			const from = `${display(OBSERVATIONS_PATH)}.enabled`;
+			const to = display(OBSERVE_PATH);
+			if (doc.hasIn(OBSERVE_PATH)) result.changed.push(`Removed ${from}: ${to} is also set and wins.`);
+			else {
+				const value = enabled.value ? "on" : "off";
+				doc.setIn(OBSERVE_PATH, value);
+				result.changed.push(`Moved ${from}: ${String(enabled.value)} to ${to}: ${value}, the same switch.`);
+			}
+			removeKey(doc, OBSERVATIONS_PATH);
+		}
+	}
 	return result;
 }
 
@@ -164,44 +187,53 @@ export function dropRetiredSettings(raw: Record<string, unknown>): RetiredSettin
 	return { document: doc.toJS() as Record<string, unknown>, ...rewrite };
 }
 
-const migration: Migration = {
-	id: ID,
-	projectSettings(raw: unknown): unknown {
-		if (!isRecord(raw) || (raw.version !== undefined && raw.version !== 2)) return raw;
-		return dropRetiredSettings(raw).document;
-	},
-	async up(): Promise<MigrationReport> {
-		return withSettingsLock(() => {
-			const report: MigrationReport = { changed: [], attention: [] };
-			const file = settingsPath();
-			if (!existsSync(file)) return report;
-			const text = readFileSync(file, "utf8");
-			const doc = parseDocument(text);
-			if (doc.errors.length > 0) throw new Error(`retired settings migration: ${doc.errors[0]?.message}`);
-			const before = doc.toJS() as unknown;
-			// Version 1 is the v1 migrator's, which runs first and applies this same rewrite. A
-			// version-2 file may omit the key, as the validator allows.
-			if (!isRecord(before) || (before.version !== undefined && before.version !== 2)) return report;
-			const rewrite = rewriteRetiredSettings(doc);
-			report.attention.push(...rewrite.attention);
-			if (rewrite.changed.length === 0) return report;
-			const next = doc.toString({ lineWidth: 0 });
-			// The rewrite only removes or renames; an issue it introduces means it misread the file.
-			const known = new Set(validateSettings(before).issues.map((issue) => issue.path));
-			const introduced = validateSettings(parseDocument(next).toJS()).issues.filter((issue) => !known.has(issue.path));
-			if (introduced.length > 0)
-				throw new Error(
-					`retired settings migration left settings.yaml unchanged: the rewrite would introduce ${introduced.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+/**
+ * The rewrite as a registered migration. It is registered twice: a home that recorded the first id before the
+ * memory switch joined the rewrite still meets it under the second, and on any other home the second finds nothing.
+ */
+function retiredSettingsMigration(id: string, backupSuffix: string): Migration {
+	return {
+		id,
+		projectSettings(raw: unknown): unknown {
+			if (!isRecord(raw) || (raw.version !== undefined && raw.version !== 2)) return raw;
+			return dropRetiredSettings(raw).document;
+		},
+		async up(): Promise<MigrationReport> {
+			return withSettingsLock(() => {
+				const report: MigrationReport = { changed: [], attention: [] };
+				const file = settingsPath();
+				if (!existsSync(file)) return report;
+				const text = readFileSync(file, "utf8");
+				const doc = parseDocument(text);
+				if (doc.errors.length > 0) throw new Error(`retired settings migration: ${doc.errors[0]?.message}`);
+				const before = doc.toJS() as unknown;
+				// Version 1 is the v1 migrator's, which runs first and applies this same rewrite. A
+				// version-2 file may omit the key, as the validator allows.
+				if (!isRecord(before) || (before.version !== undefined && before.version !== 2)) return report;
+				const rewrite = rewriteRetiredSettings(doc);
+				report.attention.push(...rewrite.attention);
+				if (rewrite.changed.length === 0) return report;
+				const next = doc.toString({ lineWidth: 0 });
+				// The rewrite only removes or renames; an issue it introduces means it misread the file.
+				const known = new Set(validateSettings(before).issues.map((issue) => issue.path));
+				const introduced = validateSettings(parseDocument(next).toJS()).issues.filter((issue) => !known.has(issue.path));
+				if (introduced.length > 0)
+					throw new Error(
+						`retired settings migration left settings.yaml unchanged: the rewrite would introduce ${introduced.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+					);
+				const backupPath = `${file}.${backupSuffix}.bak`;
+				safeResourceWrite(file, next, { encoding: "utf8", mode: SETTINGS_FILE_MODE, backup: { path: backupPath } });
+				report.changed.push(
+					`What changed for you in settings.yaml (the previous file is ${backupPath}):`,
+					...rewrite.changed,
 				);
-			const backupPath = `${file}.retired.bak`;
-			safeResourceWrite(file, next, { encoding: "utf8", mode: SETTINGS_FILE_MODE, backup: { path: backupPath } });
-			report.changed.push(
-				`What changed for you in settings.yaml (the previous file is ${backupPath}):`,
-				...rewrite.changed,
-			);
-			return report;
-		});
-	},
-};
+				return report;
+			});
+		},
+	};
+}
 
-export default migration;
+export default retiredSettingsMigration(ID, "retired");
+
+/** The memory observation switch, moved to `context.memory.surfaces.observe`, joined the rewrite after it shipped. */
+export const memoryObserveSwitch = retiredSettingsMigration("2026-11-21-memory-observe-switch", "memory-observe");

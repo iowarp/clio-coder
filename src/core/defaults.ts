@@ -597,7 +597,7 @@ export interface ChatSettings extends WorkerTarget {
 export interface MemorySurfaceSettings {
 	/**
 	 * Observation preparation for a predicted fold. Off by default as a policy choice: its cost is measured and its
-	 * benefit is not. `context.memory.observations.enabled: true` still turns it on when this key is unset.
+	 * benefit is not.
 	 */
 	observe: "off" | "on";
 	/**

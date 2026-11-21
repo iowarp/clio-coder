@@ -414,9 +414,7 @@ tabs. Opening the view does not activate memory (`src/interactive/memory-overlay
 `context.memory.enabled` is on lets background memory prepare source-linked
 notes that the existing compactor can use in place of the history they cover.
 These continuity notes are separate from reusable lessons and preserve source
-references; they do not approve a durable record.
-`context.memory.observations.enabled: true` turns the surface on when
-`surfaces.observe` is unset. Source:
+references; they do not approve a durable record. Source:
 `src/domains/memory/observations.ts` and `src/domains/memory/runtime.ts`.
 
 Preparation is sized so a session that never nears compaction pays little:
@@ -571,7 +569,7 @@ Each memory surface has one switch under `context.memory.surfaces`. A change app
 | `context.memory.surfaces.correct` | `rules` | `rules`, `model` | In-session correction after repeated failures. `rules` keeps the repeated-failure annotation and makes no model call. `model` adds a model step on two consecutive tool errors or a loop signal. |
 | `context.memory.surfaces.bank` | `rules` | `rules`, `model` | Task-bank maintenance. `rules` writes procedural entries from failures and knowledge from your statements. `model` adds a model step every `context.memory.cadenceToolCalls` tools. |
 | `context.memory.surfaces.history` | `off` | `off`, `on` | Reviewing this repository's earlier sessions for lessons while the session is idle. Set `on` to turn it on. `clio-coder memory consolidate` is the separate model-free pass. |
-| `context.memory.surfaces.observe` | `off` | `off`, `on` | Preparing observation notes for a predicted compaction. `context.memory.observations.enabled: true` turns it on when this key is unset. |
+| `context.memory.surfaces.observe` | `off` | `off`, `on` | Preparing observation notes for a predicted compaction. |
 
 ## Trigger semantics
 
