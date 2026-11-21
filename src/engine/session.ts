@@ -739,6 +739,26 @@ export function readSessionMeta(id: string): ClioSessionMeta {
 	return readMetaFile(join(findSessionDir(id), "meta.json"));
 }
 
+/**
+ * The ids of every session recorded under `stateDir`, across workspaces. A session's directory exists from its
+ * creation until it is deleted, so state kept elsewhere under a session id is orphaned only when the id is missing
+ * here. Null when the sessions root cannot be read, which says nothing about which sessions exist.
+ */
+export function recordedSessionIds(stateDir: string): Set<string> | null {
+	const root = join(stateDir, "sessions");
+	const ids = new Set<string>();
+	try {
+		for (const workspace of readdirSync(root, { withFileTypes: true })) {
+			if (!workspace.isDirectory()) continue;
+			for (const entry of readdirSync(join(root, workspace.name), { withFileTypes: true }))
+				if (entry.isDirectory()) ids.add(entry.name);
+		}
+	} catch {
+		return null;
+	}
+	return ids;
+}
+
 const APPEND_FSYNC_DEBOUNCE_MS = 500;
 /** See isFenced in createWriter. */
 const FENCE_PROBE_REUSE_MS = 1_000;

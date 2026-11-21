@@ -274,6 +274,19 @@ describe("workspace snapshots", () => {
 		strictEqual(refsUnder("refs/clio-coder/"), "");
 	});
 
+	it("prunes the snapshot state of a session that no longer exists, never a recorded or the current one (C-35)", async () => {
+		for (const sessionId of ["s-1", "s-gone", "s-kept"])
+			ok(
+				(await createWorkspaceSnapshots({ stateDir, sessionId, cwd: repo }).snapshot({ reason: "turn-start" })).kind ===
+					"taken",
+			);
+		mkdirSync(path.join(stateDir, "sessions", "workspace-hash", "s-kept"), { recursive: true });
+		await pruneWorkspaceSnapshots({ stateDir, cwd: repo, keepSessionId: "s-1" });
+		deepStrictEqual(readdirSync(path.join(stateDir, "snapshots")).sort(), ["s-1", "s-kept"]);
+		strictEqual(refsUnder("refs/clio-coder/snapshots/s-gone/"), "");
+		ok(refsUnder("refs/clio-coder/snapshots/s-kept/").length > 0);
+	});
+
 	it("is unavailable outside a Git work tree", async () => {
 		const plain = path.join(env.dir, "plain");
 		mkdirSync(plain);

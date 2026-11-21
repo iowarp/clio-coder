@@ -1,5 +1,5 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -324,6 +324,37 @@ test("startup reload keeps the boot hook generation; a later reload commits a ne
 	equal(commits, 0, "boot already published the hook generation, so startup publishes no second one");
 	equal((await runtime.reload()).status, "committed");
 	equal(commits, 1);
+});
+
+test("a session host's startup prunes per-session extension state only of sessions that no longer exist (C-35)", async (t) => {
+	const env = await isolateClioEnv("clio-coder-orphan-state-");
+	t.after(() => env.restore());
+	const stateDir = path.join(env.dir, "state");
+	const cwd = path.join(env.dir, "workspace");
+	mkdirSync(cwd);
+	mkdirSync(path.join(stateDir, "sessions", "workspace-hash", "kept"), { recursive: true });
+	const workspaces = path.join(stateDir, "extension-workspaces");
+	const sessions = path.join(stateDir, "extensions", "lab_status.v1", "sessions");
+	mkdirSync(workspaces, { recursive: true });
+	mkdirSync(sessions, { recursive: true });
+	for (const name of ["kept.json", "gone.json", "current.json"]) writeFileSync(path.join(workspaces, name), "null\n");
+	for (const name of ["kept.json", "gone.json", "gone.json.bak", "current.json", "notes.txt"])
+		writeFileSync(path.join(sessions, name), "{}");
+	writeFileSync(path.join(stateDir, "extensions", "lab_status.v1", "store.json"), "{}");
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: cwd, sessionId: "current", mode: "interactive" }),
+		isIdle: () => true,
+		list: () => [],
+		stateDir: () => stateDir,
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	deepStrictEqual(readdirSync(workspaces).sort(), ["current.json", "kept.json"]);
+	deepStrictEqual(readdirSync(sessions).sort(), ["current.json", "kept.json", "notes.txt"]);
+	ok(
+		existsSync(path.join(stateDir, "extensions", "lab_status.v1", "store.json")),
+		"the shared store is not per-session",
+	);
 });
 
 test("real import failure and missing/undeclared handlers report degraded readiness", async (t) => {
