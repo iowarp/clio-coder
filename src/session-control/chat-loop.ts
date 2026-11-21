@@ -5282,7 +5282,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const unused = instructions?.trim() ? ". Your compaction instructions were not used" : "";
 				emitNotice(
 					hasMessages
-						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet${unused}`
+						? `[/context compact] too short to compact (${budget}); every turn is still inside the kept recent window, so no older history can be summarized yet${unused}`
 						: `[/context compact] session is empty; start a conversation first${unused}`,
 				);
 			}

@@ -101,12 +101,17 @@ function factRows(lead: string, facts: ReadonlyArray<string>, room: number): str
 			bare = false;
 			continue;
 		}
-		const [first = "", ...rest] = wrapTextWithAnsi(fact, Math.max(1, room - Math.max(visibleWidth(row), HANG.length)));
+		const firstRoom = Math.max(1, room - Math.max(visibleWidth(row), HANG.length));
+		const [first = "", ...overflow] = wrapTextWithAnsi(fact, firstRoom);
 		bare = false;
-		if (rest.length === 0) {
+		if (overflow.length === 0) {
 			row = `${row}${first}`;
 			continue;
 		}
+		// Only the first piece sits beside the label; the rest rewraps at the row's width under the hanging indent, or a
+		// 40-column card wrapped every continuation as narrow as the label left the first (CLI-P57).
+		const remainder = fact.startsWith(first) ? fact.slice(first.length).trimStart() : overflow.join(" ");
+		const rest = wrapTextWithAnsi(remainder, Math.max(1, room - HANG.length));
 		rows.push(`${row}${first}`, ...rest.slice(0, -1).map((piece) => `${HANG}${piece}`));
 		row = `${HANG}${rest.at(-1) ?? ""}`;
 	}

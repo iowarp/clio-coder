@@ -9,6 +9,7 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { countVerifiedOutcomes } from "../../src/domains/evidence/verified-outcomes.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { renderExitSummary } from "../../src/interactive/exit-summary.js";
 import { createExitSummaryCollector, exitSpend } from "../../src/interactive/exit-summary-collector.js";
 import { createSessionFileRecorder, sessionFileOutcomeForExitCode } from "../../src/interactive/session-file.js";
@@ -124,6 +125,33 @@ test("the session summary counts what Clio answered while the operator was away 
 		);
 	}
 	collector.dispose();
+});
+
+test("a wrapped fact's continuation rows use the box's inner width less the hanging indent once (CLI-P57)", () => {
+	const ready = exitSpend(telemetryViewOf("session-1", []), "1970-01-01T00:00:00.000Z");
+	ok(ready.kind === "ready" && ready.verified.kind === "none");
+	const snapshot = createExitSummaryCollector({
+		bus: createTelemetryHub(),
+		telemetry: {
+			subscribe: () => () => {},
+			read: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
+		} as unknown as TelemetryContract,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	}).snapshot();
+	ok(snapshot);
+	const rows = renderExitSummary({ ...snapshot, spend: ready }, "brief", 40, true).map((row) =>
+		stripTerminalSequences(row).replace(/^\S\s/u, "").replace(/\s\S$/u, "").trimEnd(),
+	);
+	const at = rows.findIndex((row) => row.startsWith("Session verified:"));
+	deepStrictEqual(rows.slice(at, at + 3), [
+		"Session verified: no judged outcome",
+		"  this session; command checks such",
+		"  as unit tests are not counted",
+	]);
 });
 
 test("the activity row names its visit scope and a worker whose writes went unrecorded (bt-11)", () => {
