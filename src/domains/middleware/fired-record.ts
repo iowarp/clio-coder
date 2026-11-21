@@ -30,13 +30,17 @@ export function nextFiringId(): string {
 	return `fir_${PROCESS_TOKEN}_${firingSequence}`;
 }
 
+/** A firing settles when one of its effects does or its rule declares that every firing of it settles. */
+function settles(rule: MiddlewareFiredRule): boolean {
+	return rule.settles === true || rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind));
+}
+
 /** The result with a firing id on every rule whose effects settle; a hook with no session or run has no ledger. */
 function withFiringIds(result: MiddlewareHookResult): MiddlewareHookResult {
 	const owner = result.input.sessionId ?? result.input.runId;
-	if (owner === undefined || !result.fired?.some((rule) => rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind))))
-		return result;
+	if (owner === undefined || !result.fired?.some(settles)) return result;
 	const fired: MiddlewareFiredRule[] = result.fired.map((rule) =>
-		rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind)) ? { ...rule, firingId: nextFiringId() } : rule,
+		settles(rule) ? { ...rule, firingId: nextFiringId() } : rule,
 	);
 	return { ...result, fired };
 }

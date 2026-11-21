@@ -1075,6 +1075,10 @@ describe("the finish declaration (fleet design 4.3)", () => {
 		strictEqual(finishRoundDue({ ...turn, headless: false }), false);
 		strictEqual(finishRoundDue({ ...turn, headless: false, origin: "job" }), true);
 		strictEqual(finishRoundDue({ ...turn, headless: false, origin: "continuation" }), true);
+		// CLI-P46: a continuation is judged by the prompt that owns its chain.
+		strictEqual(finishRoundDue({ ...turn, headless: false, origin: "continuation", promptOrigin: "job" }), true);
+		strictEqual(finishRoundDue({ ...turn, headless: false, origin: "continuation", promptOrigin: "operator" }), false);
+		strictEqual(finishRoundDue({ ...turn, origin: "continuation", promptOrigin: "operator" }), true);
 		for (const change of [{ declared: true }, { calledWork: false }, { spent: true }, { toolsLocked: true }])
 			strictEqual(finishRoundDue({ ...turn, ...change }), false, JSON.stringify(change));
 	});
@@ -1105,6 +1109,10 @@ describe("the finish declaration (fleet design 4.3)", () => {
 				null,
 				JSON.stringify(unattended),
 			);
+		// CLI-P46: a chain a job or a headless run owns stays unattended (the attended roll is in continuation-last-tool-call).
+		const rolled = { headless: false, origin: "continuation", promptOrigin: "job", refusedThisTurn: false };
+		strictEqual(bareFinishVerdict(finish, bare, rolled), null);
+		strictEqual(bareFinishVerdict(finish, bare, { ...rolled, headless: true, promptOrigin: "operator" }), null);
 	});
 
 	it("assesses a textless declared done over an unvalidated edit as partly_done (fleet design 4.3)", () => {

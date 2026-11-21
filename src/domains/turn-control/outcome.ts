@@ -40,6 +40,15 @@ export interface TurnOutcomeRecord {
 		readonly duplicateDispatch: boolean;
 	};
 	readonly harness: { readonly runIds: ReadonlyArray<string>; readonly reads: number };
+	/**
+	 * The no-progress read streak as the read-streak rule measured it this turn (exploration design 3.4): the longest
+	 * streak reached, carried streak included; the rounds it counted toward serial runs; the notes it attached.
+	 */
+	readonly exploration?: {
+		readonly maxReadStreak: number;
+		readonly serialRounds: number;
+		readonly notes: number;
+	};
 	readonly conversation: {
 		/** Regex facts about the closing text. */
 		readonly endedWithQuestion: boolean;
@@ -76,6 +85,7 @@ export interface TurnOutcomeInput {
 	readonly dispatches: TurnOutcomeRecord["coordinator"]["dispatches"];
 	readonly duplicateDispatch: boolean;
 	readonly harness: TurnOutcomeRecord["harness"];
+	readonly exploration?: TurnOutcomeRecord["exploration"];
 	readonly finalAssistantText: string;
 	readonly taskEstablished: boolean;
 	readonly previousClarificationStreak: number;
@@ -170,6 +180,7 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 			duplicateDispatch: input.duplicateDispatch,
 		},
 		harness: { runIds: [...input.harness.runIds], reads: input.harness.reads },
+		...(input.exploration !== undefined ? { exploration: { ...input.exploration } } : {}),
 		conversation: {
 			...shape,
 			taskEstablished: input.taskEstablished,

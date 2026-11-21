@@ -83,7 +83,10 @@ export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from
 export {
 	createReadStreakRegistration,
 	READ_STREAK_REGISTRATION_ID,
+	READ_STREAK_SERIAL_EVIDENCE,
 	type ReadStreakClassifiers,
+	type ReadStreakObserver,
+	type ReadStreakStep,
 } from "./read-streak.js";
 export {
 	createMiddlewareRegistrationTable,

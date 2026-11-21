@@ -7,7 +7,7 @@ import {
 	isReadOnlyExplorationCall,
 	workspaceRelativeTarget,
 } from "./dispatch-nudge.js";
-import { createReadStreakRegistration, type ReadStreakClassifiers } from "./read-streak.js";
+import { createReadStreakRegistration, type ReadStreakClassifiers, type ReadStreakObserver } from "./read-streak.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { type MiddlewareEffect, type MiddlewareHookInput, metadataString } from "./types.js";
 
@@ -100,6 +100,7 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 		description: "suggest one parallel scout dispatch when a turn's reads span several top-level directories",
 		hooks: ["turn_start", "before_tool", "after_tool"],
 		evidence: "count:read-class-calls-and-areas@user-turn",
+		settles: true,
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
 				const key = metadataString(input, "userTurnId");
@@ -154,15 +155,28 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 
 /**
  * The exploration advisories the main session registers together: the follow-up Scout advisory, the in-turn scout
- * nudge and, when the composition supplies its classifiers, the no-progress read streak.
+ * nudge and, when the composition supplies its classifiers, the no-progress read streak, reporting what it sees to
+ * `readStreakObserver` when one is given (the outcome ledger, X4).
  */
 export function createExplorationNudgeRegistrations(
-	deps: { workspaceRoot?: () => string; readStreak?: ReadStreakClassifiers } = {},
+	deps: {
+		workspaceRoot?: () => string;
+		readStreak?: ReadStreakClassifiers;
+		readStreakObserver?: ReadStreakObserver;
+	} = {},
 ): ReadonlyArray<MiddlewareHookRegistration> {
-	const { readStreak, ...shared } = deps;
+	const { readStreak, readStreakObserver, ...shared } = deps;
 	return [
 		createReadOnlyExplorationNudgeRegistration(shared).registration,
 		createScoutNudgeRegistration(shared),
-		...(readStreak !== undefined ? [createReadStreakRegistration({ ...shared, classifiers: readStreak })] : []),
+		...(readStreak !== undefined
+			? [
+					createReadStreakRegistration({
+						...shared,
+						classifiers: readStreak,
+						...(readStreakObserver !== undefined ? { observer: readStreakObserver } : {}),
+					}),
+				]
+			: []),
 	];
 }

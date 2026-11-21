@@ -226,7 +226,10 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			]);
 			const continuation = run.prompts[1] ?? "";
 			ok(continuation.includes("budget and rolled over"), continuation);
-			ok(continuation.includes("No summary is needed."), continuation);
+			ok(
+				continuation.includes("No recap of earlier turns is needed; answer the operator when the work is done."),
+				continuation,
+			);
 			ok(!continuation.includes("every tool the turn held is available again"), continuation);
 			// The roll's closing record is its notice; the generic "Continuing this turn" line does not repeat it.
 			const repeated = run.events.filter(
