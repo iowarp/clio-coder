@@ -8,6 +8,7 @@ import type { UserTask } from "../../domains/user-tasks/store.js";
 import type { DispatchPlanView } from "../../tools/dispatch-plan.js";
 import type { AgentMessage } from "../types.js";
 import { ACP_MAX_JOBS } from "./runtime.js";
+import type { ACP_V1_TOOL_CALL_STATUSES } from "./upstream-schema.js";
 
 /**
  * ACP extensibility reserves `_meta` for non-spec data. Clio namespaces its
@@ -303,7 +304,11 @@ export type AcpToolKind =
 	| "other";
 
 /** ACP v1 `ToolCallStatus` closed enum (schema v1.23.0). */
-export type AcpToolCallStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+/**
+ * A tool call status CLIO Coder sends, held to the pinned upstream v1 list: v1 has no `cancelled`, so a cancelled call
+ * goes out as `failed` with the reason in its content.
+ */
+export type AcpToolCallStatus = (typeof ACP_V1_TOOL_CALL_STATUSES)[number];
 
 export interface AcpJsonRpcRequest {
 	jsonrpc: "2.0";

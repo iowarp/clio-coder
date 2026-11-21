@@ -23,6 +23,7 @@ import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js"
 import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
 import {
 	ACP_UPSTREAM_V1,
+	ACP_V1_TOOL_CALL_STATUSES,
 	AcpV1InitializeResponseSchema,
 	AcpV1LoadSessionResponseSchema,
 	AcpV1NewSessionResponseSchema,
@@ -506,10 +507,19 @@ test("ACP close cancels and waits for an active prompt", async () => {
 			prompt: [{ type: "text", text: "Hello" }],
 		});
 		await Promise.resolve();
+		peer.emit({ type: "tool_execution_start", toolCallId: "open-1", toolName: "read", args: { path: "README.md" } });
 		await rejects(peer.call("session/set_mode", { sessionId: opened.sessionId, modeId: "yolo" }), /active prompt/u);
 		deepStrictEqual(await peer.call("session/close", { sessionId: opened.sessionId }), {});
 		strictEqual(peer.cancelled, true);
 		strictEqual(((await prompt) as { stopReason: string }).stopReason, "cancelled");
+		// The call the close cut off settles with a status ACP v1 has: failed, the cancel named in its content.
+		const swept = peer.updates
+			.map((params) => params.update as { sessionUpdate?: string; status?: string; content?: unknown })
+			.filter((update) => update.sessionUpdate === "tool_call_update" && update.status !== "in_progress");
+		strictEqual(swept.length, 1);
+		ok((ACP_V1_TOOL_CALL_STATUSES as readonly string[]).includes(swept[0]?.status ?? ""), swept[0]?.status);
+		strictEqual(swept[0]?.status, "failed");
+		ok(JSON.stringify(swept[0]?.content).includes("cancelled"), JSON.stringify(swept[0]?.content));
 		const closed = peer.history.find((meta) => meta.id === opened.sessionId);
 		strictEqual(closed?.lastCheckpointReason, "close", "the close is checkpointed before the session is released");
 	} finally {
