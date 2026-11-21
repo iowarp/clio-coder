@@ -3,7 +3,7 @@ import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:f
 import path from "node:path";
 import { readClioVersion } from "../core/package-root.js";
 import type { RunResult } from "../domains/dispatch/types.js";
-import { CITATION_CHECK_PREFIX } from "../domains/safety/citation-grounding.js";
+import { CITATION_CHECK_PREFIX } from "../domains/safety/citation-check-prefix.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import type { ErrorSlug } from "./kit/slugs.js";
 import { type TurnAnswerEntry, turnAnswer } from "./modes/answer-segments.js";
