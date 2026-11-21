@@ -12,8 +12,10 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
 	readSettings,
+	type SettingsIssue,
 	SettingsValidationError,
 	settingsPath,
+	settingsUpgradeAdvice,
 	updateSavedSettingsDocument,
 	updateSettings,
 	validateSettings,
@@ -108,6 +110,12 @@ function describe(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/** A file the pending retired-settings migration repairs names that command, as doctor does (M-38). */
+function withUpgradeAdvice(listed: string, issues: ReadonlyArray<SettingsIssue>): string {
+	const upgrade = settingsUpgradeAdvice(issues);
+	return upgrade === null ? listed : `${listed}. ${upgrade.charAt(0).toUpperCase()}${upgrade.slice(1)}.`;
+}
+
 function parseDocument(text: string | null, file: string): Record<string, unknown> {
 	if (text === null) return {};
 	let parsed: unknown;
@@ -171,9 +179,11 @@ interface Reading {
  */
 class UserSettingsInvalidError extends Error {}
 
-function refuseInvalidUser(file: string, issues: ReadonlyArray<{ path: string; message: string }>): never {
+function refuseInvalidUser(file: string, issues: ReadonlyArray<SettingsIssue>): never {
 	const listed = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
-	throw new UserSettingsInvalidError(`${file} failed validation, so CLIO Coder reads none of it: ${listed}`);
+	throw new UserSettingsInvalidError(
+		withUpgradeAdvice(`${file} failed validation, so CLIO Coder reads none of it: ${listed}`, issues),
+	);
 }
 
 function getEffective(path: string, cwd: string): Reading {
@@ -372,7 +382,10 @@ export function runConfigSettingCommand(verb: Verb, args: ReadonlyArray<string>,
 		return EXIT_CODES.success;
 	} catch (error) {
 		const failure = failureOf(error);
-		writeCliFailure({ path: commandPath, slug: failure.slug, message: describe(error), json });
+		// A value refusal arrives as SettingUsageError, so only the file's own failure reaches the advice.
+		const message =
+			error instanceof SettingsValidationError ? withUpgradeAdvice(describe(error), error.issues) : describe(error);
+		writeCliFailure({ path: commandPath, slug: failure.slug, message, json });
 		return failure.code;
 	}
 }

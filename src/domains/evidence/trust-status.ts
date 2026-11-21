@@ -565,6 +565,9 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 	if (settledQualityFails(facts.quality))
 		return attributed("failed", source, { kind: "validator", id: "result-quality" }, artifacts);
 	const grounding = facts.validationGrounding;
+	// An unobserved tool lane's claims are unknown, never ungrounded (DESIGN 4.8 V1); a failing one already lowered it.
+	if (grounding?.basis === "unobserved-lane" && grounding.ungrounded.length > 0)
+		return attributed("unknown", source, { kind: "validator", id: "unobserved-tool-lane" }, artifacts);
 	if (
 		grounding?.basis === "no-command-executed" &&
 		(grounding.ungrounded.length > 0 || grounding.claimed > grounding.grounded)

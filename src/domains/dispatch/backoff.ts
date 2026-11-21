@@ -19,6 +19,7 @@ export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefin
 		code === "worker_mutation_blocked" ||
 		code === "merge_withheld" ||
 		code === "worker_removed_tests" ||
+		code === "assurance_compromised" ||
 		code === "information_flow_blocked" ||
 		code === "acp_model_unavailable" ||
 		code === "acp_thinking_unavailable"

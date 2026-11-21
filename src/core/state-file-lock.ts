@@ -41,7 +41,7 @@ const STALE_LOCK_MS = 30_000;
 /** Well under STALE_LOCK_MS, so a slow holder never reads as an abandoned one. */
 const REFRESH_LOCK_MS = 5_000;
 /**
- * Default acquisition budget. Deliberately under DEFAULT_CAPACITY_LEASE_TTL_MS:
+ * Default acquisition budget. Deliberately under the lease TTL (LEASE_TTL_MS):
  * the sync path blocks the event loop, so a process waiting here also stalls its
  * own lease heartbeat, and a wait longer than a lease lives would let a live
  * holder's lease expire under it. capacity-lease.ts asserts the relation.
@@ -231,9 +231,38 @@ export class StateFileLockTimeoutError extends Error {
 	}
 }
 
+/** The holder's command line, read only for a pid this host's /proc can name; null otherwise. */
+function holderCommand(owner: LockOwner): string | null {
+	if (owner.host !== null && owner.host !== hostname()) return null;
+	if (owner.pidNs !== null && owner.pidNs !== ownerIdentity().pidNs) return null;
+	try {
+		const command = readFileSync(`/proc/${owner.pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
+		return command.length > 0 ? (command.length > 160 ? `${command.slice(0, 157)}...` : command) : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The remedy for a lock wait that ran out: it names the holder and says to wait for it or stop it. Only an owner that
+ * is provably gone is a lock to delete; a live one is never, and one that cannot be checked from here is deleted only
+ * once the operator has seen it gone.
+ */
+function lockTimeoutRemedy(lockPath: string): string {
+	const owner = readLockOwner(lockPath);
+	if (owner === null) return `its owner record cannot be read; it is reclaimed once it is ${STALE_LOCK_MS / 1000} s old`;
+	const host = owner.host ?? hostname();
+	const state = ownerState(owner);
+	if (state === "gone") return `its owner pid ${owner.pid} on ${host} is gone; delete ${lockPath}`;
+	const command = state === "alive" ? holderCommand(owner) : null;
+	const holder = `pid ${owner.pid} on ${host}${command !== null ? ` (${command})` : ""}${owner.note !== undefined ? `, ${owner.note}` : ""}`;
+	if (state === "alive") return `held by ${holder}; wait for it to finish or stop that process`;
+	return `held by ${holder}, which cannot be checked from here; wait for it, or delete ${lockPath} once that process is gone`;
+}
+
 function timeoutError(lockPath: string, timeoutMs: number): Error {
 	return new StateFileLockTimeoutError(
-		`timed out after ${timeoutMs}ms waiting for ${lockPath} (owner pid=${readLockOwner(lockPath)?.pid ?? "?"}); delete it if no other clio-coder process is running`,
+		`timed out after ${timeoutMs}ms waiting for ${lockPath}: ${lockTimeoutRemedy(lockPath)}`,
 		timeoutMs,
 	);
 }

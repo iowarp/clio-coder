@@ -445,6 +445,9 @@ export const SessionTelemetrySchema = Type.Object(
 );
 export type SessionTelemetryV1 = Static<typeof SessionTelemetrySchema>;
 
+/** One seat-billing figure as its runtime reported it; not a dollar amount, so it has no fold ref. */
+const SeatUnitSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
+
 export const CallRowSchema = Type.Object(
 	{
 		callId: CallIdSchema,
@@ -532,6 +535,19 @@ export const CallRowSchema = Type.Object(
 		),
 		quota: Type.Union([CallSettledSchema.properties.quota, Type.Null()]),
 		responseId: Type.Union([text, Type.Null()]),
+		/** The seat units the call's runtime reported (`call.settled` billing); null when the call journaled none. */
+		billing: Type.Union([
+			Type.Object(
+				{
+					provider: CallSettledSchema.properties.billing.properties.provider,
+					premiumRequests: SeatUnitSchema,
+					nanoAiu: SeatUnitSchema,
+					modelCalls: SeatUnitSchema,
+				},
+				closed,
+			),
+			Type.Null(),
+		]),
 	},
 	closed,
 );
@@ -1214,7 +1230,13 @@ export const RunEvidenceSchema = Type.Object(
 								claimed: count,
 								grounded: count,
 								ungrounded: Type.Array(text),
-								basis: vocabulary(["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]),
+								basis: vocabulary([
+									"grounded",
+									"no-command-executed",
+									"unmatched-command",
+									"unattributable-status",
+									"unobserved-lane",
+								]),
 							},
 							closed,
 						),

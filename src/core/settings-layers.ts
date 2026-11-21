@@ -63,7 +63,9 @@ export interface SettingsLayerIssue {
 	origin: SettingsOrigin;
 	path: string;
 	message: string;
-	kind?: SettingsIssue["kind"];
+	kind?: NonNullable<SettingsIssue["kind"]>;
+	/** A user-layer issue the pending `2026-11-21-retired-settings` migration rewrites (M-38). */
+	upgrade?: true;
 }
 
 export interface SettingsLayerInfo {
@@ -951,7 +953,14 @@ function validateLayerStack(
 	}
 	for (const issue of validation.issues) {
 		if (downgraded.has(issue.path)) continue;
-		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
+		const origin = settingsSourceFor(sources, issue.path);
+		// The migration rewrites settings.yaml only, so a project layer's retired key is not its to repair.
+		issues.push({
+			origin,
+			path: issue.path,
+			message: issue.message,
+			...(issue.upgrade && origin === "user" ? { upgrade: true as const } : {}),
+		});
 	}
 	// AUD-2 finding 4: keep rejected input in diagnostics before attributing its fallback.
 	for (const path of Object.keys(sources)) {
@@ -995,6 +1004,7 @@ export function readLayeredSettings(cwd: string | null, options: ReadLayeredSett
 					path: issue.path,
 					message: issue.message,
 					...(issue.kind ? { kind: issue.kind } : {}),
+					...(issue.upgrade ? { upgrade: issue.upgrade } : {}),
 				}));
 	return {
 		settings,
@@ -1027,14 +1037,24 @@ export function readStrictLayeredSettings(cwd: string, options: ReadLayeredSetti
 	const layered = readLayeredSettings(cwd, options) as InternalLayeredSettings;
 	const reportedUserIssues = layered.issues
 		.filter((issue) => issue.origin === "user")
-		.map(({ path, message, kind }): SettingsIssue => ({ path, message, ...(kind ? { kind } : {}) }));
-	const userIssues = [...reportedUserIssues, ...layered[STRICT_USER_ISSUES]].filter(
-		(issue, index, all) =>
-			all.findIndex(
-				(candidate) =>
-					candidate.path === issue.path && candidate.message === issue.message && candidate.kind === issue.kind,
-			) === index,
-	);
+		.map(
+			({ path, message, kind, upgrade }): SettingsIssue => ({
+				path,
+				message,
+				...(kind ? { kind } : {}),
+				...(upgrade ? { upgrade } : {}),
+			}),
+		);
+	const same = (a: SettingsIssue, b: SettingsIssue) => a.path === b.path && a.message === b.message && a.kind === b.kind;
+	const all = [...reportedUserIssues, ...layered[STRICT_USER_ISSUES]];
+	// A duplicate keeps the upgrade flag either copy carries, so the thrown error still names the migration (M-38).
+	const userIssues = all
+		.filter((issue, index) => all.findIndex((candidate) => same(candidate, issue)) === index)
+		.map((issue) =>
+			issue.upgrade !== true && all.some((other) => other.upgrade === true && same(other, issue))
+				? { ...issue, upgrade: true as const }
+				: issue,
+		);
 	if (userIssues.length > 0) throw new SettingsValidationError(userIssues);
 	return layered;
 }

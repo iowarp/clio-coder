@@ -1,10 +1,13 @@
-import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual, throws } from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { afterEach, beforeEach, it } from "node:test";
 import { dispatchAdmissionFindings } from "../../src/cli/doctor-dispatch-admission.js";
 import { withStateFileLockSync } from "../../src/core/state-file-lock.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
+import { AdmissionLockBusyError } from "../../src/domains/dispatch/admission-error.js";
 import {
 	acquireCapacityLease,
 	type CapacityLimits,
@@ -15,6 +18,7 @@ import {
 	releaseCapacityLease,
 	writeCapacityStateUnsafe,
 } from "../../src/domains/dispatch/capacity-lease.js";
+import { LEASE_CLOCK_SKEW_MS } from "../../src/domains/dispatch/lease-clock.js";
 import {
 	cleanupDispatchReservations,
 	createDispatchReservation,
@@ -23,6 +27,7 @@ import {
 	releaseDispatchReservation,
 	releaseDispatchReservationMemberAsync,
 	rollbackDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 	transferDispatchReservationToLeaseUnsafe,
 } from "../../src/domains/dispatch/reservation-store.js";
 import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
@@ -37,8 +42,9 @@ afterEach(() => env.restore());
 const endpointKey = "http://127.0.0.1:8080";
 const limits: CapacityLimits = { global: 1, nodes: { local: 1 }, endpoints: { [endpointKey]: 1 } };
 
-function reserve(waves = [0, 1], cap = limits) {
+function reserve(waves = [0, 1], cap = limits, lockTimeoutMs?: number) {
 	return createDispatchReservation({
+		...(lockTimeoutMs !== undefined ? { lockTimeoutMs } : {}),
 		topology: "pipeline",
 		tasks: waves.map((wave, index) => ({
 			memberId: `task-${index + 1}`,
@@ -401,6 +407,45 @@ it("drops invalid settled admission records on boot and refuses only an invalid 
 	deepStrictEqual(readCapacityStateUnsafe().reservations, []);
 });
 
+it("boot never waits on a live admission lock holder; the first plan admission refuses typed, then runs the deferred sweep (M-35)", async (t) => {
+	// A plan whose owner died inside its lifetime: only the startup sweep expires it, and it holds the one slot.
+	const orphan = reserve([0]);
+	const state = readCapacityStateUnsafe();
+	const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+	for (const record of state.reservations as Array<{ ownerId: string; ownerPid: number }>)
+		if (record.ownerId === orphan.ownerId) record.ownerPid = deadPid;
+	writeCapacityStateUnsafe(state);
+	const holder = spawn("sleep", ["600"], { stdio: "ignore" });
+	t.after(() => holder.kill("SIGKILL"));
+	await once(holder, "spawn");
+	const lockPath = `${capacityStateLockPath()}.lock`;
+	writeFileSync(lockPath, JSON.stringify({ host: hostname(), pid: holder.pid }));
+
+	strictEqual(sweepDispatchReservationsAtStartup(), "deferred");
+	strictEqual(getDispatchReservation(orphan.ownerId)?.status, "active");
+	let refusal: unknown;
+	throws(() => {
+		try {
+			reserve([0], limits, 50);
+		} catch (error) {
+			refusal = error;
+			throw error;
+		}
+	});
+	ok(refusal instanceof AdmissionLockBusyError);
+	match(refusal.message, /^dispatch: admission denied: the shared admission store is busy; timed out after 50ms/);
+	match(
+		refusal.message,
+		new RegExp(`held by pid ${holder.pid} on ${hostname()} \\(sleep 600\\); wait for it to finish or stop that process`),
+	);
+	doesNotMatch(refusal.message, /delete/);
+
+	rmSync(lockPath);
+	const next = reserve([0]);
+	strictEqual(getDispatchReservation(orphan.ownerId)?.status, "expired");
+	releaseDispatchReservation(next.ownerId);
+});
+
 it("counts another host's loopback endpoint lease only when it runs on a named node", () => {
 	const cap = { global: 4, nodes: { local: 4, gpu07: 4 }, endpoints: { [endpointKey]: 1 } };
 	const onNamed = acquireCapacityLease({ assignmentId: "named", nodeId: "gpu07", endpointKey, limits: cap });
@@ -455,6 +500,50 @@ it("a running member's lease heartbeat keeps its plan current for hosts that can
 	} finally {
 		await controller.stop();
 	}
+});
+
+it("the admission heartbeat keeps a plan current while none of its members holds a lease (M12)", async (t) => {
+	const reservation = reserve();
+	let clock = Date.now();
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const controller = createCapacityAdmissionController({ limits: () => limits, now: () => clock, heartbeatMs: 5 });
+	try {
+		// The next member waits longer than the plan's TTL with no lease, in the writer-set queue or behind a long step.
+		clock += 60 * 60_000;
+		t.mock.timers.tick(5);
+		await controller.stop();
+		strictEqual(
+			Date.parse(getDispatchReservation(reservation.ownerId)?.expiresAt ?? ""),
+			clock + DEFAULT_RESERVATION_TTL_MS,
+			"the heartbeat did not refresh the plan's expiry",
+		);
+		const state = readCapacityStateUnsafe();
+		state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+		writeCapacityStateUnsafe(state);
+		strictEqual(cleanupDispatchReservations({ nowMs: clock }), 0);
+	} finally {
+		await controller.stop();
+		releaseDispatchReservation(reservation.ownerId);
+	}
+});
+
+it("another host's lease and plan hold until their expiry plus the clock skew tolerance, then are reclaimed (M12)", () => {
+	const reservation = reserve();
+	const lease = acquireCapacityLease({
+		assignmentId: "far",
+		nodeId: "gpu07",
+		limits: { global: 4, nodes: { gpu07: 4 }, endpoints: {} },
+	});
+	const state = readCapacityStateUnsafe();
+	for (const entry of state.leases) entry.host = "other-host";
+	state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+	writeCapacityStateUnsafe(state);
+	const leaseLapse = Date.parse(lease.expiresAt) + LEASE_CLOCK_SKEW_MS;
+	strictEqual(capacityLeaseUsage({ nowMs: leaseLapse - 1 }).nodes.gpu07, 1);
+	strictEqual(capacityLeaseUsage({ nowMs: leaseLapse }).nodes.gpu07, undefined);
+	const planLapse = Date.parse(reservation.expiresAt) + LEASE_CLOCK_SKEW_MS;
+	strictEqual(cleanupDispatchReservations({ nowMs: planLapse - 1 }), 0);
+	strictEqual(cleanupDispatchReservations({ nowMs: planLapse }), 1);
 });
 
 it("another host's leases and reservations do not consume this host's global cap", () => {
