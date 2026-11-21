@@ -47,7 +47,7 @@ A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an u
 
 ## Run workers on another machine
 
-Remote native workers use SSH and need the same CLIO Coder version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings workers`.
+Remote native workers use SSH and need the same CLIO Coder version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings fleet`, which opens the Workers area.
 
 A node receives work only after `clio-coder fleet nodes test <id> --record` passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.
 
