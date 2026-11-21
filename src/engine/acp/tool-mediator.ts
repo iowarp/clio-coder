@@ -655,7 +655,7 @@ export class AcpToolMediator {
 		if (decision === "approved" && allowOnceOption(options) === null) {
 			decision = "denied";
 			noAllowOnce = true;
-			reason = `approved by Clio policy (${reason ?? "allowed"}), but the peer offered no allow_once option and Clio never selects allow_always, so the call was rejected`;
+			reason = `approved by CLIO Coder policy (${reason ?? "allowed"}), but the peer offered no allow_once option and CLIO Coder never selects allow_always, so the call was rejected`;
 		}
 		if (decision === "approved") this.approved += 1;
 		else this.denied += 1;

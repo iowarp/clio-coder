@@ -1043,7 +1043,7 @@ function qualityRow(
 	// run and pass, so the line names it rather than claiming no test was recognized.
 	if (!inspect && entry.state === "absent")
 		return passingCheck !== null
-			? `${passingCheck} passed on the worker's own report; Clio graded no check of its own`
+			? `${passingCheck} passed on the worker's own report; CLIO Coder graded no check of its own`
 			: "no check ran on this work";
 	return `quality ${validationClause(trust)}${why}`;
 }

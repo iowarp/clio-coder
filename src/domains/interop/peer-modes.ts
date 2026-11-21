@@ -106,7 +106,7 @@ export function peerModeCapabilities(
 				? `Install ${kind.label} CLI`
 				: context.paneAvailable === true
 					? `Run /panes peer ${kind.id} <brief>`
-					: "Start Clio inside Herdr with clio-coder --with-panes",
+					: "Start CLIO Coder inside Herdr with clio-coder --with-panes",
 			command: binaryPresent ? `/panes peer ${kind.id} <brief>` : null,
 		});
 	}

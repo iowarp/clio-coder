@@ -393,7 +393,7 @@ const WELCOME_HINT: {
 	commands: ReadonlyArray<readonly [string, string]>;
 	keys: ReadonlyArray<readonly [Keybinding, string]>;
 } = {
-	title: "Make Clio yours",
+	title: "Make CLIO Coder yours",
 	commands: [
 		["/model", "Choose a model and target"],
 		["/library", "Browse plugins and extensions"],
@@ -610,7 +610,7 @@ export function buildWelcomeDashboardLines(
 				: [
 						theme.style("sectionHeading", "Also", { bold: true }),
 						`${theme.fg("guidance", "/help")}     ${theme.fg("body", "Commands and shortcuts")}`,
-						`${theme.fg("guidance", "/context")}  ${theme.fg("body", "What Clio knows about this repo")}`,
+						`${theme.fg("guidance", "/context")}  ${theme.fg("body", "What CLIO Coder knows about this repo")}`,
 					]),
 		showHints
 			? theme.fg("annotation", "/usage for limits and reset times")

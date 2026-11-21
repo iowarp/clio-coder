@@ -96,9 +96,9 @@ function mapDeclaration(raw: Record<string, unknown>, name: string): AdoptedMcpS
 	if (raw.enabled === false) return "disabled in the source configuration";
 	const type = raw.type;
 	if (typeof raw.url === "string" || (type !== undefined && type !== "stdio" && type !== "local"))
-		return `uses the ${typeof type === "string" ? type : "remote"} transport; Clio runs stdio servers only`;
+		return `uses the ${typeof type === "string" ? type : "remote"} transport; CLIO Coder runs stdio servers only`;
 	if (raw.env_vars !== undefined)
-		return "passes host environment variables through by name (env_vars), which Clio's mcp.yaml cannot state";
+		return "passes host environment variables through by name (env_vars), which CLIO Coder's mcp.yaml cannot state";
 	// OpenCode's local servers spell argv as one `command` array.
 	const argv = Array.isArray(raw.command) ? strings(raw.command) : null;
 	const command = argv ? argv[0] : raw.command;
@@ -116,7 +116,7 @@ function mapDeclaration(raw: Record<string, unknown>, name: string): AdoptedMcpS
 	}
 	const expanded = [command, ...args, ...Object.values(env)].some((value) => /\$\{[^}]*\}/.test(value));
 	if (expanded)
-		return "expands environment variables in its values, which Clio's mcp.yaml does not do; declare the literal values by hand";
+		return "expands environment variables in its values, which CLIO Coder's mcp.yaml does not do; declare the literal values by hand";
 	const server: AdoptedMcpServer = { id: serverId(name), command, args, env };
 	if (typeof raw.cwd === "string" && raw.cwd.length > 0) server.cwd = raw.cwd;
 	if (typeof raw.tool_timeout_sec === "number" && raw.tool_timeout_sec > 0)
@@ -185,7 +185,8 @@ export function mapForeignMcpServer(item: InteropInventoryItem, cwd: string): Mc
 		destination,
 	);
 	const problems = errorsOf(alone);
-	if (problems.length > 0) return { ok: false, reason: `Not adoptable under Clio's mcp.yaml: ${problems.join("; ")}.` };
+	if (problems.length > 0)
+		return { ok: false, reason: `Not adoptable under CLIO Coder's mcp.yaml: ${problems.join("; ")}.` };
 	return {
 		ok: true,
 		server: mapped,
@@ -207,12 +208,12 @@ export function mcpDestinationConflict(server: AdoptedMcpServer, destination: st
 	const document = parseDocument(text);
 	const parsed: unknown = document.errors.length > 0 ? null : document.toJS();
 	const servers = record(parsed) && Array.isArray(parsed.servers) ? parsed.servers : null;
-	if (servers === null) return `${destination} is not a valid Clio MCP config; fix it before adopting servers.`;
+	if (servers === null) return `${destination} is not a valid CLIO Coder MCP config; fix it before adopting servers.`;
 	const existing = servers.find((entry) => record(entry) && entry.id === server.id);
 	if (!record(existing)) return null;
 	const same = JSON.stringify(existing) === JSON.stringify(serverNode(server));
 	return same
-		? "Already declared: same server in the Clio config."
+		? "Already declared: same server in the CLIO Coder config."
 		: `Server id collision: ${server.id} is already declared in ${destination}; existing content will not be replaced.`;
 }
 

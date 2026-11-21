@@ -1,6 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Document, isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
-import { SETTINGS_V1_RETIRED_PATHS, settingsPath, validateSettings, withSettingsLock } from "../../../core/config.js";
+import {
+	SETTINGS_V1_RETIRED_PATHS,
+	SETTINGS_V2_RETIRED_VALUE_SPELLINGS,
+	SETTINGS_V2_RETIRED_WORKFLOWS,
+	settingsPath,
+	validateSettings,
+	withSettingsLock,
+} from "../../../core/config.js";
 import { SETTINGS_FILE_MODE } from "../../../core/defaults.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { Migration, MigrationReport } from "./index.js";
@@ -19,12 +26,10 @@ const ID = "2026-11-21-retired-settings";
 
 type Segment = string | number;
 
-const RETIRED_TURN_CONTROL_WORKFLOWS: ReadonlySet<unknown> = new Set(["orientation", "direction", "ledger-facts"]);
-
-const RETIRED_VALUE_SPELLINGS: ReadonlyArray<{ path: readonly Segment[]; values: Readonly<Record<string, string>> }> = [
-	{ path: ["interface", "exitSummary"], values: { full: "standard" } },
-	{ path: ["interface", "outputDetail"], values: { minimal: "compact", default: "standard", verbose: "detailed" } },
-];
+const RETIRED_VALUE_SPELLINGS = Object.entries(SETTINGS_V2_RETIRED_VALUE_SPELLINGS).map(([dotted, values]) => ({
+	path: dotted.split(".") as readonly Segment[],
+	values,
+}));
 
 interface RetiredSettingsRewrite {
 	changed: string[];
@@ -104,7 +109,7 @@ function rewriteRetiredSettings(doc: Document): RetiredSettingsRewrite {
 	if (isSeq(workflows)) {
 		for (let index = workflows.items.length - 1; index >= 0; index -= 1) {
 			const item = workflows.items[index];
-			if (!isScalar(item) || !RETIRED_TURN_CONTROL_WORKFLOWS.has(item.value)) continue;
+			if (!isScalar(item) || !SETTINGS_V2_RETIRED_WORKFLOWS.has(item.value)) continue;
 			workflows.items.splice(index, 1);
 			result.changed.push(
 				`Removed ${String(item.value)} from turnControl.workflows: no harness workflow by that name runs any more.`,

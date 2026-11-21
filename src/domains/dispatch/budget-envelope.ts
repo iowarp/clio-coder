@@ -531,7 +531,7 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
  */
 export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 	if (envelope.enforcement.classification === "external-one-shot") {
-		return "one launch; Clio cannot count its tool calls, so its time and output limits bound it";
+		return "one launch; CLIO Coder cannot count its tool calls, so its time and output limits bound it";
 	}
 	const budget = workerBudgetFromEnvelope(envelope);
 	const codes = new Set(envelope.reasons.map((reason) => reason.code));
@@ -539,7 +539,7 @@ export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 	// produced: a cap that folded the revision onto the base phase leaves nothing to grow into (M6).
 	const revision = budget.revision;
 	const notes = [
-		...(codes.has("global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
+		...(codes.has("global-cap-clamp") ? ["lowered to CLIO Coder's overall limit"] : []),
 		...(revision === undefined
 			? []
 			: [
@@ -552,11 +552,11 @@ export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 	// A plan that equals the stop is one number, said once: `about 20; stops at 20` read as two limits.
 	const limit =
 		budget.mode === "advisory" && budget.toolCalls === stop
-			? `Clio stops it at ${stop} tool calls`
+			? `CLIO Coder stops it at ${stop} tool calls`
 			: budget.mode === "advisory"
-				? `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${budget.ceiling ?? budget.hardCap}`
+				? `planned for about ${budget.toolCalls} tool calls; CLIO Coder stops it at ${budget.ceiling ?? budget.hardCap}`
 				: budget.synthesis
-					? `answers after ${budget.toolCalls} tool calls; Clio stops it at ${budget.hardCap}`
-					: `Clio stops it at ${budget.hardCap} tool calls`;
+					? `answers after ${budget.toolCalls} tool calls; CLIO Coder stops it at ${budget.hardCap}`
+					: `CLIO Coder stops it at ${budget.hardCap} tool calls`;
 	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
 }

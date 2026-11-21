@@ -8485,7 +8485,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (active.admissionReason !== undefined && !active.sawTurnEnd && active.updatesSent === 0) {
 			throw new AcpRequestError(
 				active.admissionReason === "authentication-required" ? -32000 : -32603,
-				`Clio could not admit this prompt: ${active.admissionReason}`,
+				`CLIO Coder could not admit this prompt: ${active.admissionReason}`,
 				{
 					code: "prompt_not_admitted",
 					reason: active.admissionReason,

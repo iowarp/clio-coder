@@ -19,11 +19,16 @@ import { AdmissionCanceledError, AdmissionTimedOutError } from "../../src/domain
 import type { AdmissionQueueRequest } from "../../src/domains/dispatch/admission-queue.js";
 import { createAdmissionQueue, orderAdmissionRequests } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
-import type { CapacityLease } from "../../src/domains/dispatch/capacity-lease.js";
+import type { CapacityLease, LeaseOwnerProbe } from "../../src/domains/dispatch/capacity-lease.js";
 import {
+	acquireCapacityLease,
 	capacityLeaseUsage,
 	capacityStateLockPath,
+	claimLeaseCacheLane,
+	claimMainCacheLane,
+	processBirthToken,
 	readCapacityStateUnsafe,
+	releaseMainCacheLanes,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
@@ -243,6 +248,41 @@ describe("dispatch admission boundary", () => {
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
 
+	it("hands out prompt cache lanes across processes: workers on their lease, main sessions beside it, both freed with their owner (M-11)", () => {
+		const peer = { pid: 999_001, token: "peer-birth" };
+		let peerAlive = true;
+		const probe: LeaseOwnerProbe = {
+			birthToken: (pid) => (pid === peer.pid ? (peerAlive ? peer.token : null) : processBirthToken(pid)),
+			tokenProvesDeath: true,
+		};
+		const limits = { global: 4, nodes: { local: 4 }, endpoints: {} };
+		const asPeer = { ownerPid: peer.pid, processBirthToken: peer.token, probe };
+		// Another process's main session holds lane 0; this process's sessions take the next lanes and keep them.
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "peer-session", ...asPeer }), 0);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1, "a held lane is kept");
+		strictEqual(claimMainCacheLane({ key: "other head", conversation: "elsewhere", probe }), 0);
+		// Workers take lanes on their leases, and no capacity reader counts a main session's lane.
+		const peerLease = acquireCapacityLease({ assignmentId: "peer-worker", nodeId: "local", limits, ...asPeer });
+		const ownLease = acquireCapacityLease({ assignmentId: "own-worker", nodeId: "local", limits, probe });
+		strictEqual(claimLeaseCacheLane(peerLease.leaseId, "worker head", { probe }), 0);
+		strictEqual(claimLeaseCacheLane(ownLease.leaseId, "worker head", { probe }), 1);
+		deepStrictEqual(readCapacityStateUnsafe().leases.find((lease) => lease.leaseId === ownLease.leaseId)?.cacheLane, {
+			key: "worker head",
+			lane: 1,
+		});
+		strictEqual(capacityLeaseUsage({ probe }).global, 2);
+		// The peer dies: its lease and its main lane are reaped by owner pid and birth token, and both lanes free.
+		peerAlive = false;
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "next", probe }), 0);
+		const later = acquireCapacityLease({ assignmentId: "later-worker", nodeId: "local", limits, probe });
+		strictEqual(claimLeaseCacheLane(later.leaseId, "worker head", { probe }), 0);
+		// A released conversation resumed in another process takes its old lane back while it is free.
+		releaseMainCacheLanes(undefined);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
+		strictEqual(claimMainCacheLane({ key: "head", conversation: "fresh", probe }), 0);
+	});
+
 	it("states each run's bounds on the plan card: a priced estimate at the output bound, else only the timers and tool ceiling it has (M6)", async () => {
 		const planText = async (
 			runtime: RuntimeDescriptor,
@@ -290,7 +330,7 @@ describe("dispatch admission boundary", () => {
 		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
 		match(
 			unpriced,
-			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; Clio stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; CLIO Coder stops it at 300 tool calls/u,
 		);
 		// The approval card's Plan rows carry the same limits text the plan signs, once when both workers share it.
 		const card = readDispatchPlan(unpriced);
@@ -298,15 +338,15 @@ describe("dispatch admission boundary", () => {
 		const cardLimits = planFacts(card).filter((fact) => fact.label === "limits");
 		strictEqual(cardLimits.length, 1, unpriced);
 		ok(unpriced.split("\n").includes(`    limits: ${cardLimits[0]?.value}`), unpriced);
-		match(cardLimits[0]?.value ?? "", /Clio stops it at 300 tool calls/u);
+		match(cardLimits[0]?.value ?? "", /CLIO Coder stops it at 300 tool calls/u);
 		match(
 			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
-			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; Clio stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; CLIO Coder stops it at 300 tool calls/u,
 		);
 		// An external one-shot worker's tool calls are not counted, so no tool ceiling is promised.
 		const external = await planText(claudeCodeRuntime, "claude-haiku-5-5");
-		match(external, /limits: .*one launch whose tool calls Clio cannot count, so no tool ceiling applies/u);
-		ok(!/Clio stops it at/u.test(external), external);
+		match(external, /limits: .*one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies/u);
+		ok(!/CLIO Coder stops it at/u.test(external), external);
 		const priced = (maxOutputTokens: number) => planText(anthropic, "claude-haiku-5-5", maxOutputTokens);
 		const estimate = (text: string) => /limits: cost (~\S+ est) per model call at a (\d+)-token output bound/u.exec(text);
 		const [small, large] = [estimate(await priced(100)), estimate(await priced(4000))];

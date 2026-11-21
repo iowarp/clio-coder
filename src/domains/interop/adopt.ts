@@ -254,7 +254,7 @@ export function prepareForeignPackage(
 		id: projection.id,
 		version: projection.version,
 		files: projection.files,
-		note: `${detection.format === "claude-code" ? "Claude Code" : "Codex"} plugin normalized to a portable Clio package; hooks, MCP, LSP, scripts and host settings are never activated.${
+		note: `${detection.format === "claude-code" ? "Claude Code" : "Codex"} plugin normalized to a portable CLIO Coder package; hooks, MCP, LSP, scripts and host settings are never activated.${
 			projection.notes.length ? ` ${projection.notes.join(" ")}` : ""
 		}`,
 		omitted: projection.omitted,
@@ -285,7 +285,7 @@ function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdo
 					: projectPrompt({ file: item.path, name: item.name });
 		if (item.kind === "agent")
 			note =
-				"Persona copied into a read-only Clio agent; host tools, permissions, model, hooks and skill bindings are omitted.";
+				"Persona copied into a read-only CLIO Coder agent; host tools, permissions, model, hooks and skill bindings are omitted.";
 		const files = { ...resource.files };
 		files["plugin.json"] = JSON.stringify(
 			{
@@ -509,7 +509,7 @@ export function planInteropAdoption(input: {
 				reason:
 					item.scope === "project"
 						? "Ported into the project hooks file; it runs only after `clio-coder config trust hooks` approves the changed file."
-						: "Ported into your Clio hooks file: the same shell command, the event as JSON on stdin, exit 2 blocks.",
+						: "Ported into your CLIO Coder hooks file: the same shell command, the event as JSON on stdin, exit 2 blocks.",
 				...(mapping.notes.length ? { unsupported: mapping.notes } : {}),
 			});
 			continue;
@@ -563,7 +563,7 @@ export function planInteropAdoption(input: {
 				reason:
 					item.scope === "project"
 						? `Declared in the project MCP config; it launches only after \`clio-coder mcp trust ${mapping.server.id}\`.`
-						: "Declared in your Clio MCP config, which Clio trusts as your own; it gets no network grant unless you add `network: true`.",
+						: "Declared in your CLIO Coder MCP config, which CLIO Coder trusts as your own; it gets no network grant unless you add `network: true`.",
 				...(mapping.omittedFields.length ? { unsupported: mapping.omittedFields.map((f) => `field ${f}`) } : {}),
 			});
 			continue;
@@ -645,7 +645,7 @@ function renderOutcomes(outcomes: ReadonlyArray<ForeignResourceOutcome> | undefi
 }
 export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 	return [
-		`Adopt resources from ${plan.host} into Clio (${plan.scope})?`,
+		`Adopt resources from ${plan.host} into CLIO Coder (${plan.scope})?`,
 		...plan.entries.flatMap((entry) => [
 			`${entry.action.toUpperCase()} ${entry.item.kind} ${entry.item.name} (${entry.item.scope})`,
 			`  Source: ${entry.item.path}`,
@@ -668,7 +668,7 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 				: []),
 			`  ${entry.reason}`,
 			...(entry.format && entry.format !== "portable"
-				? [`  Format: ${entry.format} (normalized to a portable Clio package)`]
+				? [`  Format: ${entry.format} (normalized to a portable CLIO Coder package)`]
 				: []),
 			...(entry.requirements?.length ? [`  Requires installed packages: ${entry.requirements.join(", ")}`] : []),
 			...renderOutcomes(entry.outcomes),

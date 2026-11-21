@@ -352,7 +352,7 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 					? "Denies this request and refuses identical calls under the same permission conditions in this worker run without asking."
 					: sessionConsent
 						? "Denies only the presented request; the next test runner asks again."
-						: "Denies only this call. Clio continues the turn without it, and the next waiting request, if any, comes up.",
+						: "Denies only this call. CLIO Coder continues the turn without it, and the next waiting request, if any, comes up.",
 		},
 		{ id: "stop", label: "Deny and stop", consequence: stopConsequence },
 	];

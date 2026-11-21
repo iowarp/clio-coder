@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS, type OutputStyle } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
@@ -359,7 +360,7 @@ describe("Clio rendering invariants", () => {
 		deepStrictEqual(markerRows(rendered), []);
 		match(rendered, /│ Thinking · read the module\n\n▸ read src\/retry\.js/u);
 		// Stretches of reasoning that nothing visible separates are one run and one row.
-		match(rendered, /\n│ Thinking · the test is next run it\n\n\$ Clio ran `npm test`/u);
+		match(rendered, /\n│ Thinking · the test is next run it\n\n\$ CLIO Coder ran `npm test`/u);
 		const long = thinkingTurn("standard", [[`Plan first.\n\nI will read ${"the module ".repeat(20)}`, "read"]]);
 		match(long, /\n│ Thinking · I will read the module the module .*…\n\n▸ read/u);
 		match(rendered, /│ Thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
@@ -2388,6 +2389,7 @@ describe("Pi TUI compatibility", () => {
 		const noop = (): void => undefined;
 		const liveEdge = (): void => returnToLiveEdge(tui);
 		const runtime = createInteractiveSlashRuntime({
+			bus: createTelemetryHub(),
 			io: { stdout: noop, stderr: noop },
 			chat: { isStreaming: () => false, submit: async () => undefined },
 			chatPanel: { appendReplayBlock: noop, appendUser: noop },
@@ -3932,7 +3934,7 @@ describe("tool classes", () => {
 	it("states a refusal once: on the blocked row's tail, not again as its body's first line", () => {
 		const rejection = [
 			"bash blocked: system_modify",
-			"Clio refused to run bash.",
+			"CLIO Coder refused to run bash.",
 			"- matched rm-recursive-or-force: rm with recursive or force flags",
 			"rule: rm-recursive-or-force",
 		].join("\n");
@@ -4015,7 +4017,7 @@ describe("tool classes", () => {
 			plain,
 			new RegExp(`${GLYPH.classMutate} edited 2 files · \\+2 -1 ✓\\n  │ a\\.ts \\+1 -1 · b\\.ts \\+1 -0`, "u"),
 		);
-		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} Clio ran`, "gmu"))?.length, 2, plain);
+		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} CLIO Coder ran`, "gmu"))?.length, 2, plain);
 		match(plain, new RegExp(`${GLYPH.toolHeader} read gone\\.ts ✗`, "u"));
 		match(plain, new RegExp(`${GLYPH.toolHeader} read c\\.ts · lines 1-1 of 1 ✓`, "u"));
 	});

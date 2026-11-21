@@ -96,8 +96,10 @@ export function silenceNoteForms(
 	if (!waiting && phase !== "thinking" && phase !== "writing") return null;
 	const limit = silenceLimitMs(waiting, retry, tier);
 	const ends =
-		limit === null ? "Clio has no time limit on this call" : `Clio ends this call after ${age(limit)} of silence`;
-	const endsShort = limit === null ? "No time limit" : `Clio ends this call at ${age(limit)}`;
+		limit === null
+			? "CLIO Coder has no time limit on this call"
+			: `CLIO Coder ends this call after ${age(limit)} of silence`;
+	const endsShort = limit === null ? "No time limit" : `CLIO Coder ends this call at ${age(limit)}`;
 	const endsTight = limit === null ? "no limit" : `ends at ${age(limit)}`;
 	if (!waiting) {
 		const silent = age(silentMs);

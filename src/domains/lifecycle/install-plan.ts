@@ -76,6 +76,29 @@ function alive(pid: number): boolean {
 }
 
 /**
+ * Launch receipts the installer's launcher wrote for `root`, from `<state>/launches/`.
+ * One state root serves every install root, so a receipt counts only when it names this one.
+ */
+export function launchReceipts(root: string, state = resolveClioDirs().state): { pid: number; host: unknown }[] {
+	const spellings = new Set([root, realPathOf(root)]);
+	const dir = join(state, "launches");
+	const receipts: { pid: number; host: unknown }[] = [];
+	for (const name of existsSync(dir) ? readdirSync(dir) : []) {
+		let receipt: Record<string, unknown> | null = null;
+		try {
+			receipt = JSON.parse(readFileSync(join(dir, name), "utf8")) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+		const from = typeof receipt?.root === "string" ? receipt.root : null;
+		if (from === null || !(spellings.has(from) || spellings.has(realPathOf(from)))) continue;
+		const pid = Number(receipt?.pid);
+		if (Number.isSafeInteger(pid) && pid > 0) receipts.push({ pid, host: receipt?.host });
+	}
+	return receipts;
+}
+
+/**
  * Processes still loading files from an installer root, named for the operator:
  * live launch receipts, live session records, and on Linux any process of this
  * user whose command line or working directory lies inside it.
@@ -95,12 +118,9 @@ export function installRootHolders(root: string, state = resolveClioDirs().state
 			return null;
 		}
 	};
-	const receipts = join(root, ".active");
-	for (const name of existsSync(receipts) ? readdirSync(receipts) : []) {
-		const receipt = json(join(receipts, name));
-		const pid = Number(receipt?.pid ?? name.replace(/\.json$/, ""));
-		if (!Number.isSafeInteger(pid) || pid <= 0 || own.has(pid)) continue;
-		if (receipt?.host !== undefined && receipt.host !== hostname()) holders.push(`pid ${pid}@${String(receipt.host)}`);
+	for (const { pid, host } of launchReceipts(root, state)) {
+		if (own.has(pid)) continue;
+		if (host !== undefined && host !== hostname()) holders.push(`pid ${pid}@${String(host)}`);
 		else if (alive(pid)) holders.push(`pid ${pid} (launched from it)`);
 	}
 	const builds = join(state, "running-builds");

@@ -7,7 +7,7 @@ import type { RuntimeApiFamily } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 export const CLAUDE_CODE_AUTH_NOTICE =
-	"Runs the Claude Code agent loop. Uses Clio's Claude subscription when connected; an explicitly selected Claude profile or credential uses that external login instead. Clio never copies Claude Code's refresh credentials.";
+	"Runs the Claude Code agent loop. Uses CLIO Coder's Claude subscription when connected; an explicitly selected Claude profile or credential uses that external login instead. CLIO Coder never copies Claude Code's refresh credentials.";
 
 export const CLAUDE_CODE_MODELS: ReadonlyArray<string> = [
 	"sonnet",

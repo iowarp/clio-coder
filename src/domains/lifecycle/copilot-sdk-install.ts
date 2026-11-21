@@ -62,7 +62,7 @@ export class CopilotSdkUnavailableError extends Error {
 
 	constructor() {
 		super(
-			`The copilot-sdk runtime needs ${COPILOT_SDK_PACKAGE}@${COPILOT_SDK_VERSION}. Run: ${COPILOT_SDK_INSTALL_COMMAND}. This installs a separate component at ${operatorComponentDir(COMPONENT_ID, COPILOT_SDK_VERSION)}; it does not change Clio's installation.`,
+			`The copilot-sdk runtime needs ${COPILOT_SDK_PACKAGE}@${COPILOT_SDK_VERSION}. Run: ${COPILOT_SDK_INSTALL_COMMAND}. This installs a separate component at ${operatorComponentDir(COMPONENT_ID, COPILOT_SDK_VERSION)}; it does not change CLIO Coder's installation.`,
 		);
 		this.name = "CopilotSdkUnavailableError";
 	}

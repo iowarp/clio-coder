@@ -84,7 +84,7 @@ function fixture(cwd = "/workspace") {
 	);
 	const text = () => stripTerminalSequences(view.render(86).join("\n"));
 	const order = () =>
-		[...text().matchAll(/(?:You|Clio|Compacted)\s+(oldest|branch|marker|newest)\b/gu)].map((entry) => entry[1]);
+		[...text().matchAll(/(?:You|CLIO Coder|Compacted)\s+(oldest|branch|marker|newest)\b/gu)].map((entry) => entry[1]);
 	return { snapshot, view, text, order, switched, edits, closed: () => closed };
 }
 

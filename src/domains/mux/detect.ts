@@ -137,7 +137,7 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 		return { detection: none("panes are turned off"), client: null };
 	}
 	if (env.HERDR_ENV !== "1") {
-		return { detection: none("HERDR_ENV is not 1, so Clio is not running inside a pane host"), client: null };
+		return { detection: none("HERDR_ENV is not 1, so CLIO Coder is not running inside a pane host"), client: null };
 	}
 
 	const candidates = resolveSocketCandidates(env);

@@ -312,7 +312,7 @@ function formatAbsorbLines(summary: RunBootstrapSummary): string[] {
 	if (absorb.rules.length > ABSORB_LINE_CAP)
 		lines.push(`    and ${absorb.rules.length - ABSORB_LINE_CAP} more in the ledger`);
 	if (absorb.handbooks.length > 0)
-		lines.push(`  absorbed handbooks: ${absorb.handbooks.join(", ")}; Clio did not modify them`);
+		lines.push(`  absorbed handbooks: ${absorb.handbooks.join(", ")}; CLIO Coder did not modify them`);
 	return lines;
 }
 

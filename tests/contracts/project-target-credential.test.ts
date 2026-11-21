@@ -244,4 +244,10 @@ test("a trusted project target whose named key is unset is refused before any re
 	strictEqual(requests.length, 0, `doctor reached the project URL: ${requests.join(", ")}`);
 	ok(row, doctor.stdout + doctor.stderr);
 	match(row, named);
+	// The chat row names the two fixes, the shell and the project file, in one sentence: no `.; next:` and no configure.
+	const chat = (doctor.stdout + doctor.stderr).split("\n").find((line) => /^\S+\s+chat\s/.test(line));
+	strictEqual(
+		chat,
+		`WARN chat                   target 'team', model 'mock-model'; target team reads its key from $TEAM_KEY, which is not set in this shell; set it with \`export TEAM_KEY=<key>\`, or fix auth.apiKeyEnvVar on target team in ${join(workspace, ".clio-coder", "settings.yaml")}.`,
+	);
 });

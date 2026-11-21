@@ -9,7 +9,7 @@ export interface HtmlTemplateInput {
 
 /** A self-contained document: no scripts, fonts, stylesheets, or remote URLs. */
 export function htmlTemplate(input: HtmlTemplateInput): string {
-	const title = `Clio session ${input.sessionId}`;
+	const title = `CLIO Coder session ${input.sessionId}`;
 	return `<!doctype html>
 <html lang="en">
 <head>

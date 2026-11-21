@@ -309,7 +309,7 @@ it("keeps compaction failure lines in the reply, where context status does not g
 				type: "notice",
 				surface: "transcript",
 				level: "info",
-				text: "Clio compacted 36.2K → 28.6K tokens",
+				text: "CLIO Coder compacted 36.2K → 28.6K tokens",
 				key: CONTEXT_STATUS_NOTICE_KEY,
 			});
 		},
@@ -391,18 +391,18 @@ it("projects transcript notices for plain ACP clients while keeping footer state
 	const status = [
 		"[context engine] working set: nothing evictable, the 1 turn is inside the protected window; llm_summary runs instead",
 		"compaction would not reduce context; checkpoint discarded (usage recorded)",
-		"Clio compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
+		"CLIO Coder compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
 		// ACP-3: the producer's tag routes the line, so a reworded one still stays off the reply.
 		"Context trimmed: 3 tool results now read by ref",
 	];
 	// The same lead without the tag is ordinary transcript text; wording no longer decides the route.
-	const untagged = "Clio compacted nothing; this line came from an extension";
+	const untagged = "CLIO Coder compacted nothing; this line came from an extension";
 	// M-28: the route's thinking clamp is host information, not the model's words.
 	const clamp = "low was ignored because thinking is unsupported";
 	// Row 338: host status lines (route facts, project instructions) are host information too; a host warning is not.
 	const hostStatus = [
 		"Project instructions: all 42 lines loaded",
-		"[CLIO Coder] This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window.",
+		"[CLIO Coder] This model's context window is unknown, so CLIO Coder compacts at its token budget instead. clio-coder configure can set the window.",
 	];
 	const hostWarning = "[CLIO Coder] auto-compaction failed; this turn goes on without it.";
 	const peer = stdioPeer();

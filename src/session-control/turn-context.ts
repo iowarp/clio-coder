@@ -2874,7 +2874,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (result === null || result.summary.length === 0) summarySignal?.throwIfAborted();
 		if (result?.providerFallbackReason)
 			deps.emitNotice(
-				`Native compaction used Clio's portable path: ${result.providerFallbackReason}.`,
+				`Native compaction used CLIO Coder's portable path: ${result.providerFallbackReason}.`,
 				"info",
 				HOST_STATUS_NOTICE_KEY,
 			);

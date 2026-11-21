@@ -37,5 +37,5 @@ export function olderClioMessage(name: string, declaration: string): string {
 		name === WTFP_PLUGIN_NAME
 			? `install the current WTF-P with \`${WTFP_INSTALL_COMMAND}\`, which installs the WTF-P plugin and its desk extension`
 			: "its author renames resources.fleets to resources.playbooks, the fleets directory to playbooks, and fleet kinds and requirements to playbook";
-	return `built for an older Clio: ${name} declares ${declaration}, and playbooks replaced fleets; ${fix}`;
+	return `built for an older CLIO Coder: ${name} declares ${declaration}, and playbooks replaced fleets; ${fix}`;
 }

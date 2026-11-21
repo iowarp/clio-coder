@@ -27,7 +27,7 @@ describe("/upgrade", () => {
 		deepStrictEqual(parseSlashCommand("/upgrade"), { kind: "upgrade" });
 		strictEqual(parseSlashCommand("/upgrade now").kind, "usage-error");
 		const reference = commandReference().find((entry) => entry.name === "upgrade");
-		strictEqual(reference?.group, "Clio");
+		strictEqual(reference?.group, "CLIO Coder");
 		strictEqual(reference?.usage, "/upgrade");
 	});
 

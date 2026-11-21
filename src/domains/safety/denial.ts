@@ -49,7 +49,7 @@ export interface ToolDenial {
 }
 
 const LAYER_LABEL: Readonly<Record<DenialLayer, string>> = {
-	clio_policy: "Clio policy",
+	clio_policy: "CLIO Coder policy",
 	operator_approval: "operator approval",
 	mcp_server_policy: "MCP server policy",
 };
@@ -74,7 +74,7 @@ export function denialLines(denial: ToolDenial): [refusal: string, remedy: strin
 					? "an identical call asks the operator again"
 					: "an identical call meets the same refusal";
 	return [
-		`Refused by ${LAYER_LABEL[denial.layer]}${source !== undefined ? ` (${source})` : ""}; ${denial.basis ?? `Clio classifies this call as ${denial.actionClass}${hint}`}. ${denial.untilOperatorAnswers === true ? "Retry only after the operator answers" : "Not retryable"}: ${repeat}.`,
+		`Refused by ${LAYER_LABEL[denial.layer]}${source !== undefined ? ` (${source})` : ""}; ${denial.basis ?? `CLIO Coder classifies this call as ${denial.actionClass}${hint}`}. ${denial.untilOperatorAnswers === true ? "Retry only after the operator answers" : "Not retryable"}: ${repeat}.`,
 		`To allow it: ${denial.allowedBy}`,
 	];
 }
