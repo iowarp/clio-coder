@@ -26,6 +26,25 @@ export function reportedModelFromMessage(message: unknown): Fact<string> {
 		: { kind: "unknown", reason: observation.state === "not-reported" ? "provider-omitted" : "not-observed" };
 }
 
+/** The message fields `transportFacts` reads, which an adapter stamps on the message it settles. */
+const TRANSPORT_STAMPS = [
+	"codexTransport",
+	"anthropicResponse",
+	"copilotSession",
+	"copilotContinuation",
+	"clioCoderRequestBytes",
+	"clioCoderPromptCacheKey",
+] as const;
+
+/**
+ * The transport stamps on one message, for a caller that settles from usage it read off that message: the side request
+ * admission rebuilds its message, and without these its call reads as an unknown transport (#434).
+ */
+export function transportStamps(message: unknown): Record<string, unknown> {
+	const raw = record(message);
+	return Object.fromEntries(TRANSPORT_STAMPS.flatMap((key) => (raw[key] !== undefined ? [[key, raw[key]]] : [])));
+}
+
 /**
  * Transport facts Clio counts itself: its Responses socket (`src/engine/apis/responses-websocket.ts`) records each
  * call's sends, reuse and SSE pin, attributed to that call alone, and the copilot-sdk stream records which of its pooled
@@ -71,15 +90,24 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 	const bytes = sent && continuation !== "delta" ? amount(raw.clioCoderRequestBytes) : null;
 	const cacheKey = sent && typeof raw.clioCoderPromptCacheKey === "string" ? raw.clioCoderPromptCacheKey : undefined;
 	return {
-		kind: codex.mode === "websocket" || codex.mode === "sse" ? codex.mode : copilotSession ? "subprocess" : "unknown",
+		kind:
+			codex.mode === "websocket" || codex.mode === "sse"
+				? codex.mode
+				: copilotSession !== undefined
+					? "subprocess"
+					: "unknown",
 		continuation: continuation ? counted(continuation) : unobserved,
 		requestBytes:
 			bytes === null || !Number.isInteger(bytes)
 				? unobserved
 				: { kind: "estimated", value: bytes, method: "payload-json" },
 		sessionPinnedToSse:
-			typeof codex.fallbackActive === "boolean" ? counted(codex.fallbackActive) : copilotSession ? unknown : unobserved,
-		...(copilotSession ? { session: counted(copilotSession), connectionReused: unknown } : {}),
+			typeof codex.fallbackActive === "boolean"
+				? counted(codex.fallbackActive)
+				: copilotSession !== undefined
+					? unknown
+					: unobserved,
+		...(copilotSession !== undefined ? { session: counted(copilotSession), connectionReused: unknown } : {}),
 		...(codex.mode === "websocket" && codex.attribution === "exclusive" && counters.requests === 1
 			? { connectionReused: counted(counters.connectionsReused === 1 && counters.connectionsCreated === 0) }
 			: {}),

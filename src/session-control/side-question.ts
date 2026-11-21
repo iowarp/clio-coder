@@ -5,6 +5,7 @@ import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.
 import type { SurfaceId } from "../core/side-surfaces.js";
 import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
+import { transportStamps } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 /**
@@ -515,6 +516,7 @@ async function runRound(
 				input.onUsage?.(usage, {
 					callOutcome: "success",
 					...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
+					transport: transportStamps(event.message),
 				});
 				const reported = responseModelIdObservationFromRecord(event.message as never, "not-observed");
 				const content = (event.message as { content?: unknown }).content;
@@ -538,6 +540,7 @@ async function runRound(
 					...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
 					callOutcome: aborted ? "aborted" : "error",
 					failure: tracking.failure(failed, aborted, usage !== null),
+					transport: transportStamps(failed),
 				});
 				if (event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true) {
 					return { text: text.trim(), usage, aborted: true };

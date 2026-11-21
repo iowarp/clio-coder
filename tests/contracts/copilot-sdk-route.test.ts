@@ -17,7 +17,8 @@ import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-a
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
-import { resolveClioDirs } from "../../src/core/xdg.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { createBackgroundMemoryModelClient } from "../../src/domains/memory/background-route.js";
@@ -38,6 +39,9 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -55,7 +59,9 @@ import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js"
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
+import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -1372,37 +1378,73 @@ test("a rewritten history seeds a fresh session; a side call never disturbs the 
 });
 
 test("a side call leaves one spare session, and the next side call of its configuration runs there (PV-2)", async () => {
-	const side = (text: string) =>
-		engineStreamSimple(model, normalizeContext({ systemPrompt: "Side judge.", messages: [user(text)] }), {}).result();
+	// The safety judge's own path: its one-shot round settles through the side request admission, not a call scope.
+	const origin = { id: "judge-transport", cwdHash: "judgehash" };
+	const journals = createSessionJournals(clioStateDir(), () => {});
+	const admit = createSideRequestAdmission({
+		providers: { getTarget: () => ({ id: "copilot", runtime: "copilot-sdk" }) } as never,
+		telemetry: {
+			acquireTelemetrySession: journals.acquire,
+			settledSessionSpend: async () => ({ usd: 0 }),
+		} as never,
+		getCeilingUsd: () => 0,
+		currentSession: () => origin.id,
+		repoIdentity: () => origin.cwdHash,
+		role: "safety-judge",
+	});
+	const side = async (text: string) => {
+		const signal = new AbortController().signal;
+		let account: Awaited<ReturnType<typeof admit>> | undefined;
+		return runOutOfTurnRound({
+			model: model as never,
+			messages: [],
+			systemPrompt: "Side judge.",
+			userText: text,
+			thinkingLevel: "off",
+			signal,
+			runtimeId: "copilot-sdk",
+			beforeRequest: async () => {
+				account = await admit({ targetId: "copilot", model: "fake-model", signal });
+				return account.withContext ? { withContext: account.withContext } : undefined;
+			},
+			onUsage: (usage, observation) => account?.(usage, observation),
+		});
+	};
 	try {
 		const start = fake().sessions.length;
-		const transport = (message: AssistantMessage) => {
-			const { kind, continuation, session, connectionReused } = callSettlementFromMessage(message, "none").transport;
+		const transport = (call: CallSettled | undefined) => {
+			const { kind, continuation, session, connectionReused } = call?.transport ?? {};
 			return { kind, continuation, session, connectionReused };
 		};
 		const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" });
 		const notReported = { kind: "unknown", reason: "provider-omitted" };
-		const one = await side("judge one");
-		strictEqual(one.stopReason, "stop");
+		strictEqual((await side("judge one")).text, "hello");
+		ok(await eventually(() => fake().sessions.length === start + 2), "the side call's own session and one spare");
+		strictEqual((await side("judge two")).text, "hello");
+		match(fake().sessions[start + 1]?.prompts[0] ?? "", /judge two/, "the second side call ran on the spare");
+		ok(await eventually(() => fake().sessions.length === start + 3), "taking the spare leaves a new one");
+		strictEqual(fake().sessions[start + 2]?.prompts.length, 0, "and the new spare is still empty");
+		await journals.closeAll();
+		const [one, two, ...rest] = (
+			await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))
+		).records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
+		strictEqual(rest.length, 0, "each judge call settled once");
+		strictEqual(one?.stop.reason, "stop");
 		deepStrictEqual(transport(one), {
 			kind: "subprocess",
 			continuation: counted("full"),
 			session: counted("new"),
 			connectionReused: notReported,
 		});
-		ok(await eventually(() => fake().sessions.length === start + 2), "the side call's own session and one spare");
-		const two = await side("judge two");
-		strictEqual(two.stopReason, "stop");
+		strictEqual(two?.stop.reason, "stop");
 		deepStrictEqual(transport(two), {
 			kind: "subprocess",
 			continuation: counted("full"),
 			session: counted("spare"),
 			connectionReused: notReported,
 		});
-		match(fake().sessions[start + 1]?.prompts[0] ?? "", /judge two/, "the second side call ran on the spare");
-		ok(await eventually(() => fake().sessions.length === start + 3), "taking the spare leaves a new one");
-		strictEqual(fake().sessions[start + 2]?.prompts.length, 0, "and the new spare is still empty");
 	} finally {
+		await journals.closeAll();
 		disposeCopilotConversations("default");
 	}
 });
