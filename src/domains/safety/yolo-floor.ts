@@ -1061,6 +1061,10 @@ export function yoloFloorWorkspaceGitHit(command: string, cwd: string, workspace
 					if (operand.word.split("/").some((part) => part === ".git" || part === "..")) {
 						return hit(operand.word, "deletes, in each matched directory,");
 					}
+					// The matched directory is not known here: an absolute operand lands as written, and a relative one is
+					// read as after a cd the floor cannot place (r261f-4).
+					const spelled = reaches(operand.word, bases, true, links);
+					if (spelled !== null) return hit(spelled, "deletes, in each matched directory,");
 					continue;
 				}
 				const spelled = reaches(operand.word, bases, unplaced, links);
