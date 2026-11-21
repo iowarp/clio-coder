@@ -293,9 +293,18 @@ export type GateDecisionDraft = Omit<GateDecisionArtifact, "version" | "id" | "c
  * of its evidence packet. Null for a run with no gate verdict contract, a council synthesis, or an answer that does not
  * parse under its contract.
  */
-export function gateVerdictFactsOf(contract: ResultContract | null, output: string | null): GateVerdictFacts | null {
+export function gateVerdictFactsOf(
+	contract: ResultContract | null,
+	output: string | null,
+	ground: (claim: { name: string; evidence: string }) => { command: boolean; ran: boolean },
+): GateVerdictFacts | null {
 	const cites = (checks: ReadonlyArray<GateCheck>) =>
-		checks.map((check) => ({ name: check.name, cites: [...(check.cites ?? [])] }));
+		checks.map((check) => ({
+			name: check.name,
+			cites: [...(check.cites ?? [])],
+			passed: check.passed,
+			...ground({ name: check.name, evidence: check.evidence }),
+		}));
 	if (contract?.kind === "review-verdict") {
 		const parsed = parseReviewVerdict(output);
 		return parsed === null ? null : { verdict: parsed.verdict, checks: cites(parsed.checks) };

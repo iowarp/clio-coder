@@ -280,6 +280,8 @@ export interface RunGateProvenance {
 export interface RunGatePacket {
 	ids: string[];
 	digest: string;
+	/** Host check ids the packet records as verified; absent when none is. Only these ground a command-shaped claim. */
+	verified?: string[];
 }
 
 export interface RunCouncilProvenance {

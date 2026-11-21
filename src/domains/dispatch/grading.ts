@@ -37,6 +37,8 @@ export interface GradeContract {
 	toolLaneObserved: boolean;
 	/** A gate decider's evidence packet ids (M10), what its verdict may cite; absent for a gate given no packet. */
 	packet?: ReadonlyArray<string>;
+	/** The packet's host check ids whose status is verified: the only items that ground a command-shaped claim. */
+	verifiedChecks?: ReadonlyArray<string>;
 }
 
 /**
@@ -102,8 +104,19 @@ export interface WorkFacts {
 export interface GateVerdictFacts {
 	/** A reviewer's pass or fail; null for a judge, whose winner the gate validates. */
 	verdict: "pass" | "fail" | null;
-	/** Each check's name and the evidence packet ids it cites, in report order. */
-	checks: ReadonlyArray<{ name: string; cites: ReadonlyArray<string> }>;
+	/** Each check, in report order: its name, the packet ids it cites, and what grounds it. */
+	checks: ReadonlyArray<GateCheckFacts>;
+}
+
+/** One verdict check as the cited-evidence rule matches it, per check and never by name. */
+export interface GateCheckFacts {
+	name: string;
+	cites: ReadonlyArray<string>;
+	passed: boolean;
+	/** The claim names a validation command (`detectValidationCommand`), so only a run of it can ground it. */
+	command: boolean;
+	/** A command this run ran to a clean exit, or a verify run on its final tree, grounds the claim. */
+	ran: boolean;
 }
 
 export interface GradeVerdict {
@@ -303,22 +316,30 @@ function checkCitedEvidence(facts: WorkFacts, contract: GradeContract): RuleChec
 			return citedEvidenceUnmet(`the verdict cites ids its evidence packet does not hold (${unknown.join(", ")})`);
 		if (cited.length === 0) return citedEvidenceUnmet("the verdict cites no item of its evidence packet");
 		const uncited = verdict.checks.filter((check) => check.cites.length === 0).map((check) => check.name);
-		if (uncited.length > 0 && contract.toolLaneObserved && facts.activity !== null && facts.activity.observations === 0)
+		const observed = contract.toolLaneObserved && facts.activity !== null;
+		// An unobserved lane cannot say an uncited check rests on something the gate read: unknown, as with no packet.
+		if (uncited.length > 0 && !observed) return UNKNOWN;
+		if (uncited.length > 0 && facts.activity !== null && facts.activity.observations === 0)
 			return citedEvidenceUnmet(
 				`${plural(uncited.length, "check", "checks")} ${uncited.join(", ")} ${plural(uncited.length, "cites", "cite")} no packet item and the gate observed nothing itself`,
 			);
-	}
-	// A check resting on cited packet items is grounded by the packet (4.8: a reason cites an item of the packet or an
-	// observation the gate made); only an uncited check the reviewer claims to have run and never ran is unearned.
-	const citing = new Set(
-		packet === undefined
-			? []
-			: (verdict?.checks ?? []).filter((check) => check.cites.length > 0).map((check) => check.name),
-	);
-	const unearned = facts.ungroundedChecks.filter((name) => !citing.has(name));
-	if (contract.role === "reviewer" && verdict?.verdict === "pass" && unearned.length > 0)
+		if (contract.role !== "reviewer" || verdict.verdict !== "pass") return PASS;
+		// 4.8: a participant's own report cannot raise assurance. A passing check that names a validation command rests
+		// on a run the gate observed, or on a host check the packet records as verified; a handback or diff citation
+		// grounds only a claim about what the gate read. Matched per check, before any name list is cut.
+		const verified = new Set(contract.verifiedChecks ?? []);
+		const unearned = verdict.checks
+			.filter((check) => check.passed && check.command && !check.cites.some((id) => verified.has(id)))
+			.filter((check) => !check.ran);
+		if (unearned.length === 0) return PASS;
+		if (!observed) return UNKNOWN;
 		return citedEvidenceUnmet(
-			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${unearned.join(", ")})`,
+			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${[...new Set(unearned.map((check) => check.name))].join(", ")})`,
+		);
+	}
+	if (contract.role === "reviewer" && verdict?.verdict === "pass" && facts.ungroundedChecks.length > 0)
+		return citedEvidenceUnmet(
+			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${facts.ungroundedChecks.join(", ")})`,
 		);
 	return PASS;
 }

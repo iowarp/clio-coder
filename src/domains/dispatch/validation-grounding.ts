@@ -275,6 +275,21 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	};
 }
 
+/**
+ * One gate verdict check (M10): whether its claim names a validation command, and whether a run this gate observed
+ * grounds it, under the same matching as the claims above. Unattributable runs ground nothing.
+ */
+export function groundGateCheck(
+	input: Pick<ValidationGroundingInput, "executedCommands" | "verifyRuns" | "taskGates">,
+	claim: ClaimedValidation,
+): { command: boolean; ran: boolean } {
+	const command =
+		detectValidationCommand(claim.name, "grounding").kind === "validation" || namedVerifyChecks(claim.name).length > 0;
+	if (!command) return { command, ran: false };
+	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
+	return { command, ran: isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? []) };
+}
+
 /** True when the sealed quality label may not rest on these claims. */
 export function invalidatesQuality(grounding: ValidationGrounding): boolean {
 	return grounding.ungrounded.length > 0 && grounding.basis === "no-command-executed";

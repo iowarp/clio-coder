@@ -213,7 +213,10 @@ export function buildEvidencePacket(
 
 /** The packet as gate provenance seals it: the ids a verdict may cite and the digest of what they named. */
 export function packetProvenance(packet: EvidencePacket): RunGatePacket {
-	return { ids: [...packet.ids], digest: packet.digest };
+	const verified = packet.subjects.flatMap((subject) =>
+		(subject.hostChecks ?? []).filter((check) => check.status === "verified").map((check) => check.id),
+	);
+	return { ids: [...packet.ids], digest: packet.digest, ...(verified.length > 0 ? { verified } : {}) };
 }
 
 /**

@@ -591,7 +591,12 @@ import {
 	type PipelineInput,
 	validateJobSpec,
 } from "./validation.js";
-import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import {
+	describeUngroundedValidations,
+	groundClaimedValidations,
+	groundGateCheck,
+	invalidatesQuality,
+} from "./validation-grounding.js";
 import {
 	HOST_VERIFICATION_EVENT,
 	type VerificationSlotEvents,
@@ -10314,6 +10319,7 @@ export function createDispatchBundle(
 					contractKind: appliedResultContract?.kind ?? null,
 					toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
 					...(req.gate?.packet !== undefined ? { packet: req.gate.packet.ids } : {}),
+					...(req.gate?.packet?.verified !== undefined ? { verifiedChecks: req.gate.packet.verified } : {}),
 				};
 				const gradeFacts: GradeFacts = {
 					termination: { outcome, detail: terminationDetail },
@@ -10431,7 +10437,15 @@ export function createDispatchBundle(
 					// A claim is unmet evidence only when no checking call ran at all; a name that matched no command lowers quality.
 					ungroundedChecks:
 						validationGrounding !== null && invalidatesQuality(validationGrounding) ? validationGrounding.ungrounded : [],
-					gateVerdict: gateVerdictFactsOf(appliedResultContract, finalText),
+					gateVerdict: gateVerdictFactsOf(appliedResultContract, finalText, (claim) =>
+						groundGateCheck(
+							{
+								executedCommands: observedRunEffects.verificationCommands,
+								verifyRuns: runEffects.checkFreshness().verifyRuns,
+							},
+							claim,
+						),
+					),
 				};
 				applyGrade(grade(gradeContract, gradeFacts));
 				let sealedResultContractFact: RunResultContractFact | null =
