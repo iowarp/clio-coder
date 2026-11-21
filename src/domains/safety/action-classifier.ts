@@ -235,6 +235,8 @@ function baseClassify(tool: string): ActionClass | null {
 		// safetyCall projects the exact argv to a bash command so the policy
 		// engine applies the shell rules to it.
 		case ToolNames.RunScript:
+		// browser drives a sandboxed session worker; safetyCall projects each op to the driver command as bash.
+		case ToolNames.Browser:
 			return "execute";
 		case ToolNames.Dispatch:
 		case ToolNames.Job:

@@ -110,6 +110,8 @@ const WORKSPACE_WRITING_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Edit,
 	ToolNames.Bash,
 	ToolNames.RunScript,
+	// A run script has Node; it may write files.
+	ToolNames.Browser,
 ]);
 
 export type ToolExecutionMode = "sequential" | "parallel";

@@ -20,6 +20,8 @@ import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { AUTONOMY_HELP } from "../../src/core/settings-awareness.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
+import { PLAYWRIGHT_CORE_VERSION } from "../../src/domains/lifecycle/browser-component.js";
+import { componentInstallDir } from "../../src/domains/lifecycle/components.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
@@ -44,6 +46,7 @@ import {
 } from "../../src/domains/workspace-snapshots/store.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { browserToolSurface } from "../../src/tools/browser/surface.js";
 import { editTool } from "../../src/tools/edit.js";
 import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
 import { createRunScriptTool } from "../../src/tools/run-script.js";
@@ -151,6 +154,43 @@ test("a verify check that runs a command is contained at default like bash; list
 		{ check: undefined, sandboxed: false },
 	]);
 	deepStrictEqual(session.reviewed, []);
+});
+
+test("every browser op is contained at default like bash; a host beyond loopback asks before the page reaches it", async (t) => {
+	const home = await isolateClioEnv("clio-contained-browser-home-");
+	t.after(() => home.restore());
+	// A provisioned component, so only the host rule can ask.
+	const pkg = join(componentInstallDir("browser", PLAYWRIGHT_CORE_VERSION), "node_modules", "playwright-core");
+	mkdirSync(pkg, { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "playwright-core", main: "index.js" }));
+	writeFileSync(join(pkg, "index.js"), "");
+	mkdirSync(join(pkg, "..", "..", "browsers", "chromium_headless_shell-1"), { recursive: true });
+	const session = defaultSession(workspace("clio-contained-browser-"), { sandbox: true, snapshots: false });
+	const ran: Array<{ op: unknown; sandboxed: boolean }> = [];
+	session.registry.register({
+		...browserToolSurface,
+		run: async (args, options) => {
+			ran.push({ op: args.op, sandboxed: options?.shellSandbox !== undefined });
+			return { kind: "ok", output: "" };
+		},
+	});
+	for (const args of [
+		{ op: "open", url: "http://127.0.0.1:5173/" },
+		{ op: "run", script: "await page.click('#save')" },
+		{ op: "look" },
+	]) {
+		strictEqual((await session.registry.invoke({ tool: ToolNames.Browser, args })).kind, "ok", JSON.stringify(args));
+	}
+	const outward = await session.registry.invoke({
+		tool: ToolNames.Browser,
+		args: { op: "open", url: "https://example.com/" },
+	});
+	strictEqual(outward.kind, "blocked");
+	deepStrictEqual(ran, [
+		{ op: "open", sandboxed: true },
+		{ op: "run", sandboxed: true },
+		{ op: "look", sandboxed: true },
+	]);
 });
 
 // ob-yolo Q7: a recognized command with unsandboxed: true ran unconfined at default with no review.
