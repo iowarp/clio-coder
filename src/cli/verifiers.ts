@@ -40,8 +40,7 @@ Usage:
   clio-coder verifiers baseline <id> [--json]
 
 Fields:
-  --check-cwd <path>      repository-relative directory the check runs in (default .);
-                          --cwd is its deprecated spelling
+  --check-cwd <path>      repository-relative directory the check runs in (default .)
   --timeout-ms <number>   bounded timeout in milliseconds (default 120000)
   --tags <a,b>            comma-separated catalog tags
   --kind <kind>           command (default), numeric-compare, perf-budget, or reproduce
@@ -76,7 +75,6 @@ const VALUE_OPTIONS = new Set([
 	"--description",
 	"--command",
 	"--check-cwd",
-	"--cwd",
 	"--timeout-ms",
 	"--tags",
 	"--exclude",
@@ -141,21 +139,9 @@ function parseAuthoringArgs(argv: ReadonlyArray<string>): ParsedAuthoringArgs {
 	return { yes, help, json, positional, values };
 }
 
-/**
- * The check's directory, from `--check-cwd` (C10: `--cwd` means the process directory everywhere else) or its
- * deprecated spelling `--cwd`, which still works through 0.8.x with one stderr note.
- */
+/** The check's directory, from `--check-cwd` (C10: `--cwd` means the process directory everywhere else). */
 function checkCwd(parsed: ParsedAuthoringArgs): string | undefined | Error {
-	const current = oneValue(parsed, "--check-cwd");
-	const deprecated = oneValue(parsed, "--cwd");
-	if (current !== undefined && deprecated !== undefined) return new Error("give --check-cwd or --cwd, not both");
-	if (deprecated !== undefined) {
-		process.stderr.write(
-			"clio-coder: deprecated: verifiers --cwd; use clio-coder verifiers --check-cwd (removed in 0.9.0)\n",
-		);
-		return deprecated;
-	}
-	return current;
+	return oneValue(parsed, "--check-cwd");
 }
 
 function oneValue(parsed: ParsedAuthoringArgs, option: string): string | undefined {

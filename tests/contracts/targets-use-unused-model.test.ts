@@ -125,17 +125,17 @@ it("shows the fleet default that targets use --fleet-model sets, with no profile
 	updateSettings((value) => {
 		value.targets = [{ id: "blade", runtime: "litellm", url: "http://127.0.0.1:9", defaultModel: "dynamo/main" }];
 	});
-	const unset = await stdoutOf(["fleet"]);
+	const unset = await stdoutOf(["profile", "list"]);
 	strictEqual(unset.code, 0);
 	match(unset.output, /^fleet default: not set\. run `clio-coder targets use <id> --fleet-model <model>`/mu);
 
 	updateSettings((value) => {
 		value.fleet.default = { target: "blade", model: "dynamo/fast", thinkingLevel: "off" };
 	});
-	const text = await stdoutOf(["fleet"]);
+	const text = await stdoutOf(["profile", "list"]);
 	match(text.output, /^fleet default: target blade \(litellm\), model dynamo\/fast, thinking off, from user$/mu);
 	match(text.output, /no fleet profiles configured/u);
-	const json = JSON.parse((await stdoutOf(["fleet", "--json"])).output) as {
+	const json = JSON.parse((await stdoutOf(["profile", "list", "--json"])).output) as {
 		default: { target: string; model: string | null; source: string } | null;
 		profiles: unknown[];
 	};
@@ -163,26 +163,4 @@ it("names the Copilot sign-in as the auth of a copilot-sdk target", async () => 
 	const row = listed.output.split("\n").find((line) => line.startsWith("copilot "));
 	match(row ?? "", /copilot login/u);
 	strictEqual(/\bnone\b/u.test(row ?? ""), false, row);
-});
-
-it("keeps the deprecated targets worker spelling binding through profile, with one deprecation line", async () => {
-	const errors: string[] = [];
-	const originalErr = process.stderr.write.bind(process.stderr);
-	process.stderr.write = ((chunk: string | Uint8Array) => {
-		errors.push(String(chunk));
-		return true;
-	}) as typeof process.stderr.write;
-	let bound: { code: number; output: string };
-	try {
-		bound = await stdoutOf(["worker", "bind", "coder", "local-fast"]);
-	} finally {
-		process.stderr.write = originalErr;
-	}
-	strictEqual(bound.code, 0, errors.join(""));
-	strictEqual(errors.filter((line) => /deprecated/u.test(line)).length, 1, errors.join(""));
-	const rows = JSON.parse((await stdoutOf(["profile", "bindings", "--json"])).output) as Array<{
-		agentId: string;
-		profile: string;
-	}>;
-	strictEqual(rows.find((row) => row.agentId === "coder")?.profile, "local-fast");
 });

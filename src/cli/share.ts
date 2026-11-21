@@ -23,10 +23,6 @@ Commands:
   clio-coder share inspect <path> [--json]
 
 A flag the chosen command does not use is refused rather than ignored.
-
-Aliases:
-  clio-coder export --out <path> ...
-  clio-coder import <path> ...
 `;
 
 interface Parsed {
@@ -319,12 +315,4 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 			});
 			return 2;
 	}
-}
-
-export function runExportCommand(argv: ReadonlyArray<string>): number {
-	return runShareCommand(["export", ...argv]);
-}
-
-export function runImportCommand(argv: ReadonlyArray<string>): number {
-	return runShareCommand(["import", ...argv]);
 }

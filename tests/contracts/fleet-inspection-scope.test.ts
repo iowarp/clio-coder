@@ -115,11 +115,10 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 				(row) => row.runId === foreign.id,
 			),
 		);
-		// fleet inspect --json was removed at the maintainer's decision; it points at its replacements (#434).
+		// fleet inspect was removed (#434); it is an ordinary unknown subcommand.
 		const inspect = run("inspect", "--json");
 		strictEqual(inspect.status, 2);
-		ok(inspect.stderr.includes("clio-coder fleet status --json"), inspect.stderr);
-		ok(inspect.stderr.includes("clio-coder telemetry inspect --run <runId> --json"), inspect.stderr);
+		ok(inspect.stderr.includes("unknown subcommand 'inspect'"), inspect.stderr);
 		const decisions = run("decisions", "--json");
 		strictEqual(decisions.status, 0, decisions.stderr);
 		const decisionRows = JSON.parse(decisions.stdout) as { decisions: Array<{ subjects: string[] }> };

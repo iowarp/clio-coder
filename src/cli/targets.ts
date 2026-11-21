@@ -30,7 +30,7 @@ import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
-import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
+import { runTargetRemove, runTargetRename } from "./configure.js";
 import { inventoryNote, resolveSupportedWireModels } from "./configure-target.js";
 import { printError, printOk } from "./shared.js";
 import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
@@ -46,10 +46,8 @@ that send generation requests and can load models.
 
 Usage:
   clio-coder targets [--json] [--probe [--reasoning] [--tools [--tools-timeout <seconds>]]] [--target <id>]
-  clio-coder targets add [configure flags]
   clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                        [--fleet-target <id>] [--fleet-model <id>]
-  clio-coder targets fleet [--json]
   clio-coder targets profile list [--json]
   clio-coder targets profile set <name> <id> [--model <id>] [--thinking <level>]
   clio-coder targets profile <name> <id> [--model <id>] [--thinking <level>]
@@ -181,15 +179,8 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 
 export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<number> {
 	const subcommand = args[0];
-	if (subcommand === "add") return runConfigureCommand(args.slice(1));
 	if (subcommand === "use") return runUse(args.slice(1));
-	if (subcommand === "fleet" || subcommand === "workers") return runFleet(args.slice(1));
 	if (subcommand === "profile") return runProfile(args.slice(1));
-	if (subcommand === "worker") {
-		// Deprecated spelling of the whole profile namespace; removed in 0.9.0.
-		process.stderr.write("clio-coder: deprecated: targets worker; use clio-coder targets profile (removed in 0.9.0)\n");
-		return runProfile(args.slice(1));
-	}
 	if (subcommand === "remove") return runRemove(args.slice(1));
 	if (subcommand === "rename") return runRename(args.slice(1));
 	if (subcommand === "convert") return runConvert(args.slice(1));

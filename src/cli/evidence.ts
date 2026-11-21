@@ -46,11 +46,6 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 				parsed.command = arg;
 				continue;
 			}
-			// A run is assessed when it settles, inside its sealed scope (#434).
-			if (arg === "build")
-				throw new Error(
-					"evidence build was removed: every run is assessed when it settles; use `evidence inspect <runId>`",
-				);
 			throw new Error(`unknown evidence command: ${arg}`);
 		}
 		if (parsed.command === "inspect" && arg === "--json" && !parsed.json) {

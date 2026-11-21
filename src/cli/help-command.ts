@@ -338,24 +338,16 @@ function withCuratedFlags(derived: ReadonlyArray<LeafFlag>, curated: ReadonlyArr
 	return help !== undefined ? [...flags.values(), help] : [...flags.values()];
 }
 
-const ALIAS_SUMMARY = /^alias for clio-coder (.+)$/u;
-
 /** Every canonical leaf, top-level commands first in table order, then nested leaves by path. */
 async function buildManifest(): Promise<ManifestLeaf[]> {
 	const nested = new Map<string, readonly [string, string, string]>();
 	for (const row of NESTED_LEAVES) nested.set(row[0], row);
 	const tops: Array<{ name: string; summary: string; hidden: boolean }> = [];
-	const aliases: Array<[string, string]> = [];
 	const curated = new Map<string, ReadonlyArray<FlagSpec>>();
 	for (const [name, load] of Object.entries(COMMAND_SPECS)) {
 		const module: { spec: { summary: string; hidden: boolean } } & Record<string, unknown> = await load();
 		if (Array.isArray(module.leafFlags))
 			for (const item of module.leafFlags as ReadonlyArray<LeafFlagsSpec>) curated.set(item.path.join(" "), item.flags);
-		const alias = ALIAS_SUMMARY.exec(module.spec.summary);
-		if (alias?.[1] !== undefined) {
-			aliases.push([name, alias[1]]);
-			continue;
-		}
 		tops.push({ name, summary: module.spec.summary, hidden: module.spec.hidden });
 		// Leaves a lane already declared in the command's own spec module.
 		for (const list of [module.leaves, module.leafSpecs]) {
@@ -390,7 +382,6 @@ async function buildManifest(): Promise<ManifestLeaf[]> {
 		);
 	}
 	const byKey = new Map(entries.map((entry) => [entry.path.join(" "), entry]));
-	for (const [alias, target] of aliases) byKey.get(target)?.aliases.push([alias]);
 	for (const [key, flags] of curated) {
 		const entry = byKey.get(key);
 		if (entry !== undefined) entry.flags = withCuratedFlags(entry.flags, flags);

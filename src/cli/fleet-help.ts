@@ -18,7 +18,6 @@ Subcommands:
                                 is the lower of this and the playbook's budgetUsd
        [--detach]               start the fleet in the background and return once its root is recorded;
                                 json prints one fleet_accepted line
-       [--json]                 deprecated: the per-step JSON lines of earlier releases
   status [--json] [--all]       show running, retrying, and total dispatch state
   list [--all-projects] [--limit N] [--json]
                                 list this project's fleet roots, newest first, with each one's state
@@ -38,8 +37,6 @@ Subcommands:
   admission [status|drain|open] [--json]
                                 show the dispatch admission gate, deny new execution starts for up
                                 to one hour (drain), or reopen it (open)
-  drain [--json]                alias of admission drain
-  resume [--json]               alias of admission open
   cancel <runId> [--json] [--reason <text>]
                                 cancel one running run from any terminal
   cancel <fleetRootId> [--json] [--reason <text>]
@@ -58,8 +55,9 @@ Notes:
   run from a second terminal or over SSH. Its transcript comes from the run
   event journal, written when fleet.history.journal is on (the default). Handed the
   fleet-<hex> root id that run prints, it lists that run's steps instead.
-  drain preserves running work. Repeat it to renew the one-hour expiry; resume
-  clears it early. The expiry keeps an abandoned drain from wedging CLIO Coder.
+  admission drain preserves running work. Repeat it to renew the one-hour
+  expiry; admission open clears it early. The expiry keeps an abandoned drain
+  from wedging CLIO Coder.
   cancel asks the process that owns the run to abort it and waits up to 15s
   for the run to seal canceled; it exits 1 while the request is still pending.
   When the owning process is gone it terminates the orphaned worker's process
@@ -79,8 +77,7 @@ const FLEET_LEAF_HELP: Readonly<Record<string, string>> = {
 
 Show the dispatch admission gate (status, the default), deny new execution starts
 for up to one hour (drain), or reopen it (open). drain preserves running work;
-repeat it to renew the one-hour expiry. fleet drain and fleet resume are aliases
-of admission drain and admission open.
+repeat it to renew the one-hour expiry.
 
   --json    print the admission document
 `,

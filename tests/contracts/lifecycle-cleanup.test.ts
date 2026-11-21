@@ -84,7 +84,7 @@ for (const command of ["reset", "uninstall"] as const) {
 		assert.equal(preview.status, 0, preview.stderr + preview.stdout);
 		assert.ok(processAlive(pid));
 		assert.ok(existsSync(f.history));
-		const real = await f.run(command, ["--force", "--json"]);
+		const real = await f.run(command, ["--yes", "--json"]);
 		assert.equal(real.status, 0, real.stderr + real.stdout);
 		assert.equal(processAlive(pid), false);
 		assert.equal(existsSync(f.history), false);
@@ -110,7 +110,7 @@ for (const command of ["reset", "uninstall"] as const) {
 			packageRoot: f.root,
 		});
 		writeFileSync(f.registry, record);
-		const result = await f.run(command, ["--force", "--json"]);
+		const result = await f.run(command, ["--yes", "--json"]);
 		assert.equal(result.status, 1, result.stderr + result.stdout);
 		assert.ok(processAlive(pid));
 		assert.equal(readFileSync(f.registry, "utf8"), record);
@@ -128,7 +128,7 @@ test("reset refuses to orphan a background service when its ownership cannot be 
 	const preview = await f.run("reset", ["--all", "--dry-run", "--json"]);
 	assert.equal(preview.status, 0, preview.stderr + preview.stdout);
 	assert.ok(existsSync(f.history));
-	const result = await f.run("reset", ["--all", "--force", "--json"]);
+	const result = await f.run("reset", ["--all", "--yes", "--json"]);
 	assert.equal(result.status, 1, result.stderr + result.stdout);
 	assert.ok(existsSync(f.history));
 	assert.ok(existsSync(join(directory, "owner.json")));

@@ -7,7 +7,7 @@ CLIO Coder has two related but separate surfaces:
 1. **Components**: deterministic inventory of files that can affect harness behavior.
 2. **Middleware**: a hook and effect contract around tool, turn, and compaction lifecycle points.
 
-The components surface is user-facing through `clio-coder components`. The middleware runtime carries CLIO Coder's built-in registrations and the operator's declared user hooks. Arbitrary repository or user middleware packages are not a public extension point: the only declarative rule source is `builtin`, and hook files compile into coded registrations that grant no tool authority. Enforcing registrations ride the same hook runtime at the composition root ([orchestrator.ts](../../src/entry/orchestrator.ts)). The loop guard, protected-artifacts guard, dispatch dedup, injection screen, tool-prose assessor, finish-contract assessor and citation-grounding assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
+The components surface is user-facing through `clio-coder dev components`. The middleware runtime carries CLIO Coder's built-in registrations and the operator's declared user hooks. Arbitrary repository or user middleware packages are not a public extension point: the only declarative rule source is `builtin`, and hook files compile into coded registrations that grant no tool authority. Enforcing registrations ride the same hook runtime at the composition root ([orchestrator.ts](../../src/entry/orchestrator.ts)). The loop guard, protected-artifacts guard, dispatch dedup, injection screen, tool-prose assessor, finish-contract assessor and citation-grounding assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
 
 ---
 
@@ -66,9 +66,9 @@ A listed file that does not exist is skipped. `doc-spec` reads only `docs/specs/
 ## Component CLI
 
 ```bash
-clio-coder components [list] [--json]
-clio-coder components snapshot --out <path>
-clio-coder components diff --from <snapshot-a.json> --to <snapshot-b.json> [--json]
+clio-coder dev components [list] [--json]
+clio-coder dev components snapshot --out <path>
+clio-coder dev components diff --from <snapshot-a.json> --to <snapshot-b.json> [--json]
 ```
 
 Source: [components.ts](../../src/cli/components.ts).

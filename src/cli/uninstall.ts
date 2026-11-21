@@ -81,8 +81,7 @@ Flags:
                    launcher. Your config, data, sessions and this installation stay.
   --dry-run        print what would be removed without changing anything
   --yes, -y        skip the confirmation; without a terminal, uninstall needs it
-                   (exit 2, confirmation_required). --force and -f are deprecated
-                   spellings of --yes.
+                   (exit 2, confirmation_required).
   --json           emit machine-readable JSON output; a terminal run still asks,
                    on stderr
   --help, -h       show this message
@@ -95,8 +94,6 @@ interface ParsedUninstallArgs {
 	inactive: boolean;
 	keepPackage: boolean;
 	yes: boolean;
-	/** `--force` or `-f` spelled the confirmation skip; it still works and says it is deprecated. */
-	forceSpelling: string | null;
 	dryRun: boolean;
 	json: boolean;
 	help: boolean;
@@ -112,7 +109,6 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 		inactive: false,
 		keepPackage: false,
 		yes: false,
-		forceSpelling: null,
 		dryRun: false,
 		json: false,
 		help: false,
@@ -137,11 +133,6 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 			case "--yes":
 			case "-y":
 				parsed.yes = true;
-				break;
-			case "--force":
-			case "-f":
-				parsed.yes = true;
-				parsed.forceSpelling = arg;
 				break;
 			case "--dry-run":
 				parsed.dryRun = true;
@@ -680,8 +671,6 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		process.stdout.write(HELP);
 		return 0;
 	}
-	if (args.forceSpelling !== null)
-		process.stderr.write(`clio-coder: deprecated: uninstall ${args.forceSpelling}; use --yes\n`);
 
 	// One sentence on stderr, and nothing on stdout but the --json failure
 	// document: a caller that piped this run is parsing stdout.

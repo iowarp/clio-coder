@@ -25,7 +25,6 @@ import { parseTomlDocument } from "../../src/core/toml.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import type { MuxContract, MuxOpenUtilityPaneRequest } from "../../src/domains/mux/contract.js";
 import {
-	PANES_PRESET_ALIASES,
 	PANES_PRESET_IDS,
 	PANES_PRESETS,
 	type PanesYaziController,
@@ -123,11 +122,10 @@ const filesEnabled = {
 };
 
 describe("contracts/panes files surface", () => {
-	it("names the preset files and keeps yazi as a parsing alias only", () => {
+	it("names the preset files; yazi is the engine, not a preset name", () => {
 		deepStrictEqual([...PANES_PRESET_IDS], ["files", "logs", "shell"]);
 		strictEqual(PANES_PRESETS[0].binary, "yazi");
-		deepStrictEqual(PANES_PRESET_ALIASES, { yazi: "files" });
-		strictEqual(resolvePanesPresetId("yazi"), "files");
+		strictEqual(resolvePanesPresetId("yazi"), null);
 		strictEqual(resolvePanesPresetId("files"), "files");
 		strictEqual(resolvePanesPresetId("htop"), null);
 		// The model's enum carries the Clio name, not the engine's.
@@ -138,8 +136,7 @@ describe("contracts/panes files surface", () => {
 		deepStrictEqual(enumValues, ["files", "logs", "shell"]);
 	});
 
-	it("parses /panes open yazi, /panes open files --once, and /files [open|close|pick]", () => {
-		deepStrictEqual(parseSlashCommand("/panes open yazi"), { kind: "panes-open", preset: "files" });
+	it("parses /panes open files --once and /files [open|close|pick]", () => {
 		deepStrictEqual(parseSlashCommand("/panes open files --once"), { kind: "panes-open", preset: "files", once: true });
 		deepStrictEqual(parseSlashCommand("/files"), { kind: "files", action: "toggle" });
 		deepStrictEqual(parseSlashCommand("/files pick"), { kind: "files", action: "pick" });
@@ -318,8 +315,8 @@ describe("contracts/panes files surface", () => {
 		deepStrictEqual(await panes.files("pick"), { status: "opened", paneId: "p9", existing: false });
 		deepStrictEqual(await panes.files("close"), { status: "closed" });
 		deepStrictEqual(log, ["open", "hide", "open", "open:once", "close"]);
-		// The preset door and the alias reach the same controller.
-		deepStrictEqual(await panes.open({ preset: "yazi" }), {
+		// The preset door reaches the same controller.
+		deepStrictEqual(await panes.open({ preset: "files" }), {
 			status: "opened",
 			label: "files",
 			paneId: "p9",
