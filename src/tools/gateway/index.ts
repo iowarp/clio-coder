@@ -8,6 +8,7 @@ import { telemetryHub } from "../../core/telemetry/hub.js";
 import { isBuiltinToolName, isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { toolSurfaceSources } from "../../core/turn-constraints.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import { classify } from "../../domains/safety/action-classifier.js";
 import { StringEnum, validateEngineToolArguments } from "../../engine/ai.js";
 import { wireParameterSchema } from "../agent-tools.js";
 import type { ToolSurface } from "../lazy-tool.js";
@@ -89,6 +90,19 @@ export interface GatewayCapabilityEntry {
 
 /** Entries an unfiltered listing must exceed before a ranker is asked to order it. */
 export const GATEWAY_RANK_MIN_LISTING = 40;
+/** Action classes a read-only run never admits, whatever sandbox its commands run in. */
+const READ_ONLY_REFUSED_CLASSES: ReadonlySet<ActionClass> = new Set<ActionClass>([
+	"write",
+	"system_modify",
+	"destructive",
+	"git_destructive",
+]);
+/** Tools a read-only run admits when their command is contained, so their refusal is never certain up front. */
+const SANDBOX_ADMITTED_TOOLS: ReadonlySet<string> = new Set<string>([
+	ToolNames.Bash,
+	ToolNames.RunScript,
+	ToolNames.Verify,
+]);
 export interface GatewayToolDeps {
 	registry: ToolRegistry;
 	/** Local MCP servers, present on the session registry only. */
@@ -322,6 +336,24 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (sources.length === 0)
 			return "Refused by: dispatch tool scope.\nRemedy: Ask the operator to widen this dispatch's tool scope, then redispatch.";
 		return `Refused by: ${[...new Set(sources.map((entry) => entry.source))].join("; ")}.\nRemedy: ${[...new Set(sources.map((entry) => entry.remedy))].join(" ")}`;
+	};
+
+	/**
+	 * True when a read-only run can never make this built-in call, so admission's read-only denial is certain to fire
+	 * before anything runs: both the call's classification and the tool's declared class are a write, a system change,
+	 * a deletion or destructive git, none of which admission's read-only rule admits. Shell and check tools and every
+	 * tool that projects its effect onto a shell command stay out, because a contained command is admitted read-only.
+	 */
+	const readOnlyRefuses = (name: string, args: Record<string, unknown>): boolean => {
+		if (!isBuiltinToolName(name as ToolName) || SANDBOX_ADMITTED_TOOLS.has(name)) return false;
+		const spec = registry.get(name as ToolName);
+		if (spec === undefined || spec.safetyCall !== undefined) return false;
+		const declared = spec.readOnlyActionClass ?? spec.baseActionClass;
+		const classified = classify({ tool: name, args }).actionClass;
+		return (
+			READ_ONLY_REFUSED_CLASSES.has(declared) &&
+			READ_ONLY_REFUSED_CLASSES.has(classified === "unknown" ? declared : classified)
+		);
 	};
 
 	const outsideSurface = (
@@ -895,14 +927,12 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (allowed !== null && !allowed.has(name)) {
 			// A read-only run's envelope withholds its writes, and admission refuses a write as read-only before it
 			// weighs tool scope, so the model hears why and what lifts it, not to widen a scope that never would.
-			// Admission refuses every name off the run's allowed tools, so this call cannot run.
-			if (
-				(deps.readOnly === true || options?.turnConstraints?.readOnly === true) &&
-				isBuiltinToolName(name as ToolName) &&
-				registry.get(name as ToolName) !== undefined
-			) {
+			// Only a call a read-only run can never make takes that route, so admission's read-only denial fires
+			// before anything could run; every other off-surface name is refused here without an invocation.
+			const innerArgs = isRecord(args.args) ? args.args : {};
+			if ((deps.readOnly === true || options?.turnConstraints?.readOnly === true) && readOnlyRefuses(name, innerArgs)) {
 				const { approval: _approval, ...outer } = options ?? {};
-				const verdict = await invokeInner(name, isRecord(args.args) ? args.args : {}, { ...outer, nested: !allowDirect });
+				const verdict = await invokeInner(name, innerArgs, { ...outer, nested: !allowDirect });
 				const reasonCode = verdict.kind === "blocked" ? verdict.decision.policy?.reasonCode : undefined;
 				if (verdict.kind === "blocked" && (reasonCode === "dispatch:read_only" || reasonCode === "task:read_only"))
 					return nestedBlockedResult(verdict);

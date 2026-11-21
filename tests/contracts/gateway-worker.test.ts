@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -169,5 +169,35 @@ describe("gateway on the worker surface", () => {
 		);
 		if (describe.kind !== "ok" || describe.result.kind !== "error") throw new Error(JSON.stringify(describe));
 		ok(describe.result.message.includes("not on this run's admitted tool surface"));
+	});
+
+	it("a read-only run refuses a withheld write as read-only and never invokes an off-surface read or shell", async () => {
+		const cwd = scratch();
+		const notes = join(cwd, "notes.txt");
+		writeFileSync(notes, "kept\n");
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd }), undefined, [], true);
+		const inner: string[] = [];
+		const invoke = registry.invoke.bind(registry);
+		registry.invoke = (call, options) => {
+			if (call.tool !== ToolNames.Gateway) inner.push(call.tool);
+			return invoke(call, options);
+		};
+		// No run tool list: only the turn bounds the surface, so nothing here leans on admission's run-scope check.
+		const options = { turnConstraints: { allowedTools: [ToolNames.Grep, ToolNames.Gateway] } };
+		const call = (capability: string, args: Record<string, unknown>) =>
+			registry.invoke({ tool: ToolNames.Gateway, args: { op: "call", capability, args } }, options);
+		for (const [capability, args] of [
+			[ToolNames.Read, { path: notes }],
+			[ToolNames.Bash, { command: `cat ${notes}` }],
+		] as const) {
+			const verdict = await call(capability, args);
+			if (verdict.kind !== "ok" || verdict.result.kind !== "error") throw new Error(JSON.stringify(verdict));
+			ok(verdict.result.message.includes(`capability "${capability}" is not on this run's admitted tool surface`));
+		}
+		deepStrictEqual(inner, [], "an off-surface read or shell call is refused without being invoked");
+		const write = JSON.stringify(await call(ToolNames.Write, { path: notes, content: "changed\n" }));
+		ok(/write denied: this run is read-only/u.test(write), write);
+		deepStrictEqual(inner, [ToolNames.Write]);
+		strictEqual(readFileSync(notes, "utf8"), "kept\n");
 	});
 });
