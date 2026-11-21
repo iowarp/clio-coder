@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Type } from "typebox";
 import { telemetryContext } from "../../src/core/telemetry/context.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
@@ -16,6 +17,7 @@ import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rule
 import { foldDecisions } from "../../src/domains/telemetry/fact-folds.js";
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { sessionOperatorMetrics } from "../../src/domains/telemetry/read-model.js";
 import { readSessionPromptCompiles } from "../../src/domains/telemetry/session-artifacts.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { researchCaptureFor } from "../../src/engine/research-capture.js";
@@ -123,6 +125,18 @@ test("every tool.decided under a gateway call or chain settles once under its ow
 		}));
 		strictEqual(foldDecisions(journal as never).tools.allowed, 2);
 		strictEqual(sink.of("tool.settled").filter((record) => countsAsToolCall(record.data as never)).length, 2);
+		// The operator performance totals agree with its per-tool and per-session rows.
+		const records = sink.records.map((record, index) =>
+			makeTelemetryRecord(record.kind, record.data as never, record.ctx, { t: "2026-11-20T00:00:00.000Z", mono: index }),
+		);
+		const performance = sessionOperatorMetrics({
+			sessionId: "producer-gateway",
+			journal: { present: true, records, modes: ["standard"], skipped: 0, damaged: 0 },
+			runs: new Map(),
+			parent: null,
+		}).performance;
+		strictEqual(performance.totals.toolCalls.display, "2");
+		strictEqual(performance.sessions[0]?.toolCalls.display, "2");
 	} finally {
 		sink.release();
 	}

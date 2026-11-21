@@ -4496,6 +4496,10 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 		tools.set(record.data.tool, row);
 	}
 	const compactions = ordered.filter((record) => record.k === "compaction.settled");
+	// Totals count the model's calls only, like the per-tool and per-session rows (C-9).
+	const settledCalls = ordered
+		.filter((record) => record.k === "tool.settled")
+		.filter((record) => countsAsToolCall(record.data));
 	const outcomes = { committed: 0, discarded: 0, failed: 0, unresolved: 0 };
 	for (const record of compactions) outcomes[record.data.outcome]++;
 	const sessions = source.sessions
@@ -4544,13 +4548,9 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 			),
 		},
 		totals: {
-			toolCalls: shownCount(ordered.filter((record) => record.k === "tool.settled").length),
-			toolErrors: shownCount(
-				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "error").length,
-			),
-			toolBlocked: shownCount(
-				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "blocked").length,
-			),
+			toolCalls: shownCount(settledCalls.length),
+			toolErrors: shownCount(settledCalls.filter((record) => record.data.outcome === "error").length),
+			toolBlocked: shownCount(settledCalls.filter((record) => record.data.outcome === "blocked").length),
 			compactions: shownCount(compactions.length),
 		},
 		tools: [...tools]
