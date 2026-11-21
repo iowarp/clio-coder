@@ -34,13 +34,44 @@ describe("task board done", () => {
 				["First task", "Second task"],
 			);
 		}
-		const result = await tool.run({ action: "create", title: "Repair", tasks: ["First task"] });
+		const result = await tool.run({ action: "build", title: "Repair", tasks: ["First task"] });
 		strictEqual(result.kind, "error");
 		if (result.kind === "error")
 			strictEqual(
 				result.message,
-				'tasks: unknown action \'create\'; to create a board use action="plan" with title="..." and tasks=["first task", "second task"]',
+				'tasks: unknown action \'build\'; to create a board use action="plan" with title="..." and tasks=["first task", "second task"]',
 			);
+	});
+
+	it("reads create with items as plan with tasks, and ids as one action per id (C-24)", async () => {
+		const board = createTaskBoardStore({ getSessionId: () => "s1", createBoardId: () => "b1" });
+		const tool = createTasksTool({ board });
+		const prepare = tool.prepareArguments;
+		ok(prepare);
+		const run = (args: Record<string, unknown>) => tool.run(prepare(args));
+		const statuses = () => board.snapshot()?.tasks.map((task) => task.status);
+		const planned = await run({ action: "create", title: "Repair", items: ["a", { title: "b" }, "c", "d"] });
+		ok(planned.kind === "ok", JSON.stringify(planned));
+		deepStrictEqual(
+			board.snapshot()?.tasks.map((task) => task.title),
+			["a", "b", "c", "d"],
+		);
+		const done = await run({ action: "done", ids: ["t1", 2], note: "observed both" });
+		ok(done.kind === "ok", JSON.stringify(done));
+		deepStrictEqual(statuses(), ["completed", "completed", "pending", "pending"]);
+		// A failure stops the sequence and names what already applied.
+		const partial = await run({ action: "drop", ids: ["t3", "t9", "t4"] });
+		ok(partial.kind === "error", JSON.stringify(partial));
+		match(partial.message, /t9.*\(t3 already applied; t4 not attempted\)/su);
+		deepStrictEqual(statuses(), ["completed", "completed", "cancelled", "pending"]);
+		for (const args of [
+			{ action: "start", ids: ["t4", "t3"] },
+			{ action: "block", id: "t4", ids: ["t4"] },
+		]) {
+			const refused = await run(args);
+			ok(refused.kind === "error", JSON.stringify(refused));
+		}
+		deepStrictEqual(statuses(), ["completed", "completed", "cancelled", "pending"]);
 	});
 
 	it("completes a pending task with evidence and records the implicit start", () => {
