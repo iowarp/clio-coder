@@ -472,7 +472,7 @@ function deleteTargetReason(
  * Clio-variable pins (`yolo-floor.ts` DYNAMIC_ASSIGNERS).
  */
 const TEMP_DIR_ASSIGNERS =
-	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin|trap|coproc)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
+	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
 
 /**
  * The bash command with each `$TMPDIR` and `${TMPDIR}` the outer shell expands spelled as this process's temp
@@ -501,17 +501,24 @@ function stableTempDir(): string | null {
 	return value;
 }
 
-function hasStableTempDirReferences(command: string): boolean {
-	// Quotes and escapes are dropped first, so `T''MPDIR=` and `\\declare` count as the name and the assigner (row 261).
+/**
+ * Row 261: a TMPDIR rebinding the reading below misses because quotes or escapes split its words (`T''MPDIR=.`,
+ * `\\declare`), or a `trap` or `coproc` that may assign it later. It only ever withholds the expansion.
+ */
+function quotedTempDirRebinding(command: string): boolean {
 	const plain = command.replace(/['"\\]/gu, "");
 	const names = plain.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
 	return (
-		names === references &&
-		!TEMP_DIR_ASSIGNERS.test(command) &&
-		!TEMP_DIR_ASSIGNERS.test(plain) &&
-		!/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command)
+		names > references || TEMP_DIR_ASSIGNERS.test(plain) || /(?:^|[\s;&|(){}`])(?:trap|coproc)(?=[\s;&|)]|$)/u.test(plain)
 	);
+}
+
+function hasStableTempDirReferences(command: string): boolean {
+	if (quotedTempDirRebinding(command)) return false;
+	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
+	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
+	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
 }
 
 function expandTempDirReferences(command: string): string {
