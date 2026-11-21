@@ -10439,7 +10439,6 @@ export function createDispatchBundle(
 					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
 					toolLaneObserved: gradeContract.toolLaneObserved,
-					readOnly: lifecycle.readOnly,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});

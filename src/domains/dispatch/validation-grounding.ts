@@ -76,8 +76,6 @@ export interface ValidationGrounding {
 
 export interface ValidationGroundingInput {
 	contractKind: ResultContract["kind"] | null;
-	/** Read claims in restricted runs are not command validation claims. */
-	readOnly?: boolean;
 	/** The run's terminal assistant text, or null when none was captured. */
 	output: string | null;
 	/** Canonical validation commands the run ran to a clean exit. */
@@ -234,6 +232,29 @@ function groundedByVerifyRun(
 }
 
 /**
+ * A builder's passing claim that is inspection prose, not a validation: it names no command the grounding vocabulary
+ * detects (in the whole claim or one of its parenthesised or listed parts) and no `verify`, and it reads as an
+ * inspection ("Inspect supplied Scout findings", "read src/math.ts") or names neither a script path nor a check
+ * ("fixture"). It neither grounds nor lowers assurance (DESIGN 4.8). "tests pass", "npm test: 12 passing" and
+ * "./gradlew" stay claims, so a check claimed and never run is still ungrounded.
+ */
+function isInspectionProse(name: string): boolean {
+	if (/^(?:tool:)?verify$/iu.test(name.trim()) || namedVerifyChecks(name).length > 0) return false;
+	const parts = [name, ...name.split(/[(),;:`"']/u)];
+	if (parts.some((part) => detectValidationCommand(part, "grounding").kind === "validation")) return false;
+	if (
+		/^(?:read|inspect(?:ed)?|review(?:ed)?|source|file)\b|^checked\s+\S+\.(?:[cm]?[jt]sx?|md|txt|json|yaml|yml)\b/iu.test(
+			name.trim(),
+		)
+	)
+		return true;
+	if (/(?:^|\s)\.{0,2}\/?[\w.-]+\/[\w./-]*|(?:^|\s)\.\/[\w.-]+/u.test(name)) return false;
+	return !/\b(?:tests?|testing|tested|specs?|typecheck(?:ed|s|ing)?|type-check(?:ed|s|ing)?|lint(?:ed|s|ing)?|builds?|built|compil(?:e|es|ed|ing)|checks?|smoke|coverage)\b/iu.test(
+		name,
+	);
+}
+
+/**
  * Fold a terminal result's passing validation claims against the run's executed
  * commands. Returns null when there is nothing to ground, which is every
  * contract kind that carries no correctness claim and every result that named
@@ -244,20 +265,19 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	// Hoare machine claims use exact native proof records, while argued obligations claim no command execution.
 	if (input.contractKind === "verifier-report" && parseVerifierResult(input.output)?.assurance !== undefined)
 		return null;
-	const claims = claimedValidations(input.output).filter(({ name }) => {
-		if (!input.readOnly || input.contractKind !== "mutation-report") return true;
-		if (detectValidationCommand(name, "grounding").kind === "validation") return true;
-		return !/^(?:read|inspect(?:ed)?|review(?:ed)?|source|file)\b|^checked\s+\S+\.(?:[cm]?[jt]sx?|md|txt|json|yaml|yml)\b/iu.test(
-			name,
-		);
-	});
+	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
+	const matched = (claim: ClaimedValidation): boolean =>
+		isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? []);
+	// A claim an execution matches named that execution, whatever its wording.
+	const claims = claimedValidations(input.output).filter(
+		(claim) => input.contractKind !== "mutation-report" || matched(claim) || !isInspectionProse(claim.name),
+	);
 	if (claims.length === 0) return null;
 	const ungrounded: string[] = [];
 	let grounded = 0;
 	let unattributable = false;
-	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
 	for (const claim of claims) {
-		if (isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? [])) grounded += 1;
+		if (matched(claim)) grounded += 1;
 		else {
 			if (!ungrounded.includes(claim.name)) ungrounded.push(claim.name);
 			if (input.unattributableCommands !== undefined && isExecuted(claim.name, input.unattributableCommands))
