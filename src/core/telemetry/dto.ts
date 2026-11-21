@@ -508,6 +508,8 @@ export const CallRowSchema = Type.Object(
 				requestBytes: QuantitySchema,
 				sessionPinnedToSse: FactTextSchema,
 				connectionReused: FactTextSchema,
+				/** The Copilot session a copilot-sdk call went to: new, spare, continued or resumed. */
+				session: FactTextSchema,
 				websocketFailures: QuantitySchema,
 				sseFallbacks: QuantitySchema,
 				pinReason: Type.Union([transportFacts.pinReason, Type.Null()]),
