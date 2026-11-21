@@ -11,14 +11,15 @@ import {
 	contextElements,
 	startCaptureServer,
 	tappedCli,
+	tappedWorkerFile,
 	wireElements,
 } from "../harness/context-capture.js";
 import { headlessScratch, runCli } from "../harness/headless-run.js";
-import { seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
+import { seedOpenAICompatFleetDefault, seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
 
 /**
  * ContextFold surface capture through the real entry points: the built CLI's `clio-coder run` and `clio-coder acp`
- * as subprocesses against the capture server. These run the bundle in dist/, so they belong to the full tier, whose
+ * as subprocesses, and a native worker `run` dispatches, against the capture server. These run the bundle in dist/, so they belong to the full tier, whose
  * pretest refuses a dist/ built from another commit; the core tier runs from source and would test a stale bundle.
  */
 
@@ -85,6 +86,61 @@ describe("surface capture", () => {
 		});
 	}
 
+	it("worker: a dispatched native worker's payloads carry the context its attempt seam finalized", {
+		timeout: 300_000,
+	}, async (t) => {
+		const isWorker = (request: CapturedRequest) =>
+			wireElements(request)[0]?.includes("running as one bounded fleet worker") === true;
+		const server = await startCaptureServer((request) => {
+			const mine = server.requests.filter((sent) => isWorker(sent) === isWorker(request)).length;
+			if (isWorker(request))
+				return mine === 1
+					? { calls: [{ id: "call_w1", name: "read", arguments: { path: "notes.txt" } }] }
+					: { text: '{"findings":[{"claim":"notes.txt reads body a"}],"needsSplit":false,"proposedSubtasks":[]}' };
+			return mine === 1
+				? {
+						calls: [
+							{
+								id: "call_1",
+								name: "dispatch",
+								arguments: { agent: "scout", task: "Read notes.txt and report what it says." },
+							},
+						],
+					}
+				: { text: "done" };
+		});
+		const scratch = headlessScratch("cf-worker-capture-");
+		t.after(async () => {
+			await server.close();
+			scratch.cleanup();
+		});
+		seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+		seedOpenAICompatFleetDefault(scratch.configDir);
+		const project = path.join(scratch.root, "project");
+		mkdirSync(project);
+		writeFileSync(path.join(project, "notes.txt"), "body a\n");
+		const tapFile = path.join(scratch.root, "session-capture.jsonl");
+		const prompt = ["--no-context-files", "--no-skills", "run", "--autonomy", "yolo", "have a scout read notes.txt"];
+		const result = await runCli(prompt, {
+			env: scratch.env,
+			cwd: project,
+			timeoutMs: 240_000,
+			...tappedCli(tapFile),
+		});
+		strictEqual(result.code, 0, result.stderr);
+		const read = (file: string) =>
+			readFileSync(file, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Context);
+		const worker = server.requests.filter(isWorker);
+		const parent = server.requests.filter((request) => !isWorker(request));
+		ok(worker.length >= 2, "the worker's tool round and its report both reached the server");
+		ok(wireElements(worker.at(-1) as CapturedRequest).some((element) => element.startsWith("result:")));
+		ok(parent.length >= 2, "the dispatch round and the answer both reached the server");
+		deepStrictEqual(worker.map(wireElements), read(tappedWorkerFile(tapFile)).map(contextElements));
+		deepStrictEqual(parent.map(wireElements), read(tapFile).map(contextElements));
+	});
 	for (const surface of ["headless run", "acp"] as const) {
 		for (const cached of [false, true]) {
 			it(`${surface}: ${cached ? "a cached route sends every superseded read whole" : "an uncached route's payload is the session's after the S0 commit"}`, {
