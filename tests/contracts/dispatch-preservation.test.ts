@@ -16,7 +16,6 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { processBirthToken } from "../../src/core/process-identity.js";
-import { workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import { joinWriterSet, WriterSetBusyError } from "../../src/domains/dispatch/writer-set.js";
 import {
 	claimCompeteGroup,
@@ -29,24 +28,6 @@ import {
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
 import type { DispatchToolDeps } from "../../src/tools/dispatch-types.js";
-
-test("a no-change report that names its block under a commit subject line settles as no work", () => {
-	const input = {
-		activity: { calls: 8, succeeded: 7, failed: 1, blocked: 0, mutatingSucceeded: true },
-		limitationRecorded: false,
-		mutatedPathCount: 0,
-		finalText: JSON.stringify({
-			mutatedPaths: [],
-			validations: [],
-			summary:
-				"fix(compaction): reserve the real summary output\nBLOCKED: the trigger lives outside my write roots.\nchangelog: none.",
-		}),
-	};
-	match(workerNoWorkDetail(input) ?? "", /changed nothing.*BLOCKED: the trigger lives outside/s);
-	strictEqual(workerNoWorkDetail({ ...input, mutatedPathCount: 1 }), null);
-	const subjectOnly = JSON.stringify({ mutatedPaths: [], summary: "fix(x): done\nThe parser cannot overflow." });
-	strictEqual(workerNoWorkDetail({ ...input, finalText: subjectOnly }), null);
-});
 
 function git(root: string, ...args: string[]) {
 	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -683,35 +664,26 @@ test("a capped worker's dirty task worktree is committed on its preserved branch
 
 test("an edit worker that changed files but reports it could not finish settles partial, preserved under a partial subject", async () => {
 	const { taskWorktreeCommitMessage, preservesPartialResult } = await import("../../src/domains/dispatch/merge-gate.js");
-	const { workerPartialWorkDetail } = await import("../../src/domains/dispatch/tool-stats.js");
+	const { gradeWork } = await import("../harness/grade-facts.js");
 	const summary = "Could not finish everything. The parser change is in; the CLI flag is not wired.";
-	const input = {
-		activity: { mutatingSucceeded: true },
+	const changed = {
+		activity: { executed: 6, observations: 3, mutatingSucceeded: true, storeWritten: false },
 		mutatedPathCount: 2,
-		finalText: JSON.stringify({ mutatedPaths: ["a.ts", "b.ts"], validations: [], summary }),
 	};
-	match(workerPartialWorkDetail(input) ?? "", /did not finish the assignment.*Could not finish everything/su);
-	match(
-		workerPartialWorkDetail({ ...input, finalText: "fix(cli): wire the flag\nPartially done: tests pending." }) ?? "",
-		/partial/u,
-	);
-	// Nothing changed is no work, not partial work; a report that opens with its result is a success.
-	strictEqual(workerPartialWorkDetail({ ...input, mutatedPathCount: 0 }), null);
-	strictEqual(workerPartialWorkDetail({ ...input, finalText: "Wired the flag. The parser cannot overflow." }), null);
-	// Partial means unfinished work: a finish it could not verify here is still a finish.
-	for (const finalText of [
-		"Unable to run the tests here; implemented the --strict flag and its parser branch.",
-		"Could not verify with the full suite (no network). Wired the flag.",
-		"I couldn't build the docs locally, but the flag is done.",
-	])
-		strictEqual(workerPartialWorkDetail({ ...input, finalText }), null, finalText);
-	match(
-		workerPartialWorkDetail({ ...input, finalText: "Unable to complete the CLI half; the parser is done." }) ?? "",
-		/partial/u,
-	);
-	match(
-		workerPartialWorkDetail({ ...input, finalText: "I couldn't implement the flag's help text." }) ?? "",
-		/partial/u,
+	const limitations = [{ what: "the CLI flag is not wired", why: "out_of_budget" as const }];
+	const partial = gradeWork({ ...changed, completion: { state: "partly_done", limitations, unverified: [] } });
+	strictEqual(partial.outcomeCode, "worker_partial_work");
+	match(partial.detail ?? "", /partly done, so its changes are a partial result: the CLI flag is not wired/u);
+	// Nothing changed is not partial work, and a done declaration is a finish whatever the summary's words say.
+	const unchanged = gradeWork({
+		...changed,
+		mutatedPathCount: 0,
+		completion: { state: "not_done", limitations, unverified: [] },
+	});
+	strictEqual(unchanged.outcomeCode, "worker_not_done");
+	strictEqual(
+		gradeWork({ ...changed, completion: { state: "done", limitations: [], unverified: [] } }).outcome,
+		"succeeded",
 	);
 	strictEqual(preservesPartialResult("worker_partial_work", true), true);
 	const task = "Add the --strict flag to the CLI parser.";

@@ -12,7 +12,11 @@ import {
 	resultContractShape,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
-import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatch/merge-gate.js";
+import {
+	mergeWithheldDetail,
+	removedTestCases,
+	taskRequestsTestRemoval,
+} from "../../src/domains/dispatch/merge-gate.js";
 import {
 	deriveRunVerification,
 	settledVerifyCall,
@@ -268,90 +272,54 @@ it("a verify that resolved to no check ran nothing, so a later pass under the de
 	}
 });
 
-it("withholds requested validation even when the worker omits declaredChecks", () => {
+it("the merge gate reads the run's assurance, never the task's words (M9)", () => {
 	const input = {
-		quality: "unmeasured",
-		hostStatus: undefined,
+		assurance: "unverified" as const,
 		contract: { kind: "mutation-report" as const },
 		output: '{"validations":[]}',
 		branch: "clio-coder/task/check",
-		task: "Implement parseDuration. The worker runs npm test and commits.",
-		executedCheckingCalls: 0,
 	};
-	match(mergeWithheldDetail(input) ?? "", /requested validation.*executed no check/u);
-	strictEqual(mergeWithheldDetail({ ...input, hostStatus: "verified" }), null);
-	strictEqual(mergeWithheldDetail({ ...input, executedCheckingCalls: 1 }), null);
-	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser." }), null);
-	for (const task of [
-		"Do not run the tests.",
-		"No need to test.",
-		"No need to run npm test.",
-		"Don't run npm test.",
-		"Running the tests is not required.",
-		"Never run npm test.",
-		"Implement the parser without running tests.",
-	]) {
-		strictEqual(mergeWithheldDetail({ ...input, task }), null, task);
-	}
+	strictEqual(mergeWithheldDetail(input), null);
+	strictEqual(mergeWithheldDetail({ ...input, assurance: "grounded" }), null);
+	strictEqual(mergeWithheldDetail({ ...input, assurance: "reviewed" }), null);
 	match(
-		mergeWithheldDetail({ ...input, task: "Do not run the tests, but run lint checks." }) ?? "",
-		/requested validation/u,
+		mergeWithheldDetail({ ...input, assurance: "compromised" }) ?? "",
+		/^merge withheld: its result is not trusted/u,
 	);
-});
-
-it("withholds a task-named check the worker never ran, though unrelated shell calls succeeded", () => {
-	const input = {
-		quality: "unmeasured",
-		hostStatus: undefined,
-		contract: { kind: "mutation-report" as const },
-		output: '{"validations":[]}',
-		branch: "clio-coder/task/calc",
-		task: "Add mul(a,b) to calc.py. Verify the change by running: python3 -B -c 'import calc'",
-		executedCheckingCalls: 2,
-		executedShellCommands: ["python3 --version", 'echo "hello"'],
+	const failing = {
+		...input,
+		assurance: "compromised" as const,
+		output: '{"validations":[{"name":"npm test","passed":false}]}',
 	};
-	match(mergeWithheldDetail(input) ?? "", /python3 -B -c 'import calc'.*never ran/u);
-	strictEqual(mergeWithheldDetail({ ...input, executedShellCommands: ["cd /w && python3 -B -c 'import calc'"] }), null);
-	strictEqual(mergeWithheldDetail({ ...input, hostStatus: "verified" }), null);
-	strictEqual(
-		mergeWithheldDetail({ ...input, task: "Add mul. Run `python3 -B -c 'import calc'` to verify it." }) === null,
-		false,
-	);
-	strictEqual(mergeWithheldDetail({ ...input, task: "Add mul and run the app." }), null);
-	match(mergeWithheldDetail({ ...input, task: "Add mul. Verify by running `make check`." }) ?? "", /make check/u);
-	for (const task of [
-		"Verify the change by running the tests",
-		"Test it by running pytest and fix any failures",
-		"check it works by running the app",
-	]) {
-		strictEqual(mergeWithheldDetail({ ...input, task }), null, task);
-	}
-	// The named command present only as a failed run is not a clean execution.
-	const recorder = createRunEffectsRecorder("/w");
-	recorder.start("c1", "bash", { command: "python3 -B -c 'import calc'" });
-	recorder.checkOutcome("c1", "error");
-	recorder.finish("c1", false);
-	recorder.start("c2", "bash", { command: "python3 --version" });
-	recorder.checkOutcome("c2", "ok");
-	recorder.finish("c2", false);
-	const ran = recorder.snapshot().executedShellCommands ?? [];
-	deepStrictEqual(ran, ["python3 --version"]);
-	match(mergeWithheldDetail({ ...input, executedShellCommands: ran }) ?? "", /never ran/u);
+	const detail = mergeWithheldDetail(failing) ?? "";
+	match(detail, /the worker's own report lists a failing validation \(npm test\)/u);
+	match(detail, /`clio-coder fleet land clio-coder\/task\/check` applies it if that failure was already there/u);
+	doesNotMatch(detail, /requested validation/u);
 });
 
-it("a passing verify run of the task's named check satisfies it; a failed or bare listing call does not", () => {
+it("a declared unrun check holds an unverified merge, and a grounded one merges", () => {
+	const input = {
+		assurance: "unverified" as const,
+		contract: { kind: "mutation-report" as const },
+		output: '{"validations":[],"declaredChecks":["Tests not run as requested."]}',
+		branch: "clio-coder/task/check",
+	};
+	match(mergeWithheldDetail(input) ?? "", /host did not run \(Tests not run as requested\.\)/u);
+	strictEqual(mergeWithheldDetail({ ...input, assurance: "grounded" }), null);
+});
+
+it("the recorder keeps only cleanly executed commands, a passing verify run resolved to what it ran", () => {
+	const shell = createRunEffectsRecorder("/w");
+	shell.start("c1", "bash", { command: "python3 -B -c 'import calc'" });
+	shell.checkOutcome("c1", "error");
+	shell.finish("c1", false);
+	shell.start("c2", "bash", { command: "python3 --version" });
+	shell.checkOutcome("c2", "ok");
+	shell.finish("c2", false);
+	deepStrictEqual(shell.snapshot().executedShellCommands ?? [], ["python3 --version"]);
 	const repo = mkdtempSync(join(tmpdir(), "named-verify-"));
 	try {
 		writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", scripts: { test: "node -e 0" } }));
-		const input = {
-			quality: "unmeasured",
-			hostStatus: undefined,
-			contract: { kind: "mutation-report" as const },
-			output: '{"validations":[]}',
-			branch: "clio-coder/task/calc",
-			task: "Add mul. Verify by running `pnpm test`.",
-			executedCheckingCalls: 1,
-		};
 		const ran = (args: Record<string, unknown>, outcome: "ok" | "error") => {
 			const recorder = createRunEffectsRecorder(repo);
 			recorder.start("v1", "verify", args);
@@ -359,45 +327,18 @@ it("a passing verify run of the task's named check satisfies it; a failed or bar
 			recorder.finish("v1", outcome === "error");
 			return recorder.snapshot().executedShellCommands ?? [];
 		};
-		const passed = ran({ check: "test" }, "ok");
-		deepStrictEqual(passed, ["npm run test"]);
-		strictEqual(mergeWithheldDetail({ ...input, executedShellCommands: passed }), null);
-		const goReason = mergeWithheldDetail({ ...input, executedShellCommands: ["go run test.go"] }) ?? "";
-		match(goReason, /\(pnpm test\) but the worker never ran/u);
-		doesNotMatch(goReason, /npm-script/u);
-		match(mergeWithheldDetail({ ...input, executedShellCommands: ran({ check: "test" }, "error") }) ?? "", /never ran/u);
-		match(mergeWithheldDetail({ ...input, executedShellCommands: ran({}, "ok") }) ?? "", /never ran/u);
-		// A verifier's task gate resolves in the worker's recorder too.
+		deepStrictEqual(ran({ check: "test" }, "ok"), ["npm run test"]);
+		strictEqual(ran({ check: "test" }, "error").includes("npm run test"), false);
+		strictEqual(ran({}, "ok").includes("npm run test"), false);
 		const gated = "Verify the change by running: `python3 -m pytest -q tests`";
 		configureTaskGates(gated, { confined: false });
 		try {
-			const viaGate = ran({ check: "gate-1" }, "ok");
-			deepStrictEqual(viaGate, ["python3 -m pytest -q tests"]);
-			strictEqual(mergeWithheldDetail({ ...input, task: gated, executedShellCommands: viaGate }), null);
+			deepStrictEqual(ran({ check: "gate-1" }, "ok"), ["python3 -m pytest -q tests"]);
 		} finally {
 			clearTaskGates();
 		}
 	} finally {
 		rmSync(repo, { recursive: true, force: true });
-	}
-});
-
-it("a declared unrun check holds the merge unless the task opted out of validation", () => {
-	const input = {
-		quality: "unmeasured",
-		hostStatus: undefined,
-		contract: { kind: "mutation-report" as const },
-		output: '{"validations":[],"declaredChecks":["Tests not run as requested."]}',
-		branch: "clio-coder/task/check",
-		executedCheckingCalls: 0,
-	};
-	match(mergeWithheldDetail({ ...input, task: "Edit the parser." }) ?? "", /host did not run/u);
-	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser. Do not run the tests." }), null);
-	for (const task of ["Skip tests", "No tests needed", "No need to test", "Do not run tests and lint"]) {
-		strictEqual(mergeWithheldDetail({ ...input, task }), null, task);
-	}
-	for (const task of ["Run tests without changing snapshots", "Do not edit tests, but run lint checks"]) {
-		match(mergeWithheldDetail({ ...input, task }) ?? "", /requested validation/u, task);
 	}
 });
 
@@ -459,8 +400,7 @@ it("withholds a verified merge whose diff replaces an existing test, but not an 
 	].join("\n");
 	deepStrictEqual(removedTestCases(deleted), ["tests/test_parse.py (file removed)"]);
 	const input = {
-		quality: "pass",
-		hostStatus: "verified",
+		assurance: "grounded" as const,
 		contract: null,
 		output: null,
 		branch: "clio-coder/task/dropped",
@@ -470,11 +410,9 @@ it("withholds a verified merge whose diff replaces an existing test, but not an 
 	match(detail, /removes existing test cases.*totalDuration sums every part/u);
 	match(detail, /if removing those tests was intended/u);
 	strictEqual(mergeWithheldDetail({ ...input, removedTests: [] }), null);
-	strictEqual(mergeWithheldDetail({ ...input, task: "Delete the obsolete totalDuration test." }), null);
-	match(
-		mergeWithheldDetail({ ...input, task: "Do not delete tests; fix totalDuration." }) ?? "",
-		/removes existing test cases/u,
-	);
+	// The settle path clears removedTests when a clause of the task asks for the removal.
+	strictEqual(taskRequestsTestRemoval("Delete the obsolete totalDuration test."), true);
+	strictEqual(taskRequestsTestRemoval("Do not delete tests; fix totalDuration."), false);
 });
 
 it("observed command outcomes preserve full failures and invalidate passes after edits", () => {

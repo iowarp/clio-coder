@@ -358,11 +358,7 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 			usd: "unknownCount" in usd ? usd : sumFacts([usd]),
 			...freeClaim(settled.pricing.pricedBy === "free", settled.pricing.freeRule),
 		},
-		inspection: reviewerInspectionOf({
-			runtimeKind: settled.route.runtimeKind,
-			toolActivity: settled.toolActivity,
-			validationGrounding: settled.validationGrounding,
-		}),
+		inspection: reviewerInspectionOf({ outcomeCode: settled.outcomeCode, verdict: settled.verdict ?? null }),
 	};
 }
 

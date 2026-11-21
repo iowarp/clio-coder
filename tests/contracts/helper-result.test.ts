@@ -11,12 +11,13 @@ import {
 } from "../../src/domains/agents/result-contract.js";
 import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
 
-import { summarizeToolActivity, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
+import { executedCalls, summarizeToolActivity } from "../../src/domains/dispatch/tool-stats.js";
 import { approvedIdentityForSpec } from "../../src/domains/dispatch/worker-protocol.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
 import { parseWorkerSpec, workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { gradeWork } from "../harness/grade-facts.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const evidence = {
@@ -118,7 +119,8 @@ test("typed mutation reports retain semantic grounding and their authorship and 
 	);
 	strictEqual(activity.calls, 0);
 	strictEqual(activity.mutatingSucceeded, false);
-	ok(workerNoWorkDetail({ activity, limitationRecorded: false, mutatedPathCount: 0 }));
+	const idle = { executed: executedCalls(activity), observations: 0, mutatingSucceeded: false, storeWritten: false };
+	strictEqual(gradeWork({ activity: idle }).outcomeCode, "obligation_unmet");
 });
 
 // bt-17: a deliberate red baseline before the change is not a failure of the work; an unmarked failure still is.

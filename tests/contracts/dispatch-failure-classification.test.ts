@@ -14,16 +14,16 @@ import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.
 import {
 	blockedStateChangingCalls,
 	blockedWriteAttempts,
-	readScopedNoToolsReason,
+	executedCalls,
 	recordToolFinish,
 	summarizeToolActivity,
-	workerNoWorkDetail,
 } from "../../src/domains/dispatch/tool-stats.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
+import { BUILDER_GRADE, gradeWork } from "../harness/grade-facts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
@@ -68,13 +68,22 @@ describe("dispatch failure classification", () => {
 		for (const actionClass of ["write", "write", "read"])
 			recordToolFinish(stats, { tool: "store", outcome: "ok", actionClass });
 		recordToolFinish(stats, { tool: "limitation", outcome: "ok", actionClass: "read" });
-		const activity = summarizeToolActivity(stats, () => "read");
-		strictEqual(workerNoWorkDetail({ activity, limitationRecorded: true, mutatedPathCount: 0 }), null);
+		const work = (activity: ReturnType<typeof summarizeToolActivity>) => ({
+			activity: {
+				executed: executedCalls(activity),
+				observations: activity.succeeded,
+				mutatingSucceeded: activity.mutatingSucceeded,
+				storeWritten: activity.storeWritten === true,
+			},
+			recordedLimitations: ["the store tag was the deliverable"],
+		});
+		strictEqual(gradeWork(work(summarizeToolActivity(stats, () => "read"))).outcome, "succeeded");
 		const readOnly = new Map<string, ToolCallStat>();
 		recordToolFinish(readOnly, { tool: "store", outcome: "ok", actionClass: "read" });
 		recordToolFinish(readOnly, { tool: "limitation", outcome: "ok", actionClass: "read" });
-		const idle = summarizeToolActivity(readOnly, () => "read");
-		match(workerNoWorkDetail({ activity: idle, limitationRecorded: true, mutatedPathCount: 0 }) ?? "", /changed nothing/);
+		const idle = gradeWork(work(summarizeToolActivity(readOnly, () => "read")));
+		strictEqual(idle.outcomeCode, "worker_not_done");
+		match(idle.detail ?? "", /changed nothing/);
 	});
 
 	it("journals a store-only worker's settled run with its store write in the tool activity", async () => {
@@ -116,62 +125,85 @@ describe("dispatch failure classification", () => {
 			"change-or-declared",
 		);
 		const scout = {
-			activity: summarizeToolActivity(stats, () => "read"),
+			role: "explorer" as const,
 			obligation: "observed-evidence" as const,
+			contractKind: "scout-report",
 			toolLaneObserved: true,
 		};
-		match(readScopedNoToolsReason(scout) ?? "", /^obligation observed-evidence unmet: no tools executed/);
-		strictEqual(readScopedNoToolsReason({ ...scout, obligation: "cited-evidence" }), null);
-		strictEqual(readScopedNoToolsReason({ ...scout, toolLaneObserved: false }), null);
+		const executed = executedCalls(summarizeToolActivity(stats, () => "read"));
+		const idle = { activity: { executed, observations: 0, mutatingSucceeded: false, storeWritten: false } };
+		const unmet = gradeWork(idle, scout);
+		strictEqual(unmet.outcomeCode, "obligation_unmet");
+		match(unmet.detail ?? "", /^obligation observed-evidence unmet: no tools executed/);
+		strictEqual(unmet.retryObligation, "observed-evidence");
+		deepStrictEqual(
+			unmet.rules.find((rule) => rule.id === "obligation"),
+			{ id: "obligation", layer: "V3", status: "fail", code: "obligation_unmet" },
+		);
+		strictEqual(gradeWork(idle, { ...scout, role: "judge", obligation: "cited-evidence" }).outcome, "succeeded");
+		strictEqual(gradeWork(idle, { ...scout, toolLaneObserved: false }).outcome, "succeeded");
 		recordToolFinish(stats, { tool: "read", outcome: "ok", actionClass: "read" });
-		strictEqual(readScopedNoToolsReason({ ...scout, activity: summarizeToolActivity(stats, () => "read") }), null);
+		const read = executedCalls(summarizeToolActivity(stats, () => "read"));
+		strictEqual(gradeWork({ activity: { ...idle.activity, executed: read } }, scout).outcome, "succeeded");
 		const failureClass = classifyFailure({ ...evidence, exitCode: 0, qualityGateFailure: true }, null, "failed", null);
 		strictEqual(failureClass, "model-quality");
 		strictEqual(decideRetry(failureClass, 0, OBLIGATION_RETRY_LIMIT).retry, true);
 		strictEqual(decideRetry(failureClass, 1, OBLIGATION_RETRY_LIMIT).retry, false);
-		// A zero-tool builder's worker_no_work retries on another model only when it carries the unmet obligation.
+		// A zero-tool builder's obligation_unmet retries on another model only when the grader marked it retryable.
 		const builder = { ...evidence, exitCode: 0, obligationUnmet: "change-or-declared" as const };
-		strictEqual(classifyFailure(builder, null, "failed", "worker_no_work"), "model-quality");
-		strictEqual(classifyFailure({ ...evidence, exitCode: 0 }, null, "failed", "worker_no_work"), "deterministic-task");
+		strictEqual(classifyFailure(builder, null, "failed", "obligation_unmet"), "model-quality");
+		strictEqual(classifyFailure({ ...evidence, exitCode: 0 }, null, "failed", "obligation_unmet"), "deterministic-task");
 	});
 
-	it("names an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {
-		const activity = (calls: number) => ({ calls, succeeded: calls, failed: 0, blocked: 0, mutatingSucceeded: false });
-		match(
-			workerNoWorkDetail({ activity: activity(0), limitationRecorded: false, mutatedPathCount: 0 }) ?? "",
-			/executed no tools/,
-		);
-		match(
-			workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: 0 }) ?? "",
-			/changed nothing/,
-		);
-		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: 2 }), null);
-		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: null }), null);
-		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: false, mutatedPathCount: 0 }), null);
-		const denied = { activity: activity(1), limitationRecorded: false, mutatedPathCount: 0, escalationsDenied: 1 };
-		match(workerNoWorkDetail(denied) ?? "", /operator denied the worker's permission request/);
-		strictEqual(
-			workerNoWorkDetail({ ...denied, activity: { ...activity(1), mutatingSucceeded: true }, mutatedPathCount: 1 }),
-			null,
-		);
+	it("grades an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {
+		const activity = (executed: number) => ({
+			executed,
+			observations: executed,
+			mutatingSucceeded: false,
+			storeWritten: false,
+		});
+		const none = gradeWork({ activity: activity(0) });
+		strictEqual(none.outcomeCode, "obligation_unmet");
+		match(none.detail ?? "", /executed no tools/);
+		strictEqual(none.retryObligation, "change-or-declared");
+		const limited = gradeWork({ activity: activity(4), recordedLimitations: ["no access"] });
+		strictEqual(limited.outcomeCode, "worker_not_done");
+		match(limited.detail ?? "", /changed nothing/);
+		const landed = { activity: activity(4), recordedLimitations: ["x"] };
+		strictEqual(gradeWork({ ...landed, mutatedPathCount: 2 }).outcome, "succeeded");
+		strictEqual(gradeWork({ ...landed, mutatedPathCount: null }).outcome, "succeeded");
+		strictEqual(gradeWork({ activity: activity(4) }).outcome, "succeeded");
+		const denied = gradeWork({ activity: activity(1), escalations: { denied: 1, timedOut: 0 } });
+		strictEqual(denied.outcomeCode, "obligation_unmet");
+		match(denied.detail ?? "", /operator denied the worker's permission request/);
+		strictEqual(denied.retryObligation, null);
+		const deniedButChanged = gradeWork({
+			activity: { ...activity(1), mutatingSucceeded: true },
+			mutatedPathCount: 1,
+			escalations: { denied: 1, timedOut: 0 },
+		});
+		strictEqual(deniedButChanged.outcome, "succeeded");
 	});
 
-	it("recognizes a prose-only limitation in the final mutation report without failing completed edits", () => {
-		const input = {
-			activity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false },
-			limitationRecorded: false,
-			mutatedPathCount: 0,
-			finalText: JSON.stringify({
-				mutatedPaths: [],
-				summary: "Cannot add parseDuration because ms cannot parse compound strings. No edits made.",
-			}),
+	it("reads a builder's finish from its typed completion, never its report's prose (M9)", () => {
+		const declared = {
+			state: "not_done" as const,
+			limitations: [{ what: "ms cannot parse compound strings", why: "out_of_scope" as const }],
+			unverified: [],
 		};
-		match(workerNoWorkDetail(input) ?? "", /ms cannot parse compound strings/);
-		strictEqual(workerNoWorkDetail({ ...input, mutatedPathCount: 1 }), null);
-		strictEqual(workerNoWorkDetail({ ...input, finalText: "Already implemented; no changes needed." }), null);
+		const notDone = gradeWork({ completion: declared });
+		strictEqual(notDone.outcomeCode, "worker_not_done");
+		match(notDone.detail ?? "", /ms cannot parse compound strings/);
+		strictEqual(notDone.retryObligation, null);
+		const partial = gradeWork({ completion: { ...declared, state: "partly_done" }, mutatedPathCount: 1 });
+		strictEqual(partial.outcomeCode, "worker_partial_work");
+		strictEqual(gradeWork({ completion: { state: "done", limitations: [], unverified: [] } }).outcome, "succeeded");
+		// Without a typed declaration the same words in the summary decide nothing.
+		strictEqual(gradeWork({ completion: null }).outcome, "succeeded");
+		strictEqual(BUILDER_GRADE.obligation, "change-or-declared");
 	});
 
-	it("fails an edit worker on refusals only when every state-changing call was refused and it did not report no change was needed (FL-1)", () => {
+	it("fails an edit worker on refusals only when every state-changing call was refused and it did not declare done (FL-1)", () => {
 		const classify = (tool: string): ActionClass => (tool === "read" ? "read" : "execute");
 		const stats = (...rows: Array<Partial<ToolCallStat> & { tool: string }>): Map<string, ToolCallStat> =>
 			new Map(rows.map((row) => [row.tool, { count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0, ...row }]));
@@ -179,20 +211,15 @@ describe("dispatch failure classification", () => {
 		strictEqual(blockedStateChangingCalls(refusedOnly, classify), 1);
 		const ranAndFailed = stats({ tool: "bash", count: 2, errors: 1, blocked: 1 });
 		strictEqual(blockedStateChangingCalls(ranAndFailed, classify), 0);
-		const input = {
-			activity: { calls: 4, succeeded: 3, failed: 0, blocked: 1, mutatingSucceeded: false },
-			limitationRecorded: false,
-			mutatedPathCount: 0,
-			blockedStateChanging: 1,
-			finalText: "Done: the parser now handles the case.",
-		};
-		match(workerNoWorkDetail(input) ?? "", /refused by policy and nothing changed/u);
-		const noChange = JSON.stringify({ mutatedPaths: [], summary: "No changes needed: the parser already handles it." });
-		strictEqual(workerNoWorkDetail({ ...input, finalText: noChange }), null);
+		const refused = gradeWork({ blockedStateChanging: 1 });
+		strictEqual(refused.outcomeCode, "obligation_unmet");
+		match(refused.detail ?? "", /refused by policy and nothing changed/u);
+		const done = { state: "done" as const, limitations: [], unverified: [] };
+		strictEqual(gradeWork({ blockedStateChanging: 1, completion: done }).outcome, "succeeded");
 	});
 
 	it("does not retry no-work outcomes or charge the provider breaker", () => {
-		const failure = classifyFailure(evidence, null, "failed", "worker_no_work");
+		const failure = classifyFailure(evidence, null, "failed", "obligation_unmet");
 		strictEqual(failure, "deterministic-task");
 		strictEqual(decideRetry(failure, 0, 2).retry, false);
 		strictEqual(affectsTargetBreaker(failure), false);

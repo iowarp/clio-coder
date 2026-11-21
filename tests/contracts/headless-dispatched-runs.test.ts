@@ -27,8 +27,7 @@ describe("headless dispatched runs", () => {
 			...run("withheld", "failed"),
 			outcomeCode: "merge_withheld" as const,
 			outcomeDetail: mergeWithheldDetail({
-				quality: "fail",
-				hostStatus: undefined,
+				assurance: "compromised",
 				contract: null,
 				output: null,
 				branch: "clio-coder/task/withheld",
