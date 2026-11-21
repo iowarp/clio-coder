@@ -406,6 +406,7 @@ export const RUN_FLAGS: ReadonlyArray<ManifestFlag> = [
 	{ name: "--output-format", value: ["text", "json", "stream-json"] },
 	{ name: "--output-schema", value: "path" },
 	{ name: "--output-last-message", aliases: ["-o"], value: "path" },
+	{ name: "--output", value: "path", repeatable: true, appliesTo: main },
 	{ name: "--dry-run", value: "boolean" },
 	{ name: "--timeout", value: "duration" },
 	{ name: "--max-cost-usd", value: "number" },

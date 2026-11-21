@@ -145,6 +145,7 @@ import {
 	type SessionEntry,
 	SKILL_CONTEXT_STATE,
 } from "../domains/session/entries.js";
+import { absentOutputs, namedOutputs } from "../domains/session/output-obligations.js";
 import { readPromptCompileRecords } from "../domains/session/prompt-manifest.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import type { RetrySettings } from "../domains/session/retry.js";
@@ -1528,6 +1529,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
 	// A headless run's observation pool rolls once spent instead of capping the run (CLI-P42); attended turns keep theirs.
 	const headlessObservation = deps.headless === true ? createHeadlessObservationPool() : null;
+	// M-4: the outputs this session's operator prompts named with an `output: <path>` line that do not exist now.
+	const missingOutputs = (): string[] =>
+		absentOutputs(
+			namedOutputs(activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined)),
+			process.cwd(),
+		);
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
@@ -1645,6 +1652,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
 		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
+		missingOutputs,
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
 		queueHostMessage: (text, source, rule) => queues.queueHostMessage(text, source, rule),
 	});
@@ -2106,6 +2114,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		telemetry: deps.telemetry,
 		scheduling: deps.scheduling,
 		headless: deps.headless,
+		missingOutputs,
 		createAgent,
 		noteMainRequest: (runtime, request, stream) => {
 			keepalive.noteRequest(runtime, request, stream);
@@ -3625,6 +3634,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
+					state.finishOutputRefused = false;
 					state.turnReplied = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
 					if (options.machineTurn === undefined) headlessObservation?.reset(options.hostRun?.runId);

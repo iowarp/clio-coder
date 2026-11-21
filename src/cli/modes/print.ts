@@ -1882,6 +1882,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
+	} else if (result.terminatedByFinish && printedAnswer(result).length === 0) {
+		// M-6: the bare-finish refusal is one-shot, so the second bare finish settles the run partly_done with no reply
+		// text (CLI-P49). The typed fact is an empty answer under a finish, never the prompt's wording: there is nothing
+		// for the caller to read, so the run did not succeed.
+		const failureMessage =
+			"clio-coder run: the agent declared completion through finish without writing a reply, so there is no answer to print";
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "no_reply_text" };
+		stderrMessage = failureMessage;
 	} else {
 		// A normal provider stop does not erase an explicit limitation or a
 		// block with no applied change. Judge settled tool outcomes, not prose
@@ -1999,10 +2007,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = failureMessage;
 		answerMessage = null;
 	}
+	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);
+	// M-4: an output the operator named is still absent at the seal, so the run did not succeed, whatever it claimed.
+	if (terminal.exitCode === 0 && sealedCompletion.facts.includes("missing_output")) {
+		const missing = sealedCompletion.unverified.filter((line) => line.startsWith("missing output: "));
+		const failureMessage = `clio-coder run: ${missing.length > 0 ? missing.join("; ") : "missing output"}`;
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "missing_output" };
+		stderrMessage = [stderrMessage, failureMessage].filter(Boolean).join("\n");
+	}
 	const exitCode = terminal.exitCode;
 	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
 	// the claim, its assessment from the turn's facts, and state = assessed, which `--exit-code` maps (ruling 7).
-	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);
 	noteRunCompletion({
 		declared: sealedCompletion.declared,
 		claimed: sealedCompletion.claimed,

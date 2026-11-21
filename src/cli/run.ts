@@ -273,7 +273,10 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		return 2;
 	}
 	return {
-		prompt: initial.initialMessage,
+		prompt:
+			parsed.outputs.length > 0
+				? `${initial.initialMessage}\n\n${parsed.outputs.map((path) => `output: ${path}`).join("\n")}`
+				: initial.initialMessage,
 		...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
 		...(fileRefs.referencedPaths.length > 0 ? { workingContextPaths: fileRefs.referencedPaths } : {}),
 	};
