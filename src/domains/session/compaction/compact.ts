@@ -439,6 +439,42 @@ function hasConversation(slice: ReadonlyArray<SessionEntry>): boolean {
 	);
 }
 
+/** The operator turn an automatic pass carries verbatim whether or not it is cut, so it compresses nothing. */
+function preservedOperatorTurnId(input: CompactInput, entries: ReadonlyArray<SessionEntry>): string | undefined {
+	if (input.pendingOperatorTurn) return undefined;
+	return (
+		input.preserveUserTurnId ??
+		[...entries]
+			.reverse()
+			.find(
+				(entry) =>
+					entry.kind === "message" &&
+					entry.role === "user" &&
+					(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+			)?.turnId
+	);
+}
+
+/**
+ * A1(b) on a native route. A native checkpoint covers the whole ledger and its size is opaque, so what an automatic
+ * pass would fold is the conversation since the latest checkpoint; below the summary room the portable path uses as
+ * its bar, the paid native call gains nothing (CTX-12). A pass the request needs to fit, and /compact, always run.
+ */
+function nativeSkipReason(input: CompactInput): "nothing-to-summarize" | "below-summary-room" | undefined {
+	if (input.automatic !== true || input.requireFit === true) return undefined;
+	const checkpoint = input.entries.map((entry) => entry.kind === "compactionSummary").lastIndexOf(true);
+	const preserved = preservedOperatorTurnId(input, input.entries);
+	const span = input.entries.slice(checkpoint + 1).filter((entry) => entry.turnId !== preserved);
+	if (!hasConversation(span)) return "nothing-to-summarize";
+	const room = summaryOutputBudget(
+		input.model,
+		input.reserveTokens ?? DEFAULT_RESERVE_TOKENS,
+		input.summaryOutputCap,
+		input.summaryThinkingLevel,
+	).summaryRoom;
+	return span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < room ? "below-summary-room" : undefined;
+}
+
 /**
  * Provider messages a slice replays as, the unit a context snapshot's `messageRange` counts: a tool call rides in its
  * assistant message, and bookkeeping rows send nothing.
@@ -1501,6 +1537,19 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	let fallbackReason = input.providerFallbackReason;
 	const providerCompaction = input.providerCompaction;
 	if (providerCompaction && input.providerCheckpointSource && input.entries.some((entry) => entry.kind === "message")) {
+		const skip = nativeSkipReason(input);
+		if (skip !== undefined)
+			return {
+				summary: "",
+				firstKeptEntryIndex: input.entries.length,
+				firstKeptTurnId: null,
+				tokensBefore: calculateContextTokens(input.entries, getLastAssistantUsage(input.entries), input.continuityNote),
+				messagesSummarized: 0,
+				conversationMessagesSummarized: 0,
+				isSplitTurn: false,
+				emptyReason: skip,
+				...(skip === "below-summary-room" ? { noGain: true } : {}),
+			};
 		input.signal?.throwIfAborted();
 		const selection =
 			input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
@@ -1683,18 +1732,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		return emptyResult(cut === rawCut ? "protected-recent" : "protected-skill");
 	}
 	if (input.automatic === true && input.requireFit !== true) {
-		// The preserved turn rides verbatim whether or not it is cut, so it compresses nothing.
-		const preservedTurnId = input.pendingOperatorTurn
-			? undefined
-			: (input.preserveUserTurnId ??
-				[...entries]
-					.reverse()
-					.find(
-						(entry) =>
-							entry.kind === "message" &&
-							entry.role === "user" &&
-							(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
-					)?.turnId);
+		const preservedTurnId = preservedOperatorTurnId(input, entries);
 		const span = (summarizePriorSuffix ? priorSuffix : [...pre, ...turnPrefix]).filter(
 			(entry) => entry.turnId !== preservedTurnId,
 		);
