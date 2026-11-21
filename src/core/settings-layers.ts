@@ -755,11 +755,22 @@ interface PreparedLayers {
 	local: RawLayer;
 }
 
+/** No project: the user layer stands alone, as for a surface with no workspace open. */
+const NO_PROJECT_LAYERS: PreparedLayers = {
+	projectFile: "",
+	localFile: "",
+	projectRaw: { origin: "project", path: "", blob: undefined },
+	localRaw: { origin: "project.local", path: "", blob: undefined },
+	project: { origin: "project", path: "", blob: undefined },
+	local: { origin: "project.local", path: "", blob: undefined },
+};
+
 function prepareProjectLayers(
-	cwd: string,
+	cwd: string | null,
 	issues: SettingsLayerIssue[],
 	userBlob: Record<string, unknown> | undefined,
 ): PreparedLayers {
+	if (cwd === null) return NO_PROJECT_LAYERS;
 	const operatorLevel = userAutonomy(userBlob);
 	const root = clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml");
 	const projectFile = join(root, ".clio-coder", "settings.yaml");
@@ -926,9 +937,10 @@ function validateLayerStack(
  * Read and layer settings for `cwd`, returning the validated effective settings
  * plus per-leaf source attribution. Never throws: validation issues and layer
  * problems are returned, and the effective settings always validate (invalid
- * merges fall back to the schema defaults for the offending keys).
+ * merges fall back to the schema defaults for the offending keys). A null `cwd`
+ * reads the user layer alone, with no project lookup and no project layers.
  */
-export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
+export function readLayeredSettings(cwd: string | null, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
 	const issues: SettingsLayerIssue[] = [];
 	const userFile = options.userPath ?? settingsPath();
 	const user = readRawLayer("user", userFile, issues);
@@ -951,8 +963,16 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 		layers: [
 			{ origin: "built-in", path: "(defaults)", present: true },
 			{ origin: "user", path: userFile, present: user.blob !== undefined },
-			{ origin: "project", path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
-			{ origin: "project.local", path: prepared.localFile, present: prepared.localRaw.blob !== undefined },
+			...(cwd === null
+				? []
+				: [
+						{ origin: "project" as const, path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
+						{
+							origin: "project.local" as const,
+							path: prepared.localFile,
+							present: prepared.localRaw.blob !== undefined,
+						},
+					]),
 		],
 		[STRICT_USER_ISSUES]: strictUserIssues,
 	} as InternalLayeredSettings;
@@ -984,9 +1004,9 @@ export function readStrictLayeredSettings(cwd: string, options: ReadLayeredSetti
  * user layer. The candidate user document is re-layered with the same project
  * files before it is written. This preserves references to project-only
  * targets while refusing a mutation that a higher-precedence project leaf
- * would silently override.
+ * would silently override. A null `cwd` re-layers with no project at all.
  */
-export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
+export function updateLayeredSettings(cwd: string | null, mutate: SettingsMutator): ClioSettings {
 	let committed: ClioSettings | null = null;
 	updateSavedSettingsDocument((saved) => {
 		const userValidation = validateSettings(saved);

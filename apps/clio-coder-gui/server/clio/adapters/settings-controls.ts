@@ -178,7 +178,8 @@ function plainIssue(label: string, message: string): string {
 	return `${label} must be ${what}${range ? `${range.startsWith("at ") ? " of" : ""} ${range}` : ""}; ${shape[4]} was entered.`;
 }
 
-export function readSettingsControls(cwd: string): SettingsControls {
+/** A null `cwd` is the user layer alone: no workspace is open, so no project layer applies. */
+export function readSettingsControls(cwd: string | null): SettingsControls {
 	const layered = readLayeredSettings(cwd);
 	const targets = layered.settings.targets.map((target) => target.id);
 	const controls = SHARED_SETTINGS_AREAS.flatMap((area) => orderedAreaControls(area.id).map((entry) => entry.control))
@@ -236,7 +237,7 @@ export function readSettingsControls(cwd: string): SettingsControls {
 	};
 }
 
-export function writeSettingControl(cwd: string, write: SettingWrite): SettingWritten {
+export function writeSettingControl(cwd: string | null, write: SettingWrite): SettingWritten {
 	runtimes();
 	const before = readSettingsControls(cwd);
 	const control = before.controls.find((candidate) => candidate.path === write.path);

@@ -193,6 +193,8 @@ export type Input<R extends Route> = {
 export type Output<R extends Route> = Static<R["response"]>;
 const toolParams = Type.Object({ toolId: Id }, { additionalProperties: false });
 const operationParams = Type.Object({ id: Id }, { additionalProperties: false });
+/** Settings are the user layer alone until a workspace is named; then that project's layers apply too. */
+const settingsScope = Type.Object({ workspace: Type.Optional(Id) }, { additionalProperties: false });
 const snapshotParams = Type.Object({ id: Id, n: SnapshotNumber }, { additionalProperties: false });
 const trustParams = Type.Object({ id: Id, surface: TrustSurface }, { additionalProperties: false });
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
@@ -598,24 +600,28 @@ export const routes = {
 		summary: "Remove the stored credential for a target through the CLI",
 		...runtimeRoutes.targetsSignOut,
 	}),
-	workspaceSettings: defineRoute({
+	settingsReport: defineRoute({
 		...get,
-		params: operationParams,
+		params: Empty,
+		query: settingsScope,
 		response: SettingsReport,
-		summary: "Effective settings and each leaf's origin layer",
-		...runtimeRoutes.workspaceSettings,
+		summary: "Effective settings and each leaf's origin layer; without a workspace, the user layer alone",
+		...runtimeRoutes.settingsReport,
 	}),
 	settingsControls: defineRoute({
 		...get,
-		params: operationParams,
+		params: Empty,
+		query: settingsScope,
 		response: SettingsControls,
-		summary: "The engine's setting controls with the app's write policy, timing and origin",
+		summary:
+			"The engine's setting controls with the app's write policy, timing and origin; without a workspace, the user layer alone",
 		...runtimeRoutes.settingsControls,
 	}),
 	writeSetting: defineRoute({
 		...post,
 		status: 200,
-		params: operationParams,
+		params: Empty,
+		query: settingsScope,
 		body: SettingWrite,
 		response: SettingWritten,
 		summary: "Write one allowlisted setting to the user layer through the engine's cross-field validation",

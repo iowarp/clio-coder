@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { Client } from "../api/client.js";
-import { useShell } from "../shell/shell-context.js";
 import { settingsDestination } from "../shell/shell-model.js";
 import type { SettingsScopeId } from "./settings-control-model.js";
 import { SettingsControlsView } from "./settings-controls.js";
@@ -26,12 +25,13 @@ function SettingsPageFrame({
 	scope: SettingsScopeId;
 	title: string;
 	lede: string;
-	before?: (workspaceId: string) => ReactNode;
+	before?: (workspaceId: string | null) => ReactNode;
 	after?: ReactNode;
 }) {
-	const shell = useShell();
 	const selection = useWorkspaceSelection(client);
 	const { id } = selection;
+	// With no workspace the page is the user layer alone; a workspace adds its project rows.
+	const controlsScope = selection.workspaces.isPending || selection.missing ? undefined : (id ?? null);
 	return (
 		<section className="general settings-page">
 			<div className="panel-heading">
@@ -41,20 +41,17 @@ function SettingsPageFrame({
 				</div>
 			</div>
 			<WorkspacePicker selection={selection} purpose="settings" />
-			{before?.(id)}
-			{id ? (
-				<SettingsControlsView key={`${id}:${scope}`} client={client} workspaceId={id} scope={scope} />
+			{before?.(id ?? null)}
+			{controlsScope !== undefined ? (
+				<SettingsControlsView
+					key={`${controlsScope ?? "user"}:${scope}`}
+					client={client}
+					workspaceId={controlsScope}
+					scope={scope}
+				/>
 			) : selection.workspaces.isPending ? (
 				<p>Reading settings…</p>
-			) : selection.missing || selection.workspaces.error ? null : (
-				<p className="settings-page__note">
-					Settings are read for a project.{" "}
-					<button type="button" className="wb-link" onClick={() => shell?.openWorkspace()}>
-						Open a workspace
-					</button>{" "}
-					to see them.
-				</p>
-			)}
+			) : null}
 			{after}
 		</section>
 	);
@@ -75,18 +72,22 @@ export function ModelsSettings({ client }: { client: Client }) {
 						</Link>
 						<small>Guided setup for an app, a server, a subscription or an API account.</small>
 					</li>
-					<li>
-						<Link to={settingsDestination("/settings/targets", workspaceId)}>
-							Connections <span aria-hidden="true">→</span>
-						</Link>
-						<small>Check each connection, choose the one that answers, repair or remove one.</small>
-					</li>
-					<li>
-						<Link to={settingsDestination("/settings/routing", workspaceId)}>
-							Routing <span aria-hidden="true">→</span>
-						</Link>
-						<small>Which model each profile and agent uses.</small>
-					</li>
+					{workspaceId && (
+						<>
+							<li>
+								<Link to={settingsDestination("/settings/targets", workspaceId)}>
+									Connections <span aria-hidden="true">→</span>
+								</Link>
+								<small>Check each connection, choose the one that answers, repair or remove one.</small>
+							</li>
+							<li>
+								<Link to={settingsDestination("/settings/routing", workspaceId)}>
+									Routing <span aria-hidden="true">→</span>
+								</Link>
+								<small>Which model each profile and agent uses.</small>
+							</li>
+						</>
+					)}
 				</ul>
 			)}
 		/>
@@ -130,12 +131,14 @@ export function AdvancedSettings({ client }: { client: Client }) {
 						</Link>
 						<small>What is in force right now, and which layer set it.</small>
 					</li>
-					<li>
-						<Link to={settingsDestination("/settings/why", workspaceId)}>
-							Sources and timing <span aria-hidden="true">→</span>
-						</Link>
-						<small>How the layers combine and when each change takes effect.</small>
-					</li>
+					{workspaceId && (
+						<li>
+							<Link to={settingsDestination("/settings/why", workspaceId)}>
+								Sources and timing <span aria-hidden="true">→</span>
+							</Link>
+							<small>How the layers combine and when each change takes effect.</small>
+						</li>
+					)}
 				</ul>
 			)}
 		/>

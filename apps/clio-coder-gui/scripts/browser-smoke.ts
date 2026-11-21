@@ -903,7 +903,7 @@ try {
 		await step("models and connections", async () => {
 			// Adding a connection is the guided setup's job; it opens from Models and closes back there.
 			await navigate("Models");
-			const controlsPath = "**/api/workspaces/*/settings/controls";
+			const controlsPath = "**/api/settings/controls?*";
 			await page.route(controlsPath, async (route) => {
 				const response = await route.fetch();
 				const report = (await response.json()) as SettingsControls;

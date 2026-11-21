@@ -50,9 +50,9 @@ export interface Methods {
 	"library.read": { params: { cwd: string; kind: "inventory" | "extensions" }; result: unknown };
 	"evidence.read": { params: EvidenceRequest; result: unknown };
 	"fleet.read": { params: FleetRequest; result: unknown };
-	"settings.read": { params: { cwd: string }; result: unknown };
-	"settings.controls": { params: { cwd: string }; result: unknown };
-	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
+	"settings.read": { params: { cwd?: string }; result: unknown };
+	"settings.controls": { params: { cwd?: string }; result: unknown };
+	"settings.write": { params: { cwd?: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"sessions.workspaces": { params: Record<string, never>; result: unknown };
 	"sessions.list": { params: { cwd: string }; result: unknown };

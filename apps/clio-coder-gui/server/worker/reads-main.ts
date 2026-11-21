@@ -42,7 +42,7 @@ serveWorker(async (call) => {
 	}
 	if (call.method === "settings.read") {
 		const { inspectSettings } = await import("../clio/adapters/settings.js");
-		return inspectSettings(call.params.cwd);
+		return inspectSettings(call.params.cwd ?? null);
 	}
 	if (call.method === "setup.status") {
 		const { readSetupStatus } = await import("../clio/adapters/setup-status.js");
@@ -50,7 +50,7 @@ serveWorker(async (call) => {
 	}
 	if (call.method === "settings.controls") {
 		const { readSettingsControls } = await import("../clio/adapters/settings-controls.js");
-		return readSettingsControls(call.params.cwd);
+		return readSettingsControls(call.params.cwd ?? null);
 	}
 	if (call.method === "config.graph") {
 		if (settings.fixture && settings.fixtureGraphDelayMs)
