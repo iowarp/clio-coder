@@ -448,6 +448,56 @@ export function parseSourceEvidenceRef(ref: string): SourceEvidence | null {
 	return match === null ? null : { path: match[1] ?? "", spanHash: match[2] ?? "" };
 }
 
+/** One argv word as the shell reads it back: bare when it holds nothing the shell interprets, else single-quoted. */
+function shellWord(word: string): string {
+	return /^[\w@%+=:,./-]+$/u.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+/** An argv written back as one shell command that reads as the same words. */
+export function shellCommandText(argv: readonly string[]): string {
+	return argv.map(shellWord).join(" ");
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The command a verify run executed, as one shell command a receipt can vouch for (CLI-P52), or null. It is the argv
+ * the run reported, from the workspace root only, written back as shell words and read by the same identity rules a
+ * shell receipt meets, so `verify make-test` stands for `make test` and for nothing a shell receipt of that argv would
+ * not. An argv that does not read back as itself (an assignment-shaped program word) stands for nothing.
+ */
+export function verifyReceiptCommand(details: unknown, workspaceRoot: string | undefined): string | null {
+	if (!plainRecord(details)) return null;
+	const argv = details.argv;
+	if (!Array.isArray(argv) || argv.length === 0 || !argv.every((word): word is string => typeof word === "string"))
+		return null;
+	if (typeof details.cwd !== "string" || !atWorkspaceRoot(workspaceRoot, details.cwd)) return null;
+	const command = shellCommandText(argv);
+	const segments = commandSegments(command, workspaceRoot);
+	const [segment] = segments;
+	if (segment === undefined || segments.length !== 1 || segment.assignments.length > 0) return null;
+	const expected = identityArgv(argv);
+	return segment.argv.length === expected.length && segment.argv.every((word, index) => word === expected[index])
+		? command
+		: null;
+}
+
+/**
+ * A verify result that passed: it settled ok, ran to a clean finish, and its judgement says pass (a command check's
+ * clean exit, a judged check's verdict); a result with no judgement passes on exit 0. Failed, unavailable, aborted,
+ * timed-out and capped runs never pass.
+ */
+export function verifyRunPassed(settledOk: boolean, details: unknown): boolean {
+	if (!settledOk || !plainRecord(details)) return false;
+	if (details.aborted === true || details.timedOut === true || details.outputCapped === true) return false;
+	const judgement = plainRecord(details.judgement) ? details.judgement : null;
+	if (judgement === null) return details.exitCode === 0;
+	if (judgement.execution !== "succeeded") return false;
+	return judgement.validation === "passed" || (judgement.validation === "exit-code" && details.exitCode === 0);
+}
+
 /**
  * The shell tool's own success receipt: an ok result that reported success and
  * exit 0. Direct calls and settled gateway chain children are judged by this

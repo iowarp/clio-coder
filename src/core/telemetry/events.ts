@@ -163,6 +163,8 @@ function projectMemoryObservation(payload: {
 		"split",
 		"ids",
 		"retainedIds",
+		"turnId",
+		"selection",
 		"route",
 		"outcomes",
 		"decision",

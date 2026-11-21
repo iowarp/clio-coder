@@ -726,6 +726,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			inputIds: "id",
 			offerIds: "id",
 			outcomes: { kind: "keep", ids: "id" },
+			turnId: "id",
+			selection: { id: "id", decision: "keep", reason: "keep" },
 			phase: "token",
 			by: "token",
 			filing: "token",

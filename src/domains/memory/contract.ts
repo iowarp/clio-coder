@@ -129,7 +129,11 @@ export interface MemoryPromptSelection {
 		readonly scope: string;
 		readonly rank: number;
 		readonly reason: "selected" | "token-budget" | "item-limit";
+		/** CLI-P53: carried as a repository check lesson rather than by sharing the turn's words. */
+		readonly eligibleBy?: "check-command";
 	}[];
+	/** Eligible records the selection left out before the caps: the relevance gate, or the delivery gate at load. */
+	readonly withheld?: readonly { readonly id: string; readonly reason: "not-relevant" | "delivery-refused" }[];
 }
 
 /** Foreign domains receive this query surface only. */
