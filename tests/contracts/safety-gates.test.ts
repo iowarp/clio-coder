@@ -1327,7 +1327,9 @@ describe("safety gate boundary", () => {
 		const reason = (command: string) => protectedArtifactMutationBlockReason(artifacts, ToolNames.Bash, { command });
 		for (const command of [
 			`cat > src/probe.ts <<'EOF'\n${body}EOF`,
-			`cat >> tests/probe.test.ts <<'EOF'\n${body}EOF\nnode --version`,
+			`cat >> tests/probe.test.ts <<'EOF'\n${body}EOF\nwc -l tests/probe.test.ts`,
+			`cat > src/probe.ts <<'EOF'\n${body}EOF\ngit diff src/probe.ts`,
+			`tee src/probe.ts <<'EOF'\n${body}EOF`,
 			`tee src/probe.ts > /dev/null <<'EOF'\n${body}EOF`,
 			"git add -A && git commit -q -F - <<'EOF'\nfix: map a > [5]) to b\nEOF",
 		])
@@ -1337,6 +1339,11 @@ describe("safety gate boundary", () => {
 			`cat > src/probe.ts <<EOF\n${body}EOF`,
 			"cat > run.sh <<'EOF'\nrm -rf .planning\nEOF\nbash run.sh",
 			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
+			// Row 261 bounce: only a call whose later steps provably run nothing reads the body as data.
+			`cat > probe.ts <<'EOF'\n${body}EOF\nnode --version`,
+			"cat > a.txt <<'EOF'\nrm -rf .planning\nEOF\nbash a.'txt'",
+			"cat > a.txt <<'EOF'\nrm -rf .planning\nEOF\nbash a.t*",
+			"cat > a.txt <<'EOF'\nrm -rf .planning\nEOF\n'.' a.t*",
 		])
 			strictEqual(reason(command) !== null, true, command);
 	});

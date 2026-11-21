@@ -103,6 +103,9 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"cat > notes.yaml <<'EOF'\nsecrets:\n  - credentials.yaml,\nEOF",
 		"cat >> report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF",
 		"tee report.md > /dev/null <<'EOF'\nsee nope.key\nEOF",
+		// Row 261 bounce: tee's copy to stdout is the terminal, and an inert step after the copy reads nothing as code.
+		"tee report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF",
+		"cat > report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF\nwc -l report.md",
 	]) {
 		strictEqual(engine.evaluate(bash(command), "default", OPERATOR_DEFAULT).kind, "allow", command);
 	}
@@ -112,6 +115,16 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"git commit -F - <<EOF\n$(cat credentials.yaml)\nEOF",
 		"cat > notes.md <<EOF\n$(cat credentials.yaml)\nEOF",
 		"cat > run.sh <<'EOF'\ncat credentials.yaml\nEOF\nbash run.sh",
+		// Row 261 bounce: a later step that may run the copy under a glob, a quote-split or variable name, or after
+		// redefining the copier keeps the body read as commands.
+		"cat > x.py <<'EOF'\nprint(open(\"credentials.yaml\").read())\nEOF\npython3 *.py",
+		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\nbash a.t*",
+		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\ncat a.t*|sh",
+		"cat > a.'txt' <<'EOF'\ncat credentials.yaml\nEOF\nbash a.txt",
+		"F=a; cat > \"$F.txt\" <<'EOF'\ncat credentials.yaml\nEOF\nbash a.txt",
+		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\n'.' a.t*",
+		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\ns''ource a.t*",
+		"printf -v PATH /tmp/evil; cat > /dev/null <<'EOF'\ncat credentials.yaml\nEOF",
 		"cat <<'EOF' | sh\ncat credentials.yaml\nEOF",
 		"cat credentials.yaml > out.txt <<'EOF'\nx\nEOF",
 		"wc -c < nope.key",

@@ -168,7 +168,9 @@ export function protectArtifact(state: ProtectedArtifactState, artifact: Protect
  */
 function heredocDataCommandText(command: string): string {
 	const text = withoutDataHeredocBodies(command);
-	return text !== command && extractCommandPathWalks(command).length === 1 ? text : command;
+	if (text === command || extractCommandPathWalks(command).length !== 1) return command;
+	const { dataOutputs } = removeHeredocBodies(command, false);
+	return dataOutputs !== null && heredocCopiesInert(text, dataOutputs) ? text : command;
 }
 
 function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): boolean {
@@ -899,7 +901,11 @@ export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
 	if (withoutBodies === command) return [extractCommandPathWalk(command)];
 	const removedAll = !scanShellLike(withoutBodies).some((token) => token.operator && token.value === "<<");
-	if (removedAll && dataOutputs !== null && !mayRunHeredocOutputs(withoutBodies, dataOutputs))
+	if (
+		removedAll &&
+		dataOutputs !== null &&
+		(heredocCopiesInert(withoutBodies, dataOutputs) || !mayRunHeredocOutputs(withoutBodies, dataOutputs))
+	)
 		return [extractCommandPathWalk(withoutBodies)];
 	return [extractCommandPathWalk(command, !removedAll), extractCommandPathWalk(withoutBodies)];
 }
@@ -980,8 +986,11 @@ function heredocDataOutputs(
 		if (!both && (fd ?? (operator.value === "<>" ? "0" : "1")) !== "1") continue;
 		stdout = operator.value === ">&" && /^(?:\d+-?|-)$/u.test(target.value) ? null : target.value;
 	}
+	const tee = basenameToken(argv[commandIndex]) === "tee";
+	// tee also copies to its stdout, which is data too when no pipe takes it.
+	if (stdout === null && tee && tokens[end]?.value !== "|" && tokens[start - 1]?.value !== "|") stdout = "/dev/null";
 	if (stdout === null || (stdout.startsWith("/dev/") && stdout !== "/dev/null")) return null;
-	const outputs = basenameToken(argv[commandIndex]) === "tee" ? pathArgs(argv, commandIndex) : [];
+	const outputs = tee ? pathArgs(argv, commandIndex) : [];
 	return [stdout, ...outputs].filter((output) => output !== "/dev/null");
 }
 
@@ -1048,9 +1057,83 @@ function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): 
 	return false;
 }
 
-/** A redefined recipient need not treat stdin as data, even when its original command did. */
+/** Commands that run no file and read none as code, so a copied here-document stays unrun by them (C-7, C-22). */
+const INERT_AFTER_COPY: ReadonlySet<string> = new Set([
+	"cat",
+	"tee",
+	"echo",
+	"printf",
+	"mkdir",
+	"ls",
+	"wc",
+	"head",
+	"tail",
+	"grep",
+	"diff",
+	"cmp",
+	"stat",
+	"true",
+	"false",
+	":",
+	"pwd",
+	"cd",
+	"touch",
+	"chmod",
+	"test",
+	"[",
+]);
+/** git subcommands that run no hook and no file the call wrote; `commit` only when nothing was copied to a file. */
+const INERT_GIT_AFTER_COPY: ReadonlySet<string> = new Set(["add", "commit", "diff", "status", "log", "show"]);
+
+/**
+ * Whether a call whose quoted here-documents were removed (`text`) can run nothing it copied them into (`outputs`):
+ * the relaxations C-7 and C-22 make hold only for a shape read in full. Every step's command word is written plainly
+ * (no quote, escape or expansion) and is a command that runs no file ({@link INERT_AFTER_COPY}, or a git subcommand
+ * that runs no hook), no word holds a substitution, and no copy lands in a git or hook directory or shares a name
+ * with a command the call runs. A glob, a variable or a quote-split name in an inert step cannot run anything, and
+ * an interpreter, `source`, `eval`, `make`, a PATH change, an assignment or any other step keeps the base reading.
+ */
+function heredocCopiesInert(text: string, outputs: ReadonlyArray<string>): boolean {
+	if (
+		outputs.some(
+			(output) =>
+				!/^[\w./@+,=:~-]+$/u.test(output) || output.split("/").some((part) => part.startsWith(".git") || part === ".husky"),
+		)
+	)
+		return false;
+	const names = new Set(outputs.map((output) => basenameToken(output)));
+	const tokens = scanShellLike(text);
+	if (tokens.some((token) => token.unterminated === true || token.hiddenContent === true)) return false;
+	if (tokens.some((token) => (token.substitutions?.length ?? 0) > 0)) return false;
+	for (const segment of splitSegments(tokens)) {
+		const words = segment.filter(
+			(token, index) =>
+				!token.operator &&
+				!(segment[index - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[index - 1]?.value ?? "")),
+		);
+		const head = words[0];
+		if (head === undefined) continue;
+		if (text.slice(head.start, head.end) !== head.value || names.has(basenameToken(head.value))) return false;
+		if (head.value === "git") {
+			const sub = words[1]?.value ?? "";
+			if (!INERT_GIT_AFTER_COPY.has(sub) || (sub === "commit" && outputs.length > 0)) return false;
+			continue;
+		}
+		if (head.value === "printf" && words.some((word) => word.value.startsWith("-v"))) return false;
+		if (!INERT_AFTER_COPY.has(head.value)) return false;
+	}
+	return true;
+}
+
+/**
+ * A redefined recipient need not treat stdin as data, even when its original command did. Read as written and with
+ * quotes and escapes dropped, so `'al'ias` and `\source` count, and any word that may set PATH (`PATH=`, `export PATH`,
+ * `printf -v PATH`, `read PATH`) counts; only `$PATH` and `${PATH}` read it.
+ */
 function mayRedefineHeredocCopier(command: string): boolean {
-	return /\bPATH=|\b(?:alias|function|source|eval|enable|hash)\b|\(\s*\)|(?:^|[\s;&|])\.[ \t]/u.test(command);
+	return [command, command.replace(/['"\\]/gu, "")].some((text) =>
+		/(?<![$\w{])PATH\b|\b(?:alias|function|source|eval|enable|hash|shopt)\b|\(\s*\)|(?:^|[\s;&|])\.[ \t]/u.test(text),
+	);
 }
 
 /** More here-documents than this in one command are left in place. */
@@ -1085,8 +1168,11 @@ export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode 
 	)
 		return command;
 	if (mayRedefineHeredocCopier(text)) return command;
-	if (mode === "stdin-only" && mayRunHeredocOutputs(text, removedOutputs))
-		return withoutDataHeredocBodies(command, "sinks");
+	if (mode === "stdin-only") {
+		// What this reading drops beyond the sinks' is a file copy, data only when nothing else in the call can run it.
+		const sinks = withoutDataHeredocBodies(command, "sinks");
+		if (text !== sinks && !heredocCopiesInert(text, removedOutputs)) return sinks;
+	}
 	return text;
 }
 
