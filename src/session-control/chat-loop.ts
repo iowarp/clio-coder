@@ -227,7 +227,6 @@ import { createSteerInterrupter } from "./steer-interrupt.js";
 import {
 	parseTriageAnswer,
 	runTriageRound,
-	TRIAGE_MAX_TOKENS,
 	TRIAGE_RESPONSE_SCHEMA,
 	TRIAGE_SCHEMA_NAME,
 	TRIAGE_SYSTEM_PROMPT,
@@ -237,6 +236,7 @@ import {
 	triageFloor,
 	triageKindFor,
 	triageLabelsFor,
+	triageMaxTokens,
 	triageMayInterrupt,
 	triageSnapshotMatches,
 	triageUserText,
@@ -3100,9 +3100,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							previous: state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : "",
 							entries: asked,
 						}),
-						maxTokens: TRIAGE_MAX_TOKENS,
+						maxTokens: triageMaxTokens(resolved.thinkingLevel),
 						// A schema-bound classification; reasoning only spends the output budget, so
-						// `chat.steering.triage.thinkingLevel` defaults to off.
+						// `chat.steering.triage.thinkingLevel` defaults to off, and a raised level gets its own room.
 						thinkingLevel: resolved.thinkingLevel,
 						responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
 						runtimeId: resolved.runtimeId,
