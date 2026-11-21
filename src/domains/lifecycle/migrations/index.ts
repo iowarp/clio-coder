@@ -42,6 +42,7 @@ import approvalsToConfig from "./2026-11-02-approvals-to-config.js";
 import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
 import retireFleetLocks from "./2026-11-21-retire-fleet-locks.js";
 import retiredSettings from "./2026-11-21-retired-settings.js";
+import writerSetLeaseClock from "./2026-11-21-writer-set-lease-clock.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -109,6 +110,7 @@ const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	approvalsToConfig,
 	removeCopilotConsent,
 	retireFleetLocks,
+	writerSetLeaseClock,
 ]);
 
 // A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id

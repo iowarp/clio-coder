@@ -18,6 +18,7 @@ import {
 	releaseCapacityLease,
 	writeCapacityStateUnsafe,
 } from "../../src/domains/dispatch/capacity-lease.js";
+import { LEASE_CLOCK_SKEW_MS } from "../../src/domains/dispatch/lease-clock.js";
 import {
 	cleanupDispatchReservations,
 	createDispatchReservation,
@@ -411,7 +412,8 @@ it("boot never waits on a live admission lock holder; the first plan admission r
 	const orphan = reserve([0]);
 	const state = readCapacityStateUnsafe();
 	const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
-	for (const record of state.reservations) if (record.ownerId === orphan.ownerId) record.ownerPid = deadPid;
+	for (const record of state.reservations as Array<{ ownerId: string; ownerPid: number }>)
+		if (record.ownerId === orphan.ownerId) record.ownerPid = deadPid;
 	writeCapacityStateUnsafe(state);
 	const holder = spawn("sleep", ["600"], { stdio: "ignore" });
 	t.after(() => holder.kill("SIGKILL"));
@@ -498,6 +500,50 @@ it("a running member's lease heartbeat keeps its plan current for hosts that can
 	} finally {
 		await controller.stop();
 	}
+});
+
+it("the admission heartbeat keeps a plan current while none of its members holds a lease (M12)", async (t) => {
+	const reservation = reserve();
+	let clock = Date.now();
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const controller = createCapacityAdmissionController({ limits: () => limits, now: () => clock, heartbeatMs: 5 });
+	try {
+		// The next member waits longer than the plan's TTL with no lease, in the writer-set queue or behind a long step.
+		clock += 60 * 60_000;
+		t.mock.timers.tick(5);
+		await controller.stop();
+		strictEqual(
+			Date.parse(getDispatchReservation(reservation.ownerId)?.expiresAt ?? ""),
+			clock + DEFAULT_RESERVATION_TTL_MS,
+			"the heartbeat did not refresh the plan's expiry",
+		);
+		const state = readCapacityStateUnsafe();
+		state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+		writeCapacityStateUnsafe(state);
+		strictEqual(cleanupDispatchReservations({ nowMs: clock }), 0);
+	} finally {
+		await controller.stop();
+		releaseDispatchReservation(reservation.ownerId);
+	}
+});
+
+it("another host's lease and plan hold until their expiry plus the clock skew tolerance, then are reclaimed (M12)", () => {
+	const reservation = reserve();
+	const lease = acquireCapacityLease({
+		assignmentId: "far",
+		nodeId: "gpu07",
+		limits: { global: 4, nodes: { gpu07: 4 }, endpoints: {} },
+	});
+	const state = readCapacityStateUnsafe();
+	for (const entry of state.leases) entry.host = "other-host";
+	state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+	writeCapacityStateUnsafe(state);
+	const leaseLapse = Date.parse(lease.expiresAt) + LEASE_CLOCK_SKEW_MS;
+	strictEqual(capacityLeaseUsage({ nowMs: leaseLapse - 1 }).nodes.gpu07, 1);
+	strictEqual(capacityLeaseUsage({ nowMs: leaseLapse }).nodes.gpu07, undefined);
+	const planLapse = Date.parse(reservation.expiresAt) + LEASE_CLOCK_SKEW_MS;
+	strictEqual(cleanupDispatchReservations({ nowMs: planLapse - 1 }), 0);
+	strictEqual(cleanupDispatchReservations({ nowMs: planLapse }), 1);
 });
 
 it("another host's leases and reservations do not consume this host's global cap", () => {

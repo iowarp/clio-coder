@@ -41,7 +41,7 @@ const STALE_LOCK_MS = 30_000;
 /** Well under STALE_LOCK_MS, so a slow holder never reads as an abandoned one. */
 const REFRESH_LOCK_MS = 5_000;
 /**
- * Default acquisition budget. Deliberately under DEFAULT_CAPACITY_LEASE_TTL_MS:
+ * Default acquisition budget. Deliberately under the lease TTL (LEASE_TTL_MS):
  * the sync path blocks the event loop, so a process waiting here also stalls its
  * own lease heartbeat, and a wait longer than a lease lives would let a live
  * holder's lease expire under it. capacity-lease.ts asserts the relation.

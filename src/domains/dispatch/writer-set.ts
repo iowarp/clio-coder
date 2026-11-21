@@ -7,8 +7,9 @@
  * empties, or gives up when its run's deadline passes. Nothing is refused for being busy.
  *
  * Across processes the set is one record under the state root, named by the canonical checkout, holding the pid,
- * birth token and heartbeat of the process that owns the set. A record whose owner is gone (dead pid, reused pid, a
- * zombie, or another host whose heartbeat lapsed on the state filesystem's clock) is taken over. A record this build
+ * birth token and lease stamps of the process that owns the set. A record whose owner is gone (dead pid, reused pid, a
+ * zombie, or another host whose lease lapsed under the lease clock rule in `lease-clock.ts`) is taken over. A record
+ * this build
  * cannot read fails the join closed. A fleet run holds the record for its whole run; its own steps are writers of
  * this process and never wait on it, and only another fleet does.
  *
@@ -16,16 +17,7 @@
  */
 
 import { createHash } from "node:crypto";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	realpathSync,
-	rmSync,
-	statSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
@@ -42,6 +34,7 @@ import { atomicWrite } from "../../engine/session.js";
 import type { AgentSpec } from "../agents/spec.js";
 import type { DispatchRequest } from "./contract.js";
 import { withDispatchIntentWriteRoots } from "./intent.js";
+import { isLeaseInstant, LEASE_HEARTBEAT_MS, leaseLapsed, leaseRenewal } from "./lease-clock.js";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Write roots
@@ -156,23 +149,17 @@ export function writerSetConflict(
 // The checkout's writer set
 
 export interface WriterSetRecord {
-	version: 1;
+	version: 2;
 	checkout: string;
 	host: string;
 	pid: number;
 	processBirthToken: string;
 	acquiredAt: string;
-	/**
-	 * When the owner last proved it still runs, by its own clock, and how long that proof lasts. The age that lapses
-	 * it is read from the record file's modification time, never from this field.
-	 */
+	/** The owner's last renewal and how long it holds, by the owner's wall clock (`lease-clock.ts`). */
 	heartbeatAt: string;
-	heartbeatExpiresMs: number;
+	expiresAt: string;
 }
 
-/** How often an owner refreshes its record, and how long a refresh stays good. */
-export const WRITER_SET_HEARTBEAT_MS = 15_000;
-export const WRITER_SET_EXPIRY_MS = 120_000;
 /** How often a queued join looks again when nothing in this process woke it first. */
 const WRITER_SET_POLL_MS = 1_000;
 
@@ -251,18 +238,15 @@ function validRecord(value: unknown): value is WriterSetRecord {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const record = value as Partial<WriterSetRecord>;
 	return (
-		record.version === 1 &&
+		record.version === 2 &&
 		typeof record.checkout === "string" &&
 		typeof record.host === "string" &&
 		Number.isSafeInteger(record.pid) &&
 		(record.pid ?? 0) > 0 &&
 		typeof record.processBirthToken === "string" &&
-		typeof record.acquiredAt === "string" &&
-		Number.isFinite(Date.parse(record.acquiredAt)) &&
-		typeof record.heartbeatAt === "string" &&
-		Number.isFinite(Date.parse(record.heartbeatAt)) &&
-		Number.isSafeInteger(record.heartbeatExpiresMs) &&
-		(record.heartbeatExpiresMs ?? 0) > 0
+		isLeaseInstant(record.acquiredAt) &&
+		isLeaseInstant(record.heartbeatAt) &&
+		isLeaseInstant(record.expiresAt)
 	);
 }
 
@@ -279,35 +263,16 @@ function readRecord(path: string): WriterSetRecord | null {
 	}
 }
 
-/**
- * How long ago the owner last wrote its record, on the clock of the filesystem that stores it: the record's
- * modification time against a file this reader writes beside it now.
- */
-function recordAgeMs(path: string): number {
-	const probe = join(dirname(path), `.clock-${hostname()}-${process.pid}`);
-	try {
-		writeFileSync(probe, String(process.pid));
-		return statSync(probe).mtimeMs - statSync(path).mtimeMs;
-	} catch {
-		return Date.now() - statSync(path).mtimeMs;
-	} finally {
-		rmSync(probe, { force: true });
-	}
-}
-
-function heartbeatExpired(record: WriterSetRecord, path: string): boolean {
-	return recordAgeMs(path) > record.heartbeatExpiresMs;
-}
-
-function ownerAlive(record: WriterSetRecord, path: string, probe: WriterSetProbe): boolean {
-	// Another host's pid cannot be probed from here: its owner stays live until its heartbeat lapses (#439).
-	if (record.host !== (probe.host ?? hostname())) return !heartbeatExpired(record, path);
+function ownerAlive(record: WriterSetRecord, probe: WriterSetProbe, nowMs: number): boolean {
+	// Another host's pid cannot be probed from here: its owner stays live until its lease lapses (#439).
+	if (record.host !== (probe.host ?? hostname())) return !leaseLapsed(record.expiresAt, nowMs, true);
 	if (probe.zombie?.(record.pid) === true) return false;
 	const current = probe.birthToken(record.pid);
 	// A different birth token is a different process on a reused pid.
 	if (current === null || current !== record.processBirthToken) return false;
-	// Where the token cannot tell a reused pid from the owner, only a live pid with a fresh heartbeat holds.
-	if (probe.tokenProvesDeath === false) return (probe.alive?.(record.pid) ?? false) && !heartbeatExpired(record, path);
+	// Where the token cannot tell a reused pid from the owner, only a live pid with an unlapsed lease holds.
+	if (probe.tokenProvesDeath === false)
+		return (probe.alive?.(record.pid) ?? false) && !leaseLapsed(record.expiresAt, nowMs, false);
 	return true;
 }
 
@@ -318,7 +283,7 @@ const defaultProbe: WriterSetProbe = {
 	zombie: processIsZombie,
 };
 
-/** Refresh the record while this process owns it; a contended beat is skipped and the next lands inside the expiry. */
+/** Renew the record while this process owns it; a contended beat is skipped and the next lands inside the TTL. */
 function startHeartbeat(path: string, checkout: string, pid: number, token: string): () => void {
 	const timer = setInterval(() => {
 		try {
@@ -326,12 +291,12 @@ function startHeartbeat(path: string, checkout: string, pid: number, token: stri
 				const record = readRecord(path);
 				if (record?.checkout !== checkout || record.pid !== pid || record.processBirthToken !== token) return;
 				if (record.host !== hostname()) return;
-				atomicWrite(path, JSON.stringify({ ...record, heartbeatAt: new Date().toISOString() }, null, 2));
+				atomicWrite(path, JSON.stringify({ ...record, ...leaseRenewal(Date.now()) }, null, 2));
 			});
 		} catch {
 			// A failed beat is retried on the next tick; only a long run of them lets the record lapse.
 		}
-	}, WRITER_SET_HEARTBEAT_MS);
+	}, LEASE_HEARTBEAT_MS);
 	timer.unref();
 	return () => clearInterval(timer);
 }
@@ -437,21 +402,21 @@ function tryJoin(input: JoinInput, checkout: string, path: string): JoinAttempt 
 	const token = input.processBirthToken ?? processBirthToken(ownerPid);
 	if (token === null) throw new Error("dispatch: cannot establish the writer set owner's process birth token");
 	const waitingOn = withStateFileLockSync(path, (): string | null => {
+		const nowMs = Date.now();
 		const existing = readRecord(path);
-		if (existing !== null && ownerAlive(existing, path, input.probe ?? defaultProbe)) {
+		if (existing !== null && ownerAlive(existing, input.probe ?? defaultProbe, nowMs)) {
 			const where = existing.host !== hostname() ? ` on host ${existing.host}` : "";
 			return `the writer set of pid ${existing.pid}${where}`;
 		}
-		const at = new Date().toISOString();
+		const renewal = leaseRenewal(nowMs);
 		const record: WriterSetRecord = {
-			version: 1,
+			version: 2,
 			checkout,
 			host: hostname(),
 			pid: ownerPid,
 			processBirthToken: token,
-			acquiredAt: at,
-			heartbeatAt: at,
-			heartbeatExpiresMs: WRITER_SET_EXPIRY_MS,
+			acquiredAt: renewal.heartbeatAt,
+			...renewal,
 		};
 		atomicWrite(path, JSON.stringify(record, null, 2));
 		return null;
@@ -486,8 +451,10 @@ function tryJoin(input: JoinInput, checkout: string, path: string): JoinAttempt 
 
 /**
  * Join the checkout's writer set. A member that would overlap a live set waits for it to empty, waking on every
- * release in this process and polling the record for other processes, until `deadlineAt` passes or `signal` aborts;
- * then it throws `WriterSetBusyError`. `onQueued` is told once what the join waits on.
+ * release in this process and polling the record for other processes, until `deadlineAt` (a wall-clock instant, the
+ * run's sealed deadline) passes or `signal` aborts; then it throws `WriterSetBusyError`. The wait itself is a span in
+ * this process, so it runs on the monotonic clock from the deadline's distance at entry. `onQueued` is told once what
+ * the join waits on.
  */
 export async function joinWriterSet(
 	input: JoinInput & {
@@ -499,7 +466,9 @@ export async function joinWriterSet(
 ): Promise<WriterSetLease> {
 	const checkout = canonicalCheckout(input.checkout);
 	const path = writerSetPath(checkout);
-	const startedAt = Date.now();
+	const startedAt = performance.now();
+	const deadline =
+		input.deadlineAt === undefined ? Number.POSITIVE_INFINITY : startedAt + (input.deadlineAt - Date.now());
 	let queued = false;
 	for (;;) {
 		input.signal?.throwIfAborted();
@@ -510,10 +479,10 @@ export async function joinWriterSet(
 			queued = true;
 			input.onQueued?.(attempt.waitingOn);
 		}
-		const remaining = (input.deadlineAt ?? Number.POSITIVE_INFINITY) - Date.now();
+		const remaining = deadline - performance.now();
 		if (remaining <= 0) {
 			throw new WriterSetBusyError(
-				`writer_set_busy: ${agent} waited ${Math.round((Date.now() - startedAt) / 1000)} s for ${attempt.waitingOn} to finish writing in ${checkout}, and its run's deadline passed first. Wait for that work to settle, declare disjoint intent.write_roots, or use worktree: true.`,
+				`writer_set_busy: ${agent} waited ${Math.round((performance.now() - startedAt) / 1000)} s for ${attempt.waitingOn} to finish writing in ${checkout}, and its run's deadline passed first. Wait for that work to settle, declare disjoint intent.write_roots, or use worktree: true.`,
 				checkout,
 			);
 		}
