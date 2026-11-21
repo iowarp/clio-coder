@@ -4,7 +4,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-coder run` has one versioned output contract, typed causes behind every exit code, per-run limits, a dry run and host-validated structured answers, and sessions, fleets and settings can be driven from the shell without opening the terminal UI. The agent now states whether it finished, and CLIO Coder records that claim beside its own assessment of the work. Fleet dispatch routes each job to a role with an evidence obligation, proactive memory was rebuilt around claims that have to be demonstrated before they are kept, and the Antigravity CLI joins the agents CLIO Coder can delegate to. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
+CLIO Coder 0.8.5 is one large release with breaking changes, built so that a script, a CI job or another agent can depend on CLIO Coder the way a person at the terminal does. `clio-coder run` has one versioned result, a typed cause behind every exit code, per-run limits, a dry run and host-validated structured answers. A run states whether it finished, and CLIO Coder seals that claim beside its own assessment of the work. Fleet dispatch routes each job to a role that owes evidence, proactive memory keeps only what has been demonstrated, and the Antigravity CLI joins the agents CLIO Coder delegates to. Every command and flag now has one spelling: earlier spellings are removed, and `clio-coder upgrade` migrates your settings and prints each change. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
 
 ### Highlights
 
@@ -58,11 +58,29 @@ CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-
 - `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh`, `report sweep` and `telemetry share sweep`.
 - Reviewing earlier sessions for memory is off by default. Set `context.memory.surfaces.history: on` to turn it on.
 
-### Upgrading
+#### Upgrading
 
-- Upgrade with `clio-coder upgrade` or by running the installer again. Both migrate your settings to the 0.8.5 names automatically, so there is nothing to edit by hand.
-- Update scripts and CI jobs that call `clio-coder run`: add `-` where a task is piped in, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, and read the result from the `run_end` envelope.
-- Replace any spelling in the table above in scripts, aliases and editor configuration.
+Run `clio-coder upgrade`, or run the installer again. After an update made with a package manager directly, run `clio-coder upgrade` once so the migration runs. Then run `clio-coder doctor`.
+
+**What the upgrade rewrites.** The migration edits your user `settings.yaml` in place, keeps the previous file as `settings.yaml.retired.bak` beside it, and prints each change under "What changed for you in settings.yaml". A project's `.clio-coder/settings.yaml` is the repository's and is left for you to edit.
+
+| In your settings | What the migration does |
+| --- | --- |
+| `interface.exitSummary: full` | Becomes `standard` |
+| `interface.outputDetail: minimal`, `default`, `verbose` | Become `compact`, `standard`, `detailed` |
+| `fleet.nodes[].clioEntry` | Renamed to `clioCoderEntry` |
+| `background.thinkingLevel` | Removed; memory follows `context.memory.thinkingLevel`, default `off` |
+| `context.compaction.excludeLastTurns`, `compaction.excludeLastTurns` | Removed |
+| `fleet.decisionProfiles`, `fleet.speculativeDispatch` | Removed |
+| `systemOne.sites`, `cuts`, `record`, `retentionDays`, `maxMiB` and each engine's `mode` | Removed; `systemOne.use` names the engine |
+| `turnControl.interpretation`, `turnControl.orientation` and the `orientation`, `direction` and `ledger-facts` workflows | Removed |
+| `interface.panes.enabled` | Removed; `--with-panes` joins an existing pane host |
+| `identity`, `theme`, `telemetry.research.systemOneDataset` | Removed; nothing read them |
+| `permissionTimeoutMs` and `labels` on an external agent entry | Removed |
+
+A key written through a YAML anchor, alias or merge key is left as written, and the upgrade asks you to edit it by hand. A settings file that still names a retired key fails to load with a message naming `clio-coder upgrade`.
+
+**What you retype.** The upgrade cannot reach scripts, CI jobs, shell aliases or editor configuration. Add `-` where a task is piped into `clio-coder run`, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, read the result from the `run_end` envelope, and replace every spelling in the removed commands table above.
 
 ### Added
 

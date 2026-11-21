@@ -4,12 +4,13 @@
 
 # CLIO Coder
 
-**An open-source coding agent for any model you have, from a GPU in your lab to a frontier API, that shows you the checks behind what it says.**
+**An open-source coding agent for scientific software that runs on any model you have, tells you honestly how a run ended, and gives scripts a result they can parse.**
 
-CLIO Coder is for developers and research teams who want one set of project
-rules, tools, checks and safety controls above whatever model they run. Change
-the model and nothing else changes. Use it in the terminal, from scripts and
-CI, inside an ACP editor, or in the desktop app (alpha).
+CLIO Coder works in simulation codes, numerical libraries and everyday
+repositories, on a GPU in your lab or a frontier API. It changes code, runs
+your project's own checks, and records what passed, what failed and what was
+never checked. The same agent runs in the terminal, in CI through
+`clio-coder run`, inside an ACP editor, and in the desktop app (alpha).
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm version" src="https://img.shields.io/npm/v/%40iowarp%2Fclio-coder?color=00a6ad&amp;style=flat-square" /></a>
@@ -45,38 +46,64 @@ No root and no account. The first launch connects a model.
 - **Any model, local to frontier.** Ollama, vLLM or llama.cpp on your own
   hardware, a lab gateway, cloud APIs, and the ChatGPT, Claude and GitHub
   Copilot subscriptions you already pay for. `/model` switches the
-  conversation, and your project rules, tools and sessions stay the same.
-- **One agent, four ways in.** `clio-coder` in the terminal,
-  `clio-coder run` for scripts and CI with typed exit codes and one
-  versioned JSON result,
-  `clio-coder acp` for editors that speak the Agent Client Protocol, and
-  `clio-coder gui` for the desktop alpha. All four share the same
-  connections, project rules and tool policy.
+  conversation, and your project rules, tools, checks and sessions stay the
+  same.
+- **A headless CLI that scripts can trust.**
+  `clio-coder run --output-format json` prints one versioned result with the
+  answer, a typed cause for every exit code, the checks that ran and what the
+  run cost. `--max-requests`, `--max-tool-calls`, `--max-cost-usd` and
+  `--timeout` bound it, `--dry-run` previews it without calling a model,
+  `--output-schema` makes the answer a JSON object CLIO Coder validates, and
+  `clio-coder schema run-result` prints the contract.
+- **Runs that say honestly how they ended.** The agent declares `done`,
+  `partly_done` or `not_done`. CLIO Coder records that claim beside its own
+  assessment, and a `done` that left unvalidated changes or a failing check is
+  recorded as partly done. `run --exit-code` makes CI fail on anything short
+  of done.
+- **A safety floor that holds in yolo.** Yolo removes the approval cards. It
+  keeps the OS sandbox, the file snapshots behind `/rewind`, the hard blocks
+  on protected paths and the rule that only you change project trust,
+  settings and CLIO Coder's own state. The floor reads the shell scripts a
+  command runs, not only the command line.
+- **Memory that learns only from evidence.** A note is a claim tied to a
+  command that succeeded or a file that was read. It becomes a lesson after
+  other sessions demonstrate it or you approve it, and it is checked against
+  the repository again before it reaches the model.
 - **A fleet with sealed receipts.** Chat on one model and send workers to
-  others, or to Claude Code, Codex, OpenCode and Pi, each with a fixed set of
-  tools, permissions and budget. Every run seals a record of what it did:
-  `clio-coder evidence inspect` reads it, and `clio-coder telemetry verify`
-  checks it again on any machine.
+  others, or to Claude Code, Codex, OpenCode, Pi and the Antigravity CLI. Each
+  job goes to the agent built for it, each role owes a kind of evidence, and
+  every run seals a record: `clio-coder evidence inspect` reads it, and
+  `clio-coder telemetry verify` checks it again on any machine.
 - **Context that holds on small windows.** The window comes from the live
   model server. Before paying for a summary, CLIO Coder evicts old tool output
-  it can recall exactly later, so long tasks keep their working context on
-  local models.
-  `/context` shows what fills the window.
-- **Pipelines you can build on.** Extensions add tools, hooks and interviews
-  that declare what they may touch. Prompt templates bound a turn's budget,
-  run one pipeline step per turn, and carry separate prompts for small,
-  standard and frontier models. `clio-coder run --answers` runs the whole
-  pipeline headless.
-- **Autonomy you choose, safety that stays on.** By default it asks before
-  commands it cannot sandbox and outward actions such as `git push`. Yolo
-  removes the approval cards but keeps the OS sandbox, file snapshots for
-  `/rewind` and a safety judge.
-- **Claims tied to checks that ran.** CLIO Coder runs your tests, compares
-  numbers within a tolerance you set, and reruns an analysis from pinned
-  inputs. It records what passed, what failed and what was never checked.
+  it can recall exactly later, so long tasks keep their working context on a
+  28K or 32K local model. `/context` shows what fills the window.
+- **Checks built for research code.** CLIO Coder runs your tests, compares
+  numbers within a tolerance you set, reruns an analysis from pinned inputs,
+  reads HDF5, NetCDF and Zarr, inspects ADIOS2 output, and works on HPC login
+  nodes without root.
+- **Upgrades that migrate your setup.** `clio-coder upgrade` rewrites retired
+  settings in place, keeps the previous file beside it and prints every
+  change.
 - **Open source, Apache-2.0.** Project rules and checks live in plain files in
   your repository. There is no CLIO Coder account, and nothing is sent home in
   the background.
+
+### How it compares
+
+Claude Code, Codex and OpenCode are capable coding agents, and CLIO Coder can
+dispatch work to each of them. Choose CLIO Coder when you need one or more of
+these, and check any tool you compare against the same list:
+
+| Question to ask of a coding agent | CLIO Coder |
+| --- | --- |
+| Does it run on the model I already have, including a local one? | Local servers, lab gateways, cloud APIs and subscriptions, switched with `/model`. |
+| Can a script read the result without parsing prose? | One versioned JSON result with typed causes, and a printed JSON Schema. |
+| Does it say when the work is not finished? | The agent's declared state and the host's assessment are both sealed, with the facts behind a lowered claim. |
+| Which rules still apply with approvals off? | The sandbox, snapshots, protected paths and operator-only changes all stay. |
+| What is a stored memory based on? | A command that succeeded or a file that was read, demonstrated again before it is kept. |
+| Can I verify a run afterwards, on another machine? | Every run seals a record that `clio-coder telemetry verify` rechecks. |
+| Does it check numerical results, not only tests? | Tolerance comparisons, seeded repeats and reproductions from pinned inputs. |
 
 ## Built for science and HPC
 
@@ -117,43 +144,43 @@ without root, older glibc, `module load`, proxies and
 
 ## New in 0.8.5
 
-- **A command line scripts can depend on.** `clio-coder run --output-format json`
-  prints one versioned result with the answer, exit code, outcome, typed
-  causes, checks and usage. `stream-json` streams the events and ends with the
-  same result, and `clio-coder schema run-result` prints its JSON Schema.
-- **Runs that say how they ended.** The agent declares `done`, `partly_done`
-  or `not_done` with its limitations. CLIO Coder records that claim beside its
-  own assessment and lowers a `done` that left unvalidated changes or a
-  failing check. `run --exit-code` turns anything short of done into exit 1.
-- **Limits and a preview for every run.** `--max-requests`, `--max-tool-calls`,
-  `--max-cost-usd`, `--timeout 15m`, `--sandbox required` and
-  `--require-priced` bound one run. `--dry-run` prints the route, tools,
-  sandbox and limits without calling a model.
-- **Structured answers.** `run --output-schema schema.json` makes the answer
-  one JSON object that CLIO Coder validates before the run exits 0.
-- **Sessions, fleets and settings from the shell.**
-  `clio-coder session history|show|export|fork|compact`, `run --resume` with
-  `--fork`, `fleet run --detach` with `fleet wait`, and
-  `clio-coder config get|set|unset`.
-- **Workers routed by job and graded by role.** A dispatch goes to the agent
-  whose job it is, a built-in `reviewer` judges diffs, and each role owes a
-  kind of evidence. A worker that returns without it is retried once on
-  another model.
-- **Memory that has to be demonstrated.** A note is a claim tied to a command
-  that succeeded or a file that was read. Stored lessons are checked against
-  the repository before they reach the model, and automatic memory spending is
-  capped at a share of the session.
-- **One more agent to delegate to.** The Antigravity CLI joins Claude Code,
-  Codex, OpenCode and Pi, with model and thinking selection, live steering and
-  questions that reach you.
-- **Zarr and ADIOS2.** The `data` tool reads Zarr v2 and v3 stores and
-  inspects ADIOS2 BP4 and BP5 directories.
+0.8.5 is the release to upgrade for if anything other than a person reads
+CLIO Coder's output. It is one large release with breaking changes, and
+`clio-coder upgrade` migrates your settings.
 
-0.8.5 has one spelling for each command and flag, and earlier spellings are
-gone: `run` reads stdin only when you pass `-`, `--output-format` replaces
-`--json`, and `--resume` replaces `--session`. The installer and
-`clio-coder upgrade` migrate your settings. Read the
-[breaking changes](CHANGELOG.md#breaking-changes) before upgrading.
+**Scripts get a contract.** Before 0.8.5 a script read an event stream and
+guessed from prose. Now `clio-coder run --output-format json` prints one
+versioned result: the answer, the exit code, a typed cause for it, the checks
+that ran and the spend. Limits (`--max-requests`, `--max-tool-calls`,
+`--max-cost-usd`, `--timeout 15m`) are flags, `--dry-run` shows the route,
+tools and sandbox before any model call, and `--output-schema` returns a JSON
+object CLIO Coder has already validated.
+
+**A run tells you whether it finished.** The agent declares `done`,
+`partly_done` or `not_done` and lists what it could not do. CLIO Coder seals
+that beside its own assessment, so a `done` with unvalidated changes reads as
+partly done, and `run --exit-code` fails the job.
+
+**The fleet is graded, not trusted.** A dispatch goes to the agent whose job
+it is, including a built-in `reviewer` for diffs. A worker that returns
+without the evidence its role owes is retried once on another model. The
+Antigravity CLI joins the agents CLIO Coder delegates to.
+
+**Memory earns its place.** Notes are claims tied to a command that succeeded
+or a file that was read, lessons are rechecked against the repository before
+delivery, and automatic memory spending is capped at a share of the session.
+
+**Everything is reachable from the shell.**
+`clio-coder session history|show|export|fork|compact`, `run --resume` with
+`--fork`, `fleet run --detach` with `fleet wait`, and
+`clio-coder config get|set|unset`. The `data` tool now reads Zarr and inspects
+ADIOS2.
+
+**What breaks.** Each command and flag has one spelling, and earlier
+spellings are gone: `run` reads stdin only when you pass `-`,
+`--output-format` replaces `--json`, and `--resume` replaces `--session`.
+Read the [breaking changes](CHANGELOG.md#breaking-changes) and
+[upgrading](CHANGELOG.md#upgrading) before you upgrade.
 
 > **Pre-1.0.** The terminal is the primary interface, and the desktop app is
 > in alpha. Commands and settings can change between minor releases, so read
