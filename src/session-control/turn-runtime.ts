@@ -1786,17 +1786,19 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					handoffChanged ||
 					continued ||
 					requirementChanged;
+				// Retracting or installing only replaces or appends messages, so the install's publications read the history the
+				// guard's last publication checked: the guard runs it in that settled stretch (SC-6).
+				let restored = false as boolean;
 				const update = await context
-					.postToolContinuationGuard(localRuntime, signal, contextChanged)
+					.postToolContinuationGuard(localRuntime, signal, contextChanged, () => {
+						if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return;
+						restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
+					})
 					.catch((error: unknown) => {
 						// Clio's guard, not the route, ended the turn (CLI-3).
 						if (error instanceof Error && error.name === OVERSIZED_RESULT_STOP) guardStopCause = "oversized_tool_result";
 						throw error;
 					});
-				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
-				// Retracting or installing only replaces or appends messages, so the install's second publication reads the
-				// history its first one checked (SC-6).
-				const restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// A tool hook changed a pinned block, or the guard's compaction dropped one: it rides the next request.
 				const pinned = context.appendPinnedContext(localRuntime);
