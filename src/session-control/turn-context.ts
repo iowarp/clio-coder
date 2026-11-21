@@ -7,7 +7,7 @@ import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import { mainSessionShellSandboxed } from "../core/sandbox/main-session.js";
 import type { SandboxAvailability } from "../core/sandbox/types.js";
-import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js";
+import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
@@ -75,7 +75,6 @@ import type {
 	ContextActivityPhase,
 	ContextActivityStatus,
 	ContextRecalledPayload,
-	ContextWarningPayload,
 	MemoryStepCompletedPayload,
 	ResidencyMutationPayload,
 } from "../core/telemetry/live-events.js";
@@ -507,7 +506,6 @@ export interface TurnContext {
 	>;
 	contextUsage(): LiveContextUsage;
 	contextLedger(): ContextLedger;
-	emitContextWindowWarningTransition(warning: string | null): void;
 	/** Record one known cache disturbance for the current or next call. */
 	noteColdReason(reason: ExpectedColdReason): void;
 	/** The tool choice a request sends; `afterRejection` marks the #426 retry of a request the provider rejected. */
@@ -1025,13 +1023,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * flush) clears the flag because it writes the current snapshot state.
 	 */
 	let snapshotPersistPending = false;
-
-	/**
-	 * Publish the window-resolution warning only on transitions (appeared,
-	 * changed, cleared). ensureRuntime runs on every submit; re-emitting the
-	 * same state each turn would spam every ContextWarning subscriber.
-	 */
-	let lastContextWindowWarning: string | null = null;
 
 	const persistContextSnapshot = (snapshot: ContextSnapshot): void => {
 		const currentSession = deps.session?.current();
@@ -4334,16 +4325,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				promptCache: lastPromptCache,
 				prewarm: lastPrewarm,
 			});
-		},
-
-		emitContextWindowWarningTransition(warning: string | null): void {
-			if (warning === lastContextWindowWarning) return;
-			lastContextWindowWarning = warning;
-			deps.bus?.emit(
-				"context.warning_raised",
-				{ warning } satisfies ContextWarningPayload,
-				sessionTelemetryContext(deps.session?.current()?.id),
-			);
 		},
 
 		noteColdReason,

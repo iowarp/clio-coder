@@ -766,8 +766,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Preflight and the wire budget share the session's effective settings,
 		// including overrides that never reach the saved providers snapshot.
 		setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
-		if (!options?.silent)
-			context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new TurnAdmissionError(
 				`[CLIO Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
