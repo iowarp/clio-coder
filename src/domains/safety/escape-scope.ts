@@ -1,8 +1,10 @@
 /**
  * Session scopes for sandbox escapes (M-7). An `unsandboxed: true` call whose only ask is leaving the
- * main-session sandbox can be approved for the rest of the session over an explicit scope: the
- * directories of the scripts it runs, its working directory and the environment assignments it sets.
- * A later call inside that scope no longer asks. The scope is the harness's own reading of the asked
+ * main-session sandbox can be approved for the rest of the session over an explicit scope: the exact
+ * script files it runs (canonical path and content hash), its working directory and the environment
+ * assignments it sets. A later rerun of those same unchanged files, from the same cwd with the same env,
+ * no longer asks; an edited script, another script, another cwd or other env asks again. No directory
+ * is ever a scope. The scope is the harness's own reading of the asked
  * call, shown on the card as the option's label, and a grant is recorded only when the operator picks
  * that option: on the approval card, on an ACP client, or on the option ask_user adds to a question
  * that names leaving the sandbox. Operator free text (a steer, a typed answer) is never a grant.
@@ -12,8 +14,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { canonicalizePath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -33,14 +34,20 @@ export const ESCAPE_SCOPE_OPTION_PREFIX = "Approve for this session:";
 
 /** What an escape scope covers, as the harness read it from the asked call. */
 export interface EscapeScope {
-	/** Canonical directories of the script files the call runs, sorted. */
-	readonly scriptDirs: ReadonlyArray<string>;
+	/** The script files the call runs: canonical path and `sha256:<hex>` of the content, sorted by path. */
+	readonly scripts: ReadonlyArray<EscapeScopeScript>;
 	/** The resolved working directory the call runs in. */
 	readonly cwd: string;
 	/** Environment assignments the call sets, by name, as `sha256:<hex>` digests of their values. */
 	readonly env: Readonly<Record<string, string>>;
 	/** The same assignments as the card shows them, redacted; never persisted. */
 	readonly envShown?: Readonly<Record<string, string>>;
+}
+
+/** One script file a scope names. */
+export interface EscapeScopeScript {
+	readonly path: string;
+	readonly sha256: string;
 }
 
 /** Where the operator approved a scope. */
@@ -59,16 +66,20 @@ export interface EscapeScopeGrant {
 /** What admission does with an escape a granted scope covers. */
 export type ScopedEscapeRoute = "run" | "judge";
 
-function digest(value: string): string {
-	return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
+function digest(value: string | Buffer): string {
+	return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
+
+const DIGEST = /^sha256:[0-9a-f]{64}$/u;
+/** The largest script file a scope hashes; a larger one gets only the one-call approval. */
+const SCOPE_SCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 /**
  * The reach of one escape: every script it runs, where it runs and what environment it sets. Null for a
  * call that does not leave the sandbox, runs anything but script files, redirects into a file, or runs a
- * script that is not a regular file inside `roots` (the workspace and scratch roots).
+ * script that is not a readable regular file inside `roots` (the workspace and scratch roots).
  */
 function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase: string): EscapeScope | null {
 	const args = call.args;
@@ -115,19 +126,23 @@ function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase
 	} else {
 		return null;
 	}
-	const dirs = new Set<string>();
+	const scripts = new Map<string, string>();
 	for (const operand of spelled) {
 		const file = canonicalizePath(path.resolve(cwd, operand));
 		if (file === null || !roots.some((root) => isSameOrDescendant(file, root))) return null;
+		if (scripts.has(file)) continue;
 		try {
-			if (!statSync(file).isFile()) return null;
+			const stat = statSync(file);
+			if (!stat.isFile() || stat.size > SCOPE_SCRIPT_MAX_BYTES) return null;
+			scripts.set(file, digest(readFileSync(file)));
 		} catch {
 			return null;
 		}
-		dirs.add(path.dirname(file));
 	}
 	return {
-		scriptDirs: [...dirs].sort(),
+		scripts: [...scripts.entries()]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([file, sha256]) => ({ path: file, sha256 })),
 		cwd: canonicalizePath(cwd) ?? cwd,
 		env: Object.fromEntries([...raw.entries()].sort(([a], [b]) => a.localeCompare(b))),
 		envShown,
@@ -136,27 +151,21 @@ function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase
 
 /**
  * The scope a session-scope option offers for an asked escape, or null when the call gets only the
- * one-call approval. PENDING the maintainer's ruling on scope derivation (M-7 Q2): until then the scope
- * is every script directory, the cwd and the env assignments of the call, refusing a script directory
- * that is the home directory or a filesystem root.
+ * one-call approval. Maintainer ruling on M-7 Q2: the exact script files the call runs, by canonical path
+ * and content hash, the exact cwd and the exact env assignments.
  */
 function deriveEscapeScope(
 	call: ClassifierCall,
 	roots: ReadonlyArray<string>,
 	cwdBase: string = process.cwd(),
 ): EscapeScope | null {
-	const reach = escapeReach(call, roots, cwdBase);
-	if (reach === null) return null;
-	const home = canonicalizePath(homedir()) ?? homedir();
-	if (reach.scriptDirs.some((dir) => dir === home || dir === path.parse(dir).root)) return null;
-	return reach;
+	return escapeReach(call, roots, cwdBase);
 }
 
 /**
- * True when `call` lies inside a granted `scope`. PENDING the maintainer's ruling on what counts as
- * inside (M-7 Q2): until then the call must run from the same cwd, every script it runs must lie in a
- * scope directory or below, and every env assignment it sets must be one the scope names, with the
- * same value.
+ * True when `call` lies inside a granted `scope` (M-7 Q2 ruling): it runs from the same cwd, sets exactly
+ * the scope's env assignments with the same values, and every script it runs is one of the scope's files
+ * with the content it had when approved. An edited or another script asks again.
  */
 function escapeScopeCovers(
 	scope: EscapeScope,
@@ -166,15 +175,19 @@ function escapeScopeCovers(
 ): boolean {
 	const reach = escapeReach(call, roots, cwdBase);
 	if (reach === null || reach.cwd !== scope.cwd) return false;
-	if (!reach.scriptDirs.every((dir) => scope.scriptDirs.some((granted) => isSameOrDescendant(dir, granted))))
-		return false;
-	return Object.entries(reach.env).every(([name, value]) => scope.env[name] === value);
+	const covered = reach.scripts.every((script) =>
+		scope.scripts.some((granted) => granted.path === script.path && granted.sha256 === script.sha256),
+	);
+	if (!covered) return false;
+	const names = Object.keys(reach.env);
+	if (names.length !== Object.keys(scope.env).length) return false;
+	return names.every((name) => scope.env[name] === reach.env[name]);
 }
 
 /**
  * Whether a covered escape runs at admission or still goes to the safety judge with the grant as its
- * approval. PENDING the maintainer's ruling (M-7 Q3): until then a covered escape runs, as a call the
- * operator approved on a card does.
+ * approval. Maintainer ruling on M-7 Q3: it runs, without the judge; admission consults a grant only when
+ * leaving the sandbox is the call's sole ask reason (`onlyAsksToLeaveSandbox`), so any other ask still asks.
  */
 export function scopedEscapeRoute(): ScopedEscapeRoute {
 	return "run";
@@ -188,14 +201,15 @@ function onlyAsksToLeaveSandbox(decision: SafetyDecision): boolean {
 	return policy.reasons.length > 0 && policy.reasons.every((reason) => reason === SANDBOX_ESCAPE_REASON);
 }
 
-/** The scope as one line: the script directories, the cwd and the env assignments it covers. */
+/** The scope as one line: the script files with their short hashes, the cwd and the env assignments it covers. */
 export function describeEscapeScope(scope: EscapeScope): string {
 	const names = Object.keys(scope.env);
 	const env =
 		names.length === 0
 			? "no env assignments"
 			: `env ${names.map((name) => `${name}=${scope.envShown?.[name] ?? "…"}`).join(" ")}`;
-	return `scripts in ${scope.scriptDirs.join(", ")} · cwd ${scope.cwd} · ${env}`;
+	const files = scope.scripts.map((script) => `${script.path} (${script.sha256.slice(0, 19)})`).join(", ");
+	return `${scope.scripts.length === 1 ? "script" : "scripts"} ${files} · cwd ${scope.cwd} · ${env}`;
 }
 
 /** The option label every surface shows: `Approve for this session: <scope>`. */
@@ -205,20 +219,28 @@ export function escapeScopeOptionLabel(scope: EscapeScope): string {
 
 /** What choosing the option does, in one sentence. */
 export function escapeScopeOptionConsequence(scope: EscapeScope): string {
-	const dirs = scope.scriptDirs.join(", ");
-	return `Runs this call outside the sandbox, and for the rest of this session every unsandboxed run of a script in ${dirs} or below, from ${scope.cwd}, that sets no env assignment other than these, without asking. Anything else still asks.`;
+	const files = scope.scripts.map((script) => script.path).join(", ");
+	return `Runs this call outside the sandbox, and for the rest of this session every unsandboxed rerun of ${files}, unchanged, from ${scope.cwd} with exactly these env assignments, without asking. An edited script, another script, cwd or env still asks.`;
 }
 
 function validScope(value: unknown): EscapeScope | null {
 	if (value === null || typeof value !== "object") return null;
-	const { scriptDirs, cwd, env } = value as Record<string, unknown>;
-	if (!Array.isArray(scriptDirs) || scriptDirs.length === 0) return null;
-	if (!scriptDirs.every((dir): dir is string => typeof dir === "string" && path.isAbsolute(dir))) return null;
+	const { scripts, cwd, env } = value as Record<string, unknown>;
+	if (!Array.isArray(scripts) || scripts.length === 0) return null;
+	const files: EscapeScopeScript[] = [];
+	for (const script of scripts as unknown[]) {
+		if (script === null || typeof script !== "object") return null;
+		const { path: file, sha256 } = script as Record<string, unknown>;
+		if (typeof file !== "string" || !path.isAbsolute(file) || typeof sha256 !== "string" || !DIGEST.test(sha256))
+			return null;
+		files.push({ path: file, sha256 });
+	}
 	if (typeof cwd !== "string" || !path.isAbsolute(cwd)) return null;
 	if (env === null || typeof env !== "object" || Array.isArray(env)) return null;
 	const pairs = Object.entries(env as Record<string, unknown>);
-	if (!pairs.every(([name, digested]) => ENV_NAME.test(name) && typeof digested === "string")) return null;
-	return { scriptDirs: [...scriptDirs], cwd, env: Object.fromEntries(pairs) as Record<string, string> };
+	if (!pairs.every(([name, digested]) => ENV_NAME.test(name) && typeof digested === "string" && DIGEST.test(digested)))
+		return null;
+	return { scripts: files, cwd, env: Object.fromEntries(pairs) as Record<string, string> };
 }
 
 /** A recorded grant read back from a ledger entry, or null for anything else. */

@@ -3337,7 +3337,7 @@ const CONTAINED_YOLO_ESCAPE_REASON =
 
 /** How the agent can still get an escape approved: the option ask_user adds to a question about it. */
 function escapeScopeAskHint(scope: EscapeScope): string {
-	return `To run it, ask the operator with ask_user in one question that names running it outside the sandbox. Clio adds the option "${escapeScopeOptionLabel(scope)}" to that question; choosing it runs later unsandboxed scripts inside that scope this session without asking, so rerun the call after they choose it. Do not write that option yourself. Otherwise continue with work that does not need it and name it in your report as left for the operator.`;
+	return `To run it, ask the operator with ask_user in one question that names running it outside the sandbox. Clio adds the option "${escapeScopeOptionLabel(scope)}" to that question; choosing it lets unsandboxed reruns of those same unchanged script files, from the same cwd with the same env, run this session without asking, so rerun the call after they choose it. Do not write that option yourself. Otherwise continue with work that does not need it and name it in your report as left for the operator.`;
 }
 
 /** The ask a granted escape scope answered, as the allow that runs it. */

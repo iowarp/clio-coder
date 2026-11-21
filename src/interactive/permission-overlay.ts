@@ -411,7 +411,7 @@ function permissionChoices(
 					{
 						key: permissionKeyLabel(PERMISSION_SESSION_SCOPE_KEY),
 						verb: "approve for this session",
-						consequence: `${view.escapeScope.label.replace(/^Approve for this session:\s*/u, "")}; later unsandboxed scripts inside it run without asking${draftNote}`,
+						consequence: `${view.escapeScope.label.replace(/^Approve for this session:\s*/u, "")}; reruns of these unchanged files run without asking${draftNote}`,
 					},
 				]
 			: []),

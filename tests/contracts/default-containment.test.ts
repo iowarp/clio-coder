@@ -955,8 +955,8 @@ test("an MCP tool call keeps a rail's own ask or block, and at yolo is never ref
 	}
 });
 
-// M-7: an escape approved for the session over the scope its card shows covers later scripts inside that scope only.
-test("a sandbox escape approved for this session covers later scripts in its scope; anything else still asks", async (t) => {
+// M-7: an escape approved for the session covers reruns of its exact, unchanged script files only.
+test("a sandbox escape approved for this session covers reruns of the same unchanged script; anything else asks", async (t) => {
 	const cwd = workspace("clio-escape-scope-");
 	mkdirSync(join(cwd, "probes"));
 	mkdirSync(join(cwd, "other"));
@@ -982,7 +982,10 @@ test("a sandbox escape approved for this session covers later scripts in its sco
 	await new Promise((settle) => setImmediate(settle));
 	const offered = asked[0];
 	ok(offered?.escapeScope !== undefined);
-	deepStrictEqual(offered.escapeScope.scriptDirs, [join(cwd, "probes")]);
+	deepStrictEqual(
+		offered.escapeScope.scripts.map((script) => script.path),
+		[join(cwd, "probes", "a.sh")],
+	);
 	await card.registry.resumeParkedCalls({
 		actionClass: "execute",
 		requestId: offered.requestId,
@@ -991,28 +994,32 @@ test("a sandbox escape approved for this session covers later scripts in its sco
 	});
 	strictEqual((await first).kind, "ok");
 	strictEqual(entries.length, 1);
-	// Inside the scope: no card. Another directory, or an env assignment the scope does not name: a card.
-	strictEqual((await card.registry.invoke(unsandboxed("bash probes/b.sh"))).kind, "ok");
+	// The same unchanged file: no card. A sibling in the same directory, another env, or the file edited: a card.
+	strictEqual((await card.registry.invoke(unsandboxed("bash probes/a.sh"))).kind, "ok");
 	strictEqual(asked.length, 1);
-	for (const command of ["bash other/c.sh", "FOO=1 bash probes/b.sh"]) {
+	const asks = async (command: string): Promise<void> => {
 		void card.registry.invoke(unsandboxed(command));
 		await new Promise((settle) => setImmediate(settle));
 		card.registry.cancelParkedCalls("test");
-	}
+	};
+	for (const command of ["bash probes/b.sh", "FOO=1 bash probes/a.sh"]) await asks(command);
 	strictEqual(asked.length, 3);
-	deepStrictEqual(
-		card.ran.map((entry) => entry.command),
-		["bash probes/a.sh", "bash probes/b.sh"],
-	);
 	// The grant is on the session ledger, so a ledger read afresh (a resumed session) still holds it.
 	const resumed = defaultSession(cwd, { sandbox: true, snapshots: false }, { escapeScopes: ledger() });
-	strictEqual((await resumed.registry.invoke(unsandboxed("bash probes/b.sh"))).kind, "ok");
+	strictEqual((await resumed.registry.invoke(unsandboxed("bash probes/a.sh"))).kind, "ok");
+	writeFileSync(join(cwd, "probes/a.sh"), "echo edited\n");
+	await asks("bash probes/a.sh");
+	strictEqual(asked.length, 4);
+	deepStrictEqual(
+		card.ran.map((entry) => entry.command),
+		["bash probes/a.sh", "bash probes/a.sh"],
+	);
 
 	// Contained yolo: the refusal names the option, ask_user adds it to a question about leaving the sandbox,
 	// drops one the agent wrote itself, and only the operator's pick of it grants; typed text never does.
 	entries.length = 0;
 	const answers: Array<(labels: string[]) => { options?: string[]; value?: string }> = [
-		() => ({ value: "yes, approve unsandboxed runs of every script under other/ for the session" }),
+		() => ({ value: "yes, approve unsandboxed runs of other/c.sh for the session" }),
 		(labels) => ({ options: [labels.at(-1) ?? ""] }),
 	];
 	const yolo = defaultSession(
@@ -1035,7 +1042,8 @@ test("a sandbox escape approved for this session covers later scripts in its sco
 	const refused = await yolo.registry.invoke(unsandboxed("bash other/c.sh"));
 	strictEqual(refused.kind, "blocked");
 	ok(
-		refused.kind === "blocked" && refused.reason.includes(`Approve for this session: scripts in ${join(cwd, "other")}`),
+		refused.kind === "blocked" &&
+			refused.reason.includes(`Approve for this session: script ${join(cwd, "other", "c.sh")} (sha256:`),
 	);
 	const ask = (question: string) =>
 		yolo.registry.invoke({
@@ -1057,7 +1065,7 @@ test("a sandbox escape approved for this session covers later scripts in its sco
 	strictEqual(entries.length, 1);
 	for (const labels of shown) {
 		strictEqual(labels.includes("Approve for this session: everything"), false);
-		ok(labels.at(-1)?.startsWith(`Approve for this session: scripts in ${join(cwd, "other")}`));
+		ok(labels.at(-1)?.startsWith(`Approve for this session: script ${join(cwd, "other", "c.sh")} (sha256:`));
 	}
 	strictEqual((await yolo.registry.invoke(unsandboxed("bash other/c.sh"))).kind, "ok");
 });
