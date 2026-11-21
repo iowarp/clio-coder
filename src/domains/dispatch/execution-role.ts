@@ -207,6 +207,14 @@ function gateVerdictContract(gate: DispatchResultContractRequest["gate"]): Resul
 	return undefined;
 }
 
+/**
+ * The contract a fleet step whose output a gate checks hands back. A builder's is its builder report, with the typed
+ * completion DESIGN 4.3 requires; any other role's output is prose, so it answers `text-report`.
+ */
+export function gateAuthorContractKind(role: ExecutionRole): "artifact-report" | "text-report" {
+	return role === "builder" ? "artifact-report" : "text-report";
+}
+
 /** A caller's summary allowance for one dispatch, with where it was set. */
 export interface DispatchResultSummaryAllowance {
 	maxBytes: number;

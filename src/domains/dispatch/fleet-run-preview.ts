@@ -35,7 +35,12 @@ import { foregroundStreamUsage } from "../providers/index.js";
 import { type BudgetSpendPricing, budgetRemainingText, budgetSpendText } from "../scheduling/budget.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
-import { type AgentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "./execution-role.js";
+import {
+	type AgentRoleFactsResolver,
+	gateAuthorContractKind,
+	requestExecutionRole,
+	withAttemptRole,
+} from "./execution-role.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { hasConcurrentAgentSteps } from "./execution-scheduler.js";
 import { compileFleetExecutionPlan } from "./fleet-plan.js";
@@ -227,7 +232,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 						context.planRole === true
 							? "delegation-plan"
 							: context.gateAuthorRole === true
-								? "artifact-report"
+								? gateAuthorContractKind(requestRole)
 								: context.gateRole === "reviewer"
 									? "verifier-report"
 									: spec.resultContract.kind,

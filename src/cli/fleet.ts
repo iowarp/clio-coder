@@ -43,7 +43,12 @@ import { clearRootCancelRequest, readRootCancelRequest } from "../domains/dispat
 import { capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
+import {
+	agentRoleFactsResolver,
+	gateAuthorContractKind,
+	requestExecutionRole,
+	withAttemptRole,
+} from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import {
 	type FleetRootRecord,
@@ -506,7 +511,7 @@ async function runFleetTracked(
 						context.planRole === true
 							? "delegation-plan"
 							: context.gateAuthorRole === true
-								? "artifact-report"
+								? gateAuthorContractKind(requestRole)
 								: context.gateRole === "reviewer"
 									? "verifier-report"
 									: spec.resultContract.kind,

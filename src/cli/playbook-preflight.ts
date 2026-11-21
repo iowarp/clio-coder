@@ -11,7 +11,7 @@ import { discoverAgentRecipes } from "../domains/agents/registry.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import { isShadowAgent, normalizeAgentSpec, userOriginAudienceRefusal } from "../domains/agents/spec.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
+import { gateAuthorContractKind, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 
 export interface PlaybookPreflightResult {
@@ -152,7 +152,7 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 					context.planRole === true
 						? "delegation-plan"
 						: context.gateAuthorRole === true
-							? "artifact-report"
+							? gateAuthorContractKind(role)
 							: context.gateRole === "reviewer"
 								? "verifier-report"
 								: spec.resultContract.kind,

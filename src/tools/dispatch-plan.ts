@@ -769,6 +769,7 @@ const RESULT_CONTRACT_KINDS = new Set<ResultContract["kind"]>([
 	"oracle-report",
 	"external-delegation",
 	"artifact-report",
+	"text-report",
 	"context-handbook",
 	"delegation-plan",
 ]);

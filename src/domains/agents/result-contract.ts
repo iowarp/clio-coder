@@ -85,6 +85,12 @@ export type ResultContract =
 	| { kind: "oracle-report" }
 	| { kind: "external-delegation" }
 	/**
+	 * A non-builder's prose answer: any final text is the result, and nothing in it is validated (fleet design 4.8,
+	 * M9). Fleet proposals, a non-builder gate author and imported read-only recipes hand back text; they borrowed
+	 * `artifact-report` until that became a builder report with a required typed completion.
+	 */
+	| { kind: "text-report" }
+	/**
 	 * The run's postcondition is the artifact it left on disk, so its terminal
 	 * text carries no claim to validate. A caller may bind a workspace-relative
 	 * path to check readability and nonempty content during terminal repair.
@@ -2360,6 +2366,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateOracle(input.contract, input.output);
 		case "external-delegation":
 			return success(input.contract, "unmeasured", { external: true });
+		case "text-report":
+			return success(input.contract, "unmeasured", { text: true });
 		case "artifact-report":
 			return validateArtifactReport(input.contract, input);
 		case "context-handbook":
@@ -2461,6 +2469,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "oracle-report":
 			return '{"verdict":"one line","challenge":"the strongest objection you can mount","changesMyMind":"the evidence that would reverse the verdict","citedDecisions":["decision key or task id you relied on"]}';
 		case "external-delegation":
+		case "text-report":
 			return "any final text";
 		case "artifact-report":
 			return `{"summary":"optional: what the artifact holds","completion":{"state":"done|partly_done|not_done","limitations":[{"what":"...","why":"blocked_by_policy|missing_access|needs_decision|out_of_scope|out_of_budget|not_reproducible|tool_unavailable|other"}],"unverified":["claims made without a check behind them"],"remaining":["optional, for partly_done"]}}; the artifact you wrote ${contract.path === undefined ? "at the location the task named" : `at ${JSON.stringify(contract.path)}, readable and non-empty on disk,`} is the result, and completion declares whether it is finished`;
@@ -2482,6 +2491,7 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 	switch (contract.kind) {
 		case "architect-plan":
 		case "external-delegation":
+		case "text-report":
 		case "code-report":
 			return null;
 		case "artifact-report":
@@ -2656,6 +2666,7 @@ const RECIPE_DECLARABLE_KINDS = [
 	"oracle-report",
 	"external-delegation",
 	"artifact-report",
+	"text-report",
 	"context-handbook",
 	"delegation-plan",
 ] as const;
