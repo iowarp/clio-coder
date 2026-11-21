@@ -97,6 +97,13 @@ const BUDGET_TRACK_LIMIT = 256;
 const MAX_EXHAUSTED_NOTICES_PER_TURN = 3;
 
 /**
+ * Refused calls one model response gets before its next refused sibling fails terminally (C-17). The turn streak
+ * counts a wide batch once, so without this a model could send thirty parallel reads into a spent pool three batches
+ * running. Four is one more than the turn's streak: a batch of four honest parallel reads is not a retry loop.
+ */
+const MAX_EXHAUSTED_NOTICES_PER_BATCH = 4;
+
+/**
  * `details.notExecuted` on an observation call the spent turn pool stopped before it ran (C-17). The result stays
  * `kind:"ok"` so the model reads the notice as it always has; `ToolFinishEvent.notExecuted` carries the type to
  * tool stats, which count the call withheld.
@@ -113,6 +120,10 @@ interface TurnBudgetState {
 	exhaustedStreak: number;
 	/** The model response whose short-circuit last counted toward the streak, so its siblings count once (C-17). */
 	exhaustedBatch: string | null;
+	/** Refusals in `exhaustedBatch`, against MAX_EXHAUSTED_NOTICES_PER_BATCH. */
+	batchRefusals?: number;
+	/** The model calls (`ToolInvokeOptions.observationCall`) refused in `exhaustedBatch`; a chain step repeats one. */
+	batchCalls?: WeakSet<object>;
 }
 
 const turnBudgets = new Map<string, TurnBudgetState>();
@@ -153,6 +164,8 @@ export interface ObservationReservation {
 	poolEvent?: (event: ObservationPoolEvent) => void;
 	/** The model response this call belongs to (`ToolInvokeOptions.correlationId`); its siblings share one refusal count. */
 	batch?: string;
+	/** The model tool call this belongs to (`ToolInvokeOptions.observationCall`), shared by a gateway chain's steps. */
+	call?: object;
 }
 
 /**
@@ -380,6 +393,7 @@ export function reserveObservation(
 					? () => poolEvent("refused")
 					: undefined;
 		const batch = options?.correlationId;
+		const call = options?.observationCall;
 		return {
 			key,
 			limitBytes,
@@ -395,12 +409,15 @@ export function reserveObservation(
 			...(roll === undefined ? {} : { roll }),
 			...(pooled ? { poolEvent } : {}),
 			...(batch === undefined ? {} : { batch }),
+			...(call === undefined ? {} : { call }),
 		};
 	}
 	// A call that got a slice is progress, so the exhausted streak starts over.
 	// Only an unbroken run of short-circuits reaches the terminal failure.
 	state.exhaustedStreak = 0;
 	state.exhaustedBatch = null;
+	delete state.batchRefusals;
+	delete state.batchCalls;
 	const callCapBytes = Math.min(askBytes, remaining);
 	return {
 		key,
@@ -519,14 +536,17 @@ function trackCharge(observation: Observation, reservation: ObservationReservati
  * Settle an observation's pool charge to the bytes of the shaped result the model receives (C-17): its context text
  * and any images it still carries. Called on every shaped result; one that carries no tracked envelope is left alone.
  * A charge only ever falls, so a result shaped twice (a gateway call's inner and outer pass) settles at the smaller.
+ * `deliveredBytes` names what reached the model when a later layer cut the shaped result again (a gateway chain's
+ * aggregate cap) or withheld it whole (a flow restriction, 0).
  */
-export function settleObservationCharge(result: ToolResult): void {
+export function settleObservationCharge(result: ToolResult, deliveredBytes?: number): void {
 	const observation = result.details?.observation;
 	if (observation === null || typeof observation !== "object") return;
 	const pending = pendingCharges.get(observation);
 	if (pending === undefined || pending.reservation.key === null) return;
 	const images = result.kind === "ok" ? (result.images ?? []) : [];
 	const delivered =
+		deliveredBytes ??
 		byteLength(toolResultContextText(result)) + images.reduce((bytes, image) => bytes + byteLength(image.data), 0);
 	if (delivered >= pending.chargedBytes) return;
 	const state = turnBudgets.get(pending.reservation.key);
@@ -546,19 +566,41 @@ function budgetDetails(reservation: ObservationReservation): ObservationBudgetDe
 }
 
 /**
- * Count this short-circuit against the turn's run of them. Siblings of one model response count once, so a wide batch
- * that meets a spent pool is one attempt, not four (C-17). Untracked calls never escalate.
+ * Count this short-circuit against the turn's run of them (C-17). Parallel siblings of one model response count once,
+ * so a wide batch that meets a spent pool is one attempt, not four; a gateway chain's sequential steps are one model
+ * call refused again, and each counts, as at df75c10aa. A batch's refused calls past MAX_EXHAUSTED_NOTICES_PER_BATCH
+ * escalate on their own. Untracked calls never escalate; an unbatched call counts each time.
  */
-function bumpExhaustedStreak(key: string | null, batch: string | undefined): number {
-	if (key === null) return 1;
+function bumpExhaustedStreak(
+	key: string | null,
+	batch: string | undefined,
+	call: object | undefined,
+): { streak: number; batchRefusals: number; unit: "tool batch" | "call" } {
+	if (key === null) return { streak: 1, batchRefusals: 1, unit: "call" };
 	const state = turnBudgets.get(key);
-	if (state === undefined) return 1;
+	if (state === undefined) return { streak: 1, batchRefusals: 1, unit: "call" };
 	state.lastSeenAt = Date.now();
-	if (batch !== undefined && batch === state.exhaustedBatch) return state.exhaustedStreak;
-	state.exhaustedStreak += 1;
-	state.exhaustedBatch = batch ?? null;
-	turnBudgets.set(key, state);
-	return state.exhaustedStreak;
+	if (batch === undefined) {
+		state.exhaustedStreak += 1;
+		state.exhaustedBatch = null;
+		return { streak: state.exhaustedStreak, batchRefusals: 1, unit: "call" };
+	}
+	if (batch !== state.exhaustedBatch) {
+		state.exhaustedStreak += 1;
+		state.exhaustedBatch = batch;
+		state.batchRefusals = 1;
+		state.batchCalls = new WeakSet(call === undefined ? [] : [call]);
+		return { streak: state.exhaustedStreak, batchRefusals: 1, unit: "tool batch" };
+	}
+	state.batchRefusals = (state.batchRefusals ?? 0) + 1;
+	const calls = state.batchCalls ?? new WeakSet<object>();
+	state.batchCalls = calls;
+	let unit: "tool batch" | "call" = "tool batch";
+	if (call !== undefined && calls.has(call)) {
+		state.exhaustedStreak += 1;
+		unit = "call";
+	} else if (call !== undefined) calls.add(call);
+	return { streak: state.exhaustedStreak, batchRefusals: state.batchRefusals, unit };
 }
 
 function bumpCallRefusals(poolEvent: (event: ObservationPoolEvent) => void): number {
@@ -592,16 +634,22 @@ export function observationBudgetExhausted(input: {
 	// the model is told the call waits for it instead of being asked to re-plan or summarize (XR-6).
 	const rolled = reservation.roll !== undefined;
 	reservation.roll?.();
-	const streak = !rolled
-		? bumpExhaustedStreak(reservation.key, reservation.batch)
-		: reservation.poolEvent !== undefined
-			? bumpCallRefusals(reservation.poolEvent)
-			: 1;
-	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
-		const attempt = !rolled && reservation.batch !== undefined ? "tool batch" : "call";
+	const counted = !rolled
+		? bumpExhaustedStreak(reservation.key, reservation.batch, reservation.call)
+		: {
+				streak: reservation.poolEvent !== undefined ? bumpCallRefusals(reservation.poolEvent) : 1,
+				batchRefusals: 1,
+				unit: "call" as const,
+			};
+	const { streak, batchRefusals } = counted;
+	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN || batchRefusals > MAX_EXHAUSTED_NOTICES_PER_BATCH) {
+		const which =
+			streak > MAX_EXHAUSTED_NOTICES_PER_TURN
+				? `This is the ${streak}th ${counted.unit} to hit it`
+				: `This tool batch sent ${batchRefusals} calls into it`;
 		const message =
 			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
-			`This is the ${streak}th ${attempt} to hit it, so no observation tool can return content until the ` +
+			`${which}, so no observation tool can return content until the ` +
 			`next turn. Do not retry this call and do not substitute another one. Re-plan with what you ` +
 			`already have: say what you found, name what is still unread, and propose the next step.`;
 		recordSpentBytes(reservation, byteLength(message));

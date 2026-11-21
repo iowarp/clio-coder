@@ -948,6 +948,9 @@ export const readTool: ToolSpec = {
 			file = { bytes: opened.size, mtimeMs: opened.mtimeMs };
 			if (!opened.isFile())
 				return { kind: "error", message: notAFileMessage(filePath, opened.isDirectory()), details: { file } };
+			// A file that grew between the stat and the open (or a link retargeted) holds what the opened file can return.
+			const grown = opened.size > entry.size ? readReservationBytes(pathArg, request, opened.size) : undefined;
+			if (grown !== undefined) widenObservationReservation(reservation, grown);
 			await readTestSeams.afterIdentity?.(file, filePath);
 			const first = await readExact(handle, 0, Math.min(file.bytes, READ_SCAN_CHUNK_BYTES));
 			if (detectSupportedImageMimeType(first) !== null) {
@@ -987,7 +990,19 @@ export const readTool: ToolSpec = {
 				counted: file.bytes <= READ_LINE_COUNT_BUDGET_BYTES,
 				endsWithNewline: file.bytes > 0 && lastByte === 0x0a,
 			};
-			const view = request.tail === null ? await readHead(handle, request, plan) : await readTail(handle, request, plan);
+			const reader: FileHandle = handle;
+			const readView = () => (request.tail === null ? readHead(reader, request, plan) : readTail(reader, request, plan));
+			let view = await readView();
+			// A range hold is 256 bytes a line, so a longer first (or, for tail, last) line would show only a cut piece with
+			// no continuation. Widen toward the per-call cap the read had before C-17 and read the window again.
+			if (!("kind" in view) && view.shownCount === 0 && view.readRange.partialLine && docsIndex === null) {
+				const before = reservation.callCapBytes;
+				widenObservationReservation(reservation, readMaxBytes());
+				if (reservation.callCapBytes > before) {
+					plan.cap = reservation.callCapBytes;
+					view = await readView();
+				}
+			}
 			if ("kind" in view) return view;
 			if (docsIndex !== null) {
 				view.output += `\n\n${docsIndex}`;

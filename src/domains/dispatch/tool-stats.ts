@@ -132,18 +132,26 @@ export function summarizeToolActivity(
 	classify: (tool: string) => ActionClass,
 ): ToolActivitySummary {
 	const summary: ToolActivitySummary = { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false };
+	let withheld = 0;
 	for (const stat of stats.values()) {
 		if (stat.tool === "clio_submit_result") continue;
 		summary.calls += stat.count;
 		summary.succeeded += stat.ok;
 		summary.failed += stat.errors;
 		summary.blocked += stat.blocked;
+		withheld += stat.withheld ?? 0;
 		if (stat.ok > 0 && MUTATING_ACTION_CLASSES.has(classify(stat.tool))) {
 			summary.mutatingSucceeded = true;
 		}
 		if (stat.tool === "store" && (stat.okWrites ?? 0) > 0) summary.storeWritten = true;
 	}
+	if (withheld > 0) summary.withheld = withheld;
 	return summary;
+}
+
+/** Calls that ran: a notice the spent observation pool returned in a call's place ran nothing (C-17). */
+function executedCalls(activity: Pick<ToolActivitySummary, "calls" | "withheld">): number {
+	return activity.calls - (activity.withheld ?? 0);
 }
 
 /**
@@ -154,8 +162,12 @@ export function summarizeToolActivity(
  */
 export function zeroSuccessfulToolNote(activity: ToolActivitySummary): string | null {
 	if (activity.succeeded > 0) return null;
-	if (activity.calls === 0) return "completed without executing any tools";
-	return `completed without a successful tool call (${activity.calls} attempted: ${activity.failed} failed, ${activity.blocked} blocked)`;
+	const withheld = activity.withheld ?? 0;
+	if (executedCalls(activity) === 0)
+		return withheld > 0
+			? `completed without executing any tools (${withheld} withheld by the observation budget)`
+			: "completed without executing any tools";
+	return `completed without a successful tool call (${activity.calls} attempted: ${activity.failed} failed, ${activity.blocked} blocked${withheld > 0 ? `, ${withheld} withheld` : ""})`;
 }
 
 /**
@@ -302,7 +314,7 @@ export function workerNoWorkDetail(input: {
 		const reason = input.limitationDetail?.trim() || report;
 		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
 	}
-	if (input.toolLaneObserved !== false && input.activity.calls === 0) {
+	if (input.toolLaneObserved !== false && executedCalls(input.activity) === 0) {
 		return "worker executed no tools, so it did none of its assignment";
 	}
 	// A worker that found nothing to change says so; one incidental refusal on the way does not undo that finish.
@@ -320,11 +332,12 @@ export function workerNoWorkDetail(input: {
  * subprocess whose tool lane Clio cannot see.
  */
 export function readScopedNoToolsReason(input: {
-	activity: Pick<ToolActivitySummary, "calls">;
+	activity: Pick<ToolActivitySummary, "calls" | "withheld">;
 	obligation: Obligation;
 	toolLaneObserved: boolean;
 }): string | null {
-	if (input.obligation !== "observed-evidence" || !input.toolLaneObserved || input.activity.calls > 0) return null;
+	if (input.obligation !== "observed-evidence" || !input.toolLaneObserved || executedCalls(input.activity) > 0)
+		return null;
 	return "obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited";
 }
 

@@ -658,6 +658,12 @@ export interface ToolInvokeOptions {
 	 * the next tool batch and a refusal tells the model to make the call again there.
 	 */
 	observationPoolEvent?: (event: ObservationPoolEvent) => void;
+	/**
+	 * One model tool call's identity for the observation pool's refusal count (C-17): set once per call by the agent
+	 * tool runner, and spread by a gateway chain into each step, so its sequential steps count as that call refused
+	 * again while parallel siblings each carry their own.
+	 */
+	observationCall?: object;
 	/** Session-effective ceiling for one tool result, read again before every invocation. */
 	toolResultMaxBytes?: number;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
@@ -1560,7 +1566,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// not to the screening classifier, not to the hooks, not to the model.
 				// An error can quote the source, so it is labeled and absorbed too.
 				const resultWithheld = withheld(sourceRestrictions, "result");
-				if (resultWithheld !== null) return resultWithheld;
+				if (resultWithheld !== null) {
+					// Nothing of the result reaches the model, so the turn pool pays for none of it (C-17).
+					settleObservationCharge(result, 0);
+					return resultWithheld;
+				}
 				// A refusal settles only after its label is absorbed: an MCP server's
 				// refusal quotes the server's own text, which the source rule labels
 				// exactly as it would label a result.

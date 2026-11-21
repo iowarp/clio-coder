@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { recordToolFinish } from "../../src/domains/dispatch/tool-stats.js";
+import {
+	readScopedNoToolsReason,
+	recordToolFinish,
+	summarizeToolActivity,
+	zeroSuccessfulToolNote,
+} from "../../src/domains/dispatch/tool-stats.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
@@ -599,7 +604,7 @@ describe("read windowed reader", () => {
 		strictEqual(steered.run.stopped(), true);
 	});
 
-	it("charges parallel reads to the turn pool before any of them awaits", async () => {
+	it("charges parallel reads to the turn pool before any of them opens its file", async () => {
 		configureGuardrails({ readMaxBytes: 4096, observationTurnBudgetBytes: 8192 });
 		const paths = ["a", "b", "c", "d"].map((name) => join(scratch.dir, `${name}.txt`));
 		for (const path of paths) writeFileSync(path, Array.from({ length: 400 }, (_, i) => fixedLine(i + 1, 64)).join(""));
@@ -607,7 +612,8 @@ describe("read windowed reader", () => {
 		const results = await Promise.all(paths.map((path) => readTool.run({ path }, options)));
 		// Each sibling used to reserve against the untouched pool across its stat
 		// and return a full 4 KiB slice, spending the 8 KiB pool twice over. A read
-		// reserves once its stat resolves (C-17), so which two win is the stat order.
+		// reserves once its stat resolves (C-17), and the threadpool settles the four
+		// stats in no fixed order, so the row asserts which count wins, not which read.
 		const exhausted = results.map((result) => result.kind === "ok" && result.output.startsWith("[observation budget"));
 		deepStrictEqual([...exhausted].sort(), [false, false, true, true]);
 	});
@@ -679,6 +685,15 @@ describe("read windowed reader", () => {
 			ranges.map((result) => (result.kind === "ok" ? result.output.slice(0, 12) : result.message)),
 			[1, 51, 101, 151, 201].map((line) => `L${String(line).padStart(10, "0")} `),
 		);
+		// A line longer than its range share widens toward the per-call cap instead of showing a cut piece.
+		const long = join(scratch.dir, "long.txt");
+		writeFileSync(long, `${"y".repeat(3072)}\nshort\n`);
+		const wide = await readTool.run(
+			{ path: long, limit: 1 },
+			{ sessionId: "c17-reserve", turnId: `${scratch.dir}:long` },
+		);
+		ok(wide.kind === "ok" && wide.output.startsWith(`${"y".repeat(3072)}\n`), JSON.stringify(wide).slice(0, 300));
+		match(wide.output, /next: offset=2/);
 	});
 
 	it("charges the turn pool what the shaped result delivered, not the bytes before the session cap (C-17)", async () => {
@@ -712,6 +727,16 @@ describe("read windowed reader", () => {
 		for (const event of events) recordToolFinish(stats, event);
 		const stat = stats.get(ToolNames.Read);
 		deepStrictEqual([stat?.count, stat?.ok, stat?.withheld], [2, 1, 1]);
+		// A run whose only calls were withheld ran nothing: the activity says so and the no-work checks see it.
+		const onlyWithheld = new Map<string, ToolCallStat>();
+		for (const event of events.slice(1)) recordToolFinish(onlyWithheld, event);
+		const activity = summarizeToolActivity(onlyWithheld, () => "read");
+		deepStrictEqual([activity.calls, activity.succeeded, activity.withheld], [1, 0, 1]);
+		ok(readScopedNoToolsReason({ activity, obligation: "observed-evidence", toolLaneObserved: true }) !== null);
+		strictEqual(
+			zeroSuccessfulToolNote(activity),
+			"completed without executing any tools (1 withheld by the observation budget)",
+		);
 	});
 
 	it("escalates the exhausted-pool refusal on the fourth batch, never on the fourth sibling of one batch (C-17)", async () => {
@@ -732,6 +757,32 @@ describe("read windowed reader", () => {
 			["error", "error"],
 		);
 		match(fourth[0]?.kind === "error" ? fourth[0].message : "", /This is the 4th tool batch to hit it/);
+		// One batch of many siblings is refused four times, then its later siblings fail.
+		const wideTurn = { sessionId: "c17-batches", turnId: `${scratch.dir}#wide` };
+		ok((await readTool.run({ path }, wideTurn)).kind === "ok");
+		const wide = await Promise.all(
+			Array.from({ length: 6 }, () =>
+				readTool.run({ path }, { ...wideTurn, correlationId: "round-1", observationCall: {} }),
+			),
+		);
+		deepStrictEqual(wide.map((r) => r.kind).sort(), ["error", "error", "ok", "ok", "ok", "ok"]);
+		// A gateway chain's sequential steps are one model call refused again: the fourth step fails, as at df75c10aa.
+		const chainTurn = { sessionId: "c17-batches", turnId: `${scratch.dir}#chain` };
+		ok((await readTool.run({ path }, chainTurn)).kind === "ok");
+		const steps: string[] = [];
+		await runGatewayChain(
+			Array.from({ length: 6 }, (_, n) => ({ id: `s${n}`, capability: "read", args: { path } })),
+			{
+				getSpec: () => undefined,
+				call: async (_name, args, options) => {
+					const result = await readTool.run(args, options);
+					steps.push(result.kind);
+					return result;
+				},
+			},
+			{ ...chainTurn, correlationId: "round-1", toolCallId: "call-1", observationCall: {} },
+		);
+		deepStrictEqual(steps, ["ok", "ok", "ok", "error"]);
 	});
 
 	it("reports a file that changes in flight with both identities and a notice", async () => {

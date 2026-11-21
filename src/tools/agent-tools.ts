@@ -283,6 +283,8 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	const invokeOpts: ToolInvokeOptions = {};
 	if (input.invokeOptions) Object.assign(invokeOpts, input.invokeOptions);
 	if (signal) invokeOpts.signal = signal;
+	// One token per model tool call: a gateway chain spreads it into its steps (C-17, `observationCall`).
+	if (invokeOpts.observationCall === undefined) invokeOpts.observationCall = {};
 	// The registry parks a call that needs an operator decision inside this
 	// invocation, so the span below covers the operator as well as the tool.
 	// Subtracting the park keeps `durationMs` a measurement of the tool: an
@@ -502,6 +504,7 @@ function recordToolSettled(
 			...(outcome !== "blocked" && result ? { resultBytes: Buffer.byteLength(toolResultContextText(result)) } : {}),
 			...(images > 0 ? { images } : {}),
 			...(extra?.terminate === true ? { terminate: true as const } : {}),
+			...(outcome === "ok" && extra?.notExecuted !== undefined ? { notExecuted: extra.notExecuted } : {}),
 			...(outcome === "blocked"
 				? {
 						blocked: extra?.deniedPark

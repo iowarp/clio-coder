@@ -558,6 +558,8 @@ export interface ToolActivitySummary {
 	mutatingSucceeded: boolean;
 	/** The worker wrote at least one blob into a granted store tag. */
 	storeWritten?: boolean;
+	/** Calls in `calls` the spent observation pool answered with a notice instead of running (C-17); absent when none. */
+	withheld?: number;
 }
 
 /** One live-grant request on a worker receipt: who could decide, who did, and whether the call ran. */

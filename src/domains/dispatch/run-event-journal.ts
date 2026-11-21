@@ -48,6 +48,8 @@ export interface RunEventJournalFacts {
 	/** Present-tense descriptor verb (`reading`); the object is the line's detail. */
 	verb?: string;
 	outcome?: "ok" | "error" | "blocked";
+	/** An `ok` finish whose call returned a notice without running: the spent observation pool stopped it (C-17). */
+	notExecuted?: "observation_budget";
 	durationMs?: number;
 	/** Why a call was blocked or failed, or why an approval resolved the way it did. */
 	reason?: string;

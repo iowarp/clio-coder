@@ -654,7 +654,8 @@ function renderRunChecks(run: SettledRunView): string[] {
 		...(failedOnBase > 0 ? [`${failedOnBase} failing check(s) also failed on the task base.`] : []),
 		...(run.result?.hostVerification?.reason ? [run.result.hostVerification.reason] : []),
 		...run.settled.tools.map(
-			(stat) => `- ${stat.tool}: ${stat.ok} succeeded, ${stat.errors} failed, ${stat.blocked} blocked`,
+			(stat) =>
+				`- ${stat.tool}: ${stat.ok} succeeded, ${stat.errors} failed, ${stat.blocked} blocked${(stat.withheld ?? 0) > 0 ? `, ${stat.withheld} withheld by the observation budget` : ""}`,
 		),
 	];
 }

@@ -829,7 +829,8 @@ function dispatchFailureReason(event: ChatLoopEvent): string {
 function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeeded: number; blocked: number } {
 	const totals = { calls: 0, succeeded: 0, blocked: 0 };
 	for (const stat of stats.values()) {
-		totals.calls += stat.count;
+		// A notice the spent observation pool returned in a call's place ran nothing, so it is no call here (C-17).
+		totals.calls += stat.count - (stat.withheld ?? 0);
 		totals.succeeded += stat.ok;
 		totals.blocked += stat.blocked;
 	}
