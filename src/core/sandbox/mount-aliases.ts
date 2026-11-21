@@ -111,12 +111,13 @@ function collapsibleRootView(
  * workspace, scratch and writable roots, the cwd) is covered by masking that
  * mount once as a directory instead of binding over each file in it: every
  * file bind is one more mount a host program renaming the file can break
- * (C-38), and the directory hides every alias at once.
+ * (C-38), and the directory hides every alias at once. Without `roots` no
+ * mount is known to be safe to hide, and every alias keeps its own mask.
  */
 export function withMountAliases(
 	masks: ReadonlyArray<SandboxMaskedPath>,
 	mountinfo: string = MOUNTINFO,
-	roots: ReadonlyArray<string> = [],
+	roots?: ReadonlyArray<string>,
 ): SandboxMaskedPath[] | Error {
 	let mounts: MountRecord[];
 	try {
@@ -134,7 +135,7 @@ export function withMountAliases(
 	// included, and a mask there leaves the command a read-only /dev/null.
 	const secretBearing = masks.filter((mask) => !isDeviceNode(mask.path));
 	const aliases = maskAliases(secretBearing, mounts).map((alias) =>
-		collapsibleRootView(alias.via, mounts, roots)
+		roots !== undefined && collapsibleRootView(alias.via, mounts, roots)
 			? { path: alias.via.mountPoint, kind: "directory" as const }
 			: { path: alias.path, kind: alias.kind },
 	);

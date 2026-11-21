@@ -697,7 +697,11 @@ export async function compareHostVerificationBase(input: {
 				...baseMasks,
 				...secretMasks,
 			]);
-			const masks = withMountAliases([...baseMasks, ...secretMasks, ...sockets.masks]);
+			const masks = withMountAliases([...baseMasks, ...secretMasks, ...sockets.masks], undefined, [
+				worktree.path,
+				worktree.root,
+				...links.map((link) => dirname(link.target)),
+			]);
 			// A sandbox that cannot see the mount aliases would leave secrets readable.
 			if (masks instanceof Error) return { exitCode: null, incomplete: true, lines: [] };
 			const invocation = buildSandboxInvocation(

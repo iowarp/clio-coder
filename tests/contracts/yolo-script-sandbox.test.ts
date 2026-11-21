@@ -358,9 +358,10 @@ test("under bwrap a yolo script runs in its own PID namespace and cannot reach a
 		`test -S ${join(scratch, "agent.sock")} || echo auth-sock-hidden`,
 	].join("; ");
 	const spec = mainSandboxInvocationSpec(policy, { argv: ["/bin/bash", "-c", script] }, scratch, masks);
-	const { args } = buildBwrapInvocation(spec, availability.executable ?? undefined);
-	assert.ok(args.includes("--unshare-pid"));
-	const result = await run(availability.executable ?? "bwrap", args);
+	const invocation = buildBwrapInvocation(spec, availability.executable ?? undefined);
+	assert.ok(invocation.args.includes("--unshare-pid"));
+	// With masks the invocation is the retrying launcher shell, not bwrap itself: spawn what it names.
+	const result = await run(invocation.file, invocation.args);
 	assert.equal(result.code, 0, result.output);
 	for (const marker of ["own-pid-namespace", "tmp-agent-hidden", "auth-sock-hidden"]) {
 		assert.match(result.output, new RegExp(marker, "u"), result.output);
