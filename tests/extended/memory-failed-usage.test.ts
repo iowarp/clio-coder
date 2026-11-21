@@ -672,6 +672,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		unregister();
 		await journal.close();
 	});
+	const steps: Parameters<ReturnType<typeof createTaskMemoryTelemetrySink>["record"]>[0][] = [];
 	let recorded!: () => void;
 	const completed = new Promise<void>((resolve) => {
 		recorded = resolve;
@@ -699,7 +700,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		client: {
 			getModelClient: () => ({
 				complete: async () => ({
-					text: "<operations>[]</operations>",
+					text: '<operations>[{"op":"save_lesson","content":"The earlier test command failed."}]</operations>',
 					usage: {
 						targetId: "history-target",
 						attributedModelId: "history-model",
@@ -728,6 +729,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		scopeKey: () => "current-session",
 		telemetry: {
 			record(step) {
+				steps.push(step);
 				sink.record(step);
 				recorded();
 			},
@@ -741,6 +743,8 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	const spend = readTaskMemorySpendSummary(stateDir);
 	assert.equal(spend.llmSteps, 1);
 	assert.equal(spend.totalTokens.unknownCount, 1);
+	// C-20: the step's bank delta is what the review wrote, not a constant zero.
+	assert.deepEqual(steps[0]?.bankDelta.knowledge, { added: 1, updated: 0, deleted: 0 });
 });
 
 test("an ACP host's guardian starts no history review before the first turn, at boot or on a reopen (ACP-6)", async (t) => {

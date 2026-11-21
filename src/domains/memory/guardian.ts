@@ -48,7 +48,7 @@ import type { MemoryInterventionRegistration, MemoryStepLaunchOutcome } from "./
 import { lessonEvidence } from "./lesson-evidence.js";
 import type { HistoryFiling } from "./lesson-feedback.js";
 import type { KeptLesson } from "./lesson-projection.js";
-import type { TaskMemoryTelemetrySink } from "./memory-events.js";
+import type { TaskMemoryBankDelta, TaskMemoryTelemetrySink } from "./memory-events.js";
 import { taskMemoryBankDelta } from "./memory-events.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
@@ -379,6 +379,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		const bank = new TaskMemoryBank();
 		const run = (selected: TaskMemoryModelClient): Promise<TaskMemoryPolicyResult> => {
 			const started = process.hrtime.bigint();
+			const before = bank.snapshot();
 			return runTaskMemoryPolicy(bank, selected, {
 				purpose: "memory.history",
 				isCurrent,
@@ -401,7 +402,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 					trajectoryMaxChars: depth.maxChars,
 				},
 			}).then((result) => {
-				record(result, selected, started);
+				record(result, selected, started, taskMemoryBankDelta(before, bank.snapshot()));
 				return result;
 			});
 		};
@@ -479,12 +480,18 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		return "ran";
 	}
 
-	function record(result: TaskMemoryPolicyResult, client: TaskMemoryModelClient, started: bigint): void {
+	function record(
+		result: TaskMemoryPolicyResult,
+		client: TaskMemoryModelClient,
+		started: bigint,
+		bankDelta: TaskMemoryBankDelta,
+	): void {
 		try {
 			deps.telemetry?.record({
 				triggerReasons: ["idle_review"],
 				tier: "llm",
-				bankDelta: taskMemoryBankDelta(EMPTY_SNAPSHOT, EMPTY_SNAPSHOT),
+				// What this review wrote to its own bank; a constant zero hid the steps that filed lessons (C-20).
+				bankDelta,
 				decision:
 					result.reason === "endpoint_preempted" || BACKGROUND_SKIP_REASONS.has(result.reason as BackgroundSkipReason)
 						? "dropped"
@@ -545,8 +552,6 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		},
 	};
 }
-
-const EMPTY_SNAPSHOT = new TaskMemoryBank().snapshot();
 
 function deepestDepth(idleMs: number): number {
 	let index = 0;
