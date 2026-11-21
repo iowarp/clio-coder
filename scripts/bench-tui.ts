@@ -35,8 +35,9 @@ const turns = positive(values.turns);
 const frames = positive(values.frames);
 const repeats = positive(values.repeats);
 
+const columns = positive(values.columns);
 class CountingTerminal implements Terminal {
-	columns = positive(values.columns);
+	columns = columns;
 	rows = positive(values.rows);
 	kittyProtocolActive = false;
 	bytes = 0;
@@ -90,6 +91,12 @@ const workloads = [
 	"telemetry",
 	"turn",
 	"skill",
+	// A worker still running near the top of a long session while the reply streams at the end.
+	"live-early",
+	// A width that changes every frame, as a drag-resize delivers it, so no cached layout matches.
+	"resize",
+	// Alt+O cycling the three output styles, one per frame.
+	"style",
 	...(Object.keys(replySizes) as (keyof typeof replySizes)[]),
 ] as const;
 const modes = ["regular", "fullscreen"] as const;
@@ -190,10 +197,10 @@ function recording(panel: ChatPanel, calls: Array<(target: ChatPanel) => void>):
 	});
 }
 
-/** The rows a renderer holds as painted: the regular screen's diff baseline, or the fullscreen document. */
+/** The rows a renderer holds as painted: the regular screen's diff baseline, or the fullscreen screen. */
 function paintedRows(tui: InstrumentedTuiMainScreen | InstrumentedTuiAltScreen): readonly string[] {
-	const state = tui as unknown as { previousLines?: readonly string[]; lastDocument?: readonly string[] };
-	return state.previousLines ?? state.lastDocument ?? [];
+	const state = tui as unknown as { previousLines?: readonly string[]; previousScreen?: readonly string[] };
+	return (tui instanceof InstrumentedTuiAltScreen ? state.previousScreen : state.previousLines) ?? [];
 }
 
 const yieldToLoop = (): Promise<void> => new Promise((done) => setImmediate(done));
@@ -218,14 +225,15 @@ function mount(
 async function sample(
 	mode: TuiMode,
 	workload: Workload,
-): Promise<{ milliseconds: number[]; bytes: number; verified: number; mismatches: number }> {
+): Promise<{ milliseconds: number[]; bytes: number; documentBytes: number; verified: number; mismatches: number }> {
 	const terminal = new CountingTerminal();
 	let view: never | null = null;
+	let style: (typeof styles)[number] | undefined = outputStyle;
 	const panelOptions = {
 		now: () => 1_000,
 		getTerminalRows: () => terminal.rows,
 		getTelemetry: () => view,
-		...(outputStyle ? { getOutputStyle: () => outputStyle } : {}),
+		...(outputStyle || workload === "style" ? { getOutputStyle: () => style ?? "standard" } : {}),
 		copyMarks: mode === "fullscreen",
 	};
 	// Under --verify every transcript call is kept, so a fresh panel can replay it with no render cache.
@@ -245,6 +253,7 @@ async function sample(
 			} as never);
 		}
 		settle(panel, answer);
+		if (workload === "live-early" && index === 0) panel.applyWorkerState(workerState(9_000, true));
 		if (workload === "telemetry" && index % 10 === 0) panel.applyWorkerState(workerState(1_000 + index, false));
 	}
 	let draft = "draft";
@@ -255,6 +264,7 @@ async function sample(
 		const fresh = createChatPanel(panelOptions);
 		for (const replay of calls) replay(fresh);
 		const freshTerminal = new CountingTerminal();
+		freshTerminal.columns = terminal.columns;
 		const freshTui = mount(mode, freshTerminal, fresh, new Text(draft, 0, 0));
 		try {
 			freshTui.renderNow();
@@ -334,6 +344,10 @@ async function sample(
 					result: { content: [{ type: "text", text: "ok" }] },
 					isError: false,
 				} as never);
+			} else if (workload === "resize") {
+				terminal.columns = columns - (index % 40);
+			} else if (workload === "style") {
+				style = styles[index % styles.length];
 			} else if (workload === "turn") {
 				panel.appendUser(`Prompt ${index}`);
 				panel.applyEvent({ type: "agent_start" } as never);
@@ -362,6 +376,7 @@ async function sample(
 			await yieldToLoop();
 		}
 		terminal.bytes = 0;
+		let documentBytes = 0;
 		const milliseconds: number[] = [];
 		let verified = 0;
 		let mismatches = 0;
@@ -370,6 +385,11 @@ async function sample(
 			mutate(index + 20);
 			tui.renderNow();
 			milliseconds.push(performance.now() - start);
+			// Outside the timed span: the size of the transcript frame, every row of history included. The fullscreen
+			// transcript keeps a column for its scrollbar; at that width this is the frame just rendered, a cache hit.
+			if (index === frames - 1)
+				for (const row of panel.render(mode === "fullscreen" ? terminal.columns - 1 : terminal.columns))
+					documentBytes += Buffer.byteLength(row) + 1;
 			// Outside the timed span; every tenth frame and the last, since each check re-renders the whole transcript.
 			if (values.verify && (index % 10 === 0 || index === frames - 1)) {
 				verified += 1;
@@ -377,7 +397,7 @@ async function sample(
 			}
 			await yieldToLoop();
 		}
-		return { milliseconds, bytes: terminal.bytes, verified, mismatches };
+		return { milliseconds, bytes: terminal.bytes, documentBytes, verified, mismatches };
 	} finally {
 		tui.stop();
 	}
@@ -400,6 +420,7 @@ for (const mode of modes) {
 			p99Ms: percentile(0.99),
 			maxMs: percentile(1),
 			bytesPerFrame: Math.round(samples.reduce((sum, entry) => sum + entry.bytes, 0) / times.length),
+			documentBytes: samples[0]?.documentBytes ?? 0,
 			...(values.verify
 				? {
 						verifiedFrames: samples.reduce((sum, entry) => sum + entry.verified, 0),
@@ -414,7 +435,7 @@ console.log(
 		{
 			node: process.version,
 			platform: process.platform,
-			columns: positive(values.columns),
+			columns,
 			rows: positive(values.rows),
 			turns,
 			frames,
