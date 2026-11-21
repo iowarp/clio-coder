@@ -554,6 +554,18 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	const textDomain = `TEXTDOMAINDIR=${temp}/mo\nTEXTDOMAIN=x\n`;
 	const localeDelete = `${textDomain}rm -rf $"${temp}/safe"`;
 	strictEqual(resolveScratchDeleteOperands(localeDelete).command, localeDelete);
+	// Neon finding 3: a glob or brace operand the projection leaves unplaced is read by the walk from the cd base, where
+	// `*\/..` climbs out or `*` expands through a link, so the leading temp cd is no base for it.
+	mkdirSync(join(temp, "run"), { recursive: true });
+	symlinkSync(cwd, join(temp, "run", "link"));
+	t.after(() => rmSync(join(temp, "run", "link"), { force: true }));
+	const up = ["..", "..", "..", "home", "user", "important"].join("/");
+	for (const command of [
+		`cd ${temp}/run && mkdir a && rm -rf {a,b}/${up}`,
+		`cd ${temp}/run && rm -rf */important`,
+		`cd ${temp}/run && mkdir a && rm -rf */${up}`,
+	])
+		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 	// Row 261 final (r261c): the floor gaps the second review found, each red at the bounce-1 head.
 	symlinkSync(".git", join(cwd, "gitlink261"));
 	t.after(() => rmSync(join(cwd, "gitlink261"), { force: true }));

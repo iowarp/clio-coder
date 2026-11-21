@@ -698,6 +698,11 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 	let linkRisk = false;
 	let hasDelete = false;
 	let failed = false;
+	/**
+	 * A delete operand the projection left for the walk while a cd may have moved the shell: a glob or brace (`*\/../..`)
+	 * or a path below a link the walk would read from the cd base, so the cd neither stays a base nor is rewritten.
+	 */
+	let unplaced = false;
 	const singleChain = script.items.length === 1 && script.items[0]?.andOr.ops.every((op) => op === "&&") === true;
 	const quoted = (value: string): string => (/^[\w./+@%,:=-]+$/u.test(value) ? value : shellQuote(value));
 
@@ -713,26 +718,42 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 			}
 			if (options && value?.startsWith("-") && value !== "-") {
 				// An option the reader does not know may change what the delete reaches: the step stays the walk's.
-				if (!SCRATCH_DELETE_OPTION.test(value)) return;
+				if (!SCRATCH_DELETE_OPTION.test(value)) {
+					unplaced = true;
+					return;
+				}
 				continue;
 			}
 			const [only] = word.parts;
 			const freshPin = word.parts.length === 1 && only?.kind === "param" ? pins.get(only.name) : undefined;
 			let target: string | null = freshPin?.fresh === true ? freshPin.target : value;
-			if (target === null || target === "") continue;
-			if (!path.isAbsolute(target)) {
-				if (cdBase === null) continue;
+			if (target === null || target === "") {
+				unplaced = true;
+				continue;
+			}
+			const relative = !path.isAbsolute(target);
+			if (relative) {
+				if (cdBase === null) {
+					unplaced = true;
+					continue;
+				}
 				target = `${cdBase}/${target}`;
 			}
 			const follows = /\/\.?$/u.test(target);
 			const suffix = tempSuffix(target);
-			if (suffix === null || suffix.length === 0) continue;
+			if (suffix === null || suffix.length === 0) {
+				if (relative) unplaced = true;
+				continue;
+			}
 			const clean = path.join(target.startsWith(canonicalTemp) ? canonicalTemp : temp, ...suffix);
 			if (!realUnderTemp(clean, suffix)) {
 				failed = true;
 				return;
 			}
-			if (linkRisk && (suffix.length !== 1 || follows)) continue;
+			if (linkRisk && (suffix.length !== 1 || follows)) {
+				if (relative) unplaced = true;
+				continue;
+			}
 			planned.push({ start: word.start, end: word.end, text: quoted(follows ? `${clean}/` : clean) });
 		}
 		edits.push(...planned);
@@ -823,6 +844,7 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 				if (name === "mkdir") continue;
 				if (SCRATCH_DELETES.has(name)) {
 					if (alone) projectDelete(step, cdBase);
+					else unplaced = true;
 					if (failed) return unchanged;
 					continue;
 				}
@@ -835,8 +857,9 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 		for (const name of chainNames) pins.delete(name);
 	}
 	// A program may plant a link where the walk would follow the cd as a base, so only a call that runs none keeps it,
-	// and the cd stays as written: a rewritten landing would be a base the walk places under a scratch root.
-	if (linkRisk) leadingCd = null;
+	// and the cd stays as written: a rewritten landing would be a base the walk places under a scratch root. A delete
+	// operand left unplaced (a glob, a brace, `..`) is read by the walk from that base, so it voids the cd the same way.
+	if (linkRisk || unplaced) leadingCd = null;
 	else edits.push(...cdEdits);
 	if (!hasDelete || (edits.length === 0 && leadingCd === null)) return unchanged;
 	let projected = command;
