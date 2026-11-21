@@ -649,14 +649,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		!options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1",
 	);
 	const bootConversions = takeBootMigrationNotices();
-	{
-		// A workspace's `.clio-coder/` converts the first time Clio opens it, before any domain reads it.
-		const { convertWorkspaceOnce, describeConversion } = await import("../domains/lifecycle/canonical-names.js");
-		const converted = convertWorkspaceOnce(process.cwd());
-		if (converted) bootConversions.push(describeConversion(converted, "this workspace"));
-		// A `.clio-coder/` from before Clio wrote its own ignore file gets one on the next open.
-		if (existsSync(join(process.cwd(), ".clio-coder"))) ensureProjectIgnore(process.cwd());
-	}
+	// A `.clio-coder/` without Clio's own ignore file gets one on open.
+	if (existsSync(join(process.cwd(), ".clio-coder"))) ensureProjectIgnore(process.cwd());
 	// The leased TUI turns boot diagnostics into transcript notices. Without a
 	// lease (instant shell off) stderr would print before the first frame, so
 	// the interactive boot holds trust notices for the transcript instead (C-4).
@@ -2400,7 +2394,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				},
 				hasSourceRules: flowLedger.hasSourceRules,
 			},
-			snapshot.version === 2 ? snapshot.source.sessionId : null,
+			snapshot.source.sessionId,
 		);
 	const seedCurrentTaskMemoryFromHandoff = () => {
 		return seedTaskMemoryFromNewestHandoff(

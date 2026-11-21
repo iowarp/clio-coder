@@ -11,13 +11,9 @@ import { buildProjectOrientation, type ProjectOrientation, parseProjectOrientati
 /**
  * How the last handbook was produced. "model" is the `context-bootstrap`
  * dispatch; "heuristic" is the deterministic layer alone; "existing" preserved
- * what was already on disk. "scout" is the pre-0.3.0 spelling of "model", back
- * when bootstrap ran through the Scout recipe; it is accepted on read so an
- * upgrade does not discard a state file, and never written.
+ * what was already on disk.
  */
 export type BootstrapGenerationMode = "model" | "heuristic" | "existing";
-
-const LEGACY_BOOTSTRAP_GENERATION_MODE = "scout";
 
 export type BootstrapParserOutcome = "parsed" | "rejected" | "not-run";
 
@@ -218,20 +214,6 @@ export function statePath(cwd: string): string {
 	return join(cwd, STATE_RELATIVE_PATH);
 }
 
-/**
- * Rewrite the one legacy spelling in place before validation. A state file
- * written by an older Clio is otherwise rejected wholesale by `isProjectState`,
- * which silently discards the fingerprint and makes the next session re-run
- * bootstrap it did not need.
- */
-function migrateLegacyGenerationMode(parsed: unknown): void {
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
-	const last = (parsed as Record<string, unknown>).lastBootstrap;
-	if (typeof last !== "object" || last === null || Array.isArray(last)) return;
-	const record = last as Record<string, unknown>;
-	if (record.mode === LEGACY_BOOTSTRAP_GENERATION_MODE) record.mode = "model";
-}
-
 export function readClioState(cwd: string): ClioProjectState | null {
 	const filePath = statePath(cwd);
 	if (!existsSync(filePath)) return null;
@@ -241,7 +223,6 @@ export function readClioState(cwd: string): ClioProjectState | null {
 	} catch {
 		return null;
 	}
-	migrateLegacyGenerationMode(parsed);
 	if (!isProjectState(parsed)) return null;
 	const orientation = parseProjectOrientation(parsed.orientation);
 	if (orientation) parsed.orientation = orientation;

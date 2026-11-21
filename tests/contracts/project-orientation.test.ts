@@ -14,12 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fallbackBootstrapOutput, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { runContextClear } from "../../src/domains/context/clear.js";
-import {
-	codemapPath,
-	codewikiPath,
-	legacyCodewikiPath,
-	readCodewiki,
-} from "../../src/domains/context/codewiki/artifact.js";
+import { codemapPath, codewikiPath, readCodewiki } from "../../src/domains/context/codewiki/artifact.js";
 import {
 	coordinateCodewikiExclusive,
 	coordinateCodewikiWrite,
@@ -191,8 +186,10 @@ test("legacy codemap migrates under the existing lease; malformed canonical neve
 	try {
 		writeFileSync(join(env.dir, "a.ts"), "export const before = 1;\n");
 		await index(env.dir);
-		renameSync(codemapPath(env.dir), legacyCodewikiPath(env.dir));
-		strictEqual(codewikiPath(env.dir), legacyCodewikiPath(env.dir));
+		// An index under the old name is not read; the next use builds codemap.json.
+		const oldName = join(env.dir, ".clio-coder", "codewiki.json");
+		renameSync(codemapPath(env.dir), oldName);
+		strictEqual(readCodewiki(env.dir), null);
 		await ensureCodewikiOnDisk(env.dir);
 		ok(existsSync(codemapPath(env.dir)));
 		strictEqual(codewikiPath(env.dir), codemapPath(env.dir));
@@ -391,8 +388,9 @@ test("legacy configuration-only maps backfill content identities before canonica
 	try {
 		writeFileSync(join(env.dir, "package.json"), '{"name":"configuration-only"}');
 		const original = await index(env.dir);
-		unlinkSync(codemapPath(env.dir));
-		writeFileSync(legacyCodewikiPath(env.dir), JSON.stringify({ ...original.codewiki, version: 4 }));
+		// An index of an earlier version is not read; the next use rebuilds it.
+		writeFileSync(codemapPath(env.dir), JSON.stringify({ ...original.codewiki, version: 4 }));
+		strictEqual(readCodewiki(env.dir), null);
 		const migrated = await ensureCodewikiOnDisk(env.dir);
 		ok(readCodewiki(env.dir));
 		ok(migrated.codewiki.files.every((file) => /^[0-9a-f]{16}$/.test(file.hash)));
