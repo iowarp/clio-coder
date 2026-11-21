@@ -146,7 +146,11 @@ const RAW_COLLECTIONS: ReadonlySet<string> = new Set([
 	"interface.keybindings",
 	"integrations.externalAgents.entries",
 ]);
-const GUIDED_ROW_IDS: ReadonlySet<string> = new Set(["workers.profiles", "workers.agentBindings", "delegation.agents"]);
+const GUIDED_ROW_IDS: ReadonlySet<string> = new Set([
+	"fleet.profiles",
+	"fleet.agentProfiles",
+	"integrations.externalAgents.entries",
+]);
 
 const under = (path: string, prefix: string): boolean => path === prefix || path.startsWith(`${prefix}.`);
 const place = (area: SettingsAreaId, group = ""): SettingsPlacement => ({ area, group });
@@ -310,13 +314,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	return place("advanced", "Other");
 }
 
-const GUIDED_ROW_ID_BY_PATH: Readonly<Record<string, string>> = {
-	"fleet.profiles": "workers.profiles",
-	"fleet.agentProfiles": "workers.agentBindings",
-	"integrations.externalAgents.entries": "delegation.agents",
-};
-
 /** The area a person is sent to for a setting path, which is its guided row when one exists. */
 export function settingsAreaForPath(path: string): SettingsAreaId {
-	return settingsPlacementForRow(GUIDED_ROW_ID_BY_PATH[path] ?? `setting.${path}`, path).area;
+	return settingsPlacementForRow(GUIDED_ROW_IDS.has(path) ? path : `setting.${path}`, path).area;
 }

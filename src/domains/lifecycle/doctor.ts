@@ -779,11 +779,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const migrationRead = readMigrationManifestResult(dirs.state);
 	const availableMigrations = listMigrations().map((migration) => migration.id);
 	const appliedMigrations = new Set(migrationRead.manifest.applied);
-	const satisfiedMigrations = new Set(
-		currentSettingsValid
-			? ["2026-09-01-settings-v2", "2026-11-21-retired-settings", "2026-09-01-retire-panes-knobs"]
-			: [],
-	);
+	const satisfiedMigrations = new Set(currentSettingsValid ? ["2026-11-21-retired-settings"] : []);
 	const unrecordedMigrations = availableMigrations.filter((id) => !appliedMigrations.has(id));
 	const pendingMigrations = unrecordedMigrations.filter((id) => !satisfiedMigrations.has(id));
 	findings.push({

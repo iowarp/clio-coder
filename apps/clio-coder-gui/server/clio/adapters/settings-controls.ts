@@ -5,7 +5,7 @@ import {
 	type SettingControl as RootControl,
 	SETTINGS_LABELS_BY_ID,
 	SETTINGS_VALUE_HELP_BY_ID,
-	settingsV2PathForRow,
+	settingsPathForRow,
 } from "../../../../../src/core/settings-controls.js";
 import { readLayeredSettings, updateLayeredSettings } from "../../../../../src/core/settings-layers.js";
 import {
@@ -102,7 +102,7 @@ const readOnlyReason = (control: RootControl): string | undefined => {
 	return READ_ONLY.find(([prefix]) => control.path === prefix || control.path.startsWith(`${prefix}.`))?.[1];
 };
 const VALUE_HELP = new Map(
-	Object.keys(SETTINGS_LABELS_BY_ID).map((id) => [settingsV2PathForRow(id), SETTINGS_VALUE_HELP_BY_ID[id] ?? {}]),
+	Object.keys(SETTINGS_LABELS_BY_ID).map((id) => [settingsPathForRow(id), SETTINGS_VALUE_HELP_BY_ID[id] ?? {}]),
 );
 
 function at(root: unknown, path: string): unknown {

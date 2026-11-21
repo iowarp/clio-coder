@@ -951,19 +951,17 @@ for a recorded prerelease channel) for installer installs.
 
 #### Current migration contract
 
-The source tree registers ten migrations in execution order
+The source tree registers eight migrations in execution order
 (`src/domains/lifecycle/migrations/index.ts`):
 
-1. `2026-09-01-settings-v2`
-2. `2026-11-21-retired-settings`
-3. `2026-09-01-retire-panes-knobs`
-4. `2026-10-06-playbooks-and-packages`
-5. `2026-10-07-acp-adapters`
-6. `2026-10-07-claude-subscription`
-7. `2026-10-20-fleet-permissions-judge`
-8. `2026-10-31-remove-old-telemetry`
-9. `2026-11-02-approvals-to-config`
-10. `2026-11-07-remove-copilot-consent`
+1. `2026-11-21-retired-settings`
+2. `2026-10-06-playbooks-and-packages`
+3. `2026-10-07-acp-adapters`
+4. `2026-10-07-claude-subscription`
+5. `2026-10-20-fleet-permissions-judge`
+6. `2026-10-31-remove-old-telemetry`
+7. `2026-11-02-approvals-to-config`
+8. `2026-11-07-remove-copilot-consent`
 
 The retired-settings migration removes the keys retired without a replacement
 from the user `settings.yaml`, rewrites the older `interface.exitSummary` and
@@ -1262,8 +1260,8 @@ Lifecycle facts that belong here:
 - Leaving first-run setup before any target is saved exits 130 with
   ``configuration cancelled; no target saved. Run `clio-coder configure` when you are ready.``
   A bare `clio-coder` launch reads that status as "nothing was configured".
-- Settings files written by an older release are migrated by
-  `clio-coder upgrade --post-install`, which keeps the original as `settings.yaml.v1.bak`.
+- A version-1 settings file is not read or converted; move it aside and the next run
+  writes a version-2 file with the defaults.
 
 ---
 

@@ -52,19 +52,19 @@ test("every existing settings control has exactly one home and canonical persist
 	}
 	const byId = new Map(items.map((item) => [item.id, item]));
 	for (const [id, home] of [
-		["budget.concurrency", "workers"],
-		["guardrails.workerToolCallCap", "workers"],
-		["guardrails.internalDispatchTimeoutMs", "advanced"],
-		["panes.journal", "workers"],
-		["terminal.smoothStreaming", "chat"],
-		["attribution.gitCommits", "workspace"],
-		["skills.trustProjectCompatRoots", "workspace"],
-		["workers.onPermission", "safety"],
-		["delegation.defaults.toolGovernance", "safety"],
-		["watchdog.enabled", "safety"],
-		["compaction.model", "context"],
-		["background.target", "context"],
-		["defaults.maxTokens", "models"],
+		["fleet.concurrency", "workers"],
+		["fleet.limits.toolCallsPerRun", "workers"],
+		["fleet.limits.internalRunTimeoutMs", "advanced"],
+		["fleet.history.journal", "workers"],
+		["interface.smoothStreaming", "chat"],
+		["integrations.git.commitAttribution", "workspace"],
+		["integrations.projectResources.trustProjectImports", "workspace"],
+		["fleet.permissions.mode", "safety"],
+		["integrations.externalAgents.defaults.toolGovernance", "safety"],
+		["safety.review.enabled", "safety"],
+		["context.compaction.model", "context"],
+		["context.memory.target", "context"],
+		["chat.maxOutputTokens", "models"],
 	] as const)
 		strictEqual(byId.get(id)?.section, home, id);
 });
@@ -124,7 +124,7 @@ test("every area renders within narrow and wide terminals, and headings are skip
 	center.handleInput("\r");
 	strictEqual(center.getSelection().section, "chat");
 	center.handleInput("\r");
-	strictEqual(center.getSelection().rowId, "terminal.smoothStreaming");
+	strictEqual(center.getSelection().rowId, "interface.smoothStreaming");
 	match(center.render(112).join("\n"), /Smooth streaming/);
 });
 
@@ -139,8 +139,8 @@ test("settings groups collect related controls and preserve the target inventory
 		if (item.presentationKind === "group-header") group = item.label;
 		else memberships.set(item.id, group);
 	}
-	strictEqual(memberships.get("compaction.auto"), "Compaction");
-	strictEqual(memberships.get("compaction.model"), "Compaction");
-	strictEqual(memberships.get("background.target"), "Proactive memory");
-	strictEqual(memberships.get("memory.intervention.enabled"), "Proactive memory");
+	strictEqual(memberships.get("context.compaction.auto"), "Compaction");
+	strictEqual(memberships.get("context.compaction.model"), "Compaction");
+	strictEqual(memberships.get("context.memory.target"), "Proactive memory");
+	strictEqual(memberships.get("context.memory.enabled"), "Proactive memory");
 });
