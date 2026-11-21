@@ -42,9 +42,7 @@ import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
 import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import approvalsToConfig from "./2026-11-02-approvals-to-config.js";
 import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
-import memoryFlowSweep from "./2026-11-21-memory-flow-sweep.js";
-import memoryStoreV2 from "./2026-11-21-memory-store-v2.js";
-import retiredSettings, { memoryObserveSwitch } from "./2026-11-21-retired-settings.js";
+import retiredSettings from "./2026-11-21-retired-settings.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -106,7 +104,6 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	settingsV2,
 	retiredSettings,
-	memoryObserveSwitch,
 	retirePanesKnobs,
 	playbooksAndPackages,
 	acpAdapters,
@@ -115,8 +112,6 @@ const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	removeOldTelemetry,
 	approvalsToConfig,
 	removeCopilotConsent,
-	memoryStoreV2,
-	memoryFlowSweep,
 ]);
 
 // A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id

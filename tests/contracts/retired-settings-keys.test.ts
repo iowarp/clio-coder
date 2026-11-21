@@ -43,8 +43,6 @@ test("the retired-settings migration rewrites a home's settings, reports each ch
 		"context:",
 		"  compaction:",
 		"    excludeLastTurns: 3",
-		"  memory:",
-		"    observations: { enabled: true }",
 		"telemetry:",
 		"  research:",
 		"    systemOneDataset: true",
@@ -79,7 +77,6 @@ test("the retired-settings migration rewrites a home's settings, reports each ch
 	strictEqual(settings.interface.exitSummary, "standard");
 	strictEqual(settings.interface.outputDetail, "detailed");
 	strictEqual(settings.fleet.nodes[0]?.clioCoderEntry, "/opt/clio");
-	strictEqual(settings.context.memory.surfaces.observe, "on");
 	strictEqual(settings.integrations.externalAgents.entries[0]?.command, "peer");
 	ok(after.includes("chat:\n  model: kept\n"), after);
 	ok(!("mode" in (settings.systemOne.engines.fast ?? {})));
@@ -100,7 +97,6 @@ test("the retired-settings migration rewrites a home's settings, reports each ch
 		"interface.exitSummary: full → standard",
 		"interface.outputDetail: verbose → detailed",
 		"Renamed fleet.nodes[0].clioEntry to fleet.nodes[0].clioCoderEntry",
-		"Moved context.memory.observations.enabled: true to context.memory.surfaces.observe: on",
 	])
 		ok(
 			report.changed.some((entry) => entry.startsWith(line)),
@@ -119,14 +115,12 @@ test("with the read path gone, a retired key is an ordinary unknown key and an o
 		orchestrator: { target: "x" },
 		fleet: { speculativeDispatch: true },
 		interface: { exitSummary: "full", outputDetail: "minimal" },
-		context: { memory: { observations: { enabled: true } } },
 	});
 	deepStrictEqual(
 		issues.map((issue) => `${issue.path}: ${issue.message}`),
 		[
 			"orchestrator: unknown key",
 			"fleet.speculativeDispatch: unknown key",
-			"context.memory.observations: unknown key",
 			"interface.outputDetail: expected compact, standard, or detailed",
 			"interface.exitSummary: expected auto, brief, standard, report, or off",
 		],

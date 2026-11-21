@@ -361,7 +361,6 @@ targets:
 		deepStrictEqual(ids, [
 			SETTINGS_V2_MIGRATION_ID,
 			"2026-11-21-retired-settings",
-			"2026-11-21-memory-observe-switch",
 			retiredPanes,
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
@@ -370,8 +369,6 @@ targets:
 			OLD_TELEMETRY_MIGRATION_ID,
 			"2026-11-02-approvals-to-config",
 			"2026-11-07-remove-copilot-consent",
-			"2026-11-21-memory-store-v2",
-			"2026-11-21-memory-flow-sweep",
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -411,13 +408,13 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-memory-store-v2","2026-11-21-memory-flow-sweep"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
 		strictEqual(current?.ok, true);
 		strictEqual(current?.level, undefined);
-		ok(current?.detail.includes("already satisfy 4 unrecorded"));
+		ok(current?.detail.includes("already satisfy 3 unrecorded"));
 		strictEqual(readFileSync(manifest, "utf8"), recorded);
 		strictEqual(readFileSync(settingsFile, "utf8"), "version: 2\n");
 		for (const settings of ["version: 1\n", "version: 2\npanes: { agents: off }\n", "version: [\n"]) {

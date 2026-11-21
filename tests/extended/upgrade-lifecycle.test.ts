@@ -6,11 +6,21 @@ import { describe, it } from "node:test";
 import { runUpgradeCommand, type UpgradeDependencies } from "../../src/cli/upgrade.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { type Installation, inspectInstallation } from "../../src/domains/lifecycle/install-method.js";
-import { REGISTERED_MIGRATION_IDS } from "../../src/domains/lifecycle/migrations/registry-ids.js";
 import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
 import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
-const MIGRATION_IDS = REGISTERED_MIGRATION_IDS;
+const MIGRATION_IDS = [
+	"2026-09-01-settings-v2",
+	"2026-11-21-retired-settings",
+	"2026-09-01-retire-panes-knobs",
+	"2026-10-06-playbooks-and-packages",
+	"2026-10-07-acp-adapters",
+	"2026-10-07-claude-subscription",
+	"2026-10-20-fleet-permissions-judge",
+	"2026-10-31-remove-old-telemetry",
+	"2026-11-02-approvals-to-config",
+	"2026-11-07-remove-copilot-consent",
+] as const;
 
 const installation = (kind: Installation["kind"]): Installation => ({
 	...inspectInstallation(),
@@ -102,7 +112,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run"]);
 			strictEqual(code, 0);
-			match(stdout, new RegExp(`Would apply ${MIGRATION_IDS.length} pending migrations:`, "u"));
+			match(stdout, /Would apply 10 pending migrations:/u);
 			for (const id of MIGRATION_IDS) ok(stdout.includes(id), id);
 			match(stdout, /Would refresh state metadata/u);
 			match(stdout, /Dry run: no changes made/u);
@@ -142,7 +152,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			const { code, stdout } = await upgrade(temp, []);
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
-			match(stdout, new RegExp(`${MIGRATION_IDS.length} migrations applied`, "u"));
+			match(stdout, /10 migrations applied/u);
 		} finally {
 			temp.cleanup();
 		}

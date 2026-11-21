@@ -11,7 +11,6 @@ import { clioStateDir, resolveClioDirs } from "../../../core/xdg.js";
 export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-09-01-settings-v2",
 	"2026-11-21-retired-settings",
-	"2026-11-21-memory-observe-switch",
 	"2026-09-01-retire-panes-knobs",
 	"2026-10-06-playbooks-and-packages",
 	"2026-10-07-acp-adapters",
@@ -20,8 +19,6 @@ export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-10-31-remove-old-telemetry",
 	"2026-11-02-approvals-to-config",
 	"2026-11-07-remove-copilot-consent",
-	"2026-11-21-memory-store-v2",
-	"2026-11-21-memory-flow-sweep",
 ]);
 
 /**
@@ -76,10 +73,7 @@ export function pendingMigrationAdvice(): string | null {
 	const recorded = new Set(applied);
 	const pending = REGISTERED_MIGRATION_IDS.filter((id) => !recorded.has(id));
 	if (pending.length === 0) return null;
-	const retired = pending.find(
-		(id) => id === "2026-11-21-retired-settings" || id === "2026-11-21-memory-observe-switch",
-	);
-	if (retired !== undefined)
-		return `run \`clio-coder upgrade\`: its pending migration ${retired} rewrites retired keys and old value spellings`;
+	if (pending.includes("2026-11-21-retired-settings"))
+		return "run `clio-coder upgrade`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings";
 	return `run \`clio-coder upgrade\` to apply ${pending.length} pending migration${pending.length === 1 ? "" : "s"}`;
 }
