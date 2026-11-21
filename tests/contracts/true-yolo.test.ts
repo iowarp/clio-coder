@@ -56,6 +56,7 @@ import {
 	type OperatorYoloScope,
 } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
+import { setValidationWrappers } from "../../src/domains/safety/protected-artifacts.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { jobAuthorityRefusal } from "../../src/entry/job-runtime.js";
 import { createYoloActivation, YOLO_ACCEPT_LABEL, YOLO_DECLINE_LABEL } from "../../src/interactive/yolo-activation.js";
@@ -1972,6 +1973,43 @@ test("the raw-text reading covers every line with a substitution the shell runs,
 	]) {
 		strictEqual(judge(command).kind, "allow", command);
 	}
+});
+
+// FX-46: a declared validation wrapper is read through like timeout or nice, and only ever tightens.
+test("a declared validation wrapper is judged by what it runs, at least as strictly as the bare command", (t) => {
+	const cwd = workspace("clio-yolo-wrapper-");
+	const savedCwd = process.cwd();
+	process.chdir(cwd);
+	t.after(() => {
+		setValidationWrappers([]);
+		process.chdir(savedCwd);
+	});
+	mkdirSync(join(cwd, "scripts"));
+	for (const name of ["slot.sh", "x.sh"]) {
+		writeFileSync(join(cwd, "scripts", name), '#!/bin/sh\nexec "$@"\n');
+		chmodSync(join(cwd, "scripts", name), 0o755);
+	}
+	const engine = engineFor(cwd);
+	const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+	const contained = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as const;
+	const verdicts = (command: string) =>
+		[
+			engine.evaluate(bash(command)),
+			engine.evaluate(bash(command), "default", contained),
+			engine.evaluate(bash(command), "yolo", OPERATOR_YOLO),
+		].map((decision) => `${decision.kind}/${decision.reasonCode}`);
+	const outside = `rm -rf ~/clio-fx46-outside-${basename(cwd)}`;
+	const undeclared = "./scripts/x.sh rm -rf .git";
+	const before = verdicts(undeclared);
+	setValidationWrappers(["scripts/slot.sh"]);
+	const git = "block/yolo-floor:yolo-floor-workspace-git";
+	deepStrictEqual(verdicts("scripts/slot.sh rm -rf .git"), ["block/damage-control:delete-outside-workspace", git, git]);
+	const kinds = (command: string) => verdicts(command).map((verdict) => verdict.split("/")[0]);
+	deepStrictEqual(kinds(`timeout 60 scripts/slot.sh -q ${outside}`), kinds(outside));
+	strictEqual(verdicts(`scripts/slot.sh ${outside}`)[0], "block/damage-control:delete-outside-workspace");
+	// An undeclared script stays opaque, and a check behind the declared wrapper is not judged more strictly.
+	deepStrictEqual(verdicts(undeclared), before);
+	deepStrictEqual(verdicts("scripts/slot.sh ls"), verdicts("scripts/x.sh ls"));
 });
 
 test("the yolo floor places a top-level delete after a literal cd, and judges one after any other cd as unplaced", async (t) => {

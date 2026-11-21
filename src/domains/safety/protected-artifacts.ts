@@ -4951,11 +4951,55 @@ function checkBehindWrapper(
 	for (let hop = 0; hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
 		const word = argv[current];
 		if (word === undefined || !isValidationWrapper(word)) break;
-		const next = builtinCommandIndex(argv, pastWrapperOptions(argv, current));
+		const next = pastDeclaredWrapper(argv, current);
 		if (next === null) return null;
 		current = next;
 	}
 	return current !== index && isCheck(basenameToken(argv[current]), argv.slice(current + 1)) ? current : null;
+}
+
+/**
+ * The shared transparent-prefix reader for a declared wrapper (FX-44, FX-46): the command word past the declared
+ * wrapper standing at `index`, its leading options and the built-in prefixes after it, as `timeout` or `nice` is read
+ * through; null when no declared wrapper stands there or nothing follows it. An undeclared script stays opaque.
+ */
+function pastDeclaredWrapper(argv: ReadonlyArray<string>, index: number): number | null {
+	const word = argv[index];
+	if (word === undefined || !isValidationWrapper(word)) return null;
+	return builtinCommandIndex(argv, pastWrapperOptions(argv, index));
+}
+
+/**
+ * The command with each declared validation wrapper (and its leading options) at a top-level command position
+ * blanked out, so the rails read what it runs (FX-46): `scripts/test-slot.sh rm -rf .git` reads as `rm -rf .git`.
+ * Redirections, here-documents and every other word stay where they were. The command itself when no declared
+ * wrapper stands at a command position. Admission judges both readings and keeps the stricter, so this only tightens.
+ */
+export function withoutDeclaredWrappers(command: string): string {
+	if (validationWrappers().length === 0) return command;
+	const blanks: Array<{ start: number; end: number }> = [];
+	for (const segment of splitSegments(scanShellLike(command, true))) {
+		// Words only: a redirection operator and its target are not argv.
+		const words = segment.filter(
+			(token, at) =>
+				!token.operator && !(segment[at - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[at - 1]?.value ?? "")),
+		);
+		const argv = words.map((token) => token.value);
+		let index = builtinCommandIndex(argv);
+		for (let hop = 0; index !== null && hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
+			const next = pastDeclaredWrapper(argv, index);
+			if (next === null) break;
+			const start = words[index]?.start;
+			const end = words[next - 1]?.end;
+			if (start !== undefined && end !== undefined) blanks.push({ start, end });
+			index = next;
+		}
+	}
+	if (blanks.length === 0) return command;
+	let out = command;
+	for (const { start, end } of blanks.sort((left, right) => right.start - left.start))
+		out = `${out.slice(0, start)}${" ".repeat(end - start)}${out.slice(end)}`;
+	return out;
 }
 
 /**

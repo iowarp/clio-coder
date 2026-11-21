@@ -107,6 +107,7 @@ import {
 	shellCommandSteps,
 	shellScriptSources,
 	withoutDataHeredocBodies,
+	withoutDeclaredWrappers,
 } from "./protected-artifacts.js";
 import {
 	fetchCouldCarryLocalData,
@@ -2120,6 +2121,28 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	};
 
 	const evaluateScoped = (
+		rawCall: ClassifierCall,
+		posture: string | undefined,
+		scope: OperatorScope | undefined,
+	): SafetyPolicyDecision => {
+		const decision = evaluateScopedReading(rawCall, posture, scope);
+		const command = rawCall.tool === ToolNames.Bash ? commandArg(rawCall.args) : null;
+		if (command === null || decision.kind === "block") return decision;
+		// FX-46: a declared validation wrapper runs the rest of its line, so what it runs is judged as if written bare,
+		// and the stricter of the two readings stands. An undeclared script stays opaque.
+		const inner = withoutDeclaredWrappers(command);
+		if (inner === command) return decision;
+		const through = evaluateScopedReading({ ...rawCall, args: { ...rawCall.args, command: inner } }, posture, scope);
+		const rank = (kind: SafetyPolicyDecision["kind"]) => (kind === "block" ? 2 : kind === "ask" ? 1 : 0);
+		if (rank(through.kind) <= rank(decision.kind)) return decision;
+		return {
+			...through,
+			...(decision.command !== undefined ? { command: decision.command } : {}),
+			reasons: [`a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`, ...through.reasons],
+		};
+	};
+
+	const evaluateScopedReading = (
 		rawCall: ClassifierCall,
 		posture: string | undefined,
 		scope: OperatorScope | undefined,
