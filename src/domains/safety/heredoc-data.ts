@@ -25,8 +25,8 @@ import {
  *   `git add`/`status`/`diff`/`log`/`show` (only when nothing is copied, since git
  *   runs hooks and configured programs a copy could be), or an interpreter
  *   that reads no project file asked only for its version;
- * - no copy lands in a device, in `.git*` or in `.husky`, or is named like a
- *   command the call runs.
+ * - no file any step writes (a copy, a redirect, a tee operand) lands in a device, in `.git*` or in `.husky`, or is
+ *   named like a command the call runs.
  *
  * Anything else keeps the rail's older reading, which reads the body as
  * commands. The command line itself, redirect targets included, stays judged.
@@ -77,14 +77,14 @@ const PLAIN_REDIRECTS: ReadonlySet<string> = new Set([">", ">>", ">|", "<", "<<<
 const STDOUT_REDIRECTS: ReadonlySet<string> = new Set([">", ">>", ">|", "&>", "&>>", ">&", "<>"]);
 const DESCRIPTOR = /^(?:\d+-?|-)$/u;
 
-/** The files a step's standard output lands in (a descriptor duplication names none), or null when one is unread. */
-function stdoutTargets(command: ShellSimpleCommand): string[] | null {
+/** Every file a step's standard output or error lands in (a descriptor duplication names none), or null when one is unread. */
+function writeTargets(command: ShellSimpleCommand): string[] | null {
 	const targets: string[] = [];
 	for (const redirect of command.redirects) {
 		if (!STDOUT_REDIRECTS.has(redirect.op)) continue;
 		const both = redirect.op === "&>" || redirect.op === "&>>";
 		const fd = redirect.fd ?? (redirect.op === "<>" ? 0 : 1);
-		if (!both && fd !== 1) continue;
+		if (!both && fd !== 1 && fd !== 2) continue;
 		const target = staticWordValue(redirect.target);
 		if (target === null) return null;
 		if ((redirect.op === ">&" || redirect.op === "<&") && DESCRIPTOR.test(target)) continue;
@@ -165,6 +165,7 @@ function readsAsMessage(args: ReadonlyArray<string>): boolean {
 }
 
 interface DataReading {
+	/** Every file a step writes, here-document copies and plain redirects alike. */
 	copies: string[];
 	git: boolean;
 	names: string[];
@@ -194,6 +195,18 @@ function readStep(command: ShellSimpleCommand, alone: boolean, negated: boolean,
 	}
 	reading.names.push(name);
 	if (name === "printf" && words.some((word) => word.startsWith("-v"))) return false;
+	// Neon finding 6: every file any step writes (a redirect on stdout or stderr, a tee operand) is checked like a copy,
+	// since `cat tmpfile > ls` carries the body as far as the here-document's own step does.
+	const outputs = writeTargets(command);
+	if (outputs === null) return false;
+	if (name === "tee") {
+		for (const word of words) {
+			if (word.startsWith("-") && word !== "-") {
+				if (!TEE_OPTIONS.has(word)) return false;
+			} else outputs.push(word);
+		}
+	}
+	reading.copies.push(...outputs);
 	if (docs.length > 1) return false;
 	const doc = docs[0];
 	if (doc !== undefined) {
@@ -203,18 +216,7 @@ function readStep(command: ShellSimpleCommand, alone: boolean, negated: boolean,
 			reading.git = true;
 			return true;
 		}
-		if (name !== "cat" && name !== "tee") return false;
-		const outputs = stdoutTargets(command);
-		if (outputs === null) return false;
-		if (name === "tee") {
-			for (const word of words) {
-				if (word.startsWith("-") && word !== "-") {
-					if (!TEE_OPTIONS.has(word)) return false;
-				} else outputs.push(word);
-			}
-		}
-		reading.copies.push(...outputs);
-		return true;
+		return name === "cat" || name === "tee";
 	}
 	if (INERT_STEPS.has(name)) return true;
 	if (name === "git" && GIT_INERT_SUBCOMMANDS.has(words[0] ?? "")) {

@@ -1352,6 +1352,8 @@ describe("safety gate boundary", () => {
 			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
 			// Neon round: a locale-quoted command name bash may translate to any program.
 			`$"cat" <<'EOF'\n${gone}; cat .env\nEOF`,
+			// Neon round: a later plain copy into a name the call runs.
+			`cat <<'EOF' > tmpfile && cat tmpfile > ls && ls\n#!/bin/sh\n${gone}\nEOF`,
 		])
 			strictEqual(reason(command) !== null, true, command);
 	});
