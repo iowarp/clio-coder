@@ -2939,9 +2939,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * The level the triage round asks for. Off is sent as off, exactly as before the setting existed; any other level
-	 * resolves through the route the way the chat route's level does, so a model without that level gets its nearest
-	 * supported one. A route that no longer resolves keeps the round at off.
+	 * The level the triage round asks for, resolved through the route the way the chat route's level does, so a model
+	 * without that level, off included, gets its nearest supported one. A route that no longer resolves keeps the
+	 * round at off.
 	 */
 	const triageThinkingLevel = (
 		level: ThinkingLevel,
@@ -2949,7 +2949,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		wireModelId: string,
 		model: EngineModel,
 	): ThinkingLevel => {
-		if (level === "off") return "off";
 		const resolved = resolveRuntimeTarget(deps.providers, {
 			targetId,
 			wireModelId,
