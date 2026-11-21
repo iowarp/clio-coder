@@ -32,6 +32,11 @@ export interface RunAssessmentContext {
 	decisionRefs: ReadonlyArray<string>;
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
+	/**
+	 * The finish contract decision the run's session recorded for it, for a run whose own journal holds none: a
+	 * headless main run's turn records it in its session, which settles before the run scope opens (C-11).
+	 */
+	completion?: Pick<TelemetryRecord<"completion.evaluated">, "id" | "t" | "data">;
 }
 
 export interface AssessRunInput {
@@ -68,11 +73,14 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 	const digest = runSettledDigest(settled);
 	// The producer holds the record it is about to seal; a reader replaces this integrity with the seal's verdict.
 	let trust = adaptRunTrustStatus({ ...settled, runId, digest }, { state: "verified", by: "producer" });
-	const completion = input.records
-		.filter((record) => record.k === "completion.evaluated" && record.ctx.runId === runId && record.t <= settledAt)
-		.sort((left, right) => left.t.localeCompare(right.t))
-		.at(-1);
-	if (completion?.k === "completion.evaluated")
+	const completion =
+		input.records
+			.flatMap((record) =>
+				record.k === "completion.evaluated" && record.ctx.runId === runId && record.t <= settledAt ? [record] : [],
+			)
+			.sort((left, right) => left.t.localeCompare(right.t))
+			.at(-1) ?? input.context?.completion;
+	if (completion !== undefined)
 		trust = composeTrustStatus(trust, { completionEvidence: adaptCompletionEvidence(completion) });
 	const verdicts: EvidenceAssessed["verdicts"] = [];
 	for (const gate of [...input.gateDecisions].sort(compareGates)) {

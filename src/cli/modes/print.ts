@@ -11,6 +11,7 @@ import {
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
 import type { CallFilter } from "../../core/telemetry/dto.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { renderCompactCount, renderUsdSum } from "../../core/telemetry/render.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
@@ -68,7 +69,7 @@ import {
 } from "../../domains/safety/run-effects.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { formatStatedWait } from "../../domains/session/retry.js";
-import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
@@ -907,6 +908,29 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	return count;
 }
 /**
+ * The finish contract decision the run's own turns recorded last: the main loop journals it in the session, not the run
+ * scope, so the run's assessment reads it from there (C-11). A worker's decision carries its own run id and is left
+ * out; a journal that cannot be read leaves the completion axis unrecorded.
+ */
+async function sessionCompletion(
+	sessionId: string,
+	from: string,
+): Promise<Pick<TelemetryRecord<"completion.evaluated">, "id" | "t" | "data"> | undefined> {
+	try {
+		const { readCallJournal } = await import("../../domains/telemetry/call-journal.js");
+		const read = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId), ["completion.evaluated"]);
+		return read.records
+			.flatMap(({ record }) =>
+				record.k === "completion.evaluated" && record.ctx.runId === undefined && record.t >= from ? [record] : [],
+			)
+			.sort((left, right) => left.t.localeCompare(right.t))
+			.at(-1);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Settle the main-agent run the way dispatch settles a worker (#434): one result built with its run.settled, the
  * record made durable and the run scope sealed, and only then the ledger row published terminal, so `fleet verify`
  * and `fleet view` read a finished run the same way whoever ran it. A settlement that does not land publishes the row
@@ -1081,7 +1105,12 @@ async function recordHeadlessMainAgentRun(input: {
 					...(stepPipeline !== null ? { stepPipeline } : {}),
 				},
 			);
-			await journal.settle(finished.settlement);
+			const completion = sessionId === null ? undefined : await sessionCompletion(sessionId, input.startedAt);
+			const settlement =
+				completion !== undefined && finished.settlement.assessment !== undefined
+					? { ...finished.settlement, assessment: { ...finished.settlement.assessment, completion } }
+					: finished.settlement;
+			await journal.settle(settlement);
 		} finally {
 			await journal.close();
 		}

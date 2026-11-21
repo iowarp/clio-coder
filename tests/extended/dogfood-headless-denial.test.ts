@@ -15,6 +15,7 @@ import {
 } from "../../src/core/headless-permission.js";
 
 import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
+import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
@@ -260,7 +261,7 @@ describe("headless no-op contract through the built binary", () => {
 		ok(envelope);
 		strictEqual(envelope.exitCode, turn.code, "the receipt and the process must agree on the exit code");
 		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
-		return { turn, envelope, project, fixture };
+		return { turn, envelope, project, fixture, stateDir: scratch.stateDir };
 	}
 
 	test("--on-permission fail ends the run at the first refused ask with exit 3 before another request", async () => {
@@ -384,7 +385,7 @@ describe("headless no-op contract through the built binary", () => {
 	});
 
 	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
-		const { turn, envelope, project } = await headlessTurn({
+		const { turn, envelope, project, stateDir } = await headlessTurn({
 			autonomy: "default",
 			steps: [writeProof],
 			failOnNoop: true,
@@ -393,6 +394,9 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(turn.code, 0, turn.stderr);
 		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
 		strictEqual(envelope.outcome, "succeeded");
+		// C-11: the seal cites the finish contract decision the run's session recorded at its end.
+		const evidence = await inspectRunEvidence(stateDir, envelope.id);
+		strictEqual(evidence.trust.completionEvidence.state, "incomplete", JSON.stringify(evidence.trust));
 	});
 
 	test("one blocked call and one successful write is not a no-op under --fail-on-noop", async () => {
