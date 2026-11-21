@@ -10,8 +10,6 @@ import { clioStateDir, resolveClioDirs } from "../../../core/xdg.js";
  */
 export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-11-21-retired-settings",
-	"2026-11-21-fleet-role-names",
-	"2026-11-21-run-role-populations",
 	"2026-10-06-playbooks-and-packages",
 	"2026-10-07-acp-adapters",
 	"2026-10-07-claude-subscription",

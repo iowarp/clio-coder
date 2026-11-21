@@ -69,6 +69,7 @@ import { describeTracking } from "./install-plan.js";
 import { listMigrations, projectPendingSettings, readMigrationManifestResult } from "./migrations/index.js";
 import { APPLY_MIGRATIONS_COMMAND } from "./migrations/registry-ids.js";
 import { nativeAutoUpdatePolicy } from "./native-update.js";
+import { type RoleSettingsRepair, repairRoleSettings } from "./role-settings.js";
 import { readStateInfoResult } from "./state.js";
 import { deferredResultPath, readDeferredWait, readLastBackgroundUpdate } from "./update-check.js";
 import { getVersionInfo } from "./version.js";
@@ -592,6 +593,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let credentialsAclRemoved: string[] = [];
 	const rootsTightened: string[] = [];
 	let retiredSettings: RetiredSettingsRemoval | null = null;
+	let roleSettings: RoleSettingsRepair | null = null;
 	let memoryRepair: MemoryStoreRepair | null = null;
 	const retiredStateRemoved: string[] = [];
 	if (options.fix) {
@@ -639,6 +641,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			}
 			// Earlier builds' shapes are not migrated: what this build cannot read is removed.
 			retiredSettings = removeRetiredSettingsKeys();
+			roleSettings = repairRoleSettings({ write: true });
 			const repairDirs = resolveClioDirs();
 			memoryRepair = repairMemoryStore(repairDirs.data, repairDirs.state);
 			for (const file of retiredStateFiles(repairDirs.state)) {
@@ -797,6 +800,29 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 					detail: `${retiredKeys.join(", ")} no longer exist (run \`clio-coder doctor --fix\` to remove them)`,
 				});
 			}
+		}
+		// Retired role names fail the settings row above; a moved agent population loads but activates nothing.
+		const roleRepair = options.fix ? roleSettings : repairRoleSettings({ write: false });
+		if (roleRepair !== null && roleRepair.changes.length > 0) {
+			const changes = roleRepair.changes.join(", ");
+			findings.push(
+				roleRepair.refused !== null
+					? {
+							ok: false,
+							name: "settings.yaml roles",
+							detail: foldDetail(`could not safely rewrite ${changes}: ${roleRepair.refused}`),
+						}
+					: roleRepair.written
+						? { ok: true, name: "settings.yaml roles", detail: foldDetail(`rewrote ${changes}`) }
+						: {
+								ok: true,
+								level: "warn",
+								name: "settings.yaml roles",
+								detail: foldDetail(
+									`${changes} name runs the role rule no longer produces (run \`clio-coder doctor --fix\` to rewrite them)`,
+								),
+							},
+			);
 		}
 		if (settingsRepair !== null && settingsRepair.skipped.length > 0) {
 			findings.push({

@@ -126,6 +126,38 @@ export function withAttemptRole(requestRole: ExecutionRole, attempt: number): Ex
 	return attempt > 0 ? "recovery" : requestRole;
 }
 
+const UNGATED_ROLES: ReadonlyArray<ExecutionRole> = ["builder", "explorer", "checker"];
+const GATE_POSITIONS: ReadonlySet<GateTopologyRole> = new Set(["reviewer", "judge", "synthesis", "member"]);
+
+/**
+ * Every population an agent's first attempt can run under outside a gate, by `requestRunRole`: with its write scope and
+ * asked to write nothing. Null for an agent the resolver does not know. A record naming another population for this
+ * agent outside a gate (a ledger row, a `fleet.adaptiveRouting.agentRoles` pair) describes runs the rule no longer
+ * produces: a Debugger is a checker, never a builder (row 352).
+ */
+export function agentRunRoles(agentId: string, resolveFacts: AgentRoleFactsResolver): ExecutionRole[] | null {
+	if (resolveFacts(agentId) === null) return null;
+	return [...new Set([false, true].map((readOnly) => requestRunRole({ agentId, readOnly }, resolveFacts)))];
+}
+
+/**
+ * Whether a recorded run's role is one the rule can assign it (row 352). A name outside the current vocabulary
+ * (`researcher`, `verifier`) never is; a gate position fixes its role; otherwise the role is one of the agent's
+ * populations by `agentRunRoles`, or any ungated role when its recipe is unknown here. Recovery is any agent's.
+ */
+export function recordedRoleIsCurrent(
+	run: { agentId: string; executionRole: unknown; gate?: { role?: GateTopologyRole } | undefined },
+	resolveFacts?: AgentRoleFactsResolver,
+): boolean {
+	if (!isExecutionRole(run.executionRole)) return false;
+	if (run.executionRole === "recovery") return true;
+	const gateRole = run.gate?.role;
+	if (gateRole !== undefined && GATE_POSITIONS.has(gateRole))
+		return run.executionRole === resolveRunRole({ gateRole, capabilityClass: null, readOnly: true });
+	const roles = resolveFacts === undefined ? null : agentRunRoles(run.agentId, resolveFacts);
+	return (roles ?? UNGATED_ROLES).includes(run.executionRole);
+}
+
 /**
  * The builtin quality agent every gate decider defaults to.
  *

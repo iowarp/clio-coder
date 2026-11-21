@@ -40,10 +40,8 @@ import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
 import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import approvalsToConfig from "./2026-11-02-approvals-to-config.js";
 import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
-import fleetRoleNames from "./2026-11-21-fleet-role-names.js";
 import retireFleetLocks from "./2026-11-21-retire-fleet-locks.js";
 import retiredSettings from "./2026-11-21-retired-settings.js";
-import runRolePopulations from "./2026-11-21-run-role-populations.js";
 import writerSetLeaseClock from "./2026-11-21-writer-set-lease-clock.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
@@ -101,13 +99,9 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 //
 // `retiredSettings` runs first: the strict reader does not tolerate retired
 // keys, so it must run before any migration that reads settings through
-// `readSettings`. `fleetRoleNames` follows it for the same reason: the reader
-// refuses the retired role names it renames. `runRolePopulations` moves roles
-// between current names, so it follows the rename.
+// `readSettings`.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	retiredSettings,
-	fleetRoleNames,
-	runRolePopulations,
 	playbooksAndPackages,
 	acpAdapters,
 	claudeSubscription,

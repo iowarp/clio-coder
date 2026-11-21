@@ -12483,6 +12483,7 @@ export function createDispatchBundle(
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
 				},
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
 			});
 			ledger = runLedger;
 			const recoverRuns = async (): Promise<void> => {
