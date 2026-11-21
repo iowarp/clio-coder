@@ -202,6 +202,7 @@ import {
 	workerRefusalLimitReason,
 	workerRefusalReportDirective,
 } from "./worker-refusals.js";
+import { createThrashOutcome } from "./worker-thrash-outcome.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -1150,7 +1151,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The write-side equivalent: what this run changed and what it validated,
 	// so a mutation report is judged against the run instead of believed. Scratch roots read as the orchestrator's copy
 	// reads them, so a check logged under one is output in both recorders (x6-8).
-	const runEffects = createRunEffectsRecorder(contractCwd, { scratchRoots: workerSettings.safety.scratchRoots });
+	// X4: the thrash note's settlement, from the request that carries it to the change or report that answers it.
+	const thrashOutcome = createThrashOutcome({ context: input.telemetryContext });
+	const runEffects = createRunEffectsRecorder(contractCwd, {
+		scratchRoots: workerSettings.safety.scratchRoots,
+		onWorkspaceChange: (toolCallId) => thrashOutcome.changed(toolCallId),
+	});
 	const acceptHelperResult = (data: unknown): string | null => {
 		if (!input.resultContract) return "missing helper result contract";
 		const validationInput = {
@@ -2098,6 +2104,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
 				workerTelemetry?.settle(event.message);
+				// This answer is a request the thrash note may have ridden, though the round ends here.
+				thrashOutcome.observe(event);
 				// The middleware round must run before this answer can seal a terminal result (#423).
 				const tail: AgentMessage = { role: "user", content: reminder, timestamp: Date.now() };
 				if (event.message.content.some((block) => block.type === "toolCall")) agent.steer(tail);
@@ -2180,6 +2188,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
 			recordToolExecutionEffects(runEffects, event);
 		}
+		// After the effects, so a call that changed the workspace has settled the note under its own id first.
+		thrashOutcome.observe(event);
 		if (event.type === "tool_execution_start") {
 			const call = effectiveToolCall(event.toolName, event.args);
 			if (call.toolName === ToolNames.Read) {
@@ -2250,6 +2260,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					telemetryHub().emit(
 						"middleware.fired",
 						{
+							firingId: thrashOutcome.fire(),
 							hook: "after_tool",
 							phase: "sync",
 							ruleId: "worker.thrash",
@@ -3082,6 +3093,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			clearTimeout(synthesisTimer);
 			clearActiveEscalation();
 			unsubscribePermission();
+			thrashOutcome.end(agent.state.messages.slice(inheritedCount));
 			// Every server this run launched closes with it; teardown reports go to
 			// stderr inside the source, never to the NDJSON lane.
 			try {
