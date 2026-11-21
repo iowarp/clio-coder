@@ -19,6 +19,7 @@ import {
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { turnSettlementFromCalls } from "../../src/domains/telemetry/call-facts.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import {
 	bareFinishVerdict,
@@ -33,7 +34,6 @@ import {
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
-import { turnSettlementFromCalls } from "../../src/domains/telemetry/call-facts.js";
 
 const SOURCE = { source: "builtin" } as never;
 
@@ -1049,6 +1049,20 @@ describe("the finish declaration (fleet design 4.3)", () => {
 		// CLI-P50: the refusal repeats the reply rule, and each refusal is counted on its turn's turn.settled so the rate
 		// per model is readable (absent when none was refused).
 		ok(FINISH_WITHOUT_REPLY_REFUSAL.includes("Write your reply to the user as text first; then, in that same response"));
+		// CLI-P49: the measured description, verbatim; no "alone" anywhere the model reads about finish.
+		strictEqual(
+			finishTool.description,
+			"Declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
+		);
+		for (const text of [
+			FINISH_WITHOUT_REPLY_REFUSAL,
+			finishSiblingRefusal(
+				{ name: ToolNames.Finish, arguments: {} },
+				{ content: [{ type: "toolCall" }, { type: "toolCall" }] },
+			)?.reason ?? "",
+			builtin(finishTool, SOURCE).metadata?.resultSizePolicy?.followUpHint ?? "",
+		])
+			ok(text.length > 0 && !/\balone\b/u.test(text), text);
 		strictEqual(turnSettlementFromCalls("stop", [], 0, undefined, undefined, 2).bareFinishRefusals, 2);
 		ok(!("bareFinishRefusals" in turnSettlementFromCalls("stop", [], 0)));
 		const call = { name: ToolNames.Finish, arguments: { state: "done" } };

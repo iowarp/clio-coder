@@ -124,7 +124,7 @@ export function finishSiblingRefusal(
 	return {
 		block: true,
 		reason:
-			"finish must be the only call in its response: it did not run, and the other calls in this batch did. Use their results, then write your final reply and call finish alone.",
+			"finish must be the only tool call in its response: it did not run, and the other calls in this batch did. Use their results, then write your reply to the user as text and, in that same response, call finish as the only tool call.",
 	};
 }
 
@@ -247,8 +247,10 @@ function normalizeLimitations(value: unknown): unknown {
 export const finishTool: ToolSpec = {
 	name: ToolNames.Finish,
 	// The schema stays at its floor (fleet design open question 10): the enums carry the meaning, and the operating
-	// fragments carry the guidance on when and how to declare.
-	description: "Declare how the turn ended. Call it alone with your final reply; it ends the turn.",
+	// fragments carry the guidance on when and how to declare. The wording is measured (CLI-P49): "call it alone"
+	// read to some models as "the response is only this call", so the description says the reply text comes first.
+	description:
+		"Declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
 	parameters: Type.Object({
 		state: StringEnum(COMPLETION_STATES),
 		limitations: Type.Optional(

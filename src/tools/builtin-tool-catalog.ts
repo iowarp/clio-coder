@@ -455,7 +455,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 1_024,
-			followUpHint: "Call finish alone with a valid state if the first call was rejected.",
+			followUpHint:
+				"Write your reply to the user as text, then call finish with a valid state as the only tool call in that response.",
 		},
 	},
 	[ToolNames.Consult]: {
