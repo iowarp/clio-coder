@@ -291,6 +291,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			"Prefer run_script over bash for a script that produces large or long-running output: it streams both streams to .clio-coder/runs/<runId>/ and records the script hash, argv, and declared inputs and outputs.",
 	},
+	[ToolNames.Browser]: {
+		promptHint: UNTRUSTED_CONTENT_BANNER,
+		objective:
+			"Drive a persistent headless browser session: open a URL, run Playwright scripts, look at the accessibility tree or a screenshot, close.",
+		uiLabel: "Browser",
+		resultSizePolicy: {
+			kind: "bounded",
+			maxBytes: 16_384,
+			followUpHint: "Use look with a target to scope the snapshot, or read the offloaded full result.",
+		},
+	},
 	// ORCHESTRATE: agent-class, receipts as evidence.
 	[ToolNames.Tasks]: {
 		objective: "Declare and track the session task board with completion claims and separate validation evidence.",
@@ -622,10 +633,10 @@ function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
 						return policyCap(readMaxBytes());
 					},
 				}
-			: spec.name === ToolNames.Verify
+			: spec.name === ToolNames.Verify || spec.name === ToolNames.Browser
 				? {
 						...metadata.resultSizePolicy,
-						// The frontend check's screenshot gets read's image budget; its report text keeps the summary bound.
+						// The frontend check's and the browser's screenshots get read's image budget; their text keeps its bound.
 						get imageMaxBytes() {
 							return readMaxBytes();
 						},

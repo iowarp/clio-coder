@@ -110,6 +110,8 @@ const WORKSPACE_WRITING_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Edit,
 	ToolNames.Bash,
 	ToolNames.RunScript,
+	// A run script has Node; it may write files.
+	ToolNames.Browser,
 ]);
 
 export type ToolExecutionMode = "sequential" | "parallel";
@@ -206,6 +208,11 @@ export interface ToolConfirmation {
 	hints: ReadonlyArray<string>;
 }
 
+/** What a per-call confirmation may depend on besides the arguments: the session the call runs in, as `run` sees it. */
+export interface ToolConfirmationContext {
+	sessionId?: string;
+}
+
 export interface ToolSpec {
 	name: ToolName;
 	description: string;
@@ -250,7 +257,7 @@ export interface ToolSpec {
 	 * The same rail decided per call, for a tool whose arguments decide whether
 	 * the operator must confirm. Wins over `confirmationRuleId` when it returns one.
 	 */
-	confirmationFor?(args: Record<string, unknown>): ToolConfirmation | undefined;
+	confirmationFor?(args: Record<string, unknown>, context?: ToolConfirmationContext): ToolConfirmation | undefined;
 	/** Harness-owned projection of executable effects for the safety engine. Never package-supplied code. */
 	safetyCall?(args: Record<string, unknown>): ClassifierCall | undefined;
 	/**
@@ -1917,7 +1924,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
 				: null;
 		const planScale = dispatchPlan?.planScale === true;
-		const confirmation = spec.confirmationFor?.(call.args ?? {});
+		const confirmation = spec.confirmationFor?.(
+			call.args ?? {},
+			options?.sessionId !== undefined ? { sessionId: options.sessionId } : {},
+		);
 		// The shared evaluator decides; this adapter only parks, audits and runs.
 		// The SDK bridge and the ACP mediator call the same function.
 		const admission = evaluateAdmission({
