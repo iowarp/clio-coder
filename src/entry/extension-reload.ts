@@ -31,7 +31,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { recordPackageActivity } from "../core/package-activity.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
-import { telemetryHub } from "../core/telemetry/hub.js";
+import { type TelemetryHub, telemetryHub } from "../core/telemetry/hub.js";
 import type { ToolName } from "../core/tool-names.js";
 import type {
 	ExtensionReloadCommitted,
@@ -124,6 +124,13 @@ export interface ExtensionReloadCoordinatorDeps {
 	runtimeHooks?: ExtensionRuntimeHookBridge;
 	/** The session gateway's MCP ownership, read by runtime hooks that name one server's tools. */
 	mcpOwner?: McpToolOwnerLookup;
+	/**
+	 * Where a main session's boundaries are heard. The effect-free hook runs held for a turn's receipt are written when a
+	 * turn is aborted or the session parks, and the holder closes when shutdown is requested, before any drain hook
+	 * unbinds the session ledger (C-33). Defaults to the process hub; a host with no turns hears neither and flushes as
+	 * it stops.
+	 */
+	bus?: Pick<TelemetryHub, "subscribe">;
 }
 
 export interface ExtensionReloadCoordinator {
@@ -287,7 +294,12 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 	let promptGate: ExtensionPromptGate | null = null;
 	let publishedPackages: ReadonlyArray<InstalledExtension> = [];
 	// Effect-free runtime hook runs wait here for their turn's aggregate receipt, across generations (C-33).
-	const quietRuns = createQuietHookRuns(deps.recordReceipt);
+	const quietRuns = createQuietHookRuns(deps.recordReceipt, () => deps.runtimeHooks?.sessionId() ?? null);
+	// A turn that ends without turn_end, or a session that parks, writes what it held under its own session.
+	const bus = deps.bus ?? telemetryHub();
+	bus.subscribe("turn.aborted", () => quietRuns.flush());
+	bus.subscribe("session.parked", () => quietRuns.flush());
+	bus.subscribe("shutdown.requested", () => quietRuns.close());
 	/** Published after every runtime hook, so the turn's own turn_end runs are in the aggregate it writes. */
 	const quietRunsAtTurnEnd: MiddlewareHookRegistration = {
 		id: "extension:hook-receipts:turn_end",
@@ -485,6 +497,8 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 					diagnostics: failure(`generation ${candidate.generation} was superseded before it could be published`),
 				});
 			}
+			// The outgoing generation's held runs are written now; the next one may have no turn_end to write them.
+			quietRuns.flush();
 			candidate.publish();
 			replacement.publish();
 			promptGate = nextPromptGate;

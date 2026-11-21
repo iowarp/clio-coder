@@ -93,20 +93,53 @@ type ToolOrTurnPoint = "before_tool" | "after_tool" | "turn_start" | "turn_end";
  * Effect-free runs of extension runtime hooks, held per hook, generation, session, run and turn until `flush`
  * writes one receipt for each: how many ran, their total and their longest duration (C-33). A hook that answers
  * every tool call with nothing otherwise wrote a receipt per call. The holder outlives a generation, so a reload
- * between a turn's calls loses none of them.
+ * between a turn's calls loses none of them. A run that names no session is held under the session current when it
+ * ran, so a flush after a session switch never files it under the new one.
  */
 export interface QuietHookRuns {
 	add(receipt: HookReceipt): void;
 	flush(): void;
+	/** Write what is held, and from now on every run as it settles: the process is stopping. */
+	close(): void;
 }
 
-export function createQuietHookRuns(sink: HookReceiptSink): QuietHookRuns {
+export function createQuietHookRuns(sink: HookReceiptSink, sessionId?: () => string | null): QuietHookRuns {
 	const held = new Map<
 		string,
 		{ first: HookReceipt; at: number; runs: number; total: number; max: number; mixed: boolean }
 	>();
+	let closed = false;
+	const write = (receipt: HookReceipt): void => {
+		try {
+			sink(receipt);
+		} catch {
+			// Receipts are observability; a failed write changes no call.
+		}
+	};
+	const flush = (): void => {
+		const pending = [...held.values()];
+		held.clear();
+		for (const { first, at, runs, total, max, mixed } of pending) {
+			// A hook whose filter names several tools stands for all of them, so the receipt names none.
+			const { toolName, ...rest } = first;
+			write({
+				...rest,
+				at,
+				durationMs: total,
+				runs,
+				maxDurationMs: max,
+				...(!mixed && toolName !== undefined ? { toolName } : {}),
+			});
+		}
+	};
 	return {
-		add(receipt) {
+		add(ran) {
+			const current = ran.sessionId === undefined ? (sessionId?.() ?? null) : null;
+			const receipt = current === null ? ran : { ...ran, sessionId: current };
+			if (closed) {
+				write(receipt);
+				return;
+			}
 			const key = JSON.stringify([
 				receipt.hookId,
 				receipt.extension?.generation ?? null,
@@ -126,25 +159,10 @@ export function createQuietHookRuns(sink: HookReceiptSink): QuietHookRuns {
 			prior.max = Math.max(prior.max, duration);
 			if (prior.first.toolName !== receipt.toolName) prior.mixed = true;
 		},
-		flush() {
-			const pending = [...held.values()];
-			held.clear();
-			for (const { first, at, runs, total, max, mixed } of pending) {
-				// A hook whose filter names several tools stands for all of them, so the receipt names none.
-				const { toolName, ...rest } = first;
-				try {
-					sink({
-						...rest,
-						at,
-						durationMs: total,
-						runs,
-						maxDurationMs: max,
-						...(!mixed && toolName !== undefined ? { toolName } : {}),
-					});
-				} catch {
-					// Receipts are observability; a failed write changes no call.
-				}
-			}
+		flush,
+		close() {
+			closed = true;
+			flush();
 		},
 	};
 }
@@ -749,6 +767,15 @@ export function buildExtensionPromptGate(
 			let text = typed;
 			const notices: string[] = [];
 			const { lastToolCall, ...turnOrigin } = origin;
+			// The prompt's session, read once: a receipt written later still names the session it was typed in.
+			const sessionId = bridge.sessionId() ?? undefined;
+			const settle = (verdict: RunnerVerdict, runner: RuntimeHookRunner, startedAt: number, effects: string[]) =>
+				runner.settle(verdict, startedAt, effects, undefined, sessionId);
+			// A blocked prompt starts no turn, so no turn_end writes the quiet runs that came before the block.
+			const block = (reason: string): ExtensionPromptGateVerdict => {
+				options.quietRuns?.flush();
+				return { kind: "block", reason, notices };
+			};
 			for (const { extensionId, access, runner } of runners) {
 				const startedAt = performance.now();
 				// The call's arguments cross under tool-args, as a before_tool hook's do; its name and outcome always cross.
@@ -763,20 +790,16 @@ export function buildExtensionPromptGate(
 						: { lastToolCall: { ...call, ...(args !== undefined && access.includes("tool-args") ? { args } : {}) } }),
 				});
 				if (verdict.kind === "failed") {
-					runner.settle(verdict, startedAt, verdict.policy === "block" ? ["block_prompt"] : []);
+					settle(verdict, runner, startedAt, verdict.policy === "block" ? ["block_prompt"] : []);
 					if (verdict.policy === "block")
-						return {
-							kind: "block",
-							reason: `extension ${extensionId} prompt_submit hook ${verdict.reason}; the gate fails closed`,
-							notices,
-						};
+						return block(`extension ${extensionId} prompt_submit hook ${verdict.reason}; the gate fails closed`);
 					continue;
 				}
 				const applied: string[] = [];
 				for (const effect of verdict.effects) {
 					if (effect.kind === "block_prompt") {
-						runner.settle(verdict, startedAt, [...applied, "block_prompt"]);
-						return { kind: "block", reason: `${extensionId}: ${effect.reason}`, notices };
+						settle(verdict, runner, startedAt, [...applied, "block_prompt"]);
+						return block(`${extensionId}: ${effect.reason}`);
 					}
 					if (effect.kind === "rewrite_prompt") {
 						if (!rewritable) {
@@ -794,7 +817,7 @@ export function buildExtensionPromptGate(
 						applied.push("pin_context");
 					}
 				}
-				runner.settle(verdict, startedAt, applied);
+				settle(verdict, runner, startedAt, applied);
 			}
 			return { kind: "pass", text, notices };
 		},
