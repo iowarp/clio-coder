@@ -1324,9 +1324,197 @@ describe("user hook applicability", () => {
 		deepStrictEqual(receipt.effectKinds, ["annotate_tool_result"]);
 	});
 
+	it("feeds command hooks their event on stdin and blocks with exit 2 at each event (EX-4)", async () => {
+		const inputs: Array<string | undefined> = [];
+		let answer = { code: 2 as number | null, timedOut: false, stdout: "ignored", stderr: "no rm here" };
+		const runCommand: UserHookCommandRunner = (_argv, runOptions) => {
+			inputs.push(runOptions.input);
+			return answer;
+		};
+		const build = (raw: Record<string, unknown>) => {
+			const hook = normalizeUserHook({ kind: "command", argv: ["/bin/sh", "-c", "x"], ...raw }, source, options).hook;
+			ok(hook, JSON.stringify(raw));
+			return userHookToRegistration(hook, { recordReceipt: () => {}, runCommand });
+		};
+		const pre = build({
+			id: "pre",
+			on: "before_tool",
+			as: "none",
+			eventName: "PreToolUse",
+			tools: ["bash"],
+			dialect: "claude-code",
+		});
+		const call = { hook: "before_tool" as const, sessionId: "s1", toolName: "bash", toolArgs: { command: "rm -rf x" } };
+		deepStrictEqual(pre.evaluate(call), [{ kind: "block_tool", reason: "no rm here", severity: "hard-block" }]);
+		deepStrictEqual(JSON.parse(inputs.at(-1) ?? "{}"), {
+			hook_event_name: "PreToolUse",
+			session_id: "s1",
+			cwd: "/workspace",
+			tool_name: "Bash",
+			tool_input: { command: "rm -rf x" },
+		});
+		deepStrictEqual(build({ id: "post", on: "after_tool", as: "none" }).evaluate({ ...call, hook: "after_tool" }), [
+			{ kind: "annotate_tool_result", message: "no rm here", severity: "warn" },
+		]);
+		const stop = build({ id: "stop", on: "turn_end", as: "none" }).evaluate({ hook: "turn_end", text: "done" });
+		strictEqual(stop[0]?.kind, "request_continuation");
+		strictEqual(JSON.parse(inputs.at(-1) ?? "{}").last_assistant_message, "done");
+		// A prompt hook gates its turn, so it runs only in the awaited turn_start phase.
+		const prompt = build({ id: "prompt", on: "turn_start", as: "reminder" });
+		strictEqual(prompt.awaited, true);
+		deepStrictEqual(prompt.evaluate({ hook: "turn_start" }), []);
+		const start = { hook: "turn_start" as const, sessionId: "s1", text: "hi" };
+		deepStrictEqual(await prompt.evaluateAsync?.(start), [
+			{ kind: "block_tool", reason: "no rm here", severity: "hard-block" },
+		]);
+		strictEqual(JSON.parse(inputs.at(-1) ?? "{}").prompt, "hi");
+		// Exit 0: `none` discards the output; a once-per-session hook runs on a session's first turn only.
+		answer = { code: 0, timedOut: false, stdout: "context", stderr: "" };
+		deepStrictEqual(pre.evaluate(call), []);
+		const session = build({ id: "session", on: "turn_start", as: "reminder", once: "session" });
+		deepStrictEqual(await session.evaluateAsync?.(start), [{ kind: "inject_reminder", message: "context" }]);
+		deepStrictEqual(await session.evaluateAsync?.(start), []);
+		deepStrictEqual(await session.evaluateAsync?.({ ...start, sessionId: "s2" }), [
+			{ kind: "inject_reminder", message: "context" },
+		]);
+		ok(
+			issuesFor({ on: "turn_end", kind: "command", argv: ["true"], once: "session" }).includes(
+				"once applies to turn_start hooks only",
+			),
+		);
+		// The operator's own <config>/hooks.yaml loads as the user origin, with no trust record.
+		const configDir = mkdtempSync(path.join(tmpdir(), "clio-coder-user-hooks-"));
+		try {
+			writeFileSync(
+				path.join(configDir, "hooks.yaml"),
+				"- id: mine\n  on: turn_end\n  kind: prompt\n  message: wrap up\n",
+			);
+			const read = readHookSources({ cwd: configDir, configDir });
+			deepStrictEqual(
+				read.batches.map((batch) => batch.source.origin),
+				["user"],
+			);
+		} finally {
+			rmSync(configDir, { recursive: true, force: true });
+		}
+	});
+
+	it("speaks the claude-code and codex hook dialects: their tool_input names and JSON decisions (EX-4)", () => {
+		const inputs: Array<string | undefined> = [];
+		let stdout = "";
+		const runCommand: UserHookCommandRunner = (_argv, runOptions) => {
+			inputs.push(runOptions.input);
+			return { code: 0, timedOut: false, stdout, stderr: "" };
+		};
+		const build = (raw: Record<string, unknown>) => {
+			const hook = normalizeUserHook(
+				{ kind: "command", argv: ["/bin/sh", "-c", "x"], as: "none", ...raw },
+				source,
+				options,
+			).hook;
+			ok(hook, JSON.stringify(raw));
+			return userHookToRegistration(hook, { recordReceipt: () => {}, runCommand });
+		};
+		const sent = () => JSON.parse(inputs.at(-1) ?? "{}") as Record<string, unknown>;
+		const claude = build({ id: "claude", on: "before_tool", dialect: "claude-code" });
+		const call = (toolName: string, toolArgs: Record<string, unknown>) => ({
+			hook: "before_tool" as const,
+			toolName,
+			toolArgs,
+		});
+		claude.evaluate(call("edit", { path: "a.env", edits: [{ oldText: "x", newText: "y" }] }));
+		deepStrictEqual(
+			[sent().tool_name, sent().tool_input],
+			["Edit", { file_path: "a.env", old_string: "x", new_string: "y" }],
+		);
+		claude.evaluate(
+			call("edit", {
+				path: "a",
+				edits: [
+					{ oldText: "1", newText: "2" },
+					{ oldText: "3", newText: "4" },
+				],
+			}),
+		);
+		deepStrictEqual(
+			[sent().tool_name, sent().tool_input],
+			[
+				"MultiEdit",
+				{
+					file_path: "a",
+					edits: [
+						{ old_string: "1", new_string: "2" },
+						{ old_string: "3", new_string: "4" },
+					],
+				},
+			],
+		);
+		claude.evaluate(call("write", { path: "b", content: "c" }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Write", { file_path: "b", content: "c" }]);
+		claude.evaluate(call("read", { path: "r", offset: 3, limit: 9 }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Read", { file_path: "r", offset: 3, limit: 9 }]);
+		claude.evaluate(call("find", { pattern: "*.ts", path: "src" }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Glob", { pattern: "*.ts", path: "src" }]);
+		const codex = build({ id: "codex", on: "before_tool", dialect: "codex" });
+		codex.evaluate(call("bash", { command: "ls" }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Bash", { command: "ls" }]);
+		codex.evaluate(call("edit", { path: "a.env", edits: [{ oldText: "x", newText: "y" }] }));
+		strictEqual(sent().tool_name, "apply_patch");
+		ok(String((sent().tool_input as { command?: unknown }).command).includes("*** Update File: a.env\n@@\n-x\n+y"));
+		// Exit 0 with JSON on stdout decides like exit 2 does; plain stdout stays ignored under as: none.
+		const bash = call("bash", { command: "cat .env" });
+		stdout = "not json";
+		deepStrictEqual(claude.evaluate(bash), []);
+		stdout = JSON.stringify({
+			hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "secrets stay closed" },
+		});
+		deepStrictEqual(claude.evaluate(bash), [
+			{ kind: "block_tool", reason: "secrets stay closed", severity: "hard-block" },
+		]);
+		deepStrictEqual(codex.evaluate(bash), [
+			{ kind: "block_tool", reason: "secrets stay closed", severity: "hard-block" },
+		]);
+		stdout = JSON.stringify({ decision: "block", reason: "legacy block" });
+		deepStrictEqual(claude.evaluate(bash), [{ kind: "block_tool", reason: "legacy block", severity: "hard-block" }]);
+		stdout = JSON.stringify({
+			hookSpecificOutput: { permissionDecision: "ask", permissionDecisionReason: "confirm the secret read" },
+		});
+		deepStrictEqual(claude.evaluate(bash), [{ kind: "request_approval", reason: "confirm the secret read" }]);
+		ok(
+			issuesFor({ on: "turn_start", kind: "effect", effect: { kind: "request_approval", reason: "x" } }).some((i) =>
+				i.includes("before_tool"),
+			),
+			"an approval request applies only before a tool runs",
+		);
+		stdout = JSON.stringify({ hookSpecificOutput: { permissionDecision: "allow" } });
+		deepStrictEqual(claude.evaluate(bash), [], "allow grants nothing past Clio's own admission");
+		stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: "touches generated files" } });
+		deepStrictEqual(claude.evaluate(bash), [
+			{ kind: "annotate_tool_result", message: "touches generated files", severity: "info" },
+		]);
+		const prompt = build({ id: "prompt", on: "turn_start", as: "reminder", dialect: "claude-code" });
+		deepStrictEqual(prompt.evaluate({ hook: "turn_start" }), []);
+		stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: "ask for a reproduction" } });
+		return Promise.resolve(prompt.evaluateAsync?.({ hook: "turn_start", text: "fix it" })).then(async (effects) => {
+			deepStrictEqual(effects, [{ kind: "inject_reminder", message: "ask for a reproduction" }]);
+			stdout = JSON.stringify({ decision: "block", reason: "say what broke" });
+			deepStrictEqual(await prompt.evaluateAsync?.({ hook: "turn_start", text: "fix it" }), [
+				{ kind: "block_tool", reason: "say what broke", severity: "hard-block" },
+			]);
+			const stop = build({ id: "stop", on: "turn_end", dialect: "codex" });
+			stdout = JSON.stringify({ decision: "block", reason: "run the failing tests again" });
+			const continued = stop.evaluate({ hook: "turn_end", text: "done" });
+			strictEqual(continued[0]?.kind, "request_continuation");
+			ok(JSON.stringify(continued).includes("run the failing tests again"));
+			ok(
+				issuesFor({ on: "before_tool", kind: "command", argv: ["x"], dialect: "zed" }).some((i) => i.includes("dialect")),
+			);
+		});
+	});
+
 	it("surfaces a command hook's first-run stall and receipts a thrown hook as failed, not skipped (D2-3)", () => {
 		const hook = normalizeUserHook(
-			{ id: "cold", on: "turn_start", kind: "command", argv: ["npx", "x"], as: "reminder" },
+			{ id: "cold", on: "turn_end", kind: "command", argv: ["npx", "x"], as: "reminder" },
 			source,
 			options,
 		).hook;
@@ -1337,11 +1525,11 @@ describe("user hook applicability", () => {
 			recordReceipt: (receipt) => receipts.push(receipt),
 			runCommand: (argv, runOptions) => run(argv, runOptions),
 		});
-		const inProcess = registration("in-process", () => [], { hooks: ["turn_start"] });
+		const inProcess = registration("in-process", () => [], { hooks: ["turn_end"] });
 		const clock = [0, 5000, 5000, 10_000];
 		const diagnostics: MiddlewareDiagnostic[] = [];
 		// Both overrun on their first call; only the subprocess is denied the warmup grace.
-		runMiddlewareRegistrations({ hook: "turn_start" }, [cold, inProcess], {
+		runMiddlewareRegistrations({ hook: "turn_end" }, [cold, inProcess], {
 			onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
 			now: () => clock.shift() ?? 0,
 		});
@@ -1350,12 +1538,10 @@ describe("user hook applicability", () => {
 			[["budget_exceeded", "cold"]],
 		);
 		// A lone stall is no steady-state slowness, but the operator still hears of it, once (EX-2).
-		const stall = { kind: "budget_exceeded", registrationId: "cold", hook: "turn_start", elapsedMs: 5000, budgetMs: 50 };
+		const stall = { kind: "budget_exceeded", registrationId: "cold", hook: "turn_end", elapsedMs: 5000, budgetMs: 50 };
 		const seen = new Set<string>();
 		ok(
-			middlewareHookFailedSessionNotice({ ...stall, steadyStateWarn: false }, seen)?.text.includes(
-				"stalled on turn_start",
-			),
+			middlewareHookFailedSessionNotice({ ...stall, steadyStateWarn: false }, seen)?.text.includes("stalled on turn_end"),
 		);
 		strictEqual(middlewareHookFailedSessionNotice({ ...stall, steadyStateWarn: false }, seen), null);
 		strictEqual(middlewareHookFailedSessionNotice({ ...stall, elapsedMs: 60, steadyStateWarn: false }, new Set()), null);
@@ -1363,12 +1549,12 @@ describe("user hook applicability", () => {
 			throw new Error("spawn exploded");
 		};
 		diagnostics.length = 0;
-		runMiddlewareRegistrations({ hook: "turn_start" }, [cold], {
+		runMiddlewareRegistrations({ hook: "turn_end" }, [cold], {
 			onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
 		});
 		strictEqual(receipts.at(-1)?.outcome, "failed");
 		deepStrictEqual(diagnostics, [
-			{ kind: "hook_failed", registrationId: "cold", hook: "turn_start", message: "spawn exploded" },
+			{ kind: "hook_failed", registrationId: "cold", hook: "turn_end", message: "spawn exploded" },
 		]);
 	});
 

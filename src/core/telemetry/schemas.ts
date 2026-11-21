@@ -545,6 +545,7 @@ export const MIDDLEWARE_EFFECTS = vocabulary([
 	"lock_tools",
 	"notify_operator",
 	"rewrite_tool_input",
+	"request_approval",
 ]);
 export const SYSTEM_ONE_OUTCOME = vocabulary([
 	"answered",
