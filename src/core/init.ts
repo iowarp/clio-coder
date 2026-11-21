@@ -418,7 +418,7 @@ function enforceHomePrefixGuard(): void {
 	if (!dirs.cache.startsWith(home)) offenders.push(`cacheDir=${dirs.cache}`);
 	if (offenders.length === 0) return;
 	throw new Error(
-		`CLIO_CODER_REQUIRE_HOME_PREFIX guardrail tripped: resolved Clio directories escape CLIO_CODER_HOME=${home}. ` +
+		`CLIO_CODER_REQUIRE_HOME_PREFIX guardrail tripped: resolved CLIO Coder directories escape CLIO_CODER_HOME=${home}. ` +
 			`Offending paths: ${offenders.join(", ")}. ` +
 			`Individual overrides CLIO_CODER_CONFIG_DIR, CLIO_CODER_DATA_DIR, CLIO_CODER_STATE_DIR, and CLIO_CODER_CACHE_DIR take precedence ` +
 			`over CLIO_CODER_HOME, so a test that sets only CLIO_CODER_HOME inherits whatever the parent process configured. ` +

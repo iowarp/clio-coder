@@ -1091,7 +1091,7 @@ export function verifyShareArchive(archive: Buffer): ShareArchiveCheck {
 			const legacy = keepsRunIds(manifest.clioCoderVersion);
 			const violation = profileViolation(files, scope.profile, manifest.installId, legacy);
 			if (violation !== null)
-				check.failure = `${label}: ${violation}${legacy ? ` (written by Clio ${manifest.clioCoderVersion})` : ""}`;
+				check.failure = `${label}: ${violation}${legacy ? ` (written by CLIO Coder ${manifest.clioCoderVersion})` : ""}`;
 		}
 		if (check.failure !== null) return check;
 	}

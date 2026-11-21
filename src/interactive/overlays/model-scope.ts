@@ -79,7 +79,7 @@ function buildModelScopeItems(saveOnly: boolean): ChoiceItem[] {
 		{
 			value: "cancel",
 			label: "Cancel",
-			description: "Nothing changes; Clio keeps the current model",
+			description: "Nothing changes; CLIO Coder keeps the current model",
 		},
 	];
 	return saveOnly ? items.filter((item) => item.value !== "session") : items;

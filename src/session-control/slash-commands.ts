@@ -618,7 +618,7 @@ export async function handleRun(
 		deps.notice(
 			"warn",
 			options.worktree
-				? `External CLI ${selectedRuntime} will run in a Clio-created Git worktree. The worktree separates Git changes but does not confine the peer's filesystem, shell, or network tools.`
+				? `External CLI ${selectedRuntime} will run in a CLIO Coder-created Git worktree. The worktree separates Git changes but does not confine the peer's filesystem, shell, or network tools.`
 				: `External CLI ${selectedRuntime} will run in the current checkout; edits may appear immediately. The peer's own tools may access paths outside this checkout.`,
 		);
 	}
@@ -1416,7 +1416,7 @@ function formatRunVerificationBlock(runId: string, result: SlashRunVerification)
 }
 
 /** What a command is about, in the order /help lists the groups. */
-export const SLASH_COMMAND_GROUPS = ["Session", "Model and context", "Work", "Clio"] as const;
+export const SLASH_COMMAND_GROUPS = ["Session", "Model and context", "Work", "CLIO Coder"] as const;
 export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
 
 export interface CommandAcpAdmission {
@@ -1512,7 +1512,11 @@ function panesPeerFromArgs(parsed: ParsedArgs): SlashCommand {
 	if (parsed.error) return usageError("panes", parsed.error, "peer");
 	const peer = parsed.positionals[0] ?? "";
 	if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
-		return usageError("panes", `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}`, "peer");
+		return usageError(
+			"panes",
+			`${peer} is not a peer CLIO Coder can open. Name one of ${PANE_PEER_IDS.join(", ")}`,
+			"peer",
+		);
 	}
 	const cwd = parsed.flags.get("--cwd");
 	return {
@@ -1562,7 +1566,7 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 	// The settings and wire facts follow on one details line, in words.
 	const host = status.server ? `Herdr ${status.server.version}` : "the pane host";
 	const lead = status.available
-		? `Panes: ${host} is available. Clio opens panes beside this one, ${status.mode === "embedded" || isClioHostSocket(status.socketPath ?? undefined) ? "in its own workspace" : "as a guest in this workspace"}.`
+		? `Panes: ${host} is available. CLIO Coder opens panes beside this one, ${status.mode === "embedded" || isClioHostSocket(status.socketPath ?? undefined) ? "in its own workspace" : "as a guest in this workspace"}.`
 		: `Panes: unavailable. ${status.reason}`;
 	const row = (label: string, value: string): string => `  ${label.padEnd(12)} ${value}`;
 	const files =
@@ -1616,7 +1620,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: { reads: ["", "status"], sessionOnly: ["off"] },
 		description: "Show active conversation eggs or turn them off",
-		group: "Clio",
+		group: "CLIO Coder",
 		hidden: true,
 		kinds: ["eggs"],
 		args: { subcommands: { status: {}, off: { positionals: [{ name: "id", required: false }] } } },
@@ -1639,7 +1643,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Reload settings, library resources and extension runtimes with one report",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["reload"],
 		args: {
 			positionals: [{ name: "target", required: false, values: ["settings", "library", "extensions", "prompts", "all"] }],
@@ -1670,7 +1674,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Save and restart into this session and workspace; text after /restart becomes its next message",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["restart"],
 		args: { positionals: [{ name: "task", required: false, rest: true }] },
 		fromArgs(parsed) {
@@ -1690,7 +1694,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Review this repository's own configuration and trust it, then restart to apply it",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["trust"],
 		args: {},
 		fromArgs: fromArgsOrUsage("trust", { kind: "trust" }),
@@ -1721,7 +1725,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 1,
 		acp: false,
 		description: "Open the help center for commands and keys",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["help"],
 		args: {
 			positionals: [{ name: "query", required: false, rest: true }],
@@ -1773,7 +1777,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 2,
 		acp: false,
 		description: "Browse skills, agents, prompts, playbooks, plugins and extensions, or review an install or removal",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["resources", "agents"],
 		// The same verbs as `clio-coder library`; each opens the review that command would apply.
 		subcommandDescriptions: {
@@ -1900,7 +1904,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: { reads: ["", "list"] },
 		description: "List MCP servers, or trust or untrust one by id",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["mcp"],
 		args: {
 			subcommands: {
@@ -1938,7 +1942,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: { reads: [""] },
 		description: "Check this install; `--deep` adds live tool probes and a contract dry run",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["doctor"],
 		args: { flags: [{ name: "--deep" }] },
 		fromArgs(parsed) {
@@ -1975,7 +1979,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Review and approve a CLIO Coder update, then restart when it succeeds",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["upgrade"],
 		args: {},
 		fromArgs: fromArgsOrUsage("upgrade", { kind: "upgrade" }),
@@ -1992,7 +1996,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Inspect extensions, manage dev and muted ones for this session, or leave a workspace",
-		group: "Clio",
+		group: "CLIO Coder",
 		// Harness navigation uses the shared overlay dispatcher, independently of component reload.
 		kinds: [],
 		args: {
@@ -2026,11 +2030,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "archive",
 		rank: 3,
 		acp: {},
-		description: "Export or import a full Clio archive",
+		description: "Export or import a full CLIO Coder archive",
 		group: "Session",
 		hidden: true,
 		kinds: ["archive-export", "archive-import"],
-		subcommandDescriptions: { export: "Export a full Clio archive", import: "Import a full Clio archive" },
+		subcommandDescriptions: { export: "Export a full CLIO Coder archive", import: "Import a full CLIO Coder archive" },
 		args: {
 			subcommands: {
 				export: {
@@ -2948,7 +2952,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Let another terminal watch this session, answer its approvals, or pair",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["attach"],
 		args: {
 			subcommands: { observe: {}, approve: {}, pair: {}, off: {} },
@@ -2993,7 +2997,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show pane status, watch a run, open a utility pane or a coding peer",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-peers", "peer-pane"],
 		args: {
 			subcommands: {
@@ -3014,11 +3018,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		subcommandDescriptions: {
-			peer: "Open a coding peer in a Clio-owned interactive pane",
+			peer: "Open a coding peer in a CLIO Coder-owned interactive pane",
 			show: "Watch a live run or agent in the watch pane",
 			open: `Open a utility pane (${PANES_PRESET_IDS.join(", ")}, \`files --once\` for one pick, or a command)`,
-			zoom: "Toggle zoom on a Clio-owned pane (default: the watch pane)",
-			close: "Close a Clio-owned pane, or all of them",
+			zoom: "Toggle zoom on a CLIO Coder-owned pane (default: the watch pane)",
+			close: "Close a CLIO Coder-owned pane, or all of them",
 		},
 		fromArgs(parsed) {
 			if (parsed.subcommand === "peer") return panesPeerFromArgs(parsed);
@@ -3060,7 +3064,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 							kind: "usage-error",
 							command: "panes",
 							subcommand: "peer",
-							reason: `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt`,
+							reason: `Name the coding agent to open beside CLIO Coder: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt`,
 						},
 						ctx,
 					);
@@ -3070,7 +3074,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				const width = Math.max(...listing.map((row) => row.peer.length));
 				const lines = [
 					status.available
-						? "Peers: coding agents Clio can open in a pane beside this one. Clio does not track or review their work."
+						? "Peers: coding agents CLIO Coder can open in a pane beside this one. CLIO Coder does not track or review their work."
 						: `Peers: none can open now. ${status.reason}`,
 					...listing.map(
 						(row) => `  ${row.peer.padEnd(width)}  ${row.found ? "installed" : `not found; install ${row.binary} to use it`}`,
@@ -3100,7 +3104,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					if (result.status === "opened") {
 						ctx.notice(
 							"success",
-							`Opened ${command.peer} in a pane beside this one, working in ${result.cwd}. It runs on its own: Clio keeps no run record of it and does not review its changes.`,
+							`Opened ${command.peer} in a pane beside this one, working in ${result.cwd}. It runs on its own: CLIO Coder keeps no run record of it and does not review its changes.`,
 						);
 					} else if (result.status === "missing-binary") {
 						ctx.notice("warn", result.detail);
@@ -3168,7 +3172,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					if (result.status === "zoomed") {
 						ctx.notice("success", `toggled zoom on ${result.label} (${result.paneId})`);
 					} else if (result.status === "not-found") {
-						ctx.notice("warn", `no Clio-owned pane matches ${result.target}`);
+						ctx.notice("warn", `no CLIO Coder-owned pane matches ${result.target}`);
 					} else {
 						ctx.notice("warn", result.reason);
 					}
@@ -3182,7 +3186,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					const what = result.labels.length > 0 ? `: ${result.labels.join(", ")}` : "";
 					ctx.notice(result.closed > 0 ? "success" : "info", `closed ${result.closed} pane(s)${what}`);
 				} else if (result.status === "not-found") {
-					ctx.notice("warn", `no Clio-owned pane matches ${result.target}`);
+					ctx.notice("warn", `no CLIO Coder-owned pane matches ${result.target}`);
 				} else {
 					ctx.notice("warn", result.reason);
 				}
@@ -3194,7 +3198,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show or hide the files pane; picks land in the composer as @ mentions",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["files"],
 		args: { subcommands: { open: {}, hide: {}, close: {}, pick: {} } },
 		subcommandDescriptions: {
@@ -3257,7 +3261,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show or hide the focus-radio music pane (cliamp in a herdr dock)",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["music", "music-station"],
 		args: {
 			subcommands: {
@@ -3418,7 +3422,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		],
 		acp: false,
 		description: "Open interactive settings",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["settings"],
 		args: {
 			positionals: [
@@ -3508,7 +3512,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			readOnlyRefuses: ["send", "forget"],
 		},
 		description: "Preview, then send a bug, feature request or question to CLIO Coder's maintainers",
-		group: "Clio",
+		group: "CLIO Coder",
 		kinds: ["report", "report-status", "report-send", "report-forget", "report-security"],
 		subcommandDescriptions: {
 			bug: "Report a bug; the summary becomes the title",
@@ -3673,7 +3677,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 1,
 		aliases: [{ name: "undo" }],
 		acp: false,
-		description: "Restore workspace files from a snapshot taken before Clio's changes; /tree rewinds the conversation",
+		description:
+			"Restore workspace files from a snapshot taken before CLIO Coder's changes; /tree rewinds the conversation",
 		group: "Session",
 		kinds: ["rewind"],
 		args: {},

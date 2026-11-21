@@ -1500,7 +1500,7 @@ it("reports the rejected sibling rules with their source line and reason, in the
 		ok(line?.includes(reasons.get(at ?? "")?.reason.slice(0, 40) ?? "\u0000"), text);
 	}
 	ok(text.includes("absorbed rules: 1 verified, 2 stale, 1 contradicted, 0 unverifiable"), text);
-	ok(text.includes("absorbed handbooks: CLAUDE.md; Clio did not modify them"), text);
+	ok(text.includes("absorbed handbooks: CLAUDE.md; CLIO Coder did not modify them"), text);
 
 	rmSync(join(cwd, "CLIO-CODER.md"));
 	const previous = process.cwd();

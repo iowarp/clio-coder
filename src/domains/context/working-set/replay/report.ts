@@ -205,7 +205,7 @@ function reasonRows(policy: string, result: ReplayPolicyResult): string[] {
 
 export function renderReplayMarkdown(input: ReplayReportInput): string {
 	const lines = [
-		"# Clio working-set replay",
+		"# CLIO Coder working-set replay",
 		"",
 		"## Inclusion cascade",
 		"",

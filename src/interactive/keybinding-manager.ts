@@ -423,13 +423,13 @@ export function formatPlatformKeybindingNotice(warnings: ReadonlyArray<PlatformK
 				return base ? `Alt+${base.toUpperCase()}` : key;
 			})
 			.join(", ");
-		return `Clio keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt; until then Ctrl+G and the same letter does the same thing, and the hints say so.\n`;
+		return `CLIO Coder keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt; until then Ctrl+G and the same letter does the same thing, and the hints say so.\n`;
 	}
 	const count = warnings.reduce((sum, entry) => sum + entry.keys.length, 0);
 	const detail = warnings
 		.flatMap((entry) => entry.keys.map((key) => `${entry.id}="${key}" (${entry.source}, ${entry.reason})`))
 		.join(", ");
-	return `Clio keybinding notice: ${count} keybinding${count === 1 ? "" : "s"} may not fire reliably in this terminal: ${detail}. Rebind in settings.yaml or inspect /help.\n`;
+	return `CLIO Coder keybinding notice: ${count} keybinding${count === 1 ? "" : "s"} may not fire reliably in this terminal: ${detail}. Rebind in settings.yaml or inspect /help.\n`;
 }
 
 function joinKeys(keys: ReadonlyArray<KeyId>): string {

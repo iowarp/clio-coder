@@ -478,8 +478,8 @@ test("a lock, an unload, a switch and a load each say their own thing, and a loc
 		holder: { pid: 4242, host: null, self: false, wants: "big-model" },
 		since: at,
 	});
-	strictEqual(held.subject, "Clio");
-	match(held.label, /is waiting for another Clio/);
+	strictEqual(held.subject, "CLIO Coder");
+	match(held.label, /is waiting for another CLIO Coder/);
 	match(held.label, /that session is loading Big-model/);
 	doesNotMatch(held.label, /pid|4242/);
 	match(wait({ stage: "lock", holder: null, since: at }).label, /who holds it is unknown/);
@@ -487,7 +487,10 @@ test("a lock, an unload, a switch and a load each say their own thing, and a loc
 		wait({ stage: "lock", holder: { pid: 1, host: "other", self: false, wants: null }, since: at }).label,
 		/on other/,
 	);
-	match(wait({ stage: "lock", holder: { pid: 1, host: null, self: true, wants: null }, since: at }).label, /this Clio/);
+	match(
+		wait({ stage: "lock", holder: { pid: 1, host: null, self: true, wants: null }, since: at }).label,
+		/this CLIO Coder/,
+	);
 	match(wait({ stage: "unloading", model: "old", since: at }).label, /is unloading Old/);
 	match(wait({ stage: "switching", from: "old", to: "new", since: at }).label, /is replacing Old with New/);
 	match(
@@ -832,7 +835,10 @@ test("a wait of exactly the budget is honoured, and one past it sends nothing an
 	deepStrictEqual(past.delays, []);
 	strictEqual(past.sent, 0);
 	strictEqual(past.last?.attempt, 0);
-	match(formatRetryStatus(past.last as RetryStatusPayload), /provider asked to wait 2h, and Clio waits at most 1h/u);
+	match(
+		formatRetryStatus(past.last as RetryStatusPayload),
+		/provider asked to wait 2h, and CLIO Coder waits at most 1h/u,
+	);
 	doesNotMatch(formatRetryStatus(past.last as RetryStatusPayload), /exhausted/u);
 });
 
@@ -1954,7 +1960,7 @@ test("a long silence states its evidence age, what is usual and the limit, and n
 		silenceNoteForms(waiting, at, DEFAULT_RETRY_SETTINGS, history)?.[0] ?? "";
 	match(
 		first(null),
-		/No bytes for 1m35s, usual time for this route unknown\. Clio ends this call after 10m of silence/u,
+		/No bytes for 1m35s, usual time for this route unknown\. CLIO Coder ends this call after 10m of silence/u,
 	);
 	// One call is not a usual.
 	match(first({ calls: 1, slowestMs: 8_000 }), /usual time for this route unknown/u);
@@ -2217,7 +2223,7 @@ test("a silent worker says whether its wait is usual for the route only from two
 	bindWorkerResponseLimit(() => 600_000);
 	try {
 		const bounded = workerSilenceWords(late, { now, history: null });
-		match(bounded ?? "", /Clio ends a reply after 10m/u);
+		match(bounded ?? "", /CLIO Coder ends a reply after 10m/u);
 		doesNotMatch(bounded ?? "", /no time limit/u);
 		strictEqual(workerSilenceWords(late, { now, history: null, room: 40 }), "no output for 1m35s · reply limit 10m");
 	} finally {
@@ -2323,7 +2329,7 @@ test("a worker failure's primary words name what happened to the task, never the
 		],
 		[
 			"exit code 1; result contract failed after 2 bounded repair rounds: Verifier result payload failed: result must be valid JSON",
-			/^its answer was not in the format Clio asked for$/u,
+			/^its answer was not in the format CLIO Coder asked for$/u,
 		],
 		[
 			"exit code 1; result contract failed after 2 bounded repair rounds: Scout citation cannot be read: tests/contracts directory",
@@ -2337,7 +2343,7 @@ test("a worker failure's primary words name what happened to the task, never the
 			"the operator denied the worker's permission request, so it changed nothing and the assignment was not done",
 			/^you denied its permission request, so it changed nothing$/u,
 		],
-		["no worker activity within the stall window", /^stopped responding, so Clio stopped it$/u],
+		["no worker activity within the stall window", /^stopped responding, so CLIO Coder stopped it$/u],
 		[
 			"worker_turn_timeout: round 1 exceeded the 20 second response limit",
 			/^its model gave no complete reply within the 20s worker response limit$/u,

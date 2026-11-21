@@ -355,7 +355,7 @@ function parsePermissions(value: unknown, policy: ManifestKeyPolicy): ExtensionP
 		// checks the resolved path, which catches a link to either.
 		const first = root.split("/").find((segment) => segment !== ".");
 		if (first === undefined || first === ".clio-coder")
-			fail(path, "must not name the workspace root or Clio-managed .clio-coder state");
+			fail(path, "must not name the workspace root or CLIO Coder-managed .clio-coder state");
 		return root;
 	});
 	if (new Set(read).size !== read.length || new Set(write).size !== write.length)

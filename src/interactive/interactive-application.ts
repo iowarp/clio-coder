@@ -1346,7 +1346,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				notifications.add({
 					level: "info",
 					key: "arcade:paused",
-					text: "Ms. Clio waits until Clio's question is answered",
+					text: "Ms. Clio waits until CLIO Coder's question is answered",
 					ttlMs: 4_000,
 				});
 			return true;
@@ -2260,7 +2260,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			if (agent === null) return false;
 			notify(
 				"info",
-				`Steer to ${agent} not sent. ${editor.getText().length > 0 ? "Your text stays as a draft; Enter now sends it to Clio." : ""}`.trim(),
+				`Steer to ${agent} not sent. ${editor.getText().length > 0 ? "Your text stays as a draft; Enter now sends it to CLIO Coder." : ""}`.trim(),
 				"steer:cancelled",
 			);
 			tui.requestRender();
@@ -2268,7 +2268,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		explainThinkingUnavailable: () => notify("info", "Thinking is not adjustable on this model", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
-			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
+			notify("info", "CLIO Coder transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
 		keybindings,
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
@@ -2283,7 +2283,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				void suspendTerminalAsync(suspendProcessUntilContinued, tui instanceof TuiAltScreen).then(
 					(suspended) => {
 						if (!suspended) {
-							notify("info", "Ctrl+Z needs Clio started from an interactive shell with job control", "keyboard:suspend");
+							notify("info", "Ctrl+Z needs CLIO Coder started from an interactive shell with job control", "keyboard:suspend");
 						}
 					},
 					(err: unknown) => {
@@ -2589,7 +2589,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	}
 
 	const unregisterReportReview = deps.registerReportReviewOpener?.((draftId) => {
-		notifications.add({ level: "info", text: `Clio drafted a report; /report send ${draftId} reviews it` });
+		notifications.add({ level: "info", text: `CLIO Coder drafted a report; /report send ${draftId} reviews it` });
 		tui.requestRender();
 	});
 	if (unregisterReportReview) getTerminationCoordinator().onDrain(unregisterReportReview);
@@ -2741,7 +2741,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					if (!first) return;
 					appendNotice(
 						"info",
-						`${live.length === 1 ? "Another Clio session is" : `${live.length} other Clio sessions are`} open in this folder. This terminal keeps its own conversation, and ${live.length === 1 ? "both" : "all of them"} work on the same files.`,
+						`${live.length === 1 ? "Another CLIO Coder session is" : `${live.length} other CLIO Coder sessions are`} open in this folder. This terminal keeps its own conversation, and ${live.length === 1 ? "both" : "all of them"} work on the same files.`,
 						busNoticeSink,
 					);
 				})

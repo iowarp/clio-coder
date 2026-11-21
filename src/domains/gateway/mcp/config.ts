@@ -772,7 +772,7 @@ function loadPluginFile(plugin: {
 		if (!isRecord(value)) return { servers: [], diagnostics: [diagnostic(`${location} must be an object`)] };
 		if (value.type !== undefined && value.type !== "stdio") {
 			diagnostics.push(
-				diagnostic(`${location} uses transport ${JSON.stringify(value.type)}; Clio runs stdio servers only`),
+				diagnostic(`${location} uses transport ${JSON.stringify(value.type)}; CLIO Coder runs stdio servers only`),
 			);
 			continue;
 		}

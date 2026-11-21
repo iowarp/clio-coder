@@ -74,7 +74,7 @@ export class BrowserComponentUnavailableError extends Error {
 	readonly code = "BROWSER_COMPONENT_UNAVAILABLE";
 	constructor(detail?: string) {
 		super(
-			`The browser tool needs ${PLAYWRIGHT_CORE_PACKAGE}@${PLAYWRIGHT_CORE_VERSION} and a headless Chromium shell${detail ? ` (${detail})` : ""}. Run: ${BROWSER_INSTALL_COMMAND}. It installs a separate component under Clio's data directory and does not change Clio's installation.`,
+			`The browser tool needs ${PLAYWRIGHT_CORE_PACKAGE}@${PLAYWRIGHT_CORE_VERSION} and a headless Chromium shell${detail ? ` (${detail})` : ""}. Run: ${BROWSER_INSTALL_COMMAND}. It installs a separate component under CLIO Coder's data directory and does not change CLIO Coder's installation.`,
 		);
 		this.name = "BrowserComponentUnavailableError";
 	}

@@ -19,7 +19,7 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
  */
 
 export const ANTIGRAVITY_AUTH_NOTICE =
-	"Experimental local delegation through your installed Antigravity (`agy`) CLI. Clio neither signs in nor stores " +
+	"Experimental local delegation through your installed Antigravity (`agy`) CLI. CLIO Coder neither signs in nor stores " +
 	"or inspects Antigravity credentials. Run `agy` yourself and complete sign-in before probing this target.";
 
 // Hints only until an account returns a live catalog. They are never used to

@@ -438,7 +438,7 @@ export function sweepCopilotConversationRecords(live: ReadonlySet<string>, now =
 
 function refuseWorkspaceWrite(path: string): never {
 	throw new Error(
-		`Clio does not let the Copilot runtime change ${path}; workspace changes go through Clio's own tools.`,
+		`CLIO Coder does not let the Copilot runtime change ${path}; workspace changes go through CLIO Coder's own tools.`,
 	);
 }
 

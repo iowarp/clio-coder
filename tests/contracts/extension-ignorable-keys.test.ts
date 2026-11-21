@@ -78,7 +78,10 @@ test("an unknown key listed as ignorable passes with one warning per path, at ev
 			"runtime.workspaces.keys.hint",
 		],
 	);
-	match(warnings(result)[0] ?? "", /^extension desk ignores compatibility\.node: this Clio does not know the field/u);
+	match(
+		warnings(result)[0] ?? "",
+		/^extension desk ignores compatibility\.node: this CLIO Coder does not know the field/u,
+	);
 	// Ignored keys are never read into the declaration.
 	ok(!("cacheHint" in (result.manifest.runtimeV2?.tools[0] ?? {})));
 });

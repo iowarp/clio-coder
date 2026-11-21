@@ -27,7 +27,7 @@ function askedFor(status: RetryStatusPayload): string {
 export function stoppedOnWait(status: RetryStatusPayload): string | null {
 	if (status.waitBudgetMs === undefined || status.retryAfterMs === undefined) return null;
 	const waited = status.waitedMs ? ` after waiting ${formatStatedWait(status.waitedMs)}` : "";
-	return `stopped without retrying: provider asked to wait ${formatStatedWait(status.retryAfterMs)}${waited}, and Clio waits at most ${formatStatedWait(status.waitBudgetMs)} on one request · /model switches route`;
+	return `stopped without retrying: provider asked to wait ${formatStatedWait(status.retryAfterMs)}${waited}, and CLIO Coder waits at most ${formatStatedWait(status.waitBudgetMs)} on one request · /model switches route`;
 }
 
 /** A move is its own event, and it reads as what the operator chose. Neither side's name needs the target beside it. */

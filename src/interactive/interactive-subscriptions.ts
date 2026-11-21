@@ -147,10 +147,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			status === "failed" ? "warning" : status === "completed" ? "success" : "info",
 			// A helper runs for Clio, not for the operator's turn, so its failure costs that turn nothing and the run itself is on the board.
 			status === "failed"
-				? `Clio's ${name} helper failed; your turn is not affected · /fleet shows why`
+				? `CLIO Coder's ${name} helper failed; your turn is not affected · /fleet shows why`
 				: status === "completed"
-					? `Clio's ${name} helper finished`
-					: `Clio's ${name} helper is working`,
+					? `CLIO Coder's ${name} helper finished`
+					: `CLIO Coder's ${name} helper is working`,
 			`helper:${assignment}`,
 		);
 	};

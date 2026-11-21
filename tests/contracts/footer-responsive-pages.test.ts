@@ -101,7 +101,7 @@ test("the machine block splits its meters only when wide and names its sampling"
 		for (const row of lines) ok(stripTerminalSequences(row).length <= width);
 		const cpu = lines.find((line) => line.includes("CPU")) ?? "";
 		ok(width < 84 ? !cpu.includes("RAM") : cpu.includes("RAM"), "machine meters split only when wide");
-		for (const label of ["Machine ─", "Clio RSS", "Sampling", "Scope"]) match(lines.join("\n"), new RegExp(label));
+		for (const label of ["Machine ─", "CLIO Coder RSS", "Sampling", "Scope"]) match(lines.join("\n"), new RegExp(label));
 	}
 });
 

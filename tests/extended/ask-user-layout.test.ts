@@ -187,7 +187,7 @@ for (const [columns, rows] of [
 		ok(!text.some((row) => row.includes("Question 1 of 1")), "a lone question has no position row");
 		strictEqual(
 			text[0],
-			"Clio asks you · Research Exploration; Material Science",
+			"CLIO Coder asks you · Research Exploration; Material Science",
 			"the speaker and question header lead the dialog",
 		);
 		const lastQuestionRow = text.findIndex((row) => row.includes("combination?"));
@@ -471,7 +471,7 @@ test("an unanswered round shows its countdown and closes as timed out; any key h
 	const idlePending = idle.ask([SAFE_DEFAULT_ROUND], undefined, {
 		unattended: { windowMs: 5_000, timers: clock.timers },
 	});
-	match(plain(idle.render(100)).join("\n"), /No answer in 0:05 picks the recommended option and Clio continues/);
+	match(plain(idle.render(100)).join("\n"), /No answer in 0:05 picks the recommended option and CLIO Coder continues/);
 	clock.advance(5_000);
 	deepStrictEqual(await idlePending, { answers: [], timedOut: { afterSeconds: 5 } });
 
@@ -587,7 +587,7 @@ test("a round whose recommended option leaves the workspace says the timeout dec
 		{ unattended: { windowMs: 5_000, timers: clock.timers } },
 	);
 	const text = plain(view.render(100)).join("\n");
-	match(text, /No answer in 0:05 declines the step outside the workspace and Clio continues/);
+	match(text, /No answer in 0:05 declines the step outside the workspace and CLIO Coder continues/);
 	doesNotMatch(text, /picks the recommended option/);
 });
 

@@ -19,7 +19,7 @@ import { ARCADE_PALETTE } from "./theme/arcade-palette.js";
 const TICK_MS = 140;
 
 /** Said when the game steps aside for a card, and again when its phrase is typed at that card. */
-export const ARCADE_PAUSED_NOTICE = "Ms. Clio paused: answer Clio, then type the phrase to play on";
+export const ARCADE_PAUSED_NOTICE = "Ms. Clio paused: answer CLIO Coder, then type the phrase to play on";
 
 function isTypedText(data: string): boolean {
 	return data.length > 0 && [...data].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127);

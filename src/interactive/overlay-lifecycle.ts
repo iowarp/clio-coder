@@ -452,7 +452,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		},
 		replaceInterruptedOverlay: (from, to) => overlayTransitions.replaceInterrupted?.(from, to),
 		onHarnessWaiting: () => {
-			appendNotice("info", "Clio has a question for you, hidden behind this overlay. Close it to answer.", busNoticeSink);
+			appendNotice(
+				"info",
+				"CLIO Coder has a question for you, hidden behind this overlay. Close it to answer.",
+				busNoticeSink,
+			);
 			deps.onOperatorParked?.();
 		},
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),
@@ -478,7 +482,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			if (questions.some((question) => question.operator_only === true)) {
 				appendNotice(
 					"warn",
-					`No answer within ${seconds}s. This was your own choice to make, so Clio chose nothing, recorded nothing, and ended the turn; the choice stays open.`,
+					`No answer within ${seconds}s. This was your own choice to make, so CLIO Coder chose nothing, recorded nothing, and ended the turn; the choice stays open.`,
 					busNoticeSink,
 				);
 				return;
@@ -486,7 +490,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			appendNotice(
 				"warn",
 				// The question row above already lists each pick marked `chosen by Clio`; this says why and what happens now.
-				`No answer within ${seconds}s, so Clio chose for you on ${open === 1 ? "the open question" : `${open} open questions`}, taking the recommended option where one was offered unless it left the workspace, and continued. The question row above shows each pick; tell Clio if one is wrong.`,
+				`No answer within ${seconds}s, so CLIO Coder chose for you on ${open === 1 ? "the open question" : `${open} open questions`}, taking the recommended option where one was offered unless it left the workspace, and continued. The question row above shows each pick; tell CLIO Coder if one is wrong.`,
 				busNoticeSink,
 			);
 		},

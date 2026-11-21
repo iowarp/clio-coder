@@ -388,13 +388,13 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 }
 
 /**
- * The run's tool-call limit as a person reads it: how many calls it was planned for and where Clio stops it. The
+ * The run's tool-call limit as a person reads it: how many calls it was planned for and where CLIO Coder stops it. The
  * recipe policy, the request and the reason codes stay in `/view` and `clio-coder fleet view`, which keep them whole.
  * A pre-M12 envelope read from a journal is worded as it was recorded.
  */
 export function budgetLimitWords(envelope: RecordedRunToolBudgetEnvelope): string {
 	if (envelope.enforcement.classification === "external-one-shot") {
-		return "one launch; Clio cannot count its tool calls, so its time and output limits bound it";
+		return "one launch; CLIO Coder cannot count its tool calls, so its time and output limits bound it";
 	}
 	if (isRetiredBudgetEnvelope(envelope)) return retiredBudgetLimitWords(envelope);
 	const budget = workerBudgetFromEnvelope(envelope);
@@ -403,15 +403,15 @@ export function budgetLimitWords(envelope: RecordedRunToolBudgetEnvelope): strin
 	// produced: a cap that folded the revision onto the base phase leaves nothing to grow into (M6).
 	const revision = budget.revision;
 	const notes = [
-		...(codes.has("global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
+		...(codes.has("global-cap-clamp") ? ["lowered to CLIO Coder's overall limit"] : []),
 		...(revision === undefined ? [] : [`about ${revision.toolCalls} if it has to redo its answer`]),
 	];
 	const stop = budget.ceiling ?? budget.hardCap;
 	// A plan that equals the stop is one number, said once: `about 20; stops at 20` read as two limits.
 	const limit =
 		budget.toolCalls === stop
-			? `Clio stops it at ${stop} tool calls`
-			: `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${stop}`;
+			? `CLIO Coder stops it at ${stop} tool calls`
+			: `planned for about ${budget.toolCalls} tool calls; CLIO Coder stops it at ${stop}`;
 	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
 }
 
@@ -639,7 +639,9 @@ function retiredBudgetLimitWords(envelope: RetiredRunToolBudgetEnvelope): string
 	const advisory = budget.mode === "advisory";
 	const revision = budget.revision;
 	const notes = [
-		...(envelope.reasons.some((reason) => reason.code === "global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
+		...(envelope.reasons.some((reason) => reason.code === "global-cap-clamp")
+			? ["lowered to CLIO Coder's overall limit"]
+			: []),
 		...(revision === undefined
 			? []
 			: [
@@ -651,11 +653,11 @@ function retiredBudgetLimitWords(envelope: RetiredRunToolBudgetEnvelope): string
 	const stop = advisory ? (budget.ceiling ?? budget.hardCap) : budget.hardCap;
 	const limit =
 		advisory && budget.toolCalls === stop
-			? `Clio stops it at ${stop} tool calls`
+			? `CLIO Coder stops it at ${stop} tool calls`
 			: advisory
-				? `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${stop}`
+				? `planned for about ${budget.toolCalls} tool calls; CLIO Coder stops it at ${stop}`
 				: budget.synthesis
-					? `answers after ${budget.toolCalls} tool calls; Clio stops it at ${budget.hardCap}`
-					: `Clio stops it at ${budget.hardCap} tool calls`;
+					? `answers after ${budget.toolCalls} tool calls; CLIO Coder stops it at ${budget.hardCap}`
+					: `CLIO Coder stops it at ${budget.hardCap} tool calls`;
 	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
 }

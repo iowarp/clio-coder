@@ -468,7 +468,7 @@ test("a host check that never started keeps its not-run reason in sealed evidenc
 		);
 		assert.equal(
 			readRunResultFacts("nr1", stateDir)?.validationFailure,
-			"Clio's own check failed: repro did not run: its process could not start",
+			"CLIO Coder's own check failed: repro did not run: its process could not start",
 		);
 	} finally {
 		rmSync(stateDir, { recursive: true, force: true });

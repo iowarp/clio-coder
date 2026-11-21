@@ -377,7 +377,7 @@ export function isUserVisibleAgent(spec: AgentSpec): boolean {
 export const SHADOW_AGENT_OPERATOR_STAND_IN = "coder";
 
 function audienceRefusalHead(spec: Pick<AgentSpec, "id" | "audience">): string {
-	return `dispatch: agent '${spec.id}' is a ${spec.audience} agent reserved for Clio internal orchestration`;
+	return `dispatch: agent '${spec.id}' is a ${spec.audience} agent reserved for CLIO Coder internal orchestration`;
 }
 
 /**

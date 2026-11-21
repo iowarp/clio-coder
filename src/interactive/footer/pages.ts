@@ -447,7 +447,7 @@ export function machineBlock(resource: LocalMachineMetrics | null, now: number, 
 					}`,
 				)
 		: `${theme.fg("fieldName", "GPU")} ${value("unavailable on this OS/driver")}`;
-	const rss = `${theme.fg("fieldName", "Clio RSS")} ${resource ? theme.fg("fieldValue", mib(resource.processRssBytes)) : value("sampling")}`;
+	const rss = `${theme.fg("fieldName", "CLIO Coder RSS")} ${resource ? theme.fg("fieldValue", mib(resource.processRssBytes)) : value("sampling")}`;
 	const machine = [
 		sectionRule(theme, width, "Machine", {
 			meta: resource

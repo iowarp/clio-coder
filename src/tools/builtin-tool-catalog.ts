@@ -164,7 +164,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Look up Clio commands and configuration", args: { query: "configuration and targets" } },
 			{ goal: "Propose and approve persistent repository memory", args: { query: "memory promotion" } },
 		],
-		uiLabel: "Clio docs",
+		uiLabel: "CLIO Coder docs",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.contextDocs, "Use a narrower query or a lower limit."),
 	},
 	[ToolNames.ClioLibrary]: {
@@ -173,7 +173,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		examples: [
 			{ goal: "Find review workflows and specialists with their readiness and invocation", args: { query: "review" } },
 		],
-		uiLabel: "Clio library",
+		uiLabel: "CLIO Coder library",
 		resultSizePolicy: observePolicy(
 			OBSERVE_SELF_CAPS.contextLibrary,
 			"Use kind, query, or ref to narrow the rows, or follow nextOffset.",

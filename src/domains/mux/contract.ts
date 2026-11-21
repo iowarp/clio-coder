@@ -843,7 +843,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						await live.paneClose(pane.paneId).catch(() => undefined);
 						reaped += 1;
 					}
-					if (reaped > 0) log("info", `mux closed ${reaped} parked dock(s) left behind by a Clio process that exited`);
+					if (reaped > 0) log("info", `mux closed ${reaped} parked dock(s) left behind by a CLIO Coder process that exited`);
 					return reaped;
 				},
 				0,

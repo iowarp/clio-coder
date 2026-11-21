@@ -131,19 +131,19 @@ function reviewFacts(step: LibraryPlanStep, review: LibraryStepReview | undefine
 /** One step's facts, in the order the questions matter. */
 /** Why a copy that takes effect still does not load, in the operator's words. */
 const COPY_NOT_LOADED: Record<NonNullable<LibraryPlanStep["effectiveAfter"]>["state"], string> = {
-	loadable: "Clio cannot load it",
-	disabled: "it is disabled, so Clio skips it",
+	loadable: "CLIO Coder cannot load it",
+	disabled: "it is disabled, so CLIO Coder skips it",
 	shadowed: "another copy shadows it",
-	invalid: "its package is invalid, so Clio cannot load it",
-	incompatible: "it does not support this Clio version",
-	damaged: "its files changed since install, so Clio cannot load it",
-	untrusted: "it waits for workspace trust before Clio loads it",
+	invalid: "its package is invalid, so CLIO Coder cannot load it",
+	incompatible: "it does not support this CLIO Coder version",
+	damaged: "its files changed since install, so CLIO Coder cannot load it",
+	untrusted: "it waits for workspace trust before CLIO Coder loads it",
 };
 
 /** Which copy is in effect after the step, and whether Clio loads it. */
 function afterwardsText(after: NonNullable<LibraryPlanStep["effectiveAfter"]>): string {
 	const copy = `the ${after.scope} copy is in effect`;
-	if (after.loadable && after.state === "loadable") return `${copy} and Clio loads it`;
+	if (after.loadable && after.state === "loadable") return `${copy} and CLIO Coder loads it`;
 	return `${copy}, but ${COPY_NOT_LOADED[after.state]}`;
 }
 
@@ -283,7 +283,7 @@ export function formatLibraryPlanReview(
 			reviewChoices(
 				plan.applicable,
 				plan.request.operation,
-				`${APPLY_CONSEQUENCE[plan.request.operation]}, then shows what Clio loads afterwards`,
+				`${APPLY_CONSEQUENCE[plan.request.operation]}, then shows what CLIO Coder loads afterwards`,
 				detail,
 			),
 			width,
@@ -316,8 +316,8 @@ export function formatLibraryPlanReview(
 const EXTENSION_REFRESH_TEXT = {
 	reloading: "Extensions are restarting now; a notice says when they are ready.",
 	queued:
-		"Extensions restart once you close the Library and Clio is idle; until then the ones already running stay as they are.",
-	unavailable: "This session has no extension host, so extensions were not restarted; restart Clio to load them.",
+		"Extensions restart once you close the Library and CLIO Coder is idle; until then the ones already running stay as they are.",
+	unavailable: "This session has no extension host, so extensions were not restarted; restart CLIO Coder to load them.",
 } as const;
 
 /** The refresh as one sentence for a notice, in what the operator will see next. */
@@ -448,7 +448,7 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 			verification.resources.length === 0
 				? outcome.identity.kind === "extension"
 					? "no skills, agents, prompts or playbooks; an extension adds its commands and status instead"
-					: "nothing Clio can load from it"
+					: "nothing CLIO Coder can load from it"
 				: [
 						resourceSummary(verification.resources.filter((item) => item.available)),
 						...verification.resources
@@ -469,8 +469,8 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 				? verification.effective.loadable
 					? nothingAvailable
 						? `the ${verification.effective.scope} copy; nothing from it is available yet`
-						: `the ${verification.effective.scope} copy, which Clio loads`
-					: `the ${verification.effective.scope} copy, which Clio cannot load`
+						: `the ${verification.effective.scope} copy, which CLIO Coder loads`
+					: `the ${verification.effective.scope} copy, which CLIO Coder cannot load`
 				: "no copy remains",
 			tone: "muted",
 		});

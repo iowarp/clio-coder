@@ -51,7 +51,7 @@ export class ManifestKeyPolicy {
 	warnings(id: string | undefined, manifestPath: string): ExtensionDiagnostic[] {
 		return [...this.skipped].sort().map((field) => ({
 			type: "warning",
-			message: `extension ${id ?? "<unknown>"} ignores ${field}: this Clio does not know the field and the manifest lists it under ignorable`,
+			message: `extension ${id ?? "<unknown>"} ignores ${field}: this CLIO Coder does not know the field and the manifest lists it under ignorable`,
 			path: manifestPath,
 		}));
 	}
