@@ -63,6 +63,7 @@ if (mode === "editor") {
 			target: { id: "fixture", url: "http://127.0.0.1:1" },
 			wireModelId: "fixture",
 			allowedTools: [],
+			envelope: { tools: { direct: [], gateway: [] } },
 		} as unknown as WorkerSpec,
 		{
 			cwd: root,
