@@ -485,6 +485,7 @@ const MENU_ROWS = new Set([
 	"safety.limits.autonomousMinutes",
 	"safety.limits.autonomousTokens",
 	"safety.limits.bashIdleSeconds",
+	"fleet.limits.runTimeoutMs",
 	"safety.sandbox",
 	"safety.sandboxNetwork",
 	"safety.scratchRoots",
@@ -607,6 +608,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.limits.autonomousTokens": [
 		"Yolo stretch tokens",
 		"Tokens one yolo stretch spends before it pauses for you to resume; 0 turns this cap off.",
+	],
+	"fleet.limits.runTimeoutMs": [
+		"Worker run time",
+		"Milliseconds one dispatched worker run may take, time queued for a slot included. At 85% it is told to hand back its report; at the limit it stops as timed out. A recipe or a dispatch's timeout_ms can only lower it.",
 	],
 	"safety.limits.bashIdleSeconds": [
 		"Bash idle timeout",

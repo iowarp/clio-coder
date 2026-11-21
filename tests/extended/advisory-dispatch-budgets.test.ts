@@ -1,5 +1,6 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -13,12 +14,14 @@ import {
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
+import { resolveRunWall, runWallCapMs, wallClockMessage } from "../../src/domains/dispatch/run-limits.js";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { finishedRun, PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -465,12 +468,298 @@ describe("dispatch advisory admission and explicit authority", () => {
 			const run = await bundle.contract.dispatch({ ...request, assignmentDeadlineAt: Date.now() + 500 });
 			const receipt = await run.finalPromise;
 			equal(aborts, 1);
-			equal(receipt.outcome, "canceled");
+			// A deadline is a bound, not an operator action: it seals timed_out (DESIGN 4.5, M8).
+			equal(receipt.outcome, "timed_out");
 			match(receipt.outcomeDetail ?? "", /explicit assignment deadline/u);
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+});
+
+describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
+	beforeEach(() => isolateDispatchState());
+	afterEach(() => restoreDispatchState());
+	const checkout = (): string => {
+		const repo = realpathSync(mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "clio-coder-wall-")));
+		const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+		git("init", "-q");
+		git("config", "user.name", "Contract");
+		git("config", "user.email", "contract@example.invalid");
+		writeFileSync(join(repo, "base.txt"), "base\n");
+		git("add", ".");
+		git("commit", "-qm", "base");
+		return repo;
+	};
+	const coder = (cwd: string) => ({
+		agentId: "coder",
+		task: "Port every module in src/ to the new API.",
+		executionRole: "builder" as const,
+		requestOrigin: "internal" as const,
+		cwd,
+	});
+	const partial = (cwd: string): void => {
+		mkdirSync(join(cwd, "src"), { recursive: true });
+		writeFileSync(join(cwd, "src", "partial.ts"), "export const ported = 1;\n");
+	};
+
+	it("the wall clock only lowers, and a spec without agreeing sealed limits is refused", async () => {
+		// The cap is the operator's; a recipe or an earlier deadline lowers it, nothing raises it.
+		deepStrictEqual(resolveRunWall({ capMs: 1_800_000, startedAt: 1000 }), { wallMs: 1_800_000, deadlineAt: 1_801_000 });
+		deepStrictEqual(resolveRunWall({ capMs: 1_800_000, recipeMs: 60_000, startedAt: 1000 }), {
+			wallMs: 60_000,
+			deadlineAt: 61_000,
+		});
+		deepStrictEqual(resolveRunWall({ capMs: 60_000, recipeMs: 600_000, startedAt: 1000, deadlineAt: 11_000 }), {
+			wallMs: 10_000,
+			deadlineAt: 11_000,
+		});
+		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "internal"), DEFAULT_SETTINGS.fleet.limits.internalRunTimeoutMs);
+		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "user"), 1_800_000);
+		// The worker keeps working and the host's 85% handback asks for the report; a quit cue made coders stop at 13 s.
+		const wallLine = wallClockMessage(120_000);
+		match(wallLine, /Keep working/u);
+		match(wallLine, /At 85% the host withdraws your tools and asks for your report/u);
+		ok(!/stops as timed out/u.test(wallLine), wallLine);
+		let observed: unknown;
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec) => {
+				observed = JSON.parse(JSON.stringify(spec));
+				throw new Error("fixture launch reached");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(bundle.contract.dispatch(coder(process.cwd())), /fixture launch/u);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+		const spec = observed as { limits: Record<string, unknown> & { time: { deadlineAt: number } } };
+		const parsed = parseWorkerSpec(spec);
+		ok(parsed.limits.time.handbackAt < parsed.limits.time.deadlineAt);
+		equal(parsed.limits.tools.ceiling, parsed.budget.ceiling ?? parsed.budget.hardCap);
+		const { limits: _limits, ...withoutLimits } = spec;
+		throws(() => parseWorkerSpec(withoutLimits), /limits/u);
+		throws(() => parseWorkerSpec({ ...spec, limits: { ...spec.limits, tools: { ceiling: 1 } } }), /ceiling/u);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...spec,
+					limits: { ...spec.limits, time: { ...spec.limits.time, handbackAt: spec.limits.time.deadlineAt + 1 } },
+				}),
+			/handbackAt must not be after deadlineAt/u,
+		);
+	});
+
+	it("a coder the wall clock moved to handback seals timed_out with its report and the paths it changed", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const report = "PARTIAL REPORT: ported src/partial.ts; 11 modules remain.";
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: () => {
+				partial(repo);
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: {
+								outcomeCode: "worker_run_timeout",
+								detail: "worker_run_timeout: the run reached 85% of its 1800 s wall clock and handed back its report",
+							},
+						};
+						yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: report } };
+					})(),
+					abort() {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch(coder(repo));
+			const receipt = await run.finalPromise;
+			equal(receipt.outcome, "timed_out");
+			deepStrictEqual(receipt.checkoutChanges?.changedPaths, ["src/partial.ts"]);
+			ok(JSON.stringify(receipt).includes("11 modules remain"), "the receipt keeps the handback report");
+			match(receipt.outcomeDetail ?? "", /wall clock/u);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("a run stopped at the wall with a tool call in flight after handback says it wrote no report", {
+		timeout: 20_000,
+	}, async () => {
+		// The host's deadline abort is a stop; a worker that exits on its own after the handback is described by its exit.
+		for (const shape of ["host-timeout", "crash"] as const) {
+			const repo = checkout();
+			let stopped: (value: { exitCode: number | null; signal: NodeJS.Signals | null }) => void = () => {};
+			const exited = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+				stopped = resolve;
+			});
+			let handedBack: () => void = () => {};
+			const atHandback = new Promise<void>((resolve) => {
+				handedBack = resolve;
+			});
+			const bundle = makeDispatchBundle(dispatchStubContext(), {
+				spawnWorker: () => {
+					partial(repo);
+					return {
+						pid: null,
+						heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+						promise: shape === "crash" ? Promise.resolve({ exitCode: 1, signal: "SIGTERM" as const }) : exited,
+						events: (async function* () {
+							yield { type: "clio_coder_tool_start", payload: { tool: "bash", toolCallId: "call-sleep" } };
+							yield {
+								type: "clio_coder_run_outcome",
+								payload: {
+									outcomeCode: "worker_run_timeout",
+									detail: "worker_run_timeout: the run reached 85% of its 120 s wall clock and handed back its report",
+								},
+							};
+							if (shape === "host-timeout") {
+								handedBack();
+								await exited;
+								return;
+							}
+							yield {
+								type: "clio_coder_run_outcome",
+								payload: {
+									outcomeCode: "worker_final_output_missing",
+									detail: "worker loop ended without a final assistant output (stopReason=aborted)",
+								},
+							};
+						})(),
+						abort() {
+							stopped({ exitCode: null, signal: "SIGTERM" });
+						},
+					};
+				},
+			});
+			await bundle.extension.start();
+			try {
+				const run = await bundle.contract.dispatch(coder(repo));
+				if (shape === "host-timeout") {
+					await atHandback;
+					bundle.contract.abort(run.runId, { cause: "timeout", detail: "timed out: run wall clock reached" });
+				}
+				const receipt = await run.finalPromise;
+				equal(receipt.outcome, "timed_out", shape);
+				const detail = receipt.outcomeDetail ?? "";
+				ok(!/handed back its report/u.test(detail), `the detail claims a report that never came: ${detail}`);
+				ok(!/conflicting trusted outcome codes/u.test(detail), `handback then no report is one story: ${detail}`);
+				if (shape === "host-timeout") {
+					match(detail, /reached the wall clock with 1 tool call \(bash\) still running before it wrote a report/u);
+					match(detail, /the host stopped it with SIGTERM, so it handed back no report/u);
+				} else {
+					match(detail, /it exited \(exit code 1, signal SIGTERM\) before it wrote a report, so it handed back no report/u);
+					ok(!/host stopped|reached the wall clock/u.test(detail), `the host never stopped this run: ${detail}`);
+				}
+			} finally {
+				await bundle.extension.stop?.();
+				rmSync(repo, { recursive: true, force: true });
+			}
+		}
+	});
+
+	it("a timed-out worktree coder names the host's changed paths and the unmerged branch that holds them", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec) => {
+				const tree = (spec as { taskWorktree?: { path: string } }).taskWorktree?.path;
+				if (tree !== undefined) partial(tree);
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						yield { type: "tool_execution_start", toolCallId: "w", toolName: "write", args: { path: "src/partial.ts" } };
+						yield { type: "tool_execution_end", toolCallId: "w", toolName: "write", isError: false };
+						yield { type: "clio_coder_tool_finish", payload: { tool: "write", outcome: "ok", durationMs: 1 } };
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: { outcomeCode: "worker_run_timeout", detail: "worker_run_timeout: the run reached 85%" },
+						};
+						yield {
+							type: "message_end",
+							message: { role: "assistant", stopReason: "stop", content: "Ported src/claimed.ts; 11 remain." },
+						};
+					})(),
+					abort() {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch({ ...coder(repo), worktree: true });
+			const receipt = await run.finalPromise;
+			equal(receipt.outcome, "timed_out");
+			const branch = `clio-coder/task/${receipt.runId}`;
+			equal(receipt.worktree?.branch, branch);
+			equal(receipt.worktree?.applied, false);
+			deepStrictEqual(receipt.worktree?.changedPaths, ["src/partial.ts"]);
+			equal(
+				execFileSync("git", ["show", `${branch}:src/partial.ts`], { cwd: repo, encoding: "utf8" }),
+				"export const ported = 1;\n",
+			);
+			const detail = receipt.outcomeDetail ?? "";
+			ok(detail.includes(`unmerged on ${branch}`), detail);
+			ok(detail.includes(`clio-coder fleet land ${branch} --yes`), detail);
+			const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY).join(" ");
+			ok(labels.includes('changed=1["src/partial.ts"]'), labels);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("a coder the host stops at fleet.limits.runTimeoutMs seals timed_out with the paths it changed", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.limits.runTimeoutMs = 400;
+		settings.fleet.limits.internalRunTimeoutMs = 400;
+		let aborts = 0;
+		let wallMs: number | undefined;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			spawnWorker: (spec) => {
+				wallMs = (spec as { limits?: { time: { wallMs: number } } }).limits?.time.wallMs;
+				partial(repo);
+				let finish!: (value: { exitCode: number; signal: null }) => void;
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: new Promise((resolve) => {
+						finish = resolve;
+					}),
+					events: (async function* () {})(),
+					abort() {
+						aborts++;
+						finish({ exitCode: 1, signal: null });
+					},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch(coder(repo));
+			const receipt = await run.finalPromise;
+			ok(wallMs !== undefined && wallMs <= 400, `the sealed wall clock is the setting's: ${wallMs}`);
+			equal(aborts, 1);
+			equal(receipt.outcome, "timed_out");
+			deepStrictEqual(receipt.checkoutChanges?.changedPaths, ["src/partial.ts"]);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
 		}
 	});
 });

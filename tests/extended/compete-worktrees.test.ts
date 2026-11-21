@@ -645,11 +645,14 @@ for (const phase of ["candidates", "judge"] as const) {
 					const receipt = readVerifiedRun(clioStateDir(), run.id);
 					ok(receipt);
 					const interrupted = phase === "candidates" || bundle.contract.getRun(receipt.row.runId)?.gate?.role === "judge";
-					strictEqual(receipt.settled.outcome, interrupted ? "canceled" : "succeeded");
+					// A deadline is a bound, not an operator action: it seals timed_out (DESIGN 4.5, M8).
+					const stoppedAs = stopKind === "timeout" ? "timed_out" : "canceled";
+					strictEqual(receipt.settled.outcome, interrupted ? stoppedAs : "succeeded");
 					if (interrupted)
 						match(
 							receipt.settled.outcomeDetail ?? "",
-							stopKind === "timeout" ? /timed out after 1500ms/u : /operator abort/u,
+							// The call's timeout_ms and the run's wall clock are one deadline; either stop may name it.
+							stopKind === "timeout" ? /timed out/u : /operator abort/u,
 						);
 					ok(result.message.includes(run.id), "stopped tool output must retain each terminal run identity");
 				}

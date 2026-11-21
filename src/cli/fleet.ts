@@ -58,10 +58,9 @@ import {
 	type ExecuteFleetRunInput,
 	executeFleetRun,
 	type FleetRunOutcome,
-	FleetWorkspaceBusyError,
-	FleetWorkspaceLockUnavailableError,
 	planFleetResume,
 	readFleetRun,
+	WriterSetBusyError,
 } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
@@ -90,9 +89,9 @@ import { playbookAgents, playbookPreflightDiagnostic } from "./playbook-prefligh
 import { parsePlaybookVars } from "./playbook-vars.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
-/** A busy or unjudgeable workspace lock refuses a run; it is not a usage error, so it exits 1 like the other refusals. */
+/** A checkout whose writer set stayed busy past the run's deadline is not a usage error, so it exits 1 like the other refusals. */
 function fleetFailureExitCode(err: unknown): number {
-	return err instanceof FleetWorkspaceBusyError || err instanceof FleetWorkspaceLockUnavailableError ? 1 : 2;
+	return err instanceof WriterSetBusyError ? 1 : 2;
 }
 
 /** The last diagnostic `fail` or `refuse` printed, so a structured fleet run can carry it in its refusal document. */

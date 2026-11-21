@@ -177,7 +177,11 @@ export function isContextOverflowFailure(
 	code: RunOutcomeCode | null | undefined,
 	providerError?: string | null,
 ): boolean {
-	if (failureClass !== "deterministic-task" || isDeterministicOutcomeCode(code)) return false;
+	if (failureClass !== "deterministic-task") return false;
+	// A run that exhausted its window is the same verdict reached from inside the run: it earns the overflow's one
+	// retry onto a strictly larger window, and nothing else retries it (DESIGN 4.5, fleet M8).
+	if (code === "worker_context_exhausted") return true;
+	if (isDeterministicOutcomeCode(code)) return false;
 	const diagnostic = resultText(result, providerError);
 	if (diagnostic === "" || isResponseSchemaRejection(diagnostic) || WORKERSPEC_REJECTION.test(diagnostic)) return false;
 	return isEngineContextOverflow(diagnostic);

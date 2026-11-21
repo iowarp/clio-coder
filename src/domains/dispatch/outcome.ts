@@ -21,8 +21,8 @@ export interface RunTerminationEvidence {
 	abortedByOperator: boolean;
 	/**
 	 * Cause detail when the abort was not an operator cancel (e.g. a dispatch
-	 * `timeout_ms` kill). Names the timeout on the receipt so it stays
-	 * distinguishable from an operator abort; the outcome remains `canceled`.
+	 * `timeout_ms` kill or the run's wall clock). Names the cause on the receipt;
+	 * a `timeout` cause seals `timed_out`, never `canceled` (DESIGN 4.5).
 	 */
 	abortDetail?: string | null;
 	/** The reconciler declared the worker dead (heartbeat) or stalled (ACP inactivity) and killed it. */
@@ -59,6 +59,10 @@ export function resolveRunOutcome(evidence: RunTerminationEvidence): ResolvedOut
 	// a stall into an operator abort.
 	if (evidence.stallKilled) {
 		return { outcome: "stalled", detail: "no worker activity within the stall window" };
+	}
+	// The run's wall clock or the call's timeout_ms stopped it: a bound, not an operator action (DESIGN 4.5, fleet M8).
+	if (evidence.abortedByOperator && evidence.abortCause === "timeout") {
+		return { outcome: "timed_out", detail: evidence.abortDetail ?? "wall clock reached" };
 	}
 	if (evidence.abortedByOperator || evidence.stopReason === "cancelled") {
 		const detail = evidence.abortedByOperator ? (evidence.abortDetail ?? "operator abort") : "peer cancelled";
@@ -134,6 +138,7 @@ const BOUND_OUTCOME_CODES: Partial<Record<RunOutcomeCode, RunBoundKind>> = {
 	worker_context_exhausted: "tokens",
 	worker_output_cap_exhausted: "tokens",
 	worker_turn_timeout: "time",
+	worker_run_timeout: "time",
 };
 
 /**

@@ -145,6 +145,8 @@ export interface FleetRetrySettings {
 
 export interface FleetLimitsSettings {
 	toolCallsPerRun: number;
+	/** Wall clock of one dispatched run, queue time included; a recipe or a call's timeout_ms may only lower it. */
+	runTimeoutMs: number;
 	internalRunTimeoutMs: number;
 }
 
@@ -922,6 +924,7 @@ export const DEFAULT_SETTINGS = {
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
 			toolCallsPerRun: 300,
+			runTimeoutMs: 1800000,
 			internalRunTimeoutMs: 2700000,
 		},
 		history: { maxRuns: GUARDRAIL_DEFAULTS.maxDispatchRuns, journal: true },
@@ -1155,6 +1158,8 @@ fleet:
     breakerThreshold: 1
   limits:
     toolCallsPerRun: 300
+    # Wall clock of one dispatched run, queue time included (30 minutes).
+    runTimeoutMs: 1800000
     internalRunTimeoutMs: 2700000
   history:
     maxRuns: 1000

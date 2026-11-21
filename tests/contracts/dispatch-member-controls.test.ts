@@ -409,7 +409,8 @@ describe("dispatch member controls", () => {
 				strictEqual(f.workers[0]?.messages.length, 0);
 				f.contract.abort(second.runId, { cause: "timeout", detail: "explicit member deadline" });
 				const receipt = await second.finalPromise;
-				strictEqual(receipt.outcome, "canceled");
+				// A deadline is a bound, not an operator action (DESIGN 4.5, M8).
+				strictEqual(receipt.outcome, "timed_out");
 				match(receipt.outcomeDetail ?? "", /explicit member deadline/u);
 				match(receipt.outcomeDetail ?? "", /worker process signal: SIGTERM/u);
 				strictEqual(f.workers[0]?.aborts(), 0);

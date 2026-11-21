@@ -681,6 +681,18 @@ function heldReservationUsage(
 	const foreignNodeHosts = new Map<string, Set<string>>();
 	const foreignEndpointHosts = new Map<string, Set<string>>();
 	let ownHeld = false;
+	// Plans take capacity in the order they were reserved (DESIGN 4.5, fleet M8): a member of one plan waits only
+	// behind plans reserved before it, so two plans admitted while capacity was busy never wait on each other.
+	const transferringCreatedAt =
+		transferring === undefined
+			? undefined
+			: (values.find(
+					(value): value is { createdAt: string } =>
+						typeof value === "object" &&
+						value !== null &&
+						(value as { ownerId?: unknown }).ownerId === transferring.ownerId &&
+						typeof (value as { createdAt?: unknown }).createdAt === "string",
+				)?.createdAt ?? undefined);
 	for (const value of values) {
 		if (typeof value !== "object" || value === null)
 			throw new Error("dispatch capacity store has invalid reservation records");
@@ -690,7 +702,15 @@ function heldReservationUsage(
 			host?: unknown;
 			status?: unknown;
 			members?: unknown;
+			createdAt?: unknown;
 		};
+		if (
+			transferringCreatedAt !== undefined &&
+			record.ownerId !== transferring?.ownerId &&
+			typeof record.createdAt === "string" &&
+			Date.parse(record.createdAt) > Date.parse(transferringCreatedAt)
+		)
+			continue;
 		if (typeof record.status !== "string" || !RESERVATION_STATUSES.has(record.status) || !Array.isArray(record.members))
 			throw new Error("dispatch capacity store has invalid reservation records");
 		if (record.status !== "active") continue;

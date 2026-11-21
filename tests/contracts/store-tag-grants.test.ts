@@ -10,7 +10,7 @@ import {
 	confineGrantOnlyWriters,
 	overlappingWriteRootsWarning,
 	writeRootsOverlap,
-} from "../../src/domains/dispatch/parallel-writers.js";
+} from "../../src/domains/dispatch/writer-set.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { isSubset, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
