@@ -4,7 +4,7 @@
  * or a step checkpoint runs after its entry is on the ledger. The turn context
  * owns the state these read and write and lends it through the port; this
  * module keeps one record of its own, the automatic eviction it last held on a
- * full-reseed route, which arms the rearm band a committed eviction would (C-3).
+ * full-reseed route, which holds that stage until the context grows (C-3).
  */
 
 import type { ClioSettings } from "../core/config.js";
@@ -228,10 +228,13 @@ export interface ContextFold {
 	/** The one publication for a checkpoint of either kind, keyed on the id the ledger confirmed. */
 	publishCheckpoint(input: CheckpointPublicationInput): Promise<CheckpointPublication>;
 	/**
-	 * An automatic eviction this fold held below the minimum yield arms the rearm band a committed one would: true
-	 * while the same session, user turn and newest reduction have grown by less than `rearmFraction` of the window.
+	 * An automatic eviction this fold held below the minimum yield holds the working-set stage, never the checkpoint:
+	 * true while the same session, branch, user turn, pending prompt and newest reduction have grown by less than
+	 * `rearmFraction` of the window. Anything else drops the hold.
 	 */
 	autoEvictionHeld(input: AutoEvictionHoldInput): boolean;
+	/** Session or branch navigation: a held automatic eviction described the history this context left. */
+	resetAutoHold(): void;
 }
 
 export interface AutoEvictionHoldInput {
@@ -239,6 +242,7 @@ export interface AutoEvictionHoldInput {
 	projectedTokens: number;
 	contextWindow: number;
 	rearmFraction: number;
+	pendingUserText: string | undefined;
 }
 
 /** Copilot SDK sessions reseed the whole request when the history diverges, so any eviction costs the cache (XR-40). */
@@ -271,28 +275,39 @@ function evictionSkipMessage(
 
 export function createContextFold(port: ContextFoldPort): ContextFold {
 	const { deps, state } = port;
-	/** The automatic eviction last held below the minimum yield, and the ledger it was planned over. */
-	let autoHold: { key: string; tokens: number } | null = null;
-	/** What a held automatic eviction stands for: its session, its user turn and the newest reduction on the path. */
-	const autoHoldKey = (entries: ReadonlyArray<SessionEntry>): string => {
-		const path = activePath(entries, state.lastTurnId ?? undefined);
+	/**
+	 * The automatic eviction last held below the minimum yield: the leaf it was planned at, what the request stood for
+	 * (session, last user message on the path, pending prompt, newest reduction) and its size then.
+	 */
+	let autoHold: { leaf: string | null; key: string; tokens: number } | null = null;
+	/** The request a hold stands for, and the path's turn ids; the hold's leaf must still be on that path. */
+	const autoHoldIdentity = (pendingUserText: string | undefined): { key: string; path: Set<string> } => {
+		const path = activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		let user: string | null = null;
 		let reduction: string | null = null;
-		for (const entry of path)
+		for (const entry of path) {
+			if (entry.kind === "message" && entry.role === "user") user = entry.turnId;
 			if (entry.kind === "contextEviction" || entry.kind === "compactionSummary") reduction = entry.turnId;
-		return JSON.stringify([deps.session?.current()?.id ?? null, state.activeUserTurnId || null, reduction]);
+		}
+		const key = JSON.stringify([deps.session?.current()?.id ?? null, user, pendingUserText ?? null, reduction]);
+		return { key, path: new Set(path.map((entry) => entry.turnId)) };
 	};
 	const autoEvictionHeld = (input: AutoEvictionHoldInput): boolean => {
 		if (autoHold === null) return false;
-		if (!fullReseedRoute(input.agentRuntime) || autoHold.key !== autoHoldKey(deps.readSessionEntries?.() ?? [])) {
-			autoHold = null;
-			return false;
-		}
-		return withinRearmBand({
-			projectedTokens: input.projectedTokens,
-			contextWindow: input.contextWindow,
-			rearmFraction: input.rearmFraction,
-			lastEvictionTokensAfter: autoHold.tokens,
-		});
+		const hold = autoHold;
+		const current = fullReseedRoute(input.agentRuntime) ? autoHoldIdentity(input.pendingUserText) : null;
+		const held =
+			current !== null &&
+			current.key === hold.key &&
+			(hold.leaf === null || current.path.has(hold.leaf)) &&
+			withinRearmBand({
+				projectedTokens: input.projectedTokens,
+				contextWindow: input.contextWindow,
+				rearmFraction: input.rearmFraction,
+				lastEvictionTokensAfter: hold.tokens,
+			});
+		if (!held) autoHold = null;
+		return held;
 	};
 
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
@@ -599,8 +614,13 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			return { acted: false, committed: false, fit: false, skipNotice: structuralSkip() };
 		}
 		if (yieldLimit !== undefined && planned.tokensAfter > yieldLimit) {
-			// Until the context grows past the rearm band, the next automatic checkpoint holds before it plans (C-3).
-			if (autoGated) autoHold = { key: autoHoldKey(deps.readSessionEntries?.() ?? []), tokens: heldTokens };
+			// Until the context grows past the rearm band, the next automatic checkpoint skips this stage (C-3).
+			if (autoGated && folded.structural)
+				autoHold = {
+					leaf: state.lastTurnId ?? null,
+					key: autoHoldIdentity(pendingUserText).key,
+					tokens: heldTokens,
+				};
 			if (superseded.outcome === "planned") decision.stage({ stage: "superseded", outcome: "held", reason: "no_gain" });
 			if (structural)
 				decision.stage({
@@ -763,5 +783,8 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		adoptLegacyAging,
 		publishCheckpoint,
 		autoEvictionHeld,
+		resetAutoHold: () => {
+			autoHold = null;
+		},
 	};
 }

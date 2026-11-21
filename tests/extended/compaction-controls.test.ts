@@ -1743,6 +1743,79 @@ describe("production compaction controls", () => {
 		strictEqual(route.evictions(), 0);
 	});
 
+	it("a held automatic eviction holds only its stage: an eligible summary still runs past the trigger (XR-40 C-3)", async () => {
+		const route = autoEvictionRoute("copilot-sdk", 200_000, (plan) => plan.tokens - 70, true);
+		const { f, state, runtime, context } = route;
+		// The first summary fails once, transiently; the next checkpoint must retry it, not skip it with the held stage.
+		f.response.fail = true;
+		await context.runAutoCompact(runtime, false).catch(() => false);
+		const failed = f.calls.length;
+		ok(failed > 0, "the first summary was asked for");
+		f.response.fail = false;
+		const entry = appendEntry(f.state, {
+			kind: "message",
+			role: "assistant",
+			parentTurnId: state.lastTurnId,
+			payload: { text: "read one more file" },
+		});
+		f.pinLeaf(entry.turnId);
+		state.lastTurnId = entry.turnId;
+		context.refreshAgentMessagesFromSession(runtime);
+		await context.runAutoCompact(runtime, false);
+		ok(f.calls.length > failed, "the eligible summary runs");
+		strictEqual(route.plans(), 1, "the held working-set stage is not planned again");
+		deepStrictEqual(route.stages().at(-1), [["held", "rearm_band"]]);
+	});
+
+	it("a held automatic eviction does not carry into the next user turn (XR-40 C-3)", async () => {
+		const route = autoEvictionRoute("copilot-sdk", 200_000, (plan) => plan.tokens - 70, false);
+		const { f, state, runtime, context } = route;
+		// Two consecutive asks answered without a tool call, each checked before it is submitted.
+		const ask = "Say done.";
+		state.activeUserTurnId = null;
+		await context.runAutoCompact(runtime, false, undefined, undefined, ask);
+		strictEqual(route.plans(), 1);
+		const user = appendEntry(f.state, {
+			kind: "message",
+			role: "user",
+			parentTurnId: state.lastTurnId,
+			payload: { text: ask },
+		});
+		const reply = appendEntry(f.state, {
+			kind: "message",
+			role: "assistant",
+			parentTurnId: user.turnId,
+			payload: { text: "done" },
+		});
+		f.pinLeaf(reply.turnId);
+		state.lastTurnId = reply.turnId;
+		context.refreshAgentMessagesFromSession(runtime);
+		await context.runAutoCompact(runtime, false, undefined, undefined, ask);
+		strictEqual(route.plans(), 2, "the next turn plans its own eviction");
+	});
+
+	it("a held automatic eviction does not carry to a sibling branch, and navigation clears it (XR-40 C-3)", async () => {
+		const route = autoEvictionRoute("copilot-sdk", 200_000, (plan) => plan.tokens - 70, false);
+		const { f, state, runtime, context } = route;
+		const fork = state.lastTurnId;
+		const step = async (parentTurnId: string | null, text: string) => {
+			const entry = appendEntry(f.state, { kind: "message", role: "assistant", parentTurnId, payload: { text } });
+			f.pinLeaf(entry.turnId);
+			state.lastTurnId = entry.turnId;
+			context.refreshAgentMessagesFromSession(runtime);
+			await context.runAutoCompact(runtime, false);
+			return entry.turnId;
+		};
+		await step(fork, "branch A");
+		strictEqual(route.plans(), 1);
+		// A /tree switch to a sibling under the same user turn, sharing every reduction (none) with branch A.
+		const sibling = await step(fork, "branch B");
+		strictEqual(route.plans(), 2, "the sibling plans its own eviction");
+		context.resetForSession(sibling);
+		await context.runAutoCompact(runtime, false);
+		strictEqual(route.plans(), 3, "navigation drops the hold");
+	});
+
 	it("gates an automatic copilot-sdk eviction only on a known window (XR-40 C-3)", async () => {
 		const route = autoEvictionRoute("copilot-sdk", 0, (plan) => Math.floor(plan.tokens / 2), false);
 		// An unknown window triggers on the compaction ceiling.

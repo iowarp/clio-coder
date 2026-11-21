@@ -2392,11 +2392,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					: triggerOverride !== "overflow" && summaryRearm !== null && tokens < summaryRearm.tokensAfter + summaryRearm.band
 						? "rearm_band"
 						: null;
+		// A held automatic eviction holds only its own stage until the context grows (C-3): the summary keeps its own
+		// holds, and with the stage held it short-circuits here before an operation opens, as with the stage disabled.
+		const workingSetHeld =
+			pressureEstimate !== null &&
+			!requiredFit &&
+			settings.context.workingSet.enabled &&
+			contextFold.autoEvictionHeld({
+				agentRuntime,
+				projectedTokens: pressureEstimate.tokens,
+				contextWindow: economic.budgetWindow,
+				rearmFraction: settings.context.workingSet.rearmFraction,
+				pendingUserText,
+			});
 		const preSummaryStageAvailable =
-			pressureEstimate !== null && Boolean(deps.session?.current()) && settings.context.workingSet.enabled;
+			pressureEstimate !== null &&
+			Boolean(deps.session?.current()) &&
+			settings.context.workingSet.enabled &&
+			!workingSetHeld;
 		if (!force && !preSummaryStageAvailable) {
 			const hold = summaryHoldReason(pressureEstimate?.tokens ?? 0);
 			if (hold !== null) {
+				if (workingSetHeld) decision.stage({ stage: "working_set", outcome: "held", reason: "rearm_band" });
 				decision.stage({ stage: "llm_summary", outcome: "held", reason: hold });
 				return supersededOnly(pressureEstimate);
 			}
@@ -2414,19 +2431,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const entries = deps.readSessionEntries() ?? [];
 				const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
 				resolveWorkingSetPolicy(settings.context.workingSet.policy);
-				held =
-					withinRearmBand({
-						projectedTokens: pressureEstimate.tokens,
-						contextWindow: economic.budgetWindow,
-						rearmFraction: settings.context.workingSet.rearmFraction,
-						lastEvictionTokensAfter: view.lastEvictionTokensAfter,
-					}) ||
-					contextFold.autoEvictionHeld({
-						agentRuntime,
-						projectedTokens: pressureEstimate.tokens,
-						contextWindow: economic.budgetWindow,
-						rearmFraction: settings.context.workingSet.rearmFraction,
-					});
+				held = withinRearmBand({
+					projectedTokens: pressureEstimate.tokens,
+					contextWindow: economic.budgetWindow,
+					rearmFraction: settings.context.workingSet.rearmFraction,
+					lastEvictionTokensAfter: view.lastEvictionTokensAfter,
+				});
 			} catch {
 				// Safe to ignore here: the eviction stage repeats this read inside the
 				// operation and surfaces the same error with its activity.
@@ -2528,11 +2538,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 			if (session?.current()) {
 				adoptOnce(estimate);
+				if (workingSetHeld) decision.stage({ stage: "working_set", outcome: "held", reason: "rearm_band" });
 				const stage = contextFold.runEvictionStage({
 					...foldInput(session, estimate),
 					...stageRoute,
 					requiredFit,
-					structural: true,
+					structural: !workingSetHeld,
 					superseded: supersededApplies,
 				});
 				if (stage.acted) preSummaryStageActed = true;
@@ -4601,6 +4612,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			summaryRearmSeededFor = null;
 			noGainSummaryDigest = null;
 			noUsefulCutBasisKey = null;
+			contextFold.resetAutoHold();
 			reconciledAnchor = null;
 			rehydrationMiss = null;
 			// The last reduction /context and ACP name is the one on the path now current, not the branch left.
