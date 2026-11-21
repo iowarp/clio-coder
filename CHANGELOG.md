@@ -4,214 +4,315 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+CLIO Coder 0.8.5 is one large release with breaking changes, built so that a script, a CI job or another agent can depend on CLIO Coder the way a person at the terminal does. `clio-coder run` has one versioned result, a typed cause behind every exit code, per-run limits, a dry run and host-validated structured answers. A run states whether it finished, and CLIO Coder seals that claim beside its own assessment of the work. Fleet dispatch routes each job to a role that owes evidence, and proactive memory keeps only what has been demonstrated. The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering and quota reporting. Every command and flag now has one spelling: earlier spellings are removed, and `clio-coder upgrade` migrates your settings and prints each change. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
+
+### Highlights
+
+- **One output contract for headless runs.** `clio-coder run --output-format json` prints a single `run_end` envelope (`schemaVersion: 2`) with the answer, exit code, outcome, typed `causes[]`, timings, checks and usage. `stream-json` streams the events and ends with the same envelope, and `clio-coder schema run-result` prints its JSON Schema.
+- **Runs that state how they ended.** The new `finish` tool lets the agent declare `done`, `partly_done` or `not_done` with its limitations. CLIO Coder seals the claim beside its own assessment, lowers a `done` that left unvalidated changes or a failing check, and `run --exit-code` turns anything short of done into exit 1.
+- **Limits and previews per run.** `--max-requests`, `--max-tool-calls`, `--max-cost-usd`, `--timeout 15m`, `--sandbox required`, `--require-priced`, `--deny-tools` and `--on-permission fail` bound one run, and `--dry-run` prints the route, tools, sandbox and limits without calling a model.
+- **Structured answers and task files.** `run --output-schema schema.json` makes the answer one JSON object that the host validates, and `run --task-file task.json` carries a whole task envelope.
+- **Sessions and fleets from the shell.** `clio-coder session history|show|export|fork|compact|rm`, `run --resume <id|prefix|name>` with `--fork`, `fleet run --detach` with `fleet wait`, and `clio-coder config get|set|unset`.
+- **Dispatch by job, graded by role.** Each dispatch goes to the agent whose job it is, a builtin `reviewer` judges diffs, every role owes a kind of evidence, and a worker that returns without it is retried once on another model.
+- **Memory that has to earn its place.** Notes are claims bound to a command that succeeded or a file that was read. A stored lesson is checked against the repository before it is delivered, automatic memory spending is capped at a share of the session, and mining earlier sessions is off unless you turn it on.
+- **The Antigravity CLI over ACP.** The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering, operator-answered questions and quota reporting.
+- **Zarr and ADIOS2.** The `data` tool reads Zarr v2 and v3 stores and inspects ADIOS2 BP4 and BP5 directories.
+
+### Breaking changes
+
+0.8.5 has one spelling for each command and flag. The earlier spellings below are gone, with no aliases: each is an unknown command or flag and exits 2; a removed `/loop` verb is refused in the session.
+
+**Headless `run`**
+
+- `clio-coder run` reads stdin only when `-` is passed. Use `run -` to take the task from stdin, or `run "<task>" -` to append stdin after the task as a `<stdin>` block. A pipe without `-` is ignored, and `run` with neither a task nor `-` exits 2 `empty_task`.
+- `run --json` and `run --json-events` are removed. Use `--output-format json` for one result document or `--output-format stream-json` for the event stream that ends with the `run_end` envelope.
+- `run --session <id>` is removed. Use `run --resume <id|prefix|name>`.
+- The printed answer of a headless run is every reply of the final user turn, joined, without the commentary written beside tool calls. Text stdout, `-o` and `result.text` all carry that one answer.
+
+**Removed commands and flags**
+
+| Removed | Use |
+| --- | --- |
+| `clio-coder --acp` | `clio-coder acp` |
+| `clio-coder ext` | `clio-coder extensions` |
+| `clio-coder export`, `clio-coder import` | `clio-coder share export`, `clio-coder share import` |
+| `clio-coder context-init`, `context-index`, `context-clear` | `clio-coder context init`, `context index`, `context reset` |
+| `clio-coder components`, `evolve`, `flywheel` | `clio-coder dev components`, `dev evolve`, `dev flywheel` |
+| `fleet run --json` | `fleet run --output-format stream-json` |
+| `fleet drain`, `fleet resume` | `fleet admission drain`, `fleet admission open` |
+| `fleet inspect` | `fleet status --json [--all]` or `telemetry inspect --run <runId> --json` |
+| `evidence build` | `evidence inspect <runId>`; every run is assessed when it settles |
+| `targets add` | `clio-coder configure` |
+| `targets fleet`, `targets workers` | `targets profile list` |
+| `targets worker <args>` | `targets profile <args>` |
+| `reset --force`, `uninstall --force` | `reset --yes`, `uninstall --yes` |
+| `tools status --reset-profile` | `tools reset-profile <id>` |
+| `verifiers --cwd` | `verifiers --check-cwd` |
+| `semantic inbox-add`, `inbox-list`, `inbox-remove`, `inbox-preview` | `semantic inbox add`, `list`, `remove`, `preview` |
+| `clio-coder dev share`, `clio-coder dev gui` | `clio-coder share`, `clio-coder gui` |
+| `/loop list`, `/loop cancel` | `/loop`, `/loop stop <id> --now` |
+
+**Changed behaviour**
+
+- `clio-coder playbook validate` exits 2 for an invalid playbook, in text and `--json`, matching `fleet run`. Check for 2 where a script checked for 1.
+- `clio-coder fleet verify` prints a text verdict by default. Pass `--json` for the document.
+- `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh`, `report sweep` and `telemetry share sweep`.
+- Reviewing earlier sessions for memory is off by default. Set `context.memory.surfaces.history: on` to turn it on.
+
+#### Upgrading
+
+Run `clio-coder upgrade`, or run the installer again. After an update made with a package manager directly, run `clio-coder upgrade --post-install`. The first launch also applies pending migrations. Then run `clio-coder doctor`.
+
+**What the upgrade rewrites.** The migration edits your user `settings.yaml` in place, keeps the previous file as `settings.yaml.retired.bak` beside it, and prints each change under "What changed for you in settings.yaml". A project's `.clio-coder/settings.yaml` is the repository's and is left for you to edit.
+
+| In your settings | What the migration does |
+| --- | --- |
+| `interface.exitSummary: full` | Becomes `standard` |
+| `interface.outputDetail: minimal`, `default`, `verbose` | Become `compact`, `standard`, `detailed` |
+| `fleet.nodes[].clioEntry` | Renamed to `clioCoderEntry` |
+| `background.thinkingLevel` | Removed; memory follows `context.memory.thinkingLevel`, default `off` |
+| `context.compaction.excludeLastTurns`, `compaction.excludeLastTurns` | Removed |
+| `fleet.decisionProfiles`, `fleet.speculativeDispatch` | Removed |
+| `systemOne.sites`, `cuts`, `record`, `retentionDays`, `maxMiB` and each engine's `mode` | Removed; `systemOne.use` names the engine |
+| `turnControl.interpretation`, `turnControl.orientation` and the `orientation`, `direction` and `ledger-facts` workflows | Removed |
+| `interface.panes.enabled` | Removed; `--with-panes` joins an existing pane host |
+| `identity`, `theme`, `telemetry.research.systemOneDataset` | Removed; nothing read them |
+| `permissionTimeoutMs` and `labels` on an external agent entry | Removed |
+
+A key written through a YAML anchor, alias or merge key is left as written, and the upgrade asks you to edit it by hand. While the migration is still pending, a settings file that names a retired key fails to load with a message naming `clio-coder upgrade`. Once it has run, a retired key is an ordinary unknown key, and `clio-coder doctor --fix` removes it.
+
+**What you retype.** The upgrade cannot reach scripts, CI jobs, shell aliases or editor configuration. Add `-` where a task is piped into `clio-coder run`, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, read the result from the `run_end` envelope, and replace every spelling in the removed commands table above.
+
 ### Added
 
 **Headless `run`**
 
-- `clio-coder run --output-format text|json|stream-json` selects schema v2 output. `json` prints one `run_end` envelope (`schemaVersion: 2`) with `sessionId`, `runId`, `result.text`, `exitCode`, `outcome`, `causes[]`, `timings`, `verify` and usage split into `main`, compaction, `side` (safety judge, memory and other side calls), workers and `total`. `stream-json` prints a session frame, the event frames and then that envelope, and acknowledges each `--steer-channel` line with a `steer` frame (`queued`, then `accepted` or refused with a reason). `text` ends with one stderr line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`. Under v2, an answer that ends on a tool call written as text exits 1 with cause `no_answer`, and a failed dispatch that a later identical dispatch delivered is listed under `dispatch.superseded` and no longer fails the run.
-- `-o`/`--output-last-message <path>` writes the final answer to a file when the run exits 0. An unwritable path exits 2 before boot.
-- `run --resume <id|prefix|name>` (`-r`), `--fork` and `--name <text>`. `--fork` branches a new session from the last committed turn and never writes the parent. Resuming a session another process holds exits 2 with cause `session_live`, and a forked run's `run_end` carries `parentSessionId`.
-- Run limits: `--max-requests <N>` and `--max-tool-calls <N>` cap the main agent loop for one run (exit 4, causes `max_requests` and `max_tool_calls`). `--on-permission fail` ends the run at the first ask it cannot approve (exit 3, `permission_required`); `deny` stays the default. `--fail-on-verify` turns a failed or timed-out `--verify` check into exit 1 (`verify_failed`). The v2 envelope and the dry-run plan list `limits.requested` and `limits.enforced`.
-- `run --dry-run` prints the route, admitted tools, delegated tools, autonomy, sandbox mode, limits and `--verify` checks, then exits 0 without a session, a model call or a check. Under `--output-format json` it is the v2 envelope with outcome `previewed` and a `plan`.
-- `run --sandbox required` pins `safety.sandbox: required` for the run and its workers and exits 2 before boot on a host without an OS sandbox. `run --require-priced` exits 2 naming any unpriced route the run can reach, and dispatch refuses an unpriced worker route at admission.
-- `--deny-tools <names>` on `run`, interactive `clio-coder` and `clio-coder acp` removes tools whatever else admits them, including from an `--allow-tools` list. Denying every allowed tool exits 2 (`flag_conflict`).
-- `run --agent` accepts `--max-cost-usd` and `--worktree`. `--timeout` and `--verify-timeout` accept durations (`90`, `90s`, `15m`, `2h`, `500ms`), and a bare number is still seconds.
-- `run --output-schema <file.json>` makes the final answer one JSON object that the host validates against the schema. The main agent gets one tool-free repair turn, `--agent` is validated once, and a mismatch exits 1 `schema_mismatch`. A schema the host cannot enforce (non-object root, `$ref` outside `#/$defs/`, over 64 KiB) exits 2 `schema_unsupported` before any model request. The envelope carries `result.structured` and `result.enforcedBy`.
-- `run --task-file <path|->` reads a version 1 JSON task envelope. A key set both in the file and on the command line exits 2 naming the key, and a file that adds `verify`, yolo autonomy or `cwd` needs `--trust-task-file`.
-- `clio-coder schema <name>` prints the shipped JSON Schema for `run-result`, `run-events`, `task`, `help` and `fleet-result`. `clio-coder help --json` prints a manifest of every command leaf with its flags, value choices, credential flag persistence, stdin use, effects and exit codes.
+- `--output-format text|json|stream-json` selects schema v2 output. The `run_end` envelope carries `sessionId`, `runId`, `result.text`, `exitCode`, `outcome`, `causes[]`, `timings`, `verify`, `completion`, `dispatch.runs` (every child run, retries included) and usage split into `main`, compaction, `side`, workers and `total`. `text` ends with one stderr line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`.
+- `stream-json` tool frames carry a stable `toolCallId` (`tc_<turn>_<n>`) with the provider's id in `providerToolCallId`, and each `--steer-channel` line is acknowledged with a `steer` frame (`queued`, then `accepted` or refused with a reason).
+- `-o`/`--output-last-message <path>` writes the final answer to a file when the run exits 0.
+- `--resume <id|prefix|name>` (`-r`), `--fork` and `--name <text>`. `--fork` branches a new session from the last committed turn and never writes the parent. Resuming a session another process holds exits 2 with cause `session_live`.
+- `--max-requests <N>` and `--max-tool-calls <N>` cap the main agent loop (exit 4, causes `max_requests` and `max_tool_calls`). `--on-permission fail` ends the run at the first ask it cannot approve (exit 3, `permission_required`). `--fail-on-verify` turns a failed or timed-out `--verify` check into exit 1 (`verify_failed`).
+- `--exit-code` exits 1 when a run that would exit 0 was assessed `partly_done` or `not_done`. The envelope's `completion` block carries `claimed`, `assessed`, `limitations`, `unverified` and the facts behind a lowered claim (`unvalidated_mutation`, `failed_check`, `uncollected_run`, `open_task`, `observation_budget`).
+- `--dry-run` prints the route, admitted and delegated tools, autonomy, sandbox mode, limits and `--verify` checks, then exits 0 with no session, model call or check. Under `--output-format json` it is the envelope with outcome `previewed` and a `plan`.
+- `--sandbox required` pins `safety.sandbox: required` for the run and its workers and exits 2 before boot on a host without an OS sandbox. `--require-priced` exits 2 naming any unpriced route the run can reach, and dispatch refuses an unpriced worker route at admission.
+- `--deny-tools <names>` on `run`, interactive `clio-coder` and `clio-coder acp` removes tools whatever else admits them.
+- `--output-schema <file.json>` makes the final answer one JSON object validated by the host. The main agent gets one tool-free repair turn, a mismatch exits 1 `schema_mismatch`, and a schema the host cannot enforce exits 2 `schema_unsupported` before any model request.
+- `--task-file <path|->` reads a version 1 JSON task envelope. A file that adds `verify`, yolo autonomy or `cwd` needs `--trust-task-file`.
+- `run --agent` accepts `--max-cost-usd` and `--worktree`. Its `run_end` envelope carries the worker's sealed `completion`. `--timeout` and `--verify-timeout` accept durations (`90s`, `15m`, `2h`, `500ms`), and a bare number is still seconds.
+- `clio-coder schema <name>` prints the shipped JSON Schema for `run-result`, `run-events`, `task`, `help` and `fleet-result`. `clio-coder help --json` prints a manifest of every command leaf with its flags, value choices, stdin use, effects and exit codes.
+
+**Completion**
+
+- The `finish` tool declares how a turn ended: `state` (`done`, `partly_done`, `not_done`) with optional `limitations`, `unverified` and `remaining`. It is the only call in its response, and the turn ends with no further model round.
+- CLIO Coder seals the declared state beside its own assessment. A `done` with unvalidated changes, a failing check, an uncollected child run or an open task is assessed `partly_done`, and the terminal UI shows one line: `declared done, assessed partly done: …`.
+- An unattended turn (a headless run, a scheduled job, an unwatched yolo continuation) that did work without declaring gets one round pinned to `finish`. An attended turn may leave the declaration out.
 
 **Sessions**
 
-- `clio-coder session history|show|export|artifacts|rename|fork|rm` manage persisted sessions from the shell, and `--all-projects` widens the read verbs.
-- `clio-coder session compact <id> [--json]` compacts a persisted session. A session held open elsewhere is refused with `session_live`, and `compacted: false` carries a `reason`.
+- `clio-coder session history|show|export|artifacts|rename|fork|rm` manage persisted sessions from the shell, and `--all-projects` widens the read verbs. `session show` prints the build that wrote the session.
+- `clio-coder session compact <id> [--json]` compacts a persisted session.
+- `clio-coder --resume <id or prefix>` opens CLIO Coder on an earlier session, a bare `--resume` opens the session picker, and `--continue` opens the most recent session for the project.
 - `telemetry` session reads, `context working-set` and `report --session` accept a unique id prefix or a session name.
 
-**Fleet and playbooks**
+**Fleet and dispatch**
 
+- Dispatch routes by job: inspecting goes to `scout`, reviewing a diff to the new builtin `reviewer`, running checks to `verifier`, diagnosing a failure to `debugger`, adding tests to `tester`, implementing to `coder` and documentation to `documenter`.
+- Each role owes evidence: an explorer an answer from what it observed, a builder a change or a declared reason, a checker executed checks, a reviewer cited evidence. A worker that returns without it is retried once on another model, and a pinned route settles failed and says so.
+- A `compete` dispatch runs the declared host checks on every candidate in its own worktree before judging. A candidate that deleted or retyped a path its check needs is rejected.
+- The dispatch plan card and the approval card state each run's bounds: the cost per model call at its output bound, or that the route is unpriced and has no wall-clock bound unless `timeout_ms` is set.
+- Workers hand back by role, at 70% of the context window, or 85% for a builder. A batch shares a 12,000-byte answer budget, and a cut answer names `monitor(mode="answer", run_id=…)`.
 - `fleet run --output-format text|json|stream-json` ends with a `fleet_end` result, and `fleet run` gains `--cwd`, `--timeout` and `--max-cost-usd`.
-- `fleet run --detach` prints `fleet_accepted` once the fleet root is recorded. `fleet wait <fleetRootId>` prints the result and exits with its code (`owner_gone` exits 1 and `--timeout` exits 75). `fleet cancel <fleet-...>` cancels a whole fleet root and is idempotent once sealed.
-- `fleet list` shows this project's fleet roots with their state and sealed outcome. `fleet admission [status|drain|open]` controls dispatch admission.
-- `--exit-code` on `fleet verify` (0 verified, 1 failed or unavailable, 75 pending), `evidence inspect` and `campaign run` (1 unless every entry completed). `campaign run --json` gains `completion` and `verdict`.
-- A person at a fleet worker's approval card can keep it open past 15 minutes. Each key renews the hold to 15 minutes from that moment, up to one hour after the ask opened. Workers on older builds keep the 15-minute ceiling.
-- Running fleet rows show each worker's context fill, in the warning colour from 80%.
+- `fleet run --detach` returns once the fleet root is recorded (a `fleet_accepted` frame under `--output-format json|stream-json`). `fleet wait <fleetRootId>` prints the result and exits with its code, and `fleet cancel <fleet-...>` cancels a whole fleet root.
+- `fleet list` shows this project's fleet roots with their state and sealed outcome, and `fleet admission [status|drain|open]` controls dispatch admission.
+- `--exit-code` on `fleet verify` (0 verified, 1 failed or unavailable, 75 pending), `evidence inspect` and `campaign run`.
+- A person at a fleet worker's approval card can keep it open past 15 minutes: each key renews the hold for 15 minutes, up to one hour after the ask opened.
+- The coordinator has `grep` and `code_nav` attached directly. Running fleet rows show each worker's context fill, and the Turn ended row states detached worker spend apart from the turn's own.
+
+**Delegation to other agents**
+
+- The Antigravity CLI is now also an ACP delegation target (`antigravity`). Add it with `clio-coder configure --interop` and run it with `/run antigravity`. It uses the `agy` login already on the machine.
+- A dispatch that names a `<model>-<level>` id selects the model and its thinking level, and a refusal lists the values the agent offers.
+- Questions from the delegated agent reach the operator as a card headed "Delegated agent", and are cancelled when no operator is attached. A steer goes to the agent as its own prompt.
+- Quota exhaustion fails the run as `usage_limit_reached` with the reset time and the retry moves to another target. The agent's `run_command` and `run_workflow` calls are judged by the command they run.
+- ACP delegation failures settle under their own codes (`acp_auth_required`, `acp_model_unavailable`, `acp_thinking_unavailable`, `acp_transport_error`), and a sign-in failure is retried on another target.
+
+**Memory**
+
+- The `memory_note` tool lets the main agent record a note bound to a command that succeeded or a file read in the session. A failed command followed by a success that changed only its options is filed as a fix. `context.memory.surfaces.lessons` (`off|rules|agent|side`, default `agent`) selects who writes lessons.
+- A note is a claim identified by repository, kind, body and conditions, and it is promoted only after two sessions other than its author's have demonstrated it. Operator decisions are never evicted.
+- A stored lesson is checked once per session before delivery: its command must still resolve and its quoted source must still be in the file. A lesson that binds another worktree, a path outside the checkout or a program under a temp directory is withheld. `context.memory.surfaces.delivery` (`off|section|decision|broadcast`, default `decision`) selects how lessons reach the model.
+- `context.memory.sideShare` (default `0.15`) caps automatic memory calls at a share of the session's main output after the first three, and `0` removes the cap. `context.memory.surfaces.correct` and `.bank` (`rules|model`, default `rules`) select whether a model step runs.
+- `clio-coder memory consolidate [--json]` merges records of one claim, demotes lessons that no longer hold and drops automatic notes with no evidence, with no model call. `memory list --approved-by operator|guardian` lists approved memory by approver, and `memory list` reports records the store set aside as invalid.
+- `context.memory.thinkingLevel` and `chat.steering.triage.thinkingLevel` (default `off`) set how much the memory and steering-triage side calls reason.
 
 **Commands**
 
-- `clio-coder config get|set|unset <path> [--scope user|project]` reads, saves or removes one setting. The project scope requires a trusted project, and routing paths point to `clio-coder targets use`.
-- `--json` on `auth status`, `auth list`, `version`, `interop adopt`, every `tasks` leaf, `playbook list|new`, `commands init`, `verifiers discover|validate|dry-run|baseline` and `library sync|push`.
-- `doctor --fix --yes` applies model-id corrections without asking. `tools reset-profile <id>` and `agents list` are new verbs. `verifiers add|edit --check-cwd <path>` names a check's directory. `research start|resume --json` reports `completion.stopReason` (`max_iterations`, `max_wall`, `max_cost`).
-- `reset --yes` and `uninstall --yes` (`-y`). `reset`, `uninstall` and `doctor --fix` with `--json` on a terminal ask on stderr instead of cancelling.
-- `clio-coder telemetry quota|health|runs` print the telemetry snapshots ACP serves. `quota` reads only readings this host journaled and polls no provider.
-- `clio-coder report sweep` and `clio-coder telemetry share sweep` delete expired shares, and `report status --refresh` asks GitHub.
-- `clio-coder memory list --approved-by operator|guardian` lists approved memory by approver, and a plain listing notes how many records wait for review.
-- `clio-coder --help --all` lists every command path, and `clio-coder help run --topics` prints the long-form run notes.
-- `clio-coder --resume <id or prefix>` opens CLIO Coder on an earlier session, a bare `clio-coder --resume` opens the session picker, and `clio-coder --continue` opens the most recent session for the project; the exit summary and upgrade hints now name these flags.
-- `clio-coder dev flywheel --pull` keeps verified report bundles in a private intake store whose bundle bytes never enter git. `--sweep` deletes debug-only bundles 90 days after their issue closed or at 180 days and honours reporters' deletion requests, and `--forget <reportId>` deletes one bundle on request.
+- `clio-coder config get|set|unset <path> [--scope user|project]` reads, saves or removes one setting.
+- `clio-coder telemetry surfaces [--session <id>] [--json]` lists what each side surface (memory, compaction, the safety judge, triage, prewarm, vision and others) cost, and how each reminder that cost a round settled. `telemetry quota|health|runs` print the snapshots ACP serves.
+- `--json` on `auth status`, `auth list`, `version`, `interop adopt`, every `tasks` leaf, `playbook list|new`, `commands init`, the `verifiers` read verbs and `library sync|push`.
+- `doctor --fix --yes`, `reset --yes` and `uninstall --yes`. `tools reset-profile <id>` and `agents list` are new verbs, and `verifiers add|edit --check-cwd <path>` names a check's directory.
+- `clio-coder --help` is a grouped page of about 45 lines, `--help --all` lists every command path, and `help run --topics` prints the long-form run notes.
+- `clio-coder report sweep` and `telemetry share sweep` delete expired shares.
 
 **Tools and settings**
 
-- The `data` tool reads Zarr v2 and v3 stores (`inspect`, `select`, `stats`) with raw, zlib, gzip and zstd chunks, and inspects ADIOS2 BP4 and BP5 directories (variables, types, shapes, steps, block min/max, attributes). Blosc, lz4, sharding, filters and BP data decoding are refused with the `run_script` route.
-- `chat.steering.triage.thinkingLevel` and `context.memory.thinkingLevel` (default `off`) set how much the steering-triage and proactive-memory side calls reason. `off` sends the same requests as before.
+- The `data` tool reads Zarr v2 and v3 stores (`inspect`, `select`, `stats`) with raw, zlib, gzip and zstd chunks, and inspects ADIOS2 BP4 and BP5 directories. Blosc, lz4, sharding, filters and BP data decoding are refused with a pointer to `run_script`.
+- A queued steer ends a running `bash`, `run_script`, `verify`, `find`, `grep` or web fetch call after a 10-second grace. The partial result is marked `aborted-by-steer` and the turn continues.
+- `safety.limits.bashIdleSeconds` (default `0`, off) stops a command that prints nothing and uses no CPU for that long.
+- `safety.validationWrappers` names wrapper scripts whose wrapped check counts as validation for the finish gate.
+- `tasks` accepts `ids=[...]` for `done`, `block` and `drop`, and typed `git` accepts `range`, `ref` and `max_count`.
 
 **Terminal UI**
 
-- Ctrl+X clears the whole draft in one press and Ctrl+_ restores it (`clio-coder.editor.clear`).
-- The arcade steps aside when CLIO Coder needs an approval or an `ask_user` answer, and the trigger phrase resumes the game where it stopped.
-- A hook that stalls a turn for 10x its budget or more shows a one-time warning, and `tool.settled` records hook time as `hookMs` apart from `durationMs`.
+- Ctrl+X clears the whole draft in one press and Ctrl+_ restores it.
+- The arcade steps aside when CLIO Coder needs an approval or an `ask_user` answer and resumes where it stopped.
+- A hook that stalls a turn for 10 times its budget shows a one-time warning.
 
 ### Changed
 
-- **Breaking:** `clio-coder run` reads stdin only when `-` is passed. `run -` takes the task from stdin, and `run "<task>" -` appends stdin after the task as a `<stdin>` block. A pipe without `-` is ignored with no 2-second wait, and `run` with neither a task nor `-` exits 2 `empty_task` naming `-`. Scripts that pipe a task into `run` must add `-`.
-- **Breaking:** `clio-coder playbook validate` exits 2 for an invalid playbook (parse, schema, reference, missing file or preflight error) in text and `--json`, matching `fleet run`. Callers that checked for exit 1 must check for 2.
-- `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh` and the new sweep verbs.
-- Deprecated spellings keep working through 0.8.x and print one `clio-coder: deprecated: <old>; use clio-coder <new> (removed in 0.9.0)` line on stderr: `--acp`, `run --session` (use `run --resume`), `fleet run --json`, `fleet drain` and `fleet resume` (use `fleet admission drain|open`), `ext`, `export`, `import`, `targets add|fleet|workers|worker`, `reset --force`, `uninstall --force`, `tools status --reset-profile`, `verifiers --cwd`, the `semantic inbox-*` verbs, and top-level `components`, `evolve` and `flywheel` (now under `dev`). `fleet drain`, `fleet resume` and `tools status --reset-profile` keep their old output, which differs from the replacement's.
-- `clio-coder --help` is a grouped page of about 45 lines. The removed commands `context-init`, `context-index`, `context-clear`, `fleet inspect` and `evidence build` exit 2 with a pointer to their replacement, even with `--help`.
-- Usage errors across `run`, the lifecycle commands, `tools`, `paths`, `upgrade`, `playbook`, `agents`, `tasks`, `verifiers`, `arena`, `research`, `claims`, `store`, `library`, `mcp` and `share` print one `clio-coder <command>: ...` line and a help pointer instead of the full help, and print one failure document under `--json`. `run` refuses usage errors before its module loads. `clio-coder -p`, `--print`, `--prompt` and bare task text point at `clio-coder run`. `--systemone` and image attachments are refused with `--agent`, and `--timeout` counts from process start.
-- `fleet verify` takes `--json` as an option and prints a text verdict without it. `playbook validate` and `fleet run` share one preflight and print the same diagnostic, and both accept `hello.md` or a path under `.clio-coder/playbooks/` as the playbook name.
-- `arena run`, `vote` and `list` no longer take the next flag as a flag's value, and `--flag=value` is accepted. `store rm` and `store rm-tag` without `--yes` ask at a terminal.
-- `clio-coder telemetry tokens` counts the calls of workers a session dispatched as a `worker` row charged to the turn it ran in, `--json` totals include them, and its columns read `cache read`, `fresh` and `prompt`.
-- Telemetry text words re-prefilled tokens and the cache-break bill as an upper bound ("up to N") in `telemetry cache`, `explain`, `why-stopped`, `doctor`, `/context`, `/usage` and the exit summary. JSON values are unchanged.
-- "Add a target" in `clio-coder configure` opens the same "What do you have?" screen as first-run setup, and the category list moves to its "Every provider and app" row.
-- The compaction trigger and the context gauge price the conversation at the route's measured characters per token, live, after a compaction and on resume, instead of a flat chars/4. A fresh process starts at chars/4 until its first measured call.
-- On windows under 52,428 tokens, a compaction summary reserves reasoning room only when the summary call itself thinks. Larger windows are unchanged.
-- An api 2 `turn_start` gate decides before image processing, turn control and reminders, so a refused turn spends nothing. Its prompt text no longer includes the image-sidecar observation.
-- Under `prompts.profile` v2 with a window below 48K tokens, the Catalogs section lists skill, agent and playbook names only. The v2 Delegating section says an undeclared `intent.verification` check id is refused. A `prompts.profile` change applies from the next turn.
-- The session-context git and last-commit lines say "at session start", so a final answer after the turn's own edits no longer reads the start-of-session "clean tree" as current. The default autonomy description states that outside reads run without asking and outside writes go to the safety judge.
-- `ls` checks only the entries it shows against path policy, so a 50,000-entry directory lists in about 0.4 s instead of 4 to 12 s. Past the shown prefix, the total is a lower bound with a note.
-- Sharing a report bundle refuses an intake key past its expiry date (2027-12-31) with an upgrade message. Without `gh`, the report still sends and only the sealed `.box` is skipped.
-- The welcome screen keeps one hints page instead of rotating every 15 seconds. The rows above the composer leave the transcript a third of the terminal and fold the workers row and context rail into the composer rail under 30 rows.
-- "Reply from <target> · <model>" appears only when the replying route changes, not above the first reply from the configured route.
-- The version banner, notice prefixes, upgrade messages, installer output, desktop app messages, TUI header, composer, slash command descriptions, prompt fragments, tool descriptions, worker commit text and pane profiles name the product CLIO Coder, and report consent text is version 3. The `clio-coder` command, package and paths are unchanged.
-- On the `openai-codex` runtime, fleet workers with the same model, tools and system prompt reuse one prompt-cache affinity when they run one after another, so a later worker's first request reads the prefix an earlier one wrote.
-- When a configured `high` thinking level runs as `xhigh` on a model that offers no `high`, the notice reads "high isn't offered by <model>; using xhigh".
+**Command line**
+
+- Usage errors print one `clio-coder <command>: ...` line and a help pointer instead of the full help, and one failure document under `--json`. `clio-coder -p`, `--print`, `--prompt` and bare task text point at `clio-coder run`.
+- `run --timeout` counts from process start, and a bash call's `timeout_ms` is capped at the time the run has left.
+- `playbook validate` and `fleet run` share one preflight and print the same diagnostic.
+- `clio-coder telemetry tokens` counts the calls of workers a session dispatched as a `worker` row charged to the turn that ran them.
+- Telemetry text words re-prefilled tokens and the cache-break bill as an upper bound ("up to N"). JSON values are unchanged.
+- "Add a target" in `clio-coder configure` opens the same "What do you have?" screen as first-run setup. The sign-in step says what each provider's flow asks of you and promises a browser only where one can open.
+- Sessions and run journals record the build commit and build time that wrote them.
+
+**Agent behaviour**
+
+- A long run of reads with no change, plan, question or dispatch gets a note asking what the agent now knows at 25 reads, and a firmer one at 40 and 60 asking for the smallest defensible change, a plan or a stop. Writer workers follow the same rule.
+- When a turn's reads span three or more areas of the repository, the agent is advised once to send one parallel `scout` dispatch.
+- Skills advice is ranked on the operator's task and does not repeat. A skill that is already loaded is not offered again. A marketplace skill is offered only when the request names its domain, and never under yolo.
+- A redundant reread is annotated ("These lines were already shown in this turn") instead of blocked.
+- The turn tool budget scales with how many calls per round the route makes, a continued turn that crosses its budget rolls into a fresh turn, and `finish` stays admissible after the budget is spent.
+- An answered `ask_user` interview closes when the next reply asks nothing more, and a question sent as a bare string is accepted.
+- A scheduled job command that bash would run contained is admitted contained.
+
+**Context**
+
+- The compaction trigger and the context gauge price the conversation at the route's measured characters per token instead of a flat chars/4.
+- A split compaction runs its two summaries at the same time when the route has no endpoint limit and no cost cap is active.
+- On routes that resend the whole context after every fold, an automatic eviction that would free too little is held.
+- On hosted routes the first-token limit adapts to the route: after five first tokens it is ten times their 95th percentile, at least 30 seconds, capped at `chat.retry.streamStallMs`.
+- Memory observations are prepared only as context nears the fold trigger, and never when automatic compaction is off.
+
+**Terminal UI and naming**
+
+- The welcome screen keeps one hints page, and the rows above the composer leave the transcript a third of the terminal.
+- "Reply from <target> · <model>" appears only when the replying route changes.
+- The version banner, notices, installer output, desktop app messages and prompts name the product CLIO Coder. The `clio-coder` command, package and paths are unchanged.
 
 **Performance**
 
-- Boot no longer blocks on fsync while it records the running build, which saves about 15 to 25 ms on every TUI, ACP and headless start. Headless boots load the ACP server only when they serve ACP, and a `run` usage error is refused before the boot graph loads.
-- `clio-coder fleet --help` answers in about 35 ms and `fleet status` in about 90 ms (from about 400 ms) without loading the fleet command.
-- Each main request checks the history once at admission, and the post-tool guard checks fit on one history observation. Ledger reads skip copying entries with no legacy event id, which speeds start and resume on long sessions.
-- The bash tool masks output as it arrives, so a 16 MiB output no longer stalls the session for about half a second at the end.
-- Fullscreen: a scroll writes about 15x fewer bytes, keystroke frames with the scrollbar on are about 6x cheaper, and dragging the window edge re-wraps the transcript once, when the drag pauses. Live worker cards advance elapsed time without refolding the run journal, so a fleet board costs about a tenth as much per poll. `/export` converts to HTML in chunks so the prompt stays responsive.
-- A running worker's spend no longer rewrites `runs.json`: inspection reads it from the run journal, and the ledger is written only on lifecycle and heartbeat transitions. `fleet view --follow` re-reads `runs.json` only when it changed.
-- The terminal UI tracks which offscreen rows are still valid and repaints only rows that changed, which halves the row writes per frame.
-
-### Removed
-
-- **Breaking:** `clio-coder run --json` and `--json-events` are removed and are now usage errors (exit 2, `unknown_flag` under `--output-format`). Use `--output-format json` for one result document or `--output-format stream-json` for the event stream that ends with the `run_end` envelope.
-- `/loop list` and `/loop cancel` are no longer accepted. Use `/loop` and `/loop stop <id> --now`.
+- Every start is about 15 to 25 ms faster, `clio-coder fleet --help` answers in about 35 ms and `fleet status` in about 90 ms, down from about 400 ms.
+- `ls` on a 50,000-entry directory lists in about 0.4 s instead of 4 to 12 s.
+- Fullscreen scrolling writes about 15 times fewer bytes, the terminal UI repaints only rows that changed, and a fleet board costs about a tenth as much per poll.
+- The bash tool masks output as it arrives, so a 16 MiB output no longer stalls the session.
+- On the `openai-codex` runtime, fleet workers with the same model, tools and system prompt reuse one prompt cache when they run one after another.
 
 ### Fixed
 
 **Headless and automation**
 
-- `clio-coder run --max-context-tokens=N` is accepted like `--max-context-tokens N`, with the same positive-integer error for an invalid value, instead of failing as an unknown option.
-- `run --timeout` stops a `--verify` check that is still running at the deadline. The run exits 124 `timed_out` and the check reads skipped (`deadline`) instead of running to completion.
-- A headless run whose worker the main agent cancelled through `steer` no longer exits 1 `dispatched_worker_failed`. The worker settles cancelled and stderr names it.
-- `--verify` checks seal with the `bash -o pipefail` argv they ran under.
-- A failed unclassified command is disclosed on the run receipt and the headless `observed:` line even when no check outcome stands.
-- A headless run with more than 50 refused asks no longer counts the rest as blocked in its sealed tools row. A turn ended by a scheduled job's clock records `job_clock` as its stop cause, and a cancel or failed turn that ends an unfinished step pipeline names itself in `stepPipeline.stoppedBy`.
-- `fleet run` no longer reports its own redirected stdout or stderr file as a change made outside the fleet run.
+- A run the context window ended exits 1 with cause `context_overflow`.
+- `run --timeout` stops a `--verify` check still running at the deadline, and bash starts no command once the deadline has passed and names the limit that stopped it.
+- A read-only shell command or a check is no longer a change the run must validate, and a finished `--read-only` run is not sealed a no-op for one blocked call.
+- A headless run whose worker the main agent cancelled through `steer` no longer exits 1 `dispatched_worker_failed`.
+- `--verify` checks that finished are sealed when a shutdown cuts the run, and `--exit-code` applies when `-o` is set.
+- A FIFO steer channel keeps being read after a writer closes it.
+- A headless turn that calls `finish` without writing a reply is asked for the reply first, and the declaration is never printed as the answer.
+- `run --max-context-tokens=N` is accepted like `--max-context-tokens N`.
+- `fleet run` no longer reports its own redirected stdout or stderr file as an outside change.
 
 **Context and compaction**
 
-- Parallel reads with a small `limit` or `tail` hold only their requested range of the per-turn observation budget, so siblings in one batch are no longer refused as exhausted, and a refusal counts bytes reserved by sibling calls apart from bytes already returned.
-- When the summary that should clear a context overflow is refused or fails, the turn continues on an eviction-only fit with a notice naming the failure, and a summary stream is stopped at twice its output budget instead of running unbounded.
-- A compaction summary call the provider stops answering fails at the `chat.retry` stall window instead of hanging the run.
-- When the checkpoint validator refuses a summary, the summarizer is asked once more with the validator's message, and a fence left open at the end is closed, so one malformed checkpoint no longer ends the turn.
-- A compaction whose checkpoint is not smaller than the history it replaces keeps the session unchanged and reports `compacted: false`. A checkpoint with sections out of order is repaired instead of discarded, and a failed compaction journals its `failureCause`.
-- A turn stopped because one tool result cannot fit, including the post-tool guard's stop, is journaled as the harness cause `oversized_tool_result` and reads `run_failed` with the guard's message under v2, not a provider error.
-- Compaction keeps the head and the tail of each clipped tool result for the summarizer. `context(scope="recall")` lists refs that match any query term, best first. A summarized assistant reply can be recalled by its turn ref, and the exact-facts block carries short hidden results verbatim.
-- A resumed session on another endpoint serving the same model id no longer reuses the old endpoint's measured usage, and step checkpoints no longer carry legacy `<read-files>`/`<modified-files>` blocks.
-- `compaction.settled` records the fit reserve, summary output cap and room, never a negative headroom on a commit. `telemetry tokens` charges a manual `/compact` to the turn before it and a discarded compaction to the turn it ran for.
-- A `self_compact` batched with other calls refuses only itself, and the other calls run.
-- When a model keeps repeating itself, the second recovery sends a firmer instruction with thinking one step lower, and the turn shows one outcome footer instead of an extra "Cancelled".
-- At the turn tool budget, a parallel batch is admitted or refused whole, the refusal says a continuation follows only when one will, and the footer shows the turn's calls against the budget (`turn 12/73`).
-- After a tool call written as text, the nudge names the calls that already ran this turn, so a model no longer reapplies a landed edit. A template turn queued while a run streams is triaged like any queued message, and `consult` accepts `filter`, `state` or `questions` sent as JSON text.
+- When the summary that should clear a context overflow is refused or fails, the turn continues on an eviction-only fit with a notice, and a summary stream is stopped at twice its output budget.
+- A summary call the provider stops answering fails at the stall window instead of hanging the run, and a refused checkpoint is asked for once more with the validator's message.
+- A compaction whose checkpoint is not smaller than the history it replaces keeps the session unchanged and reports `compacted: false`.
+- Parallel reads with a small `limit` or `tail` hold only their requested range of the per-turn observation budget, so siblings in one batch are no longer refused as exhausted.
+- A resumed session on another endpoint serving the same model id no longer reuses the old endpoint's measured usage.
+- A stalled request's late completion is dropped instead of landing in the next turn, and a provider retry that answers is recorded as recovered.
+- At the turn tool budget, a parallel batch is admitted or refused whole, and the footer shows the turn's calls against the budget.
 
 **Fleet and workers**
 
-- A worker whose only state-changing call was refused no longer reports `mutations:yes` on an unchanged tree. One refused call no longer fails an edit worker that found nothing to change, and a run whose validation failed is no longer recorded as a first-pass success.
-- A read-scoped worker (scout, or a read-only run with read roots) that reports without executing any tool settles failed with `quality=fail` ("no tools executed"), so the host retries it.
-- A worker that keeps recalling content it evicted, or fills 80% of its context without changing anything, is told once to write or report. A worker stopped by context exhaustion hands back its last message as partial output and names the files it changed.
-- Dispatch names the runs that lost `bash` and `verify` to write roots without an OS sandbox (`[withheld: bash, verify]`), in the result and in the worker's prompt.
-- A dispatch to an endpoint full with worker leases and the foreground stream queues for a slot. It is refused as a deadlock only when foreground streams fill every slot.
-- The dispatch plan preview refuses what the run would refuse for store grants, cost bounds, the session ceiling, store tags on a remote node and a misplaced outside read root, and names what only the run can check.
-- A council seat whose target is down is reported as "seat not run (target unavailable)" while the live seats deliberate, and fewer than two live seats refuses the council with `council_too_few_live_seats`. Counts and cards name only seats that ran, and a member answering in a code block no longer previews as its fence line. The council judge runs in the dispatch's working directory.
-- `verify test` runs pytest when tox or nox is also declared, an unavailable runner no longer reads as "validation failed", and the tester can run the project's locked test command through `bash` when `verify` refuses. A bare `python -m pytest` pass in an unprovisioned uv project no longer seals verified.
-- Evidence counts a worker's refused ask among blocked tool calls. Helper-result workers show their work counters on dispatch and collect, and sealed run records keep unfinished calls and route warnings.
-- At the refusal limit, Claude SDK workers get a report reply, and workers on APIs without named tool choice are asked for a prose report instead of an unavailable result tool.
-- A worker's locked synthesis or handoff round on OpenAI Responses keeps the run's reasoning level. A helper worker on a non-native route keeps its system prompt through the handoff, so both rounds read the cached prefix.
-- `fleet nodes test` probes a pinned target with the credential dispatch sends and never refreshes a login. Worker admission also compares tool parameter schemas, so a node on another build is refused, and older peers keep the name check.
-- The attached dispatch schema points at worker context fork and splice. Context seeds age out in the daily retention sweep, `monitor collect` reports attempts a retry recovered, and a worker stopped by its own lost stdout lane is sealed `internal`.
-- Dispatch verification admits family words such as `test` that resolve to one derived check, and citations ground on lines a `bash` `grep -n` printed.
-- A fork keeps reading and collecting its ancestors' runs through a deleted intermediate session, and `/view` lists them.
-- A sealed run whose telemetry was truncated and whose `bundle.json` was deleted reports failed integrity, not unsealed. Route history re-reads a sealed run whose journal changed in place.
-- Restart recovery settles an abandoned run at the spend its journal recorded, not as unobserved, and ends it at the last moment the host saw the worker.
-- On a shared state directory, the global dispatch concurrency cap counts per host, so another host's leases and reservations no longer consume this host's cap.
-- A worker permission ask left without its owning session is refused with "the session that owns this worker exited or disconnected; re-run the work from a live session".
-- A worker's checkout delta reports a same-size rewrite made within one filesystem timestamp tick of the baseline. Content checks per run are capped, and past the cap a file counts as changed.
-- A turn that collected detached workers' results, through the idle wake or `monitor` collect, no longer gets the "No dispatch ran this turn" honesty line.
+- A worker whose only state-changing call was refused no longer reports changes on an unchanged tree, and a builder whose calls were all withheld is graded as having run no tool.
+- A read-scoped worker that reports without executing any tool settles failed, so the host retries it.
+- A pytest or unittest run that collected no test counts as not run, never as a pass, and a run that collected no test is never sealed host-verified.
+- A worker that keeps recalling content it evicted, or fills 80% of its context without changing anything, is told once to write or report. A worker stopped by context exhaustion hands back its last message as partial output.
+- A dispatch to an endpoint full with worker leases queues for a slot instead of being refused as a deadlock.
+- Dispatch admission reads absolute workspace paths as workspace-relative, runs an empty `write_roots` read-only and forwards a dispatch sent through the tool gateway, each with a `[dispatch normalize]` line.
+- A council seat whose target is down is reported as not run while the live seats deliberate, and fewer than two live seats refuses the council.
+- `verify test` runs pytest when tox or nox is also declared, and an unavailable runner no longer reads as a failed validation. `max_output_bytes` trims the returned text and never stops the check, and build checks default to a 300-second deadline.
+- ACP delegations report which tool ran and on what, so a delegated agent's edits are no longer graded as no change.
+- Restart recovery settles an abandoned run at the spend its journal recorded.
+- On a shared state directory, the dispatch concurrency cap counts per host.
+- A turn that collected detached workers' results no longer gets the "No dispatch ran this turn" line.
 
 **Checks and safety classification**
 
-- A later run of a check under another spelling (`npm test` after `verify test`, `npm run test` after `npm test`) settles the earlier result, and `./gen.sh; npm test` no longer retires a standing pass. Checks behind `stdbuf`, `ionice`, `nohup`, `sudo -u`, `env -u`, `make -C` and `pnpm --filter` read as checks.
-- Writer-named nox and tox sessions, golden-update environment variables, `cargo insta accept`, and tracked check reports, coverage output and `go build` binaries count as tree changes. A here-document that writes a test and runs it counts as both the change and the check.
-- Shell redirects to `$TMPDIR`, unexpanded variables, git-ignored paths and paths outside the workspace no longer count as changed files in the exit summary and finish contract. The finish contract credits a changed file run through `uv run`, `make` or `npm`/`pnpm`/`yarn run`.
-- Text a command only prints (`python -c "print('sudo')"`, a print-only `sed` or `awk` script, `LC_ALL=C grep sudo`, `git log --grep`) is no longer a system change or destructive git, and git behind `stdbuf`, `ionice`, `taskset`, `chrt` or `xargs` is recognized.
-- The loop guard reads bash by shell words: quoted operators, `env git status`, `/usr/bin/git log` and `git config --get` count as reads, and `git config <key> <value>` as a change. Memory evidence judges `sudo`, `doas` and similar wrappers by the command they run, and a reflection cannot promote context to a constraint or decision.
-- Bash text naming a secret-looking word such as `event.key` in a sed script, heredoc or echo is no longer refused as a key-file read, while `cat x.key` and `find -name '*.key' -exec cat` still are. A scratch delete spelled `$TMPDIR/...` is judged like the literal temp path unless the command can reassign `TMPDIR`.
-- `clio-coder config get|set|unset` with a dotted setting path is no longer refused as a secret-file read. At yolo, a write into a scratch home pinned with `CLIO_CODER_HOME=/path` is no longer refused as CLIO Coder's own state.
-- An unquoted assignment under a key or count name (`sort_key=name`, `max_tokens=128`) shows a short value, while every value under a password, secret, token, auth or credential name stays redacted. A `Line N:` label in a reply no longer triggers the task-board reminder or citation nudge.
-- Command output is masked to the same text however it arrives. `grep` and `find` errors quote rg's or fd's own reason. The `numeric-compare` summary names keys with two empty arrays as unjudgeable.
-- A sandbox launched inside another no longer masks `/dev/null` read-only, so host verification compares a failed check against the task base again.
-- Paths under a folder whose name starts with `..` (such as `..notes/`) are treated as inside the workspace by share import, toolchain install, snapshot rewind, session artifacts, handoff, the store and path displays.
-- A project's claims log caps at 4096 claims by moving superseded claims nothing cites to an evicted file, and `clio-coder claims list` says how many and where.
-- Same-directory git reads with `-C`, `--git-dir` or `--work-tree` no longer clear observed checks as if they were changes.
-- A safety-judge refusal of a compound bash command names the sub-command the block is about and tells the agent to run it alone. Verdicts and policy are unchanged.
+- A later run of a check under another spelling (`npm test` after `verify test`) settles the earlier result. Checks behind `stdbuf`, `nohup`, `env -u`, `make -C`, `pnpm --filter`, `corepack` and `npx` or `pnpm exec` read as checks.
+- Shell redirects to `$TMPDIR`, git-ignored paths and paths outside the workspace no longer count as changed files in the exit summary and finish contract.
+- Text a command only prints (`python -c "print('sudo')"`, a print-only `sed` script, `git log --grep`) is no longer a system change, and a quoted heredoc body is judged as data.
+- Bash text naming a secret-looking word such as `event.key` is no longer refused as a key-file read, while `cat x.key` still is.
+- Cleanup of scratch files under the temp root is recognized, including a relative delete after `cd "$TMPDIR" &&`.
+- The finish gate skips a turn declared `partly_done` or `not_done`, and a `Line N:` label in a reply no longer triggers the task-board reminder.
+- When a check ran after the last edit and failed, the finish advisory names it.
+- A safety-judge refusal of a compound bash command names the sub-command the block is about.
+- A sandbox launched inside another no longer masks `/dev/null` read-only. Contained pnpm gets its own store and an empty npm user config when `~/.npmrc` is masked, and a worker holding `web_read` gets the shell network `web_fetch` gets.
 
-**Providers**
+**Memory**
 
-- Copilot names a served model only when it differs from the requested one, reports a reasoning count it sent (zero included) as measured, and keeps a zero sent while thinking as unknown.
-- A finish-gate continuation on copilot-sdk no longer re-sends the whole transcript in a new Copilot session. The Copilot route cancels the runtime's own background compaction and closes a run still waiting on calls CLIO Coder's transcript already answered.
-- A LiteLLM model whose output limit equals its window keeps its known output limit. Pre-warm runs on a route with an unknown window, and Anthropic cache keepalives stop after a zero-hit refresh.
-- Inception `mercury-3` is priced at list rates ($0.20 input, $0.70 output and $0.02 cache read per million tokens), so `run --require-priced` admits it and `--max-cost-usd` bounds it.
+- A memory reminder counts as delivered only when its text reached an admitted request, and a lesson holds only when a later result satisfies its own evidence.
+- A successful shell result vouches for its exact command, not for look-alike wording, and a command run outside the workspace root vouches for nothing.
+- The observations of deleted sessions are swept daily.
+- A passed `verify` run vouches for its command as `memory_note` evidence, and lessons about a repository's checks reach every turn the finish gate covers.
+- `memory consolidate` leaves operator decisions and other repositories' records alone.
 
-**ACP and editors**
+**Telemetry and quota**
 
-- ACP re-runs the thinking probe when `set_config_option` changes the target or model. A standard `session/fork` attaches the MCP servers the client names, and config updates carry the model.
-- ACP and the extension bus report a call the output limit cut off as not run, and an ACP session starts no memory history review before its first prompt.
+- Every side call is attributed to the surface that made it, and each reminder that costs a round settles once.
+- Each model call journals the thinking level that was requested and the effort sent on the wire.
+- A target with declared rates is priced from its settled usage counts when the runtime computed no cost, and the cache verdict counts cache writes as uncached prefill.
+- Performance totals count only the model's own tool calls.
+- Quota readings and holds are shared across processes, a rate-limited read is held for its Retry-After, and a hold belongs to the credential that earned it.
+- Report archives written by 0.8.4 still verify and import.
 
-**Extensions**
+**Providers and editors**
 
-- Reloading an extension no longer asks again for hooks that fit inside the approved set. A failed `after_tool` hook under `block` says the tool already ran and its result carries the warning.
+- Copilot keeps an omitted reasoning effort omitted, names a served model only when it differs from the requested one, and a finish-gate continuation no longer re-sends the whole transcript.
+- A LiteLLM model whose output limit equals its window keeps its known output limit.
+- Inception `mercury-3` is priced at list rates, so `--require-priced` admits it and `--max-cost-usd` bounds it.
+- ACP re-runs the thinking probe when `set_config_option` changes the target or model, and a standard `session/fork` attaches the MCP servers the client names.
+- Settings load when a project `targets` list drops a target only the user settings define.
 
 **Terminal UI**
 
-- The TUI keeps running when its workspace directory is removed. Slash completion falls back to built-in commands and warns once, without a raw ENOENT notice from the handbook compile.
-- Enter in the files pane enters a directory or sends the selection as Ctrl+Y does, and editors opened from the pane no longer blank it. A pick from a subdirectory inserts a workspace-relative mention such as `@src/inner.txt`.
-- The sign-in step keeps the authorization URL whole, wrapped across rows, under the paste-code prompt.
-- After `/resume`, `/fork` or `/new`, the exit card names the session's own turns and tools beside the visit's and counts a worker's tools on the session that dispatched it. The "Turn ended · N workers running" row keeps the turn's own call count.
-- `/context` keeps the Agent fleet and Project rows after compaction. `/thinking` completion marks the level the route runs, turn receipt clocks follow the time locale and show the date after midnight, and hiding the workers dock names the workers still running.
-- Fullscreen: a double-click on a URL keeps its scheme, the selection no longer highlights the scrollbar, and a drag on the last transcript row no longer scrolls away.
-- `/report` bundles drop image base64, ignore a forged report block, never revive a pruned year-old draft and strip control characters from duplicate titles. `gh` is asked who is signed in only after you press s, and Enter on the duplicates step cancels.
-- Pane and library notices name the real settings section, pane side and dock axis. The idle rail says a non-resident model is not loaded, and `/rewind`'s preview names the snapshot as the list does.
-- The GUI trace view shows a host check that reused an earlier pass as "Reused", and rebuilding the GUI client no longer empties the directory a running GUI serves.
-
-**Commands**
-
-- `fleet cancel --json` prints one compact document with `version: 1`. Root `--help`, `-h`, `help` and `--version` piped into a reader that closes early exit 141 quietly. `telemetry calls --session <id> --run <r>` returns only that run's calls.
-- `config --json trust safety` no longer exits 2, and `config trust` takes its surface and flag in either order. `library --help` writes no process journal, `library inventory --help` works, and `panes install --if-missing --json` prints one document when herdr is installed.
-- `campaign run` entries find the vendored tools (herdr, yazi, asciinema, croc, cliamp) the operator installed.
+- The terminal UI keeps running when its workspace directory is removed.
+- Enter in the files pane enters a directory or sends the selection, and a pick from a subdirectory inserts a workspace-relative mention.
+- `/thinking` refuses another mechanism's label and refuses `off` on a model whose thinking is always on.
+- The interview card sizes to the pane and pages a long question.
+- After `/resume`, `/fork` or `/new`, the exit card names the session's own turns and tools beside the visit's.
+- `/context` keeps the Agent fleet and Project rows after compaction.
+- A `/compact` that changes nothing says why and names the turns it protects.
+- `/report` bundles drop image base64 and ignore a forged report block.
 
 ### Security
 
-- MCP results, errors and refusals can no longer open or close a host reminder or middleware frame. Pipeline and predecessor handoff blocks end with a sealed delimiter that the handed-off text cannot forge.
-- With `safety.sandbox: required`, an extension runtime that no OS sandbox can confine is not started.
-- Contained commands get a private tsx, jiti and Node compile cache, so the host's cache cannot be poisoned. After a secret read, a fetch carrying headers, a body or a long host label asks.
-- Typed tools refuse a settings backup holding a header secret and an `mcp.yaml` with a credential in `args`. `clio-coder config set` and `config unset` from a tool call are refused as settings changes.
-- Files written by `sed`'s `w` command or by `awk`'s `>` and `>>` are judged as write targets. At yolo, writing CLIO Coder's home through a link planted in the same command, or copying, moving or rsyncing into the home root, hits the `clio-owned-state` floor.
-- Init closes `state/memory` and `data/memory` to the owner, and `/export` transcripts are written owner-only. On Windows, the credentials file is owner-only after every write, `doctor` warns when its ACL grants other accounts, and `doctor --fix` reapplies it.
-- Reset and uninstall keep an unmarked data root whose CLIO-named directory holds files CLIO Coder does not write. Concurrent background app starts no longer leave a launch token the setup refuses.
+- The safety floor reads shell scripts a command runs by path, through `exec` or by `source`. A script it cannot place or read sends the call to the safety judge, where one runs.
+- Deleting the workspace's own `.git` is refused at every autonomy level, yolo included, wherever a `cd` in the command lands.
+- Changes only the operator may make (project trust, settings, CLIO Coder's own state) are refused with a message that sends the model to the operator, and `config trust` is recognized in any program's arguments.
+- An `ask_user` answer approves a sandbox escape only when its question names leaving the sandbox.
+- MCP results, errors and refusals can no longer open or close a host reminder or middleware frame, and handoff blocks end with a delimiter the handed-off text cannot forge.
+- With `safety.sandbox: required`, an extension runtime that no OS sandbox can confine is not started. Contained commands get a private tsx, jiti and Node compile cache.
+- Files written by `sed`'s `w` command or by `awk`'s `>` and `>>` are judged as write targets. At yolo, writing CLIO Coder's home through a link planted in the same command is refused.
+- Redaction covers `DB_PASS`, `PGPASS`, `*_PASSPHRASE`, `MYSQL_PWD`, `AccountKey` and `Authorization: ApiKey`, in display and in shared bundles.
+- The hosted installer downloads into a private directory it created and runs the installer it downloaded, and refuses a directory that is not its own.
+- Init closes the memory directories to the owner, and `/export` transcripts are written owner-only. On Windows, `doctor --fix` removes extra grants from the credentials file.
+- The desktop app's launcher trusts a held credential's answer only from the app that issued it.
+- Reset and uninstall keep an unmarked data root that holds files CLIO Coder does not write.
 
 ## 0.8.4 - 2026-11-19
 

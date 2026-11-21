@@ -129,6 +129,8 @@ Rigor decides what evidence a completed turn needs. At `normal` the finish-contr
 4. Contained [yolo](../architecture/safety-model.md#contained-and-unconfined) selects `high` in the main session, because nobody checks the work before it is reported. Its continuation uses a slot of its own, so another nudge spent earlier in the prompt cannot skip it; when that slot is spent too, the turn settles and is recorded unverified.
 5. Otherwise `normal`. An invalid quality policy or contract is diagnosed and raises nothing, and a root-level `VALIDATION.md` is advisory prose that never raises rigor.
 
+Without a quality policy, the finish contract accepts a recognized check command as validation evidence, and a later run of the same check under another spelling, such as `npm test` after `verify(check="test")`, settles the earlier result. A check that runs behind a repository wrapper script counts when `safety.validationWrappers` names the wrapper: an entry with a slash matches that script path and a bare name matches its basename, so `scripts/test-slot.sh pnpm run test:file x` reads as the check it runs. The whole command's exit status decides the result. A quality policy's named checks still require `verify(check="<id>")`.
+
 The validation contract ([validation-contract.ts](../../src/domains/safety/validation-contract.ts)) is the first existing of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml` and `validation.yml` at the workspace root. The file must resolve inside the workspace and stay under 256 KiB. The parser is strict: unknown fields, duplicate keys and aliases are errors, and `version` must be `1`. It states requirements and executes nothing.
 
 | Field | Content |

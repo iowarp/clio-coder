@@ -49,7 +49,7 @@ Every other page in this section depends on the answer. A study of decision mode
 ### Run a task and read its record
 
 ```sh
-clio-coder run --agent <agent-id> --json "<task>"
+clio-coder run --agent <agent-id> --output-format stream-json "<task>"
 clio-coder telemetry inspect --run <run-id> --json
 clio-coder telemetry cost --run <run-id> --json
 ```

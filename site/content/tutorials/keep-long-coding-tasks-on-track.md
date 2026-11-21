@@ -69,16 +69,16 @@ A restarted process records an interrupted handoff as paused and waits for your 
 
 Proactive memory is separate from the working context. Open `/memory` and use its **Review** tab to approve a proposed lesson with `a`, or press `x` twice to reject it; an observation about one repository should not quietly become a rule for every project.
 
-Global, procedural, runtime, and agent lessons wait for you. A repository knowledge lesson can be approved automatically once a session records that it held with no contradiction, and a later contradiction demotes it.
+Global, procedural, runtime, and agent lessons wait for you. A repository note can become a lesson automatically once two other sessions demonstrate it with no contradiction, and a later contradiction demotes it. `clio-coder memory consolidate` merges duplicate claims and demotes lessons that no longer hold, with no model call.
 
-In `/settings`, under **Context and memory**, **Memory connection** and **Memory model** choose where memory's model calls run. With neither set, memory uses your chat route and spends model calls there. Turning **Proactive memory** off stops those calls, along with task memory and the memory section of the prompt.
+In `/settings`, under **Context and memory**, **Memory connection** and **Memory model** choose where memory's model calls run. Memory runs on rules by default, and its model steps are opt-in; with no route set, one you turn on uses your chat route. Turning **Proactive memory** off stops task memory, the memory section of the prompt and the `memory_note` tool.
 
 Stored memory is not fine-tuning of the underlying model. Its value depends on selection, scope, and whether it is still relevant.
 
 ::: limits
 - A summary is a model's reduction, so check it against sources when it matters.
 - A handoff belongs to the branch that prepared it; a fork recalls its notes but cannot resume it.
-- Only approved lessons influence later sessions, and a repository knowledge lesson can be approved automatically, so check `/memory`.
+- Only lessons influence later sessions, and a repository note can become one automatically after two other sessions demonstrate it, so check `/memory`.
 :::
 
 ::: next

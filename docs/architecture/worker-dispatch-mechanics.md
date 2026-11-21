@@ -290,6 +290,8 @@ A worker whose recipe carries a result contract repairs a nonconforming terminal
 
 #### Provider 4xx is not retried
 
+Two rules sit beside the table. A run that left its evidence obligation unmet classifies as `model-quality` before the `deterministic-task` test, even under a deterministic code such as `worker_no_work`, and is retried once on another model; a pinned route settles failed. The obligation comes from the run's role (explorer, builder, checker, reviewer, judge or council seat), resolved in [obligation.ts](../../src/domains/dispatch/obligation.ts) and described in [Evidence obligations and the one retry](../guide/fleet-dispatch.md#evidence-obligations-and-the-one-retry). Among ACP delegation outcome codes, `acp_auth_required` classifies as `target-auth` and retries on another target, while `acp_model_unavailable` and `acp_thinking_unavailable` are deterministic and never retried.
+
 When the native worker's stderr carries the [provider HTTP status marker](#provider-http-status-marker), a status from 400 through 499 classifies as `deterministic-task` and is never retried, because resending the identical request earns the identical answer. Four statuses are exempt. `401` and `403` retry as `target-auth`, excluding the target. `429` retries as `target-rate-limit`, excluding the target, after at least 1 second. `408` retries as `target-transient`, excluding the target. A 5xx status is never deterministic: every 5xx retries as `target-transient`. The status comes only from the native worker runtime. ACP delegations and the Claude SDK runtime rely on the text patterns above, with the explicit ACP verdict patterns `acp peer reported http 400|404` and `session/prompt|session/set_model failed: 400|404` ending as `deterministic-task`, and `acp peer reported http 408` as `target-transient`.
 
 #### Retry decision and delay
@@ -507,6 +509,10 @@ A reporting worker is a native worker whose recipe sets `synthesis: true` and wh
 The unattended finishing rule is separate. It tells a run to restate the task as clauses, map each clause to evidence in the diff or a check it ran, and name any clause without evidence as not done. It allows a new reproduction test only for a clause no existing test covers, only when the task and project instructions allow tests, and expects the test to follow neighboring tests and fail on untouched code first. It lives in the `operating.contract-headless` fragment, which only a headless main agent renders, and in the persona of the `coder` recipe ([coder.md](../../src/domains/agents/builtins/coder.md)). No other worker persona carries it, and attended sessions do not. See [built-in-agents.md](../guide/built-in-agents.md#unattended-finishing-rule).
 
 Verify entry resolution for Python projects and the changed-test runners a fleet check step recognizes are specified in [tool-usage.md](../guide/tool-usage.md).
+
+## Role handback
+
+A native worker with a role stops reading before its context fills. Before each request the worker compares the request's input with its role's share of the usable window, 70 percent for an explorer, checker, reviewer, judge or council seat and 85 percent for a builder, and at that share tools lock and the next round reports ([handback.ts](../../src/domains/dispatch/handback.ts)). [Handback and answer budgets](../guide/fleet-dispatch.md#handback-and-answer-budgets) gives the operator-facing detail.
 
 ## Antigravity conversation identity
 

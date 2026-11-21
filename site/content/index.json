@@ -125,6 +125,7 @@
     "summary": "memory.md",
     "headings": [
       "What memory does",
+      "Notes have to be demonstrated",
       "See and approve lessons",
       "Turn it off or route it elsewhere",
       "Settings",
@@ -230,6 +231,7 @@
     "summary": "interoperability.md",
     "headings": [
       "Bring an installed coding agent",
+      "Delegate to the Antigravity CLI",
       "Review resources from another agent",
       "Connect an ACP frontend",
       "Built on the Pi SDK"

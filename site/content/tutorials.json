@@ -79,6 +79,38 @@
     ]
   },
   {
+    "slug": "script-clio-coder-in-ci",
+    "title": "Script CLIO Coder in CI",
+    "description": "Build a CI job on one JSON result, typed exit codes, run limits, a dry run, and an answer validated against your schema.",
+    "category": "Safety and autonomy",
+    "time": "8 min",
+    "author": "The CLIO Coder team",
+    "source": "script-clio-coder-in-ci.md",
+    "cover": "cast-headless-run",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.5",
+    "guides": [
+      "guide/exit-codes-and-output.md",
+      "guide/commands-and-modes.md"
+    ]
+  },
+  {
+    "slug": "upgrade-to-0-8-5",
+    "title": "Upgrade to 0.8.5",
+    "description": "Run the upgrade, read what it rewrote in your settings, and replace the command spellings that 0.8.5 removed.",
+    "category": "Safety and autonomy",
+    "time": "6 min",
+    "author": "The CLIO Coder team",
+    "source": "upgrade-to-0-8-5.md",
+    "cover": "cast-headless-run",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.5",
+    "guides": [
+      "guide/commands-and-modes.md",
+      "guide/doctor.md"
+    ]
+  },
+  {
     "slug": "see-what-a-session-cost-and-what-a-run-did",
     "title": "See what a session cost and what a run did",
     "description": "Read session cost and stop reasons from local journals, verify a sealed record, and prepare an archive that uploads nothing.",

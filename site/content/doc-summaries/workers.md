@@ -7,7 +7,7 @@ clio-coder agents
 clio-coder run "Inspect the parser's test coverage and report gaps. Do not edit files." --agent verifier
 ```
 
-Use an agent ID from your installed catalog: `coder` makes changes, `tester` adds tests, and `debugger` and `verifier` only check. Add `--worktree` to `/run` to give an editing worker its own branch, or `--read-only` to make sure it changes nothing. A worker's answer stays out of the conversation until you run `/fleet share <runId>`, or start it with `--share`.
+Use an agent ID from your installed catalog: `coder` makes changes, `tester` adds tests, `reviewer` judges a diff, and `debugger` and `verifier` only check. Add `--worktree` to `/run` to give an editing worker its own branch, or `--read-only` to make sure it changes nothing. A worker's answer stays out of the conversation until you run `/fleet share <runId>`, or start it with `--share`.
 
 In the terminal, `/run <agent-id> <task>` starts a worker. The same command with a configured ACP peer's id, or `acp:<id>`, delegates to that peer. The **Workers** area of `/settings` chooses worker defaults without changing the chat model.
 
@@ -37,6 +37,8 @@ clio-coder fleet run sdlc --var task="Add empty-input handling to the parser"
 clio-coder fleet status
 ```
 
+For a script, `fleet run --output-format json` prints one result document. `fleet run --detach` returns once the fleet is recorded, `clio-coder fleet wait <fleetRootId>` prints the result and exits with its code, and `clio-coder fleet list` shows this project's fleets.
+
 A playbook combines workers into a workflow such as a review gate, competing solutions, or a council. The fleet runs it. Copy a builtin with `clio-coder playbook new <name> --from sdlc`, check it with `clio-coder playbook validate <name>`, and inspect the approval preview before starting. Its steps work and commit in your checkout, so there is nothing to land afterwards. See [the playbook tutorial](/tutorials/run-a-playbook-and-land-it.html).
 
 ## Give workers MCP tools
@@ -59,6 +61,7 @@ Some failures retry automatically and some never do:
 
 - A provider 429 retries on another target after at least one second; a 401 or 403 also moves to another target, and a 408 retries.
 - Other provider 4xx errors, cancellation, policy and permission refusals, and deterministic outcomes such as `worker_no_work` never retry.
+- Every role owes evidence: an explorer what it observed, a builder a change or a stated reason, a checker executed checks, a reviewer cited evidence. A worker that returns without it is retried once on another model.
 - No attempt retries automatically after it ran a state-changing call, or when its records cannot prove the checkout unchanged.
 - Backoff starts at 500 ms, doubles, and stops at 60 seconds.
 

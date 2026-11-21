@@ -51,7 +51,7 @@ On a new home, `clio-coder` looks for a server on its default port, such as LM S
 ### Run a single worker with a record
 
 ```sh
-clio-coder run --agent <agent-id> --target <target-id> --json "<task>"
+clio-coder run --agent <agent-id> --target <target-id> --output-format stream-json "<task>"
 clio-coder telemetry cost --run <run-id> --json
 ```
 

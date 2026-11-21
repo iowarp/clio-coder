@@ -32,13 +32,17 @@ Ask CLIO Coder to discover available checks, then run the relevant one with `ver
 
 > Discover this project's verification checks. Run the test check through verify and report the exit status, failures, and anything you could not check.
 
+The agent can end a turn by declaring how it went with the `finish` tool: `done`, `partly_done` or `not_done`, with its limitations. CLIO Coder records that claim beside its own assessment. A `done` that left unvalidated changes, a failing check or an open task is assessed as partly done, and the terminal shows one line that begins `declared done, assessed partly done`.
+
 On the desktop, the Session column's **Artifacts** card lists tool output and session records, and **Changes** lists the files a turn changed. In the terminal, use `/view` to browse artifacts and run records.
 
 For checks that must accompany specific changes, add a [project quality policy](/docs/guide/quality-policy.html). For a worked example, follow [the temperature-calibration tutorial](/tutorials/temperature-calibration.html).
 
 ## How tools reach the model
 
-A main session starts with a small set of tools attached: `read`, `bash`, `edit`, `write`, `verify`, `ask_user`, and `gateway`, plus `dispatch` when workers are available and `consult` when a decision model is configured. The model finds every other capability through `gateway`, which can search the catalog, describe a tool's arguments, and call it. This keeps the request small while search, Git, web reading, data inspection, and MCP server tools stay one call away. Workers instead receive the tools their agent recipe admits.
+A main session starts with a small set of tools attached: `read`, `bash`, `edit`, `write`, `grep`, `code_nav`, `verify`, `ask_user`, `finish`, and `gateway`. `dispatch` joins when workers are available, `consult` when a decision model is configured, and `memory_note` while the agent writes memory notes, which is the default.
+
+The model finds every other capability through `gateway`, which can search the catalog, describe a tool's arguments, and call it. This keeps the request small while search, Git, web reading, data inspection, and MCP server tools stay one call away. Workers instead receive the tools their agent recipe admits.
 
 Tool results are bounded. Each reading tool has a size cap per call, and all of them share a budget per turn that grows with the model's context window. A cut result ends with one notice line that says how much was shown and gives the exact argument for the next page. When the cap cut content that was already collected, the notice also names a read-only overflow copy in CLIO Coder's state directory, outside your workspace. The permission rules above apply to every tool, whether it is attached or reached through `gateway`.
 
