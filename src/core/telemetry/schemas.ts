@@ -2362,7 +2362,10 @@ const FiringIdSchema = Type.String({ pattern: "^fir_[0-9a-f]{8}_[1-9][0-9]{0,15}
 /** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
 export const MiddlewareFiredSchema = Type.Object(
 	{
-		/** Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`). */
+		/**
+		 * Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`) or the rule
+		 * settles every firing (`nudge.read-streak`, `nudge.scout-survey`, `worker.thrash`; exploration design 3.4).
+		 */
 		firingId: Type.Optional(FiringIdSchema),
 		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
 		phase: vocabulary(["sync", "async", "awaited"]),
