@@ -1082,10 +1082,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		const infra = this.#infrastructure;
 		if (!infra?.settings().enabled || !infra.lessonSource || this.#disposed) return null;
 		// Completion retention is the side author's (DESIGN 4.4): off unless `lessons: side`, and for the live session
-		// armed only by a fix pair it saw. A closed session's retention was armed when it ran.
+		// armed only by an evidence arm it saw (a fix pair, or a declared `done` with a passed check). A closed session's
+		// retention was armed when it ran.
 		if (infra.settings().surfaces.lessons !== "side") return null;
 		const current = this.#registration?.captureMemoryAuthority()?.scope ?? null;
-		const armed = (this.#registration?.fixPairCount() ?? 0) > 0;
+		const armed = (this.#registration?.sideArmCount() ?? 0) > 0;
 		const currentSource = current && !orphanOnly && armed ? infra.lessonSource() : null;
 		if (current && currentSource) {
 			this.#lastRetention = { scope: current, source: currentSource };

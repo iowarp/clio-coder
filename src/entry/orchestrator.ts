@@ -2534,7 +2534,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.onDrain(bus.subscribe("session.reattached", reseedUsage));
 	termination.onDrain(bus.subscribe("session.turn_switched", reseedUsage));
 
-	const turnOutcomeCollector = createTurnOutcomeCollector();
+	const turnOutcomeCollector = createTurnOutcomeCollector({ workspaceRoot: memoryWorkspaceRoot });
 	let outcomeSessionId: string | null = null;
 	const seedOutcomeFromSession = (): void => {
 		const meta = session?.current();
