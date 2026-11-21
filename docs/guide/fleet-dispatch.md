@@ -2236,7 +2236,7 @@ hard block.
   the default worker, profiles and node pins, the standing placement preference, guided
   SSH add and optional Tailscale discovery, and node rows with readiness and capacity.
   Open an SSH row for evidence, timestamps, a recorded test, installation preview or
-  removal. Agent bindings are the **Agent routes** in `/settings agents`.
+  removal. Agent bindings are the **Agent routes** in `/settings workers`.
 - `/fleet run <playbook> [--var k=v ...]` compiles the playbook's plan and opens
   the approval overlay before anything dispatches. The overlay lists the steps
   grouped by wave, as a table per wave from 100 columns and as fact blocks below that, and for each step its kind, its agent and resolved target

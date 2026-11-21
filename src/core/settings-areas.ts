@@ -10,87 +10,52 @@ export const SETTINGS_AREAS = [
 		id: "recent",
 		label: "Recent & Pinned",
 		description: "Shortcuts to settings you pinned or changed lately, plus a few suggestions until you build your own.",
-		aliases: ["pinned", "shortcuts", "recents"],
 	},
 	{
 		id: "models",
 		label: "Models",
 		description:
 			"Where models come from and which one answers: connections, the chat model, reasoning, speed, and quick switching.",
-		aliases: [
-			"target",
-			"connections",
-			"connection",
-			"auth",
-			"providers",
-			"model",
-			"inference",
-			"orchestrator",
-			"thinking",
-		],
 	},
 	{
 		id: "chat",
 		label: "Chat and display",
 		description: "How replies show up and recover: output detail, streaming, alerts, retries, transcript, and guidance.",
-		aliases: ["appearance", "terminal", "layout", "display", "retry"],
 	},
 	{
 		id: "workers",
 		label: "Workers",
 		description: "Workers and agents: default worker, profiles, agent routes, machines, limits, run history, and loops.",
-		aliases: ["agents", "agent", "delegation", "delegate", "scouts", "routing", "worker", "loops"],
 	},
 	{
 		id: "context",
 		label: "Context and memory",
 		description: "How Clio keeps long conversations useful and whether a background model records task memory.",
-		aliases: ["compaction", "memory"],
 	},
 	{
 		id: "safety",
 		label: "Safety and limits",
 		description: "What Clio may do without asking: autonomy, the safety judge, sandbox, approvals, review, and spending.",
-		aliases: ["permissions", "autonomy", "budget", "watchdog", "limits", "judge", "sandbox"],
 	},
 	{
 		id: "workspace",
 		label: "Workspace",
 		description: "Panes, files, Git, task copies, the library, external agents, and plugins.",
-		aliases: [
-			"panes",
-			"pane",
-			"files",
-			"file",
-			"git",
-			"worktrees",
-			"library",
-			"plugins",
-			"skills",
-			"skill",
-			"extensions",
-			"interop",
-			"music",
-		],
 	},
 	{
 		id: "advanced",
 		label: "Advanced",
 		description:
 			"Rarely changed: timing and size limits, context tuning, experimental engines, raw collections, and setup tools.",
-		aliases: ["all", "settings", "diagnostics", "doctor", "diag", "timing", "experimental", "raw"],
 	},
 ] as const;
 
 export type SettingsAreaId = (typeof SETTINGS_AREAS)[number]["id"];
-export type SettingsAreaAlias = (typeof SETTINGS_AREAS)[number]["aliases"][number];
-export type SettingsAreaName = SettingsAreaId | SettingsAreaAlias;
 
+/** An area by its exact id; no other word opens one. */
 export function resolveSettingsArea(name: string): SettingsAreaId | undefined {
 	const normalized = name.trim().toLowerCase();
-	return SETTINGS_AREAS.find(
-		(area) => area.id === normalized || (area.aliases as readonly string[]).includes(normalized),
-	)?.id;
+	return SETTINGS_AREAS.find((area) => area.id === normalized)?.id;
 }
 
 /** Group labels in display order, per area. A row's group is the one its placement names. */
@@ -332,7 +297,7 @@ export const SHARED_SETTINGS_AREAS = SETTINGS_AREAS.filter(
 	(area): area is Extract<(typeof SETTINGS_AREAS)[number], { id: SharedSettingsAreaId }> => area.id !== "recent",
 );
 
-/** An area `clio-coder configure` and the GUI list, by id or alias; the TUI's Recent & Pinned is not one. */
+/** An area `clio-coder configure` and the GUI list, by id; the TUI's Recent & Pinned is not one. */
 export function resolveSharedSettingsArea(name: string): SharedSettingsAreaId | undefined {
 	const area = resolveSettingsArea(name);
 	return area === "recent" ? undefined : area;

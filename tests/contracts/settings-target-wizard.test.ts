@@ -21,10 +21,10 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 test("/config opens Settings on Connections while /settings retains its areas", () => {
 	deepStrictEqual(parseSlashCommand("/config"), { kind: "settings", area: "models" });
 	strictEqual(parseSlashCommand("/config targets").kind, "usage-error");
-	for (const area of ["", "models", "connections", "chat", "workspace"]) {
+	for (const area of ["", "models", "chat", "workspace"]) {
 		strictEqual(parseSlashCommand(`/settings ${area}`.trim()).kind, "settings");
 	}
-	for (const retired of ["targets", "fleet", "interface", "integrations"])
+	for (const retired of ["targets", "fleet", "interface", "integrations", "connections"])
 		strictEqual(parseSlashCommand(`/settings ${retired}`).kind, "usage-error", retired);
 });
 

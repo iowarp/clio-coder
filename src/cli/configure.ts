@@ -122,15 +122,14 @@ const HELP = `clio-coder configure
 Configure model targets and runtime settings for chat and fleet dispatch.
 
 Usage:
-  clio-coder configure                   guided setup, endpoint shortcut, settings, or checks
+  clio-coder configure                   guided setup, endpoint shortcut, or settings
   clio-coder configure --quick           connect an endpoint with recommended defaults
   clio-coder configure --settings        open the complete settings menu
-  clio-coder configure --section <name>  open one section directly:
-                                         targets, chat, fleet, context, safety,
-                                         interface, integrations, advanced
-                                         (older section names remain accepted)
+  clio-coder configure --section <area>  open one settings area directly:
+                                         models, chat, workers, context, safety,
+                                         workspace, advanced
                                          Without a terminal this prints the
-                                         section's values and exits.
+                                         area's values and exits.
   clio-coder configure --json            emit your user settings document as JSON (config inspect --json is the effective view)
   clio-coder configure --edit            edit all user settings in VISUAL/EDITOR;
                                          validate and review before saving
@@ -1335,13 +1334,11 @@ interface SectionAction {
 }
 
 interface SectionSpec {
-	/** Canonical `--section` name. */
+	/** The `--section` value, which is the area id. */
 	id: string;
 	title: string;
 	/** What the main menu says this screen covers. */
 	summary: string;
-	/** Other spellings `--section` accepts. */
-	aliases?: ReadonlyArray<string>;
 	fields: () => Array<readonly [string, string]>;
 	actions: ReadonlyArray<SectionAction>;
 }
@@ -1413,49 +1410,6 @@ async function runTargetWizard(io: SectionIo, options: Parameters<typeof runOnbo
 	);
 	if (changed) io.ok(`Target ${changed.id} saved`);
 }
-
-const DIAGNOSTICS_SECTION: SectionSpec = {
-	id: "diagnostics",
-	title: "Diagnostics",
-	summary: "version, directories, doctor, raw settings",
-	aliases: ["doctor", "diag"],
-	fields: () => {
-		const dirs = resolveClioDirs();
-		const info = getVersionInfo();
-		return [
-			["Clio Coder", readClioVersionLabel()],
-			["Node.js", info.node],
-			["Platform", info.platform],
-			["Config dir", shortenPath(dirs.config)],
-			["Data dir", shortenPath(dirs.data)],
-			["State dir", shortenPath(dirs.state)],
-			["Cache dir", shortenPath(dirs.cache)],
-		];
-	},
-	actions: [
-		{
-			label: "Run doctor",
-			hint: "read-only health check",
-			run: async (io) => {
-				const { runDoctorCommand } = await import("./doctor.js");
-				await runDoctorCommand([]);
-				await io.rl.text("Press Enter to return");
-			},
-		},
-		{
-			label: "Show raw settings.yaml",
-			run: async (io) => {
-				const file = settingsPath();
-				if (!existsSync(file)) {
-					io.out.write("  settings.yaml does not exist yet.\n");
-					return;
-				}
-				io.out.write(`\n--- ${shortenPath(file)} ---\n${readFileSync(file, "utf8")}--- end ---\n`);
-				await io.rl.text("Press Enter to return");
-			},
-		},
-	],
-};
 
 /**
  * The hand-written parts of the configure screens, named by subject. Each part's summary rows open the area
@@ -1904,14 +1858,42 @@ const CONTENT_PARTS = {
 	},
 	advanced: {
 		fields: () => {
+			const dirs = resolveClioDirs();
+			const info = getVersionInfo();
 			return [
-				...DIAGNOSTICS_SECTION.fields(),
+				["Clio Coder", readClioVersionLabel()],
+				["Node.js", info.node],
+				["Platform", info.platform],
+				["Config dir", shortenPath(dirs.config)],
+				["Data dir", shortenPath(dirs.data)],
+				["State dir", shortenPath(dirs.state)],
+				["Cache dir", shortenPath(dirs.cache)],
 				["Settings file", shortenPath(settingsPath())],
 				["Reference", "https://coder.iowarp.ai/docs/guide/configuration-reference.html"],
 			];
 		},
 		actions: [
-			...DIAGNOSTICS_SECTION.actions,
+			{
+				label: "Run doctor",
+				hint: "read-only health check",
+				run: async (io) => {
+					const { runDoctorCommand } = await import("./doctor.js");
+					await runDoctorCommand([]);
+					await io.rl.text("Press Enter to return");
+				},
+			},
+			{
+				label: "Show raw settings.yaml",
+				run: async (io) => {
+					const file = settingsPath();
+					if (!existsSync(file)) {
+						io.out.write("  settings.yaml does not exist yet.\n");
+						return;
+					}
+					io.out.write(`\n--- ${shortenPath(file)} ---\n${readFileSync(file, "utf8")}--- end ---\n`);
+					await io.rl.text("Press Enter to return");
+				},
+			},
 			{
 				label: "Edit all settings",
 				hint: "VISUAL / EDITOR; validate before saving",
@@ -1989,7 +1971,6 @@ const SECTIONS: ReadonlyArray<SectionSpec> = SHARED_SETTINGS_AREAS.map((area) =>
 		id: area.id,
 		title: area.label,
 		summary: area.description,
-		aliases: area.aliases,
 		fields: content.fields,
 		actions: orderSettingsEntries(
 			area.id,
@@ -2098,7 +2079,7 @@ function renderSection(spec: SectionSpec, out: NodeJS.WritableStream): Lifecycle
 	const presenter = createLifecyclePresenter({ stream: out });
 	presenter.header(spec.title, "configure");
 	presenter.note(spec.summary);
-	presenter.note(`Source: ${shortenPath(settingsPath())}${spec.id === "diagnostics" ? "" : " · saves globally"}`);
+	presenter.note(`Source: ${shortenPath(settingsPath())} · saves globally`);
 	presenter.fields(spec.fields());
 	return presenter;
 }
@@ -2196,7 +2177,6 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 				{ label: "Guided setup", hint: "choose your app, subscription, provider, or server" },
 				{ label: "Connect by endpoint", hint: "shortcut when you already know the server URL" },
 				{ label: "Settings", hint: "every saved default, grouped by what it changes" },
-				{ label: "Check setup", hint: "read-only connection, model, and machine checks" },
 			],
 			"quit",
 			presenter.isPlain(),
@@ -2221,18 +2201,14 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 			if (result === "quit") return exitCode();
 		} else if (selected === 2) {
 			if ((await runConfigSectionsMenu(rl, streams, "back", verify)) === "quit") return exitCode();
-		} else {
-			const section = findSection("diagnostics");
-			if (section && (await runSection(rl, streams, section, "back", verify)) === "quit") return exitCode();
 		}
 	}
 }
 
-/** Resolve a `--section` value to exactly one screen, by id or listed alias. */
+/** Resolve a `--section` value to the one area whose id it is. */
 function findSection(name: string): SectionSpec | undefined {
-	const wanted = name.trim().toLowerCase();
-	if (["diagnostics", "doctor", "diag"].includes(wanted)) return DIAGNOSTICS_SECTION;
-	return SECTIONS.find((section) => section.id === resolveSharedSettingsArea(wanted));
+	const area = resolveSharedSettingsArea(name);
+	return SECTIONS.find((section) => section.id === area);
 }
 
 const SECTION_IDS: ReadonlyArray<string> = SECTIONS.map((section) => section.id);

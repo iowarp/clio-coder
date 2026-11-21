@@ -1307,15 +1307,15 @@ describe("contracts/configure-sections", () => {
 
 	it("renders every section's current values from settings.yaml", async () => {
 		const expected: ReadonlyArray<readonly [string, RegExp]> = [
-			["connections", /test-target\s+openai-compat/u],
+			["models", /test-target\s+openai-compat/u],
 			["models", /Chat model\s+mock-model/u],
 			["models", /Chat thinking\s+low/u],
 			["chat", /TUI mode\s+regular/u],
 			["workers", /Concurrency limit\s+auto/u],
-			["permissions", /Autonomy level\s+default/u],
-			["panes", /Startup layout\s+\S/u],
-			["skills", /Trust project imports\s+untrusted/u],
-			["diagnostics", /Config dir\s+\S/u],
+			["safety", /Autonomy level\s+default/u],
+			["workspace", /Startup layout\s+\S/u],
+			["workspace", /Trust project imports\s+untrusted/u],
+			["advanced", /Config dir\s+\S/u],
 		];
 		for (const [section, pattern] of expected) {
 			const testEnv = isolatedEnv();
@@ -1330,16 +1330,17 @@ describe("contracts/configure-sections", () => {
 		}
 	});
 
-	it("accepts a section by its canonical name or a listed alias, and nothing else", async () => {
+	it("accepts a section only by its area id, and nothing else", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			for (const name of ["permissions", "autonomy", "safety"]) {
+			for (const name of ["safety", " Safety "]) {
 				const res = await captureConfigure(["--section", name], testEnv.env, []);
 				strictEqual(res.code, 0, `${name}: ${res.stderr}`);
 				match(res.stdout, /Safety and limits/u);
 			}
 			// Substring matching used to accept anything containing "perm", so
-			// `--section permanent` silently opened this screen. The retired section ids open nothing either.
+			// `--section permanent` silently opened this screen. Old section names and the words that
+			// used to open an area, and the removed Diagnostics screen, open nothing either.
 			for (const name of [
 				"permanent",
 				"models,chat",
@@ -1347,9 +1348,20 @@ describe("contracts/configure-sections", () => {
 				"diagnostics-extra",
 				"recent",
 				"targets",
+				"target",
+				"connections",
+				"orchestrator",
 				"fleet",
 				"interface",
+				"appearance",
 				"integrations",
+				"permissions",
+				"autonomy",
+				"panes",
+				"skills",
+				"diagnostics",
+				"doctor",
+				"diag",
 			]) {
 				const res = await captureConfigure(["--section", name], testEnv.env, []);
 				strictEqual(res.code, 2, `${name} must be rejected`);

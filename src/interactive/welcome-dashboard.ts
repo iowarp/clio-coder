@@ -328,8 +328,8 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 		const detail = stats.targetLabel === null ? "no route selected" : "no model selected";
 		return say("warning", `${detail} ${GLYPH.dot} /model`);
 	}
-	if (stats.route === "unavailable") return say("error", `route unavailable ${GLYPH.dot} /settings connections`);
-	if (stats.route === "degraded") return say("warning", `route degraded ${GLYPH.dot} /settings connections`);
+	if (stats.route === "unavailable") return say("error", `route unavailable ${GLYPH.dot} /settings models`);
+	if (stats.route === "degraded") return say("warning", `route degraded ${GLYPH.dot} /settings models`);
 	if (stats.projectConfig) return say("warning", stats.projectConfig);
 	if (stats.projectContext === "malformed")
 		return say("warning", `CLIO-CODER.md malformed ${GLYPH.dot} /context to inspect`);
