@@ -17,7 +17,11 @@ import {
 import { sameFleetBuild } from "../../src/domains/dispatch/fleet-preflight.js";
 import { verifyFleetProject } from "../../src/domains/dispatch/fleet-project-verification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
-import { WORKER_SPEC_VERSIONS } from "../../src/worker/spec-contract.js";
+import {
+	WORKER_SPEC_HOOKLESS_VERSION,
+	WORKER_SPEC_VERSION,
+	WORKER_SPEC_VERSIONS,
+} from "../../src/worker/spec-contract.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("fleet node management", () => {
@@ -237,7 +241,12 @@ describe("fleet node management", () => {
 		});
 		strictEqual(record.ok, true, record.detail ?? "");
 		strictEqual(record.remoteWorkerSpecs, null);
-		match(record.note ?? "", /version 8 only.*extension hooks \(version 9\) will not run on this node/);
+		match(
+			record.note ?? "",
+			new RegExp(
+				`version ${WORKER_SPEC_HOOKLESS_VERSION} only.*extension hooks \\(version ${WORKER_SPEC_VERSION}\\) will not run on this node`,
+			),
+		);
 		strictEqual(inspectFleetNodes()[0]?.readiness, "ready for this project");
 	});
 });
