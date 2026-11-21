@@ -74,6 +74,7 @@ import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import {
+	gateCitationViolation,
 	internalHelperResultSchema,
 	type ObservedReadRanges,
 	type ObservedRunEffects,
@@ -1164,6 +1165,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let resultContractRepairsStarted = 0;
 	let toolExecutionsStarted = 0;
 	let zeroToolRepairQueued = false;
+	/** A gate verdict that cited none of its evidence packet gets one repair naming the ids (M10); a second passes through. */
+	let citationRepairQueued = false;
 	let resultContractRevisionActive = false;
 	let acceptedHelperResult: StructuredHelperResult | null = null;
 
@@ -2469,11 +2472,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					: null;
 			// A second no-work reply belongs to obligation_unmet, even when its
 			// report is malformed. The p8/S1 recovery must not spend shape repairs.
-			const violation =
+			const contractViolation =
 				zeroToolRepairQueued && toolExecutionsStarted === 0
 					? null
 					: (zeroToolViolation ??
 						terminalContractViolation(contract, event.message, contractCwd, groundingRanges(), runEffects.snapshot()));
+			// A well-formed gate verdict that cites none of its packet is asked once, with the ids that exist (M10). The
+			// grader still seals a second uncited verdict exhausted, so this round never stands in for that rule.
+			const citationViolation =
+				contractViolation === null &&
+				!citationRepairQueued &&
+				!(zeroToolRepairQueued && toolExecutionsStarted === 0) &&
+				resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT
+					? gateCitationViolation(contract, assistantMessageText(event.message))
+					: null;
+			if (citationViolation !== null) citationRepairQueued = true;
+			const violation = contractViolation ?? citationViolation;
 			const formatFailure =
 				mutationResult &&
 				violation !== null &&

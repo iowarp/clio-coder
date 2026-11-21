@@ -4,6 +4,14 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import {
+	gateCitationViolation,
+	resultContractRepairUserMessage,
+	resultContractResponseSchema,
+	resultContractShape,
+} from "../../src/domains/agents/result-contract.js";
+import { buildEvidencePacket } from "../../src/domains/dispatch/evidence-packet.js";
+import { dispatchResultContract } from "../../src/domains/dispatch/execution-role.js";
+import {
 	COMPETE_STANCES,
 	competePresentationOrder,
 	competeStanceFor,
@@ -265,4 +273,72 @@ it("can retrieve a clipped preview from an external run result under read-only p
 	} finally {
 		env.restore();
 	}
+});
+
+it("names the packet ids where a gate writes its verdict, binds cites to them, and repairs an uncited verdict with them (M10)", () => {
+	const ids = ["s1.handback", "s1.diff", "s2.handback", "s2.diff"];
+	const task = renderCompeteJudgeTask("Fix it", candidates, [], [run(1, "one"), run(2, "two")]);
+	const closing = task.split("\n\n").at(-1) ?? "";
+	match(
+		closing,
+		/cites", the packet ids it rests on, drawn only from: s1\.handback, s1\.diff, s2\.handback, s2\.diff\./u,
+	);
+	match(closing, /Example check: .*"cites":\["s1\.diff"\]/u);
+	const judge = dispatchResultContract(
+		{ agentId: "verifier", gate: { role: "judge", subjects: [{}, {}], packet: { ids } } },
+		null,
+	);
+	deepStrictEqual(judge, { kind: "judge-verdict", candidates: 2, packet: ids });
+	const reviewer = dispatchResultContract(
+		{ agentId: "reviewer", gate: { role: "reviewer", subjects: [{}], packet: { ids: ["s1.handback", "s1.diff"] } } },
+		null,
+	);
+	ok(judge !== undefined && reviewer !== undefined);
+	match(resultContractShape(reviewer), /"cites":\["s1\.diff"\].*drawn only from s1\.handback, s1\.diff;/u);
+	const schema = resultContractResponseSchema(judge) as {
+		properties: { checks: { items: { required: string[]; properties: { cites: { items: { enum: string[] } } } } } };
+	};
+	deepStrictEqual(schema.properties.checks.items.required, ["name", "passed", "evidence", "cites"]);
+	deepStrictEqual(schema.properties.checks.items.properties.cites.items.enum, ids);
+	const uncited = JSON.stringify({ winner: 1, checks: [{ name: "diff", passed: true, evidence: "edits value.txt" }] });
+	const reason = gateCitationViolation(judge, uncited);
+	ok(reason !== null);
+	match(
+		reason,
+		/^no check cites an evidence packet id\. The packet holds exactly these ids: s1\.handback, s1\.diff, s2\.handback, s2\.diff\./u,
+	);
+	match(
+		JSON.stringify(resultContractRepairUserMessage({ contract: judge, reason, attempt: 1, anchors: [] })),
+		/exactly these ids: s1\.handback/u,
+	);
+	match(
+		gateCitationViolation(judge, uncited.replace('"edits value.txt"', '"x","cites":["s9.diff"]')) ?? "",
+		/does not hold \(s9\.diff\)/u,
+	);
+	strictEqual(gateCitationViolation(judge, uncited.replace('"edits value.txt"', '"x","cites":["s1.diff"]')), null);
+	strictEqual(
+		gateCitationViolation({ kind: "review-verdict" }, uncited),
+		null,
+		"a reviewer with no packet is never asked",
+	);
+});
+
+it("redacts secrets in a packet's handback and diff before truncation, and digests the redacted packet (M10)", () => {
+	const packet = (token: string) =>
+		buildEvidencePacket(
+			[1],
+			[
+				{
+					ordinal: 1,
+					...run(1, `deployed with GITHUB_TOKEN=${token}`),
+					diff: { stat: "1 file changed", patch: `+export const key = "${token}";\n`, scope: "attributed-paths" },
+				},
+			],
+		);
+	const first = packet(`ghp_${"a1B2c3D4e5".repeat(4).slice(0, 36)}`);
+	const second = packet(`ghp_${"Z9y8X7w6V5".repeat(4).slice(0, 36)}`);
+	const text = JSON.stringify(first.subjects);
+	ok(!text.includes("ghp_a1B2"), text);
+	match(text, /\[redacted:/u);
+	strictEqual(first.digest, second.digest, "the digest names the redacted packet, never the secret");
 });

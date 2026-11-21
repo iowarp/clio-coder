@@ -3,6 +3,7 @@ import {
 	EVIDENCE_PACKET_GUIDE,
 	type EvidencePacket,
 	type MeasuredDiff,
+	packetVerdictInstruction,
 } from "../domains/dispatch/evidence-packet.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type { CandidateWorktree } from "./compete-worktrees.js";
@@ -82,5 +83,6 @@ export function renderCompeteJudgeTask(
 				...(subject?.hostChecks !== undefined ? { hostChecks: subject.hostChecks } : {}),
 			});
 		}),
+		packetVerdictInstruction(packet),
 	].join("\n\n");
 }

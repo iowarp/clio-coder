@@ -27,13 +27,13 @@ export type ResultContract =
 	 * run is validated against the answer the gate asks for. No assurance level:
 	 * a review judges a subject, it does not mechanize proofs.
 	 */
-	| { kind: "review-verdict" }
+	| { kind: "review-verdict"; packet?: string[] }
 	/**
 	 * A judge's verdict (fleet design 4.8, M9): the gate's own answer, so V2 conformance applies to judges as it does
 	 * to reviewers. With `candidates` it is a compete judge's `{winner, checks}`, the winner one of that many subjects;
 	 * without, a council synthesis's `{verdict, text}`. Only the coordinator assigns it, never a recipe.
 	 */
-	| { kind: "judge-verdict"; candidates?: number }
+	| { kind: "judge-verdict"; candidates?: number; packet?: string[] }
 	| { kind: "council-report" }
 	/**
 	 * One council member's ballot under `synthesis: "vote"`.
@@ -273,11 +273,20 @@ export function resultContractResponseSchema(contract: ResultContract): Record<s
 	});
 	switch (contract.kind) {
 		case "verifier-report":
-		case "review-verdict":
+		case "review-verdict": {
 			if (contract.kind === "verifier-report" && contract.assurance !== undefined) return null;
+			const packet = contract.kind === "review-verdict" ? contract.packet : undefined;
 			return object({
 				verdict: { type: "string", enum: ["pass", "fail"] },
-				checks: { type: "array", items: object({ name: text, passed: { type: "boolean" }, evidence: text }) },
+				checks: { type: "array", minItems: 1, items: gateCheckSchema(packet) },
+			});
+		}
+		case "judge-verdict":
+			// Only a packet-bearing compete judge gets a bound shape; its cites name the packet's ids (M10).
+			if (contract.candidates === undefined || contract.packet === undefined || contract.packet.length === 0) return null;
+			return object({
+				winner: { type: "integer", minimum: 1, maximum: contract.candidates },
+				checks: { type: "array", minItems: 1, items: gateCheckSchema(contract.packet) },
 			});
 		case "debugger-report":
 			return object({
@@ -529,6 +538,50 @@ export interface VerifierCheck {
 	obligation?: HoareObligation;
 	/** A gate verdict's references to its evidence packet's ids (M10); only review-verdict and judge-verdict carry them. */
 	cites?: string[];
+}
+
+/** The packet id a gate's example check cites: a diff when the packet has one, since that is what a gate judges. */
+function packetCiteExample(packet: ReadonlyArray<string>): string {
+	return packet.find((id) => id.endsWith(".diff")) ?? packet[0] ?? "s1.diff";
+}
+
+function packetCitesRule(packet: ReadonlyArray<string>): string {
+	return `"cites" is required on every check: the evidence packet ids the check rests on, drawn only from ${packet.join(", ")}; a verdict whose checks cite none of them is exhausted and decides nothing`;
+}
+
+/** One gate check as a bound JSON schema: with a packet, `cites` is required and its items are the packet's ids. */
+function gateCheckSchema(packet: ReadonlyArray<string> | undefined): Record<string, unknown> {
+	const text = { type: "string", minLength: 1 };
+	const properties: Record<string, unknown> = { name: text, passed: { type: "boolean" }, evidence: text };
+	if (packet !== undefined && packet.length > 0)
+		properties.cites = { type: "array", items: { type: "string", enum: [...packet] } };
+	return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
+}
+
+/**
+ * The one citation repair a gate verdict gets (M10): when its contract carries the evidence packet and no check cites
+ * a packet id, or a check cites an id the packet lacks, the worker asks once more and names exactly the ids that
+ * exist. Null when the verdict cites the packet, when the contract has no packet, or when the answer does not parse
+ * (the shape repair owns that). A second uncited verdict passes through to the grader, which seals it exhausted.
+ */
+export function gateCitationViolation(contract: ResultContract, output: string | null): string | null {
+	const packet = contract.kind === "review-verdict" || contract.kind === "judge-verdict" ? contract.packet : undefined;
+	if (packet === undefined || packet.length === 0) return null;
+	const parsed = parseJson(output);
+	if (!parsed.ok || !Array.isArray(parsed.value.checks)) return null;
+	const cited: string[] = [];
+	for (const entry of parsed.value.checks) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+		cited.push(...(parseGateCites((entry as Record<string, unknown>).cites) ?? []));
+	}
+	const known = new Set(packet);
+	const unknown = [...new Set(cited.filter((id) => !known.has(id)))];
+	if (cited.length > 0 && unknown.length === 0) return null;
+	const head =
+		unknown.length > 0
+			? `the verdict cites ids its evidence packet does not hold (${unknown.join(", ")})`
+			: "no check cites an evidence packet id";
+	return `${head}. The packet holds exactly these ids: ${packet.join(", ")}. Give every check a "cites" array of the ids it rests on, for example {"name":"...","passed":true,"evidence":"...","cites":["${packetCiteExample(packet)}"]}; a verdict that cites none of them is exhausted and decides nothing.`;
 }
 
 /**
@@ -2492,12 +2545,17 @@ export function resultContractShape(contract: ResultContract): string {
 			if (contract.assurance !== undefined)
 				return `{"verdict":"fail","assurance":"${contract.assurance}","checks":[{"name":"f.post","passed":false,"evidence":"specification source and argument, trace or missing proof evidence","obligation":{"target":"src/file.c:f","kind":"post","pre":"input contract","post":"output contract","formula":"verification condition","status":"unknown"}}]}. Every check requires an obligation; optional fields are invariant, hazard and check (an exact declared proof check ID). Statuses: mechanized, modeled, argued, assumed, refuted, unknown. Assurance is fixed at ${contract.assurance}. Assumed, refuted and unknown never pass. Machine claims require this run's matching native verify proof evidence on unchanged inputs; missing evidence must be unknown with passed=false, never an invented execution.`;
 			return 'one of {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]} or {"verdict":"fail","checks":[{"name":"npm run typecheck","passed":false,"evidence":"exit 1"}]}; verdict legal values are pass | fail and checks[].passed legal values are true | false';
-		case "review-verdict":
-			return 'one of {"verdict":"pass","checks":[{"name":"...","passed":true,"evidence":"what you inspected and observed"}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed"}]}; the verdict must agree with every check';
+		case "review-verdict": {
+			if (contract.packet === undefined || contract.packet.length === 0)
+				return 'one of {"verdict":"pass","checks":[{"name":"...","passed":true,"evidence":"what you inspected and observed"}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed"}]}; the verdict must agree with every check';
+			const example = packetCiteExample(contract.packet);
+			return `one of {"verdict":"pass","checks":[{"name":"the change does what the task asks","passed":true,"evidence":"what you inspected and observed","cites":["${example}"]}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed","cites":["${example}"]}]}; the verdict must agree with every check; ${packetCitesRule(contract.packet)}`;
+		}
 		case "judge-verdict":
-			return contract.candidates === undefined
-				? '{"verdict":"the conclusion","text":"the supported synthesis"}'
-				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on"}]}; winner is an integer 1..${contract.candidates}`;
+			if (contract.candidates === undefined) return '{"verdict":"the conclusion","text":"the supported synthesis"}';
+			return contract.packet === undefined || contract.packet.length === 0
+				? `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on"}]}; winner is an integer 1..${contract.candidates}`
+				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"the item of the candidates' evidence this rests on","cites":["${packetCiteExample(contract.packet)}"]}]}; winner is an integer 1..${contract.candidates}; ${packetCitesRule(contract.packet)}`;
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "council-ballot":
@@ -2553,7 +2611,13 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 				? '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}'
 				: `{"verdict":"pass|fail","assurance":"${contract.assurance}","checks":[{"name":"...","passed":false,"evidence":"...","obligation":{...}}]}`;
 		case "review-verdict":
-			return '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}';
+			return contract.packet === undefined || contract.packet.length === 0
+				? '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}'
+				: `{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"...","cites":["${packetCiteExample(contract.packet)}"]}]}; cites from ${contract.packet.join(", ")}`;
+		case "judge-verdict":
+			return contract.candidates === undefined || contract.packet === undefined || contract.packet.length === 0
+				? resultContractShape(contract)
+				: `{"winner":1,"checks":[{"name":"...","passed":true,"evidence":"...","cites":["${packetCiteExample(contract.packet)}"]}]}; cites from ${contract.packet.join(", ")}`;
 		case "debugger-report":
 			return '{"diagnosis":"...","reproduction":"reproduced|not-reproduced|unknown","evidence":["..."]}';
 		case "research-report":

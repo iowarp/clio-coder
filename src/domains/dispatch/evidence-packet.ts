@@ -9,6 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { failsTheSameOnBase, hostCheckNotRunNote } from "./host-verification-note.js";
 import type { RunGatePacket, RunResult } from "./types.js";
 
@@ -24,8 +25,12 @@ export interface MeasuredDiff {
 	stat: string;
 	/** The patch text; truncated by the packet to its share of the budget. */
 	patch: string;
-	/** What the diff covers: a candidate's branch against its base, or the paths a builder was measured changing. */
-	scope: "branch" | "attributed-paths" | "working-tree";
+	/**
+	 * What the diff covers: a compete candidate's branch against HEAD; a task worktree's commit against its base, or its
+	 * uncommitted tree against its base; the paths the host observed a subprocess change; or the paths a builder's
+	 * closed write record names. Never the operator's whole working tree.
+	 */
+	scope: "branch" | "task-commit" | "task-worktree" | "observed-delta" | "attributed-paths";
 }
 
 export interface PacketSubjectInput {
@@ -119,29 +124,35 @@ function handbackItem(input: PacketSubjectInput | undefined, id: string): Packet
 	) {
 		return { id, status: "malformed captured output; unavailable" };
 	}
-	const preview = truncateUtf8(output.text, PACKET_HANDBACK_PREVIEW_BYTES);
+	const preview = truncateUtf8(redact(output.text), PACKET_HANDBACK_PREVIEW_BYTES);
 	return {
 		id,
 		status: output.state,
 		text: preview,
 		capturedBytes: output.bytes,
 		capturedTextBytes: Buffer.byteLength(output.text, "utf8"),
-		previewTruncated: preview !== output.text,
+		previewTruncated: preview !== redact(output.text),
 		captureTruncated: output.truncated,
 	};
 }
 
 function diffItem(diff: MeasuredDiff | null, id: string, budget: number): PacketDiff {
 	if (diff === null) return { id, status: "unavailable" };
-	const patch = truncateUtf8(diff.patch, budget);
+	// A patch can carry a secret the change wrote; the packet and its digest hold only the redacted text.
+	const redacted = redact(diff.patch);
+	const patch = truncateUtf8(redacted, budget);
 	return {
 		id,
-		stat: diff.stat,
+		stat: redact(diff.stat),
 		scope: diff.scope,
 		patch,
-		patchBytes: Buffer.byteLength(diff.patch, "utf8"),
-		truncated: patch !== diff.patch,
+		patchBytes: Buffer.byteLength(redacted, "utf8"),
+		truncated: patch !== redacted,
 	};
+}
+
+function redact(text: string): string {
+	return redactSecretsText(text, createRedactionTally());
 }
 
 /**
@@ -203,6 +214,19 @@ export function buildEvidencePacket(
 /** The packet as gate provenance seals it: the ids a verdict may cite and the digest of what they named. */
 export function packetProvenance(packet: EvidencePacket): RunGatePacket {
 	return { ids: [...packet.ids], digest: packet.digest };
+}
+
+/**
+ * The closing instruction of a gate's task (M10): the packet's ids where the verdict is written, one example check
+ * citing the diff, and the rule that an uncited verdict decides nothing. It is the task's last block on purpose.
+ */
+export function packetVerdictInstruction(packet: EvidencePacket): string {
+	const example = packet.ids.find((id) => id.endsWith(".diff")) ?? packet.ids[0] ?? "s1.diff";
+	return [
+		`Verdict: end with the JSON object your instructions give. Every check carries "cites", the packet ids it rests on, drawn only from: ${packet.ids.join(", ")}.`,
+		`Example check: {"name":"the change matches the task","passed":true,"evidence":"what the diff changes and why that meets the task","cites":["${example}"]}`,
+		"A verdict whose checks cite none of these ids is exhausted and decides nothing.",
+	].join("\n");
 }
 
 /** How a gate reads the packet and cites it; one sentence set for reviewer and judge alike. */

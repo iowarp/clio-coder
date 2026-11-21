@@ -1,5 +1,5 @@
 import { type WithheldCapability, withheldLines } from "./envelope.js";
-import { EVIDENCE_PACKET_GUIDE, type EvidencePacket } from "./evidence-packet.js";
+import { EVIDENCE_PACKET_GUIDE, type EvidencePacket, packetVerdictInstruction } from "./evidence-packet.js";
 import type { DispatchIntent } from "./intent.js";
 
 /** Render intent fields that describe required results rather than observed facts. */
@@ -69,6 +69,6 @@ export function renderDispatchReviewerTask(
 		EVIDENCE_PACKET_GUIDE,
 		...(packet === undefined || subject === undefined
 			? ["The builder's evidence packet (its handback, measured diff and host checks) is attached when the review runs."]
-			: [`Packet ids: ${packet.ids.join(", ")}`, JSON.stringify(subject)]),
+			: [`Packet ids: ${packet.ids.join(", ")}`, JSON.stringify(subject), packetVerdictInstruction(packet)]),
 	].join("\n\n");
 }
