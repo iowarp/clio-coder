@@ -167,7 +167,8 @@ export function foldProjection(
 	const pressure = window > 0 && input !== null ? input / window : 0;
 	const ledger = planner.contextLedger();
 	const trigger = ledger.compactionThreshold;
-	if (!ledger.compactionAuto || !(window > 0) || trigger === null)
+	// A trigger of 0 (threshold 0 turns automatic compaction off, and a clamp can reach it) is no fold either.
+	if (!ledger.compactionAuto || !(window > 0) || trigger === null || !(trigger > 0))
 		return { path: "none", pressure, trigger: trigger ?? 1 };
 	if (compaction.provider === "native" && !compaction.model && view.runtimeId === "openai-codex")
 		return { path: "native", pressure, trigger };

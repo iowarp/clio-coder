@@ -320,6 +320,12 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		fold.pressure = 0.3;
 		await runtime.runIdleStep();
 		strictEqual(calls, 0, "the margin is a share of the trigger, not of the window");
+		// A trigger of 0 (threshold 0 turns automatic compaction off) is no fold, so nothing is observed from token 0.
+		fold.trigger = 0;
+		fold.pressure = 0;
+		strictEqual(foldProjection(planner, {})?.path, "none");
+		await runtime.runIdleStep();
+		strictEqual(calls, 0, "a zero trigger prepares nothing");
 		fold.trigger = 0.8;
 		fold.pressure = 0.7;
 		await runtime.runIdleStep();
