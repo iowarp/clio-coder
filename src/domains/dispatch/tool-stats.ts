@@ -150,7 +150,7 @@ export function summarizeToolActivity(
 }
 
 /** Calls that ran: a notice the spent observation pool returned in a call's place ran nothing (C-17). */
-function executedCalls(activity: Pick<ToolActivitySummary, "calls" | "withheld">): number {
+export function executedCalls(activity: Pick<ToolActivitySummary, "calls" | "withheld">): number {
 	return activity.calls - (activity.withheld ?? 0);
 }
 

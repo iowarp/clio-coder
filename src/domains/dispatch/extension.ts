@@ -534,6 +534,7 @@ import {
 	blockedWriteAttempts,
 	blockedWriteDetail,
 	countToolCalls,
+	executedCalls,
 	hasPotentiallyMutatingAttempt,
 	readScopedNoToolsReason,
 	recordToolCompletion,
@@ -10130,7 +10131,8 @@ export function createDispatchBundle(
 					runObligation === "change-or-declared" &&
 					lifecycle.runtimeKind !== "subprocess" &&
 					finishContract?.assessment.mutatedPaths.length === 0 &&
-					summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass).calls === 0 &&
+					// A notice the spent observation pool returned in a call's place ran no tool (C-17).
+					executedCalls(summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass)) === 0 &&
 					writeRootRequestFromEntries(finishContractEntries) === null
 				) {
 					evidence.obligationUnmet = runObligation;

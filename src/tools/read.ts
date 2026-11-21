@@ -171,7 +171,8 @@ export function readMaxBytes(): number {
 // siblings are not refused against a worst case it cannot fill (C-17): a whole
 // file its size plus line numbers, a range (`limit` or `tail`) 256 bytes a
 // requested line, each with room for its notices and never above the per-call
-// cap. A line longer than its share is cut at the window with the usual
+// cap. A range whose line is longer than its share widens to the per-call cap
+// and reads again, so the line shows whole up to that cap with the usual
 // continuation. Images are decoded whole, so they keep the full cap, and a
 // read that turns out to render an image, a document or a bundled doc's index
 // widens its hold once it knows (`widenObservationReservation`).
