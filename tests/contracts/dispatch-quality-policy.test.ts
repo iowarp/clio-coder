@@ -11,6 +11,7 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
+import { workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -139,7 +140,7 @@ for (const mode of ["missing", "passed", "normal", "stale"] as const) {
 					launches++;
 					strictEqual(options?.cwd, root);
 					if (mode !== "passed")
-						ok(!spec.allowedTools.includes(ToolNames.Verify), "completion must not restore a denied tool");
+						ok(!workerSpecToolNames(spec).includes(ToolNames.Verify), "completion must not restore a denied tool");
 					return {
 						pid: null,
 						promise: Promise.resolve({ exitCode: 0, signal: null }),

@@ -360,6 +360,8 @@ export interface WorkerRunInput {
 	 * native registry and the Claude SDK hook path block out-of-root writes.
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/** The envelope's word that the run's commands cannot leave a change outside `writeRoots` (fleet M7). */
+	writeRootsCommandsBounded?: boolean;
 	/** Store tags this run may put into and the dispatch run its records name (M-31). */
 	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
 	/**
@@ -882,7 +884,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		...(input.taskGit?.taskWorktree !== undefined ? { taskWorktreeRoot: input.taskGit.taskWorktree.path } : {}),
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
-		...(input.writeRoots !== undefined && workerSandboxConfinesWrites() ? { writeRootsOsConfined: true } : {}),
+		// The host decided once whether the run's commands are bound to its roots: an OS sandbox, or its own
+		// worktree whose merge-back takes only the roots (fleet M7). The worker does not probe it again.
+		...(input.writeRoots !== undefined && input.writeRootsCommandsBounded === true ? { writeRootsOsConfined: true } : {}),
 		readExemptRoots: workerSandboxReadableRoots(),
 		...(input.protectedArtifactState !== undefined
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
@@ -1382,7 +1386,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		registry,
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 		telemetry,
-		allowedTools: activeWorkerTools,
+		envelopeTools: activeWorkerTools,
 		agentId: input.agentId,
 		includeInteractiveTools: false,
 		invokeOptions: (toolCallId) => ({

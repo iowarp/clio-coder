@@ -125,6 +125,8 @@ function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn[
 				segments.push({ kind: "response", item });
 				break;
 			case "notice":
+				flush();
+				segments.push({ kind: "notice", item });
 				break;
 			case "thought":
 			case "tool":

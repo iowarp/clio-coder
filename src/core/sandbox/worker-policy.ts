@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { relativePathEscapes } from "../path-containment.js";
-import { ToolNames } from "../tool-names.js";
 import {
 	type SandboxAvailability,
 	type SandboxBackend,
@@ -21,9 +20,8 @@ export interface WorkerSandboxPolicyInput {
 	/** Canonical dispatch write boundaries; exact files and trailing-slash subtrees. */
 	writeBoundaries: ReadonlyArray<string>;
 	taskWorktree?: { path: string; branch: string };
-	allowedTools: ReadonlyArray<string>;
-	/** `safety.sandboxNetwork`: the operator's standing network grant for worker commands. */
-	networkSetting: boolean;
+	/** The envelope's `network.shell`: whether the worker's commands reach the network (fleet M7). */
+	network: boolean;
 	/** Parent checkouts supplying shared task dependencies; also visible when under /tmp. */
 	dependencyRoots?: ReadonlyArray<string>;
 	/** How the worker's sandboxed commands scrub their inherited environment (env-scrub.ts). */
@@ -43,16 +41,6 @@ export interface WorkerSandboxPolicyInput {
 function strictlyInside(root: string, candidate: string): boolean {
 	const rel = path.relative(root, candidate);
 	return rel !== "" && !relativePathEscapes(rel);
-}
-
-/**
- * Network for worker commands follows the run's retrieval grant. A worker
- * trusted with web_fetch or web_read already has an egress channel, so an isolated shell
- * would protect nothing while breaking package installs; a worker without either
- * gets an empty network namespace unless the operator opted in.
- */
-function workerSandboxNetwork(allowedTools: ReadonlyArray<string>, networkSetting: boolean): boolean {
-	return networkSetting || allowedTools.includes(ToolNames.WebFetch) || allowedTools.includes(ToolNames.WebRead);
 }
 
 /** Paths inside a writable root that stay read-only, as in Codex's workspace-write mode. */
@@ -102,7 +90,7 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		],
 		gitWritablePaths: [],
 		readableRoots: [...new Set(readableRoots)],
-		network: workerSandboxNetwork(input.allowedTools, input.networkSetting),
+		network: input.network,
 		...(passEnv.length > 0 ? { passEnv: [...passEnv] } : {}),
 		...(secretEnv.length > 0 ? { secretEnv: [...secretEnv] } : {}),
 		...(input.unixSockets !== undefined && input.unixSockets !== "block" ? { unixSockets: input.unixSockets } : {}),

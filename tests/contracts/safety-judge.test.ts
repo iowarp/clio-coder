@@ -102,6 +102,100 @@ test("the judge reads a store replace as a plain line, never as admission's mark
 	match(prompts[0] ?? "", /\{"op":"put","tag":"fleet","path":"out\/v3\.csv"\}/u);
 });
 
+test("the judge reads an approval scoped under $TMPDIR against the session's resolved temp directory (M-2)", async () => {
+	const temp = realpathSync(mkdtempSync(join(tmpdir(), "clio-judge-tmpdir-")));
+	const prompts: string[] = [];
+	let operator = "Asked: run runlive.sh and its reruns against fixture projects under $TMPDIR";
+	const judge = createSafetyJudge({
+		config: () => ({
+			...CONFIG,
+			roots: { workspace: "/work/space", scratch: [temp, "/var/tmp"], temp: { root: temp, env: temp } },
+		}),
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		operatorMessages: () => [operator],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const review = () =>
+		judge.review({
+			tool: ToolNames.Bash,
+			args: { command: `bash scripts/runlive.sh ${temp}/projB && ls $TMPDIR/projC/../../outside` },
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "execute", reasons: [] },
+				confirmationRuleId: "bash-unrecognized",
+				rejection: { short: "asks", detail: "asks", hints: [] },
+			},
+			approvalAuthority: "operator",
+		});
+	await review();
+	const user = prompts[0] ?? "";
+	ok(user.indexOf("</operator-messages>") < user.indexOf("<session-paths>"), user);
+	ok(user.includes(`- $TMPDIR is ${temp}, a scratch root`), user);
+	ok(user.includes("- the other scratch roots are /var/tmp"), user);
+	ok(
+		user.includes(
+			`operator-named scope: an operator message names $TMPDIR, which is ${temp} in this session, and the call's path ${temp}/projB is under it`,
+		),
+		user,
+	);
+	// A `..` that climbs out of the temp directory is not under it.
+	doesNotMatch(user, /outside is under it/u);
+	// Without $TMPDIR in the operator's words the paths are still shown, but no scope is computed.
+	operator = "Asked: run runlive.sh once";
+	await review();
+	match(prompts[1] ?? "", /<session-paths>/u);
+	doesNotMatch(prompts[1] ?? "", /operator-named scope/u);
+});
+
+test("a scope naming a script directory reaches the judge with the script's own text and a scope fact (M-5)", async () => {
+	const temp = realpathSync(mkdtempSync(join(tmpdir(), "clio-judge-scripts-")));
+	mkdirSync(join(temp, "drv"));
+	writeFileSync(join(temp, "drv", "poll-driver.mjs"), 'console.log("poll the candidate");\n');
+	const prompts: string[] = [];
+	const judge = createSafetyJudge({
+		config: () => ({
+			...CONFIG,
+			roots: { workspace: "/work/space", scratch: [temp], temp: null },
+		}),
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		operatorMessages: () => [`Asked: run scripts under ${temp}/drv and their reruns unsandboxed`],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	await judge.review({
+		tool: ToolNames.Bash,
+		// A file outside the workspace and scratch roots is never read for the judge.
+		args: { command: "node --trace-warnings drv/poll-driver.mjs --once && bash /etc/hostname", cwd: temp },
+		decision: {
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [] },
+			confirmationRuleId: "bash-unrecognized",
+			rejection: { short: "asks", detail: "asks", hints: [] },
+		},
+		approvalAuthority: "operator",
+	});
+	const user = prompts[0] ?? "";
+	const script = join(temp, "drv", "poll-driver.mjs");
+	ok(user.includes(`script file this call runs, ${script} (35 bytes)`), user);
+	ok(user.includes('console.log("poll the candidate");'), user);
+	ok(
+		user.includes(
+			`operator-named scope: an operator message names the directory ${join(temp, "drv")}, and the script ${script} this call runs is inside it`,
+		),
+		user,
+	);
+	doesNotMatch(user, /script file this call runs, \/etc/u);
+});
+
 test("a write to an outside path the operator spelled reaches the judge as an operator-named path, not shared config", async () => {
 	const prompts: Array<{ system: string; user: string }> = [];
 	const report = join(realpathSync(tmpdir()), "lanes", "bt-chain.txt");

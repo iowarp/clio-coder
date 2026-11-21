@@ -60,9 +60,9 @@ test("a released clio.* keybinding id is kept verbatim and reported as an unknow
 });
 
 // The pane layer used to write the released `clio_owner=clio:mux` token next to
-// the canonical one. It now writes only the canonical token and still reads the
-// released one, so a pane a 0.4 session left open is found and adopted.
-test("mux panes carry only the canonical owner token and still adopt a released one", async () => {
+// the canonical one. It now writes only the canonical token and, with row 284's
+// legacy readers deleted, never adopts a pane that carries only the released one.
+test("mux panes carry only the canonical owner token and never adopt a released one", async () => {
 	const reported: Array<Record<string, string | null>> = [];
 	const client = {
 		async snapshot() {
@@ -110,5 +110,5 @@ test("mux panes carry only the canonical owner token and still adopt a released 
 	strictEqual(Object.hasOwn(reported[0] ?? {}, "clio_owner"), false, "the released owner token is never written");
 
 	const adopted = await runtime.contract.adoptPane({ purpose: "watch", label: "watch" });
-	strictEqual(adopted?.paneId, "released");
+	strictEqual(adopted?.paneId, undefined);
 });
