@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import type { Api, Context, Model, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
+import { resolvedRequestContext } from "../context.js";
+import type { CodexConfiguration } from "../types.js";
+import type { PinnedPromptPrefix } from "./anthropic-system-split.js";
 
 /** The stable head of one worker request: what its provider can serve from a prefix cache. */
 export interface CacheFamilyInput {
@@ -54,6 +58,67 @@ export function workerCacheFamilyId(input: CacheFamilyInput): string | undefined
 export function sideCallCacheFamilyId(input: Omit<CacheFamilyInput, "tools" | "lane">): string | undefined {
 	if (!SESSION_ROUTED_APIS.has(input.api)) return undefined;
 	return `clio-coder-s-${headDigest({ ...input, tools: [] })}`;
+}
+
+/** The option a routed main request carries its own conversation id in, for the state that belongs to one session. */
+const CONVERSATION = "clioCoderConversation";
+
+/**
+ * A main session's request with the cache routing id of its pinned head on a session-routed API (M-11). The main
+ * thread keyed its routing by its own session id, so a new session never read the tools and install-wide pinned
+ * layer an identical earlier session had written, although both sent them byte for byte; only the session layer
+ * after them differs between sessions and repositories. Pi derives the body `prompt_cache_key` and the `session-id`
+ * header from `sessionId`, so the routing id takes that place, and the session's own id moves to a private option
+ * that the per-conversation state (turn state, WebSocket continuation) keys on through `cacheConversationOf`.
+ *
+ * The id covers the items every such session sends first: the tool declarations and the pinned layer, which the
+ * request's prefix hash names. A prompt that does not lead with that layer, or a request with cache retention off,
+ * keeps the session's own id.
+ */
+export function withMainCacheRouting<T extends StreamOptions | SimpleStreamOptions>(
+	model: Model<Api>,
+	context: Context,
+	options: T | undefined,
+): T | undefined {
+	const conversation = options?.sessionId;
+	if (!SESSION_ROUTED_APIS.has(model.api) || !conversation || options.cacheRetention === "none") return options;
+	const extra = options as T & { clioCoderPinnedPrefix?: PinnedPromptPrefix; codexConfiguration?: CodexConfiguration };
+	const pinned = extra.clioCoderPinnedPrefix;
+	const { systemPrompt, tools } = resolvedRequestContext(context);
+	if (
+		pinned === undefined ||
+		typeof systemPrompt !== "string" ||
+		systemPrompt.length <= pinned.chars ||
+		createHash("sha256").update(systemPrompt.slice(0, pinned.chars)).digest("hex") !== pinned.hash
+	)
+		return options;
+	const head = headDigest({
+		api: model.api,
+		provider: model.provider,
+		modelId: model.id,
+		// The top-level effort the Codex body carries: a generation's initial one, else the request's own.
+		thinkingLevel: extra.codexConfiguration?.initialEffort ?? (options as SimpleStreamOptions).reasoning ?? "off",
+		systemPrompt: `pinned:${pinned.chars}:${pinned.hash}`,
+		tools: tools ?? [],
+	});
+	return { ...options, sessionId: `clio-coder-m-${head}`, [CONVERSATION]: conversation };
+}
+
+/**
+ * The conversation a request's per-session state belongs to: a routed main request's own session, else its session
+ * id; none with cache retention off, where Pi sends no session either.
+ */
+export function cacheConversationOf(options: StreamOptions | undefined): string | undefined {
+	if (options?.cacheRetention === "none") return undefined;
+	const conversation = (options as Record<string, unknown> | undefined)?.[CONVERSATION];
+	return typeof conversation === "string" ? conversation : options?.sessionId;
+}
+
+/** The request as Pi takes it: the conversation id is Clio's own and never reaches a provider option surface. */
+export function withoutCacheConversation<T extends StreamOptions>(options: T | undefined): T | undefined {
+	if (options === undefined || !Object.hasOwn(options, CONVERSATION)) return options;
+	const { [CONVERSATION]: _conversation, ...rest } = options as T & { [CONVERSATION]?: string };
+	return rest as T;
 }
 
 function headDigest(input: Omit<CacheFamilyInput, "lane">): string {

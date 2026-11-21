@@ -6,6 +6,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
+import { zstdDecompressSync } from "node:zlib";
 import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { validateSettings } from "../../src/core/config.js";
@@ -271,7 +272,9 @@ test("the main thread's Codex request sends the pinned prompt layer as its own i
 		strictEqual(text(side.input[at]), pinned + tail);
 		deepStrictEqual(main.input.slice(0, at), side.input.slice(0, at));
 		deepStrictEqual(main.input.slice(at + 2), side.input.slice(at + 1));
-		strictEqual(main.prompt_cache_key, side.prompt_cache_key);
+		// Only the main thread routes to the cache of its pinned head (M-11); a side call keeps the session it was given.
+		ok(typeof main.prompt_cache_key === "string" && main.prompt_cache_key.startsWith("clio-coder-m-"));
+		strictEqual(side.prompt_cache_key, "session");
 		deepStrictEqual(await send("main", "0".repeat(64)), side);
 		// Without a continuation the prompt stays in instructions: the pinned part there, the rest the first input item.
 		const stock = await send("main", hash, "sse");
@@ -287,6 +290,94 @@ test("the main thread's Codex request sends the pinned prompt layer as its own i
 		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("main sessions with one pinned head share a Codex cache routing key and keep their own turn state (M-11)", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "https://codex.invalid/backend-api" },
+		"gpt-6-luna",
+		null,
+	);
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${claims.toString("base64url")}.signature`;
+	const pinned = "Install-wide identity and harness.\n";
+	const read = { name: "read", description: "Read a file.", parameters: Type.Object({ path: Type.String() }) };
+	const sent: Array<{ key: unknown; header: string | null; turnState: string | null }> = [];
+	let issued = 0;
+	const fetch = async (_url: unknown, init?: RequestInit) => {
+		const headers = new Headers(init?.headers);
+		const raw = init?.body;
+		const text =
+			headers.get("content-encoding") === "zstd" && raw instanceof Uint8Array
+				? zstdDecompressSync(raw).toString("utf8")
+				: String(raw);
+		sent.push({
+			key: (JSON.parse(text) as { prompt_cache_key?: unknown }).prompt_cache_key,
+			header: headers.get("session-id"),
+			turnState: headers.get("x-codex-turn-state"),
+		});
+		const response = {
+			id: `resp_${sent.length}`,
+			status: "completed",
+			output: [],
+			usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11, input_tokens_details: { cached_tokens: 0 } },
+		};
+		const events = [
+			{ type: "response.created", response: { ...response, status: "in_progress" } },
+			{ type: "response.completed", response },
+		];
+		return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+			status: 200,
+			headers: { "content-type": "text/event-stream", "x-codex-turn-state": `state-${++issued}` },
+		});
+	};
+	// Two fresh sessions in two repositories: the same install layer and tools, a session layer of their own.
+	const send = async (sessionId: string, sessionLayer: string, messages: unknown[], layer = pinned) => {
+		const hash = createHash("sha256").update(layer).digest("hex");
+		await engineMainStreamSimple(
+			model,
+			{ systemPrompt: layer + sessionLayer, tools: [read], messages } as never,
+			{
+				apiKey,
+				sessionId,
+				transport: "sse",
+				fetch,
+				clioCoderPinnedPrefix: { chars: layer.length, hash },
+			} as never,
+		).result();
+		return sent.at(-1);
+	};
+	const task = { role: "user", content: "Say one word.", timestamp: 1 };
+	const call = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "a" } }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+		stopReason: "toolUse",
+		timestamp: 2,
+	};
+	const result = {
+		role: "toolResult",
+		toolCallId: "call_1",
+		toolName: "read",
+		content: [],
+		isError: false,
+		timestamp: 3,
+	};
+	const first = await send("session-repo-a", "Repo A handbook.\n", [task]);
+	const second = await send("session-repo-b", "Repo B handbook.\n", [task]);
+	ok(typeof first?.key === "string" && /^clio-coder-m-[a-f0-9]{40}$/u.test(first.key), String(first?.key));
+	strictEqual(second?.key, first?.key, "one pinned head routes both sessions to one cache");
+	// The backend routes by the header: it carries the same key as the body.
+	strictEqual(first?.header, first?.key);
+	strictEqual(second?.header, second?.key);
+	// Continuation stays per session: the second session never carries the first one's turn token, its tool round does.
+	strictEqual(second?.turnState, null);
+	strictEqual((await send("session-repo-a", "Repo A handbook.\n", [task, call, result]))?.turnState, "state-1");
+	const other = await send("session-repo-c", "Repo A handbook.\n", [task], "Another install's identity.\n");
+	ok(typeof other?.key === "string" && other.key !== first?.key, "a different pinned head routes elsewhere");
 });
 
 test("the main thread's public Responses request marks the pinned prompt layer with its own breakpoint (PV-3)", async () => {
