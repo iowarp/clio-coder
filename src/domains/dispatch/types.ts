@@ -1213,6 +1213,8 @@ export interface RunResult {
 		base?: string;
 		diffHash: string | null;
 		changedPaths?: string[];
+		/** The paths among `changedPaths` the task commit deleted; absent when it deleted none. */
+		deletedPaths?: string[];
 		snapshot?: "working-tree" | "unavailable";
 		/** Pinned task commit that application merged or preserved (F5). */
 		commit?: string;

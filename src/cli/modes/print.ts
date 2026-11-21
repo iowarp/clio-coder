@@ -127,6 +127,7 @@ import {
 	describeRuns,
 	projectDispatchedRunOutcome,
 	settleDispatchedRuns,
+	settledRunEnvelopes,
 } from "./headless-dispatched-runs.js";
 import { formatHeadlessObservedLine, observeHeadlessRun } from "./headless-observed.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
@@ -1753,7 +1754,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				supersede: runResultV2Active(),
 			})
 		: { runs: [], live: [], undelivered: [], canceled: [], superseded: [] };
-	noteDispatchRunsV2(settlement.runs.map(projectDispatchedRunOutcome));
+	noteDispatchRunsV2(
+		settlement.runs.map(projectDispatchedRunOutcome),
+		runResultV2Active() && settlement.runs.length > 0
+			? settledRunEnvelopes(
+					settlement.runs.map((run) => run.id),
+					clioStateDir(),
+				)
+			: new Map(),
+	);
 	if (settlement.superseded.length > 0) noteDispatchSupersededV2(settlement.superseded.map(projectDispatchedRunOutcome));
 	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
 		writeJsonHeader(true);

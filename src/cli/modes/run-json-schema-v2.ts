@@ -9,6 +9,7 @@
  * for an optional field.
  */
 
+import type { RunSettled } from "../../core/telemetry/schemas.js";
 import { failsTheSameOnBase } from "../../domains/dispatch/host-verification-note.js";
 import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
@@ -359,6 +360,9 @@ export interface RunLimitsV2 {
 	cost?: { overshootPossible: true; unpricedCalls: number; unpricedRoutes: string[] };
 }
 
+/** The sealed envelope of one dispatched run, as its run.settled records it (M-18). */
+export type SettledRunEnvelope = NonNullable<RunSettled["envelope"]>;
+
 /** One dispatched run as v2 lists it: its own outcome, with an absent key for each value it lacks. */
 export interface RunDispatchedRunV2 {
 	runId: string;
@@ -366,6 +370,8 @@ export interface RunDispatchedRunV2 {
 	outcome?: string;
 	outcomeCode?: string;
 	outcomeDetail?: string;
+	/** The sealed envelope (staticHead included) the run's journal settled with (M-18); absent when it has none. */
+	safety?: { envelope: SettledRunEnvelope };
 }
 
 /**
