@@ -7,6 +7,7 @@ import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { pruneWorkerObservations } from "../context/worker/observation-retention.js";
 import { pruneWorkerContextSeeds } from "../context/worker/store.js";
 import { readContextSeedEnds, readRunEnds } from "../dispatch/state.js";
+import { pruneOrphanedObservations } from "../memory/observation-store.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
 import {
@@ -594,6 +595,9 @@ export async function sweepTelemetryDaily(
 	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
 	const result = await applyTelemetryPrune(plan, { stopped: () => performance.now() > deadline || hostStopped() });
 	await pruneWorkerObservationsWithRuns(stateDir, nowMs, options.budgetMs ?? SWEEP_BUDGET_MS, hostStopped);
+	// A deleted session's memory observations are orphans no session can read (C-35, orphans only).
+	const observationsDeadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
+	pruneOrphanedObservations(stateDir, () => performance.now() > observationsDeadline || hostStopped());
 	return result;
 }
 

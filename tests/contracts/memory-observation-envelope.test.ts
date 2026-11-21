@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,6 +7,7 @@ import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { foldProjection } from "../../src/domains/context/fold/pressure.js";
 import type { ObservationSource, ObservationSourceUnit } from "../../src/domains/memory/contract.js";
+import { pruneOrphanedObservations } from "../../src/domains/memory/observation-store.js";
 import { prepareObservation } from "../../src/domains/memory/observations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import type { SessionEntry } from "../../src/domains/session/index.js";
@@ -359,6 +360,25 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		strictEqual(calls, 3, "the stop holds for the session");
 	} finally {
 		runtime.dispose();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("the daily sweep removes the observations of deleted sessions only, and nothing when sessions cannot be listed (C-35)", () => {
+	const dir = mkdtempSync(join(tmpdir(), "memory-observation-orphans-"));
+	try {
+		const observations = join(dir, "memory", "observations");
+		mkdirSync(join(dir, "sessions", "project", "kept"), { recursive: true });
+		for (const id of ["kept", "gone"]) {
+			mkdirSync(join(observations, id), { recursive: true });
+			writeFileSync(join(observations, id, "batch.json"), "{}");
+		}
+		strictEqual(pruneOrphanedObservations(dir), 1);
+		deepStrictEqual(readdirSync(observations), ["kept"], "a recorded session keeps its observations however old");
+		rmSync(join(dir, "sessions"), { recursive: true });
+		strictEqual(pruneOrphanedObservations(dir), 0);
+		deepStrictEqual(readdirSync(observations), ["kept"]);
+	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });

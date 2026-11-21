@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
@@ -163,4 +163,44 @@ export function pruneConsumedObservations(
 	} catch {
 		/* Optional sidecar cleanup cannot change a durable checkpoint. */
 	}
+}
+
+/**
+ * Remove the observations of sessions no longer recorded under the state root, for the daily retention sweep (C-35).
+ * Only an orphan goes: a recorded session keeps its observations however old, a tombstoned one keeps them with its
+ * directory, and nothing goes when the sessions cannot be listed. The candidates are listed first and each session is
+ * looked for again right before its directory goes, so a session another process records meanwhile keeps its own.
+ * Returns how many directories went. Best effort.
+ */
+export function pruneOrphanedObservations(stateDir: string, stopped: () => boolean = () => false): number {
+	const root = join(stateDir, "memory", "observations");
+	let candidates: string[];
+	try {
+		if (lstatSync(root).isSymbolicLink()) return 0;
+		candidates = readdirSync(root).filter((name) => /^[a-zA-Z0-9_-]{1,128}$/u.test(name));
+	} catch {
+		return 0; /* Nothing observed yet. */
+	}
+	const sessions = join(stateDir, "sessions");
+	let removed = 0;
+	for (const id of candidates) {
+		if (stopped()) break;
+		let recorded = false;
+		try {
+			recorded = readdirSync(sessions).some((workspace) => existsSync(join(sessions, workspace, id)));
+		} catch {
+			return removed; /* An unreadable sessions root says nothing about which sessions are gone. */
+		}
+		if (recorded) continue;
+		try {
+			const directory = join(root, id);
+			const stat = lstatSync(directory);
+			if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+			rmSync(directory, { recursive: true, force: true });
+			removed += 1;
+		} catch {
+			// An undeletable directory stays; no session reads it.
+		}
+	}
+	return removed;
 }
