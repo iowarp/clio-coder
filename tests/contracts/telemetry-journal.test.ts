@@ -475,6 +475,17 @@ test("run feed telemetry names every worker frame it keeps and carries feed.json
 			"clio_coder_write_record_downgraded",
 		])
 			display.append(runId, { at, type });
+		// feed.jsonl reaches its cap first, since the journal keeps no detail: both stores truncate at the same row.
+		const bulky = "lorem ipsum ".repeat(22_000);
+		for (let n = 0; n < 10; n += 1)
+			display.append(runId, {
+				at,
+				type: "clio_coder_tool_finish",
+				tool: "read",
+				callId: `bulky-${n}`,
+				outcome: "ok",
+				detail: bulky,
+			});
 		display.terminal(runId, "succeeded");
 		await journal.close();
 		const journaled = (await readCallJournal(join(directory, runId))).records.flatMap(({ record }) =>
@@ -490,6 +501,10 @@ test("run feed telemetry names every worker frame it keeps and carries feed.json
 		deepStrictEqual(
 			journaled,
 			rows.map((row) => [row.seq, row.type ?? row.kind]),
+		);
+		ok(
+			rows.some((row) => row.kind === "journal_truncated"),
+			"the feed cap was reached",
 		);
 	} finally {
 		await journal.close();
