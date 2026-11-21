@@ -40,6 +40,13 @@ import {
 	resolveScratchDeleteOperands,
 	STORE_UNGRANTED_ARG,
 } from "./action-classifier.js";
+import {
+	CLIO_OWNED_VARIABLE,
+	clioFloorBases,
+	clioFloorReaches,
+	clioFloorReading,
+	clioFloorText,
+} from "./clio-tree-floor.js";
 import { downloadedFiles, findDeletesNotFollowing, removedAbsolutePaths, unpackedTargets } from "./command-readings.js";
 import {
 	cleansIgnoredFiles,
@@ -1080,11 +1087,33 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return operatorPathPolicy;
 	};
 	/** A write or delete into one of Clio's own trees, however the command spells or reaches it. */
-	const clioOwnedMutation = (call: ClassifierCall, callCwd: string, command: string | null, trees: ClioOwnedTrees) => {
+	const clioOwnedMutation = (
+		call: ClassifierCall,
+		callCwd: string,
+		command: string | null,
+		trees: ClioOwnedTrees,
+		depth = 0,
+	): boolean => {
 		const scanned = pathPolicyTargets(call, callCwd)
 			.filter((target) => target.operation !== "read")
 			.map((target) => ({ ...target, path: accountHomeExpanded(target.path) }));
-		const written = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, callCwd, trees.roots)];
+		// Row 314: what bash makes of the words, and the writers, deleters and aliases the general scan does not read.
+		const reading = command === null ? null : clioFloorReading(command);
+		if (reading !== null && command !== null) {
+			// `xargs rm` removes names from input no scanner places: any such command naming a Clio tree holds.
+			if (reading.fromInput && clioFloorText(command).some((text) => namesClioTree(text, trees))) return true;
+			if (
+				depth < 2 &&
+				reading.aliases.some((body) =>
+					clioOwnedMutation({ tool: ToolNames.Bash, args: { command: body } }, callCwd, body, trees, depth + 1),
+				)
+			)
+				return true;
+		}
+		const written =
+			command === null || reading === null
+				? scanned
+				: [...scanned, ...sameCommandWriteTargets(command, callCwd, trees.roots), ...reading.targets];
 		if (written.length === 0) return false;
 		// Each target also as the command's own assignments spell it, so a path split over them is judged whole.
 		const targets =
@@ -1106,7 +1135,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		);
 		if (spelled || (command !== null && writesThroughClioVariable(command, targets, trees))) return true;
 		const memo = createPathWalkMemo();
-		return skillMutationReason(trees.roots, mutationCandidates(targets, callCwd, command, memo), memo) !== null;
+		if (skillMutationReason(trees.roots, mutationCandidates(targets, callCwd, command, memo), memo) !== null) return true;
+		return (
+			command !== null && clioFloorReaches(targets, clioFloorBases(command, callCwd, trees.roots, memo), trees.roots, memo)
+		);
 	};
 	/**
 	 * The workspace `.git` floor over a command as written, then over its scratch projection (`$TMPDIR` spelled out),
@@ -1407,6 +1439,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		}
 		// No script the scan read refuses, but one it runs could not be placed or read: the judge decides it (row 215).
 		const unplaced = budgets.flatMap((budget) => budget.unplaced);
+		// Row 314: a script the floor cannot read, in a command naming one of Clio's trees, may write there: it holds.
+		if (unplaced.length > 0 && command !== null && clioFloorText(command).some((text) => namesClioTree(text, trees))) {
+			return held(
+				floorMatch({
+					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: runs a script the floor cannot read in a command naming Clio's own config, data, state or trust records, which only the operator changes; write the script to a file with the write tool and run that file`,
+				}),
+				[scriptUnplaceableReason(unplaced)],
+			);
+		}
 		if (unplaced.length > 0) {
 			return {
 				ruleId: SCRIPT_UNPLACEABLE_RULE_ID,
@@ -4760,9 +4802,6 @@ const NAME_LISTERS: ReadonlySet<string> = new Set(["ls", "stat", "du", "test", "
 
 /** `$CLIO_CODER_CONFIG_DIR`, `$CLIO_CODER_HOME` and `$XDG_CONFIG_HOME` spell the root Clio's credential store lives under at run time. */
 const CLIO_CONFIG_VARIABLE = /\$\{?(?:CLIO_CODER_CONFIG_DIR|CLIO_CODER_HOME|XDG_CONFIG_HOME)\b/u;
-
-/** `$CLIO_CODER_CONFIG_DIR`, `$XDG_CONFIG_HOME/clio-coder` and their kin name a Clio tree at run time. */
-const CLIO_OWNED_VARIABLE = /\$\{?(?:CLIO_CODER_\w+|XDG_(?:CONFIG|DATA|STATE|CACHE)_HOME\}?\/clio-coder)/u;
 
 /** What the operator's default made of a call's damage-control hits (Phase 2c). */
 interface ResortedDamageControl {
