@@ -8,10 +8,12 @@ import { StringEnum } from "../engine/ai.js";
 import { resolveFdBinary } from "./executables.js";
 import {
 	compileGlobRegex,
+	emptySearchText,
 	fallbackIgnoredDirs,
 	fdIgnoreArgs,
 	internalSearchExclusionNotice,
 	normalizeGlobInput,
+	searchedTree,
 } from "./ignore-policy.js";
 import {
 	commitObservationReservation,
@@ -254,6 +256,7 @@ function renderFindResult(input: {
 			? `\n[${packedShown} of these paths ship inside dist/assets/source.pack, not as files on disk; read opens them by this path.]`
 			: "");
 	if (ordered.paths.length === 0) {
+		// The glob is not echoed: a search that withheld a path must not name it back (S4-01, symlink accounting).
 		return finalizeObservation({
 			tool: ToolNames.Find,
 			withheldPaths: input.withheldPaths,
@@ -262,7 +265,8 @@ function renderFindResult(input: {
 				(search.complete ? "No visible files found matching pattern" : "Search incomplete") +
 				searchNotice(search, 0, "paths") +
 				coverageNotice +
-				internalSearchExclusionNotice(input.searchPath),
+				internalSearchExclusionNotice(input.searchPath) +
+				`\n[${emptySearchText(`paths under ${searchedTree(input.searchPath)} for the glob sent`)}]`,
 			details: { search, symlinkDirectories: { counted: input.fallback } },
 			shownCount: 0,
 			totalCount: search.complete ? 0 : null,
