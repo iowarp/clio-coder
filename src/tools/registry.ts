@@ -155,6 +155,8 @@ export interface ToolSourceInfo {
 export interface ToolResultSizePolicy {
 	kind: "exact" | "bounded" | "summary" | "truncate";
 	maxBytes?: number;
+	/** Combined image and text payload cap when it differs from the text cap (an MCP screenshot); defaults to maxBytes. */
+	imageMaxBytes?: number;
 	/** Scratch retention ceiling for this tool; defaults to the generic 10 MiB cap. */
 	offloadMaxBytes?: number;
 	followUpHint?: string;

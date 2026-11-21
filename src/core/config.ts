@@ -40,6 +40,7 @@ import {
 import { writeDiagnostic } from "./diagnostics.js";
 import { MODEL_TIERS } from "./model-tier.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
+import { LIVE_CHECK_LOGIN_RUNTIMES } from "./sandbox/env-scrub.js";
 import { SANDBOX_MODES, UNIX_SOCKET_MODES } from "./sandbox/types.js";
 import { readSettingsDocument } from "./settings-document.js";
 import type { SettingsFieldName } from "./settings-fields.js";
@@ -2317,6 +2318,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"sandboxNetwork",
 				"scratchRoots",
 				"sandboxPassEnv",
+				"liveCheckTargets",
 				"sandboxUnixSockets",
 				"sandboxCacheMaxGiB",
 				"snapshots",
@@ -2351,6 +2353,26 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (problem !== null) issues.add("safety.scratchRoots", `${root}: ${problem}`);
 						return problem === null;
 					});
+				}
+			}
+			if ("liveCheckTargets" in safety) {
+				const parsed = expectStringArray(issues, "safety.liveCheckTargets", safety.liveCheckTargets);
+				if (parsed !== undefined) {
+					settings.safety.liveCheckTargets = [
+						...new Set(
+							parsed.filter((id) => {
+								const target = settings.targets.find((candidate) => candidate.id === id);
+								const problem =
+									target === undefined
+										? "no target with this id"
+										: LIVE_CHECK_LOGIN_RUNTIMES.has(target.runtime)
+											? null
+											: `runtime ${target.runtime} has no login file Clio can reveal (only ${[...LIVE_CHECK_LOGIN_RUNTIMES].join(", ")})`;
+								if (problem !== null) issues.add("safety.liveCheckTargets", `${id}: ${problem}`);
+								return problem === null;
+							}),
+						),
+					];
 				}
 			}
 			if ("sandboxPassEnv" in safety) {

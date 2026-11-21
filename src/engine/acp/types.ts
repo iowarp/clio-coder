@@ -1340,7 +1340,7 @@ export interface AcpSessionBoard {
 		label: string | null;
 		value: string;
 		status: "active" | "superseded";
-		source: "operator" | "agent" | null;
+		source: "operator" | "agent" | "operator-message" | null;
 		decidedAt: string;
 		rationale: string | null;
 		correction: string | null;
@@ -1858,7 +1858,12 @@ export const AcpSessionBoardSchema = Type.Object(
 					label: wireBoardNullableText,
 					value: wireBoardText,
 					status: Type.Union([Type.Literal("active"), Type.Literal("superseded")]),
-					source: Type.Union([Type.Literal("operator"), Type.Literal("agent"), Type.Null()]),
+					source: Type.Union([
+						Type.Literal("operator"),
+						Type.Literal("agent"),
+						Type.Literal("operator-message"),
+						Type.Null(),
+					]),
 					decidedAt: Type.String({ maxLength: 64 }),
 					rationale: wireBoardNullableText,
 					correction: wireBoardNullableText,

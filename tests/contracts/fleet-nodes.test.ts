@@ -245,7 +245,6 @@ describe("fleet node management", () => {
 			record.note ?? "",
 			new RegExp(
 				`version ${WORKER_SPEC_HOOKLESS_VERSION} only.*extension hooks \\(version ${WORKER_SPEC_VERSION}\\) will not run on this node`,
-				"u",
 			),
 		);
 		strictEqual(inspectFleetNodes()[0]?.readiness, "ready for this project");

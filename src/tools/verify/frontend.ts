@@ -9,6 +9,7 @@ import { acceptsImageInput } from "../../domains/providers/image-input.js";
 import type { ImageContent } from "../../engine/types.js";
 import { escapeRegExp } from "../ignore-policy.js";
 import { resolveReadPath } from "../path-utils.js";
+import { readMaxBytes } from "../read.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "../registry.js";
 import { maxOutputArg, timeoutArg, trimOutputHeadTail } from "../safe-exec.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
@@ -120,7 +121,8 @@ export async function runFrontendCheck(
 		timeoutMs: timeoutArg(args),
 		maxOutputBytes: SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
 		supportsImages: options?.supportsImages === true,
-		imageMaxBytes: Math.min(maxOutputArg(args), options?.toolResultMaxBytes ?? 50_000) - 4096,
+		// Inside read's image budget, which verify's result shaping carries images up to.
+		imageMaxBytes: Math.min(maxOutputArg(args), options?.toolResultMaxBytes ?? readMaxBytes(), readMaxBytes()) - 4096,
 		images: [],
 	};
 	if (options?.signal !== undefined) validateOptions.signal = options.signal;

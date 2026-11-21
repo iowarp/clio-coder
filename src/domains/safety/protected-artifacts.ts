@@ -4,6 +4,7 @@ import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
+import { gitCommitReadsStdinAsMessage, heredocDataText } from "./heredoc-data.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import { FILE_WRITER_COMMANDS, isRefusedValidationWrapper, validationWrapperProblem } from "./validation-wrappers.js";
 
@@ -177,7 +178,8 @@ function classifyDestructiveCommand(
 	const artifacts = normalizedArtifacts(protectedArtifacts);
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
-	const segments = splitSegments(scanShellLike(command)).flatMap((tokens) => [
+	// C-7: a here-document the parsed call proves is data is content, not shell text (row 287).
+	const segments = splitSegments(scanShellLike(heredocDataText(command) ?? command)).flatMap((tokens) => [
 		tokens,
 		...substitutionSegments(tokens, 0),
 	]);
@@ -940,13 +942,7 @@ function isHeredocStdinData(head: ReadonlyArray<ShellToken>): boolean {
 		return false;
 	if (HEREDOC_NON_READERS.has(head[0]?.value ?? "")) return true;
 	if (head[0]?.value !== "git" || head[1]?.value !== "commit") return false;
-	const args = head.slice(2).map((token) => token.value);
-	const optionEnd = args.indexOf("--");
-	const options = optionEnd === -1 ? args : args.slice(0, optionEnd);
-	return options.some(
-		(arg, index) =>
-			arg === "--file=-" || arg === "-F-" || ((arg === "-F" || arg === "--file") && options[index + 1] === "-"),
-	);
+	return gitCommitReadsStdinAsMessage(head.slice(2).map((token) => token.value));
 }
 
 /**

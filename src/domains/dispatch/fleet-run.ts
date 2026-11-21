@@ -280,7 +280,10 @@ export interface ExecuteFleetRunInput {
 	 * hands a playbook step write or bash (Z1).
 	 */
 	turnConstraints?: TurnConstraints;
-	/** Fires once the workspace lock is held, so a refused run never announces its minted root. */
+	/**
+	 * Fires once the workspace lock and the whole-plan reservation are held, so a run the lock or the admission gate
+	 * refuses never announces its minted root.
+	 */
 	onStarted?: () => void;
 	registerEmergencySeal?: (seal: () => void) => () => void;
 	onStepDispatched?: (event: FleetRunStepEvent) => void;
@@ -476,7 +479,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			const message = error instanceof Error ? error.message : String(error);
 			throw new Error(`fleet root telemetry journal unavailable: ${message}`, { cause: error });
 		}
-		input.onStarted?.();
 		return await runFleetHoldingWorkspace(
 			input,
 			(seal) => {
@@ -799,6 +801,15 @@ async function runFleetHoldingWorkspace(
 		stepIds: fleetRunRecord.stepIds,
 	});
 	let result: ExecutionPlanResult;
+	// The run is started once its first whole-plan reservation is held; a splice reserves again and announces nothing.
+	let announced = false;
+	const reserved = (ownerId: string): { ownerId: string } => {
+		if (!announced) {
+			announced = true;
+			input.onStarted?.();
+		}
+		return { ownerId };
+	};
 	try {
 		const adapter: ExecutionSchedulerAdapter = {
 			preflight(step) {
@@ -830,7 +841,7 @@ async function runFleetHoldingWorkspace(
 				// A fleet of deterministic steps admits no worker and holds no
 				// capacity. The reservation authority refuses an empty reservation,
 				// correctly: there is nothing to reserve, so nothing is asked of it.
-				if (admissions.length === 0) return { ownerId: NO_WORKER_RESERVATION };
+				if (admissions.length === 0) return reserved(NO_WORKER_RESERVATION);
 				const tasks: Array<{ memberId: string; resolution: DispatchPlanTaskResolution }> = [];
 				const memberIds = new Set(reservedPlan.steps.map((step) => step.id));
 				for (const { step } of admissions) {
@@ -894,7 +905,7 @@ async function runFleetHoldingWorkspace(
 					tasks: tasks.map((task) => ({ ...task, wave: waves.findIndex((wave) => wave.includes(task.memberId)) })),
 				});
 				if (!reservation) throw new Error("fleet whole-plan reservation is unavailable");
-				return { ownerId: reservation.ownerId };
+				return reserved(reservation.ownerId);
 			},
 			async run(step, handoffs, reservation, ledger, signal) {
 				refuseCanceledAdmission();

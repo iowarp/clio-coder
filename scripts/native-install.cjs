@@ -189,8 +189,20 @@ function packageVersion(prefix) {
 	}
 }
 
+// What the candidate's doctor --fix deleted or rewrote because this build cannot read it.
+const HOME_REPAIR_ROWS = new Set([
+	"settings.yaml retired keys",
+	"settings.yaml repair",
+	"memory store",
+	"retired state",
+]);
+
 function checkCandidate(node, prefix, postInstall, echo = true) {
-	for (const args of [[entry(prefix), "--version"], ...(postInstall ? [[entry(prefix), "doctor", "--json"]] : [])]) {
+	// Earlier shapes are not migrated at read time, so an upgrade runs the candidate's own repair against the
+	// existing home before checking it. A home no build has written yet is left for post-install to initialize.
+	const repair = postInstall && [clioRoot("config"), clioRoot("state")].some((root) => fs.existsSync(root));
+	const doctor = [entry(prefix), "doctor", ...(repair ? ["--fix"] : []), "--json"];
+	for (const args of [[entry(prefix), "--version"], ...(postInstall ? [doctor] : [])]) {
 		const result = spawnSync(node, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024 });
 		if (
 			(result.status !== 0 && !(args[1] === "doctor" && result.status === 1)) ||
@@ -208,7 +220,15 @@ function checkCandidate(node, prefix, postInstall, echo = true) {
 					`Candidate doctor did not return its JSON report:\n${(result.stdout || result.stderr || "").trim().slice(0, 2000)}`,
 				);
 			}
+			let changed = 0;
+			for (const finding of report.findings) {
+				if (!finding.ok || !HOME_REPAIR_ROWS.has(finding.name) || !/^(removed|rewrote) /u.test(finding.detail)) continue;
+				process.stdout.write(`[install] home repair: ${finding.name}: ${finding.detail}\n`);
+				changed += 1;
+			}
+			if (repair && changed === 0) process.stdout.write("[install] home repair: nothing to remove\n");
 			const integrity = new Set([
+				...(repair ? ["repair", "settings.yaml retired keys"] : []),
 				"engine runtime",
 				"installation files",
 				"directory layout",
@@ -223,7 +243,10 @@ function checkCandidate(node, prefix, postInstall, echo = true) {
 				const missing = initializable && /(?:^missing| missing) \(run /u.test(finding.detail);
 				return !finding.ok && integrity.has(finding.name) && !missing;
 			});
-			if (failures.length) throw new Error(failures.map((finding) => `${finding.name}: ${finding.detail}`).join("\n"));
+			if (failures.length)
+				throw Object.assign(new Error(failures.map((finding) => `${finding.name}: ${finding.detail}`).join("\n")), {
+					repaired: repair,
+				});
 		} else if (echo) process.stdout.write(result.stdout);
 		process.stderr.write(result.stderr);
 	}
@@ -240,6 +263,10 @@ function check(node, prefix, postInstall, echo = true) {
 		);
 		const quote = (value) =>
 			process.platform === "win32" ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\\''")}'`;
+		if (error?.repaired)
+			throw new Error(
+				`${detail}\nThe previous installation remains active. The new version's doctor --fix ran against this home and could not repair the rows above.`,
+			);
 		const repair = `${process.platform === "win32" ? "& " : ""}${quote(node)} ${quote(entry(prefix))} doctor --fix`;
 		throw new Error(
 			`${detail}\nThe previous installation remains active, and it may predate this repair. Run the new version's own repair, then retry the installer: ${repair}`,

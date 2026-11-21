@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
+import { shellQuote } from "../../core/shell-quote.js";
 import { storeReadRoots, storeReplacedBytes, storeWriteTarget } from "../../core/store-paths.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { resolveClioDirs } from "../../core/xdg.js";
@@ -11,7 +12,16 @@ import { normalizedGitCommands } from "./git-command-normalization.js";
 import { inertQuotedMatch, matchesOnlyCommandText } from "./literal-exemption.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
-import { extractCommandPathWalks, scanShellLike, splitSegments } from "./protected-artifacts.js";
+import { extractCommandPathWalks } from "./protected-artifacts.js";
+import {
+	BASH_BUILTINS,
+	commandHasPart,
+	parseShellScript,
+	type ShellSimpleCommand,
+	type ShellWord,
+	staticCommandName,
+	staticWordValue,
+} from "./shell-syntax.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -515,10 +525,12 @@ function quotedTempDirRebinding(command: string): boolean {
 }
 
 function hasStableTempDirReferences(command: string): boolean {
-	if (quotedTempDirRebinding(command)) return false;
+	// Row 287: a line continuation can split a TMPDIR rebinding (`TM\<newline>PDIR=.`) past every count below.
+	if (command.includes("\\\n") || quotedTempDirRebinding(command)) return false;
 	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
-	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
+	// A `$'...'` escape or a `$"..."` locale string (translated through TEXTDOMAIN at run time) can spell TMPDIR.
+	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$['"]/u.test(command);
 }
 
 function expandTempDirReferences(command: string): string {
@@ -554,167 +566,306 @@ function expandTempDirReferences(command: string): string {
 	return out;
 }
 
-const SCRATCH_WORD = String.raw`[\w./+@%,:-]*`;
-const SCRATCH_REFERENCE = new RegExp(String.raw`^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))(/${SCRATCH_WORD})?$`, "u");
-const SCRATCH_LITERAL = new RegExp(`^${SCRATCH_WORD}$`, "u");
-const SCRATCH_ASSIGNMENT = /^([A-Za-z_]\w*)(\+?=)(.*)$/u;
 /**
  * Names the shell itself sets, rewrites (cd sets PWD and OLDPWD; read, getopts and mapfile set theirs), refuses
  * (readonly) or reads for its own behaviour; an assignment to one never proves the value a later reference sees.
  */
 const SCRATCH_SPECIAL =
-	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TIMEFORMAT|TMOUT|TMPDIR|UID|_)$/u;
-/** The closed set of commands a projected call may run besides plain assignments; none of them can plant a link. */
-const SCRATCH_STEPS = /^(?:cd|mkdir|rm|rmdir|unlink)$/u;
+	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LANGUAGE|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TEXTDOMAIN|TEXTDOMAINDIR|TIMEFORMAT|TMOUT|TMPDIR|UID|_|LD_\w*|DYLD_\w*|GCONV_PATH|GLIBC_TUNABLES|LOCPATH|NLSPATH|MALLOC_\w*|HOSTALIASES|POSIXLY_CORRECT)$/u;
+const SCRATCH_DELETES: ReadonlySet<string> = new Set(["rm", "rmdir", "unlink"]);
+/** Options of a delete that leave where it deletes alone. */
+const SCRATCH_DELETE_OPTION =
+	/^(?:-[rRfvdiI]+|--(?:recursive|force|verbose|dir|one-file-system|preserve-root|interactive=never))$/u;
+/** Builtins a projected call may run: none sets a variable, plants a link or moves the shell. */
+const SCRATCH_INERT_BUILTINS: ReadonlySet<string> = new Set([
+	":",
+	"true",
+	"false",
+	"echo",
+	"printf",
+	"pwd",
+	"test",
+	"[",
+]);
+const SCRATCH_SET_FLAGS = /^[-+][befhmnptuvxBCEHPT]+$/u;
+const SCRATCH_SET_NAMES: ReadonlySet<string> = new Set([
+	"errexit",
+	"nounset",
+	"pipefail",
+	"xtrace",
+	"noglob",
+	"noclobber",
+	"verbose",
+	"errtrace",
+	"functrace",
+	"physical",
+]);
 
-function plainScratchWord(raw: string): string | null {
-	const word = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
-	return SCRATCH_LITERAL.test(word) || SCRATCH_REFERENCE.test(word) ? word : null;
+interface ScratchPin {
+	target: string;
+	/** A path a `mktemp -d` printed: empty when mktemp failed, so only the bare reference is that path. */
+	fresh: boolean;
 }
 
-/** A successful mktemp prints a fresh path. On failure only a bare operand is safe: "$H/x" could become /x. */
-function scratchTemplate(raw: string, temp: string): string | null {
-	const match = /^\$\(mktemp[ \t]+-d(?:[ \t]+(.+))?\)$/u.exec(raw);
-	if (match === null) return null;
-	if (match[1] === undefined) return `${temp}/tmp.XXXXXXXXXX`;
-	const relative = /^-t[ \t]+(.+)$/u.exec(match[1]);
-	const word = plainScratchWord(relative?.[1] ?? match[1]);
-	if (word === null || !SCRATCH_LITERAL.test(word) || !/X{3,}$/u.test(word)) return null;
-	return relative !== null && !word.includes("/") ? `${temp}/${word}` : word.startsWith(`${temp}/`) ? word : null;
+/** `set` with options only (`set -e`, `set -o pipefail`): it changes no variable a pin reads. */
+function scratchSetOptions(args: ReadonlyArray<string | null>): boolean {
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index];
+		if (arg === null || arg === undefined) return false;
+		// `-o NAME`, alone or ending a cluster (`-euo pipefail`), names one option.
+		const named = /^[-+][befhmnptuvxBCEHPT]*o$/u.test(arg);
+		if (!named && !SCRATCH_SET_FLAGS.test(arg)) return false;
+		if (named) {
+			index += 1;
+			if (!SCRATCH_SET_NAMES.has(args[index] ?? "")) return false;
+		}
+	}
+	return true;
+}
+
+/** The path a `$(mktemp -d ...)` assignment pins: a template under the temp root, or null for any other form. */
+function scratchTemplate(word: ShellWord, temp: string): string | null {
+	const [part] = word.parts;
+	if (word.parts.length !== 1 || part?.kind !== "command") return null;
+	const script = parseShellScript(part.script, 1);
+	const item = script?.items.length === 1 ? script.items[0] : undefined;
+	const step = item?.andOr.pipelines.length === 1 ? item.andOr.pipelines[0] : undefined;
+	const command = step?.commands.length === 1 && !step.negated ? step.commands[0] : undefined;
+	if (item === undefined || item.background || command === undefined) return null;
+	if (command.assignments.length > 0 || command.redirects.length > 0) return null;
+	const words = command.words.map((each) => staticWordValue(each, (name) => (name === "TMPDIR" ? temp : undefined)));
+	if (words[0] !== "mktemp" || words[1] !== "-d" || words.some((each) => each === null)) return null;
+	const rest = words.slice(2) as string[];
+	if (rest.length === 0) return `${temp}/tmp.XXXXXXXXXX`;
+	const template = rest[0] === "-t" && rest.length === 2 ? rest[1] : rest.length === 1 ? rest[0] : undefined;
+	if (template === undefined || template.startsWith("-") || !/^[\w./+@%,:-]+X{3,}$/u.test(template)) return null;
+	if (rest[0] === "-t") return template.includes("/") ? null : `${temp}/${template}`;
+	return template.startsWith(`${temp}/`) ? template : null;
 }
 
 /**
- * XR-43: project operands only for the path classifier and the snapshot check, never for command execution or
- * other rails. Only a closed allowlist projects: every step is a plain assignment, `mkdir [-p]` of a pinned or
- * temp path, a leading cd to the temp root that `&&` joins to every later step, or rm, rmdir or unlink; any other command, operator, substitution
- * (but the exact mktemp form) or word leaves the original command to the conservative walk. A conditional
- * assignment or reassignment kills the old proof, and a name the shell manages is never pinned. Text is no proof
- * of where a path lands across calls, so every delete operand the projection vouches for is resolved through the
- * real path of its deepest existing ancestor now, and one that leaves the real temp root fails the whole call closed.
+ * XR-43, rebuilt on the parsed command (row 287): project delete operands only for the path classifier and the
+ * snapshot check, never for command execution or other rails. The call must parse ({@link parseShellScript}: no
+ * compound command, subshell, function or reserved word) and hold no background job, here-document, arithmetic or
+ * `${...}` operator form, and no command substitution but the exact `$(mktemp -d ...)` assignment. Steps are read in
+ * order. A builtin outside a closed inert set (`set` with options, `echo`, `printf` without `-v`, `true`, ...) can
+ * rebind a pin or the shell (read, declare, trap, eval, pushd, ...) and leaves the whole call to the conservative walk.
+ * A plain assignment pins a temp path: at the head of an and-or it holds for the rest of the call, past an `&&` only
+ * to the end of that and-or, and after an `||`, in a pipeline, negated, appended or as a prefix it kills the name.
+ * A name the shell manages is never assigned. A cd moves relative operands only when it is proven to land or stop
+ * the run: alone in its pipeline, not negated, no prefix or redirection, one absolute operand that is a real
+ * directory under the temp root today with no link in its path, no program run before it, and only `&&` from it to
+ * the delete; after `;`, `||` or a newline a relative operand stays the walk's. Any other program may plant a link,
+ * so once one has run only an entry directly in the temp root, named without a trailing slash, is still placed: rm
+ * never follows its last component. Every vouched operand is resolved through the real path of its deepest existing
+ * ancestor now, and one that leaves the real temp root fails the whole call closed. `leadingCd` names the first cd
+ * when the whole call is one `&&` chain from it, which lets the walk follow it as a base.
  */
 export function resolveScratchDeleteOperands(command: string): { command: string; leadingCd: string | null } {
 	const unchanged = { command, leadingCd: null };
-	if ((!command.includes("$") && !/^\s*cd\s/u.test(command)) || !/\b(?:rm|unlink|rmdir)\b/u.test(command))
-		return unchanged;
+	if (!/\b(?:rm|unlink|rmdir)\b/u.test(command)) return unchanged;
+	// Base's own reading of TMPDIR mentions only ever withholds: a name written outside a reference stays the walk's.
 	if (!hasStableTempDirReferences(command)) return unchanged;
 	const temp = stableTempDir();
 	if (temp === null) return unchanged;
 	const canonicalTemp = canonicalizePath(temp);
 	if (canonicalTemp === null) return unchanged;
-	const expanded = expandTempDirReferences(command);
-	const tokens = scanShellLike(expanded);
-	if (tokens.some((t) => t.operator && t.value !== ";" && t.value !== "&&")) return unchanged;
-	// A failed cd leaves the shell where it was, and only `&&` stops what follows: a relative delete is placed under the
-	// temp root only when an unbroken `&&` chain runs from the cd through it (a `;` or newline runs it in place).
-	const andChain = tokens.every((t) => !t.operator || t.value === "&&");
-	const segments = splitSegments(tokens);
-	const pins = new Map<string, { target: string; fresh: boolean }>();
-	const assigned = new Set<string>();
-	const edits: Array<{ start: number; end: number; target: string }> = [];
-	let leadingCd: string | null = null;
-	let hasDelete = false;
-	const underTemp = (word: string): boolean => {
-		if (word !== temp && !word.startsWith(`${temp}/`)) return false;
-		const suffix = word
-			.slice(temp.length)
+	const script = parseShellScript(command);
+	if (script === null || script.heredocs.length > 0) return unchanged;
+	const pins = new Map<string, ScratchPin>();
+	const lookup = (name: string): string | undefined => {
+		if (name === "TMPDIR") return temp;
+		const pin = pins.get(name);
+		return pin === undefined || pin.fresh ? undefined : pin.target;
+	};
+	/** The parts below the temp root of a lexically clean path, or null for any other path. */
+	const tempSuffix = (target: string): string[] | null => {
+		const root = [temp, canonicalTemp].find((each) => target === each || target.startsWith(`${each}/`));
+		if (root === undefined) return null;
+		const suffix = target
+			.slice(root.length)
 			.split("/")
 			.filter((part) => part !== "" && part !== ".");
-		if (suffix.includes("..")) return false;
-		// The real path now must be the lexical one: a link below the temp root, even one inside it, could lead out.
-		return canonicalizeRawPath(word, "/") === path.join(canonicalTemp, ...suffix);
+		return suffix.includes("..") ? null : suffix;
 	};
-	const isTempRoot = (word: string): boolean =>
-		!word.startsWith("$") && path.isAbsolute(word) && canonicalizeRawPath(word, "/") === canonicalTemp;
-	const resolve = (word: string): string | null => {
-		const ref = SCRATCH_REFERENCE.exec(word);
-		if (ref === null) return underTemp(word) ? word : null;
-		const pin = pins.get(ref[1] ?? ref[2] ?? "");
-		if (pin === undefined || (pin.fresh && ref[3] !== undefined)) return null;
-		const target = pin.target + (ref[3] ?? "");
-		return underTemp(target) ? target : null;
-	};
-	for (const [index, segment] of segments.entries()) {
-		const head = segment[0];
-		if (head === undefined) continue;
-		const raw = expanded.slice(head.start, head.end);
-		const assignment = SCRATCH_ASSIGNMENT.exec(raw);
-		if (assignment !== null) {
-			const [, name = "", op, rhs = ""] = assignment;
-			if (segment.length !== 1 || SCRATCH_SPECIAL.test(name)) return unchanged;
-			const word = plainScratchWord(rhs);
-			const template = scratchTemplate(rhs, temp);
-			if (word === null && template === null) return unchanged;
-			const target = template ?? (word === null ? null : resolve(word));
-			const before = expanded.slice(index === 0 ? 0 : (segments[index - 1]?.at(-1)?.end ?? 0), head.start);
-			if (!assigned.has(name) && op === "=" && !before.includes("&&") && target !== null && underTemp(target)) {
-				const ref = word === null ? null : SCRATCH_REFERENCE.exec(word);
-				const fromFresh = ref !== null && pins.get(ref[1] ?? ref[2] ?? "")?.fresh === true;
-				pins.set(name, { target, fresh: template !== null || fromFresh });
-			} else pins.delete(name);
-			assigned.add(name);
-			continue;
-		}
-		if (!SCRATCH_STEPS.test(raw)) return unchanged;
-		const operands = segment.slice(1);
-		const words = operands.map((t) => plainScratchWord(expanded.slice(t.start, t.end)));
-		if (words.some((word) => word === null)) return unchanged;
-		if (raw === "cd") {
-			const target = words[0];
-			if (index !== 0 || !andChain || words.length !== 1 || typeof target !== "string" || !isTempRoot(target))
-				return unchanged;
-			leadingCd = operands[0]?.value ?? null;
-			continue;
-		}
-		// A word relative to the leading temp cd lands under the temp root; any other relative word is the walk's.
-		const absolute = (word: string): string | null =>
-			path.isAbsolute(word) ? word : leadingCd !== null ? `${temp}/${word}` : null;
-		if (raw === "mkdir") {
-			for (const word of words as string[]) {
-				if (word === "-p") continue;
-				const target = word.startsWith("$") ? resolve(word) : absolute(word);
-				if (word.startsWith("-") || target === null || !underTemp(target)) return unchanged;
-			}
-			continue;
-		}
+	/** The real path now must be the lexical one: a link below the temp root, even one inside it, could lead out. */
+	const realUnderTemp = (target: string, suffix: ReadonlyArray<string>): boolean =>
+		canonicalizeRawPath(target, "/") === path.join(canonicalTemp, ...suffix);
+	const edits: Array<{ start: number; end: number; text: string }> = [];
+	/** The cd rewrites, which the walk reads as bases: a program run anywhere in the call voids them. */
+	const cdEdits: typeof edits = [];
+	let leadingCd: string | null = null;
+	let linkRisk = false;
+	let hasDelete = false;
+	let failed = false;
+	/**
+	 * A delete operand the projection left for the walk while a cd may have moved the shell: a glob or brace (`*\/../..`)
+	 * or a path below a link the walk would read from the cd base, so the cd neither stays a base nor is rewritten.
+	 */
+	let unplaced = false;
+	const singleChain = script.items.length === 1 && script.items[0]?.andOr.ops.every((op) => op === "&&") === true;
+	const quoted = (value: string): string => (/^[\w./+@%,:=-]+$/u.test(value) ? value : shellQuote(value));
+
+	const projectDelete = (step: ShellSimpleCommand, cdBase: string | null): void => {
 		hasDelete = true;
+		const planned: typeof edits = [];
 		let options = true;
-		for (const [offset, word] of (words as string[]).entries()) {
-			if (options && word === "--") {
+		for (const word of step.words.slice(1)) {
+			const value = staticWordValue(word, lookup);
+			if (options && value === "--") {
 				options = false;
 				continue;
 			}
-			if (options && word.startsWith("-")) continue;
-			const token = operands[offset] as (typeof operands)[number];
-			if (word.startsWith("$")) {
-				const ref = SCRATCH_REFERENCE.exec(word);
-				// An unpinned name stays as text, and the walk keeps the delete unresolved.
-				if (ref === null || !pins.has(ref[1] ?? ref[2] ?? "")) continue;
-				const target = resolve(word);
-				if (target === null) return unchanged;
-				edits.push({ start: token.start, end: token.end, target });
+			if (options && value?.startsWith("-") && value !== "-") {
+				// An option the reader does not know may change what the delete reaches: the step stays the walk's.
+				if (!SCRATCH_DELETE_OPTION.test(value)) {
+					unplaced = true;
+					return;
+				}
 				continue;
 			}
-			const target = absolute(word);
-			if (
-				target !== null &&
-				(leadingCd !== null || target === temp || target.startsWith(`${temp}/`)) &&
-				!underTemp(target)
-			)
-				return unchanged;
-			// After the leading temp cd a relative operand is that temp path: spelled out, the snapshot and scratch-only checks
-			// place it where it lands instead of reading it as a workspace delete (XR-43).
-			if (target !== null && !path.isAbsolute(word)) edits.push({ start: token.start, end: token.end, target });
+			const [only] = word.parts;
+			const freshPin = word.parts.length === 1 && only?.kind === "param" ? pins.get(only.name) : undefined;
+			let target: string | null = freshPin?.fresh === true ? freshPin.target : value;
+			if (target === null || target === "") {
+				unplaced = true;
+				continue;
+			}
+			const relative = !path.isAbsolute(target);
+			if (relative) {
+				if (cdBase === null) {
+					unplaced = true;
+					continue;
+				}
+				target = `${cdBase}/${target}`;
+			}
+			const follows = /\/\.?$/u.test(target);
+			const suffix = tempSuffix(target);
+			if (suffix === null || suffix.length === 0) {
+				if (relative) unplaced = true;
+				continue;
+			}
+			const clean = path.join(target.startsWith(canonicalTemp) ? canonicalTemp : temp, ...suffix);
+			if (!realUnderTemp(clean, suffix)) {
+				failed = true;
+				return;
+			}
+			if (linkRisk && (suffix.length !== 1 || follows)) {
+				if (relative) unplaced = true;
+				continue;
+			}
+			planned.push({ start: word.start, end: word.end, text: quoted(follows ? `${clean}/` : clean) });
 		}
+		edits.push(...planned);
+	};
+
+	for (const [itemIndex, item] of script.items.entries()) {
+		if (item.background) return unchanged;
+		const { pipelines, ops } = item.andOr;
+		const chainNames = new Set<string>();
+		let cdBase: string | null = null;
+		let conditional = false;
+		for (const [index, pipeline] of pipelines.entries()) {
+			if (index > 0 && ops[index - 1] === "||") {
+				conditional = true;
+				cdBase = null;
+				// The `||` side runs exactly when an earlier step failed, so a pin made past the head may never have been made.
+				for (const name of chainNames) pins.delete(name);
+			}
+			const alone = pipeline.commands.length === 1;
+			for (const step of pipeline.commands) {
+				if (commandHasPart(step, ["opaque"])) return unchanged;
+				for (const each of [...step.words, ...step.redirects.map((redirect) => redirect.target)])
+					if (each.parts.some((part) => part.kind === "command")) return unchanged;
+				for (const assignment of step.assignments) {
+					if (SCRATCH_SPECIAL.test(assignment.name)) return unchanged;
+					const template = scratchTemplate(assignment.value, temp);
+					if (template === null && assignment.value.parts.some((part) => part.kind === "command")) return unchanged;
+				}
+				if (step.words.length === 0) {
+					if (step.redirects.length > 0) return unchanged;
+					const pinnable = alone && !pipeline.negated && !conditional;
+					for (const assignment of step.assignments) {
+						const template = scratchTemplate(assignment.value, temp);
+						const [only] = assignment.value.parts;
+						const source = assignment.value.parts.length === 1 && only?.kind === "param" ? pins.get(only.name) : undefined;
+						const target = template ?? (source?.fresh === true ? source.target : staticWordValue(assignment.value, lookup));
+						const suffix = target === null ? null : tempSuffix(target);
+						if (!pinnable || assignment.append || target === null || suffix === null || suffix.length === 0) {
+							pins.delete(assignment.name);
+							continue;
+						}
+						pins.set(assignment.name, { target, fresh: template !== null || source?.fresh === true });
+						if (index > 0) chainNames.add(assignment.name);
+					}
+					continue;
+				}
+				for (const assignment of step.assignments) pins.delete(assignment.name);
+				const name = staticCommandName(step);
+				if (name === null) return unchanged;
+				const args = step.words.slice(1).map((word) => staticWordValue(word, lookup));
+				if (name === "cd") {
+					const operands = args[0] === "--" ? args.slice(1) : args;
+					const [operand] = operands;
+					const next = ops[index];
+					const landing = operand === null || operand === undefined ? null : operand.replace(/(.)\/+$/u, "$1");
+					const suffix = landing === null || !path.isAbsolute(landing) ? null : tempSuffix(landing);
+					const provable =
+						alone &&
+						!pipeline.negated &&
+						!conditional &&
+						!linkRisk &&
+						step.assignments.length === 0 &&
+						step.redirects.length === 0 &&
+						operands.length === 1 &&
+						(next === undefined || next === "&&") &&
+						landing !== null &&
+						suffix !== null &&
+						path.normalize(landing) === landing &&
+						statSync(landing, { throwIfNoEntry: false })?.isFile() !== true &&
+						realUnderTemp(landing, suffix);
+					cdBase = provable ? landing : null;
+					if (provable && landing !== null) {
+						const word = step.words[step.words.length - 1] as ShellWord;
+						cdEdits.push({ start: word.start, end: word.end, text: quoted(landing) });
+						if (itemIndex === 0 && index === 0 && singleChain) leadingCd = landing;
+					}
+					continue;
+				}
+				if (name === "set") {
+					if (!scratchSetOptions(args)) return unchanged;
+					continue;
+				}
+				if (SCRATCH_INERT_BUILTINS.has(name)) {
+					if (name === "printf" && args.some((arg) => arg === null || arg.startsWith("-v"))) return unchanged;
+					continue;
+				}
+				if (BASH_BUILTINS.has(name)) return unchanged;
+				if (name === "mkdir") continue;
+				if (SCRATCH_DELETES.has(name)) {
+					if (alone) projectDelete(step, cdBase);
+					else unplaced = true;
+					if (failed) return unchanged;
+					continue;
+				}
+				linkRisk = true;
+				// Row 287 (neon): the program may plant a link below the cd landing, so no later operand is placed from it.
+				cdBase = null;
+			}
+		}
+		// After the and-or a pin made past its head may never have been made, and the shell may be wherever a cd left it.
+		for (const name of chainNames) pins.delete(name);
 	}
-	if (!hasDelete) return unchanged;
-	const projected: string[] = [];
-	let cursor = 0;
-	for (const { start, end, target } of edits) {
-		projected.push(expanded.slice(cursor, start), target);
-		cursor = end;
-	}
-	projected.push(expanded.slice(cursor));
-	return { command: projected.join(""), leadingCd };
+	// A program may plant a link where the walk would follow the cd as a base, so only a call that runs none keeps it,
+	// and the cd stays as written: a rewritten landing would be a base the walk places under a scratch root. A delete
+	// operand left unplaced (a glob, a brace, `..`) is read by the walk from that base, so it voids the cd the same way.
+	if (linkRisk || unplaced) leadingCd = null;
+	else edits.push(...cdEdits);
+	if (!hasDelete || (edits.length === 0 && leadingCd === null)) return unchanged;
+	let projected = command;
+	for (const edit of [...edits].sort((left, right) => right.start - left.start))
+		projected = `${projected.slice(0, edit.start)}${edit.text}${projected.slice(edit.end)}`;
+	return { command: projected, leadingCd };
 }
 
 function deleteEventReasons(
