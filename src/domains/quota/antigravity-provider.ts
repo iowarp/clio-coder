@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 import type { QuotaProvider, UsageSnapshot, UsageWindow } from "./types.js";
-import { formatPlan } from "./types.js";
+import { credentialFingerprint, formatPlan } from "./types.js";
 
 export const ANTIGRAVITY_QUOTA_PROVIDER_ID = "antigravity";
 
@@ -185,6 +185,11 @@ export function createAntigravityQuotaProvider(options: AntigravityQuotaOptions 
 	return {
 		id: ANTIGRAVITY_QUOTA_PROVIDER_ID,
 		displayName: DISPLAY_NAME,
+
+		async credentialScope(): Promise<string | null> {
+			const credentials = await readCredentials();
+			return credentials === null ? null : credentialFingerprint(ANTIGRAVITY_QUOTA_PROVIDER_ID, credentials.accessToken);
+		},
 
 		async detect(): Promise<boolean> {
 			return (await readCredentials()) !== null;

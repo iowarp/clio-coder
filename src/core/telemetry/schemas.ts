@@ -1926,10 +1926,20 @@ export const ToolSettledSchema = Type.Object(
 		skill: Type.Optional(ExistingId),
 		/** The capabilities a gateway call or chain invoked, so the tool mix sees `data` or `web_fetch` behind it. */
 		capabilities: Type.Optional(Type.Array(ExistingId, { minItems: 1, maxItems: 32 })),
+		/** A capability a gateway call or chain step ran under the model's call; see {@link countsAsToolCall} (C-9). */
+		inner: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
 export type ToolSettled = Static<typeof ToolSettledSchema>;
+/**
+ * Whether a tool.settled or tool.decided row is a call the model made. A gateway call's capability and each chain
+ * step decide and settle as their own `inner` rows, so every decision has its settlement; counters count only the
+ * model's call (C-9).
+ */
+export function countsAsToolCall(data: { inner?: true }): boolean {
+	return data.inner !== true;
+}
 /**
  * One final safety disposition at a tool decision point, carrying its classification and policy facts. Commands,
  * arguments and policy prose stay out of the journal (#434).
@@ -1948,6 +1958,8 @@ export const ToolDecidedSchema = Type.Object(
 		policyHash: Type.Optional(ExistingId),
 		/** The confirmation rule (for example slurm-allocation) that raised an ask, apart from the policy's own rule. */
 		confirmationRuleId: Type.Optional(ExistingId),
+		/** A capability a gateway call or chain step ran under the model's call; see {@link countsAsToolCall} (C-9). */
+		inner: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );

@@ -43,55 +43,75 @@ function outcome(
 	return { status, message, windows: [], credits: null, retryAfterSeconds: null, ...extra };
 }
 
-/** Read current Anthropic usage with a bearer token, reporting failure as a status. */
+/**
+ * Read current Anthropic usage with a bearer token, reporting failure as a status. The timeout covers the body as
+ * well as the headers: a response whose body stalls would otherwise hold the caller, and its sibling adapter queued
+ * behind it, indefinitely.
+ */
 export async function fetchAnthropicUsage(
 	token: string,
 	dependencies: AnthropicUsageDependencies,
 ): Promise<AnthropicUsageOutcome> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), dependencies.timeoutMs);
-	let response: Response;
 	try {
-		response = await dependencies.fetch(ANTHROPIC_USAGE_URL, {
-			method: "GET",
-			headers: {
-				Authorization: `Bearer ${token}`,
-				"anthropic-beta": ANTHROPIC_OAUTH_BETA,
-			},
-			signal: controller.signal,
-		});
-	} catch (error) {
-		return outcome("error", describeError(error, dependencies.timeoutMs));
+		let response: Response;
+		try {
+			response = await dependencies.fetch(ANTHROPIC_USAGE_URL, {
+				method: "GET",
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"anthropic-beta": ANTHROPIC_OAUTH_BETA,
+				},
+				signal: controller.signal,
+			});
+		} catch (error) {
+			return outcome("error", describeError(error, dependencies.timeoutMs));
+		}
+
+		if (response.status === 401 || response.status === 403) {
+			await discardBody(response);
+			return outcome("expired", null);
+		}
+		if (response.status === 429) {
+			await discardBody(response);
+			return outcome("error", "HTTP 429", {
+				retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("Retry-After")),
+			});
+		}
+		if (response.status !== 200) {
+			await discardBody(response);
+			return outcome("error", `HTTP ${response.status}`);
+		}
+
+		let body: unknown;
+		try {
+			body = await untilAborted(response.json(), controller.signal);
+		} catch {
+			return outcome(
+				"error",
+				controller.signal.aborted ? `timeout after ${dependencies.timeoutMs}ms` : "Unexpected usage response",
+			);
+		}
+		if (!isRecord(body)) {
+			return outcome("error", "Unexpected usage response");
+		}
+
+		return outcome("ok", null, { windows: usageWindows(body), credits: usageCredits(body.spend) });
 	} finally {
 		clearTimeout(timer);
 	}
+}
 
-	if (response.status === 401 || response.status === 403) {
-		await discardBody(response);
-		return outcome("expired", null);
-	}
-	if (response.status === 429) {
-		await discardBody(response);
-		return outcome("error", "HTTP 429", {
-			retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("Retry-After")),
-		});
-	}
-	if (response.status !== 200) {
-		await discardBody(response);
-		return outcome("error", `HTTP ${response.status}`);
-	}
-
-	let body: unknown;
-	try {
-		body = await response.json();
-	} catch {
-		return outcome("error", "Unexpected usage response");
-	}
-	if (!isRecord(body)) {
-		return outcome("error", "Unexpected usage response");
-	}
-
-	return outcome("ok", null, { windows: usageWindows(body), credits: usageCredits(body.spend) });
+/** Settle with `work`, or reject once `signal` aborts; a body read the abort outran is left to settle unobserved. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+	work.catch(() => undefined);
+	if (signal.aborted) return Promise.reject(new Error("aborted"));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = (): void => reject(new Error("aborted"));
+		signal.addEventListener("abort", onAbort, { once: true });
+		work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+	});
 }
 
 /** Windows from `limits[]` when the endpoint sends it, otherwise the flat buckets. */

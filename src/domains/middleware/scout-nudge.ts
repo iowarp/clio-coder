@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import {
 	createReadOnlyExplorationNudgeRegistration,
 	isReadOnlyExplorationCall,
@@ -20,7 +21,10 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataString } from 
  * workspace that between them touch {@link SCOUT_NUDGE_AREA_THRESHOLD} or more
  * distinct top-level directories, and no dispatch call ran this turn, one
  * host-framed note on the read that crossed the line suggests one parallel
- * scout dispatch with one task per area.
+ * scout dispatch with one task per area. A turn that already changed the
+ * workspace (a typed edit, write or patch, or a dispatch that mutated it) is
+ * implementing, not surveying, and is never nudged; dot directories such as
+ * `.clio-coder/` are not areas (C-21).
  *
  * Typed signals only: the tool's read class and its path arguments. Bash is
  * never counted, because its scope lives in command text (#431). The turn must
@@ -41,6 +45,7 @@ interface ScoutSurveyTurn {
 	reads: number;
 	areas: Set<string>;
 	dispatched: boolean;
+	mutated: boolean;
 	advised: boolean;
 }
 
@@ -55,18 +60,31 @@ function buildScoutNudgeMessage(areas: ReadonlyArray<string>): string {
 	);
 }
 
-/** The top-level directory a workspace-relative target sits in, or null for the root or a root-level file. */
+/**
+ * The top-level directory a workspace-relative target sits in, or null for the root, a root-level file or a dot
+ * directory such as `.clio-coder/` or `.git/`, which hold tool state rather than an area of the project.
+ */
 function topLevelArea(within: string, workspaceRoot: string): string | null {
 	if (within === "") return null;
 	const segments = within.split(sep);
 	const first = segments[0];
-	if (first === undefined || first.length === 0) return null;
+	if (first === undefined || first.length === 0 || first.startsWith(".")) return null;
 	if (segments.length > 1) return first;
 	try {
 		return statSync(join(workspaceRoot, first)).isDirectory() ? first : null;
 	} catch {
 		return null;
 	}
+}
+
+/** A succeeded typed change inside the workspace: the same signals the read-only exploration advisory resets on. */
+function changedWorkspace(input: MiddlewareHookInput, workspaceRoot: string): boolean {
+	if (input.hook !== "after_tool" || input.metadata?.resultKind !== "ok") return false;
+	if (input.toolName === ToolNames.Dispatch) return dispatchMutatedParentWorkspace(input.toolResultDetails);
+	return (
+		(input.toolName === ToolNames.Edit || input.toolName === ToolNames.Write || input.toolName === "apply_patch") &&
+		workspaceRelativeTarget(input, workspaceRoot) !== null
+	);
 }
 
 /** Strict: a host that did not report the turn's capabilities gets no nudge. */
@@ -81,7 +99,7 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 		id: SCOUT_NUDGE_REGISTRATION_ID,
 		description: "suggest one parallel scout dispatch when a turn's reads span several top-level directories",
 		hooks: ["turn_start", "before_tool", "after_tool"],
-		evidence: "count:read-class-calls+top-level-areas@user-turn",
+		evidence: "count:read-class-calls-and-areas@user-turn",
 		settles: true,
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
@@ -102,6 +120,7 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 					reads: 0,
 					areas: new Set(),
 					dispatched: false,
+					mutated: false,
 					advised: false,
 				});
 				return NONE;
@@ -109,14 +128,18 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 			if (input.hook !== "before_tool" && input.hook !== "after_tool") return NONE;
 			if (input.metadata?.origin === "harness" || input.turnId === undefined) return NONE;
 			const turn = byTurn.get(input.turnId);
-			if (turn === undefined || turn.advised) return NONE;
+			if (turn === undefined || turn.advised || turn.mutated) return NONE;
+			const root = deps.workspaceRoot?.() ?? process.cwd();
+			if (changedWorkspace(input, root)) {
+				turn.mutated = true;
+				return NONE;
+			}
 			if (input.toolName === ToolNames.Dispatch) {
 				turn.dispatched = true;
 				return NONE;
 			}
 			if (input.hook !== "after_tool" || input.metadata?.resultKind !== "ok") return NONE;
 			if (!turn.canDispatch || turn.dispatched) return NONE;
-			const root = deps.workspaceRoot?.() ?? process.cwd();
 			if (!isReadOnlyExplorationCall(input, root)) return NONE;
 			const within = workspaceRelativeTarget(input, root);
 			if (within === null) return NONE;

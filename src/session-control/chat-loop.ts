@@ -1646,6 +1646,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stepTurnEnd: () => stepTurnEnd(),
 		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
+		queueHostMessage: (text, source, rule) => queues.queueHostMessage(text, source, rule),
+	});
+	// A reminder an after_tool rule emits for this session's call rides the next tool-batch boundary (X6).
+	const detachBoundaryReminders = deps.toolRegistry?.onToolBoundaryReminders?.((reminders, input) => {
+		if (input.sessionId === undefined || input.sessionId === deps.session?.current()?.id)
+			middleware.applyToolBoundaryReminders(reminders);
 	});
 
 	try {
@@ -2066,6 +2072,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * continuation follows crosses its per-turn call or observation budget, read and cleared as the turn settles.
 	 */
 	let budgetRoll: "calls" | "observation" | null = null;
+	/** The interview this operator prompt closed, carried into its continuations so a complete there is already_complete (C-25). */
+	let promptInterview: AskUserToolPolicy | undefined;
 	const requestBudgetRoll = (budget: "calls" | "observation"): void => {
 		if (budgetRoll !== null || !state.streaming) return;
 		budgetRoll = budget;
@@ -2128,6 +2136,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queueHandOver: {
 			atFinishTurn: (final) => queues.handOverAtFinishTurn(final),
 			afterPrepareNextTurn: () => queues.handOverAfterPrepareNextTurn(),
+			takeHostMessages: () => queues.takeHostMessages(),
 		},
 		middlewareToolChoice,
 		persistence,
@@ -2939,9 +2948,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * The level the triage round asks for. Off is sent as off, exactly as before the setting existed; any other level
-	 * resolves through the route the way the chat route's level does, so a model without that level gets its nearest
-	 * supported one. A route that no longer resolves keeps the round at off.
+	 * The level the triage round asks for, resolved through the route the way the chat route's level does, so a model
+	 * without that level, off included, gets its nearest supported one. A route that no longer resolves keeps the
+	 * round at off.
 	 */
 	const triageThinkingLevel = (
 		level: ThinkingLevel,
@@ -2949,7 +2958,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		wireModelId: string,
 		model: EngineModel,
 	): ThinkingLevel => {
-		if (level === "off") return "off";
 		const resolved = resolveRuntimeTarget(deps.providers, {
 			targetId,
 			wireModelId,
@@ -3702,6 +3710,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.currentTurnConstraints,
 				);
 				if (askUserPolicy) askUserPolicy.planOnly = isPlanOnlyRequest(text);
+				if (options.yoloContinuation !== true && options.requestContinuation !== true) promptInterview = undefined;
+				else if (askUserPolicy && promptInterview) askUserPolicy.closedEarlier = promptInterview;
 				// turn_start: the prompt is accepted; registrations may inject
 				// context for this request. Accumulated reminders (turn_end
 				// advisories from the previous turn plus anything turn_start just
@@ -4339,6 +4349,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
+					// Only a submit that still owns this generation hands its interview on, so a turn superseded while the
+					// decisions persisted never answers another session's continuation (C-25).
+					if (askUserPolicy?.status === "complete" && askUserPolicy.rounds.length > 0) promptInterview = askUserPolicy;
 					// A turn that ended without its turn_end hook (a throw or an abort before any reply) ended here, while this
 					// submit still owns the stream and its lease: a resubmit below can take ownership and return before its turn_start.
 					if (promptStarted && submitOwner === owner) outcomeCollector.endTurn();
@@ -4432,15 +4445,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								stopReason: record.stopReason,
 								retries: turnRetryAttempts + providerRetryAttempts,
 								// The post-tool guard stops between calls, so no call carries its cause; the ledger reply does (CLI-3).
+								// A loop-guard or turn-budget-roll stop is the guard's, read off the owner it aborted (C-10).
 								cause: canceled
 									? "operator_cancel"
 									: autonomyStopped
 										? "autonomy_stop"
 										: jobClockStopped
 											? "job_clock"
-											: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
-												? "oversized_tool_result"
-												: undefined,
+											: owner !== null && owner === guardStoppedOwner
+												? "loop_guard"
+												: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
+													? "oversized_tool_result"
+													: undefined,
 								noAnswer: ending?.kind === "no_answer" ? ending.cause : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
@@ -4653,6 +4669,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptByTriage = options?.source === "triage";
 				state.activeInterruptByAutonomy = options?.source === "autonomy";
 				state.activeInterruptByJobClock = options?.source === "job_clock";
+				state.activeInterruptByLoopGuard = options?.source === "loop_guard";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))
@@ -4875,6 +4892,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			submitOwner?.abort();
 			submitGeneration += 1;
+			// An interview another session or branch closed never answers this one's continuations (C-25).
+			promptInterview = undefined;
 			turnRuntime.cancelRunWatchdog();
 			sessionResetSettlement = activeSubmit;
 			state.streaming = false;
@@ -4962,6 +4981,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribeSynthesisLock?.();
 			unsubscribeToolBudgetLock?.();
 			detachOutcomeLedger?.();
+			detachBoundaryReminders?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			keepalive.dispose();

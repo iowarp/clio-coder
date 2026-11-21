@@ -1318,7 +1318,11 @@ function appendDispatchFinishContractEntry(
  * is the orchestrator's copy, so the sealed validation measures a mutation
  * report against the run rather than re-reading the model's word for it.
  */
-function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<string, unknown>): void {
+function recordWorkerRunEffect(
+	recorder: RunEffectsRecorder,
+	event: Record<string, unknown>,
+	helperResult: boolean,
+): void {
 	if (event.type === "clio_coder_tool_finish" && isRecord(event.payload)) {
 		const id = readStringOrNull(event.payload.toolCallId);
 		const outcome = event.payload.outcome;
@@ -1326,6 +1330,11 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 			recorder.checkOutcome(id, outcome, event.payload.unresolved === true);
 		return;
 	}
+	// In a run that holds the helper result contract, the result submission is the worker's handoff to this process,
+	// never a workspace capability, so it neither writes nor opens the write record. A tool of that name in any other
+	// run, like any other unknown name, stays opaque (C-14).
+	if (helperResult && (event.toolName === INTERNAL_HELPER_RESULT_TOOL || event.tool === INTERNAL_HELPER_RESULT_TOOL))
+		return;
 	if (typeof event.type === "string") recordToolExecutionEffects(recorder, { ...event, type: event.type });
 }
 
@@ -1508,6 +1517,8 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 }
 
 const MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS = 2048;
+/** Bound on the adapter's failure words an ACP run's outcome detail carries (C-16). */
+const MAX_ACP_FAILURE_DETAIL_BYTES = 1024;
 const MAX_WORKER_OUTCOME_DETAIL_BYTES = 1024;
 const MAX_WORKER_DIAGNOSTIC_FAILURE_CHARS = 4096;
 
@@ -7849,6 +7860,16 @@ export function createDispatchBundle(
 				const { outcome, detail } = resolveRunOutcome(evidence);
 				let finalOutcome = outcome;
 				let finalDetail = detail;
+				// A failure the adapter typed (sign-in, an unoffered model or thinking level, a broken channel) settles
+				// under its own code, with the adapter's words beside the generic exit detail (C-16).
+				if (outcome === "failed" && result.failureCode !== undefined) {
+					outcomeCode = result.failureCode;
+					if (result.failureMessage !== undefined)
+						finalDetail = boundedExternalDiagnostic(
+							detail !== null ? `${detail}; ${result.failureMessage}` : result.failureMessage,
+							MAX_ACP_FAILURE_DETAIL_BYTES,
+						);
+				}
 				// Same high-rigor completion gate as native dispatch: an external
 				// agent is a guest inside Clio's policy model, not an exemption.
 				const finishContract = assessDispatchFinishContract({
@@ -9067,7 +9088,7 @@ export function createDispatchBundle(
 					finishContractAssistantText = finishEntry.assistantText;
 					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
-				recordWorkerRunEffect(runEffects, event);
+				recordWorkerRunEffect(runEffects, event, spec.helperResult === true);
 				recordWorkerVerifyCall(verifyCalls, event);
 				if (
 					event.type === "tool_execution_end" &&

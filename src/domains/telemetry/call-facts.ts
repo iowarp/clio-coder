@@ -391,8 +391,12 @@ export function turnSettlementFromCalls(
 	const stages = last?.stages;
 	const cause = (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null;
 	// A stop that landed after the final call ended, at its tool boundary, struck no stage of that call (bt-26 N2f).
+	// The loop guard stops only from a tool, so a call it refused before sending was refused at that boundary (C-10).
 	const betweenCalls =
-		cause !== null && last !== undefined && last.stop.reason !== "aborted" && last.stop.reason !== "error";
+		cause !== null &&
+		last !== undefined &&
+		((last.stop.reason !== "aborted" && last.stop.reason !== "error") ||
+			(last.disposition === "never_sent" && last.stop.failure === "loop_guard"));
 	return {
 		stopReason: reason,
 		terminal: {

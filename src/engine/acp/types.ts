@@ -449,6 +449,13 @@ export interface AcpUsageLimit {
 	retryAfterMs?: number;
 }
 
+/** Failures the adapter types: the peer needs sign-in, refused the requested model or thinking level, or its channel broke. */
+export type AcpDelegationFailureCode =
+	| "acp_auth_required"
+	| "acp_model_unavailable"
+	| "acp_thinking_unavailable"
+	| "acp_transport_error";
+
 export interface AcpDelegationResult {
 	messages: AgentMessage[];
 	exitCode: number;
@@ -460,6 +467,8 @@ export interface AcpDelegationResult {
 	/** The peer's provider refused on quota; the run failed with `usageLimit.message`. */
 	usageLimit?: AcpUsageLimit;
 	failureMessage?: string;
+	/** The typed cause of a failed delegation, when the adapter knows one; `failureMessage` says it in words. */
+	failureCode?: AcpDelegationFailureCode;
 	delegation: {
 		acpSessionId: string | null;
 		/** The peer session cannot take another turn; a later turn starts a fresh session. */

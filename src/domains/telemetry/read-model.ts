@@ -63,7 +63,7 @@ import type {
 	ObjectRef,
 	SurfaceOutcome,
 } from "../../core/telemetry/schemas.js";
-import { EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
+import { countsAsToolCall, EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
@@ -250,7 +250,7 @@ interface ToolSummary {
 const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Tasks, ToolNames.Decide]);
 
 function noteTool(tools: Map<string, ToolSummary>, record: TelemetryRecord): string | null {
-	if (record.k !== "tool.settled" || record.ctx.callId === undefined) return null;
+	if (record.k !== "tool.settled" || record.ctx.callId === undefined || !countsAsToolCall(record.data)) return null;
 	const prior = tools.get(record.ctx.callId);
 	tools.set(record.ctx.callId, {
 		calls: (prior?.calls ?? 0) + 1,
@@ -3153,6 +3153,7 @@ export function timeline(
 				break;
 			case "tool.settled": {
 				const data = record.data;
+				if (!countsAsToolCall(data)) break;
 				const duration = localClock(data.durationMs);
 				const parked = data.parkedMs === undefined ? null : localClock(data.parkedMs);
 				const bytes = data.resultBytes === undefined ? null : localCount(data.resultBytes);
@@ -3576,7 +3577,7 @@ function runClock(
 function runActivity(run: Run, output: Quantity["fact"], options: ReadOptions): RunTelemetryV1["activity"] {
 	const toolIds = new Set<string>();
 	for (const record of run.source.records) {
-		if (record.k === "tool.settled") toolIds.add(record.ctx.toolCallId ?? record.id);
+		if (record.k === "tool.settled" && countsAsToolCall(record.data)) toolIds.add(record.ctx.toolCallId ?? record.id);
 		if (
 			record.k === "run.feed_appended" &&
 			record.data.body.kind === "event" &&
@@ -4285,6 +4286,20 @@ function sideCallTotals(attempts: readonly FoldedAttempt[]): {
 }
 
 /**
+ * The record kinds {@link foldSideSurfaces} reads: the call fold's own, the memory steps and the surface ledger. A reader
+ * may read a journal filtered to these (`readCallJournal`'s `wanted`) and fold the same result.
+ */
+export const SIDE_SURFACE_RECORD_KINDS = [
+	"call.started",
+	"call.settled",
+	"call.linked",
+	"journal.gap",
+	"memory.step_decided",
+	"middleware.fired",
+	"surface.settled",
+] as const;
+
+/**
  * Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1).
  * `route` is the caller's: without it no surface can read `unsupported`, only `unexercised`.
  */
@@ -4398,7 +4413,9 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 	const journals = [...source.sessions.flatMap(sessionJournals), ...source.runs.values()];
 	const inWindow = (at: string) => Date.parse(at) >= from && Date.parse(at) <= to + 5_000;
 	const records = accountabilityRecords(journals).filter((record) => inWindow(record.t));
-	const decisions = records.filter((record) => record.k === "tool.decided");
+	const decisions = records
+		.filter((record) => record.k === "tool.decided")
+		.filter((record) => countsAsToolCall(record.data));
 	// A stalled step pipeline settles its run `completed`, so the run count alone reads it as done (bt-20).
 	const pipelines = source.sessions
 		.flatMap((session) => session.journal.records)
@@ -4490,7 +4507,7 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 	const ordered = [...records.values()].sort((a, b) => a.t.localeCompare(b.t) || a.id.localeCompare(b.id));
 	const tools = new Map<string, { ok: number; errors: number; blocked: number; durations: number[] }>();
 	for (const record of ordered) {
-		if (record.k !== "tool.settled") continue;
+		if (record.k !== "tool.settled" || !countsAsToolCall(record.data)) continue;
 		const row = tools.get(record.data.tool) ?? { ok: 0, errors: 0, blocked: 0, durations: [] };
 		if (record.data.outcome === "ok") row.ok++;
 		else if (record.data.outcome === "error") row.errors++;
@@ -4499,6 +4516,10 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 		tools.set(record.data.tool, row);
 	}
 	const compactions = ordered.filter((record) => record.k === "compaction.settled");
+	// Totals count the model's calls only, like the per-tool and per-session rows (C-9).
+	const settledCalls = ordered
+		.filter((record) => record.k === "tool.settled")
+		.filter((record) => countsAsToolCall(record.data));
 	const outcomes = { committed: 0, discarded: 0, failed: 0, unresolved: 0 };
 	for (const record of compactions) outcomes[record.data.outcome]++;
 	const sessions = source.sessions
@@ -4515,7 +4536,9 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 			for (const journal of sessionJournals(session))
 				for (const record of journal.records) ownRecords.set(record.id, record);
 			const observed = [...ownRecords.values()];
-			const settledTools = observed.filter((record) => record.k === "tool.settled");
+			const settledTools = observed
+				.filter((record) => record.k === "tool.settled")
+				.filter((record) => countsAsToolCall(record.data));
 			return {
 				sessionId: session.sessionId,
 				startedAt: telemetry.lifetime.firstRecordAt,
@@ -4545,13 +4568,9 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 			),
 		},
 		totals: {
-			toolCalls: shownCount(ordered.filter((record) => record.k === "tool.settled").length),
-			toolErrors: shownCount(
-				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "error").length,
-			),
-			toolBlocked: shownCount(
-				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "blocked").length,
-			),
+			toolCalls: shownCount(settledCalls.length),
+			toolErrors: shownCount(settledCalls.filter((record) => record.data.outcome === "error").length),
+			toolBlocked: shownCount(settledCalls.filter((record) => record.data.outcome === "blocked").length),
 			compactions: shownCount(compactions.length),
 		},
 		tools: [...tools]

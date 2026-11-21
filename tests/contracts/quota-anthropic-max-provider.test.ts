@@ -7,6 +7,10 @@ import {
 	parseStoredAnthropicCredential,
 } from "../../src/domains/quota/anthropic-max-provider.js";
 import { ANTHROPIC_OAUTH_BETA, ANTHROPIC_USAGE_URL } from "../../src/domains/quota/anthropic-usage.js";
+import { createQuotaCache } from "../../src/domains/quota/cache.js";
+import { createClaudeCodeQuotaProvider } from "../../src/domains/quota/claude-code-provider.js";
+import { createQuotaService } from "../../src/domains/quota/service.js";
+import type { QuotaProvider, UsageSnapshot } from "../../src/domains/quota/types.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -136,6 +140,70 @@ it("carries Retry-After through from a rate-limited usage read", async () => {
 	assert.equal(snapshot.status, "error");
 	assert.equal(snapshot.message, "HTTP 429");
 	assert.equal(snapshot.retryAfterSeconds, 17);
+});
+
+it("polls the two Anthropic adapters one at a time, holds each credential's 429, and a stalled adapter blocks neither (C-19)", {
+	timeout: 10_000,
+}, async () => {
+	let active = 0;
+	let peak = 0;
+	const { fetch, calls } = stubFetch(() => new Response("", { status: 429, headers: { "Retry-After": "300" } }));
+	const serialFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		active += 1;
+		peak = Math.max(peak, active);
+		await new Promise((resolve) => setImmediate(resolve));
+		active -= 1;
+		return fetch(input, init);
+	}) as typeof globalThis.fetch;
+	const claudeCodeCredentials = async () => ({
+		accessToken: "sk-ant-oat-claude-code",
+		subscriptionType: null,
+		expiresAtMs: null,
+		refreshTokenExpiresAtMs: null,
+		hasRefreshToken: true,
+	});
+	const claudeCode = createClaudeCodeQuotaProvider({
+		fetch: serialFetch,
+		now: () => NOW,
+		readCredentials: claudeCodeCredentials,
+	});
+	const service = createQuotaService({ providers: [provider(serialFetch), claudeCode], includeLocal: false });
+
+	const rows = await service.read();
+	await service.read();
+
+	assert.equal(peak, 1, "adapters on one endpoint never poll at once");
+	assert.equal(calls.length, 2, "each credential polls once, then its own 429 holds it");
+	assert.deepEqual(
+		rows.map((row) => [row.providerId, row.status, row.message]),
+		[
+			["anthropic-max", "error", "HTTP 429"],
+			["claude-code", "error", "HTTP 429"],
+		],
+	);
+
+	// A body that never ends times out instead of holding the endpoint lane forever.
+	const stalled = stubFetch(() => new Response(new ReadableStream({ start() {} }), { status: 200 }));
+	const timedOut = await createAnthropicMaxQuotaProvider({
+		readCredentials: async () => CREDENTIALS,
+		fetch: stalled.fetch,
+		now: () => NOW,
+		timeoutMs: 20,
+	}).fetch();
+	assert.deepEqual([timedOut.status, timedOut.message], ["error", "timeout after 20ms"]);
+
+	// And a turn that never settles holds its sibling only for the lane bound.
+	const hung: QuotaProvider = {
+		id: "anthropic-max",
+		displayName: "Anthropic Max",
+		endpoint: ANTHROPIC_USAGE_URL,
+		detect: async () => true,
+		fetch: () => new Promise<UsageSnapshot>(() => undefined),
+	};
+	const cache = createQuotaCache({ laneTurnMs: 20 });
+	void cache.resolve(hung);
+	const sibling = createClaudeCodeQuotaProvider({ fetch, now: () => NOW, readCredentials: claudeCodeCredentials });
+	assert.equal((await cache.resolve(sibling)).status, "error");
 });
 
 it("accepts only a stored oauth credential with a usable access token", () => {

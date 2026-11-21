@@ -217,7 +217,7 @@ async function runTypedGitMutation(
 export const gitTool: ToolSpec = {
 	name: ToolNames.Git,
 	description:
-		'Git through fixed argv, never a shell. args.op status, diff, log, or show inspects; args.rev names a revision or an a..b range (one commit: args={op:"show",rev:"HEAD~1"}; 20 commits: args={op:"log",limit:20}). args.op add stages args.paths (literal paths); args.op commit commits the index with args.message. add and commit need approval unless a worker owns an attested task worktree under git worktree. A field the op does not take is refused, and free-form command strings are not accepted.',
+		'Typed git fields, never a shell or an argv array. args.op status, diff, log, or show inspects; args.rev names a revision or an a..b range (one commit: args={op:"show",rev:"HEAD~1"}; 20 commits: args={op:"log",limit:20}). args.op add stages args.paths (literal paths); args.op commit commits the index with args.message. add and commit need approval unless a worker owns an attested task worktree under git worktree. A field the op does not take is refused, and free-form command strings are not accepted.',
 	parameters: Type.Object({
 		// `mode` is what code_nav, evidence and monitor call their selector, and a
 		// model reaching for it here spent three calls on "last 3 commits".

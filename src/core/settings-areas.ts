@@ -298,7 +298,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		return place("workers", "Machines");
 	if (under(path, "fleet.history")) return place("workers", "Run history");
 	if (under(path, "fleet.permissions")) return place("safety", "Worker approvals");
-	if (under(path, "safety.review")) return place("safety", "Review");
+	if (under(path, "safety.review") || path === "safety.validationWrappers") return place("safety", "Review");
 	if (under(path, "safety.judge")) return place("safety", "Safety judge");
 	if (under(path, "systemOne") || under(path, "chat.steering")) return place("advanced", "Experimental");
 	if (under(path, "telemetry")) return place("advanced", "Telemetry");

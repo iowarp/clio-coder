@@ -1,5 +1,5 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -82,6 +82,118 @@ test("a failed read is held for the failure backoff, then asked again", async ()
 	state.status = "ok";
 	strictEqual((await cache.resolve(fake.provider)).status, "ok");
 	strictEqual(fake.fetches(), 2);
+});
+
+test("a rate-limited read is held for its Retry-After when that outlasts the failure backoff (C-19)", async () => {
+	let now = 1_000_000;
+	let fetches = 0;
+	const provider: QuotaProvider = {
+		id: "loop-retry-after",
+		displayName: "loop-retry-after",
+		async detect() {
+			return true;
+		},
+		async fetch() {
+			fetches += 1;
+			return {
+				providerId: "loop-retry-after",
+				displayName: "loop-retry-after",
+				status: "error",
+				windows: [],
+				message: "HTTP 429",
+				retryAfterSeconds: 600,
+				fetchedAt: null,
+			};
+		},
+	};
+	const cache = createQuotaCache({ now: () => now });
+	await cache.resolve(provider);
+	now += 61_000;
+	await cache.resolve(provider);
+	strictEqual(fetches, 1, "a 600 s Retry-After must outlast the 60 s backoff");
+	now += 540_000;
+	await cache.resolve(provider);
+	strictEqual(fetches, 2);
+});
+
+test("a fresh process serves the shared reading and hold of the same credential only; holds clamp, clears stick, text is redacted (C-19)", async () => {
+	const sharedStatePath = join(mkdtempSync(join(tmpdir(), "clio-coder-quota-shared-")), "quota-cache.json");
+	let now = 1_000_000;
+	const as = (fake: ReturnType<typeof fakeProvider>, scope: string): QuotaProvider => ({
+		...fake.provider,
+		credentialScope: async () => scope,
+	});
+	const good = fakeProvider("shared-good", { credential: true });
+	const limited = fakeProvider("shared-limited", { credential: true, status: "error" });
+	const first = createQuotaCache({ now: () => now, sharedStatePath });
+	await first.resolve(as(good, "acct-a"));
+	await first.resolve(as(limited, "acct-a"));
+
+	// Another process: a new cache over the same file, inside the TTL and the failure hold.
+	const second = createQuotaCache({ now: () => now, sharedStatePath });
+	strictEqual((await second.resolve(as(good, "acct-a"))).status, "ok");
+	await second.resolve(as(limited, "acct-a"));
+	strictEqual(good.fetches(), 1, "a fresh process must not re-poll a fresh shared reading");
+	strictEqual(limited.fetches(), 1, "the shared hold covers a process that never polled");
+	// Another login sharing the state directory gets neither the reading nor the hold.
+	await second.resolve(as(good, "acct-b"));
+	await second.resolve(as(limited, "acct-b"));
+	strictEqual(good.fetches(), 2);
+	strictEqual(limited.fetches(), 2);
+
+	// A clear travels with the file: the first process still holds the old miss, and its next write must not revive it.
+	now += 1;
+	second.clear("shared-limited");
+	now += 1;
+	await first.resolve(as(fakeProvider("shared-other", { credential: true }), "acct-a"));
+	await createQuotaCache({ now: () => now, sharedStatePath }).resolve(as(limited, "acct-a"));
+	strictEqual(limited.fetches(), 3, "a cleared hold is never written back");
+
+	// Stored text is redacted like the telemetry journal.
+	const leaky: QuotaProvider = {
+		id: "shared-leaky",
+		displayName: "shared-leaky",
+		credentialScope: async () => "acct-a",
+		detect: async () => true,
+		fetch: async () => ({
+			providerId: "shared-leaky",
+			displayName: "shared-leaky",
+			status: "error",
+			windows: [],
+			message: "proxy https://quota-user:hunter2-secret@proxy.example/ refused",
+			fetchedAt: null,
+		}),
+	};
+	await first.resolve(leaky);
+	strictEqual(readFileSync(sharedStatePath, "utf8").includes("hunter2-secret"), false);
+
+	// A stored hold past the cap, or stamped ahead of the clock, never holds past the cap.
+	const miss = (storedAtMs: number, holdMs: number) => ({
+		answer: { providerId: "x", displayName: "x", status: "error", windows: [], message: "HTTP 429", fetchedAt: null },
+		status: "error",
+		storedAtMs,
+		holdMs,
+		scope: "acct-a",
+	});
+	writeFileSync(
+		sharedStatePath,
+		JSON.stringify({
+			version: 2,
+			entries: {},
+			misses: { "shared-good": miss(now, 1e15), "shared-other": miss(now + 3_600_000, 60_000) },
+			cleared: {},
+		}),
+	);
+	const future = fakeProvider("shared-other", { credential: true });
+	await createQuotaCache({ now: () => now, sharedStatePath }).resolve(as(future, "acct-a"));
+	strictEqual(future.fetches(), 1, "a stamp ahead of the clock reads as expired");
+	now += 24 * 60 * 60_000;
+	await createQuotaCache({ now: () => now, sharedStatePath }).resolve(as(good, "acct-a"));
+	strictEqual(good.fetches(), 3, "a stored hold is clamped to the 24 h cap");
+
+	writeFileSync(sharedStatePath, "{not json");
+	await createQuotaCache({ now: () => now, sharedStatePath }).resolve(as(good, "acct-a"));
+	strictEqual(good.fetches(), 4, "a corrupt shared file reads as empty, which means poll");
 });
 
 test("an unchanged failed poll is journaled once, while each successful poll still marks freshness", () => {

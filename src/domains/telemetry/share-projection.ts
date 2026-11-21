@@ -415,6 +415,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			"notExecuted",
 			"fileExt",
 			"checkKind",
+			"inner",
 		),
 		tool: "tool",
 		skill: "name",
@@ -422,7 +423,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	},
 	// A rule and the policy source it came from are the operator's own names.
 	"tool.decided": {
-		...keep("decision", "exposure"),
+		...keep("decision", "exposure", "inner"),
 		tool: "tool",
 		actionClass: "token",
 		posture: "token",
@@ -829,6 +830,7 @@ export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
 	"count:enumerated-steps@operator-request",
 	"count:failure-recurrence@task-memory",
 	"count:open-tasks@turn-end",
+	"count:read-class-calls-and-areas@user-turn",
 	"count:ready-detached-batches@turn-end",
 	"count:repeated-call@tool-args",
 	"diff:mutating-turn@board-scope",
