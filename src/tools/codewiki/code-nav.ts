@@ -10,7 +10,7 @@ import { readWikiPage } from "../../domains/context/wiki/frontmatter.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
 import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";
-import { compileGlobRegex } from "../ignore-policy.js";
+import { compileGlobRegex, emptySearchText } from "../ignore-policy.js";
 import {
 	commitObservationReservation,
 	finalizeObservation,
@@ -278,6 +278,24 @@ function navIndexFor(codewiki: Codewiki): NavIndex {
 	return index;
 }
 
+/**
+ * A directory the index holds, for the empty-result line's listing call: the query's leading word when it names one
+ * ("src users catalog" names src), else the first top-level directory. None when every indexed file is at the root.
+ */
+function listedDirectory(index: NavIndex, query: string): string | undefined {
+	const dirs = [...new Set(index.paths.filter((path) => path.includes("/")).map((path) => path.split("/")[0] ?? ""))]
+		.filter((dir) => dir.length > 0)
+		.sort((a, b) => a.localeCompare(b));
+	const lead = query.split(/[\s/]+/u).find((word) => word.length > 0);
+	return lead !== undefined && dirs.includes(lead) ? lead : dirs[0];
+}
+
+/** The empty-result line of a symbol or path search, naming the query exactly as it was matched. */
+function navNoMatch(index: NavIndex, query: string, searched: string): string {
+	const spaced = /\s/u.test(query) ? " (matched as one string, spaces included)" : "";
+	return emptySearchText(`${searched}${spaced}`, listedDirectory(index, query));
+}
+
 function runSymbol(index: NavIndex, query: string, limit: number): NavPayload {
 	const ids = index.symbolToFileIds.get(query) ?? [];
 	const files = ids.map((id) => index.filesById.get(id)).filter((file): file is CodewikiFile => Boolean(file));
@@ -305,6 +323,9 @@ function runSymbol(index: NavIndex, query: string, limit: number): NavPayload {
 			files: files.sort(comparePath).slice(0, limit).map(fileSummary),
 			omitted,
 			...(next !== undefined ? { next } : {}),
+			...(matched.length === 0
+				? { noMatch: navNoMatch(index, query, `the code map's symbols for the exact name "${query}"`) }
+				: {}),
 		},
 		shownCount: shown.length,
 		totalCount: matched.length,
@@ -321,8 +342,16 @@ function runPath(index: NavIndex, query: string, limit: number): NavPayload {
 	const shown = matches.slice(0, limit);
 	const omitted = matches.length - shown.length;
 	const next = matches.length === 0 ? "mode=entries" : omitted > 0 ? `limit=${limit * 2}` : undefined;
+	const how = regex ? `the pattern ${query}` : `the substring "${query}"`;
 	return {
-		payload: { files: shown.map(fileSummary), omitted, ...(next !== undefined ? { next } : {}) },
+		payload: {
+			files: shown.map(fileSummary),
+			omitted,
+			...(next !== undefined ? { next } : {}),
+			...(matches.length === 0
+				? { noMatch: navNoMatch(index, query, `the code map's ${index.paths.length} indexed paths for ${how}`) }
+				: {}),
+		},
 		shownCount: shown.length,
 		totalCount: matches.length,
 		...(next !== undefined ? { next } : {}),
