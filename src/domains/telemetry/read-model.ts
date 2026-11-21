@@ -4286,6 +4286,20 @@ function sideCallTotals(attempts: readonly FoldedAttempt[]): {
 }
 
 /**
+ * The record kinds {@link foldSideSurfaces} reads: the call fold's own, the memory steps and the surface ledger. A reader
+ * may read a journal filtered to these (`readCallJournal`'s `wanted`) and fold the same result.
+ */
+export const SIDE_SURFACE_RECORD_KINDS = [
+	"call.started",
+	"call.settled",
+	"call.linked",
+	"journal.gap",
+	"memory.step_decided",
+	"middleware.fired",
+	"surface.settled",
+] as const;
+
+/**
  * Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1).
  * `route` is the caller's: without it no surface can read `unsupported`, only `unexercised`.
  */
