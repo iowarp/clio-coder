@@ -926,7 +926,8 @@ export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 	if (
 		removedAll &&
 		dataOutputs !== null &&
-		(heredocCopiesInert(withoutBodies, dataOutputs) || !mayRunHeredocOutputs(withoutBodies, dataOutputs))
+		!mayRunHeredocOutputs(withoutBodies, dataOutputs) &&
+		heredocDataTrusted(withoutBodies, dataOutputs)
 	)
 		return [extractCommandPathWalk(withoutBodies)];
 	return [extractCommandPathWalk(command, !removedAll), extractCommandPathWalk(withoutBodies)];
@@ -1072,8 +1073,34 @@ function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): 
 	return false;
 }
 
-/** Commands that run no file and read none as code, so a copied here-document stays unrun by them (C-7, C-22). */
-const INERT_AFTER_COPY: ReadonlySet<string> = new Set([
+/** Command words that can redefine a command, set a variable, or run text as code. */
+const HEREDOC_REDEFINERS: ReadonlySet<string> = new Set([
+	"alias",
+	"unalias",
+	"shopt",
+	"function",
+	"source",
+	".",
+	"eval",
+	"enable",
+	"hash",
+	"builtin",
+	"command",
+	"exec",
+	"trap",
+	"export",
+	"declare",
+	"typeset",
+	"readonly",
+	"local",
+	"read",
+	"mapfile",
+	"readarray",
+	"unset",
+	"coproc",
+]);
+/** What may run after a here-document is copied into a file: readers that run no file and write none. */
+const HEREDOC_INERT_READERS: ReadonlySet<string> = new Set([
 	"cat",
 	"tee",
 	"echo",
@@ -1091,64 +1118,81 @@ const INERT_AFTER_COPY: ReadonlySet<string> = new Set([
 	"false",
 	":",
 	"pwd",
-	"cd",
-	"touch",
-	"chmod",
 	"test",
 	"[",
 ]);
-/** git subcommands that run no hook and no file the call wrote; `commit` only when nothing was copied to a file. */
-const INERT_GIT_AFTER_COPY: ReadonlySet<string> = new Set(["add", "commit", "diff", "status", "log", "show"]);
+
+/** Variables whose value changes what a later command word runs or how a line splits. */
+const HEREDOC_DANGEROUS_NAMES =
+	/^(?:PATH|BASH_ENV|ENV|IFS|CDPATH|SHELLOPTS|BASHOPTS|PROMPT_COMMAND|BASH_FUNC_.*|LD_PRELOAD|LD_LIBRARY_PATH)$/u;
+/** Declaring words that only set the plain variables they name. */
+const HEREDOC_SETTERS: ReadonlySet<string> = new Set(["export", "declare", "typeset", "local", "readonly"]);
 
 /**
- * Whether a call whose quoted here-documents were removed (`text`) can run nothing it copied them into (`outputs`):
- * the relaxations C-7 and C-22 make hold only for a shape read in full. Every step's command word is written plainly
- * (no quote, escape or expansion) and is a command that runs no file ({@link INERT_AFTER_COPY}, or a git subcommand
- * that runs no hook), no word holds a substitution, and no copy lands in a git or hook directory or shares a name
- * with a command the call runs. A glob, a variable or a quote-split name in an inert step cannot run anything, and
- * an interpreter, `source`, `eval`, `make`, a PATH change, an assignment or any other step keeps the base reading.
+ * Whether the rest of a call (`text`, its quoted here-document bodies removed) is read in full, so the bodies it feeds
+ * stay data (row 261): an allow-list that only ever keeps a body read as commands, applied on top of the older checks.
+ * Every step's command word is written plainly, holds no `$` or backtick, and cannot redefine a command or run text
+ * ({@link HEREDOC_REDEFINERS}; `export` and its kin only of plain names, none that steers lookup or splitting); no
+ * step opens a subshell or defines a function, and no word is an ANSI-C string. When a body is copied into files
+ * (`outputs`), none lands in `.git` or `.husky`, and every step after the first copy is a pure reader
+ * ({@link HEREDOC_INERT_READERS}) with no `$`, backtick or substitution, named unlike any copy, writing nowhere but those
+ * copies, `/dev/null` or another descriptor; a copy named with `$` is trusted only when nothing runs after it.
  */
-function heredocCopiesInert(text: string, outputs: ReadonlyArray<string>): boolean {
-	if (
-		outputs.some(
-			(output) =>
-				!/^[\w./@+,=:~-]+$/u.test(output) || output.split("/").some((part) => part.startsWith(".git") || part === ".husky"),
-		)
-	)
+function heredocDataTrusted(text: string, outputs: ReadonlyArray<string>): boolean {
+	if (outputs.some((output) => output.split("/").some((part) => part.startsWith(".git") || part === ".husky")))
 		return false;
+	const written = new Set(outputs);
 	const names = new Set(outputs.map((output) => basenameToken(output)));
 	const tokens = scanShellLike(text);
 	if (tokens.some((token) => token.unterminated === true || token.hiddenContent === true)) return false;
-	if (tokens.some((token) => (token.substitutions?.length ?? 0) > 0)) return false;
+	if (tokens.some((token) => token.operator && (token.value === "(" || token.value === ")"))) return false;
+	let copied = false;
 	for (const segment of splitSegments(tokens)) {
 		const words = segment.filter(
 			(token, index) =>
 				!token.operator &&
 				!(segment[index - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[index - 1]?.value ?? "")),
 		);
+		const targets = segment.flatMap((token, index) =>
+			token.operator && SHELL_WRITE_REDIRECTIONS.has(token.value) ? [segment[index + 1]?.value ?? ""] : [],
+		);
 		const head = words[0];
-		if (head === undefined) continue;
-		if (text.slice(head.start, head.end) !== head.value || names.has(basenameToken(head.value))) return false;
-		if (head.value === "git") {
-			const sub = words[1]?.value ?? "";
-			if (!INERT_GIT_AFTER_COPY.has(sub) || (sub === "commit" && outputs.length > 0)) return false;
-			continue;
+		const raw = (token: ShellToken): string => text.slice(token.start, token.end);
+		if (head !== undefined) {
+			const assignment = /^([A-Za-z_]\w*)\+?=/u.exec(head.value);
+			if (raw(head) !== head.value && assignment === null) return false;
+			if (/[$`]/u.test(head.value) && assignment === null) return false;
+			if (assignment !== null && HEREDOC_DANGEROUS_NAMES.test(assignment[1] ?? "")) return false;
+			if (HEREDOC_SETTERS.has(head.value)) {
+				for (const word of words.slice(1)) {
+					if (word.value.startsWith("-")) continue;
+					const name = /^([A-Za-z_]\w*)(?:\+?=|$)/u.exec(raw(word));
+					if (name === null || HEREDOC_DANGEROUS_NAMES.test(name[1] ?? "")) return false;
+				}
+			} else if (HEREDOC_REDEFINERS.has(head.value)) return false;
+			if (head.value === "printf" && words.some((word) => word.value.startsWith("-v"))) return false;
 		}
-		if (head.value === "printf" && words.some((word) => word.value.startsWith("-v"))) return false;
-		if (!INERT_AFTER_COPY.has(head.value)) return false;
+		const copies =
+			targets.some((target) => written.has(target)) ||
+			(head?.value === "tee" && words.slice(1).some((word) => written.has(word.value)));
+		if (copied && head !== undefined) {
+			// After a copy nothing may run it, rewrite it elsewhere, or be named like it.
+			if (segment.some((token) => /[$`]/u.test(raw(token)) || (token.substitutions?.length ?? 0) > 0)) return false;
+			if (outputs.some((output) => /[$`]/u.test(output))) return false;
+			if (!HEREDOC_INERT_READERS.has(head.value) || names.has(basenameToken(head.value))) return false;
+			if (targets.some((target) => !written.has(target) && target !== "/dev/null" && !/^(?:\d+-?|-)$/u.test(target)))
+				return false;
+			if (head.value === "tee" && words.slice(1).some((word) => !word.value.startsWith("-") && !written.has(word.value)))
+				return false;
+		}
+		if (copies) copied = true;
 	}
 	return true;
 }
 
-/**
- * A redefined recipient need not treat stdin as data, even when its original command did. Read as written and with
- * quotes and escapes dropped, so `'al'ias` and `\source` count, and any word that may set PATH (`PATH=`, `export PATH`,
- * `printf -v PATH`, `read PATH`) counts; only `$PATH` and `${PATH}` read it.
- */
+/** A redefined recipient need not treat stdin as data, even when its original command did. */
 function mayRedefineHeredocCopier(command: string): boolean {
-	return [command, command.replace(/['"\\]/gu, "")].some((text) =>
-		/(?<![$\w{])PATH\b|\b(?:alias|function|source|eval|enable|hash|shopt)\b|\(\s*\)|(?:^|[\s;&|])\.[ \t]/u.test(text),
-	);
+	return /\bPATH=|\b(?:alias|function|source|eval|enable|hash)\b|\(\s*\)|(?:^|[\s;&|])\.[ \t]/u.test(command);
 }
 
 /** More here-documents than this in one command are left in place. */
@@ -1181,13 +1225,7 @@ export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode 
 		(dataOutputs === null || scanShellLike(text).some((token) => token.operator && token.value === "<<"))
 	)
 		return command;
-	if (mayRedefineHeredocCopier(text)) return command;
-	if (mode === "stdin-only") {
-		// What this reading drops beyond the sinks' is a file copy, data only when nothing else in the call can run it.
-		const sinks = withoutDataHeredocBodies(command, "sinks");
-		if (text !== sinks && !heredocCopiesInert(text, removedOutputs)) return sinks;
-	}
-	return text;
+	return mayRedefineHeredocCopier(text) || !heredocDataTrusted(text, dataOutputs ?? []) ? command : text;
 }
 
 /**

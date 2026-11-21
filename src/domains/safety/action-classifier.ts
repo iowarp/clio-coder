@@ -462,7 +462,7 @@ function deleteTargetReason(
  * Clio-variable pins (`yolo-floor.ts` DYNAMIC_ASSIGNERS).
  */
 const TEMP_DIR_ASSIGNERS =
-	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
+	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin|trap|coproc)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
 
 /**
  * The bash command with each `$TMPDIR` and `${TMPDIR}` the outer shell expands spelled as this process's temp
@@ -492,9 +492,16 @@ function stableTempDir(): string | null {
 }
 
 function hasStableTempDirReferences(command: string): boolean {
-	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
+	// Quotes and escapes are dropped first, so `T''MPDIR=` and `\\declare` count as the name and the assigner (row 261).
+	const plain = command.replace(/['"\\]/gu, "");
+	const names = plain.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
-	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
+	return (
+		names === references &&
+		!TEMP_DIR_ASSIGNERS.test(command) &&
+		!TEMP_DIR_ASSIGNERS.test(plain) &&
+		!/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command)
+	);
 }
 
 function expandTempDirReferences(command: string): string {
@@ -774,6 +781,18 @@ function walkPathReasons(
 		}
 		if (event.kind === "write") {
 			const target = event.target;
+			// A write into the workspace's own .git (config, hooks) runs as code the next time git runs (row 261).
+			const gitDirs = [path.resolve(process.cwd()), canonicalizePath(path.resolve(process.cwd()))]
+				.filter((root): root is string => root !== null)
+				.map((root) => path.join(root, ".git"));
+			const expandedWrite = expandShellHome(target);
+			if (expandedWrite !== null && !isDynamicShellPath(expandedWrite)) {
+				const from = path.isAbsolute(expandedWrite) ? ["/"] : (bases ?? [process.cwd()]).map(candidateBase);
+				for (const base of from) {
+					const abs = path.resolve(base, expandedWrite);
+					if (gitDirs.some((git) => isUnderPrefix(abs, git))) writeReasons.add(`bash-write-target: git-metadata: ${abs}`);
+				}
+			}
 			// `> $HOME/x`, `> ${OUT}`, and `tee {a,b}` land where the shell says.
 			if (isDynamicShellPath(target) && !target.startsWith("/dev/")) {
 				writeReasons.add(`write-path-unknown-base: ${target}`);
