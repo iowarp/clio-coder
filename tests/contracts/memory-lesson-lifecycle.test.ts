@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runMemoryCommand } from "../../src/cli/memory.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import {
 	commandEvidenceRef,
@@ -748,14 +749,26 @@ test("a recipe the task's receipts prove is filed though the model keeps nothing
 		},
 		async () => SILENT,
 	);
+	// M-29: the extraction settles once, after completion, with the outcome the task was left in, not the model's silence.
+	const journal: Array<{ event: string; facts: Record<string, unknown> }> = [];
+	const stop = telemetryHub().subscribe("memory.observation_recorded", (payload) => {
+		journal.push({ event: payload.event, facts: payload.facts });
+	});
 	try {
 		strictEqual(await closed.runtime.runIdleStep(true), "ran");
 		strictEqual(closed.marker()?.phase, "gated");
+		deepStrictEqual(
+			journal.map(({ event }) => event).filter((event) => /^lesson-(?:extraction|judgment)-/u.test(event)),
+			["lesson-extraction-started", "lesson-extraction-completed", "lesson-judgment-gated", "lesson-extraction-settled"],
+		);
+		const settled = journal.find(({ event }) => event === "lesson-extraction-settled")?.facts;
+		deepStrictEqual([settled?.decision, settled?.phase, settled?.reason], ["silent", "gated", "evidence-gate-held"]);
 		const records = closed.records();
 		strictEqual(records.length, 1);
 		strictEqual(records[0]?.approved, false, "its own session's evidence never promotes it");
 		ok(records[0]?.lesson.includes(`\`${COMMAND}\``));
 	} finally {
+		stop();
 		closed.cleanup();
 	}
 });
