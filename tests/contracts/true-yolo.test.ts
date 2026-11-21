@@ -14,7 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir, hostname, tmpdir, userInfo } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { before, test } from "node:test";
 import { runArenaCommand } from "../../src/cli/arena.js";
 import { scratchRootFindings, shellSandboxFinding } from "../../src/cli/doctor.js";
@@ -448,6 +448,42 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	}
 	const pinnedCopy = `export CLIO_CODER_HOME=${scratchHome}; cp -r src $CLIO_CODER_HOME/`;
 	strictEqual(engine.evaluate(bash(pinnedCopy), "yolo", OPERATOR_YOLO).kind, "allow", pinnedCopy);
+	// M-1: Clio's trees are the real ones captured at session start; a scratch home the command makes under TMPDIR is not.
+	const scratch = (rest: string) =>
+		`H=$(mktemp -d "$TMPDIR/home.XXXX"); export HOME=$H/home CLIO_CODER_HOME=$H/clio; ${rest}`;
+	const real = relative(process.env.TMPDIR as string, home.dir);
+	const previousEnv = { ...process.env };
+	process.env.HOME = dirname(home.dir);
+	const sessionEngine = engineFor(cwd);
+	Object.assign(process.env, { CLIO_CODER_HOME: scratchHome, CLIO_CODER_STATE_DIR: join(scratchHome, "state") });
+	for (const command of [
+		scratch("node dist/cli/index.js --version"),
+		scratch(
+			'mkdir -p "$CLIO_CODER_HOME/state" ~/.config && echo x > $CLIO_CODER_HOME/state/f && node dist/cli/index.js --version',
+		),
+		scratch(`echo x > ~/${basename(home.dir)}/state/f`),
+		'export CLIO_CODER_HOME="$TMPDIR/h"; mkdir -p $CLIO_CODER_HOME/state',
+	]) {
+		strictEqual(sessionEngine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
+	}
+	for (const command of [
+		scratch(`echo x > $H/../${real}/state/f`),
+		scratch(`echo x > $H${home.dir}/state/f`),
+		scratch(`echo x > ${link}/state/f`),
+		scratch("echo x > $CLIO_CODER_STATE_DIR/f"),
+		`export CLIO_CODER_HOME="$TMPDIR/${real}"; echo x > $CLIO_CODER_HOME/state/f`,
+		`X=$CLIO_CODER_STATE_DIR; echo x > $X/f`,
+		`X=~/${basename(home.dir)}; echo x > $X/state/f`,
+		`echo x > ~/${basename(home.dir)}/state/f`,
+		`echo x > ${home.dir}/state/f`,
+	]) {
+		strictEqual(
+			sessionEngine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode,
+			"yolo-floor:clio-owned-state",
+			command,
+		);
+	}
+	for (const key of ["HOME", "CLIO_CODER_HOME", "CLIO_CODER_STATE_DIR"]) process.env[key] = previousEnv[key];
 	// FX-7: `$TMPDIR` is the temp directory this process runs commands with, so a scratch file there deletes as one.
 	const scratchRm = bash('rm -f "$TMPDIR/probe.test.ts"');
 	const atDefault = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as const;

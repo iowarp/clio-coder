@@ -1147,53 +1147,171 @@ export function yoloFloorWorkspaceGitHit(command: string, cwd: string, workspace
 	return null;
 }
 
-/** One `CLIO_CODER_X=/literal/path` word: single-quoted, double-quoted or bare, with no expansion and no space. */
-const PINNED_ASSIGNMENT =
-	/^(CLIO_CODER_[A-Z0-9_]+)=(?:'(\/[^'\s]*)'|"(\/[^"$`\\!\s]*)"|(\/[\w./@%+,:=-]*))(?=[ \t;&\n]|$)/u;
+/** Names the shell sets, rewrites or reads for its own behaviour: an assignment to one proves nothing a later reference sees. */
+const UNPINNABLE_NAME =
+	/^(?:BASH\w*|CDPATH|DIRSTACK|ENV|EUID|FUNCNAME|GLOBIGNORE|GROUPS|HIST\w*|IFS|LINENO|OLDPWD|OPTARG|OPTIND|PATH|PIPESTATUS|PPID|PROMPT_COMMAND|PS[0-4]|PWD|RANDOM|REPLY|SECONDS|SHELLOPTS|SRANDOM|TMPDIR|UID|_)$/u;
+
+const PIN_WORD_END = String.raw`(?=[ \t;&\n]|$)`;
+const PIN_REFERENCE = String.raw`\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}`;
+/** A single-quoted absolute path: literal, nothing in it expands. */
+const PIN_SINGLE = new RegExp(String.raw`^'(\/[^'\s]*)'${PIN_WORD_END}`, "u");
+/** A double-quoted or bare word of plain characters and `$NAME` or `${NAME}` references, with no space. */
+const PIN_DOUBLE = new RegExp(String.raw`^"((?:[^"$\x60\\!\s]|${PIN_REFERENCE})*)"${PIN_WORD_END}`, "u");
+const PIN_BARE = new RegExp(String.raw`^((?:[\w./@%+,:=-]|${PIN_REFERENCE})*)${PIN_WORD_END}`, "u");
+/** The exact `$(mktemp -d [-t] [TEMPLATE])` form, optionally double-quoted: it prints a directory it just created. */
+const PIN_MKTEMP = new RegExp(
+	String.raw`^("?)\$\(mktemp[ \t]+-d(?:[ \t]+(-t[ \t]+)?("[^"\s\x60]*"|[^\s"'\x60();&|]+))?\)\1${PIN_WORD_END}`,
+	"u",
+);
+
+/** What a pinned name holds once its statement ran, and what it holds when the `mktemp` it came from failed. */
+interface PinValue {
+	fresh: string;
+	failed: string;
+}
+
+type PinWord = { literal: string } | { word: string } | { mktemp: { relative: boolean; template: string | null } };
+
+function readPinWord(text: string): { length: number; value: PinWord } | null {
+	const made = PIN_MKTEMP.exec(text);
+	if (made !== null) {
+		const template = made[3] === undefined ? null : made[3].replace(/^"(.*)"$/u, "$1");
+		return { length: made[0].length, value: { mktemp: { relative: made[2] !== undefined, template } } };
+	}
+	const single = PIN_SINGLE.exec(text);
+	if (single !== null) return { length: single[0].length, value: { literal: single[1] as string } };
+	const double = PIN_DOUBLE.exec(text);
+	if (double !== null) return { length: double[0].length, value: { word: double[1] as string } };
+	// A leading `~` in an assignment is the home directory, read as `$HOME`.
+	const tilde = /^~(?=\/|[ \t;&\n]|$)/u.test(text);
+	const bare = PIN_BARE.exec(tilde ? text.slice(1) : text);
+	if (bare === null) return null;
+	return { length: bare[0].length + (tilde ? 1 : 0), value: { word: `${tilde ? "$HOME" : ""}${bare[1]}` } };
+}
+
+/**
+ * The session's TMPDIR, which a bare `mktemp -d` and every `$TMPDIR` reference in the command see, while the command
+ * names TMPDIR only to expand it; otherwise null and `$TMPDIR` stays a reference.
+ */
+function pinTempDir(command: string): string | null {
+	const value = process.env.TMPDIR?.replace(/(.)\/+$/u, "$1");
+	if (value === undefined || !/^\/[\w./+@%,:-]*$/u.test(value)) return null;
+	const named = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
+	return (command.match(/\$\{TMPDIR\}|\$TMPDIR\b/gu)?.length ?? 0) === named ? value : null;
+}
+
+/** The readings of a word: earlier pins and TMPDIR expanded, every other reference kept as `${NAME}`. Null on a name its own statement assigns. */
+function resolvePinWord(
+	word: string,
+	pins: ReadonlyMap<string, PinValue>,
+	statement: ReadonlySet<string>,
+	temp: string | null,
+): PinValue | null {
+	let refused = false;
+	const expand = (reading: keyof PinValue) =>
+		word.replace(/\$([A-Za-z_]\w*)|\$\{([A-Za-z_]\w*)\}/gu, (_all, bare?: string, braced?: string) => {
+			const name = (bare ?? braced) as string;
+			// `export A=1 B=$A` expands `$A` before A changes, `A=1 B=$A` after: neither reading is taken.
+			if (statement.has(name)) refused = true;
+			const pin = pins.get(name);
+			if (pin !== undefined) return pin[reading];
+			return name === "TMPDIR" && temp !== null ? temp : `\${${name}}`;
+		});
+	const value = { fresh: expand("fresh"), failed: expand("failed") };
+	return refused ? null : value;
+}
+
+function resolvePin(
+	value: PinWord,
+	pins: ReadonlyMap<string, PinValue>,
+	statement: ReadonlySet<string>,
+	temp: string | null,
+): PinValue | null {
+	if ("literal" in value) return { fresh: value.literal, failed: value.literal };
+	if ("word" in value) return resolvePinWord(value.word, pins, statement, temp);
+	const { relative, template } = value.mktemp;
+	if (template === null) return temp === null ? null : { fresh: `${temp}/tmp.XXXXXXXXXX`, failed: "" };
+	const resolved = resolvePinWord(template, pins, statement, temp)?.fresh ?? null;
+	if (resolved === null || resolved.includes("$") || !/X{3,}$/u.test(resolved)) return null;
+	if (!relative) return { fresh: resolved, failed: "" };
+	return temp === null || resolved.includes("/") ? null : { fresh: `${temp}/${resolved}`, failed: "" };
+}
+
+/** The leading pins of a command, and the text they apply to. */
+export interface ClioPins {
+	/** The command with its pins applied: the fresh reading, then the one where a pinning `mktemp` failed. */
+	readings: string[];
+	/** The same pins applied to other text read from this command (its raw-text candidates). */
+	apply: (text: string) => string[];
+}
 
 /** Shell words that can set a variable without naming it in the text, so a pin cannot be trusted past them. */
 const DYNAMIC_ASSIGNERS =
 	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
 
 /**
- * The command with each `$CLIO_CODER_X` and `${CLIO_CODER_X}` replaced by the literal absolute path its leading
- * statements pin it to (`export CLIO_CODER_HOME=/scratch/h; echo x > $CLIO_CODER_HOME/state/f`), so a write into a
- * scratch Clio home is judged by the path it lands on rather than by the variable's name (CLI-H4). A pin counts only
- * from statements at the very start that do nothing but assign literal paths, each name once, when the rest names
- * that variable only to expand it and runs nothing that could set a variable without naming it (`eval`, `source`,
- * `read`, `declare`, `export`, ...). Anything else returns the command unchanged, and the variable's name keeps
- * reading as Clio's own tree. The substituted path then meets the same judgment as a literal one, so a pin to the
- * operator's real Clio home is still a floor hit.
+ * The command with each variable its leading statements pin replaced by what it holds, so a write into a scratch
+ * home is judged by the path it lands on rather than by a variable's name (CLI-H4, M-1). Clio's own trees are the
+ * operator's real directories the engine captured at session start; a `HOME` or `CLIO_CODER_*` value the command
+ * assigns never adds to them, so `H=$(mktemp -d "$TMPDIR/h.XXXX"); export HOME=$H/home CLIO_CODER_HOME=$H/clio`
+ * makes `$CLIO_CODER_HOME/state` and `~/.config` scratch paths. A pin counts only from statements at the very start
+ * that do nothing but assign, each name once, a literal path, a word of plain characters and references, or the
+ * exact `$(mktemp -d ...)` form (read as its template, and as empty for the run where it fails), and only when the
+ * rest names that variable only to expand it and runs nothing that could set a variable without naming it (`eval`,
+ * `source`, `read`, `declare`, `export`, ...). A reference a pin does not resolve stays in its value as `${NAME}`, so
+ * `X=$CLIO_CODER_STATE_DIR; echo x > $X/f` still names Clio's tree. Anything else leaves the command unchanged, and
+ * a Clio variable's name keeps reading as Clio's own tree. The substituted path then meets the same judgment as a
+ * literal one, through links and `..`, so a pin that reaches the operator's real Clio home is still a floor hit.
  */
-export function pinnedClioCommand(command: string): string {
-	const pins = new Map<string, string>();
+export function pinnedClioCommand(command: string): ClioPins {
+	const unchanged: ClioPins = { readings: [command], apply: (text) => pinnedClioCommand(text).readings };
+	const temp = pinTempDir(command);
+	const pins = new Map<string, PinValue>();
 	let rest = command;
 	for (;;) {
 		const statement = /^[ \t\n]*(?:export[ \t]+)?/u.exec(rest)?.[0] ?? "";
 		let cursor = rest.slice(statement.length);
-		const assigned: Array<[string, string]> = [];
+		const assigned: Array<[string, PinWord]> = [];
 		for (;;) {
-			const match = PINNED_ASSIGNMENT.exec(cursor);
-			if (match === null) break;
-			const [word, name, single, double, bare] = match;
-			assigned.push([name as string, (single ?? double ?? bare) as string]);
-			cursor = cursor.slice(word.length).replace(/^[ \t]+/u, "");
+			const head = /^([A-Za-z_]\w*)=/u.exec(cursor);
+			const name = head?.[1];
+			if (head === null || name === undefined || UNPINNABLE_NAME.test(name)) break;
+			const read = readPinWord(cursor.slice(head[0].length));
+			if (read === null) break;
+			assigned.push([name, read.value]);
+			cursor = cursor.slice(head[0].length + read.length).replace(/^[ \t]+/u, "");
 		}
 		const separator = /^(?:;|&&|\n)/u.exec(cursor)?.[0];
 		if (assigned.length === 0 || separator === undefined) break;
-		for (const [name, value] of assigned) {
-			if (pins.has(name)) return command;
-			pins.set(name, value);
+		const names = new Set(assigned.map(([name]) => name));
+		if (names.size !== assigned.length) return unchanged;
+		const resolved: Array<[string, PinValue]> = [];
+		for (const [name, word] of assigned) {
+			const value = resolvePin(word, pins, names, temp);
+			if (value === null || pins.has(name)) return unchanged;
+			resolved.push([name, value]);
 		}
+		for (const [name, value] of resolved) pins.set(name, value);
 		rest = cursor.slice(separator.length);
 	}
-	if (pins.size === 0 || DYNAMIC_ASSIGNERS.test(rest)) return command;
-	let substituted = rest;
-	for (const [name, value] of pins) {
+	if (pins.size === 0 || DYNAMIC_ASSIGNERS.test(rest)) return unchanged;
+	for (const name of pins.keys()) {
 		const named = rest.match(new RegExp(String.raw`\b${name}\b`, "gu"))?.length ?? 0;
-		const expanded = new RegExp(String.raw`\$\{${name}\}|\$${name}\b`, "gu");
-		if ((rest.match(expanded)?.length ?? 0) !== named) return command;
-		substituted = substituted.replace(expanded, value);
+		const expanded = rest.match(new RegExp(String.raw`\$\{${name}\}|\$${name}\b`, "gu"))?.length ?? 0;
+		if (expanded !== named) return unchanged;
 	}
-	return `${command.slice(0, command.length - rest.length)}${substituted}`;
+	// One pass, so a value's own `${NAME}` is never expanded again; a pinned HOME also moves a leading `~`.
+	const alternatives = [...pins.keys()].join("|");
+	const tilde = pins.has("HOME") ? String.raw`|(?<=^|[\s:'"(<>|;&])~(?=\/|$|[\s;&|)'"<>])` : "";
+	const pattern = new RegExp(String.raw`\$\{(${alternatives})\}|\$(${alternatives})\b${tilde}`, "gu");
+	const substitute = (text: string, reading: keyof PinValue) =>
+		text.replace(pattern, (_all, braced?: string, bare?: string) => {
+			const pin = pins.get(braced ?? bare ?? "HOME") as PinValue;
+			return pin[reading];
+		});
+	const failing = [...pins.values()].some((pin) => pin.fresh !== pin.failed);
+	const readingsOf = (text: string) =>
+		failing ? [substitute(text, "fresh"), substitute(text, "failed")] : [substitute(text, "fresh")];
+	const prefix = command.slice(0, command.length - rest.length);
+	return { readings: readingsOf(rest).map((reading) => `${prefix}${reading}`), apply: readingsOf };
 }

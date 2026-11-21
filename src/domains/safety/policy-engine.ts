@@ -845,6 +845,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return gitControlLanding(candidates, gitControls);
 	};
 	const skillRoots = activeClioSkillRoots(cwd);
+	// Clio's own trees are the operator's real directories, captured once when the session's engine is built; a HOME or
+	// CLIO_CODER_* value a command assigns never adds to them (M-1).
+	const ownedTrees = clioOwnedTrees(cwd);
 	const readExemptRoots = [
 		...readScopeExemptRoots(cwd),
 		...(options.readExemptRoots ?? []).map((root) => ({ path: root, operatorOwned: false })),
@@ -1113,6 +1116,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		trees: ClioOwnedTrees,
 		rawText = false,
 		gitOnly = false,
+		ownedReadings?: ReadonlyArray<string>,
 	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
 		if (gitOnly) {
 			for (const candidate of commands) {
@@ -1145,13 +1149,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.settingsAuthority}: ${SETTINGS_AUTHORITY_REASON}`,
 			});
 		}
-		// A Clio variable the command pins to a literal path is judged by that path (CLI-H4).
-		const owned = pinnedClioCommand(command);
-		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command: owned } }, callCwd, owned, trees)) {
-			return floorMatch({
-				ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
-				reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes Clio's own config, data, state or trust records, which only the operator changes`,
-			});
+		// A variable the command pins is judged by what it holds (CLI-H4, M-1).
+		for (const owned of ownedReadings ?? pinnedClioCommand(command).readings) {
+			if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command: owned } }, callCwd, owned, trees)) {
+				return floorMatch({
+					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes Clio's own config, data, state or trust records, which only the operator changes`,
+				});
+			}
 		}
 		return null;
 	};
@@ -1242,7 +1247,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 	> | null => {
 		const command = originalCommand === null ? null : yoloFloorCommandText(originalCommand);
-		const trees = clioOwnedTrees(cwd);
+		const trees = ownedTrees;
+		const pins = command === null || gitOnly ? null : pinnedClioCommand(command);
 		const held = (
 			hit: { match: DamageControlMatch; source: SafetyPolicySource },
 			reasons: string[] = [],
@@ -1272,6 +1278,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				trees,
 				false,
 				gitOnly,
+				pins?.readings,
 			);
 			if (hit !== null) return held(hit);
 		} else if (!gitOnly && clioOwnedMutation(call, callCwd, null, trees)) {
@@ -1299,7 +1306,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		for (const candidate of raw?.candidates ?? []) {
 			const read = credentialReadHit({ tool: ToolNames.Bash, args: { command: candidate } }, callCwd, candidate);
 			const hit =
-				commandFloorHit([candidate], [candidate], callCwd, trees, true) ??
+				commandFloorHit([candidate], [candidate], callCwd, trees, true, false, pins?.apply(candidate)) ??
 				(read === null ? null : floorMatch(read, "read"));
 			if (hit !== null) {
 				// Moving an operator-only command into a file changes nothing: the script scan refuses it there too (CLI-P31).
