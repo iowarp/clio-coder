@@ -97,7 +97,7 @@ import {
 	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
-	withoutReplyLimitation,
+	withoutReplyResult,
 } from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
@@ -1159,7 +1159,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let admittedMessages: readonly AgentMessage[] = [];
 		let admittedSystemPrompt = "";
 		let requiredToolReminder: string | null = null;
-		// FX-40: bare finish calls admitted after their user turn's one refusal; each declaration records the missing reply.
+		// FX-40: bare finish calls admitted after their user turn's one refusal; each result records the missing reply.
 		const bareFinishCalls = new Set<string>();
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
@@ -1381,6 +1381,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (verdict !== "refuse") return undefined;
 				state.finishReplyRefused = true;
 				return { block: true, reason: FINISH_WITHOUT_REPLY_REFUSAL };
+			},
+			// FX-40: an admitted bare finish files its missing reply in the result itself, which the transcript shows, the
+			// session ledger keeps and the turn's declaration is read from.
+			afterToolCall: async ({ toolCall, result, isError }) => {
+				const bare = bareFinishCalls.delete(toolCall.id);
+				return bare && !isError ? withoutReplyResult(result) : undefined;
 			},
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
@@ -2426,8 +2432,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const completion = enrichedEvent.isError
 					? null
 					: completionOfToolResult(enrichedEvent.toolName, enrichedEvent.result);
-				const bare = bareFinishCalls.delete(enrichedEvent.toolCallId);
-				if (completion !== null) state.turnCompletion = bare ? withoutReplyLimitation(completion) : completion;
+				if (completion !== null) state.turnCompletion = completion;
 				pendingTerminalToolResult =
 					(enrichedEvent.result as { terminate?: boolean } | undefined)?.terminate === true
 						? { toolCallId: enrichedEvent.toolCallId, toolName: enrichedEvent.toolName }

@@ -178,6 +178,28 @@ export function withoutReplyLimitation(completion: CompletionDeclaration): Compl
 	};
 }
 
+/** What a declaration's result says: its state and how many limitations it records. */
+function declarationText(completion: CompletionDeclaration): string {
+	const count = completion.limitations.length;
+	const suffix = count > 0 ? ` (${count} limitation${count === 1 ? "" : "s"})` : "";
+	return `completion declared: ${completion.state}${suffix}\n`;
+}
+
+/**
+ * The settled result of an admitted bare finish with the missing reply in the declaration it carries (FX-40). The
+ * host amends the result itself, so the transcript, the session ledger and every reader of the declaration see the
+ * limitation, not only the turn's seal. Undefined for a result that carries no declaration.
+ */
+export function withoutReplyResult(
+	result: unknown,
+): { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> } | undefined {
+	const completion = completionOfToolResult(ToolNames.Finish, result);
+	if (completion === null) return undefined;
+	const amended = withoutReplyLimitation(completion);
+	const details = (result as { details?: Record<string, unknown> }).details;
+	return { content: [{ type: "text", text: declarationText(amended) }], details: { ...details, completion: amended } };
+}
+
 /** The host's note on the one round an unattended turn spends to declare; it rides the request tail, never the prefix. */
 export const FINISH_DECLARATION_REMINDER =
 	"<system-reminder>Nobody is watching this turn and it ended without a completion declaration. Call finish now with the state the work is in (done, partly_done or not_done), its limitations and anything left unverified. Do not repeat your reply.</system-reminder>";
@@ -247,11 +269,9 @@ export const finishTool: ToolSpec = {
 				kind: "error",
 				message: `finish: state must be one of ${COMPLETION_STATES.join(", ")}, each limitation needs what and why (${COMPLETION_LIMITATION_REASONS.join(", ")}), and unverified and remaining are string arrays`,
 			};
-		const count = completion.limitations.length;
-		const suffix = count > 0 ? ` (${count} limitation${count === 1 ? "" : "s"})` : "";
 		return {
 			kind: "ok",
-			output: `completion declared: ${completion.state}${suffix}\n`,
+			output: declarationText(completion),
 			details: { completion },
 			terminate: true,
 		};

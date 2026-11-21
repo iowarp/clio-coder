@@ -227,7 +227,29 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 						} as unknown as AgentMessage;
 						await push(message);
 						const completion = { state: "done", limitations: [], unverified: [] };
-						const result = { content: [{ type: "text", text: "declared" }], details: { completion }, terminate: true };
+						const executed = {
+							content: [{ type: "text", text: "completion declared: done\n" }],
+							details: { completion, kind: "ok" },
+							terminate: true,
+						};
+						// Pi's afterToolCall override, merged field by field before tool_execution_end as the engine loop does.
+						const afterToolCall = (
+							agentOptions as unknown as {
+								afterToolCall?: (context: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+							}
+						).afterToolCall;
+						const override = await afterToolCall?.({
+							assistantMessage: message,
+							toolCall: finish,
+							args: completion,
+							result: executed,
+							isError: false,
+						});
+						const result = {
+							...executed,
+							...(override?.content !== undefined ? { content: override.content } : {}),
+							...(override?.details !== undefined ? { details: override.details } : {}),
+						};
 						await listener({ type: "tool_execution_start", toolCallId: "call-b", toolName: "finish", args: completion });
 						await listener({
 							type: "tool_execution_end",
@@ -406,7 +428,7 @@ test("a turn declared through finish is never continued: no required-tool round,
 test("an attended finish with no reply text is refused once per user turn, a roll of the operator's prompt included (FX-40, CLI-P46)", async (t) => {
 	const scratch = await isolateClioEnv("clio-coder-continuation-bare-");
 	t.after(() => scratch.restore());
-	const { submitted, gates, sealed } = await stoppedTurn(scratch.dir, "bare");
+	const { submitted, gates, sealed, entries } = await stoppedTurn(scratch.dir, "bare");
 	strictEqual(submitted[1]?.origin.origin, "continuation");
 	deepStrictEqual(gates, [
 		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
@@ -414,10 +436,20 @@ test("an attended finish with no reply text is refused once per user turn, a rol
 		"ran",
 	]);
 	// The bare finish that ran still declares, and the seal records that its response carried no reply.
+	const noReply = { what: "the response that declared completion carried no reply text for the operator", why: "other" };
 	strictEqual(sealed?.claimed, "done");
-	deepStrictEqual(sealed?.limitations, [
-		{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
-	]);
+	deepStrictEqual(sealed?.limitations, [noReply]);
+	// The result the transcript shows and the session files carries it too, once (KNOWN FX-40).
+	const filed = entries.find(
+		(entry) =>
+			entry.kind === "message" &&
+			(entry as { payload?: { toolCallId?: string } }).payload?.toolCallId === "call-b" &&
+			entry.role === "tool_result",
+	) as
+		| { payload: { result: { content: Array<{ text: string }>; details: { completion: { limitations: unknown[] } } } } }
+		| undefined;
+	deepStrictEqual(filed?.payload.result.details.completion.limitations, [noReply]);
+	strictEqual(filed?.payload.result.content[0]?.text, "completion declared: done (1 limitation)\n");
 });
 
 test("yolo continuations of one operator prompt share its finish round and nudges (FX-41)", async (t) => {
