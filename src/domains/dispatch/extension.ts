@@ -7288,6 +7288,9 @@ export function createDispatchBundle(
 				reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 			}
 		}
+		// The checkout and base the worktree was cut from, so a reviewer's packet can diff the task commit after cleanup.
+		if (sealed !== undefined && req.taskWorktree !== undefined)
+			sealed = { ...sealed, root: req.taskWorktree.root, base: req.taskWorktree.base };
 		if (sealed !== undefined) receiptDraft.worktree = sealed;
 		// A merge needs no card at default autonomy, so the operator's transcript says it landed.
 		const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? runId, sealed);

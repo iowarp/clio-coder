@@ -386,9 +386,12 @@ for (const cites of [true, false]) {
 			const reviewer = f.captured.find((request) => request.gate?.role === "reviewer");
 			deepStrictEqual(reviewer?.gate?.packet?.ids, ["s1.handback", "s1.diff"]);
 			match(reviewer?.task ?? "", /Packet ids: s1\.handback, s1\.diff/u);
-			const subject = JSON.parse((reviewer?.task ?? "").split("\n\n").at(-1) ?? "{}");
-			// The builder's closed write record names no path, so the operator's own edit is not its diff.
-			strictEqual(subject.diff.scope, "attributed-paths");
+			const subject = JSON.parse(
+				(reviewer?.task ?? "").split("\n\n").find((block) => block.startsWith('{"ordinal":')) ?? "{}",
+			);
+			match((reviewer?.task ?? "").split("\n\n").at(-1) ?? "", /drawn only from: s1\.handback, s1\.diff\./u);
+			// The host observed the builder change no path, so the operator's own edit is not its diff.
+			strictEqual(subject.diff.scope, "observed-delta");
 			strictEqual(subject.diff.stat, "no changes");
 			strictEqual(subject.diff.patch, "");
 			const decision = readGateDecisionArtifacts().find(({ artifact }) => artifact.topology === "review")?.artifact;

@@ -141,7 +141,7 @@ import type {
 import { grantRequestLines } from "./grant-request-text.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
-import { checkoutDiff, leftUncommittedReport } from "./task-worktree.js";
+import { builderChangeDiff, leftUncommittedReport } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	checksAreReviewJudgments,
@@ -1219,18 +1219,18 @@ function competeCorrelation(
 type ReviewGateSettings = DispatchReviewSettings;
 
 /**
- * The reviewer's evidence packet (M10): the builder's handback, its change as the host measured it in the checkout it
- * ran in, and its host checks. The change covers the paths the builder's closed write record names, else the tree.
+ * The reviewer's evidence packet (M10): the builder's handback, its change as the host recorded it (see
+ * {@link builderChangeDiff}), and its host checks.
  */
 function builderEvidencePacket(deps: DispatchToolDeps, builder: CompletedRun): EvidencePacket {
 	const receipt = builder.receipt;
 	const attribution = deps.dispatch.observedRunWriteAttribution?.(receipt.runId) ?? null;
-	const recorded = attribution?.complete === true ? attribution.recorded : null;
-	const checkout = receipt.worktree?.path ?? receipt.cwd;
-	const diff =
-		checkout === undefined
-			? null
-			: checkoutDiff(checkout, receipt.worktree?.changedPaths ?? (recorded === null ? null : [...recorded]));
+	const diff = builderChangeDiff({
+		cwd: receipt.cwd,
+		worktree: receipt.worktree,
+		checkoutChanges: receipt.checkoutChanges,
+		recorded: attribution?.complete === true ? attribution.recorded : null,
+	});
 	return buildEvidencePacket([1], [{ ordinal: 1, receipt, resultPath: runResultPath(receipt), diff }]);
 }
 

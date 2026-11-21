@@ -9445,7 +9445,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_0820f241"
+															"$ref": "#/components/schemas/Union_d7433fea"
 														}
 													}
 												},
@@ -20999,7 +20999,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_0820f241"
+															"$ref": "#/components/schemas/Union_d7433fea"
 														}
 													}
 												},
@@ -28887,6 +28887,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_base_branch_changedAfterCommit_85217f87": {
+				"type": "object",
+				"required": ["path", "branch", "diffHash"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_0e685edd"
+				},
+				"additionalProperties": false
+			},
 			"Object_base_exitCode_reason_2bfd3f0c": {
 				"type": "object",
 				"required": ["status"],
@@ -29084,14 +29092,6 @@
 				"required": ["harness", "share", "network", "model", "tool", "bookkeepingRounds", "roundTripTax", "prompt"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_c7b70a86"
-				},
-				"additionalProperties": false
-			},
-			"Object_branch_changedAfterCommit_changedPaths_0361270e": {
-				"type": "object",
-				"required": ["path", "branch", "diffHash"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_f6d59a1a"
 				},
 				"additionalProperties": false
 			},
@@ -29771,7 +29771,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checkoutChanges_failureMessage_hostVerification_d652cd6d": {
+			"Object_checkoutChanges_failureMessage_hostVerification_903acce2": {
 				"type": "object",
 				"required": [
 					"version",
@@ -29783,7 +29783,7 @@
 					"hostVerification"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_44086953"
+					"$ref": "#/components/schemas/Shape_a6426440"
 				},
 				"additionalProperties": false
 			},
@@ -32355,11 +32355,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_state_value_206a1d47": {
+			"Object_state_value_4bab959a": {
 				"type": "object",
 				"required": ["state", "value"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_7a22c61f"
+					"$ref": "#/components/schemas/Shape_41a48c52"
 				},
 				"additionalProperties": false
 			},
@@ -32537,7 +32537,7 @@
 						"$ref": "#/components/schemas/Union_4dc8870f"
 					},
 					"result": {
-						"$ref": "#/components/schemas/Union_0820f241"
+						"$ref": "#/components/schemas/Union_d7433fea"
 					},
 					"assessment": {
 						"anyOf": [
@@ -33454,6 +33454,51 @@
 					"$ref": "#/components/schemas/Object_measured_missing_p50_14460945"
 				}
 			},
+			"Shape_0e685edd": {
+				"path": {
+					"type": "string"
+				},
+				"branch": {
+					"type": "string"
+				},
+				"root": {
+					"type": "string"
+				},
+				"base": {
+					"type": "string"
+				},
+				"diffHash": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"changedPaths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"commit": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string"
+				},
+				"detail": {
+					"type": "string"
+				},
+				"leftUncommitted": {
+					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				},
+				"changedAfterCommit": {
+					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				}
+			},
 			"Shape_0f2fda0b": {
 				"id": {
 					"type": "string",
@@ -34012,50 +34057,21 @@
 					"type": "string"
 				}
 			},
+			"Shape_41a48c52": {
+				"state": {
+					"type": "string",
+					"const": "resolved"
+				},
+				"value": {
+					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_903acce2"
+				}
+			},
 			"Shape_41c86dad": {
 				"fact": {
 					"$ref": "#/components/schemas/Union_494d537c"
 				},
 				"display": {
 					"type": "string"
-				}
-			},
-			"Shape_44086953": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"output": {
-					"$ref": "#/components/schemas/Union_9db58400"
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_4df9aa34"
-				},
-				"checkoutChanges": {
-					"$ref": "#/components/schemas/Union_6397a89f"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_75ddb38c"
 				}
 			},
 			"Shape_4cbcf9e3": {
@@ -34868,15 +34884,6 @@
 					"$ref": "#/components/schemas/Problem"
 				}
 			},
-			"Shape_7a22c61f": {
-				"state": {
-					"type": "string",
-					"const": "resolved"
-				},
-				"value": {
-					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_d652cd6d"
-				}
-			},
 			"Shape_7c21800d": {
 				"id": {
 					"type": "string",
@@ -35508,6 +35515,44 @@
 				},
 				"replayMismatch": {
 					"$ref": "#/components/schemas/Object_breaks_firstDivergentSection_rePrefilled_6557f020"
+				}
+			},
+			"Shape_a6426440": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"output": {
+					"$ref": "#/components/schemas/Union_9db58400"
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_9cade175"
+				},
+				"checkoutChanges": {
+					"$ref": "#/components/schemas/Union_6397a89f"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_75ddb38c"
 				}
 			},
 			"Shape_a7a7e801": {
@@ -36877,45 +36922,6 @@
 					]
 				}
 			},
-			"Shape_f6d59a1a": {
-				"path": {
-					"type": "string"
-				},
-				"branch": {
-					"type": "string"
-				},
-				"diffHash": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"changedPaths": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"commit": {
-					"type": "string"
-				},
-				"reason": {
-					"type": "string"
-				},
-				"detail": {
-					"type": "string"
-				},
-				"leftUncommitted": {
-					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
-				},
-				"changedAfterCommit": {
-					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
-				}
-			},
 			"Shape_f7ed5f9c": {
 				"id": {
 					"type": "string",
@@ -37998,19 +38004,6 @@
 					}
 				]
 			},
-			"Union_0820f241": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_state_value_206a1d47"
-					},
-					{
-						"$ref": "#/components/schemas/Object_state_d674a4a9"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_0870035b": {
 				"anyOf": [
 					{
@@ -38680,16 +38673,6 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Union_0ee6ba7d"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_4df9aa34": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_branch_changedAfterCommit_changedPaths_0361270e"
 					},
 					{
 						"type": "null"
@@ -39448,6 +39431,16 @@
 					}
 				]
 			},
+			"Union_9cade175": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_base_branch_changedAfterCommit_85217f87"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_9d36f13d": {
 				"anyOf": [
 					{
@@ -40061,6 +40054,19 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Union_173f7898"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_d7433fea": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_state_value_4bab959a"
+					},
+					{
+						"$ref": "#/components/schemas/Object_state_d674a4a9"
 					},
 					{
 						"type": "null"

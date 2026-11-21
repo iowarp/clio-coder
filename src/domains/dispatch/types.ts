@@ -1205,6 +1205,9 @@ export interface RunResult {
 	worktree?: {
 		path: string;
 		branch: string;
+		/** The checkout the task worktree was cut from, and the commit it was cut at; a reviewer's packet diffs base..commit. */
+		root?: string;
+		base?: string;
 		diffHash: string | null;
 		changedPaths?: string[];
 		snapshot?: "working-tree" | "unavailable";
