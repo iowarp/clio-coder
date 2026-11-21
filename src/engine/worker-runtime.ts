@@ -139,6 +139,7 @@ import type {
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../tools/gateway/index.js";
 import { createWorkerGitContext } from "../tools/git-exec.js";
+import { runObservationPool } from "../tools/observation.js";
 import { CODE_NAV_TASK_STEERING, codeNavTaskSteering, type ToolProfileName } from "../tools/profiles.js";
 import type { GrantExecutionEvent, RegistryDeps } from "../tools/registry.js";
 import {
@@ -1410,6 +1411,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
+			// DESIGN 4.5: the run's own observation pool, sized from the usable window the last round measured.
+			...(runObservationWindow !== undefined && input.telemetryContext !== undefined
+				? { observationRunPool: runObservationPool(runObservationWindow) }
+				: {}),
 			// The worker's own model, resolved by the orchestrator, so hooks judge the worker by it.
 			...(input.runtimeResolution !== undefined ? { model: snapshotModelInfo(input.runtimeResolution) } : {}),
 			supportsImages: acceptsImageInput({
@@ -1477,6 +1482,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
+	/** What the run's observation pool is sized from, measured each round; tools a round calls read the latest. */
+	let runObservationWindow: { usableTokens: number; workShare: number; inputTokens: number } | undefined;
 	const contextGuard = createWorkerContextGuard(observations.archive, {
 		aliasFloor: seedLineage.aliasFloor,
 		archivePath: observations.archivePath,
@@ -1730,6 +1737,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A request admitted without a fold reports no decision, so the thrash share reads the admitted count too.
 			if (window > 0 && contextGuard.inputTokens >= window * THRASH_CONTEXT_FRACTION) contextPressureCrossed = true;
 			let handbackSurfaceTokens = 0;
+			if (window > 0) {
+				runObservationWindow = {
+					usableTokens:
+						window - requestOutputReserve(currentModel, currentModel.maxTokens, window, contextGuard.inputTokens),
+					workShare: input.role !== undefined ? workShare(input.role) : (input.limits?.context.workShare ?? 1),
+					inputTokens: contextGuard.inputTokens,
+				};
+			}
 			// M3: a run with a role hands back at its role's share of the usable window instead of dying at the wall.
 			if (window > 0 && input.role !== undefined && !phase.toolsLocked) {
 				const usable =
