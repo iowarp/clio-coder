@@ -2343,6 +2343,21 @@ export const AuthRefreshedSchema = Type.Object(
 	},
 	closed,
 );
+/**
+ * A main session's prompt cache lane came from this process's own lanes because the cross-process lane store could
+ * not take the claim (M-11), so a concurrent Clio process may route to the same id.
+ */
+export const CacheLaneFellBackSchema = Type.Object(
+	{
+		/** lock-timeout: another holder kept the admission lock past the claim's bound. store-failed: any other error. */
+		reason: vocabulary(["lock-timeout", "store-failed"]),
+		/** The lock budget that ran out; null for a store failure. */
+		timeoutMs: Type.Union([count, Type.Null()]),
+		/** The in-process lane the conversation took instead. */
+		lane: count,
+	},
+	closed,
+);
 export const MESSAGE_STEP = vocabulary([
 	"submitted",
 	"queued",
