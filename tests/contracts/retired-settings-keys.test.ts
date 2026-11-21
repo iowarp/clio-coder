@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { formatSettingsIssues, readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
+import { readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
@@ -138,13 +139,20 @@ test("a settings failure names the migration command only for a key or value its
 	const manifest = join(config, "migrations.json");
 	const advice = /clio-coder upgrade.*2026-11-21-retired-settings.*rewrites retired keys/u;
 	const surfaces = (): string[] => {
-		let thrown = "";
-		try {
-			readSettings();
-		} catch (error) {
-			thrown = String(error instanceof Error ? error.message : error).replace(/\n/gu, " ");
-		}
-		return [thrown, formatSettingsIssues(validateSettingsFile().issues)];
+		const thrown = (read: () => unknown): string => {
+			try {
+				read();
+			} catch (error) {
+				return String(error instanceof Error ? error.message : error).replace(/\n/gu, " ");
+			}
+			return "";
+		};
+		// The layered reader is what `run`, `config get` and the config domain load through (M-38).
+		return [
+			thrown(readSettings),
+			thrown(() => readStrictLayeredSettings(home.dir)),
+			formatSettingsIssues(validateSettingsFile().issues),
+		];
 	};
 	// A provisioned file with no manifest, then a manifest written before the migration existed.
 	for (const recorded of [null, REGISTERED_MIGRATION_IDS.filter((id) => id !== "2026-11-21-retired-settings")]) {
