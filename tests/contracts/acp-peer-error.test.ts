@@ -7,8 +7,10 @@ import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { resolveAcpContinuation } from "../../src/domains/dispatch/acp-continuation.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { workerFailureHeadline } from "../../src/domains/dispatch/failure-headline.js";
+import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
 import { prepareAntigravityLaunch } from "../../src/engine/acp/antigravity-launch.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
@@ -734,6 +736,135 @@ test("ACP adapter reports the config option's current model when none is request
 		safety: createWorkerSafety({ cwd }),
 	}).promise;
 	strictEqual(result.delegation.selectedModelId, "gpt-6-astra[medium]");
+});
+
+test("ACP adapter reopens an earlier session by session/resume over session/load, keeps a load's replay out of the run, and refuses a peer with neither", async () => {
+	const home = makeScratchHome("acp-reopen-");
+	const peer = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	const reopen = async (kind: "resume" | "load" | "none") => {
+		const log = join(home.dir, `${kind}.jsonl`);
+		const run = startAcpDelegationRun({
+			agent: { id: `reopen-${kind}`, command: process.execPath, args: [peer, `reopen-${kind}`, log] },
+			task: "next step",
+			systemPrompt: "SYSTEM RULES",
+			cwd: home.dir,
+			safety: createWorkerSafety({ cwd: home.dir }),
+			reopen: { sessionId: "earlier-session" },
+		});
+		const result = await run.promise;
+		const events: Array<{ type: string; text?: string }> = [];
+		for await (const event of run.events) events.push(event as { type: string; text?: string });
+		const requests = (await readFile(log, "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { method: string; params?: { prompt?: Array<{ text: string }> } });
+		return { result, events, requests };
+	};
+	try {
+		const resumed = await reopen("resume");
+		strictEqual(resumed.result.exitCode, 0, resumed.result.failureMessage);
+		strictEqual(resumed.result.delegation.opened, "resume");
+		strictEqual(resumed.result.delegation.acpSessionId, "earlier-session");
+		deepStrictEqual(
+			resumed.requests.map((request) => request.method),
+			["initialize", "session/resume", "session/prompt"],
+		);
+		// The reopened session already holds the system prompt; the turn carries only the task.
+		const prompt = resumed.requests.at(-1)?.params?.prompt?.[0]?.text ?? "";
+		ok(prompt.includes("next step") && !prompt.includes("SYSTEM RULES"), prompt);
+
+		const loaded = await reopen("load");
+		strictEqual(loaded.result.exitCode, 0, loaded.result.failureMessage);
+		strictEqual(loaded.result.delegation.opened, "load");
+		strictEqual(loaded.result.delegation.replayedUpdates, 2);
+		deepStrictEqual(
+			loaded.events.filter((event) => event.type === "text_delta").map((event) => event.text),
+			["continued earlier-session"],
+		);
+		ok(!loaded.events.some((event) => event.type === "tool_execution_start"), "replayed tool calls are not this run's");
+
+		const refused = await reopen("none");
+		strictEqual(refused.result.exitCode, 1);
+		ok(
+			/^ACP delegation failed: ACP peer cannot reopen session 'earlier-session'/u.test(
+				refused.result.failureMessage ?? "",
+			),
+			refused.result.failureMessage,
+		);
+		deepStrictEqual(
+			refused.requests.map((request) => request.method),
+			["initialize"],
+		);
+
+		// Dispatch's continue_run: the earlier row decides between reopening its session, a fresh one, and a refusal.
+		const row = {
+			runtimeKind: "acp-delegation",
+			agentId: "antigravity",
+			sessionId: "owner",
+			endedAt: "2026-11-21T12:00:00.000Z",
+			acpSession: { sessionId: "agy-1" },
+		} as unknown as RunEnvelope;
+		const ask = { runId: "run-1", agentId: "antigravity", ownerSessionId: "owner" };
+		deepStrictEqual(resolveAcpContinuation({ ...ask, row }), {
+			kind: "reopen",
+			fromRunId: "run-1",
+			acpSessionId: "agy-1",
+		});
+		const spent = { ...row, acpSession: { sessionId: "agy-1", nonResumable: { reason: "INVALID_THINKING_SIGNATURE" } } };
+		strictEqual(resolveAcpContinuation({ ...ask, row: spent }).kind, "fresh");
+		throws(() => resolveAcpContinuation({ ...ask, ownerSessionId: "other", row }), /belongs to another session/u);
+		throws(() => resolveAcpContinuation({ ...ask, agentId: "codex", row }), /ran agent 'antigravity', not 'codex'/u);
+		throws(() => resolveAcpContinuation({ ...ask, row: { ...row, endedAt: null } }), /has not settled/u);
+		throws(() => resolveAcpContinuation({ ...ask, row: null }), /names no run/u);
+	} finally {
+		home.cleanup();
+	}
+});
+
+test("ACP adapter keeps a session open after its prompt exactly while the peer reports work in progress", async () => {
+	const cwd = process.cwd();
+	const peer = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	const settle = async (scenario: "complete" | "state" | "done" | "hang") => {
+		const run = startAcpDelegationRun({
+			agent: { id: "settle-fixture", command: process.execPath, args: [peer, "post-settle", scenario] },
+			task: "build it",
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+			postSettleCapMs: 1_000,
+		});
+		const result = await run.promise;
+		const events: Array<{ type: string; message?: { content: Array<{ type: string; text?: string }> } }> = [];
+		for await (const event of run.events) events.push(event as (typeof events)[number]);
+		const end = events.find((event) => event.type === "message_end");
+		const text = end?.message?.content.find((part) => part.type === "text")?.text ?? "";
+		return { result, text, events };
+	};
+	// A v1 tool call left in progress holds the session until it settles.
+	const held = await settle("complete");
+	strictEqual(held.result.exitCode, 0, held.result.failureMessage);
+	strictEqual(held.text, "started the build. background done");
+	strictEqual(held.result.delegation.postSettle?.ended, "idle");
+	strictEqual(held.result.delegation.postSettle?.updates, 2);
+	ok(
+		held.events.some((event) => event.type === "tool_execution_end"),
+		"the background call settled inside the run",
+	);
+
+	// A v2 running state with background work holds it until the peer reports idle with nothing in the background.
+	const state = await settle("state");
+	strictEqual(state.text, "started the build. background done");
+	strictEqual(state.result.delegation.postSettle?.ended, "idle");
+
+	// Nothing in progress when the prompt answers: no window.
+	const done = await settle("done");
+	strictEqual(done.result.delegation.postSettle, undefined);
+	strictEqual(done.text, "started the build.");
+
+	// Work the peer never settles stops at the safety cap.
+	const capped = await settle("hang");
+	strictEqual(capped.result.exitCode, 0, capped.result.failureMessage);
+	strictEqual(capped.result.delegation.postSettle?.ended, "cap");
+	strictEqual(capped.text, "started the build.");
 });
 
 test("ACP adapter fails a prompt response missing stopReason", async () => {

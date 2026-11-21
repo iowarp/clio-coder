@@ -1,4 +1,6 @@
+import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { pruneSandboxCacheDaily, sandboxCacheCapBytes } from "../../core/sandbox/sandbox-cache.js";
 import { clearSessionAuthoredFiles } from "../../core/session-authored-files.js";
 import { classify as classifyCall } from "./action-classifier.js";
 import { type SafetyContract, toSafetyDecision } from "./contract.js";
@@ -22,6 +24,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let policyEngine: SafetyPolicyEngine | null = null;
 	let loopState: LoopDetectorState = createLoopState();
 	let unsubscribeSessionParked: (() => void) | null = null;
+	let pruneTimer: NodeJS.Timeout | undefined;
+	let stopping = false;
 
 	function activePolicyEngine(): SafetyPolicyEngine {
 		policyEngine ??= createSafetyPolicyEngine();
@@ -44,6 +48,16 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	const extension: DomainExtension = {
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
+			stopping = false;
+			// The sandbox cache is pruned to its cap at most once a day, after boot settles and off every input path.
+			pruneTimer = setTimeout(() => {
+				const gib =
+					context.getContract("config")?.get().safety.sandboxCacheMaxGiB ?? DEFAULT_SETTINGS.safety.sandboxCacheMaxGiB;
+				void pruneSandboxCacheDaily({ capBytes: sandboxCacheCapBytes(gib), stopped: () => stopping }).catch(() => {
+					// A failed prune removed only what it reported; the next startup tries again.
+				});
+			}, 5_000);
+			pruneTimer.unref();
 			// The shell reader looks through the declared wrappers when it names a check (FX-44). It reads them from the live
 			// snapshot each time, which a reload replaces before any change listener or bus subscriber runs.
 			const config = context.getContract("config");
@@ -54,6 +68,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			});
 		},
 		async stop() {
+			stopping = true;
+			clearTimeout(pruneTimer);
 			unsubscribeSessionParked?.();
 			unsubscribeSessionParked = null;
 			// The list is process-wide, so a stopped domain leaves none behind for the next one in this process.

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 /**
  * Worker-subprocess tool construction.
@@ -70,6 +71,24 @@ export interface WorkerSafetyOptions {
 	taskWorktreeRoot?: string;
 }
 
+/**
+ * An architect run's plan lives at its contract path. A plan artifact spelled elsewhere ("PLAN.md" because the task
+ * said so) would fail the contract after the document was written, so it is refused up front; the caller moves the
+ * plan if it wants it elsewhere (row 295).
+ */
+function architectPlanPathRefusal(
+	required: { cwd: string; path: string } | undefined,
+	tool: string,
+	args: Readonly<Record<string, unknown>> | undefined,
+): string | null {
+	if (required === undefined || tool !== ToolNames.Artifact || args?.kind !== "plan") return null;
+	const spelled = typeof args.path === "string" ? args.path.trim() : "";
+	if (spelled.length === 0 || path.resolve(required.cwd, spelled) === path.resolve(required.cwd, required.path)) {
+		return null;
+	}
+	return `This architect run's plan goes to its contract path ${required.path}, not ${spelled}. Call artifact with kind="plan" and no path; the caller receives the plan and its path, and moves it if it wants the plan elsewhere.`;
+}
+
 export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
 	const recordToolDecision = (input: ToolDecisionInput): void => {
@@ -96,11 +115,13 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		classify: (call) => classifyAction(call),
 		evaluate(call, posture, scope) {
 			const protectedReason = protectedArtifactMutationBlockReason(protectedArtifactState, call.tool, call.args);
-			if (protectedReason !== null) {
+			const planReason = protectedReason ?? architectPlanPathRefusal(requiredArtifact, call.tool, call.args);
+			if (planReason !== null) {
+				const ruleId = protectedReason !== null ? "protected-artifact" : "architect-plan-path";
 				const classification = classifyAction(call);
 				const rejection = {
-					short: "protected artifact blocked",
-					detail: protectedReason,
+					short: protectedReason !== null ? "protected artifact blocked" : "plan path refused",
+					detail: planReason,
 					hints: [],
 				};
 				const metadata = policyEngine.metadata(posture);
@@ -109,9 +130,9 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 					classification,
 					tool: call.tool,
 					actionClass: classification.actionClass,
-					reasons: [...classification.reasons, protectedReason],
-					ruleId: "protected-artifact",
-					reasonCode: "protected-artifact",
+					reasons: [...classification.reasons, planReason],
+					ruleId,
+					reasonCode: ruleId,
 					cwd: metadata.cwd,
 					policySource: "builtin-classifier" as const,
 					rejection,

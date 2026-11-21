@@ -409,7 +409,7 @@ if (process.cwd() === ${JSON.stringify(task.path)}) require('node:fs').writeFile
 		deepStrictEqual(recoverTaskWorktrees(root).removed, ["run-reused"]);
 	});
 
-	it("fails closed: an owner on another host, a claim without a lease, and a foreign claim all stay", () => {
+	it("fails closed: an owner on another host, a version 1 claim, and a foreign claim all stay", () => {
 		const remote = createTaskWorktree(root, "run-remote");
 		const remoteMarker = readMarker(remote);
 		writeFileSync(
@@ -425,10 +425,8 @@ if (process.cwd() === ${JSON.stringify(task.path)}) require('node:fs').writeFile
 
 		deepStrictEqual(recoverTaskWorktrees(root), { removed: [], preserved: [], failed: [] });
 		for (const task of [remote, legacy, foreign]) strictEqual(existsSync(task.path), true, task.runId);
-		deepStrictEqual(
-			listPreservedTaskWorktrees(root).map((entry) => entry.runId),
-			["run-legacy"],
-		);
+		// A version 1 claim is not a claim Clio recognizes, so it is neither recovered nor listed.
+		deepStrictEqual(listPreservedTaskWorktrees(root), []);
 	});
 
 	it("leaves a settled worktree alone after its owner exits, and doctor lists it with the commands to drop it", () => {

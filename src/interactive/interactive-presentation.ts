@@ -518,6 +518,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.
+		// A width, height or style change re-lays out the rows around the viewport at once and the rest in these idle
+		// steps, on both screens (TUI-4). This is the one switch: without it a layout change renders every entry.
+		deferRelayout: true,
 		scheduleIdle: (step) => {
 			const run = (): void => {
 				if (tickersStopped) return;

@@ -21,6 +21,8 @@ export const RUN_OUTCOME_CODES = [
 	"worker_turn_timeout",
 	"worker_output_cap_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	/** The read-streak decision gate refused two rounds of reads after every note (exploration design X7). */
+	"exploration_stalled",
 	"result_contract_exhausted",
 	"result_contract_invalid",
 	"worker_final_output_missing",

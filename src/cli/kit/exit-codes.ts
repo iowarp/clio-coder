@@ -27,3 +27,9 @@ export const EXIT_CODES = {
 } as const;
 
 export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
+
+/**
+ * The exit of a run the read-streak decision gate stopped (cause `exploration_stalled`): the work started and did not
+ * converge. The one entry the headless run and the v2 precedence table both read.
+ */
+export const EXPLORATION_STALLED_EXIT_CODE: ExitCode = EXIT_CODES.failed;

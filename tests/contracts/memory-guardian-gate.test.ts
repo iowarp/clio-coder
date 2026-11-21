@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { BackgroundStepDecision, BackgroundStepFacts } from "../../src/domains/memory/background-budget.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
-import { commandEvidenceRef, commandSegment, legacyCommandHash } from "../../src/domains/memory/command-evidence.js";
+import { commandEvidenceRef, commandSegment, sourceEvidenceRef } from "../../src/domains/memory/command-evidence.js";
 import {
 	type ClaimReceipt,
 	claimDemonstration,
@@ -22,6 +22,7 @@ import {
 } from "../../src/domains/memory/operations.js";
 import {
 	claimCommand,
+	claimFromEvidence,
 	claimPathRefusal,
 	memoryClaimKey,
 	proposeMemoryPromotion,
@@ -285,14 +286,19 @@ describe("memory guardian gate", () => {
 			createdAt: "2026-10-01T00:00:00.000Z",
 			approved: true,
 			repository: { kind: "canonical-path", key: repo },
+			claim: { kind: "command", command: pattern(out) },
 		};
 		ok(checkoutDeliveryCheck(repo)(bound)?.includes("outside its repository checkout"));
 		// Delivery judges what the record binds, never where its reader keeps scratch: a declared scratch parameter under
-		// another session's scratch root is delivered, a global lesson may name a machine-wide tool, and a legacy record
+		// another session's scratch root is delivered, a global lesson may name a machine-wide tool, and a record
 		// keyed by a subdirectory reads its own repository's paths as its own.
 		const deliver = checkoutDeliveryCheck(repo);
 		const elsewhere = "node fixture.mjs --out /srv/other-scratch/out.txt";
-		const lesson = (command: string) => ({ lesson: `Run \`${command}\`.`, evidenceRefs: [commandEvidenceRef(command)] });
+		const lesson = (command: string) => ({
+			lesson: `Run \`${command}\`.`,
+			evidenceRefs: [commandEvidenceRef(command)],
+			claim: { kind: "command" as const, command: pattern(command) },
+		});
 		const scratchParameter = { kind: "command" as const, command: pattern(elsewhere, 3) };
 		strictEqual(deliver({ ...bound, id: "mem-00000000000000b2", ...lesson(elsewhere), claim: scratchParameter }), null);
 		const tool = "node /opt/tools/lint.mjs";
@@ -315,8 +321,11 @@ describe("memory guardian gate", () => {
 		const checkoutParameter = { kind: "command" as const, command: pattern(intoCheckout, 3) };
 		ok(deliver({ ...bound, id: "mem-00000000000000b6", ...lesson(intoCheckout), claim: checkoutParameter }) !== null);
 
-		// The legacy reader: a store written before claims is read as it is, and its first mutation keeps the count.
+		// The store reads one shape: another envelope version is refused, and a record in an older shape is set aside and
+		// dropped by the next write.
 		const legacyDir = scratch();
+		const portRef = sourceEvidenceRef("README.md", "the port is 8080");
+		const shortRef = (ref: string) => ref.slice(0, ref.indexOf("#") + 17);
 		const legacy: MemoryRecord = {
 			id: "mem-00000000000000a1",
 			scope: "repo",
@@ -329,26 +338,39 @@ describe("memory guardian gate", () => {
 			createdAt: "2026-10-01T00:00:00.000Z",
 			approved: false,
 			repository: { kind: "canonical-path", key: repo },
-			observations: ["2026-10-02", "2026-10-03", "2026-10-04"].map((day, index) => ({
-				at: `${day}T00:00:00.000Z`,
-				sessionId: `l${index}`,
-				kind: "delivered",
-			})),
 		};
+		const at = "2026-10-02T00:00:00.000Z";
+		const oldShapes = [
+			{
+				...legacy,
+				id: "mem-00000000000000a2",
+				key: "delivered",
+				observations: [{ at, sessionId: "l0", kind: "delivered" }],
+			},
+			{ ...legacy, id: "mem-00000000000000a3", key: "unscoped", observations: [{ at, sessionId: "l5", kind: "held" }] },
+			{
+				...legacy,
+				id: "mem-00000000000000a4",
+				key: "port",
+				lesson: "README.md says the port is 8080.",
+				evidenceRefs: [shortRef(portRef)],
+			},
+		];
 		const legacyPath = join(legacyDir, "memory", "records.json");
 		mkdirSync(join(legacyDir, "memory"), { recursive: true });
-		const legacyText = `${JSON.stringify({ version: 1, records: [legacy] }, null, 2)}\n`;
-		writeFileSync(legacyPath, legacyText);
-		deepStrictEqual(await loadMemoryRecords(legacyDir), [legacy]);
-		strictEqual(readFileSync(legacyPath, "utf8"), legacyText, "nothing is rewritten on load");
-		await recordMemoryObservations(legacyDir, [{ memoryId: legacy.id, sessionId: "l9", kind: "held" }]);
-		const migrated = JSON.parse(readFileSync(legacyPath, "utf8"));
-		strictEqual(migrated.version, 2);
-		strictEqual(migrated.records[0].deliveredCount, 3);
-		strictEqual(migrated.records[0].lastDeliveredAt, "2026-10-04T00:00:00.000Z");
+		writeFileSync(legacyPath, JSON.stringify({ version: 1, records: [legacy] }));
+		await rejects(loadMemoryRecords(legacyDir), /\$\.version: expected 2 .*doctor --fix/u);
+		writeFileSync(legacyPath, JSON.stringify({ version: 2, records: [legacy, ...oldShapes] }));
 		deepStrictEqual(
-			migrated.records[0].observations.map((item: { kind: string }) => item.kind),
-			["held"],
+			(await loadMemoryRecords(legacyDir)).map((item) => item.id),
+			[legacy.id],
+		);
+		await recordMemoryObservations(legacyDir, [{ memoryId: legacy.id, sessionId: "l9", kind: "held" }]);
+		const written = JSON.parse(readFileSync(legacyPath, "utf8"));
+		deepStrictEqual(
+			written.records.map((item: { id: string }) => item.id),
+			[legacy.id],
+			"the next write drops every record in an old shape",
 		);
 
 		// At capacity: every operator decision and lesson stays, a note with no evidence goes before an older one with it.
@@ -373,7 +395,7 @@ describe("memory guardian gate", () => {
 		mkdirSync(join(fullDir, "memory"), { recursive: true });
 		writeFileSync(
 			join(fullDir, "memory", "records.json"),
-			JSON.stringify({ version: 1, records: [...decided, ...notes] }),
+			JSON.stringify({ version: 2, records: [...decided, ...notes] }),
 		);
 		await insertMemoryRecordIfAbsent(fullDir, note(999, {}));
 		const kept = new Set((await loadMemoryRecords(fullDir)).map((item) => item.id));
@@ -441,13 +463,22 @@ describe("memory guardian gate", () => {
 		strictEqual(run2.created, false);
 		strictEqual(run2.record?.id, run1.record?.id);
 
-		// `cd <root> && <command>` is the same claim as `<command>`, as evidence identity says.
-		const quoted = (command: string, ref: string): MemoryRecord =>
-			note(990, { lesson: `Run \`${command}\`.`, evidenceRefs: [ref], repository: { kind: "canonical-path", key: repo } });
+		// `cd <root> && <command>` is the same claim as `<command>`, as evidence identity says: the claim built from a text-hash
+		// ref of the chain names the command it runs.
+		const quoted = (command: string, ref: string): MemoryRecord => {
+			const lesson = `Run \`${command}\`.`;
+			const claim = claimFromEvidence(lesson, [ref], repo);
+			return note(990, {
+				lesson,
+				evidenceRefs: [ref],
+				repository: { kind: "canonical-path", key: repo },
+				...(claim !== null ? { claim } : {}),
+			});
+		};
 		const chained = `cd ${repo} && ${run("check")}`;
 		const plainKey = memoryClaimKey(quoted(run("check"), commandEvidenceRef(run("check"))));
 		ok(plainKey);
-		strictEqual(memoryClaimKey(quoted(chained, `command:${legacyCommandHash(chained)}`)), plainKey);
+		strictEqual(memoryClaimKey(quoted(chained, commandEvidenceRef(chained))), plainKey);
 
 		// Procedural entries and handoff snapshots wait for the operator however many sessions hold them.
 		const repository = canonicalMemoryRepositoryIdentity(repo);

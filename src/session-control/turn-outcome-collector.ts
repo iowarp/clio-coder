@@ -7,6 +7,7 @@ import { nextFiringId } from "../domains/middleware/fired-record.js";
 import {
 	type MiddlewareHookInput,
 	type MiddlewareHookRegistration,
+	READ_STREAK_GATE_EVIDENCE,
 	READ_STREAK_REGISTRATION_ID,
 	READ_STREAK_SERIAL_EVIDENCE,
 	type ReadStreakObserver,
@@ -204,7 +205,8 @@ function emptyTurn(previousClarificationStreak: number): CollectedTurn {
 
 function noteRule(ruleId: string, evidence: string | undefined): NoteSettlement["rule"] | null {
 	if (ruleId === SCOUT_NUDGE_REGISTRATION_ID) return "survey";
-	if (ruleId !== READ_STREAK_REGISTRATION_ID) return null;
+	// A decision-gate refusal (X7) is a block and settles as one, so the ladder's notes keep their own shares.
+	if (ruleId !== READ_STREAK_REGISTRATION_ID || evidence === READ_STREAK_GATE_EVIDENCE) return null;
 	return evidence === READ_STREAK_SERIAL_EVIDENCE ? "serial" : "streak";
 }
 

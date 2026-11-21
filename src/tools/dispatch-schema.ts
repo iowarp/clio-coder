@@ -384,6 +384,12 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				description: "One self-contained worker assignment, never the operator's words. Use tasks for a batch.",
 			}),
 		),
+		continue_run: Type.Optional(
+			Type.String({
+				description:
+					"Settled run id of an ACP agent's earlier delegation in this session: the task continues in that peer session.",
+			}),
+		),
 		tasks: Type.Optional(
 			Type.Array(
 				Type.Union([

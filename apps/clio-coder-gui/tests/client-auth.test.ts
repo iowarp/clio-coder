@@ -84,10 +84,31 @@ test("a launcher's proof opens one client, once, and only over a challenge this 
 	const restarted = await harness();
 	t.after(restarted.close);
 	assert.equal((await open(restarted, proved)).status, 401);
-	// A wrong proof spends the challenge, so each challenge admits one guess.
+	// Challenges are signed, not stored: a flood of them pushes out none, and a wrong proof spends nothing (N5).
 	const other = await challenge(h);
+	for (let index = 0; index < 300; index += 1) await challenge(h);
 	assert.equal((await open(h, { challenge: other, proof: launcherProof("test-token", other, 4318) })).status, 401);
-	assert.equal((await open(h, { challenge: other, proof: launcherProof("test-token", other, 4317) })).status, 401);
+	assert.equal((await open(h, { challenge: other, proof: launcherProof("test-token", other, 4317) })).status, 200);
+	let clock = 0;
+	const registry = new ClientRegistry(() => clock);
+	const issued2 = registry.launchChallenge().challenge;
+	assert.equal(
+		new ClientRegistry(() => 0).redeemChallenge(issued2, () => true),
+		false,
+		"another process's challenge",
+	);
+	const tampered = `${issued2.slice(0, 5)}${issued2[5] === "A" ? "B" : "A"}${issued2.slice(6)}`;
+	assert.equal(
+		registry.redeemChallenge(tampered, () => true),
+		false,
+		"a challenge whose nonce was changed",
+	);
+	clock = 61_000;
+	assert.equal(
+		registry.redeemChallenge(issued2, () => true),
+		false,
+		"an expired challenge",
+	);
 });
 
 test("the event stream opens on a single-use ticket, never on a bearer in its URL", async (t) => {

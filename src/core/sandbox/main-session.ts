@@ -20,6 +20,7 @@ import { assertClioDirLayout, clioCachePath, clioConfigPath, clioDataPath, clioS
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
 import { withMountAliases } from "./mount-aliases.js";
+import { holdSandboxCacheLease, sandboxCacheDir } from "./sandbox-cache.js";
 import { discoverSecretMasks } from "./secret-files.js";
 import type {
 	SandboxAvailability,
@@ -534,16 +535,6 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 }
 
 /**
- * The contained commands' tool cache, kept across sessions so installs stay
- * warm. The operator's ~/.cache, ~/.npm and ~/.local stay read-only: npx,
- * corepack, uv, pre-commit, Playwright, shell frameworks and ~/.local/bin on
- * PATH all run what they hold later and outside the sandbox.
- */
-function mainSandboxCacheDir(cacheDir: string = clioCachePath()): string {
-	return path.join(cacheDir, "sandbox-cache");
-}
-
-/**
  * Pure: whether a contained command can write `target`. bwrap mounts the
  * writable roots, then the read-only paths, then the sandbox cache, and the
  * last mount covering a path decides; anything none covers is the read-only
@@ -664,7 +655,10 @@ export function mainSandboxPolicy(roots: {
 	assertClioDirLayout();
 	return resolveMainSandboxPolicy({
 		...roots,
-		sandboxCache: mainSandboxCacheDir(),
+		// The contained commands' tool cache, kept across sessions so installs stay warm and pruned to its cap
+		// (sandbox-cache.ts). The operator's ~/.cache, ~/.npm and ~/.local stay read-only: npx, corepack, uv,
+		// pre-commit, Playwright, shell frameworks and ~/.local/bin on PATH all run what they hold later and outside it.
+		sandboxCache: sandboxCacheDir(),
 		clioDirs: [clioConfigPath(), clioDataPath(), clioStatePath(), clioCachePath()],
 		...(git !== undefined ? { git } : {}),
 	});
@@ -684,7 +678,7 @@ export function mainSandboxWritableRoots(
 	return resolveMainSandboxPolicy({
 		workspace,
 		scratchRoots,
-		sandboxCache: mainSandboxCacheDir(),
+		sandboxCache: sandboxCacheDir(),
 		clioDirs: [],
 		...(git !== undefined ? { git } : {}),
 	}).writableRoots;
@@ -816,6 +810,8 @@ export function planMainSandboxSpawn(
 			};
 		}
 	}
+	// From here this process may run contained commands that use the cache, so its pruner leaves it alone.
+	if (policy.sandboxCache !== undefined) holdSandboxCacheLease(policy.sandboxCache);
 	const physicalPolicy: MainSandboxPolicy = {
 		...policy,
 		writableRoots: policy.writableRoots.map(physicalSandboxPath),

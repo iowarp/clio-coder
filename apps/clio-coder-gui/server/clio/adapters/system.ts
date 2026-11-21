@@ -25,7 +25,7 @@ export function inspectSystem() {
 				level: row.level ?? (row.ok ? "ok" : "error"),
 				detailRedacted,
 				detail: detailRedacted
-					? `Clio reported a problem with ${row.name}. Inspect the source locally with clio-coder doctor; parser details are withheld to protect credentials.`
+					? `CLIO Coder reported a problem with ${row.name}. Inspect the source locally with clio-coder doctor; parser details are withheld to protect credentials.`
 					: row.detail,
 			};
 		}),

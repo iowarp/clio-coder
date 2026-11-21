@@ -39,7 +39,7 @@ function fixture(t: TestContext) {
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 	mkdirSync(join(root, "memory"));
 	const path = memoryStorePath(root);
-	const save = (records: MemoryRecord[]) => writeFileSync(path, JSON.stringify({ version: 1, records }));
+	const save = (records: MemoryRecord[]) => writeFileSync(path, JSON.stringify({ version: 2, records }));
 	const request: MemoryPromptRequest = {
 		turnId: "1",
 		sessionAuthority: "session-a:0",
@@ -67,7 +67,7 @@ test("same-size atomic external replacement is invisible within the turn and vis
 	const first = read(f.request);
 	const originalRevision = readMemoryStoreSnapshot(f.root).revision;
 	const originalStat = statSync(f.path);
-	writeFileSync(`${f.path}.next`, JSON.stringify({ version: 1, records: [record("Keep modified evidence.")] }));
+	writeFileSync(`${f.path}.next`, JSON.stringify({ version: 2, records: [record("Keep modified evidence.")] }));
 	renameSync(`${f.path}.next`, f.path);
 	utimesSync(f.path, originalStat.atime, originalStat.mtime);
 	strictEqual(statSync(f.path).size, originalStat.size);

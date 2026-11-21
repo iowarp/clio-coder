@@ -83,8 +83,7 @@ export function provenRecipes(
  * A host recipe claims only that its command works here. When another kept
  * claim already carries that command's evidence identity in different wording,
  * the template adds a second record saying less, so it is not filed; the same
- * template text still is, which is how a later session re-verifies it. A ref
- * written before evidence identity is resolved through the same function.
+ * template text still is, which is how a later session re-verifies it.
  */
 export function recipeAlreadyClaimed(
 	recipe: ProvenRecipe,
@@ -94,8 +93,7 @@ export function recipeAlreadyClaimed(
 	if (key === undefined) return false;
 	const text = recipe.content.replace(/\s+/gu, " ").trim();
 	return kept.some(
-		(lesson) =>
-			commandRefKeys(lesson.text, lesson.evidenceRefs ?? []).has(key) && lesson.text.replace(/\s+/gu, " ").trim() !== text,
+		(lesson) => commandRefKeys(lesson.evidenceRefs ?? []).has(key) && lesson.text.replace(/\s+/gu, " ").trim() !== text,
 	);
 }
 

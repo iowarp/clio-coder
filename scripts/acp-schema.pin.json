@@ -1,0 +1,17 @@
+{
+	"repository": "agentclientprotocol/agent-client-protocol",
+	"v1": {
+		"tag": "schema-v1.34.1",
+		"files": {
+			"schema.json": "79fbeccc5cb5668259ee35ff7440ffd79eaf813742366ac06f707b98bbf789db",
+			"meta.json": "061edb6efa8fb2aa2792459a86ec7268de5fe665bba48b2ffe7939df01481f88"
+		}
+	},
+	"v2": {
+		"tag": "schema-v2.0.0-beta.2",
+		"files": {
+			"schema.json": "5fd05ab6892df8dd95f225985d7ac7aa22b2732b6590e0defe76631039627826",
+			"meta.json": "5eac58a28615d399af1db8e3d636767a7e404f2df38c9668a1ba00b1989e0714"
+		}
+	}
+}

@@ -294,6 +294,7 @@ import { ceilChars } from "../session/context-accounting.js";
 import { forkParentSessionId } from "../session/fork-journal.js";
 import { telemetryBundlePath, telemetryJournalPath, telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
+import { resolveAcpContinuation } from "./acp-continuation.js";
 import {
 	approvedRouteObservation,
 	consumeActiveRouteApproval,
@@ -414,6 +415,7 @@ import {
 	hostVerificationSandbox,
 	runHostVerification,
 } from "./host-verification.js";
+import { architectPlanOutsideWriteRoots } from "./intent-compatibility.js";
 import { renderChecksWithheldNotice, renderDispatchIntentRequirements } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
@@ -454,7 +456,7 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
-import { dispatchOwnership, owningSessionPhrase, sessionAncestorIds } from "./ownership.js";
+import { dispatchOwnership, sessionAncestorIds } from "./ownership.js";
 import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
@@ -1471,6 +1473,7 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"worker_output_cap_exhausted",
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
 	"worker_no_work",
@@ -1493,6 +1496,7 @@ function hasDurableFinalOutput(output: RunResultOutput | undefined): boolean {
 const LOOP_DEGENERATION_CODES: ReadonlySet<RunOutcomeCode> = new Set([
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 ]);
 
@@ -4518,15 +4522,41 @@ export function createDispatchBundle(
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
 	});
-	/** The session an ask belongs to when that is not the current one, which alone may answer it (bt-11 f), else null. */
+	/** Asks a fork adopted from the parked session that held them, by request id; a brokered ask's record holds its own. */
+	const adoptedAsks = new Map<string, { runId: string; sessionId: string }>();
+	/**
+	 * The session an ask belongs to when that is not the current one, which alone may answer it, else null. An ask
+	 * whose holder is an ancestor of the current session is orphaned: one process runs one session, so the holder is
+	 * parked and the ask lives only here. The fork adopts it the way it inherits a collect (bt-11), and from then on
+	 * the parent no longer holds it. Steering and cancelling the run stay with the session that dispatched it.
+	 */
 	function foreignAskOwner(runId: string, requestId: string): string | null {
+		const brokered = grantBroker.get(requestId);
 		const ownerSessionId =
-			grantBroker.get(requestId)?.ownerSessionId ?? currentAssignmentRun(runId)?.req.ownerSessionId ?? null;
+			brokered?.ownerSessionId ??
+			adoptedAsks.get(requestId)?.sessionId ??
+			currentAssignmentRun(runId)?.req.ownerSessionId ??
+			null;
 		const current = contract.owner?.();
-		return ownerSessionId === null || current === undefined || ownerSessionId === current.sessionId
-			? null
-			: ownerSessionId;
+		if (ownerSessionId === null || current === undefined || ownerSessionId === current.sessionId) return null;
+		if (current.sessionId === null || !dispatchOwnership(current).inherits({ sessionId: ownerSessionId })) {
+			return ownerSessionId;
+		}
+		if (brokered === null) adoptedAsks.set(requestId, { runId, sessionId: current.sessionId });
+		else if (grantBroker.adopt(requestId, current.sessionId) === null) return ownerSessionId;
+		return null;
 	}
+	const dropAdoptedAsks = (runId: string): void => {
+		for (const [requestId, adopted] of adoptedAsks) if (adopted.runId === runId) adoptedAsks.delete(requestId);
+	};
+	const heldAskRefusal = (holder: string, runId: string): string =>
+		`the ask is held by session ${holder} (run '${runId}'); only that session can answer it. /resume ${holder} to answer it`;
+	/** Sessions a fork parked, whose brokered asks wait for the fork's open to adopt or revoke them. */
+	const forkParkedSessionIds: Array<string | null> = [];
+	/** The current session adopts every brokered ask an ancestor left pending, so its main agent and card see them. */
+	const adoptOrphanedGrants = (): void => {
+		for (const record of grantBroker.list({ state: "pending" })) foreignAskOwner(record.runId, record.requestId);
+	};
 	const workerApprovalWindows = createWorkerApprovalWindows({
 		now: monotonicNow,
 		onChange: ({ runId, agentId, requestId }, view) => {
@@ -6397,6 +6427,8 @@ export function createDispatchBundle(
 						intent: req.intent ?? null,
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
+		const planOutside = architectPlanOutsideWriteRoots(req.agentId, spec.resultContract, req.intent);
+		if (planOutside !== null) throw new Error(planOutside);
 		return { spec, capabilityMismatch };
 	}
 
@@ -7125,6 +7157,16 @@ export function createDispatchBundle(
 		});
 		publishDispatchPathScope(req, lifecycle.pathScope);
 		req = withoutDelegationStandInModel(req, lifecycle.agentConfig.id);
+		// continue_run (Phase 3.2): judged before the run takes a slot, so a refusal costs nothing.
+		const continuation =
+			req.continueRunId === undefined
+				? null
+				: resolveAcpContinuation({
+						runId: req.continueRunId,
+						row: requireLedger().get(req.continueRunId),
+						agentId: req.agentId,
+						ownerSessionId: req.ownerSessionId ?? null,
+					});
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = req.model ?? lifecycle.agentConfig.id;
@@ -7309,6 +7351,7 @@ export function createDispatchBundle(
 				now,
 				monotonicNow,
 				askPeerQuestion,
+				...(continuation?.kind === "reopen" ? { reopen: { sessionId: continuation.acpSessionId } } : {}),
 			});
 		} catch (error) {
 			await closeRunJournal();
@@ -7800,6 +7843,19 @@ export function createDispatchBundle(
 						? { trustedUnmediated: true as const }
 						: {}),
 					toolCallLog: acp.toolCallLog(),
+					opened: result.delegation.opened,
+					...(result.delegation.replayedUpdates !== undefined ? { replayedUpdates: result.delegation.replayedUpdates } : {}),
+					...(result.delegation.postSettle !== undefined ? { postSettle: { ...result.delegation.postSettle } } : {}),
+					...(continuation !== null
+						? {
+								continuedFrom: {
+									runId: continuation.fromRunId,
+									acpSessionId: continuation.acpSessionId,
+									...(continuation.kind === "fresh" ? { freshReason: continuation.reason } : {}),
+								},
+							}
+						: {}),
+					...(result.delegation.nonResumable !== undefined ? { nonResumable: result.delegation.nonResumable } : {}),
 				},
 				// The delegate's own ACP session id is recorded above as
 				// delegation.acpSessionId. This field names the Clio session that
@@ -7823,6 +7879,14 @@ export function createDispatchBundle(
 		(async (): Promise<RunResult> => {
 			try {
 				const result = await acp.promise;
+				// The peer session is what a later continue_run reopens, so the ledger row keeps it with the peer's verdict.
+				if (result.delegation.acpSessionId !== null)
+					ledgerRef.update(envelope.id, {
+						acpSession: {
+							sessionId: result.delegation.acpSessionId,
+							...(result.delegation.nonResumable !== undefined ? { nonResumable: result.delegation.nonResumable } : {}),
+						},
+					});
 				// The receipt reads meters the domain pump fills. Finalization
 				// always waits (bounded by the drain grace) for the pump to finish
 				// the source stream, whether or not an external consumer ever
@@ -8156,6 +8220,10 @@ export function createDispatchBundle(
 				.catch(() => {});
 			return handle;
 		};
+		if (req.continueRunId !== undefined && !req.delegationAgentId)
+			throw new Error(
+				`dispatch: continue_run continues an ACP delegation's peer session; '${req.agentId}' is not an ACP agent`,
+			);
 		if (req.delegationAgentId) {
 			assertAcpDelegationAdmissible(req, req.delegationAgentId, protectedArtifactState);
 			await rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
@@ -9251,6 +9319,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_permission_resolved" && typeof event.payload?.requestId === "string") {
 				workerApprovalWindows.settle(event.payload.requestId);
+				adoptedAsks.delete(event.payload.requestId);
 			}
 			if (
 				event.type === "clio_coder_permission_resolved" &&
@@ -9952,6 +10021,7 @@ export function createDispatchBundle(
 				const finalCallUsage = callUsage?.snapshot();
 				if (finalCallUsage) tokenMeter.usage = finalCallUsage;
 				workerApprovalWindows.settleRun(envelope.id);
+				dropAdoptedAsks(envelope.id);
 				// The worker is gone: every grant it held settles now, after its last
 				// execution report drained. Retries run as new attempts with new requests.
 				if (grantAttempt !== undefined) {
@@ -12041,14 +12111,28 @@ export function createDispatchBundle(
 			// revoke what they hold; a run's own exit and abort revoke at the run.
 			grantUnsubscribes.push(
 				context.bus.subscribe("session.parked", (payload) => {
+					// A fork adopts what its parent held (bt-11); the fork's own open, next, revokes only what it did not adopt.
+					if (payload.reason === "fork") {
+						forkParkedSessionIds.push(payload.sessionId);
+						return;
+					}
 					grantBroker.revokeSession(
 						payload.sessionId,
 						`the owning session was ${payload.reason === "close" ? "closed" : "parked"}`,
 					);
 				}),
 				// A fork, or a /resume back to the dispatching session, changes who may answer an open ask.
-				context.bus.subscribe("session.created", () => workerApprovalWindows.republish()),
-				context.bus.subscribe("session.reattached", () => workerApprovalWindows.republish()),
+				context.bus.subscribe("session.created", () => {
+					adoptOrphanedGrants();
+					for (const sessionId of forkParkedSessionIds.splice(0)) {
+						grantBroker.revokeSession(sessionId, "the owning session was parked");
+					}
+					workerApprovalWindows.republish();
+				}),
+				context.bus.subscribe("session.reattached", () => {
+					adoptOrphanedGrants();
+					workerApprovalWindows.republish();
+				}),
 				context.bus.subscribe("session.ended", () => {
 					const sessions = new Set(grantBroker.list({ state: "pending" }).map((record) => record.ownerSessionId));
 					for (const sessionId of sessions) grantBroker.revokeSession(sessionId, "the owning session ended");
@@ -12533,8 +12617,15 @@ export function createDispatchBundle(
 	async function decideGrantRecordAsMain(
 		input: Parameters<NonNullable<DispatchContract["grants"]>["decideAsMain"]>[0],
 	): Promise<MainGrantOutcome> {
-		const record = grantBroker.get(input.requestId);
-		if (record === null) return { ok: false, message: `unknown permission request '${input.requestId}'` };
+		const found = grantBroker.get(input.requestId);
+		if (found === null) return { ok: false, message: `unknown permission request '${input.requestId}'` };
+		// Answering is the ask's, not the run's: a fork answers the ask it adopted from its parked parent (bt-11).
+		const holder =
+			found.state === "pending" && found.ownerSessionId !== input.sessionId
+				? foreignAskOwner(found.runId, input.requestId)
+				: null;
+		if (holder !== null) return { ok: false, message: heldAskRefusal(holder, found.runId) };
+		const record = grantBroker.get(input.requestId) ?? found;
 		const base = { sessionId: input.sessionId, runId: input.runId };
 		const failed = (reason: string, view?: GrantRecord): MainGrantOutcome => ({
 			ok: false,
@@ -12900,10 +12991,8 @@ export function createDispatchBundle(
 			}
 		},
 		workerPermissionRefusal(runId, requestId) {
-			const ownerSessionId = foreignAskOwner(runId, requestId);
-			const owner = contract.owner?.();
-			if (ownerSessionId === null || owner === undefined) return null;
-			return `run '${runId}' belongs to ${owningSessionPhrase(dispatchOwnership(owner), ownerSessionId)}; only the session that dispatched it can answer its approvals, steer it or cancel it. /resume ${ownerSessionId} to answer it`;
+			const holder = foreignAskOwner(runId, requestId);
+			return holder === null ? null : heldAskRefusal(holder, runId);
 		},
 		resolveWorkerPermission(runId, requestId, decision) {
 			const refusal = contract.workerPermissionRefusal?.(runId, requestId) ?? null;

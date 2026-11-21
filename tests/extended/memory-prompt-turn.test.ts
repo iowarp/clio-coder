@@ -29,7 +29,7 @@ function save(root: string, lesson: string): void {
 	writeFileSync(
 		memoryStorePath(root),
 		JSON.stringify({
-			version: 1,
+			version: 2,
 			records: [
 				{
 					id: "mem-0000000000000001",

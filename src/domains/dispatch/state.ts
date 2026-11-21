@@ -34,20 +34,16 @@ import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { removeRunFeeds } from "./run-feed.js";
 import type { RunEnvelope, RunStatus } from "./types.js";
 
-/**
- * One fleet root's durable record. Records written by earlier builds may also
- * carry `dynamicPlans`, a list of validated delegation-plan hashes nothing
- * read; it is no longer written and readers ignore it.
- */
+/** One fleet root's durable record. */
 export interface FleetRunRecord {
 	version: 1;
 	id: string;
-	/** Workspace that launched this root; older records infer it from their runs. */
-	cwd?: string;
+	/** Workspace that launched this root. */
+	cwd: string;
 	fleet: string;
 	planHash: string;
-	/** The plan hash before endpoint binding; absent on records older than resume across endpoint load. */
-	planIdentityHash?: string;
+	/** The plan hash before endpoint binding. */
+	planIdentityHash: string;
 	stepIds: string[];
 	planSteps: unknown[];
 	vars: Record<string, string>;
@@ -100,7 +96,13 @@ function fleetRunPath(runId: string): string {
 export function readFleetRun(runId: string): FleetRunRecord | null {
 	try {
 		const parsed = JSON.parse(readFileSync(fleetRunPath(runId), "utf8")) as FleetRunRecord;
-		return parsed.version === 1 && parsed.id === runId ? structuredClone(parsed) : null;
+		return parsed.version === 1 &&
+			parsed.id === runId &&
+			typeof parsed.cwd === "string" &&
+			typeof parsed.planIdentityHash === "string" &&
+			Array.isArray(parsed.planSteps)
+			? structuredClone(parsed)
+			: null;
 	} catch {
 		return null;
 	}

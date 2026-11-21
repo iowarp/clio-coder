@@ -32,7 +32,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const WIDTHS = [60, 80, 120, 200] as const;
 
 /**
- * A settled retry row used to stop the frozen prefix at its position, so every
+ * A settled retry row used to stop the settled rows at its position, so every
  * streamed token re-rendered it and every settled row after it. The stream tick
  * must render only the live answer, and a later update of the same attempt must
  * still reach the screen.
@@ -55,13 +55,13 @@ test("a settled retry row joins the frozen prefix and a stream tick renders only
 		panel.renderRegions(width);
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "then " } as never);
 		const first = panel.renderRegions(width);
-		ok(first.prefix.length > 0, `${width}: the retry and prompt rows are frozen`);
+		ok(first.pieces.length > 1 && (first.pieces[0]?.length ?? 0) > 0, `${width}: the retry and prompt rows are a run`);
 		for (const delta of ["renders ", "only ", "its ", "tail."]) {
 			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta } as never);
 			const frame = panel.renderRegions(width);
-			strictEqual(frame.prefix, first.prefix, `${width}: the settled rows are the same array every tick`);
+			strictEqual(frame.pieces[0], first.pieces[0], `${width}: the settled rows are the same array every tick`);
 			strictEqual(rendered, 1, `${width}: a stream tick renders one entry`);
-			for (const line of [...frame.prefix, ...frame.tail]) ok(visibleWidth(line) <= width);
+			for (const line of frame.pieces.flat()) ok(visibleWidth(line) <= width);
 		}
 	}
 });
@@ -86,10 +86,10 @@ test("a height change inside every preview budget keeps the settled rows and sti
 	panel.renderRegions(80);
 	rows = 41;
 	const settled = panel.renderRegions(80);
-	ok(settled.prefix.length > 0, "the retry and prompt rows are frozen");
+	ok((settled.pieces[0]?.length ?? 0) > 0, "the retry and prompt rows are a run");
 	strictEqual(rendered, 0, "no entry renders again");
 	rows = 43;
-	strictEqual(panel.renderRegions(80).prefix, settled.prefix, "the settled rows are the same array");
+	strictEqual(panel.renderRegions(80).pieces[0], settled.pieces[0], "the settled rows are the same array");
 	panel.appendReplayBlock((_width, _detail, _unbounded, height) => [`${height} rows`]);
 	panel.renderRegions(80);
 	rows = 42;
@@ -141,14 +141,22 @@ test("the rows a stream tick vouches for are last tick's rows, even when a late 
 		for (const delta of text.match(/[\s\S]{1,23}/gu) ?? []) {
 			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta } as never);
 			const frame = panel.renderRegions(80);
-			const kept = frame.prefix === previous.prefix ? keptRows(frame.tail, previous.tail) : 0;
-			for (let row = 0; row < kept; row += 1)
-				strictEqual(
-					frame.tail[row],
-					previous.tail[row],
-					`row ${row} of ${kept} vouched for after ${JSON.stringify(delta)}`,
-				);
-			vouched += kept;
+			// A piece new at a row vouches only for rows it shares with the piece the frame before put there.
+			const before = new Map<number, readonly string[]>();
+			let at = 0;
+			for (const piece of previous.pieces) {
+				before.set(at, piece);
+				at += piece.length;
+			}
+			at = 0;
+			for (const piece of frame.pieces) {
+				const old = before.get(at);
+				const kept = old === undefined || old === piece ? 0 : keptRows(piece, old);
+				for (let row = 0; row < kept; row += 1)
+					strictEqual(piece[row], old?.[row], `row ${row} of ${kept} vouched for after ${JSON.stringify(delta)}`);
+				vouched += kept;
+				at += piece.length;
+			}
 			previous = frame;
 		}
 		ok(vouched > 0, "stream ticks vouch for unchanged rows");
@@ -174,14 +182,14 @@ test("a streamed frame's rows do not keep earlier frames' rows alive", async () 
 	panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: paragraph.repeat(20) } as never);
 	panel.renderRegions(80);
 	panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "More " } as never);
-	const first = new WeakRef(panel.renderRegions(80).tail);
+	const first = new WeakRef(panel.renderRegions(80).pieces.at(-1) as readonly string[]);
 	for (let frame = 0; frame < 20; frame += 1) {
 		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: frame % 4 === 3 ? paragraph : "words " } as never);
 		panel.renderRegions(80);
 	}
 	await new Promise((resolve) => setImmediate(resolve));
 	gc();
-	strictEqual(first.deref(), undefined, "the first frame's tail was collected");
+	strictEqual(first.deref(), undefined, "the first frame's open rows were collected");
 });
 
 /**
@@ -416,9 +424,7 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 		strictEqual(phases.filter((phase) => phase === "scheduled").length, 1, "one stall, one retry");
 		strictEqual(phases.at(-1), "recovered", "the ladder's typed outcome");
 		match(JSON.stringify(events), /stream stalled: no first token from md11-fixture for 30s/u);
-		const screen = stripTerminalSequences(
-			[...panel.renderRegions(100).prefix, ...panel.renderRegions(100).tail].join("\n"),
-		);
+		const screen = stripTerminalSequences(panel.render(100).join("\n"));
 		strictEqual(screen.split("DONE_ANSWER").length - 1, 1, "the answer is on screen once");
 		ok(!screen.includes("record-late"), "the late completion never reached the screen");
 	} finally {

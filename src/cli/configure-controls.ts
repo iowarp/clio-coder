@@ -54,7 +54,7 @@ export function saveControl(path: string, input: string): void {
 	});
 }
 
-export { orderedSectionControls } from "../core/settings-controls.js";
+export { orderedAreaControls } from "../core/settings-controls.js";
 
 /** Open one fully explained, validated global setting edit. */
 export async function editSettingControl(prompts: ConfigurePrompts, control: SettingControl): Promise<boolean> {

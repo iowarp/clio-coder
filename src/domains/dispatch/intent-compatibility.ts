@@ -139,6 +139,22 @@ function outputsOutsideWriteRoots(intent: DispatchIntent): DispatchIntentCompati
 	);
 }
 
+/**
+ * An architect run writes its plan only at its contract path. Write roots that exclude that path admit a worker whose
+ * one result the boundary refuses, which costs a whole run to discover; refuse the request instead (row 295).
+ */
+export function architectPlanOutsideWriteRoots(
+	agentId: string,
+	contract: { kind: string; path?: string },
+	intent: Pick<DispatchIntent, "writeRoots"> | undefined,
+): string | null {
+	if (contract.kind !== "architect-plan" || contract.path === undefined || intent === undefined) return null;
+	if (intent.writeRoots.length === 0 || writeRootsCover(intent.writeRoots, contract.path)) return null;
+	return admissionDiagnostic(
+		`dispatch: agent '${agentId}' writes its plan only to ${contract.path}, which intent.write_roots [${intent.writeRoots.join(", ")}] exclude. Add ${contract.path} to write_roots or omit write_roots; the result names the plan's path and carries its text, so copy it where the task wants it.`,
+	);
+}
+
 function writeWithoutAuthority(intent: DispatchIntent, readOnly: unknown): DispatchIntentCompatibilityFinding | null {
 	if (intent.writeRoots.length === 0 || readOnly !== true) return null;
 	return finding(

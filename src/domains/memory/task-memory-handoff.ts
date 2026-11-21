@@ -14,15 +14,14 @@ import { validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export const TASK_MEMORY_HANDOFF_VERSION = 2;
 export const TASK_MEMORY_HANDOFF_LANGUAGE = "clio-coder-task-memory";
-const LEGACY_TASK_MEMORY_HANDOFF_LANGUAGE = "clio-task-memory";
 const HANDOFF_MAX_BYTES = 1_000_000;
 
 export interface TaskMemoryHandoffEntry {
 	id: string;
 	content: string;
 	injectionCount: number;
-	createdAt?: string;
-	lastTouchedAt?: string;
+	createdAt: string;
+	lastTouchedAt: string;
 }
 
 export interface TaskMemoryHandoffSourceProvenance {
@@ -37,12 +36,6 @@ export interface TaskMemoryHandoffRedaction {
 	sourceFields: string[];
 }
 
-export interface LegacyTaskMemoryHandoffSnapshot {
-	version: 1;
-	knowledge: TaskMemoryHandoffEntry[];
-	procedural: TaskMemoryHandoffEntry[];
-}
-
 export interface ReviewedTaskMemoryHandoffSnapshot {
 	version: 2;
 	source: TaskMemoryHandoffSourceProvenance;
@@ -51,7 +44,7 @@ export interface ReviewedTaskMemoryHandoffSnapshot {
 	procedural: TaskMemoryHandoffEntry[];
 }
 
-export type TaskMemoryHandoffSnapshot = LegacyTaskMemoryHandoffSnapshot | ReviewedTaskMemoryHandoffSnapshot;
+export type TaskMemoryHandoffSnapshot = ReviewedTaskMemoryHandoffSnapshot;
 
 export interface TaskMemoryHandoffSeedResult {
 	seeded: number;
@@ -101,26 +94,23 @@ export function taskMemoryHandoffSnapshot(
 /** Render a redacted, compact fenced payload that the handoff skill can copy verbatim. */
 export function renderTaskMemoryHandoffSnapshot(snapshot: TaskMemoryHandoffSnapshot): string {
 	const tally = createRedactionTally();
-	const sourceFields = new Set(snapshot.version === 2 ? snapshot.redaction.sourceFields : []);
+	const sourceFields = new Set(snapshot.redaction.sourceFields);
 	const knowledge = snapshot.knowledge.map((entry, index) =>
 		redactHandoffEntry(entry, `knowledge[${index}].content`, tally, sourceFields),
 	);
 	const procedural = snapshot.procedural.map((entry, index) =>
 		redactHandoffEntry(entry, `procedural[${index}].content`, tally, sourceFields),
 	);
-	const redacted: TaskMemoryHandoffSnapshot =
-		snapshot.version === 1
-			? { version: 1, knowledge, procedural }
-			: {
-					version: TASK_MEMORY_HANDOFF_VERSION,
-					source: cloneSource(snapshot.source),
-					redaction: {
-						replacementCount: snapshot.redaction.replacementCount + tally.count,
-						sourceFields: [...sourceFields].sort(compareCodeUnits),
-					},
-					knowledge,
-					procedural,
-				};
+	const redacted: TaskMemoryHandoffSnapshot = {
+		version: TASK_MEMORY_HANDOFF_VERSION,
+		source: cloneSource(snapshot.source),
+		redaction: {
+			replacementCount: snapshot.redaction.replacementCount + tally.count,
+			sourceFields: [...sourceFields].sort(compareCodeUnits),
+		},
+		knowledge,
+		procedural,
+	};
 	return `\`\`\`${TASK_MEMORY_HANDOFF_LANGUAGE}\n${JSON.stringify(redacted)}\n\`\`\``;
 }
 
@@ -138,12 +128,8 @@ export function renderTaskMemoryHandoffSource(
 
 export function parseTaskMemoryHandoffSnapshot(text: string): TaskMemoryHandoffSnapshot | null {
 	if (typeof text !== "string" || text.length === 0 || text.length > HANDOFF_MAX_BYTES) return null;
-	const languages = [TASK_MEMORY_HANDOFF_LANGUAGE, LEGACY_TASK_MEMORY_HANDOFF_LANGUAGE]
-		.map((language) => language.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
-		.join("|");
-	const match = new RegExp(`(?:^|\\n)\\x60{3}(?:${languages})\\r?\\n([^\\r\\n]+)\\r?\\n\\x60{3}(?:$|\\n)`, "u").exec(
-		text,
-	);
+	const language = TASK_MEMORY_HANDOFF_LANGUAGE.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+	const match = new RegExp(`(?:^|\\n)\\x60{3}${language}\\r?\\n([^\\r\\n]+)\\r?\\n\\x60{3}(?:$|\\n)`, "u").exec(text);
 	if (match?.[1] === undefined) return null;
 	let raw: unknown;
 	try {
@@ -151,18 +137,11 @@ export function parseTaskMemoryHandoffSnapshot(text: string): TaskMemoryHandoffS
 	} catch {
 		return null;
 	}
-	if (!isRecord(raw) || (raw.version !== 1 && raw.version !== TASK_MEMORY_HANDOFF_VERSION)) return null;
-	if (raw.version === 1 && !hasExactKeys(raw, ["version", "knowledge", "procedural"])) return null;
-	if (
-		raw.version === TASK_MEMORY_HANDOFF_VERSION &&
-		!hasExactKeys(raw, ["version", "source", "redaction", "knowledge", "procedural"])
-	) {
-		return null;
-	}
-	const knowledge = parseEntries(raw.knowledge, TASK_MEMORY_DEFAULT_KNOWLEDGE_CAP, raw.version);
-	const procedural = parseEntries(raw.procedural, TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, raw.version);
+	if (!isRecord(raw) || raw.version !== TASK_MEMORY_HANDOFF_VERSION) return null;
+	if (!hasExactKeys(raw, ["version", "source", "redaction", "knowledge", "procedural"])) return null;
+	const knowledge = parseEntries(raw.knowledge, TASK_MEMORY_DEFAULT_KNOWLEDGE_CAP);
+	const procedural = parseEntries(raw.procedural, TASK_MEMORY_DEFAULT_PROCEDURAL_CAP);
 	if (knowledge === null || procedural === null) return null;
-	if (raw.version === 1) return { version: 1, knowledge, procedural };
 	const source = parseSource(raw.source);
 	const redaction = parseRedaction(raw.redaction);
 	if (source === null || redaction === null) return null;
@@ -259,26 +238,22 @@ export function seedTaskMemoryFromNewestHandoff(
 	};
 }
 
-function parseEntries(value: unknown, maxEntries: number, version: 1 | 2): TaskMemoryHandoffEntry[] | null {
+function parseEntries(value: unknown, maxEntries: number): TaskMemoryHandoffEntry[] | null {
 	if (!Array.isArray(value) || value.length > maxEntries) return null;
 	const entries: TaskMemoryHandoffEntry[] = [];
 	for (const raw of value) {
-		const expectedKeys =
-			version === 1
-				? ["id", "content", "injectionCount"]
-				: ["id", "content", "injectionCount", "createdAt", "lastTouchedAt"];
+		const expectedKeys = ["id", "content", "injectionCount", "createdAt", "lastTouchedAt"];
 		if (!isRecord(raw) || !hasExactKeys(raw, expectedKeys)) return null;
 		if (!nonEmptyString(raw.id) || !nonEmptyString(raw.content) || raw.content.length > TASK_MEMORY_CONTENT_MAX_CHARS)
 			return null;
 		if (!Number.isInteger(raw.injectionCount) || (raw.injectionCount as number) < 0) return null;
-		if (version === 2 && (!isIsoTimestamp(raw.createdAt) || !isIsoTimestamp(raw.lastTouchedAt))) {
-			return null;
-		}
+		if (!isIsoTimestamp(raw.createdAt) || !isIsoTimestamp(raw.lastTouchedAt)) return null;
 		entries.push({
 			id: raw.id,
 			content: raw.content,
 			injectionCount: raw.injectionCount as number,
-			...(version === 2 ? { createdAt: raw.createdAt as string, lastTouchedAt: raw.lastTouchedAt as string } : {}),
+			createdAt: raw.createdAt as string,
+			lastTouchedAt: raw.lastTouchedAt as string,
 		});
 	}
 	return entries;

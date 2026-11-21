@@ -47,6 +47,7 @@ import {
 } from "./chat-loop-messages.js";
 import type { HostInserts } from "./host-inserts.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
+import type { QueuedMessageKind } from "./turn-queues.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, TurnPersistenceState } from "./turn-state.js";
 
@@ -64,8 +65,8 @@ export interface TurnPersistenceDeps {
 	/** Consume a user text the loop already persisted itself (echo dedupe). */
 	consumePersistedEcho: (text: string) => boolean;
 	/** Remove a queued-mirror entry once the engine injects it. */
-	/** Returns the machine origin of the queued entry this text was, when it had one. */
-	removeQueuedMirrorEntry: (text: string) => string | undefined;
+	/** Returns the queue the entry rode and its machine origin, when the text was a queued entry. */
+	removeQueuedMirrorEntry: (text: string) => { kind: QueuedMessageKind; origin?: string } | undefined;
 	/** Prompt-cache record for a persisted assistant call (T3.2 + cold stamp). */
 	promptCachePayloadForAssistant: (
 		usage: Usage,
@@ -329,7 +330,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				return;
 			}
 			if (text.trim().length === 0) return;
-			const origin = deps.removeQueuedMirrorEntry(text);
+			const queued = deps.removeQueuedMirrorEntry(text);
+			const origin = queued?.origin;
 			// FX-40: the handed-over message starts its sender's turn, so a continuation or job run it lands in is attended
 			// from here when the operator sent it; a peer's message keeps its own origin.
 			const template = state.currentTurnOrigin?.template;
@@ -353,9 +355,15 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 					state.runtime?.runtimeResolution.effectiveThinkingLevel,
 				state.runtime?.runtimeResolution.effectiveThinkingLevel,
 			);
+			// `queued` names the queue that carried the message into the running run, so a replay keeps it inside the
+			// prompt that run answered (ACP-5).
 			const userTurn = appendTurn(deps.session, {
 				kind: "user",
-				payload: origin === undefined ? { text } : { text, origin },
+				payload: {
+					text,
+					...(origin !== undefined ? { origin } : {}),
+					...(queued !== undefined ? { queued: queued.kind } : {}),
+				},
 			});
 			state.lastTurnId = userTurn.id;
 			state.activeUserTurnId = userTurn.id;

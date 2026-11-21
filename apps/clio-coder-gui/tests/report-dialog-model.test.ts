@@ -21,7 +21,7 @@ const view = (gates: string[]): ProblemReportView => ({
 		postedAs: "posted from your gh account",
 		destination: "github.com/iowarp/clio-coder",
 		rendered: { title: "A title long enough", body: "body\n" },
-		maskSummary: "Masked by Clio: nothing.",
+		maskSummary: "Masked by CLIO Coder: nothing.",
 		actions: ["search", "post"],
 		bundle: null,
 		consent: "none",
@@ -103,10 +103,10 @@ test("report dialog attach: nothing is attached without the consent radio, and a
 });
 
 test("report offers: the host's offer shows as a notice; a refusal, the setting off, or a dismissal shows nothing", () => {
-	const offered = { offer: { text: "Clio stopped on an internal error.", fingerprint: "f1" }, refusal: null };
+	const offered = { offer: { text: "CLIO Coder stopped on an internal error.", fingerprint: "f1" }, refusal: null };
 	assert.deepEqual(offerNotice(offered, new Set()), {
 		fingerprint: "f1",
-		text: "Clio stopped on an internal error.",
+		text: "CLIO Coder stopped on an internal error.",
 		link: "Review a report",
 	});
 	assert.equal(offerNotice({ offer: null, refusal: "setting-off" }, new Set()), null);

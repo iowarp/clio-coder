@@ -10,9 +10,9 @@ import {
 	SETTINGS_AREA_GROUPS,
 	type SettingsAreaId,
 	settingsAreaForPath,
+	settingsPlacementForPath,
 	settingsPlacementForRow,
 } from "./settings-areas.js";
-import { type SettingsSectionId, settingsGroupForPath, settingsSectionForPath } from "./settings-navigation.js";
 
 /** Accepted settings can still be inactive on the configured route (#432). */
 export function settingInactiveNote(path: string, settings: Readonly<ClioSettings>): string | null {
@@ -506,6 +506,7 @@ const MENU_ROWS = new Set([
 	"safety.sandbox",
 	"safety.sandboxNetwork",
 	"safety.scratchRoots",
+	"safety.sandboxCacheMaxGiB",
 	"safety.snapshots",
 	"safety.unattendedAfterSeconds",
 	"safety.yoloConfinement",
@@ -773,6 +774,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Scratch roots",
 		"Absolute directories your sandboxed commands and file edits may write at autonomy default without asking, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",
 	],
+	"safety.sandboxCacheMaxGiB": [
+		"Sandbox cache cap (GiB)",
+		"Size the sandbox's own tool cache (npm, pnpm, pip, uv and Playwright downloads of your sandboxed commands) may reach. Once a day at startup, and on clio-coder doctor --fix, the least recently used tool folders are removed until it fits, never while a running session may use them. 0 is no cap. User settings only.",
+	],
 	"interface.demo": [
 		"Demo presentation and guidance",
 		"Welcome presentation and optional learning tips, bounded by output detail. Minimal stays quiet; Default shows a compact launchpad; Detailed adds artwork and shortcut hints. Off starts with an identity header, skips welcome-only reads, and stops tips and the guidance profile. Immediate controls and warnings remain. Stream pacing, motion preferences and permissions are independent.",
@@ -946,22 +951,13 @@ export const SETTING_CONTROLS: readonly SettingControl[] = (() => {
 		});
 })();
 
-/**
- * Groups are ordered by where their first key sits in DEFAULT_SETTINGS, and `fleet` precedes `safety` there,
- * so the worker-approval controls would open Permissions & Limits ahead of the autonomy level it exists for.
- */
-const LEADING_GROUPS: Partial<Record<SettingsSectionId, string>> = { safety: "Autonomy" };
-
-/** Complete section catalog in the order used by configure and /settings. */
-export function orderedSectionControls(section: SettingsSectionId): Array<{ group: string; control: SettingControl }> {
-	const controls = SETTING_CONTROLS.filter((control) => settingsSectionForPath(control.path) === section);
-	const leading = LEADING_GROUPS[section];
-	const groups = [
-		...new Set([...(leading ? [leading] : []), ...controls.map((control) => settingsGroupForPath(control.path))]),
-	];
-	return groups.flatMap((group) =>
-		controls.filter((control) => settingsGroupForPath(control.path) === group).map((control) => ({ group, control })),
-	);
+/** One area's complete control catalog, in its group order and then catalog order, as configure and the GUI list it. */
+export function orderedAreaControls(area: SettingsAreaId): Array<{ group: string; control: SettingControl }> {
+	return orderSettingsEntries(
+		area,
+		SETTING_CONTROLS.filter((control) => settingsAreaForPath(control.path) === area),
+		(control) => control.path,
+	).map((control) => ({ group: settingsPlacementForPath(control.path).group, control }));
 }
 
 /**
@@ -984,19 +980,19 @@ export function orderAreaEntries<T>(
 	});
 }
 
-/** Guided actions and live collection entries stay beside the controls they represent. */
+/** Guided actions and live collection entries, keyed by setting path, stay beside the controls they represent. */
 export function orderSettingsEntries<T>(
-	section: SettingsSectionId,
+	area: SettingsAreaId,
 	entries: readonly T[],
 	pathFor: (entry: T) => string,
 ): T[] {
-	const catalog = orderedSectionControls(section);
-	const groups = [...new Set(catalog.map((entry) => entry.group))];
-	const index = firstIndexByPath(catalog.map((entry) => entry.control.path));
+	const groups = SETTINGS_AREA_GROUPS[area];
+	controlIndex ??= firstIndexByPath(SETTING_CONTROLS.map((control) => control.path));
+	const catalog = controlIndex;
 	return sortByRank(entries, (entry) => {
 		const path = pathFor(entry);
-		const group = groups.indexOf(settingsGroupForPath(path));
-		return [group < 0 ? groups.length : group, catalogRank(index, path, catalog.length)];
+		const group = path ? groups.indexOf(settingsPlacementForPath(path).group) : -1;
+		return [group < 0 ? groups.length : group, catalogRank(catalog, path, SETTING_CONTROLS.length)];
 	});
 }
 

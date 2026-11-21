@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
 import { parse, stringify } from "yaml";
-import { orderedSectionControls } from "../../src/cli/configure-controls.js";
+import { orderedAreaControls } from "../../src/cli/configure-controls.js";
 import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
@@ -348,9 +348,10 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("❯ Settings");
 			tty.send(ENTER);
 			await tty.expect("Esc back");
-			tty.send(DOWN + ENTER);
+			// Models is the first area: four connection actions, then "Choose the chat model", then its thinking level.
+			tty.send(ENTER);
 			await tty.expect("Choose the chat model");
-			tty.send(DOWN + ENTER);
+			tty.send(DOWN.repeat(5) + ENTER);
 			await tty.expect("❯ low");
 			tty.send(DOWN + DOWN + ENTER);
 			await tty.expect("Save Thinking level globally?");
@@ -363,8 +364,8 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(ENTER);
 			await tty.expect("Chat set to existing/alpha");
 			tty.send(BACK);
-			await tty.expect("❯ Chat");
-			tty.send(DOWN.repeat(3) + ENTER);
+			await tty.expect("❯ Models");
+			tty.send(DOWN.repeat(4) + ENTER);
 			await tty.expect("Autonomy · Autonomy level");
 			tty.send(ENTER);
 			await tty.expect("❯ default");
@@ -387,12 +388,13 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		const home = makeScratchHome("clio-coder-controls-tty-");
 		const file = seed(home, "http://127.0.0.1:1");
 		const original = readFileSync(file, "utf8");
-		const tty = terminal(home, ["--section", "chat"]);
+		const tty = terminal(home, ["--section", "models"]);
 		try {
-			const controls = orderedSectionControls("chat").filter(
+			const controls = orderedAreaControls("models").filter(
 				({ control }) => !["chat.target", "chat.model"].includes(control.path),
 			);
-			const index = 1 + controls.findIndex(({ control }) => control.path === "chat.maxOutputTokens");
+			// Four connection actions and "Choose the chat model" lead the Models menu.
+			const index = 5 + controls.findIndex(({ control }) => control.path === "chat.maxOutputTokens");
 			await tty.expect("Choose the chat model");
 			ok(!tty.screen().includes("All controls"));
 			tty.send(DOWN.repeat(index) + ENTER);
@@ -453,7 +455,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			},
 		});
 		writeFileSync(credentialsFile, originalCredentials, { mode: 0o600 });
-		const tty = terminal(home, ["--section", "targets", "--no-verify"]);
+		const tty = terminal(home, ["--section", "models", "--no-verify"]);
 		try {
 			await tty.expect("Esc or q quit");
 			tty.send(ENTER);

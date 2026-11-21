@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureProjectIgnore } from "../../../core/project-root.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import type { ProjectType } from "../../session/workspace/project-type.js";
 import { grammarNowCached } from "./fetched-grammars.js";
 import {
 	CODEWIKI_VERSION,
@@ -19,59 +18,6 @@ import {
 
 function uniqueSorted(values: Iterable<string>): string[] {
 	return [...new Set([...values].filter((item) => item.length > 0))].sort((a, b) => a.localeCompare(b));
-}
-
-function stableFileId(path: string): string {
-	return `f_${createHash("sha256").update(path).digest("hex").slice(0, 16)}`;
-}
-
-function languageForLegacyPath(path: string): CodewikiLanguage | null {
-	if (path.endsWith(".d.ts")) return null;
-	const extension = path.slice(path.lastIndexOf("."));
-	const source = new Map<string, Exclude<CodewikiLanguage, "config">>([
-		[".ts", "typescript"],
-		[".tsx", "typescript"],
-		[".mts", "typescript"],
-		[".cts", "typescript"],
-		[".js", "javascript"],
-		[".jsx", "javascript"],
-		[".mjs", "javascript"],
-		[".cjs", "javascript"],
-		[".py", "python"],
-		[".pyw", "python"],
-		[".rs", "rust"],
-		[".go", "go"],
-		[".c", "c"],
-		[".h", "c"],
-		[".cc", "c++"],
-		[".cpp", "c++"],
-		[".cxx", "c++"],
-		[".hpp", "c++"],
-		[".hh", "c++"],
-		[".hxx", "c++"],
-		[".cu", "c++"],
-		[".cuh", "c++"],
-		[".java", "java"],
-		[".rb", "ruby"],
-		[".cs", "c#"],
-	]).get(extension);
-	if (source) return source;
-	const name = path.split("/").pop() ?? path;
-	return new Set([
-		"package.json",
-		"pyproject.toml",
-		"setup.py",
-		"Cargo.toml",
-		"go.mod",
-		"pom.xml",
-		"CMakeLists.txt",
-		"compile_commands.json",
-		"Gemfile",
-	]).has(name) ||
-		name.endsWith(".csproj") ||
-		name.toLowerCase().endsWith(".cmake")
-		? "config"
-		: null;
 }
 
 function compareFiles(a: CodewikiFile, b: CodewikiFile): number {
@@ -126,15 +72,10 @@ function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 }
 
 export function codewikiPath(cwd: string): string {
-	const canonical = codemapPath(cwd);
-	return existsSync(canonical) ? canonical : existsSync(legacyCodewikiPath(cwd)) ? legacyCodewikiPath(cwd) : canonical;
+	return codemapPath(cwd);
 }
 export function codemapPath(cwd: string): string {
 	return join(cwd, ".clio-coder", "codemap.json");
-}
-/** Also retained as the lease identity for mixed-version writers. */
-export function legacyCodewikiPath(cwd: string): string {
-	return join(cwd, ".clio-coder", "codewiki.json");
 }
 export function serializeCodewiki(codewiki: Codewiki): string {
 	return `${JSON.stringify(normalizeCodewiki(codewiki))}\n`;
@@ -144,82 +85,6 @@ export function writeCodewiki(cwd: string, codewiki: Codewiki): string {
 	ensureProjectIgnore(cwd);
 	safeResourceWrite(codemapPath(cwd), serialized, { encoding: "utf8" });
 	return serialized;
-}
-
-interface CodewikiFileV3 {
-	id: string;
-	path: string;
-	lang: CodewikiLanguage;
-	loc: number;
-	role: CodewikiFileRole;
-}
-interface CodewikiV3 {
-	version: 3;
-	language: ProjectType;
-	files: CodewikiFileV3[];
-	symbols: CodewikiSymbol[];
-	edges: CodewikiEdge[];
-}
-interface CodewikiV4 {
-	version: 4;
-	language: ProjectType;
-	files: CodewikiFile[];
-	symbols: CodewikiSymbol[];
-	edges: CodewikiEdge[];
-}
-interface CodewikiV2 {
-	version: 2;
-	generatedAt: string;
-	language: ProjectType;
-	entries: CodewikiEntry[];
-}
-
-function upgradeV3(value: CodewikiV3): Codewiki {
-	return normalizeCodewiki({
-		version: CODEWIKI_VERSION,
-		language: value.language,
-		files: value.files.map((file) => ({ ...file, hash: "", imports: [] })),
-		symbols: value.symbols,
-		edges: value.edges,
-	});
-}
-function upgradeV4(value: CodewikiV4): Codewiki {
-	return normalizeCodewiki({
-		version: CODEWIKI_VERSION,
-		language: value.language,
-		files: value.files.map((file) => ({ ...file, hash: "" })),
-		symbols: value.symbols,
-		edges: value.edges,
-	});
-}
-function upgradeV2(value: CodewikiV2): Codewiki {
-	const files: CodewikiFileV3[] = value.entries.map((entry) => ({
-		id: stableFileId(entry.path),
-		path: entry.path,
-		lang:
-			languageForLegacyPath(entry.path) ??
-			(value.language === "unknown" || value.language === "polyglot" || value.language === "dotfiles"
-				? "config"
-				: value.language),
-		loc: 0,
-		role: entry.kind === "entry-point" ? "entry" : entry.kind === "test" ? "test" : "module",
-	}));
-	const ids = new Map(files.map((file) => [file.path, file.id] as const));
-	const symbols = value.entries
-		.flatMap((entry) =>
-			entry.exports.map((name) => ({ name, kind: "const" as const, fileId: ids.get(entry.path) ?? "", line: 1 })),
-		)
-		.filter((symbol) => symbol.fileId);
-	const edges = value.entries
-		.flatMap((entry) =>
-			entry.imports.map((item): CodewikiEdge => {
-				const fileId = ids.get(entry.path) ?? "";
-				const toFileId = ids.get(item);
-				return toFileId ? { fileId, toFileId } : { fileId, externalModule: item };
-			}),
-		)
-		.filter((edge) => edge.fileId);
-	return upgradeV3({ version: 3, language: value.language, files, symbols, edges });
 }
 
 const LANGUAGES = new Set<CodewikiLanguage>([
@@ -242,7 +107,7 @@ function object(value: unknown): Record<string, unknown> | null {
 		? (value as Record<string, unknown>)
 		: null;
 }
-function validFile(value: unknown, hash: boolean): boolean {
+function validFile(value: unknown): boolean {
 	const item = object(value);
 	if (!item) return false;
 	return (
@@ -255,10 +120,9 @@ function validFile(value: unknown, hash: boolean): boolean {
 		(!("bytes" in item) || (Number.isSafeInteger(item.bytes) && (item.bytes as number) >= 0)) &&
 		typeof item.role === "string" &&
 		ROLES.has(item.role as CodewikiFileRole) &&
-		(!hash ||
-			(typeof item.hash === "string" &&
-				Array.isArray(item.imports) &&
-				item.imports.every((v) => typeof v === "string"))) &&
+		typeof item.hash === "string" &&
+		Array.isArray(item.imports) &&
+		item.imports.every((v) => typeof v === "string") &&
 		(!("summary" in item) || typeof item.summary === "string") &&
 		(!("grammarMissing" in item) || typeof item.grammarMissing === "boolean")
 	);
@@ -281,18 +145,6 @@ function validEdge(value: unknown): boolean {
 	const item = object(value);
 	if (!item || typeof item.fileId !== "string") return false;
 	return (typeof item.toFileId === "string") !== (typeof item.externalModule === "string");
-}
-function validEntry(value: unknown): boolean {
-	const item = object(value);
-	if (!item || typeof item.path !== "string") return false;
-	return (
-		Array.isArray(item.exports) &&
-		item.exports.every((v) => typeof v === "string") &&
-		Array.isArray(item.imports) &&
-		item.imports.every((v) => typeof v === "string") &&
-		(item.kind === "entry-point" || item.kind === "test" || item.kind === "module") &&
-		(!("summary" in item) || typeof item.summary === "string")
-	);
 }
 function validNative(value: Codewiki): boolean {
 	const ids = new Set<string>();
@@ -329,7 +181,7 @@ function upgrade(value: unknown): Codewiki | null {
 	if (
 		item.version === 5 &&
 		Array.isArray(item.files) &&
-		item.files.every((v) => validFile(v, true)) &&
+		item.files.every(validFile) &&
 		Array.isArray(item.symbols) &&
 		item.symbols.every(validSymbol) &&
 		Array.isArray(item.edges) &&
@@ -337,33 +189,6 @@ function upgrade(value: unknown): Codewiki | null {
 		validNative(item as unknown as Codewiki)
 	)
 		return normalizeCodewiki(item as unknown as Codewiki);
-	if (
-		item.version === 4 &&
-		Array.isArray(item.files) &&
-		item.files.every((v) => validFile(v, true)) &&
-		Array.isArray(item.symbols) &&
-		item.symbols.every(validSymbol) &&
-		Array.isArray(item.edges) &&
-		item.edges.every(validEdge)
-	)
-		return upgradeV4(item as unknown as CodewikiV4);
-	if (
-		item.version === 3 &&
-		Array.isArray(item.files) &&
-		item.files.every((v) => validFile(v, false)) &&
-		Array.isArray(item.symbols) &&
-		item.symbols.every(validSymbol) &&
-		Array.isArray(item.edges) &&
-		item.edges.every(validEdge)
-	)
-		return upgradeV3(item as unknown as CodewikiV3);
-	if (
-		item.version === 2 &&
-		typeof item.generatedAt === "string" &&
-		Array.isArray(item.entries) &&
-		item.entries.every(validEntry)
-	)
-		return upgradeV2(item as unknown as CodewikiV2);
 	return null;
 }
 

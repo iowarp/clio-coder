@@ -1,9 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
-import { access, readFile, realpath, stat } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, isAbsolute, join, resolve, win32 } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
+import { backgroundCapabilityReason } from "../contracts/launch-capability.js";
 import { APP_TITLE } from "../contracts/meta.js";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
 import {
@@ -13,6 +14,18 @@ import {
 	resolveClioDirs,
 	resolvePackageRoot,
 } from "./clio/http-shims.js";
+import {
+	agentCopy,
+	isServiceName,
+	launchdCalls,
+	launchdJob,
+	launchdStatus,
+	parseTaskSpec,
+	type ServiceAction,
+	serviceHost,
+	taskScript,
+	taskStatus,
+} from "./launcher/service-model.js";
 import {
 	type FocusTool,
 	focusTools,
@@ -52,9 +65,10 @@ export async function resolveClioCommand(
 	if (override) {
 		if (!isAbsolute(override)) throw new AppProblem("validation", "CLIO_CODER_WEB_CLI must be an absolute path.");
 		const file = await realpath(override).catch(() => {
-			throw new AppProblem("unavailable", "The configured Clio CLI cannot be found.");
+			throw new AppProblem("unavailable", "The configured clio-coder command cannot be found.");
 		});
-		if (!(await stat(file)).isFile()) throw new AppProblem("validation", "The configured Clio CLI must be a file.");
+		if (!(await stat(file)).isFile())
+			throw new AppProblem("validation", "The configured clio-coder command must be a file.");
 		return /\.[cm]?js$/.test(file) ? { file: process.execPath, prefix: [file] } : { file, prefix: [] };
 	}
 	const checkout = join(resolvePackageRoot(), "dist/cli/index.js");
@@ -361,8 +375,8 @@ export function serviceCommand(
 	unit: string,
 	unitFile: string,
 ) {
-	if (!/^clio-coder-gui-[a-f0-9]{12}\.service$/.test(unit) || !isAbsolute(unitFile) || !unitFile.endsWith(`/${unit}`))
-		throw new Error("Invalid Clio background service identity.");
+	if (!isServiceName("systemd", unit) || !isAbsolute(unitFile) || !unitFile.endsWith(`/${unit}`))
+		throw new Error("Invalid CLIO Coder background service identity.");
 	if (action === "reload") return ["--user", "daemon-reload"];
 	if (action === "show")
 		return ["--user", "show", unit, "--property=FragmentPath,ActiveState,UnitFileState,MainPID,Result"];
@@ -373,29 +387,13 @@ export function serviceCommand(
 function isTemporaryUnitFile(unitFile: string): boolean {
 	const roots = [tmpdir(), "/tmp", "/var/tmp"].map((root) => resolve(root));
 	const target = resolve(unitFile);
-	return roots.some((root) => target.startsWith(`${root}/`));
+	return roots.some((root) => target.startsWith(`${root}/`) || target.startsWith(`${root}\\`));
 }
 
-export async function controlService(
-	action: Parameters<typeof serviceCommand>[0],
-	unit: string,
-	unitFile: string,
-	env: NodeJS.ProcessEnv = process.env,
-) {
-	if (process.platform !== "linux")
-		throw new Error("Background setup currently requires Linux with a systemd user session.");
-	// `systemctl --user enable` links the unit into the user manager's own
-	// ~/.config/systemd/user and default.target.wants, which no environment
-	// override redirects. A unit file in a temp directory is a test fixture, and
-	// enabling it once left real login units pointing at deleted scratch paths.
-	if (action === "enable" && isTemporaryUnitFile(unitFile) && env.CLIO_CODER_REAL_SYSTEMD !== "1")
-		throw new Error("Refusing to enable a background service whose unit file lives in a temporary directory.");
-	const child = spawn("systemctl", serviceCommand(action, unit, unitFile), {
-		env,
-		shell: false,
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	return new Promise<string>((resolve, reject) => {
+/** One service-manager call, bounded in time and output. Resolves with its exit code and standard output. */
+function runServiceTool(file: string, argv: readonly string[], env: NodeJS.ProcessEnv, missing: string) {
+	const child = spawn(file, argv, { env, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+	return new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
 		const output: Buffer[] = [];
 		let bytes = 0,
 			exceeded = false;
@@ -414,15 +412,92 @@ export async function controlService(
 		child.stderr.on("data", (chunk: Buffer) => collect(chunk, false));
 		child.once("error", () => {
 			clearTimeout(timer);
-			reject(new Error("systemctl is unavailable. Background setup requires a running Linux systemd user session."));
+			reject(new Error(missing));
 		});
 		child.once("close", (code) => {
 			clearTimeout(timer);
-			if (code === 0 && !exceeded) resolve(Buffer.concat(output).toString("utf8"));
-			else
-				reject(new Error(`Background service ${action} failed. Check the user service manager and journal for ${unit}.`));
+			resolve({ code: exceeded ? null : code, stdout: Buffer.concat(output).toString("utf8") });
 		});
 	});
+}
+
+/**
+ * Drives the background app's user service: a systemd user unit on Linux, a launchd LaunchAgent on macOS and a
+ * Task Scheduler logon task on Windows. `show` answers in systemd's property vocabulary on every host.
+ */
+export async function controlService(
+	action: ServiceAction,
+	unit: string,
+	unitFile: string,
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+) {
+	const host = serviceHost(platform);
+	if (host === null) throw new Error(backgroundCapabilityReason(platform));
+	if (!isServiceName(host, unit) || !isAbsolute(unitFile))
+		throw new Error("Invalid CLIO Coder background service identity.");
+	// Enabling links or registers the service with the user's real login session, which no environment override
+	// redirects. A unit file in a temp directory is a test fixture, and enabling one once left real login units
+	// pointing at deleted scratch paths.
+	if (action === "enable" && isTemporaryUnitFile(unitFile) && env.CLIO_CODER_REAL_SYSTEMD !== "1")
+		throw new Error("Refusing to enable a background service whose unit file lives in a temporary directory.");
+	if (host === "launchd") return controlLaunchd(action, unit, unitFile, env);
+	if (host === "task-scheduler") return controlTask(action, unit, unitFile, env);
+	const result = await runServiceTool(
+		"systemctl",
+		serviceCommand(action, unit, unitFile),
+		env,
+		"systemctl is unavailable. Background setup requires a running Linux systemd user session.",
+	);
+	if (result.code === 0) return result.stdout;
+	throw new Error(`Background service ${action} failed. Check the user service manager and journal for ${unit}.`);
+}
+
+async function controlLaunchd(action: ServiceAction, label: string, unitFile: string, env: NodeJS.ProcessEnv) {
+	const uid = process.getuid?.();
+	if (uid === undefined) throw new Error("launchd needs a user id.");
+	const agentFile = join(env.HOME || homedir(), "Library", "LaunchAgents", `${label}.plist`);
+	const owned = await readFile(unitFile, "utf8").catch(() => null);
+	const agent = agentCopy(await readFile(agentFile, "utf8").catch(() => null), owned, label);
+	const launchctl = (argv: readonly string[]) =>
+		runServiceTool("launchctl", argv, env, "launchctl is unavailable. Background setup on macOS needs launchd.");
+	if (action === "show") {
+		const printed = await launchctl(["print", launchdJob(uid, label)]);
+		return launchdStatus(printed.code === 0 ? printed.stdout : null, agent, unitFile, agentFile);
+	}
+	if ((action === "enable" || action === "reload") && agent === "different")
+		throw new Error(`${agentFile} belongs to another program; it will not be replaced.`);
+	// launchd reads only the copy in LaunchAgents, so enable puts it there and reload refreshes one already there.
+	if (action === "enable" || (action === "reload" && agent === "stale" && owned !== null)) {
+		if (owned === null) throw new Error("The background service definition is missing.");
+		await mkdir(dirname(agentFile), { recursive: true });
+		await writeFile(agentFile, owned, { mode: 0o644 });
+	}
+	for (const call of launchdCalls(action, label, agentFile, uid)) {
+		const result = await launchctl(call.argv);
+		if (result.code !== 0 && !call.tolerate)
+			throw new Error(`Background service ${action} failed. Check: launchctl print ${launchdJob(uid, label)}`);
+	}
+	if (action === "disable" && (agent === "same" || agent === "stale")) await unlink(agentFile).catch(() => undefined);
+	return "";
+}
+
+async function controlTask(action: ServiceAction, name: string, unitFile: string, env: NodeJS.ProcessEnv) {
+	const text = await readFile(unitFile, "utf8").catch(() => null);
+	// Uninstall reloads after it removed the definition; the task itself is already gone by then.
+	if (text === null && (action === "reload" || action === "disable")) return "";
+	if (text === null) throw new Error("The background service definition is missing.");
+	const spec = parseTaskSpec(text);
+	if (spec.name !== name) throw new Error("Invalid CLIO Coder background service identity.");
+	const result = await runServiceTool(
+		"powershell.exe",
+		["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", taskScript(action)],
+		{ ...env, CLIO_TASK_NAME: spec.name, CLIO_TASK_EXECUTE: spec.execute, CLIO_TASK_ARGUMENTS: spec.arguments },
+		"PowerShell is unavailable. Background setup on Windows needs Task Scheduler and PowerShell.",
+	);
+	if (result.code !== 0)
+		throw new Error(`Background service ${action} failed. Check the task \\CLIO Coder\\${name} in Task Scheduler.`);
+	return action === "show" ? taskStatus(result.stdout.trim(), spec, unitFile) : result.stdout;
 }
 
 /**
