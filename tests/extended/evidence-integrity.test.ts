@@ -120,9 +120,12 @@ describe("evidence integrity boundary", () => {
 		match(labels, /refused_cause=approval_timeout:1 \(a call waited for approval and no one answered in time\)/u);
 	});
 
-	it("counts every refused ask out of the sealed tools row, past the 50 the receipt lists (SC-2)", () => {
+	it("counts every refused ask and withheld notice out of the sealed tools row, past the 50 the receipt lists (SC-2, C-17)", () => {
 		const draft = fixtureReceiptDraft(fixtureEnvelope("asks-past-the-list"));
-		draft.toolStats = [{ tool: "bash", count: 61, ok: 0, errors: 0, blocked: 61, totalDurationMs: 1 }];
+		draft.toolStats = [
+			{ tool: "bash", count: 61, ok: 0, errors: 0, blocked: 61, totalDurationMs: 1 },
+			{ tool: "read", count: 5, ok: 2, errors: 0, blocked: 0, withheld: 3, totalDurationMs: 1 },
+		];
 		draft.safety = {
 			decisions: { allowed: 0, blocked: 1, permissionRequested: 60 },
 			blockedAttempts: [{ tool: "bash" }],
@@ -147,6 +150,14 @@ describe("evidence integrity boundary", () => {
 			asked: 60,
 		});
 		deepStrictEqual(settle(), { tool: "bash", calls: 61, ok: 0, errors: 0, blocked: 11, asked: 50 });
+		// A notice the spent observation pool returned in a call's place stays on its row as `withheld` (C-17).
+		const sealed = settleFinishedRun(draft, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: 0,
+			frameType: null,
+			usage: undefined,
+		}).facts.tools[1];
+		deepStrictEqual(sealed, { tool: "read", calls: 5, ok: 2, errors: 0, blocked: 0, withheld: 3 });
 	});
 
 	it("keeps unfinished calls and route warnings on the sealed record, so a sealed reader shows them too (FL-6)", () => {

@@ -331,13 +331,15 @@ function settledToolLines(facts: FinishedRun["facts"]): string[] {
 	const activity = facts.toolActivity;
 	if (activity) {
 		lines.push(
-			`  totals: calls=${activity.calls} succeeded=${activity.succeeded} failed=${activity.failed} blocked=${activity.blocked} mutating_succeeded=${activity.mutatingSucceeded}`,
+			`  totals: calls=${activity.calls} succeeded=${activity.succeeded} failed=${activity.failed} blocked=${activity.blocked}${(activity.withheld ?? 0) > 0 ? ` withheld=${activity.withheld}` : ""} mutating_succeeded=${activity.mutatingSucceeded}`,
 		);
 	} else {
 		lines.push(`  totals: calls=${facts.toolCalls}`);
 	}
 	for (const stat of facts.tools)
-		lines.push(`  ${stat.tool}: count=${stat.calls} ok=${stat.ok} errors=${stat.errors} blocked=${stat.blocked}`);
+		lines.push(
+			`  ${stat.tool}: count=${stat.calls} ok=${stat.ok} errors=${stat.errors} blocked=${stat.blocked}${(stat.withheld ?? 0) > 0 ? ` withheld=${stat.withheld}` : ""}`,
+		);
 	// The totals count a tool guard's blocks and refused asks too, so they are listed beside the safety refusals.
 	for (const attempt of [
 		...facts.blockedAttempts,

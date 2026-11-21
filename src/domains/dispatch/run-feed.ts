@@ -507,6 +507,9 @@ function readBody(record: Record<string, unknown>): RunEventJournalBody | null {
 				...optionalCount(record, "tokens"),
 				...optionalCount(record, "callIndex"),
 				...(outcome === "ok" || outcome === "error" || outcome === "blocked" ? { outcome } : {}),
+				...(outcome === "ok" && record.notExecuted === "observation_budget"
+					? { notExecuted: "observation_budget" as const }
+					: {}),
 				...(scope === "call" || scope === "run-aggregate" ? { usageScope: scope } : {}),
 				...(callFacts !== undefined ? { callFacts } : {}),
 			};
