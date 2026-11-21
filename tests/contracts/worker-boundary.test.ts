@@ -278,7 +278,7 @@ describe("worker boundary", () => {
 			await bundle.extension.start();
 			const run = await bundle.contract.dispatch({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "Inspect isolated evidence.",
 				cwd: scratch.dir,
 				requestOrigin: "internal",
@@ -393,7 +393,7 @@ async function dispatchedWorkerSpec(url: string, cwd: string): Promise<WorkerSpe
 		await rejects(
 			bundle.contract.dispatch({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "Inspect the fixture.",
 				cwd,
 				requestOrigin: "internal",
@@ -697,6 +697,8 @@ describe("bulk-lane backpressure", () => {
 		const result = await worker.promise;
 		ok(performance.now() - stopAt < WORKER_PROCESS_CLEANUP_BOUND_MS, "Stop settles within the cleanup bound");
 		strictEqual(result.processCleanup?.incomplete, false);
+		// M-37: the host names the signal it sent, whatever the child's own exit says.
+		strictEqual(result.hostSignals?.[0], "SIGTERM");
 		throws(() => process.kill(-(worker.pid as number), 0), /ESRCH/u);
 		ok((worker.bulkLaneStats?.().retainedFrames ?? 0) <= WORKER_EVENT_QUEUE_HARD_FRAMES);
 	});
@@ -757,7 +759,7 @@ describe("bulk-lane backpressure", () => {
 					await bundle.extension.start();
 					const run = await bundle.contract.dispatch({
 						agentId: "scout",
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Reply with a short response.",
 						cwd: env.dir,
 						requestOrigin: "internal",
@@ -821,7 +823,7 @@ describe("worker admission", () => {
 						else process.env.CLIO_CODER_WORKER_FAUX = flag;
 						const run = await bundle.contract.dispatch({
 							agentId: "scout",
-							executionRole: "researcher",
+							executionRole: "explorer",
 							task: "Reply with a short response.",
 							cwd: env.dir,
 							requestOrigin: "internal",
@@ -1042,7 +1044,7 @@ describe("worker extension hooks", () => {
 			writeFileSync(join(env.dir, "input.txt"), "fixture\n");
 			const run = await bundle.contract.dispatch({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "Inspect the fixture.",
 				cwd: env.dir,
 				requestOrigin: "internal",
@@ -1123,7 +1125,7 @@ describe("worker extension hooks", () => {
 			await rejects(async () => {
 				const run = await bundle.contract.dispatch({
 					agentId: "scout",
-					executionRole: "researcher",
+					executionRole: "explorer",
 					task: "Inspect the fixture.",
 					cwd: env.dir,
 					requestOrigin: "internal",
@@ -1135,7 +1137,7 @@ describe("worker extension hooks", () => {
 				() =>
 					bundle.contract.preview?.({
 						agentId: "scout",
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Inspect the fixture.",
 						cwd: env.dir,
 						requestOrigin: "internal",
@@ -1201,7 +1203,7 @@ describe("worker extension hooks", () => {
 				await rejects(async () => {
 					const run = await bundle.contract.dispatch({
 						agentId,
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Inspect the fixture.",
 						cwd: env.dir,
 						requestOrigin: "internal",
@@ -1214,7 +1216,7 @@ describe("worker extension hooks", () => {
 				() =>
 					bundle.contract.preview?.({
 						agentId: "scout",
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Inspect the fixture.",
 						cwd: env.dir,
 						requestOrigin: "internal",
@@ -1225,7 +1227,7 @@ describe("worker extension hooks", () => {
 				() =>
 					bundle.contract.preview?.({
 						agentId: "acp-fixture",
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Inspect the fixture.",
 						cwd: env.dir,
 						requestOrigin: "internal",
@@ -1271,7 +1273,7 @@ describe("worker extension hooks", () => {
 			await rejects(async () => {
 				const run = await bundle.contract.dispatch({
 					agentId: "scout",
-					executionRole: "researcher",
+					executionRole: "explorer",
 					task: "Inspect the fixture.",
 					cwd: env.dir,
 					requestOrigin: "internal",
@@ -1282,7 +1284,7 @@ describe("worker extension hooks", () => {
 				() =>
 					bundle.contract.preview?.({
 						agentId: "scout",
-						executionRole: "researcher",
+						executionRole: "explorer",
 						task: "Inspect the fixture.",
 						cwd: env.dir,
 						requestOrigin: "internal",

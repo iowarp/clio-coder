@@ -266,6 +266,22 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			rules: { id: "keep", layer: "keep", status: "keep", code: "keep" },
 			assurance: "keep",
 		},
+		// Roots are paths and the network and withheld lists name tools and servers; the digests and modes are words.
+		envelope: {
+			...keep("version"),
+			exec: { shell: "token", checks: "token" },
+			approval: { autonomy: "token", asks: "token" },
+			sandbox: { backend: "token", confinesWrites: "keep" },
+			digest: "id",
+			permitDigest: "id",
+			staticHead: "id",
+			role: "token",
+			skills: { bound: "name", discovery: "token" },
+			read: { roots: "path", outside: "path" },
+			write: { mode: "token", roots: "path", commandsBounded: "keep" },
+			network: { shell: "keep", tools: "tool", mcp: "name" },
+			withheld: { capability: "tool", reason: "token", remedy: "withhold" },
+		},
 		stepPipeline: STEP_PIPELINE,
 	},
 	"run.feed_appended": {
@@ -539,6 +555,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		...keep("trigger", "attempted", "outcome", "writerPid", "updatedAtBefore", "updatedAtAfter", "durationMs"),
 		provider: "runtime",
 	},
+	"cache.lane_fell_back": keep("reason", "timeoutMs", "lane"),
 	"message.stepped": {
 		...keep("step", "submittedAt", "by", "chars", "lane", "changedBy", "why", "slot", "reason", "attempt"),
 		messageId: "id",

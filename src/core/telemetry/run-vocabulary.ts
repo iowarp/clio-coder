@@ -42,6 +42,8 @@ export const RUN_OUTCOME_CODES = [
 	"worker_mutation_blocked",
 	"merge_withheld",
 	"worker_removed_tests",
+	/** A builder's assurance (fleet design 4.8) is compromised: the detail names the evidence that lowered it. */
+	"assurance_compromised",
 	"information_flow_blocked",
 	"acp_auth_required",
 	"acp_model_unavailable",
@@ -76,6 +78,7 @@ export const GRADE_RULE_IDS = [
 	"obligation",
 	"host-checks",
 	"removed-tests",
+	"assurance",
 	"landing",
 ] as const;
 export type GradeRuleId = (typeof GRADE_RULE_IDS)[number];
@@ -143,5 +146,38 @@ export const RUN_HASH_SUBJECTS = [
 	"settings",
 	"skill-file",
 	"package-provenance",
+	/** A gate decider's evidence packet as its provenance seals it (M10). */
+	"evidence-packet",
 ] as const;
 export type RunHashSubject = (typeof RUN_HASH_SUBJECTS)[number];
+
+/**
+ * The execution roles a run journals and route statistics key on (fleet DESIGN 4.2, M12): the role vocabulary plus
+ * `recovery`, the population of every attempt after the first.
+ */
+export const EXECUTION_ROLE_VOCABULARY = [
+	"builder",
+	"explorer",
+	"seat",
+	"checker",
+	"reviewer",
+	"judge",
+	"recovery",
+] as const;
+
+/**
+ * The execution roles run journals held before fleet M12 (`run.settled` and `route.decided` version 1). Sealed
+ * history reads in these names as recorded; nothing writes them and no live path matches them.
+ */
+export const RETIRED_EXECUTION_ROLE_VOCABULARY = [
+	"builder",
+	"reviewer",
+	"judge",
+	"researcher",
+	"verifier",
+	"recovery",
+] as const;
+
+/** A role as some journal recorded it, current or pre-M12. */
+export const RECORDED_EXECUTION_ROLE_VOCABULARY = [...EXECUTION_ROLE_VOCABULARY, "researcher", "verifier"] as const;
+export type RecordedExecutionRole = (typeof RECORDED_EXECUTION_ROLE_VOCABULARY)[number];

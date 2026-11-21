@@ -77,7 +77,7 @@ for (const scenario of [
 			const run = await bundle.contract.dispatch({
 				agentId: "scout",
 				task: "Inspect the fixture input and report available evidence.",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				requestOrigin: "internal",
 				resultContractOverride: { kind: "provenance-report" },
 			});

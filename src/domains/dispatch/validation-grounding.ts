@@ -67,15 +67,15 @@ export interface ValidationGrounding {
 	 * `unattributable-status` means an unmatched claim names a command the run
 	 * ran, but the call's exit status was a later command's (`make test; echo
 	 * EXIT=$?`), so nothing observed says it passed; reported, never a downgrade.
+	 * `unobserved-lane` means the run's tool lane was not observed (a CLI subprocess), so nothing can match or rule out
+	 * an execution (DESIGN 4.8 V1: unobserved, never zero); the claims read unknown, never ungrounded.
 	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status";
+	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status" | "unobserved-lane";
 }
 
 export interface ValidationGroundingInput {
 	contractKind: ResultContract["kind"] | null;
-	/** Read claims in restricted runs are not command validation claims. */
-	readOnly?: boolean;
 	/** The run's terminal assistant text, or null when none was captured. */
 	output: string | null;
 	/** Canonical validation commands the run ran to a clean exit. */
@@ -84,6 +84,8 @@ export interface ValidationGroundingInput {
 	unattributableCommands?: ReadonlySet<string>;
 	/** Successful shell and typed-verification calls this run made, matched or not. */
 	executedCheckingCalls: number;
+	/** False when Clio did not see the run's tool calls (a CLI subprocess): zero executions then says nothing. */
+	toolLaneObserved?: boolean;
 	/** The gates a verifier's task declared; `verify <id>` ran the gate's command text. */
 	taskGates?: ReadonlyArray<{ id: string; text: string }>;
 	/** Passing `verify` runs on the run's final tree (`CheckFreshness.verifyRuns`): check id and resolved command. */
@@ -230,6 +232,29 @@ function groundedByVerifyRun(
 }
 
 /**
+ * A builder's passing claim that is inspection prose, not a validation: it names no command the grounding vocabulary
+ * detects (in the whole claim or one of its parenthesised or listed parts) and no `verify`, and it reads as an
+ * inspection ("Inspect supplied Scout findings", "read src/math.ts") or names neither a script path nor a check
+ * ("fixture"). It neither grounds nor lowers assurance (DESIGN 4.8). "tests pass", "npm test: 12 passing" and
+ * "./gradlew" stay claims, so a check claimed and never run is still ungrounded.
+ */
+function isInspectionProse(name: string): boolean {
+	if (/^(?:tool:)?verify$/iu.test(name.trim()) || namedVerifyChecks(name).length > 0) return false;
+	const parts = [name, ...name.split(/[(),;:`"']/u)];
+	if (parts.some((part) => detectValidationCommand(part, "grounding").kind === "validation")) return false;
+	if (
+		/^(?:read|inspect(?:ed)?|review(?:ed)?|source|file)\b|^checked\s+\S+\.(?:[cm]?[jt]sx?|md|txt|json|yaml|yml)\b/iu.test(
+			name.trim(),
+		)
+	)
+		return true;
+	if (/(?:^|\s)\.{0,2}\/?[\w.-]+\/[\w./-]*|(?:^|\s)\.\/[\w.-]+/u.test(name)) return false;
+	return !/\b(?:tests?|testing|tested|specs?|typecheck(?:ed|s|ing)?|type-check(?:ed|s|ing)?|lint(?:ed|s|ing)?|builds?|built|compil(?:e|es|ed|ing)|checks?|smoke|coverage)\b/iu.test(
+		name,
+	);
+}
+
+/**
  * Fold a terminal result's passing validation claims against the run's executed
  * commands. Returns null when there is nothing to ground, which is every
  * contract kind that carries no correctness claim and every result that named
@@ -240,20 +265,19 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	// Hoare machine claims use exact native proof records, while argued obligations claim no command execution.
 	if (input.contractKind === "verifier-report" && parseVerifierResult(input.output)?.assurance !== undefined)
 		return null;
-	const claims = claimedValidations(input.output).filter(({ name }) => {
-		if (!input.readOnly || input.contractKind !== "mutation-report") return true;
-		if (detectValidationCommand(name, "grounding").kind === "validation") return true;
-		return !/^(?:read|inspect(?:ed)?|review(?:ed)?|source|file)\b|^checked\s+\S+\.(?:[cm]?[jt]sx?|md|txt|json|yaml|yml)\b/iu.test(
-			name,
-		);
-	});
+	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
+	const matched = (claim: ClaimedValidation): boolean =>
+		isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? []);
+	// A claim an execution matches named that execution, whatever its wording.
+	const claims = claimedValidations(input.output).filter(
+		(claim) => input.contractKind !== "mutation-report" || matched(claim) || !isInspectionProse(claim.name),
+	);
 	if (claims.length === 0) return null;
 	const ungrounded: string[] = [];
 	let grounded = 0;
 	let unattributable = false;
-	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
 	for (const claim of claims) {
-		if (isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? [])) grounded += 1;
+		if (matched(claim)) grounded += 1;
 		else {
 			if (!ungrounded.includes(claim.name)) ungrounded.push(claim.name);
 			if (input.unattributableCommands !== undefined && isExecuted(claim.name, input.unattributableCommands))
@@ -267,12 +291,29 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 		basis:
 			ungrounded.length === 0
 				? "grounded"
-				: input.executedCheckingCalls === 0
-					? "no-command-executed"
-					: unattributable
-						? "unattributable-status"
-						: "unmatched-command",
+				: input.toolLaneObserved === false
+					? "unobserved-lane"
+					: input.executedCheckingCalls === 0
+						? "no-command-executed"
+						: unattributable
+							? "unattributable-status"
+							: "unmatched-command",
 	};
+}
+
+/**
+ * One gate verdict check (M10): whether its claim names a validation command, and whether a run this gate observed
+ * grounds it, under the same matching as the claims above. Unattributable runs ground nothing.
+ */
+export function groundGateCheck(
+	input: Pick<ValidationGroundingInput, "executedCommands" | "verifyRuns" | "taskGates">,
+	claim: ClaimedValidation,
+): { command: boolean; ran: boolean } {
+	const command =
+		detectValidationCommand(claim.name, "grounding").kind === "validation" || namedVerifyChecks(claim.name).length > 0;
+	if (!command) return { command, ran: false };
+	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
+	return { command, ran: isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? []) };
 }
 
 /** True when the sealed quality label may not rest on these claims. */
@@ -283,6 +324,8 @@ export function invalidatesQuality(grounding: ValidationGrounding): boolean {
 /** One line naming what the run claimed and never ran, for the sealed outcome. */
 export function describeUngroundedValidations(grounding: ValidationGrounding): string {
 	const named = grounding.ungrounded.map((name) => JSON.stringify(name)).join(", ");
+	if (grounding.basis === "unobserved-lane")
+		return `unobserved validation: this run claimed ${named} passed in a tool lane CLIO Coder does not observe, so no execution backs or refutes it (${grounding.grounded}/${grounding.claimed} claims grounded)`;
 	if (grounding.basis === "unattributable-status")
 		return `unattributable validation: this run claimed ${named} passed; it ran the check, but the command's exit status was not the check's (${grounding.grounded}/${grounding.claimed} claims grounded)`;
 	return grounding.basis === "no-command-executed"

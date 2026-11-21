@@ -189,7 +189,6 @@ import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	isHoareResultContract,
 	mutationReportFailures,
-	parseVerifierResult,
 	type ResultContract,
 	resultContractAuthorship,
 	validateRecipeResult,
@@ -364,6 +363,7 @@ import type {
 	MainGrantOutcome,
 	WorkerGrantView,
 } from "./contract.js";
+import { createCrossProcessFleet, type ForeignAnswerOrigin } from "./cross-process-fleet.js";
 import {
 	type EnvelopeInput,
 	envelopeApproval,
@@ -413,6 +413,7 @@ import {
 } from "./fleet-change-return.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
+import { gateVerdictFactsOf } from "./gate-decisions.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { type GradeContract, type GradeFacts, type GradeVerdict, grade, type RunVerdict } from "./grading.js";
 import {
@@ -456,6 +457,7 @@ import {
 	mergeCardCauseNote,
 } from "./merge-card.js";
 import {
+	compromisedReason,
 	mergeGateVerdict,
 	mergeWithheldDetail,
 	partialResultDetail,
@@ -495,7 +497,6 @@ import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
-	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
 	planQueueSlot,
@@ -506,6 +507,7 @@ import {
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
 import {
@@ -559,7 +561,10 @@ import {
 	countToolCalls,
 	executedCalls,
 	hasPotentiallyMutatingAttempt,
+	type InFlightCall,
 	observationCalls,
+	recordCallFinish,
+	recordCallStart,
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
@@ -604,7 +609,12 @@ import {
 	type PipelineInput,
 	validateJobSpec,
 } from "./validation.js";
-import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import {
+	describeUngroundedValidations,
+	groundClaimedValidations,
+	groundGateCheck,
+	invalidatesQuality,
+} from "./validation-grounding.js";
 import {
 	HOST_VERIFICATION_EVENT,
 	type VerificationSlotEvents,
@@ -4558,6 +4568,13 @@ export function createDispatchBundle(
 		...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
 		...(record.reviewer !== undefined ? { reviewer: record.reviewer } : {}),
 	});
+	/**
+	 * Answers another Clio process gave through a run's grant records, by request id, until their resolution is
+	 * published: the resolution then names that process instead of reading like this process's own card.
+	 */
+	const answeredElsewhere = new Map<string, ForeignAnswerOrigin>();
+	const answeredElsewhereReason = (decision: "approve" | "deny", origin: ForeignAnswerOrigin): string =>
+		`${decision === "approve" ? "approved" : "denied"} by the operator in another Clio process (pid ${origin.pid}${origin.host !== null ? ` on ${origin.host}` : ""})`;
 	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
@@ -4647,12 +4664,15 @@ export function createDispatchBundle(
 				: record.state === "canceled"
 					? "revoked"
 					: record.issuer !== undefined
-						? record.forwardedByMain === true && record.issuer === "operator"
-							? "operator:forwarded-by-main"
-							: record.reviewer === "safety-judge" && record.issuer === "main"
-								? "safety-judge"
-								: record.issuer
+						? record.issuer === "operator" && answeredElsewhere.has(record.requestId)
+							? "operator:another-process"
+							: record.forwardedByMain === true && record.issuer === "operator"
+								? "operator:forwarded-by-main"
+								: record.reviewer === "safety-judge" && record.issuer === "main"
+									? "safety-judge"
+									: record.issuer
 						: "worker";
+		answeredElsewhere.delete(record.requestId);
 		emitApproval(context.bus, "approval.resolved", {
 			status,
 			tool: record.tool,
@@ -4696,6 +4716,26 @@ export function createDispatchBundle(
 			);
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
+	});
+	// Cross-process fleet state (M11): run-directory records for this process's runs and asks, and, where a person can
+	// answer, the live runs and held asks of other Clio processes on this state directory.
+	const crossProcessFleet = createCrossProcessFleet({
+		bus: context.bus,
+		isLocalRun: (runId) => active.has(runId) || currentAssignmentRun(runId) !== null,
+		grantBinding: (requestId) => {
+			const record = grantBroker.get(requestId);
+			return record === null ? null : { attempt: record.attempt, argDigest: record.argDigest };
+		},
+		resolve: (runId, requestId, decision, answeredBy) => {
+			answeredElsewhere.set(requestId, answeredBy);
+			try {
+				contract.resolveWorkerPermission?.(runId, requestId, decision);
+			} catch (error) {
+				answeredElsewhere.delete(requestId);
+				throw error;
+			}
+		},
+		follow: options?.workerPermissionResponder === true,
 	});
 	/** Asks a fork adopted from the parked session that held them, by request id; a brokered ask's record holds its own. */
 	const adoptedAsks = new Map<string, { runId: string; sessionId: string }>();
@@ -7307,6 +7347,9 @@ export function createDispatchBundle(
 				reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 			}
 		}
+		// The checkout and base the worktree was cut from, so a reviewer's packet can diff the task commit after cleanup.
+		if (sealed !== undefined && req.taskWorktree !== undefined)
+			sealed = { ...sealed, root: req.taskWorktree.root, base: req.taskWorktree.base };
 		if (sealed !== undefined) receiptDraft.worktree = sealed;
 		// A merge needs no card at default autonomy, so the operator's transcript says it landed.
 		const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? runId, sealed);
@@ -8155,7 +8198,7 @@ export function createDispatchBundle(
 						writeRootRequest: null,
 						completion: null,
 						ungroundedChecks: [],
-						reviewVerdict: null,
+						gateVerdict: null,
 					},
 				};
 				let graded = grade(gradeContract, gradeFacts);
@@ -9122,6 +9165,10 @@ export function createDispatchBundle(
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
+		// The calls in flight by id, and the ones the host saw running when its abort started: the abort finishes them
+		// before the seal, so the stop detail reads this snapshot (M-37).
+		const inFlightCalls = new Map<string, InFlightCall>();
+		let callsAtAbort: InFlightCall[] | null = null;
 		let toolTelemetryIngestionErrors = 0;
 		const upstreamResponses: RunResultUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
@@ -9272,6 +9319,7 @@ export function createDispatchBundle(
 					usage?: unknown;
 					tool?: string;
 					toolCallId?: string;
+					action?: unknown;
 					sequence?: number;
 					outcomeCode?: unknown;
 					detail?: unknown;
@@ -9304,6 +9352,7 @@ export function createDispatchBundle(
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+				recordCallStart(inFlightCalls, event.payload);
 				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
 				else startsCarryIds = false;
 			}
@@ -9586,18 +9635,26 @@ export function createDispatchBundle(
 				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 				const source = event.payload.source;
 				const granted = (source === "operator" || source === "main") && event.payload.decision === "approved";
+				// An answer another Clio process gave through the run's grant records names that process.
+				const elsewhere =
+					source === "operator" && typeof event.payload.requestId === "string"
+						? answeredElsewhere.get(event.payload.requestId)
+						: undefined;
+				if (elsewhere !== undefined) answeredElsewhere.delete(event.payload.requestId as string);
 				const decidedBy =
-					source === "operator"
-						? "operator"
-						: source === "main"
-							? "main"
-							: source === "remembered"
-								? "remembered-denial"
-								: source === "timeout"
-									? "timeout"
-									: source === "binding"
-										? "policy:grant-binding"
-										: "policy:no-operator";
+					elsewhere !== undefined
+						? "operator:another-process"
+						: source === "operator"
+							? "operator"
+							: source === "main"
+								? "main"
+								: source === "remembered"
+									? "remembered-denial"
+									: source === "timeout"
+										? "timeout"
+										: source === "binding"
+											? "policy:grant-binding"
+											: "policy:no-operator";
 				const requestId =
 					typeof event.payload.requestId === "string"
 						? event.payload.requestId
@@ -9607,7 +9664,11 @@ export function createDispatchBundle(
 				const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
 				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
 				const reason =
-					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+					elsewhere !== undefined
+						? answeredElsewhereReason(granted ? "approve" : "deny", elsewhere)
+						: typeof event.payload.reason === "string"
+							? event.payload.reason
+							: `${event.payload.tool} requires approval`;
 				// A remembered answer never raised an escalation card, so it mints
 				// the adjacent request/resolve pair the way policy denials do.
 				if (
@@ -9646,6 +9707,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
+				recordCallFinish(inFlightCalls, event.payload);
 				const tool = pendingCapabilities.get(event.payload.toolCallId ?? "") ?? event.payload.tool;
 				pendingCapabilities.delete(event.payload.toolCallId ?? "");
 				if (tool === ToolNames.Gateway && event.payload.toolCallId)
@@ -9937,7 +9999,10 @@ export function createDispatchBundle(
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
 			req,
-			abort,
+			abort: () => {
+				callsAtAbort ??= [...inFlightCalls.values()];
+				abort();
+			},
 			kill: abort,
 			...(steer ? { steer } : {}),
 			...(resolvePermission ? { resolvePermission } : {}),
@@ -10327,7 +10392,9 @@ export function createDispatchBundle(
 						? wallHandbackOutcomeDetail({
 								reported: hasDurableFinalOutput(outputCapture.snapshot()),
 								unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+								runningAtStop: callsAtAbort,
 								hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+								hostSignals: result.hostSignals ?? [],
 								exitCode: result.exitCode ?? null,
 								signal: result.signal ?? null,
 							})
@@ -10341,6 +10408,8 @@ export function createDispatchBundle(
 					obligation: resolveObligation(lifecycle.runRole, appliedResultContract?.kind ?? null, req.intent?.readRoots ?? []),
 					contractKind: appliedResultContract?.kind ?? null,
 					toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
+					...(req.gate?.packet !== undefined ? { packet: req.gate.packet.ids } : {}),
+					...(req.gate?.packet?.verified !== undefined ? { verifiedChecks: req.gate.packet.verified } : {}),
 				};
 				const gradeFacts: GradeFacts = {
 					termination: { outcome, detail: terminationDetail },
@@ -10415,17 +10484,23 @@ export function createDispatchBundle(
 					// Only verify runs on the final tree ground a claim by check id or resolved command (bt-9, bt-27c).
 					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
-					readOnly: lifecycle.readOnly,
+					toolLaneObserved: gradeContract.toolLaneObserved,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
 				const activity = summarizeToolActivity(toolStats, classifyTool);
+				// A limitation the run recorded is a typed declaration whether or not the finish contract kept its words: an
+				// assessment of a run that changed nothing carries no evidence, and an empty list is not "none recorded".
+				const limitationSummaries =
+					finishContract?.assessment.evidence
+						.filter((item) => item.kind === "limitation")
+						.map((item) => item.summary.trim())
+						.filter((summary) => summary.length > 0) ?? [];
 				const recordedLimitations =
 					(toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0
-						? (finishContract?.assessment.evidence
-								.filter((item) => item.kind === "limitation")
-								.map((item) => item.summary.trim())
-								.filter((summary) => summary.length > 0) ?? ["a limitation was recorded"])
+						? limitationSummaries.length > 0
+							? limitationSummaries
+							: ["a limitation was recorded"]
 						: [];
 				gradeFacts.handback = {
 					finalOutput: hasDurableFinalOutput(capturedOutput),
@@ -10459,8 +10534,15 @@ export function createDispatchBundle(
 					// A claim is unmet evidence only when no checking call ran at all; a name that matched no command lowers quality.
 					ungroundedChecks:
 						validationGrounding !== null && invalidatesQuality(validationGrounding) ? validationGrounding.ungrounded : [],
-					reviewVerdict:
-						appliedResultContract?.kind === "review-verdict" ? (parseVerifierResult(finalText)?.verdict ?? null) : null,
+					gateVerdict: gateVerdictFactsOf(appliedResultContract, finalText, (claim) =>
+						groundGateCheck(
+							{
+								executedCommands: observedRunEffects.verificationCommands,
+								verifyRuns: runEffects.checkFreshness().verifyRuns,
+							},
+							claim,
+						),
+					),
 				};
 				applyGrade(grade(gradeContract, gradeFacts));
 				let sealedResultContractFact: RunResultContractFact | null =
@@ -10596,6 +10678,14 @@ export function createDispatchBundle(
 							? assuranceVerification
 							: verificationWithHostVerdict(assuranceVerification, hostVerification),
 				});
+				// What lowered it, in the merge gate's words: the checks this run executed that failed on its final tree.
+				const failedChecks = assuranceQuality.typedValidations
+					.filter((fact) => !fact.passed)
+					.map((fact) => fact.sourceId.replace(/^[\w-]+:/u, ""));
+				const assuranceFact = {
+					value: assurance,
+					cause: compromisedReason(appliedResultContract, finalText, failedChecks),
+				};
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
 				// check the merge used to rest on the exit status alone, and a Git
@@ -10612,6 +10702,7 @@ export function createDispatchBundle(
 					taskWorktreeHoldsWork(req.taskWorktree)
 						? {
 								assurance,
+								failedChecks,
 								contract: appliedResultContract,
 								output: finalText,
 								branch: req.taskWorktree.branch,
@@ -10624,6 +10715,14 @@ export function createDispatchBundle(
 				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);
 				const withheldVerdict = mergeGateInput === null ? null : mergeGateVerdict(mergeGateInput);
 				const mergeWithheld = withheldDetail !== null;
+				// One grade (4.8): a builder whose assurance is compromised is not delivered. A merge-mode branch with work is
+				// held by the merge gate, which reads the same assurance, and graded with its landing below.
+				if (mergeGateInput === null) {
+					gradeFacts.assurance = assuranceFact;
+					applyGrade(grade(gradeContract, gradeFacts));
+				}
+				// Its branch is kept like a host-rejected one, committed for the operator's one land command.
+				const assuranceHeld = req.taskWorktree !== undefined && outcomeCode === "assurance_compromised";
 				// A merge-mode run the worker finished but host verification rejected
 				// keeps its branch like a withheld merge, so its tree is committed there
 				// for the operator's one merge command instead of left as loose edits.
@@ -10648,8 +10747,13 @@ export function createDispatchBundle(
 				let claimReleased = false;
 				// Why landing the run's work failed or was held (V6); the grader seals it beside every other rule.
 				let landingFailure: { code: RunOutcomeCode | null; detail: string } | null = null;
+				// The operator merged a held branch from the card: a person accepted the result (V6).
+				let operatorMerged = false;
 				const landingAttempted = req.taskWorktree !== undefined;
-				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial)) {
+				if (
+					req.taskWorktree !== undefined &&
+					(finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial || assuranceHeld)
+				) {
 					const authorship =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
 							? resultContractAuthorship(appliedResultContract, capturedOutput?.state === "final" ? capturedOutput.text : null)
@@ -10665,7 +10769,7 @@ export function createDispatchBundle(
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
-						apply: mergeWithheld || hostRejectedMerge || cappedPartial ? "preserve" : (req.apply ?? "merge"),
+						apply: mergeWithheld || hostRejectedMerge || cappedPartial || assuranceHeld ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths,
 						commitMessage: taskCommitMessage,
 						authoredPaths,
@@ -10677,7 +10781,7 @@ export function createDispatchBundle(
 						landingFailure = {
 							code: null,
 							detail:
-								hostRejectedMerge || cappedPartial
+								hostRejectedMerge || cappedPartial || assuranceHeld
 									? [notedDetail(), worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
 									: (worktreeReceipt.detail ?? worktreeReceipt.reason),
 						};
@@ -10686,7 +10790,7 @@ export function createDispatchBundle(
 							detailNotes.push(partialResultDetail(req.taskWorktree.branch));
 							failureMessage = notedDetail() ?? failureMessage;
 						}
-					} else if (hostRejectedMerge) {
+					} else if (hostRejectedMerge || assuranceHeld) {
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
@@ -10799,6 +10903,7 @@ export function createDispatchBundle(
 								};
 								landingFailure = { code: null, detail: landed.detail ?? landed.reason };
 							} else {
+								operatorMerged = true;
 								worktreeReceipt = {
 									...landed,
 									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
@@ -10857,6 +10962,8 @@ export function createDispatchBundle(
 				// The landing is the last rule: its words already carry the notes made before it.
 				const preLandingDetail = notedDetail();
 				if (landingAttempted) {
+					if (mergeGateInput !== null)
+						gradeFacts.assurance = { ...assuranceFact, ...(operatorMerged ? { operatorAccepted: true } : {}) };
 					gradeFacts.landing = { failure: landingFailure };
 					applyGrade(grade(gradeContract, gradeFacts));
 				}
@@ -12349,8 +12456,9 @@ export function createDispatchBundle(
 				}),
 			);
 			// No in-memory executor survives a process restart, so every active
-			// side-store lease from an earlier bundle is orphaned and must expire.
-			cleanupDispatchReservations({ startup: true, nowMs: now() });
+			// side-store lease from an earlier bundle is orphaned and must expire. Boot never waits on the admission lock
+			// for it (M-35): a held lock leaves the sweep to the first plan admission.
+			sweepDispatchReservationsAtStartup(now());
 			const runLedger = openLedger({
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
@@ -12466,6 +12574,7 @@ export function createDispatchBundle(
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();
+				crossProcessFleet.dispose();
 				workerApprovalWindows.dispose();
 			})().then(resolveStop, rejectStop);
 			return stopPromise;
@@ -13084,6 +13193,8 @@ export function createDispatchBundle(
 			return { receipt, receipts };
 		},
 		abort(runId, reason) {
+			// A run another Clio process owns: its owner takes the durable cancel request and seals it canceled.
+			if (currentAssignmentRun(runId) === null && crossProcessFleet.cancelForeign(runId, reason?.detail ?? null)) return;
 			const rootRunId = controlRootFor(runId);
 			const run = currentAssignmentRun(runId);
 			canceledControlRoots.add(rootRunId);
@@ -13199,10 +13310,18 @@ export function createDispatchBundle(
 			// answer is bound to the attempt and argument digest the worker parked.
 			const brokered = grantBroker.get(requestId);
 			if (brokered !== null) {
-				const result = grantBroker.decide(requestId, { decision, issuer: "operator", runId });
+				const elsewhere = answeredElsewhere.get(requestId);
+				const result = grantBroker.decide(requestId, {
+					decision,
+					issuer: "operator",
+					runId,
+					...(elsewhere !== undefined ? { reason: answeredElsewhereReason(decision, elsewhere) } : {}),
+				});
 				if (!result.ok) throw new Error(`resolveWorkerPermission: ${result.reason}`);
 				return;
 			}
+			// An ask another Clio process holds: the answer goes to its run directory, and that process applies it.
+			if (crossProcessFleet.answerForeign(runId, requestId, decision)) return;
 			if (workerApprovalWindows.isExpired(requestId)) {
 				throw new Error(`resolveWorkerPermission: run '${runId}' no longer accepts input for this ask; its window ended`);
 			}

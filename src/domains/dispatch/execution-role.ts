@@ -14,6 +14,7 @@
  * clock, no engine state.
  */
 
+import { EXECUTION_ROLE_VOCABULARY } from "../../core/telemetry/run-vocabulary.js";
 import { dispatchJobRecipe } from "../agents/dispatch-jobs.js";
 import { type ResultContract, withResultSummaryAllowance } from "../agents/result-contract.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
@@ -21,22 +22,18 @@ import type { AgentCapabilityClass } from "../agents/spec.js";
 /**
  * The one execution-role union.
  *
- * `builder` produces the work under review. `reviewer` and `judge` are gate
- * deciders. `researcher` is read-only reconnaissance. `verifier` is a direct
- * typed-validation run outside a gate. `recovery` is any attempt after the
- * first: a retry is not an independent observation of the route, so it never
- * trains ordinary builder quality.
+ * The names are the fleet role vocabulary (DESIGN 4.2, M12). `builder` produces
+ * the work under review. `reviewer` and `judge` are gate deciders. `explorer`
+ * is read-only reconnaissance and `seat` a council member. `checker` is a
+ * direct typed-validation run outside a gate. `recovery` is any attempt after
+ * the first: a retry is not an independent observation of the route, so it
+ * never trains ordinary builder quality. Runs journaled before M12 recorded
+ * `researcher` and `verifier`; those records read as recorded and nothing
+ * writes or matches those names.
  */
-export type ExecutionRole = "builder" | "reviewer" | "judge" | "researcher" | "verifier" | "recovery";
+export type ExecutionRole = (typeof EXECUTION_ROLE_VOCABULARY)[number];
 
-export const EXECUTION_ROLES: ReadonlyArray<ExecutionRole> = [
-	"builder",
-	"reviewer",
-	"judge",
-	"researcher",
-	"verifier",
-	"recovery",
-];
+export const EXECUTION_ROLES: ReadonlyArray<ExecutionRole> = EXECUTION_ROLE_VOCABULARY;
 
 export function isExecutionRole(value: unknown): value is ExecutionRole {
 	return typeof value === "string" && (EXECUTION_ROLES as ReadonlyArray<string>).includes(value);
@@ -79,7 +76,7 @@ export interface ExecutionRoleInput {
  *      candidate ordinal it holds.
  *   3. Outside a gate, the recipe's own typed contract decides. A declared
  *      `verifier-report` or `review-verdict` is the only contract that makes
- *      a direct run a verifier; a Debugger's `debugger-report` deliberately does not, because
+ *      a direct run a checker; a Debugger's `debugger-report` deliberately does not, because
  *      the result schema distinguishes diagnosis from a gate verdict.
  *   4. A read-only recipe with no verifier contract is reconnaissance.
  */
@@ -88,10 +85,10 @@ export function deriveExecutionRole(input: ExecutionRoleInput): ExecutionRole {
 	if (input.gateRole === "reviewer") return "reviewer";
 	if (input.gateRole === "judge") return "judge";
 	if (input.gateRole === "synthesis") return "judge";
-	if (input.gateRole === "member") return "researcher";
+	if (input.gateRole === "member") return "seat";
 	if (input.gateRole === "builder" || input.gateRole === "candidate") return "builder";
-	if (input.resultContractKind === "verifier-report" || input.resultContractKind === "review-verdict") return "verifier";
-	if (input.capabilityClass === "read-only") return "researcher";
+	if (input.resultContractKind === "verifier-report" || input.resultContractKind === "review-verdict") return "checker";
+	if (input.capabilityClass === "read-only") return "explorer";
 	return "builder";
 }
 
@@ -117,7 +114,7 @@ export function agentRoleFactsResolver(
  * A gate position alone determines the role, so a topology never needs the
  * recipe. Outside a gate, an unresolvable agent falls back to `builder`: that is
  * the population with no special standing, so an unknown recipe can never claim
- * verifier or researcher evidence it has not proven. Admission still rejects the
+ * checker or explorer evidence it has not proven. Admission still rejects the
  * unknown agent on its own terms.
  */
 export function requestExecutionRole(input: {
@@ -201,8 +198,12 @@ export function councilJudgeAgentId(requested: string | undefined, seated: strin
  * member, whose ballot arrives as the topology's override.
  */
 function gateVerdictContract(gate: DispatchResultContractRequest["gate"]): ResultContract | undefined {
-	if (gate?.role === "reviewer") return { kind: "review-verdict" };
-	if (gate?.role === "judge") return { kind: "judge-verdict", candidates: Math.max(1, gate.subjects?.length ?? 1) };
+	// The packet's ids ride the contract so the shape, the bound schema and the repair round all name them (M10).
+	const ids = gate?.packet?.ids;
+	const packet = ids !== undefined && ids.length > 0 ? { packet: [...ids] } : {};
+	if (gate?.role === "reviewer") return { kind: "review-verdict", ...packet };
+	if (gate?.role === "judge")
+		return { kind: "judge-verdict", candidates: Math.max(1, gate.subjects?.length ?? 1), ...packet };
 	if (gate?.role === "synthesis") return { kind: "judge-verdict" };
 	return undefined;
 }
@@ -229,7 +230,13 @@ export interface DispatchResultSummaryAllowance {
 /** The request fields the applied result contract is resolved from. */
 export interface DispatchResultContractRequest {
 	agentId: string;
-	gate?: { role?: GateTopologyRole; subjects?: ReadonlyArray<unknown> } | undefined;
+	gate?:
+		| {
+				role?: GateTopologyRole;
+				subjects?: ReadonlyArray<unknown>;
+				packet?: { ids: ReadonlyArray<string> } | undefined;
+		  }
+		| undefined;
 	resultContractOverride?: ResultContract;
 	resultSummary?: DispatchResultSummaryAllowance;
 }

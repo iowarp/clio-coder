@@ -77,7 +77,7 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 					? listed
 					: { ...listed, targets: listed.targets.filter((target) => target.id !== "fixture-target") },
 			);
-			const settings = await json(await h.request(`${path}/settings`), SettingsReport);
+			const settings = await json(await h.request(`/api/settings?workspace=${workspace.id}`), SettingsReport);
 			assert.equal(
 				settings.rows.find((row) => row.key === "chat.target")?.value,
 				action === "use" ? "fixture-target" : null,

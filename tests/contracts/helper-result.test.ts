@@ -6,7 +6,9 @@ import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	internalHelperResultSchema,
 	mutationReportFailures,
+	resultContractEvidenceShortfall,
 	resultContractOutputBytes,
+	unobservedExplorerReportReason,
 	validateStructuredHelperResult,
 } from "../../src/domains/agents/result-contract.js";
 import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
@@ -189,6 +191,16 @@ test("typed Scout submission cannot ground unread lines or smuggle continuation 
 		}).structured,
 		null,
 	);
+	// M-31: an unread citation, and any explorer report submitted before a tool ran, is a shortfall the repair reads for;
+	// a form refusal and a non-explorer report are not.
+	ok(resultContractEvidenceShortfall(unread.validation.reason ?? ""));
+	for (const kind of ["scout-report", "provenance-report", "research-report", "context-handbook"]) {
+		const reason = unobservedExplorerReportReason(kind, 0);
+		ok(reason !== null && resultContractEvidenceShortfall(reason), kind);
+		strictEqual(unobservedExplorerReportReason(kind, 1), null, kind);
+	}
+	strictEqual(unobservedExplorerReportReason("verifier-report", 0), null);
+	strictEqual(resultContractEvidenceShortfall("Scout result needsSplit must be a boolean"), false);
 });
 
 test("only admitted validated terminal events seal a helper result, retaining canonical text", () => {
@@ -298,7 +310,7 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 		const run = await bundle.contract.dispatch({
 			agentId: "provenance",
 			task: "Inspect receipt evidence",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 			cwd: env.dir,
 		});

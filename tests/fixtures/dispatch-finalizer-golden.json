@@ -4,7 +4,7 @@
 			"runId": "<run>",
 			"cwd": "<home>/project",
 			"agentId": "scout",
-			"executionRole": "researcher",
+			"executionRole": "explorer",
 			"agentAudience": "shadow",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
@@ -567,6 +567,11 @@
 						"status": "not_applicable"
 					},
 					{
+						"id": "assurance",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
 						"id": "landing",
 						"layer": "V6",
 						"status": "not_applicable"
@@ -582,7 +587,7 @@
 				"selected": {
 					"agentId": "scout",
 					"specFingerprint": "<sha256>",
-					"executionRole": "researcher",
+					"executionRole": "explorer",
 					"targetId": "default",
 					"modelId": "gpt-4o",
 					"runtimeId": "openai",
@@ -619,7 +624,7 @@
 						"candidate": {
 							"agentId": "scout",
 							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
+							"executionRole": "explorer",
 							"targetId": "default",
 							"modelId": "gpt-4o",
 							"runtimeId": "openai",
@@ -677,7 +682,7 @@
 						{
 							"agentId": "scout",
 							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
+							"executionRole": "explorer",
 							"ready": false,
 							"candidateCount": 1,
 							"readyCandidateCount": 0,
@@ -686,7 +691,7 @@
 									"candidate": {
 										"agentId": "scout",
 										"specFingerprint": "<sha256>",
-										"executionRole": "researcher",
+										"executionRole": "explorer",
 										"targetId": "default",
 										"modelId": "gpt-4o",
 										"runtimeId": "openai",
@@ -720,7 +725,7 @@
 				"executedRoute": {
 					"agentId": "scout",
 					"specFingerprint": "<sha256>",
-					"executionRole": "researcher",
+					"executionRole": "explorer",
 					"targetId": "default",
 					"modelId": "gpt-4o",
 					"runtimeId": "openai",
@@ -738,7 +743,7 @@
 			"version": 1,
 			"id": "<run>",
 			"agentId": "scout",
-			"executionRole": "researcher",
+			"executionRole": "explorer",
 			"agentAudience": "shadow",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
@@ -1386,7 +1391,7 @@
 			"version": 1,
 			"id": "<run>",
 			"agentId": "scout",
-			"executionRole": "researcher",
+			"executionRole": "explorer",
 			"agentAudience": "shadow",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
@@ -1977,7 +1982,7 @@
 			"runId": "<run>",
 			"cwd": "<home>/project",
 			"agentId": "golden-peer",
-			"executionRole": "researcher",
+			"executionRole": "explorer",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
 			"answerBudgetBytes": 12000,
@@ -2439,6 +2444,11 @@
 						"status": "not_applicable"
 					},
 					{
+						"id": "assurance",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
 						"id": "landing",
 						"layer": "V6",
 						"status": "not_applicable"
@@ -2454,7 +2464,7 @@
 				"selected": {
 					"agentId": "golden-peer",
 					"specFingerprint": "acp:unobservable",
-					"executionRole": "researcher",
+					"executionRole": "explorer",
 					"targetId": "delegation:golden-peer",
 					"modelId": "golden-peer",
 					"runtimeId": "acp",
@@ -2471,7 +2481,7 @@
 						"candidate": {
 							"agentId": "golden-peer",
 							"specFingerprint": "acp:unobservable",
-							"executionRole": "researcher",
+							"executionRole": "explorer",
 							"targetId": "delegation:golden-peer",
 							"modelId": "golden-peer",
 							"runtimeId": "acp",
@@ -2525,7 +2535,7 @@
 						{
 							"agentId": "golden-peer",
 							"specFingerprint": "acp:unobservable",
-							"executionRole": "researcher",
+							"executionRole": "explorer",
 							"authority": "internal",
 							"rejections": [],
 							"coldPrior": {
@@ -2543,7 +2553,7 @@
 						{
 							"agentId": "golden-peer",
 							"specFingerprint": "acp:unobservable",
-							"executionRole": "researcher",
+							"executionRole": "explorer",
 							"ready": false,
 							"candidateCount": 1,
 							"readyCandidateCount": 0,
@@ -2552,7 +2562,7 @@
 									"candidate": {
 										"agentId": "golden-peer",
 										"specFingerprint": "acp:unobservable",
-										"executionRole": "researcher",
+										"executionRole": "explorer",
 										"targetId": "delegation:golden-peer",
 										"modelId": "golden-peer",
 										"runtimeId": "acp",
@@ -2583,7 +2593,7 @@
 				"executedRoute": {
 					"agentId": "golden-peer",
 					"specFingerprint": "acp:unobservable",
-					"executionRole": "researcher",
+					"executionRole": "explorer",
 					"targetId": "delegation:golden-peer",
 					"modelId": "golden-peer",
 					"runtimeId": "acp",
@@ -2600,7 +2610,7 @@
 			"version": 1,
 			"id": "<run>",
 			"agentId": "golden-peer",
-			"executionRole": "researcher",
+			"executionRole": "explorer",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
 			"projection": {
@@ -3184,7 +3194,7 @@
 			"version": 1,
 			"id": "<run>",
 			"agentId": "golden-peer",
-			"executionRole": "researcher",
+			"executionRole": "explorer",
 			"requestOrigin": "internal",
 			"task": "Inspect the fixture.",
 			"projection": {

@@ -780,19 +780,18 @@ A checkout has one writer set at a time (DESIGN 4.5). A `workspace-edit` recipe 
 it runs, and a fleet run joins it for its whole run; its own steps never wait on it. The set's cross-process record
 is process-owned and lives under the CLIO Coder state directory. Its key is the canonical checkout path (the source checkout
 for a `worktree: true` writer), and its record contains the
-owner host, pid, process birth token, acquisition time, and a heartbeat the holder
-refreshes every 15 seconds. A writer from a live sibling process, or one
+owner host, pid, process birth token, acquisition time, and the `heartbeatAt` and `expiresAt` the holder
+renews every 10 seconds for 30. A writer from a live sibling process, or one
 whose roots overlap a live writer from another dispatch call in this process, queues: it starts as soon as the set
 empties, and fails with `writer_set_busy`, naming what it waited on, only when its run's deadline passes first
 (the run wall clock, `fleet.limits.runTimeoutMs`, counts the queue time).
 A dead owner is reclaimed, and so is a pid that now names a different process
 (its start time differs from the recorded one; where no start time can be read,
-the lapsed heartbeat decides, so on macOS and Windows a holder whose process
-stalls for 120 seconds without beating loses the lease). A lease from another host
+the lapsed lease decides, so on macOS and Windows a holder whose process
+stalls for 30 seconds without beating loses the lease). A lease from another host
 sharing the state directory is never judged by a local pid check: it is honored
-until its heartbeat is 120 seconds old. That age is read on the clock of the
-filesystem holding the state directory (the record's modification time against a
-file the reader writes beside it), so the hosts' clocks need not agree. A record
+until this host's clock is 60 seconds past its `expiresAt`, the tolerance for
+host clocks that disagree. A record
 written before holders heartbeat, on another host, stays held. The lease remains held until the last
 writer settles, including writers collected from detached batches. Read-only
 runs never acquire it.
@@ -1685,8 +1684,8 @@ Subdirectories share the checkout's set; linked worktrees have their own. A
 second fleet, in this process or another, queues behind it with a `queued behind`
 notice and starts when the first settles; it fails with `writer_set_busy` (the
 CLI exits 1) only when `fleet.limits.runTimeoutMs` passes first. Dead local
-owners are taken over. A record from another host is taken over after 120
-seconds without a refresh; owners refresh every 15 seconds. The set is scoped
+owners are taken over. A record from another host is taken over once this host's
+clock is 60 seconds past its expiry; owners renew every 10 seconds for 30. The set is scoped
 to one user's state directory, and `clio-coder upgrade` removes the retired
 `<stateDir>/fleet-locks/` directory. Source: `src/domains/dispatch/writer-set.ts`.
 
@@ -1836,7 +1835,7 @@ selection requires both the execution role and posture to be named, a call that 
 version: 2
 fleet:
   adaptiveRouting:
-    roles: [researcher, verifier, reviewer, judge]
+    roles: [explorer, seat, checker, reviewer, judge]
     postures: [quality, balanced]
     agentRoles: []
 ```
@@ -1849,7 +1848,7 @@ a decision p95 of at most 10 ms. If no tuple is ready, active mode refuses the a
 falls back to the fixed route, and manual or `failover: none` intent never
 drifts.
 
-`roles` takes `researcher`, `verifier`, `reviewer` and `judge`. `postures` takes
+`roles` takes `explorer`, `seat`, `checker`, `reviewer` and `judge`. `postures` takes
 `quality`, `balanced`, `latency` and `economy`; `manual` is exact by definition and is
 never an activated posture. `agentRoles` takes `{agentId, executionRole}` pairs, with
 `builder` also allowed as an execution role, and rejects `agentId: auto`. All three lists

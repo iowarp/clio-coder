@@ -32,9 +32,9 @@ import {
 	MIDDLEWARE_EFFECTS,
 	ObjectRefSchema,
 	PricingSchema,
+	RecordedRunSettledSchema,
 	RunFeedBodySchema,
 	RunResultObjectSchema,
-	RunSettledSchema,
 	SessionCloseReason,
 	StepPipelineSettledSchema,
 	SYSTEM_ONE_OUTCOME,
@@ -445,6 +445,9 @@ export const SessionTelemetrySchema = Type.Object(
 );
 export type SessionTelemetryV1 = Static<typeof SessionTelemetrySchema>;
 
+/** One seat-billing figure as its runtime reported it; not a dollar amount, so it has no fold ref. */
+const SeatUnitSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
+
 export const CallRowSchema = Type.Object(
 	{
 		callId: CallIdSchema,
@@ -508,6 +511,8 @@ export const CallRowSchema = Type.Object(
 				requestBytes: QuantitySchema,
 				sessionPinnedToSse: FactTextSchema,
 				connectionReused: FactTextSchema,
+				/** The Copilot session a copilot-sdk call went to: new, spare, continued or resumed. */
+				session: FactTextSchema,
 				websocketFailures: QuantitySchema,
 				sseFallbacks: QuantitySchema,
 				pinReason: Type.Union([transportFacts.pinReason, Type.Null()]),
@@ -530,6 +535,19 @@ export const CallRowSchema = Type.Object(
 		),
 		quota: Type.Union([CallSettledSchema.properties.quota, Type.Null()]),
 		responseId: Type.Union([text, Type.Null()]),
+		/** The seat units the call's runtime reported (`call.settled` billing); null when the call journaled none. */
+		billing: Type.Union([
+			Type.Object(
+				{
+					provider: CallSettledSchema.properties.billing.properties.provider,
+					premiumRequests: SeatUnitSchema,
+					nanoAiu: SeatUnitSchema,
+					modelCalls: SeatUnitSchema,
+				},
+				closed,
+			),
+			Type.Null(),
+		]),
 	},
 	closed,
 );
@@ -1212,7 +1230,13 @@ export const RunEvidenceSchema = Type.Object(
 								claimed: count,
 								grounded: count,
 								ungrounded: Type.Array(text),
-								basis: vocabulary(["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]),
+								basis: vocabulary([
+									"grounded",
+									"no-command-executed",
+									"unmatched-command",
+									"unattributable-status",
+									"unobserved-lane",
+								]),
 							},
 							closed,
 						),
@@ -1260,7 +1284,7 @@ export const RunTelemetrySchema = Type.Object(
 		settled: Type.Union([
 			Type.Object(
 				{
-					...RunSettledSchema.properties,
+					...RecordedRunSettledSchema.properties,
 					at: UtcSchema,
 					/** The run's identity: the digest of its run.settled payload (`run-digest.ts`). */
 					digest: Type.String({ pattern: "^[0-9a-f]{64}$" }),

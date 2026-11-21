@@ -292,7 +292,7 @@ test("bounded workers discover context without a handbook; partial wiki is expli
 		const prompt = renderPromptContext(env.dir);
 		strictEqual(prompt.handbookSources.length, 0);
 		match(prompt.text, /0 of 3 planned pages validated, 3 owed/);
-		const request = { agentId: "coder", task: "Inspect", cwd: env.dir, executionRole: "researcher" as const };
+		const request = { agentId: "coder", task: "Inspect", cwd: env.dir, executionRole: "explorer" as const };
 		const messages = buildDynamicPromptMessages(request, { projectPrompt: prompt, projectContextTier: "bounded" });
 		const body = messages.find((m) => m.id === "dispatch-project-orientation")?.body;
 		ok(body);

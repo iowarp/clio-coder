@@ -57,7 +57,7 @@ it("records ACP tool kinds, completed spans, mutations, and only mediated safety
 		const run = await bundle.contract.dispatch({
 			agentId: "receipt-fixture",
 			task: "Inspect and edit fixture.",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 		});
 		const receipt = await run.finalPromise;
@@ -291,7 +291,7 @@ async function goldenRun(kind: "native" | "acp", fail: boolean): Promise<unknown
 			agentId: kind === "acp" ? "golden-peer" : "scout",
 			task: "Inspect the fixture.",
 			cwd,
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 			...(kind === "native" ? { resultContractOverride: { kind: "provenance-report" as const } } : {}),
 		});
@@ -396,7 +396,7 @@ async function agyDispatch(
 		const run = await bundle.contract.dispatch({
 			agentId: "agy-fixture",
 			task: "pick a branch",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 		});
 		const questions: unknown[] = [];

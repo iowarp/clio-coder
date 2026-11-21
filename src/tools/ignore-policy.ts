@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { toPosixPath } from "./path-utils.js";
 
 /**
@@ -74,6 +74,24 @@ export function internalSearchExclusionNotice(searchPath: string): string {
 	const excluded = excludedDirsFor(searchPath, true);
 	if (excluded.length === 0) return "";
 	return `\n[Internal directories ${excluded.join(", ")} are excluded from this search, even with include_ignored=true. No match does not prove a supplied file is absent. Search inside its explicit directory (for example path=".clio-coder/prototypes") or read the supplied exact file.]`;
+}
+
+/**
+ * What an empty search result says beside its emptiness: what was searched, that an empty match proves no file absent,
+ * and the call that lists a directory. A worker that took one empty search for "the files are not there" reported a
+ * populated src/ tree as missing (M-39), so the result states the limit of what it observed. `dir` names a directory
+ * the caller knows exists; without one the call shows the placeholder.
+ */
+export function emptySearchText(searched: string, dir?: string): string {
+	const listed = dir === undefined ? "<dir>/" : `${dir}/`;
+	return `Searched ${searched}; nothing matched. An empty match is not evidence that files are absent: list a directory with code_nav mode=path query=${listed} or ls, and read the exact path before saying it does not exist.`;
+}
+
+/** The searched tree as the empty-result line names it: workspace-relative inside the cwd, absolute outside it. */
+export function searchedTree(searchPath: string): string {
+	const inside = relative(process.cwd(), searchPath);
+	if (inside.length === 0) return ".";
+	return inside.startsWith("..") || isAbsolute(inside) ? toPosixPath(searchPath) : toPosixPath(inside);
 }
 
 /**

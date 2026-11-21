@@ -6,33 +6,30 @@ import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from ".
 import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import {
 	FILE_LOCK_ACQUIRE_TIMEOUT_MS,
+	type StateFileLockOptions,
+	StateFileLockTimeoutError,
 	withStateFileLockSection,
 	withStateFileLockSync,
 } from "../../core/state-file-lock.js";
 import { clioStateDir, clioStatePath } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { endpointLabel, foregroundStreamUsage, maxConcurrentRequestsRemedy } from "../providers/endpoint-capacity.js";
+import { AdmissionLockBusyError } from "./admission-error.js";
+import { isLeaseInstant, LEASE_TTL_MS, leaseInstant, leaseLapsed, leaseRenewal } from "./lease-clock.js";
 import type { DispatchReservationRecord } from "./reservation-store.js";
 
 export { processBirthToken } from "../../core/process-identity.js";
 
 export const MAX_CAPACITY_LEASES = 1_000;
-export const DEFAULT_CAPACITY_LEASE_TTL_MS = 30_000;
-/**
- * A lease from another host cannot be probed here, so it is dropped only once
- * it is this far past its expiry. A live owner renews on every heartbeat, so
- * only a dead or partitioned owner gets this old.
- */
-const FOREIGN_LEASE_GRACE_MS = 10 * DEFAULT_CAPACITY_LEASE_TTL_MS;
 /** `LOCAL_NODE_ID` in transport.ts; imported by value it would pull worker spawning into every admission reader. */
 const LOCAL_NODE_ID = "local";
 // Admission waits and lease renewal yield while they wait for the lock, but
 // release, rename, reservation writes and the planners' usage reads still block
 // the event loop, and a blocked process cannot renew. If such a caller could
 // wait longer than a lease lives, a live holder would watch its own lease expire.
-if (FILE_LOCK_ACQUIRE_TIMEOUT_MS >= DEFAULT_CAPACITY_LEASE_TTL_MS)
+if (FILE_LOCK_ACQUIRE_TIMEOUT_MS >= LEASE_TTL_MS)
 	throw new Error(
-		`dispatch: lock acquire timeout (${FILE_LOCK_ACQUIRE_TIMEOUT_MS}ms) must stay under the capacity lease TTL (${DEFAULT_CAPACITY_LEASE_TTL_MS}ms)`,
+		`dispatch: lock acquire timeout (${FILE_LOCK_ACQUIRE_TIMEOUT_MS}ms) must stay under the lease TTL (${LEASE_TTL_MS}ms)`,
 	);
 /**
  * An operator drain outlives the process that asked for it, so it cannot be
@@ -169,9 +166,9 @@ function validMainCacheLane(value: unknown): value is MainCacheLaneRecord {
 		typeof record.host === "string" &&
 		Number.isInteger(record.ownerPid) &&
 		typeof record.processBirthToken === "string" &&
-		validTimestamp(record.acquiredAt) &&
-		validTimestamp(record.expiresAt) &&
-		(record.releasedAt === undefined || validTimestamp(record.releasedAt))
+		isLeaseInstant(record.acquiredAt) &&
+		isLeaseInstant(record.expiresAt) &&
+		(record.releasedAt === undefined || isLeaseInstant(record.releasedAt))
 	);
 }
 function valid(value: unknown): value is CapacityLease {
@@ -185,18 +182,13 @@ function valid(value: unknown): value is CapacityLease {
 		typeof lease.host === "string" &&
 		Number.isInteger(lease.ownerPid) &&
 		typeof lease.processBirthToken === "string" &&
-		typeof lease.acquiredAt === "string" &&
-		typeof lease.expiresAt === "string" &&
-		typeof lease.heartbeatAt === "string" &&
+		isLeaseInstant(lease.acquiredAt) &&
+		isLeaseInstant(lease.expiresAt) &&
+		isLeaseInstant(lease.heartbeatAt) &&
 		(lease.reservationOwnerId === null || typeof lease.reservationOwnerId === "string") &&
 		(lease.reservationMemberId === null || typeof lease.reservationMemberId === "string") &&
 		(lease.cacheLane === undefined || validCacheLane(lease.cacheLane))
 	);
-}
-function validTimestamp(value: unknown): value is string {
-	if (typeof value !== "string") return false;
-	const timestamp = Date.parse(value);
-	return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 function validDrain(value: unknown): value is CapacityDrain {
 	if (typeof value !== "object" || value === null) return false;
@@ -204,8 +196,8 @@ function validDrain(value: unknown): value is CapacityDrain {
 	return (
 		Number.isInteger(drain.requestedByPid) &&
 		(drain.requestedByPid ?? 0) > 0 &&
-		validTimestamp(drain.requestedAt) &&
-		validTimestamp(drain.expiresAt)
+		isLeaseInstant(drain.requestedAt) &&
+		isLeaseInstant(drain.expiresAt)
 	);
 }
 /** The one reservation shape every current writer records; `reservation-store.ts` interprets it. */
@@ -230,9 +222,9 @@ export function validReservationRecord(value: unknown): value is DispatchReserva
 			record.status === "released" ||
 			record.status === "rolled_back" ||
 			record.status === "expired") &&
-		typeof record.createdAt === "string" &&
-		typeof record.expiresAt === "string" &&
-		(record.settledAt === null || typeof record.settledAt === "string") &&
+		isLeaseInstant(record.createdAt) &&
+		isLeaseInstant(record.expiresAt) &&
+		(record.settledAt === null || isLeaseInstant(record.settledAt)) &&
 		Array.isArray(record.members) &&
 		record.members.every(
 			(member) =>
@@ -244,8 +236,8 @@ export function validReservationRecord(value: unknown): value is DispatchReserva
 				Number.isFinite(member.costUpperBoundUsd) &&
 				member.costUpperBoundUsd >= 0 &&
 				(member.status === "held" || member.status === "consumed" || member.status === "released") &&
-				(member.consumedAt === null || typeof member.consumedAt === "string") &&
-				(member.releasedAt === null || typeof member.releasedAt === "string"),
+				(member.consumedAt === null || isLeaseInstant(member.consumedAt)) &&
+				(member.releasedAt === null || isLeaseInstant(member.releasedAt)),
 		)
 	);
 }
@@ -253,15 +245,16 @@ export function validReservationRecord(value: unknown): value is DispatchReserva
 /**
  * A stored record no current reader accepts. A settled one holds no capacity and is dropped where it is read.
  * A live one (an active reservation, or a lease whose expiry has not run out) may still bind a running process's
- * slots, so admission refuses until `clio-coder doctor --fix` drops it.
+ * slots, so admission refuses until `clio-coder doctor --fix` drops it. A main session's cache lane holds no slot, so
+ * an invalid one is never live.
  */
 export interface InvalidAdmissionRecord {
-	kind: "reservation" | "capacity lease";
+	kind: "reservation" | "capacity lease" | "cache lane";
 	label: string;
 	live: boolean;
 }
 
-function recordLabel(value: unknown, key: "ownerId" | "leaseId", index: number): string {
+function recordLabel(value: unknown, key: "ownerId" | "leaseId" | "conversation", index: number): string {
 	const id = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
 	return typeof id === "string" && /^[\w.:-]{1,80}$/u.test(id) ? `'${id}'` : `#${index}`;
 }
@@ -269,9 +262,9 @@ function recordLabel(value: unknown, key: "ownerId" | "leaseId", index: number):
 function liveInvalidLease(value: unknown, nowMs: number): boolean {
 	const expiresAt =
 		typeof value === "object" && value !== null ? (value as { expiresAt?: unknown }).expiresAt : undefined;
-	const expiry = typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
-	// Renewal rewrites the expiry of a lease it can find, so a lease this stale has no live owner on any host.
-	return Number.isFinite(expiry) && expiry + FOREIGN_LEASE_GRACE_MS > nowMs;
+	// An invalid record's host is not to be trusted, so it is judged as another host's: renewal rewrites the expiry of
+	// a lease it can find, so a lease lapsed past the skew tolerance has no live owner on any host.
+	return !leaseLapsed(expiresAt, nowMs, true);
 }
 
 type CapacityStateScan = { state: CapacityStateFile; invalid: InvalidAdmissionRecord[] } | { problem: string };
@@ -309,7 +302,11 @@ function scanCapacityState(nowMs: number): CapacityStateScan {
 		return false;
 	});
 	// A cache lane holds no capacity, so an invalid one is dropped where it is read, like a settled record.
-	const cacheLanes = Array.isArray(parsed.cacheLanes) ? parsed.cacheLanes.filter(validMainCacheLane) : [];
+	const cacheLanes = (Array.isArray(parsed.cacheLanes) ? parsed.cacheLanes : []).filter((record, index) => {
+		if (validMainCacheLane(record)) return true;
+		invalid.push({ kind: "cache lane", label: recordLabel(record, "conversation", index), live: false });
+		return false;
+	});
 	const { cacheLanes: _stored, ...rest } = parsed;
 	return {
 		state: {
@@ -355,22 +352,56 @@ export interface DispatchAdmissionStoreAudit {
 	problem: string | null;
 	reservations: number;
 	leases: number;
+	/** Main sessions' cache lane records (M-11): held ones and released hints. */
+	cacheLanes: number;
+	/** The processes that hold a cache lane and are still alive, as `pid N` here or `pid N on host` elsewhere. */
+	cacheLaneOwners: ReadonlyArray<string>;
 	invalid: ReadonlyArray<InvalidAdmissionRecord>;
 }
 
-/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
-export function auditDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmissionStoreAudit | null {
-	if (!capacityStateExists()) return null;
-	const scan = scanCapacityState(nowMs);
-	if ("problem" in scan)
-		return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+function unreadableAudit(problem: string): DispatchAdmissionStoreAudit {
+	return {
+		path: capacityStatePath(),
+		problem,
+		reservations: 0,
+		leases: 0,
+		cacheLanes: 0,
+		cacheLaneOwners: [],
+		invalid: [],
+	};
+}
+
+function storeAudit(
+	state: CapacityStateFile,
+	invalid: ReadonlyArray<InvalidAdmissionRecord>,
+	nowMs: number,
+	probe: LeaseOwnerProbe,
+): DispatchAdmissionStoreAudit {
+	const owners = new Set<string>();
+	for (const record of state.cacheLanes ?? []) {
+		if (record.releasedAt !== undefined || !ownerStillHolds(record, nowMs, probe)) continue;
+		owners.add(onThisHost(record.host) ? `pid ${record.ownerPid}` : `pid ${record.ownerPid} on ${record.host}`);
+	}
 	return {
 		path: capacityStatePath(),
 		problem: null,
-		reservations: scan.state.reservations.length,
-		leases: scan.state.leases.length,
-		invalid: scan.invalid,
+		reservations: state.reservations.length,
+		leases: state.leases.length,
+		cacheLanes: state.cacheLanes?.length ?? 0,
+		cacheLaneOwners: [...owners],
+		invalid,
 	};
+}
+
+/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
+export function auditDispatchAdmissionStore(
+	nowMs = Date.now(),
+	probe: LeaseOwnerProbe = defaultProbe,
+): DispatchAdmissionStoreAudit | null {
+	if (!capacityStateExists()) return null;
+	const scan = scanCapacityState(nowMs);
+	if ("problem" in scan) return unreadableAudit(scan.problem);
+	return storeAudit(scan.state, scan.invalid, nowMs, probe);
 }
 
 /**
@@ -383,16 +414,10 @@ export function repairDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmiss
 		const scan = scanCapacityState(nowMs);
 		if ("problem" in scan) {
 			writeCapacityStateUnsafe({ version: 2, draining: null, leases: [], reservations: [] });
-			return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+			return unreadableAudit(scan.problem);
 		}
 		if (scan.invalid.length > 0) writeCapacityStateUnsafe(scan.state);
-		return {
-			path: capacityStatePath(),
-			problem: null,
-			reservations: scan.state.reservations.length,
-			leases: scan.state.leases.length,
-			invalid: scan.invalid,
-		};
+		return storeAudit(scan.state, scan.invalid, nowMs, defaultProbe);
 	});
 }
 export function writeCapacityStateUnsafe(file: CapacityStateFile): void {
@@ -476,23 +501,24 @@ function ownerStillHolds(
 	probe: LeaseOwnerProbe,
 ): boolean {
 	// A record from another host is never probed here: on a shared state dir a
-	// local pid probe would inspect the wrong process. Only its age can end it.
-	if (!onThisHost(record.host)) return Date.parse(record.expiresAt) + FOREIGN_LEASE_GRACE_MS > nowMs;
+	// local pid probe would inspect the wrong process. Only its expiry can end it.
+	if (!onThisHost(record.host)) return !leaseLapsed(record.expiresAt, nowMs, true);
 	if (!ownerHoldsLease(record, probe)) return false;
 	// A real birth token identifies this exact process, so it outranks the
 	// expiry: an owner that missed heartbeats because it sat blocked on the
 	// admission lock is alive, not gone, and taking its slot would put two
 	// processes over the same cap. Where the token is synthetic it proves
 	// nothing about pid reuse, so there the expiry still decides.
-	return probe.tokenProvesDeath !== false || Date.parse(record.expiresAt) > nowMs;
+	return probe.tokenProvesDeath !== false || !leaseLapsed(record.expiresAt, nowMs, false);
 }
 function reclaim(file: CapacityStateFile, nowMs: number, probe: LeaseOwnerProbe): void {
 	file.leases = file.leases.filter((lease) => ownerStillHolds(lease, nowMs, probe));
 	if (file.cacheLanes === undefined) return;
-	const at = new Date(nowMs).toISOString();
+	const at = leaseInstant(nowMs);
 	const kept: MainCacheLaneRecord[] = [];
 	for (const record of file.cacheLanes) {
-		// A dead owner's lane becomes a hint for its conversation; a hint lasts as long as a cached prefix might.
+		// A dead owner's lane becomes a hint for its conversation; a hint lasts as long as a cached prefix might, and
+		// holds no process, so it lapses at its end on every reader.
 		if (record.releasedAt === undefined && !ownerStillHolds(record, nowMs, probe)) record.releasedAt = at;
 		if (record.releasedAt === undefined || Date.parse(record.releasedAt) + MAIN_CACHE_LANE_HINT_MS > nowMs)
 			kept.push(record);
@@ -509,6 +535,14 @@ const MAIN_CACHE_LANE_TTL_MS = 60 * 60_000;
 /** How long a released main lane stays a hint for its conversation: about as long as the backend keeps a prefix. */
 const MAIN_CACHE_LANE_HINT_MS = 60 * 60_000;
 const MAX_MAIN_CACHE_LANES = 1_000;
+/**
+ * How long a main lane claim or release waits for the admission lock before the engine falls back to its own lanes.
+ * Both run synchronously on the main thread at a conversation's first turn, its renewal and its cleanup, so the wait
+ * is a frozen TUI. Every holder of this lock reads and rewrites one bounded JSON file, a few milliseconds even with
+ * an fsync; a one-second budget still covers a queue of several such writers on a slow disk, and a wait past it means
+ * a holder that is stuck, not busy. The cost of giving up is cache affinity only: the turn runs on an in-process lane.
+ */
+export const MAIN_CACHE_LANE_LOCK_TIMEOUT_MS = 1_000;
 
 function lowestFreeCacheLane(file: CapacityStateFile, key: string, preferred?: number): number {
 	const taken = new Set<number>();
@@ -550,6 +584,8 @@ export interface ClaimMainCacheLaneInput {
 	ownerPid?: number;
 	processBirthToken?: string;
 	probe?: LeaseOwnerProbe;
+	/** Lock acquisition budget; the default is the store-wide one. */
+	timeoutMs?: number;
 }
 
 /**
@@ -557,97 +593,113 @@ export interface ClaimMainCacheLaneInput {
  * else the lowest free one, across every process sharing this state dir. Each claim renews the record.
  */
 export function claimMainCacheLane(input: ClaimMainCacheLaneInput): number {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const nowMs = input.nowMs ?? Date.now();
-		const file = readCapacityStateUnsafe();
-		reclaim(file, nowMs, input.probe ?? defaultProbe);
-		const ownerPid = input.ownerPid ?? process.pid;
-		const token = input.processBirthToken ?? processBirthToken(ownerPid);
-		if (!token) throw new Error("dispatch: cannot establish process birth token");
-		const host = hostname();
-		const records = file.cacheLanes ?? [];
-		const at = new Date(nowMs).toISOString();
-		const expiresAt = new Date(nowMs + MAIN_CACHE_LANE_TTL_MS).toISOString();
-		const ours = (record: MainCacheLaneRecord): boolean =>
-			record.releasedAt === undefined &&
-			record.conversation === input.conversation &&
-			record.host === host &&
-			record.ownerPid === ownerPid &&
-			record.processBirthToken === token;
-		const held = records.find((record) => ours(record) && record.key === input.key);
-		if (held !== undefined) {
-			held.expiresAt = expiresAt;
-			writeCapacityStateUnsafe(file);
-			return held.lane;
-		}
-		const hint = [...records]
-			.reverse()
-			.find(
+	const lock = input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {};
+	return withStateFileLockSync(
+		capacityStateLockPath(),
+		() => {
+			const nowMs = input.nowMs ?? Date.now();
+			const file = readCapacityStateUnsafe();
+			reclaim(file, nowMs, input.probe ?? defaultProbe);
+			const ownerPid = input.ownerPid ?? process.pid;
+			const token = input.processBirthToken ?? processBirthToken(ownerPid);
+			if (!token) throw new Error("dispatch: cannot establish process birth token");
+			const host = hostname();
+			const records = file.cacheLanes ?? [];
+			const at = leaseInstant(nowMs);
+			const { expiresAt } = leaseRenewal(nowMs, MAIN_CACHE_LANE_TTL_MS);
+			const ours = (record: MainCacheLaneRecord): boolean =>
+				record.releasedAt === undefined &&
+				record.conversation === input.conversation &&
+				record.host === host &&
+				record.ownerPid === ownerPid &&
+				record.processBirthToken === token;
+			const held = records.find((record) => ours(record) && record.key === input.key);
+			if (held !== undefined) {
+				held.expiresAt = expiresAt;
+				writeCapacityStateUnsafe(file);
+				return held.lane;
+			}
+			const hint = [...records]
+				.reverse()
+				.find(
+					(record) =>
+						record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key,
+				);
+			// This conversation's other head and its released hints on this key give way to the new claim.
+			const kept = records.filter(
 				(record) =>
-					record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key,
+					!ours(record) &&
+					!(record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key),
 			);
-		// This conversation's other head and its released hints on this key give way to the new claim.
-		const kept = records.filter(
-			(record) =>
-				!ours(record) &&
-				!(record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key),
-		);
-		setCacheLanes(file, kept);
-		const lane = lowestFreeCacheLane(file, input.key, hint?.lane);
-		// The oldest hints go first; a full store of live lanes is a claim failure, as a full lease store is.
-		while (kept.length >= MAX_MAIN_CACHE_LANES) {
-			const index = kept.findIndex((record) => record.releasedAt !== undefined);
-			if (index < 0) throw new Error(`dispatch: main cache lane store is full (${kept.length}/${MAX_MAIN_CACHE_LANES})`);
-			kept.splice(index, 1);
-		}
-		kept.push({
-			key: input.key,
-			lane,
-			conversation: input.conversation,
-			host,
-			ownerPid,
-			processBirthToken: token,
-			acquiredAt: at,
-			expiresAt,
-		});
-		setCacheLanes(file, kept);
-		writeCapacityStateUnsafe(file);
-		return lane;
-	});
+			setCacheLanes(file, kept);
+			const lane = lowestFreeCacheLane(file, input.key, hint?.lane);
+			// The oldest hints go first; a full store of live lanes is a claim failure, as a full lease store is.
+			while (kept.length >= MAX_MAIN_CACHE_LANES) {
+				const index = kept.findIndex((record) => record.releasedAt !== undefined);
+				if (index < 0) throw new Error(`dispatch: main cache lane store is full (${kept.length}/${MAX_MAIN_CACHE_LANES})`);
+				kept.splice(index, 1);
+			}
+			kept.push({
+				key: input.key,
+				lane,
+				conversation: input.conversation,
+				host,
+				ownerPid,
+				processBirthToken: token,
+				acquiredAt: at,
+				expiresAt,
+			});
+			setCacheLanes(file, kept);
+			writeCapacityStateUnsafe(file);
+			return lane;
+		},
+		lock,
+	);
 }
 
 /** Release this process's main cache lanes: one conversation's, or all of them when none is named. */
 export function releaseMainCacheLanes(
 	conversation: string | undefined,
-	owner: { ownerPid?: number; processBirthToken?: string; nowMs?: number } = {},
+	owner: { ownerPid?: number; processBirthToken?: string; nowMs?: number; timeoutMs?: number } = {},
 ): void {
 	if (!capacityStateExists()) return;
-	withStateFileLockSync(capacityStateLockPath(), () => {
-		const file = readCapacityStateUnsafe();
-		const ownerPid = owner.ownerPid ?? process.pid;
-		const token = owner.processBirthToken ?? processBirthToken(ownerPid);
-		const at = new Date(owner.nowMs ?? Date.now()).toISOString();
-		let changed = false;
-		for (const record of file.cacheLanes ?? []) {
-			if (record.releasedAt !== undefined || record.host !== hostname() || record.ownerPid !== ownerPid) continue;
-			if (record.processBirthToken !== token) continue;
-			if (conversation !== undefined && record.conversation !== conversation) continue;
-			record.releasedAt = at;
-			changed = true;
-		}
-		if (changed) writeCapacityStateUnsafe(file);
-	});
+	const lock = owner.timeoutMs !== undefined ? { timeoutMs: owner.timeoutMs } : {};
+	withStateFileLockSync(
+		capacityStateLockPath(),
+		() => {
+			const file = readCapacityStateUnsafe();
+			const ownerPid = owner.ownerPid ?? process.pid;
+			const token = owner.processBirthToken ?? processBirthToken(ownerPid);
+			const at = leaseInstant(owner.nowMs ?? Date.now());
+			let changed = false;
+			for (const record of file.cacheLanes ?? []) {
+				if (record.releasedAt !== undefined || record.host !== hostname() || record.ownerPid !== ownerPid) continue;
+				if (record.processBirthToken !== token) continue;
+				if (conversation !== undefined && record.conversation !== conversation) continue;
+				record.releasedAt = at;
+				changed = true;
+			}
+			if (changed) writeCapacityStateUnsafe(file);
+		},
+		lock,
+	);
 }
 
-/** The cross-process lane store the engine's main cache routing claims through (M-11). */
+/**
+ * The cross-process lane store the engine's main cache routing claims through (M-11). It runs on the main thread, so
+ * it waits `MAIN_CACHE_LANE_LOCK_TIMEOUT_MS` for the lock, never the store-wide 20 s.
+ */
 export const mainCacheLaneStore = {
-	claim: (key: string, conversation: string): number => claimMainCacheLane({ key, conversation }),
-	release: (conversation: string | undefined): void => releaseMainCacheLanes(conversation),
+	claim: (key: string, conversation: string): number =>
+		claimMainCacheLane({ key, conversation, timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS }),
+	release: (conversation: string | undefined): void =>
+		releaseMainCacheLanes(conversation, { timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS }),
 };
 /** Inspect/expire the drain inside an admission-state transaction. The caller persists the mutated state. */
 export function activeCapacityDrainUnsafe(file: CapacityStateFile, nowMs: number): CapacityDrain | null {
 	if (file.draining === null) return null;
-	if (Date.parse(file.draining.expiresAt) <= nowMs) {
+	// A drain names no holder to protect, so it lapses at its expiry on every host.
+	if (leaseLapsed(file.draining.expiresAt, nowMs, false)) {
 		file.draining = null;
 		return null;
 	}
@@ -923,7 +975,21 @@ export interface AcquireCapacityLeaseInput {
 	onAcquiredUnderLock?: (state: CapacityStateFile) => void;
 }
 export function acquireCapacityLease(input: AcquireCapacityLeaseInput): CapacityLease {
-	return withStateFileLockSync(capacityStateLockPath(), () => acquireCapacityLeaseUnsafe(input));
+	return withAdmissionLockSync(() => acquireCapacityLeaseUnsafe(input));
+}
+
+/** An admission lock wait that ran out, as the typed refusal admission reports; any other error unchanged. */
+export function admissionLockRefusal(error: unknown): unknown {
+	return error instanceof StateFileLockTimeoutError ? new AdmissionLockBusyError(error.message) : error;
+}
+
+/** The admission store lock for an admission entry point: a bounded wait whose timeout is a typed refusal (M-35). */
+export function withAdmissionLockSync<T>(fn: () => T, options: Pick<StateFileLockOptions, "timeoutMs"> = {}): T {
+	try {
+		return withStateFileLockSync(capacityStateLockPath(), fn, options);
+	} catch (error) {
+		throw admissionLockRefusal(error);
+	}
 }
 /** The caller holds the capacity state lock; a throw leaves the stored state untouched. */
 export function acquireCapacityLeaseUnsafe(input: AcquireCapacityLeaseInput): CapacityLease {
@@ -952,8 +1018,7 @@ export function acquireCapacityLeaseUnsafe(input: AcquireCapacityLeaseInput): Ca
 			if (input.endpointKey === undefined) delete existing.endpointKey;
 			else existing.endpointKey = input.endpointKey;
 		}
-		existing.heartbeatAt = new Date(nowMs).toISOString();
-		existing.expiresAt = new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString();
+		Object.assign(existing, leaseRenewal(nowMs, input.ttlMs ?? LEASE_TTL_MS));
 		writeCapacityStateUnsafe(file);
 		return clone(existing);
 	}
@@ -961,7 +1026,7 @@ export function acquireCapacityLeaseUnsafe(input: AcquireCapacityLeaseInput): Ca
 	assertCapacity(file, input.nodeId, input.endpointKey, input.limits, input.reservation);
 	const token = input.processBirthToken ?? processBirthToken(input.ownerPid ?? process.pid);
 	if (!token) throw new Error("dispatch: cannot establish process birth token");
-	const at = new Date(nowMs).toISOString();
+	const renewal = leaseRenewal(nowMs, input.ttlMs ?? LEASE_TTL_MS);
 	const lease: CapacityLease = {
 		leaseId: `lease-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
 		assignmentId: input.assignmentId,
@@ -970,9 +1035,9 @@ export function acquireCapacityLeaseUnsafe(input: AcquireCapacityLeaseInput): Ca
 		host: hostname(),
 		ownerPid: input.ownerPid ?? process.pid,
 		processBirthToken: token,
-		acquiredAt: at,
-		heartbeatAt: at,
-		expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString(),
+		acquiredAt: renewal.heartbeatAt,
+		heartbeatAt: renewal.heartbeatAt,
+		expiresAt: renewal.expiresAt,
 		reservationOwnerId: input.reservation?.ownerId ?? null,
 		reservationMemberId: input.reservation?.memberId ?? null,
 	};
@@ -1001,7 +1066,7 @@ export function renameCapacityLeaseAssignment(leaseId: string, assignmentId: str
 export function renewCapacityLeasesUnsafe(
 	leaseIds: ReadonlyArray<string>,
 	nowMs = Date.now(),
-	ttlMs = DEFAULT_CAPACITY_LEASE_TTL_MS,
+	ttlMs = LEASE_TTL_MS,
 	/** Runs before the write, so state that rides on a lease renews in the same transaction. */
 	onRenewedUnderLock?: (file: CapacityStateFile, renewed: ReadonlyArray<CapacityLease>) => void,
 ): { renewed: CapacityLease[]; missing: string[] } {
@@ -1009,8 +1074,7 @@ export function renewCapacityLeasesUnsafe(
 	const byId = new Map(file.leases.map((lease) => [lease.leaseId, lease]));
 	const renewed: CapacityLease[] = [];
 	const missing: string[] = [];
-	const heartbeatAt = new Date(nowMs).toISOString();
-	const expiresAt = new Date(nowMs + ttlMs).toISOString();
+	const { heartbeatAt, expiresAt } = leaseRenewal(nowMs, ttlMs);
 	for (const leaseId of leaseIds) {
 		const lease = byId.get(leaseId);
 		if (lease === undefined) {
@@ -1052,8 +1116,8 @@ export function setCapacityDraining(
 		file.draining = draining
 			? {
 					requestedByPid: process.pid,
-					requestedAt: new Date(nowMs).toISOString(),
-					expiresAt: new Date(nowMs + (options?.ttlMs ?? DEFAULT_CAPACITY_DRAIN_TTL_MS)).toISOString(),
+					requestedAt: leaseInstant(nowMs),
+					expiresAt: leaseInstant(nowMs + (options?.ttlMs ?? DEFAULT_CAPACITY_DRAIN_TTL_MS)),
 				}
 			: null;
 		writeCapacityStateUnsafe(file);
@@ -1076,7 +1140,7 @@ export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwne
 	endpoints: Readonly<Record<string, number>>;
 	endpointHolders: Readonly<Record<string, EndpointCapacityHolders>>;
 } {
-	return withStateFileLockSync(capacityStateLockPath(), () => capacityLeaseUsageUnsafe(options));
+	return withAdmissionLockSync(() => capacityLeaseUsageUnsafe(options));
 }
 
 /** Fresh usage for async admission: wait for the same lock without blocking callbacks. */

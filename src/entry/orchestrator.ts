@@ -577,6 +577,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			termination.notice(notice);
 			void termination.shutdown(143);
 		},
+		signalNotice: (explain) => getTerminationCoordinator().explainSignal(explain),
 	});
 	const capabilityGate = createCapabilityGate();
 	const bootStdout = (text: string): void => {
@@ -1087,9 +1088,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	// Residency and runtime notices (model swaps, double residency, VRAM
 	// stress) reach the operator through the interactive notice renderer; a
-	// headless run has no subscriber, so mirror them to stderr there. Silent
+	// headless run has no subscriber, so mirror them to stderr there; ACP sends them as session info. Silent
 	// model swaps are exactly the failure mode the residency policy forbids.
-	if (!interactive) {
+	if (!interactive && !acpMode) {
 		bus.subscribe("runtime.notice_raised", (payload: unknown) => {
 			const notice = payload as { level?: string; message?: string } | undefined;
 			if (typeof notice?.message !== "string") return;

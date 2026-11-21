@@ -223,6 +223,7 @@ export function createWorkerToolRegistry(
 	const registration = registerCoreTools(registry, {
 		...(mcpSource !== undefined ? { mcpCapabilities: mcpSource(registry) } : {}),
 		includeLedgerTools: true,
+		...(readOnly === true ? { readOnly: true } : {}),
 		...(storeGrant !== undefined && storeGrant.tags.length > 0 ? { storeGrant } : {}),
 		...(workerRecall ? { workerRecall } : {}),
 		// A fresh probe of the worker's own cwd; nothing is saved into the dispatching session.

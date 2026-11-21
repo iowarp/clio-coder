@@ -1,12 +1,14 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { attestedToolSignature, createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { effectiveToolNames, resolveAgentTools } from "../../src/tools/agent-tools.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
+import type { ToolRegistry, ToolSpec } from "../../src/tools/registry.js";
 import { toolSignatureOf } from "../../src/worker/protocol.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -169,5 +171,73 @@ describe("gateway on the worker surface", () => {
 		);
 		if (describe.kind !== "ok" || describe.result.kind !== "error") throw new Error(JSON.stringify(describe));
 		ok(describe.result.message.includes("not on this run's admitted tool surface"));
+	});
+
+	it("a read-only run refuses a withheld write as read-only and never invokes an off-surface read or shell", async () => {
+		const cwd = scratch();
+		const notes = join(cwd, "notes.txt");
+		writeFileSync(notes, "kept\n");
+		const registry = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd }), undefined, [], true);
+		const inner: string[] = [];
+		const invoke = registry.invoke.bind(registry);
+		registry.invoke = (call, options) => {
+			if (call.tool !== ToolNames.Gateway) inner.push(call.tool);
+			return invoke(call, options);
+		};
+		// No run tool list: only the turn bounds the surface, so nothing here leans on admission's run-scope check.
+		const options = { turnConstraints: { allowedTools: [ToolNames.Grep, ToolNames.Gateway] } };
+		const call = (capability: string, args: Record<string, unknown>) =>
+			registry.invoke({ tool: ToolNames.Gateway, args: { op: "call", capability, args } }, options);
+		for (const [capability, args] of [
+			[ToolNames.Read, { path: notes }],
+			[ToolNames.Bash, { command: `cat ${notes}` }],
+		] as const) {
+			const verdict = await call(capability, args);
+			if (verdict.kind !== "ok" || verdict.result.kind !== "error") throw new Error(JSON.stringify(verdict));
+			ok(verdict.result.message.includes(`capability "${capability}" is not on this run's admitted tool surface`));
+		}
+		deepStrictEqual(inner, [], "an off-surface read or shell call is refused without being invoked");
+		const write = JSON.stringify(await call(ToolNames.Write, { path: notes, content: "changed\n" }));
+		ok(/write denied: this run is read-only/u.test(write), write);
+		ok(write.includes("dispatch:read_only"), write);
+		deepStrictEqual(inner, [], "the withheld write is refused from admission's decision, never invoked");
+		strictEqual(readFileSync(notes, "utf8"), "kept\n");
+	});
+
+	it("never executes an off-surface write in a read-only run, even when admission would admit it", async () => {
+		const cwd = scratch();
+		const notes = join(cwd, "notes.txt");
+		writeFileSync(notes, "kept\n");
+		// Drift on purpose: the gateway is told the run is read-only, the registry's admission is not and admits.
+		const real = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd }), undefined, []);
+		const writeSpec = real.get(ToolNames.Write);
+		ok(writeSpec);
+		const ran: unknown[] = [];
+		const spy: ToolSpec = {
+			...writeSpec,
+			run: async (args) => {
+				ran.push(args);
+				return { kind: "ok", output: "wrote" };
+			},
+		};
+		const stub: ToolRegistry = {
+			...real,
+			get: (name) => (name === ToolNames.Write ? spy : real.get(name)),
+			invoke: async (call, options) => {
+				const spec = stub.get(call.tool as ToolName);
+				if (spec === undefined) return { kind: "not_visible", reason: call.tool };
+				const result = await spec.run(call.args ?? {}, options);
+				return { kind: "ok", result, decision: { kind: "allow", classification: { actionClass: "write", reasons: [] } } };
+			},
+		};
+		const gateway = createGatewayTool({ registry: stub, readOnly: true });
+		const result = await gateway.run(
+			{ op: "call", capability: ToolNames.Write, args: { path: notes, content: "changed\n" } },
+			{ turnConstraints: { allowedTools: [ToolNames.Grep, ToolNames.Gateway] } },
+		);
+		deepStrictEqual(ran, [], "the off-surface write's run is never called");
+		if (result.kind !== "error") throw new Error(JSON.stringify(result));
+		ok(result.message.includes(`capability "${ToolNames.Write}" is not on this run's admitted tool surface`));
+		strictEqual(readFileSync(notes, "utf8"), "kept\n");
 	});
 });

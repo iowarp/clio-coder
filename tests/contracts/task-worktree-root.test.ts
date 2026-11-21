@@ -21,6 +21,7 @@ import { captureWorkspaceSnapshot } from "../../src/domains/dispatch/write-bound
 import { workspaceRelative } from "../../src/tools/presentation.js";
 import {
 	applyTaskWorktree,
+	builderChangeDiff,
 	cleanupTaskWorktree,
 	createTaskWorktree,
 	overlayTaskWorktree,
@@ -402,6 +403,89 @@ describe("task worktree root", () => {
 			strictEqual(workspaceRelative(child, worktree.path) !== null, inside, `workspace ${child}`);
 			const parent = prepareWorktreeParent({ kind: "tmpfs", base: shm, parent: join(shm, child) });
 			strictEqual(parent === null, inside, `parent ${child}: ${parent}`);
+		}
+	});
+});
+
+describe("a reviewer's packet diff (M10)", () => {
+	it("diffs a task commit after its worktree is gone, takes the observed delta over the operator's tree, and keeps recorded paths under a symlinked root", () => {
+		const top = realpathSync(mkdtempSync(join(tmpdir(), "review-diff-")));
+		try {
+			const repo = join(top, "repo");
+			mkdirSync(join(repo, "sub"), { recursive: true });
+			const git = (...args: string[]) =>
+				execFileSync("git", ["-C", repo, "-c", "user.name=F", "-c", "user.email=f@example.invalid", ...args], {
+					encoding: "utf8",
+				}).trim();
+			git("init", "-q");
+			writeFileSync(join(repo, "a.txt"), "a\n");
+			writeFileSync(join(repo, "sub", "b.txt"), "b\n");
+			git("add", "-A");
+			git("commit", "-qm", "base");
+			const base = git("rev-parse", "HEAD");
+			git("checkout", "-qb", "task");
+			writeFileSync(join(repo, "a.txt"), "task change\n");
+			git("commit", "-qam", "task");
+			const commit = git("rev-parse", "HEAD");
+			git("checkout", "-q", "-");
+			// (a) A merged and removed task worktree: its commit against its base, from the checkout it was cut from.
+			const gone = join(top, "gone");
+			const task = builderChangeDiff({ cwd: gone, worktree: { path: gone, root: repo, base, commit }, recorded: null });
+			strictEqual(task?.scope, "task-commit");
+			match(task?.patch ?? "", /\+task change/u);
+			// (b) The operator's own edits and untracked files never reach the packet; an open record hands over nothing.
+			writeFileSync(join(repo, "a.txt"), "operator edit\n");
+			writeFileSync(join(repo, "operator-notes.txt"), "operator plans\n");
+			writeFileSync(join(repo, "sub", "b.txt"), "builder edit\n");
+			const observed = builderChangeDiff({
+				cwd: repo,
+				checkoutChanges: { cwd: repo, changedPaths: ["sub/b.txt"] },
+				recorded: null,
+			});
+			strictEqual(observed?.scope, "observed-delta");
+			match(observed?.patch ?? "", /\+builder edit/u);
+			ok(!observed?.patch.includes("operator"), observed?.patch);
+			strictEqual(builderChangeDiff({ cwd: repo, recorded: null }), null);
+			// (c) A builder in a subdirectory, reached through a symlinked alias of the checkout.
+			const alias = join(top, "alias");
+			symlinkSync(repo, alias);
+			for (const recorded of [[join(alias, "sub", "b.txt")], ["sub/b.txt"]]) {
+				const diff = builderChangeDiff({ cwd: join(alias, "sub"), recorded });
+				strictEqual(diff?.scope, "attributed-paths", JSON.stringify(recorded));
+				match(diff?.patch ?? "", /\+builder edit/u, JSON.stringify(recorded));
+				ok(!diff?.patch.includes("operator"));
+			}
+		} finally {
+			rmSync(top, { recursive: true, force: true });
+		}
+	});
+
+	it("never reads an untracked entry that is not a regular file", () => {
+		const top = realpathSync(mkdtempSync(join(tmpdir(), "review-diff-links-")));
+		try {
+			const repo = join(top, "repo");
+			mkdirSync(repo);
+			const git = (...args: string[]) =>
+				execFileSync("git", ["-C", repo, "-c", "user.name=F", "-c", "user.email=f@example.invalid", ...args], {
+					encoding: "utf8",
+				}).trim();
+			git("init", "-q");
+			writeFileSync(join(repo, "a.txt"), "a\n");
+			git("add", "-A");
+			git("commit", "-qm", "base");
+			const base = git("rev-parse", "HEAD");
+			writeFileSync(join(top, "credentials"), "outside the checkout\n");
+			symlinkSync(join(top, "credentials"), join(repo, "leak"));
+			// A link to a device that never ends is named, not read: the diff returns.
+			if (existsSync("/dev/zero")) symlinkSync("/dev/zero", join(repo, "zero"));
+			writeFileSync(join(repo, "new.txt"), "builder file\n");
+			const diff = builderChangeDiff({ cwd: repo, worktree: { path: repo, root: repo, base }, recorded: null });
+			strictEqual(diff?.scope, "task-worktree");
+			match(diff?.patch ?? "", /\+builder file/u);
+			ok(!diff?.patch.includes("outside the checkout"), diff?.patch);
+			match(diff?.patch ?? "", /b\/leak\n[\s\S]*not a regular file/u);
+		} finally {
+			rmSync(top, { recursive: true, force: true });
 		}
 	});
 });

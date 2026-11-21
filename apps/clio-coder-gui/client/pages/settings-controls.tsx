@@ -8,6 +8,7 @@ import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { Switch } from "../design/Switch.js";
+import { settingsDestination } from "../shell/shell-model.js";
 import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "./model-picker-model.js";
 import { ModelSelect } from "./model-select.js";
@@ -25,6 +26,7 @@ import {
 	settingBaselineChanged,
 	settingReviewMatches,
 	settingsControlSelection,
+	settingsScopeInput,
 	sourceLabel,
 	TIMING_PHRASE,
 	TIMING_SENTENCE,
@@ -140,7 +142,7 @@ function ControlRow({
 }: {
 	control: SettingControl;
 	save: (write: { path: string; value: string; confirmed?: boolean; expectedValue?: string }) => Promise<SettingWritten>;
-	workspaceId: string;
+	workspaceId: string | null;
 	draft: string | null;
 	expectedValue: string | undefined;
 	refreshCurrent: () => Promise<string>;
@@ -211,7 +213,7 @@ function ControlRow({
 				<small className="setting-control__source">
 					{showPath ? <code>{control.path}</code> : null}
 					<Link
-						to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}
+						to={`/settings/effective?${new URLSearchParams({ ...(workspaceId ? { workspace: workspaceId } : {}), q: control.path })}`}
 						title="Inspect the effective value and its reported source"
 					>
 						{sourceLabel(control.source)}
@@ -462,7 +464,8 @@ export function SettingsControlsView({
 	scope,
 }: {
 	client: Client;
-	workspaceId: string;
+	/** Null with no workspace open: the user layer alone, and the model lists that need a project stay closed. */
+	workspaceId: string | null;
 	compact?: boolean;
 	/** One calm page of Settings: only its controls, no section tabs, searchable on the Advanced page. */
 	scope?: SettingsScopeId;
@@ -508,7 +511,7 @@ export function SettingsControlsView({
 	const report = useQuery({
 		queryKey: key,
 		meta: { errorSurface: "inline" },
-		queryFn: () => client.call(routes.settingsControls, { ...emptyInput, params: { id: workspaceId } }),
+		queryFn: () => client.call(routes.settingsControls, settingsScopeInput(workspaceId)),
 	});
 	useEffect(() => {
 		if (!report.data) return;
@@ -537,14 +540,14 @@ export function SettingsControlsView({
 	const modelsVisible = editorControls.some((control) => MODEL_TARGET_PATHS[control.path]);
 	const inventory = useQuery({
 		queryKey: ["targets", workspaceId],
-		queryFn: () => client.call(routes.targetsList, { ...emptyInput, params: { id: workspaceId } }),
-		enabled: modelsVisible,
+		queryFn: () => client.call(routes.targetsList, { ...emptyInput, params: { id: workspaceId ?? "" } }),
+		enabled: modelsVisible && workspaceId !== null,
 	});
 	const [check, setCheck] = useState<{ operationId: string; targetId: string } | null>(null);
 	const checkOperation = useOperation(client, check?.operationId ?? null);
 	const startCheck = useMutation({
 		mutationFn: (targetId: string) =>
-			client.call(routes.targetsProbe, { ...emptyInput, params: { id: workspaceId, targetId } }),
+			client.call(routes.targetsProbe, { ...emptyInput, params: { id: workspaceId ?? "", targetId } }),
 		onSuccess: (value, targetId) => setCheck({ operationId: value.operationId, targetId }),
 	});
 	useEffect(() => {
@@ -561,6 +564,13 @@ export function SettingsControlsView({
 				models: null,
 				defaultModel: null,
 				note: `${targetControl?.label ?? targetPath} is automatic, so type an exact model id or choose a target first.`,
+			};
+		// A connection's model list is read through a project's engine, so it opens with a workspace.
+		if (workspaceId === null)
+			return {
+				models: null,
+				defaultModel: null,
+				note: `Open a workspace to choose from ${targetId}'s model list, or type an exact model id.`,
 			};
 		if (inventory.isPending) return { models: null, defaultModel: null, note: `Reading ${targetId}'s models…` };
 		if (!inventory.data)
@@ -620,9 +630,9 @@ export function SettingsControlsView({
 			</div>
 		);
 	const save = async (body: { path: string; value: string; confirmed?: boolean; expectedValue?: string }) => {
-		const result = await client.call(routes.writeSetting, { params: { id: workspaceId }, query: {}, body });
+		const result = await client.call(routes.writeSetting, { ...settingsScopeInput(workspaceId), body });
 		queries.setQueryData<SettingsControls>(key, result.controls);
-		for (const stale of ["workspace-settings", "config-graph", "targets", "routing"])
+		for (const stale of ["settings-report", "config-graph", "targets", "routing"])
 			void queries.invalidateQueries({ queryKey: [stale] });
 		return result;
 	};
@@ -762,18 +772,20 @@ export function SettingsControlsView({
 			{active === "targets" && (
 				<>
 					<ConnectionSetup />
-					<Link to={`/settings/targets?workspace=${workspaceId}`}>Manage connections</Link>
+					{workspaceId && <Link to={`/settings/targets?workspace=${workspaceId}`}>Manage connections</Link>}
 				</>
 			)}
 			{active === "advanced" && (
 				<div className="setting-group">
 					<p>Inspect saved defaults, effective values, and the sources that set them.</p>
 					<p>
-						<Link to={`/settings/effective?workspace=${workspaceId}`}>Effective settings</Link>
+						<Link to={settingsDestination("/settings/effective", workspaceId)}>Effective settings</Link>
 					</p>
-					<p>
-						<Link to={`/settings/why?workspace=${workspaceId}`}>Configuration sources and timing</Link>
-					</p>
+					{workspaceId && (
+						<p>
+							<Link to={`/settings/why?workspace=${workspaceId}`}>Configuration sources and timing</Link>
+						</p>
+					)}
 					<p>
 						<Link to="/system">Check setup</Link>
 					</p>

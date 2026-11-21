@@ -1,15 +1,23 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { hostname, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { zstdDecompressSync } from "node:zlib";
 import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { validateSettings } from "../../src/core/config.js";
+import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, StateFileLockTimeoutError } from "../../src/core/state-file-lock.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import type { RuntimeNoticePayload } from "../../src/core/telemetry/live-events.js";
+import {
+	capacityStateLockPath,
+	MAIN_CACHE_LANE_LOCK_TIMEOUT_MS,
+	mainCacheLaneStore,
+} from "../../src/domains/dispatch/capacity-lease.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import anthropicMax from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
 import openai from "../../src/domains/providers/runtimes/cloud/openai.js";
@@ -33,6 +41,7 @@ import {
 	workerCacheFamilyId,
 } from "../../src/engine/apis/cache-family.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
+import { setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 import {
 	closeResponsesWebSockets,
 	newTransportCall,
@@ -168,12 +177,15 @@ test("workers with one stable head share a session id only where the backend rou
 		{ ...head, tools: [read, { ...read, name: "grep" }] },
 	])
 		ok(workerCacheFamilyId(other) !== family);
-	// Only a measured session-routed backend takes the shared id; elsewhere a worker keeps an id of its own.
-	for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
+	// Only a measured session-routed backend takes the shared id; elsewhere a worker keeps an id of its own. The
+	// public Responses API takes one too, as measured (SESSION_ROUTED_APIS), on a family of its own: the api is in the head.
+	const responses = workerCacheFamilyId({ ...head, api: "openai-responses", provider: "openai" });
+	ok(responses !== undefined && /^clio-coder-w-[a-f0-9]{40}-0$/u.test(responses) && responses !== family);
+	for (const api of ["anthropic-messages", "openai-completions"])
 		strictEqual(workerCacheFamilyId({ ...head, api }), undefined);
 });
 
-test("tool-free side calls of one head share a session id on Codex and only there (OI-6)", async () => {
+test("tool-free side calls of one head share a session id only on session-routed APIs (OI-6)", async () => {
 	const model = openaiCodex.synthesizeModel(
 		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },
 		"gpt-6-luna",
@@ -213,7 +225,7 @@ test("tool-free side calls of one head share a session id on Codex and only ther
 		strictEqual(await key("# Memory review", "first task"), family);
 		strictEqual(await key("# Memory review", "another task"), family);
 		ok((await key("# Judge", "first task")) !== family);
-		for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
+		for (const api of ["anthropic-messages", "openai-completions"])
 			strictEqual(
 				sideCallCacheFamilyId({ api, provider: "p", modelId: "m", thinkingLevel: "low", systemPrompt: "x" }),
 				undefined,
@@ -419,6 +431,76 @@ test("main sessions with one pinned head share a Codex cache routing key and kee
 	} finally {
 		useMainCacheLaneStore(undefined);
 	}
+});
+
+test("a main lane claim behind a held admission lock waits a bounded time, then routes on an in-process lane with one host notice per conversation (M-11)", async (t) => {
+	const env = await isolateClioEnv("clio-coder-main-lane-lock-");
+	t.after(() => env.restore());
+	// Another live Clio process holds the admission lock and does not let go: this host, a live pid that is not ours.
+	const lockPath = `${capacityStateLockPath()}.lock`;
+	mkdirSync(dirname(lockPath), { recursive: true });
+	writeFileSync(lockPath, `${JSON.stringify({ host: hostname(), pid: process.ppid, at: new Date().toISOString() })}\n`);
+	const notices: RuntimeNoticePayload[] = [];
+	setResidencyNoticeSink((notice) => notices.push(notice));
+	const journaled: unknown[] = [];
+	const unsubscribe = telemetryHub().subscribe("cache.lane_fell_back", (payload) => {
+		journaled.push(payload);
+	});
+	const failures: unknown[] = [];
+	useMainCacheLaneStore({
+		claim: (key, conversation) => {
+			try {
+				return mainCacheLaneStore.claim(key, conversation);
+			} catch (error) {
+				failures.push(error);
+				throw error;
+			}
+		},
+		release: (conversation) => mainCacheLaneStore.release(conversation),
+	});
+	t.after(() => {
+		useMainCacheLaneStore(undefined);
+		setResidencyNoticeSink(null);
+		unsubscribe();
+		cleanupEngineSessionResources("held-lock-session");
+	});
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "https://codex.invalid/backend-api" },
+		"gpt-6-luna",
+		null,
+	);
+	const route = (layer: string) =>
+		(
+			withMainCacheRouting(
+				model,
+				{ systemPrompt: `${layer}Repo handbook.\n`, tools: [], messages: [] } as never,
+				{
+					sessionId: "held-lock-session",
+					clioCoderPinnedPrefix: { chars: layer.length, hash: createHash("sha256").update(layer).digest("hex") },
+				} as never,
+			) as { sessionId?: string } | undefined
+		)?.sessionId;
+	// The claim gives up after the short bound, not the 20 s default every other admission caller waits.
+	ok(MAIN_CACHE_LANE_LOCK_TIMEOUT_MS <= 2_000 && MAIN_CACHE_LANE_LOCK_TIMEOUT_MS < FILE_LOCK_ACQUIRE_TIMEOUT_MS);
+	const first = route("Install identity.\n");
+	ok(typeof first === "string" && /^clio-coder-m-[a-f0-9]{40}-0$/u.test(first), String(first));
+	strictEqual(failures.length, 1);
+	ok(failures[0] instanceof StateFileLockTimeoutError);
+	match(String((failures[0] as Error).message), new RegExp(`timed out after ${MAIN_CACHE_LANE_LOCK_TIMEOUT_MS}ms`, "u"));
+	strictEqual(notices.length, 1);
+	strictEqual(notices[0]?.kind, "cache-lane-fallback");
+	match(notices[0]?.message ?? "", /in-process cache lane/u);
+	deepStrictEqual(journaled, [{ reason: "lock-timeout", timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS, lane: 0 }]);
+	// Later turns keep the in-process lane without waiting on the store again.
+	strictEqual(route("Install identity.\n"), first);
+	strictEqual(failures.length, 1);
+	// A new head for the same conversation tries the store again and journals that fallback, but says so only once.
+	ok(route("Another identity.\n")?.endsWith("-0"));
+	strictEqual(failures.length, 2);
+	strictEqual(journaled.length, 2);
+	strictEqual(notices.length, 1, "one host notice per conversation");
+	// The peer's lock was waited on, never taken over.
+	ok(existsSync(lockPath));
 });
 
 test("the main thread's public Responses request marks the pinned prompt layer with its own breakpoint (PV-3)", async () => {

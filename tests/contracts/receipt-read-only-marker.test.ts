@@ -82,7 +82,7 @@ describe("a read-only run names its restriction in the receipt (BT-016)", () => 
 	it("seals safety.readOnly when the recipe itself is read-only", async () => {
 		const receipt = await sealedReceipt({
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 			task: "Inspect which functions lib/math.js exports.",
 		});

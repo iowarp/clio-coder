@@ -1095,6 +1095,9 @@ export interface AcpReplayMeta {
 	turn?: number;
 	run?: boolean;
 	stopReason?: string;
+	/** The ledger's time for the request that opened a replayed turn, and for its newest entry. */
+	startedAt?: string;
+	finishedAt?: string;
 }
 /** Params of the `_clio-coder/permission/withdraw` notification. */
 export interface AcpPermissionWithdrawParams {

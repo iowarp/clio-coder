@@ -182,7 +182,7 @@ test("a held follower's run row names a live process, then its worker's pid once
 	try {
 		const request = {
 			agentId: "scout",
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			task: "Inspect the fixture.",
 			requestOrigin: "internal" as const,
 		};
@@ -246,7 +246,7 @@ test("a held follower receives the board posts made during its hold once its wor
 		await openAgentLedger(ledgerId);
 		const request = {
 			agentId: "scout",
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			task: "Inspect the fixture.",
 			requestOrigin: "internal" as const,
 			ledger: { id: ledgerId, sequence: 0 },

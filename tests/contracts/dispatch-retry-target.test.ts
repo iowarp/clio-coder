@@ -22,7 +22,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 const REQUEST: DispatchRequest = {
 	agentId: "scout",
-	executionRole: "researcher",
+	executionRole: "explorer",
 	task: "Inspect isolated fixture evidence.",
 	requestOrigin: "internal",
 	resultContractOverride: { kind: "provenance-report" },
@@ -97,7 +97,7 @@ async function retryFleet(
 	settings.fleet.default.model = "gpt-4o";
 	settings.fleet.retry.maxRetries = options.maxRetries ?? 1;
 	if (options.adaptive === true) {
-		settings.fleet.adaptiveRouting = { roles: ["researcher"], postures: ["balanced"], agentRoles: [] };
+		settings.fleet.adaptiveRouting = { roles: ["explorer"], postures: ["balanced"], agentRoles: [] };
 		// Active routing admits only routes a fresh probe proved; one local fact serves every model of each target.
 		const probedAt = new Date().toISOString();
 		recordFleetPreflight([

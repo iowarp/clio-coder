@@ -213,7 +213,7 @@ describe("dispatch admission through the target breaker", () => {
 		await bundle.extension.start();
 		const request: DispatchRequest = {
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Inspect isolated fixture evidence.",
 			cwd: scratch.dir,
 			requestOrigin: "internal",

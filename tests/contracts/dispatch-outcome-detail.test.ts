@@ -13,7 +13,7 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const REQUEST: DispatchRequest = {
 	agentId: "scout",
-	executionRole: "researcher",
+	executionRole: "explorer",
 	task: "Inspect isolated fixture evidence.",
 	requestOrigin: "internal",
 	resultContractOverride: { kind: "provenance-report" },

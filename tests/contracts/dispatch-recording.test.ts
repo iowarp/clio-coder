@@ -11,6 +11,7 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { deriveExecutionRole } from "../../src/domains/dispatch/execution-role.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { readRunFeed } from "../../src/domains/dispatch/run-feed.js";
@@ -266,7 +267,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "scout",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "Inspect isolated evidence.",
 				cwd: project,
 				requestOrigin: "internal",
@@ -287,6 +288,19 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			);
 			const settled = journal.records[3]?.record;
 			ok(settled?.k === "run.settled");
+			// A run writes run.settled at version 2, its role in the fleet vocabulary only (M12).
+			equal(settled.kv, 2);
+			equal(settled.data.executionRole, "explorer");
+			deepStrictEqual(
+				(
+					[
+						{ gateRole: "member", capabilityClass: "read-only", resultContractKind: null },
+						{ capabilityClass: "read-only", resultContractKind: "scout-report" },
+						{ capabilityClass: "verification", resultContractKind: "verifier-report" },
+					] as const
+				).map((facts) => deriveExecutionRole({ attempt: 0, ...facts })),
+				["seat", "explorer", "checker"],
+			);
 			equal(settled.data.terminalReason, receipt.terminalReason);
 			deepStrictEqual(settled.data.callIds, receipt.callIds);
 			deepStrictEqual(receipt.callIds, [journal.records[1]?.record.ctx.callId]);
@@ -390,7 +404,7 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 	try {
 		const handle = await bundle.contract.dispatch({
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Inspect isolated evidence.",
 			cwd: env.dir,
 			requestOrigin: "internal",

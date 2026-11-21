@@ -118,7 +118,7 @@ for (const scenario of [
 				agentId: "usage-fixture",
 				budget: { toolCalls: 1000 },
 				task: "Inspect the fixture input.",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				requestOrigin: "internal",
 			});
 			const receipt = await run.finalPromise;
@@ -212,7 +212,7 @@ it("records no upstream row for a synthetic ACP delegation fault", { timeout: 15
 		const run = await bundle.contract.dispatch({
 			agentId: "usage-fault",
 			task: "Inspect the fixture input.",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "internal",
 		});
 		const receipt = await run.finalPromise;

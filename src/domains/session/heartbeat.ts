@@ -66,6 +66,8 @@ export interface ReleasedFence {
 
 let surface: SessionSurface = "tui";
 let terminate: ((notice: string) => void) | null = null;
+/** Sessions this process holds, so a SIGTERM can name the terminate request that came with it. */
+const heldSessions = new Set<string>();
 
 /**
  * The orchestrator names its surface once at boot and hands over the one
@@ -73,13 +75,23 @@ let terminate: ((notice: string) => void) | null = null;
  * request ends a TUI, a headless run and an ACP connection the way SIGTERM
  * does. Injected rather than imported: the coordinator's render helpers sit in
  * the Stage 0 closure and must not ride into every seam that opens a session.
+ * `signalNotice` registers the line a SIGTERM prints: `session terminate`
+ * signals right after writing its request, before any beat reads it.
  */
 export function configureSessionHeartbeat(input: {
 	surface: SessionSurface;
 	terminate: (notice: string) => void;
+	signalNotice: (explain: () => string | null) => void;
 }): void {
 	surface = input.surface;
 	terminate = input.terminate;
+	input.signalNotice(() => {
+		for (const id of heldSessions) {
+			const notice = terminateNotice(id);
+			if (notice !== null) return notice;
+		}
+		return null;
+	});
 }
 
 export function liveSessionsDir(): string {
@@ -177,6 +189,15 @@ function readTerminateRequest(id: string): TerminateRequest | null {
 	if (value === null || typeof value !== "object" || value.schema !== 1 || !isRequester(value.by)) return null;
 	if (value.reason !== undefined && typeof value.reason !== "string") return null;
 	return value as TerminateRequest;
+}
+
+/** Who asked this session to end, and why, as the line the ending process prints. */
+function terminateNotice(id: string): string | null {
+	const request = readTerminateRequest(id);
+	if (request === null) return null;
+	return printable(
+		`CLIO Coder: terminated by ${request.by.user}@${request.by.host}${request.reason ? `: ${request.reason}` : ""}`,
+	);
 }
 
 /** Any fence file fences, well-formed or not: it exists only because a release ran. */
@@ -412,13 +433,9 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 			);
 			return;
 		}
-		const request = readTerminateRequest(meta.id);
-		if (request !== null) {
-			end(
-				printable(
-					`CLIO Coder: terminated by ${request.by.user}@${request.by.host}${request.reason ? `: ${request.reason}` : ""}`,
-				),
-			);
+		const notice = terminateNotice(meta.id);
+		if (notice !== null) {
+			end(notice);
 			return;
 		}
 		publish();
@@ -438,6 +455,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 		return current !== null && !sameOwner(current, owner);
 	});
 	publish();
+	heldSessions.add(meta.id);
 	const timer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
 	timer.unref();
 
@@ -449,6 +467,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 
 	return () => {
 		stop();
+		heldSessions.delete(meta.id);
 		if (writer.fenced || stateRootRemoved()) return;
 		// Remove only a record that still names this process; a successor's is not ours.
 		const current = readLiveRecord(meta.id);

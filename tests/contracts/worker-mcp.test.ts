@@ -501,7 +501,7 @@ describe("native worker MCP capabilities", () => {
 		try {
 			const run = await bundle.contract.dispatch({
 				agentId: "coder",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				task: "Report the evidence service's answer.",
 				cwd: project,
 				requestOrigin: "internal",

@@ -3,15 +3,22 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
+import { projectDispatchedRunOutcome } from "../../src/cli/modes/headless-dispatched-runs.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { createSessionCodeConsent } from "../../src/domains/safety/session-code-consent.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/registry.js";
 import { resolveVerifyCall } from "../../src/tools/verify/resolve.js";
-import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import {
+	isolateDispatchState,
+	makeDispatchBundle,
+	restoreDispatchState,
+	settleStubBuilder,
+} from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 // F6: dispatch host verification executes declared checks as the dispatching
@@ -440,4 +447,88 @@ it("admits a toolchain check verify lists in a Python project and seals the argv
 	} finally {
 		process.chdir(previousCwd);
 	}
+});
+
+it("a builder's two verdicts disagreeing seal one grade: outcome, exit code, rule, card and dispatch.runs name the cause (M9)", async () => {
+	const root = project([]);
+	const settle = async (validations: object[], check: string, beforeExit?: () => void) => {
+		const { receipt, run } = await settleStubBuilder({
+			cwd: root,
+			report: { completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["input.txt"], validations },
+			resolvedVerification: [{ check: "unit", argv: [process.execPath, "-e", check], cwd: root, timeoutMs: 5_000 }],
+			...(beforeExit !== undefined ? { beforeExit } : {}),
+		});
+		const summary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId };
+		return {
+			receipt,
+			projected: projectDispatchedRunOutcome(run),
+			card: formatDispatchOutput("single", [{ receipt, summary }], 16_384),
+		};
+	};
+	const rule = (
+		receipt: { verdict?: { rules: ReadonlyArray<{ id: string; status: string; code?: string }> } },
+		id: string,
+	) => receipt.verdict?.rules.find((entry) => entry.id === id);
+
+	// Host verified, the worker's own `python3 extra.py` failed (wave-42 m9-3): compromised, so not delivered.
+	const cause = /assurance compromised: the worker's own report lists a failing validation \(python3 extra\.py\)/u;
+	const own = await settle([{ name: "python3 extra.py", passed: false, evidence: "exit 1" }], "process.exit(0)");
+	strictEqual(own.receipt.hostVerification?.status, "verified");
+	strictEqual(own.receipt.verdict?.assurance, "compromised");
+	strictEqual(own.receipt.outcome, "failed");
+	strictEqual(own.receipt.outcomeCode, "assurance_compromised");
+	strictEqual(own.receipt.exitCode, 1);
+	deepStrictEqual(rule(own.receipt, "host-checks")?.status, "pass");
+	deepStrictEqual(rule(own.receipt, "assurance"), {
+		id: "assurance",
+		layer: "V4",
+		status: "fail",
+		code: "assurance_compromised",
+	});
+	match(own.receipt.outcomeDetail ?? "", cause);
+	strictEqual(own.projected.outcome, "failed");
+	strictEqual(own.projected.outcomeCode, "assurance_compromised");
+	match(own.projected.outcomeDetail ?? "", cause);
+	match(own.card, cause);
+
+	// The other order: the worker's own check passed and the host's rejects the change. The host-checks rule names it.
+	const broken = join(root, "broken.txt");
+	const host = await settle(
+		[{ name: "python3 extra.py", passed: true, evidence: "exit 0" }],
+		`process.exit(require("node:fs").existsSync(${JSON.stringify(broken)}) ? 1 : 0)`,
+		() => writeFileSync(broken, "the change\n"),
+	);
+	strictEqual(host.receipt.hostVerification?.status, "rejected");
+	strictEqual(host.receipt.verdict?.assurance, "compromised");
+	strictEqual(host.receipt.outcome, "failed");
+	strictEqual(host.receipt.outcomeCode, "host_verification_rejected");
+	strictEqual(host.receipt.exitCode, 1);
+	deepStrictEqual(rule(host.receipt, "host-checks"), {
+		id: "host-checks",
+		layer: "V4",
+		status: "fail",
+		code: "host_verification_rejected",
+	});
+	strictEqual(rule(host.receipt, "assurance")?.status, "not_reached");
+	strictEqual(host.projected.outcomeCode, "host_verification_rejected");
+	match(host.projected.outcomeDetail ?? "", /host verification check 'unit' rejected/u);
+	match(host.card, /host verification check 'unit' rejected/u);
+});
+
+it("a documenter whose only validation is inspection prose stays delivered: the prose claim neither grounds nor compromises (M9)", async () => {
+	const { receipt, run } = await settleStubBuilder({
+		cwd: project([]),
+		agentId: "documenter",
+		report: {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: ["input.txt"],
+			validations: [{ name: "Inspect supplied Scout findings", passed: true, evidence: "findiff/grids.py:31" }],
+		},
+	});
+	strictEqual(receipt.validationGrounding ?? null, null);
+	ok(receipt.verdict?.assurance !== "compromised", receipt.verdict?.assurance);
+	strictEqual(receipt.verdict?.rules.find((entry) => entry.id === "assurance")?.status, "pass");
+	strictEqual(receipt.outcome, "succeeded", receipt.outcomeDetail ?? undefined);
+	strictEqual(receipt.exitCode, 0);
+	strictEqual(projectDispatchedRunOutcome(run).outcome, "succeeded");
 });

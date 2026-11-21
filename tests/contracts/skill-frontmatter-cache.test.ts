@@ -9,10 +9,11 @@ import { scratchClioEnvVars } from "../harness/scratch-env.js";
 // size. A hit must never outlive an edit, a deletion or a Clio version change.
 const home = mkdtempSync(join(tmpdir(), "clio-coder-skill-fm-cache-"));
 Object.assign(process.env, scratchClioEnvVars(home), { HOME: home });
-const { resetXdgCache, clioCacheDir, clioConfigDir } = await import("../../src/core/xdg.js");
+const { resetXdgCache, clioCacheDir, clioCachePath, clioConfigDir } = await import("../../src/core/xdg.js");
 resetXdgCache();
 const { readClioVersion } = await import("../../src/core/package-root.js");
 const { loadSkills } = await import("../../src/domains/resources/skills/loader.js");
+const { withFrontmatterCacheReadOnly } = await import("../../src/domains/resources/skills/frontmatter-cache.js");
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const skillFile = join(clioConfigDir(), "skills", "probe", "SKILL.md");
@@ -86,5 +87,14 @@ describe("skill frontmatter cache", () => {
 			? (JSON.parse(readFileSync(cacheFile(), "utf8")) as { entries: Record<string, unknown> }).entries
 			: {};
 		equal(persisted[skillFile], undefined, "a cyclic parse is never cached");
+	});
+
+	it("creates no cache root while a read-only caller such as doctor loads skills", async () => {
+		mkdirSync(join(clioConfigDir(), "skills", "probe"), { recursive: true });
+		writeFileSync(skillFile, skillText("Original one."));
+		rmSync(clioCachePath(), { recursive: true, force: true });
+		resetXdgCache();
+		equal(await withFrontmatterCacheReadOnly(async () => description()), "Original one.");
+		equal(existsSync(clioCachePath()), false, "read-only doctor must not create the cache root or its marker");
 	});
 });

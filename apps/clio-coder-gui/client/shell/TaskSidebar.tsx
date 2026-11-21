@@ -8,6 +8,7 @@ import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
+import { liveElsewhereLabel } from "../chat/live-elsewhere-model.js";
 import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { focusComposerSoon } from "../interaction/focus-return.js";
@@ -451,7 +452,9 @@ function TaskItem({
 			<span className="wb-task__glyph">{glyph}</span>
 			<span className="wb-task__title">{actions.resuming === row.id ? "Opening…" : row.title}</span>
 			{/* A queued turn says so in place of the age: nothing else on the row would show it is not running. */}
-			{row.state === "waiting" || row.state === "paused" ? (
+			{row.liveElsewhere ? (
+				<span className="wb-task__age">Live</span>
+			) : row.state === "waiting" || row.state === "paused" ? (
 				<span className="wb-task__age">{label}</span>
 			) : (
 				<>
@@ -461,7 +464,10 @@ function TaskItem({
 			)}
 		</>
 	);
-	const title = `${row.title}${label ? ` · ${label}` : ""}`;
+	const elsewhere = row.liveElsewhere
+		? liveElsewhereLabel(row.liveElsewhere, formatTime(row.liveElsewhere.since))
+		: null;
+	const title = `${row.title}${elsewhere ? ` · ${elsewhere}` : label ? ` · ${label}` : ""}`;
 	const working = row.state === "working" || row.state === "starting";
 	if (confirming)
 		return (
@@ -505,7 +511,7 @@ function TaskItem({
 						}}
 					/>
 				</div>
-			) : row.open ? (
+			) : row.open || row.liveElsewhere ? (
 				<NavLink to={`/sessions/${row.id}`} className="wb-task__main" title={title} onClick={onNavigate} {...intent}>
 					{body}
 				</NavLink>

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { formatSettingsIssues, readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
+import { readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
@@ -129,7 +130,7 @@ test("with the read path gone, a retired key is an ordinary unknown key and an o
 	);
 });
 
-test("a settings failure names `clio-coder upgrade` only for a key or value its pending migration rewrites", async (t) => {
+test("a settings failure names the migration command only for a key or value its pending migration rewrites", async (t) => {
 	const home = await isolateClioEnv("clio-retired-settings-advice-");
 	t.after(() => home.restore());
 	const config = join(home.dir, "config");
@@ -138,13 +139,20 @@ test("a settings failure names `clio-coder upgrade` only for a key or value its 
 	const manifest = join(config, "migrations.json");
 	const advice = /clio-coder upgrade.*2026-11-21-retired-settings.*rewrites retired keys/u;
 	const surfaces = (): string[] => {
-		let thrown = "";
-		try {
-			readSettings();
-		} catch (error) {
-			thrown = String(error instanceof Error ? error.message : error).replace(/\n/gu, " ");
-		}
-		return [thrown, formatSettingsIssues(validateSettingsFile().issues)];
+		const thrown = (read: () => unknown): string => {
+			try {
+				read();
+			} catch (error) {
+				return String(error instanceof Error ? error.message : error).replace(/\n/gu, " ");
+			}
+			return "";
+		};
+		// The layered reader is what `run`, `config get` and the config domain load through (M-38).
+		return [
+			thrown(readSettings),
+			thrown(() => readStrictLayeredSettings(home.dir)),
+			formatSettingsIssues(validateSettingsFile().issues),
+		];
 	};
 	// A provisioned file with no manifest, then a manifest written before the migration existed.
 	for (const recorded of [null, REGISTERED_MIGRATION_IDS.filter((id) => id !== "2026-11-21-retired-settings")]) {
@@ -158,7 +166,9 @@ test("a settings failure names `clio-coder upgrade` only for a key or value its 
 	const file = join(config, "settings.yaml");
 	const line = formatSettingsIssues(validateSettingsFile().issues);
 	ok(
-		line.startsWith("settings.yaml failed validation: fleet.speculativeDispatch: unknown key. Run `clio-coder upgrade`"),
+		line.startsWith(
+			"settings.yaml failed validation: fleet.speculativeDispatch: unknown key. Run `clio-coder upgrade --post-install`",
+		),
 		line,
 	);
 	strictEqual(line.split(file).length, 2, line);
@@ -205,6 +215,25 @@ test("the candidate check passes a home whose settings only the pending migratio
 	const refused = row();
 	strictEqual(refused?.ok, false, JSON.stringify(refused));
 	ok(/mystery: unknown key/u.test(refused?.detail ?? ""), refused?.detail);
+});
+
+// `clio-coder upgrade` refuses a package-manager install and installs a newer release first elsewhere;
+// only `upgrade --post-install` applies pending migrations with the active binary on every install (M-34).
+test("every doctor row that advises a pending migration names the same command", async (t) => {
+	const home = await isolateClioEnv("clio-migration-remedy-");
+	t.after(() => home.restore());
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(join(home.dir, "config", "settings.yaml"), "version: 2\nfleet:\n  speculativeDispatch: true\n");
+	const report = runDoctor();
+	const rows = ["settings.yaml", "lifecycle migrations"].map((name) => report.find((row) => row.name === name));
+	for (const row of rows) {
+		ok(/2026-11-21-retired-settings/u.test(row?.detail ?? ""), JSON.stringify(row));
+		deepStrictEqual(
+			row?.detail.match(/`clio-coder upgrade[^`]*`/gu),
+			["`clio-coder upgrade --post-install`"],
+			row?.detail,
+		);
+	}
 });
 
 // Old shapes are not migrated: `doctor` names what this build cannot read and `doctor --fix` removes it.

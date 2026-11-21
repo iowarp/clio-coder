@@ -298,7 +298,7 @@ describe("dispatch capacity under auto", () => {
 			const preview = bundle.contract.preview?.({
 				agentId: "scout",
 				task: "Inspect the fixture input.",
-				executionRole: "researcher",
+				executionRole: "explorer",
 			});
 			ok(preview);
 			const { endpoint: _endpoint, ...resolution } = preview;

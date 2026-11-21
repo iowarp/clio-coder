@@ -29,8 +29,10 @@ import {
 	type RunSteerFrameV2,
 	type RunUsageV2,
 	resolveRunExit,
+	type SettledRunEnvelope,
 	signalForExitCode,
 	verifyChecksV2,
+	verifyNotImplicated,
 } from "./modes/run-json-schema-v2.js";
 import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js";
 import { steerChannelRefusal } from "./steer-channel.js";
@@ -281,26 +283,37 @@ let supersededRuns: RunDispatchedRunV2[] = [];
 /** Every run the main agent dispatched, for the envelope's `dispatch.runs` (row 164); `--agent` lists its receipt instead. */
 let dispatchedRuns: RunDispatchedRunV2[] = [];
 
-function dispatchedRunV2(run: RunJsonDispatchedRunOutcome): RunDispatchedRunV2 {
+function dispatchedRunV2(
+	run: RunJsonDispatchedRunOutcome,
+	envelopes: ReadonlyMap<string, SettledRunEnvelope> = new Map(),
+): RunDispatchedRunV2 {
+	const envelope = envelopes.get(run.runId);
 	return {
 		runId: run.runId,
 		agentId: run.agentId,
 		...(run.outcome !== null ? { outcome: run.outcome } : {}),
 		...(run.outcomeCode !== null ? { outcomeCode: run.outcomeCode } : {}),
 		...(run.outcomeDetail !== null ? { outcomeDetail: run.outcomeDetail } : {}),
+		...(envelope !== undefined ? { safety: { envelope } } : {}),
 	};
 }
 
 /** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
 export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
 	if (v2Started === null) return;
-	supersededRuns = runs.map(dispatchedRunV2);
+	supersededRuns = runs.map((run) => dispatchedRunV2(run));
 }
 
-/** Hand the v2 writer every run the main agent dispatched, as they settled; a no-op for v1 runs. */
-export function noteDispatchRunsV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+/**
+ * Hand the v2 writer every run the main agent dispatched, as they settled, each with the sealed envelope its journal
+ * recorded (M-18); a no-op for v1 runs.
+ */
+export function noteDispatchRunsV2(
+	runs: ReadonlyArray<RunJsonDispatchedRunOutcome>,
+	envelopes: ReadonlyMap<string, SettledRunEnvelope> = new Map(),
+): void {
 	if (v2Started === null) return;
-	dispatchedRuns = runs.map(dispatchedRunV2);
+	dispatchedRuns = runs.map((run) => dispatchedRunV2(run, envelopes));
 }
 /** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
 let runPlan: Readonly<Record<string, unknown>> | undefined;
@@ -534,6 +547,12 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 	const text = seen.runEnd?.error ?? diagnostic;
 	const message = text !== undefined && text.length > 0 ? { message: text } : {};
 	const detail = seen.runEnd?.outcomeDetail ?? seen.receipt?.outcomeDetail ?? undefined;
+	// A worker that started and failed names its cause: the sealed receipt's detail when nothing else was said (M9).
+	const receiptDetail = seen.receipt?.outcome !== "succeeded" ? (seen.receipt?.outcomeDetail ?? undefined) : undefined;
+	const workerMessage =
+		Object.keys(message).length > 0 || receiptDetail === undefined || receiptDetail.length === 0
+			? message
+			: { message: receiptDetail };
 	const signal = signalForExitCode(code);
 	if (signal !== null) return [{ code: "interrupted", signal, ...message }];
 	// The read-streak decision gate ended the run (X7); its exit code is the cause's own, whatever it is set to.
@@ -558,7 +577,7 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 			return [{ code: "reader_closed" }];
 		case 2: {
 			if (request.mode === "agent" && seen.receipt !== undefined)
-				return [{ code: "worker_failed", exitCode: 2, ...message }];
+				return [{ code: "worker_failed", exitCode: 2, ...workerMessage }];
 			const refusal = startRefusalCause(state.refusal);
 			return [{ code: refusal.code, ...(refusal.message !== undefined ? { message: refusal.message } : message) }];
 		}
@@ -584,7 +603,9 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 				return [{ code: "schema_mismatch", errors: structuredNote.errors, ...message }];
 			// `--fail-on-verify` (SPEC 6.10) ranks above a sealed verdict: the failed checks are what that verdict judged.
 			if (detail === "verify_failed") {
-				const checks = (seen.verify ?? []).filter((check) => !check.passed).map((check) => check.command);
+				const checks = (seen.verify ?? [])
+					.filter((check) => !check.passed && !verifyNotImplicated(check))
+					.map((check) => check.command);
 				return [{ code: "verify_failed", checks, ...message }];
 			}
 			if (seen.verdict === "failed" || (seen.failedChecks?.length ?? 0) > 0)
@@ -595,7 +616,7 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 			if (detail === undefined && request.mode === "main" && seen.providerError === true)
 				return [{ code: "provider_error", ...message }];
 			if (request.mode === "agent" && seen.receipt !== undefined)
-				return [{ code: "worker_failed", exitCode: 1, ...message }];
+				return [{ code: "worker_failed", exitCode: 1, ...workerMessage }];
 			return [{ code: "run_failed", ...message }];
 		}
 		default:

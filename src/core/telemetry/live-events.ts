@@ -48,6 +48,7 @@ export const RUNTIME_NOTICE_KINDS = [
 	"degraded",
 	"route-fallback",
 	"memory-flow-blocked",
+	"cache-lane-fallback",
 ] as const;
 
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
@@ -65,7 +66,8 @@ export type RuntimeNoticeKind = (typeof RUNTIME_NOTICE_KINDS)[number];
  * src/engine/apis/degraded-inference.ts), which is how a silent spill to CPU
  * becomes visible while it is happening. `route-fallback` reports a background
  * step, such as a memory step, served by the chat target because its own
- * route was unavailable.
+ * route was unavailable. `cache-lane-fallback` reports a main conversation routed on this process's own prompt cache
+ * lane because the cross-process lane store could not take its claim (src/engine/apis/cache-family.ts).
  */
 export interface RuntimeNoticePayload {
 	kind: RuntimeNoticeKind;
@@ -785,6 +787,21 @@ export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<Disp
 	 */
 	skillActivations?: ReadonlyArray<SkillActivation>;
 }
+
+/**
+ * Published on `run.foreign_observed` by the viewer half of cross-process fleet state
+ * (src/domains/dispatch/cross-process-fleet.ts): a live run another Clio process owns, read from its run directory.
+ * Only the live run projection folds it, so a foreign run is never journaled or recorded in this session.
+ */
+export type ForeignRunObservedPayload =
+	| { kind: "started"; run: DispatchStartedPayload }
+	| { kind: "progressed"; runId: string; agentId: string; event: unknown }
+	| { kind: "ended"; runId: string; agentId: string; outcome: string; outcomeDetail: string | null };
+
+/** Published on `approval.foreign_changed`: an operator-visible ask another Clio process holds, raised or settled. */
+export type ForeignApprovalChangedPayload =
+	| { kind: "requested"; request: PermissionRequestedPayload; refusal?: string }
+	| { kind: "resolved"; resolved: PermissionResolvedPayload };
 
 // ---------------------------------------------------------------------------
 // Accountability

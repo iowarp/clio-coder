@@ -105,7 +105,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 			target: "codex-test",
 			task: "Reply PONG",
 			readOnly: true as const,
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			requestOrigin: "user" as const,
 			cwd: root,
 		};
@@ -219,7 +219,7 @@ for (const event of [
 			target: "codex-test",
 			task: "Reply PONG",
 			readOnly: true,
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "user",
 			cwd: root,
 		});
@@ -489,7 +489,7 @@ for (const event of [
 			agentId: "coder",
 			target: "pi-test",
 			task: "Reply PONG",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "user",
 			cwd: root,
 		});
@@ -511,6 +511,82 @@ for (const event of [
 		ok(stateDir);
 		ok(verifyRunRecordReport(stateDir, run.runId).ok);
 	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
+test("a CLI-subprocess builder's claims read unknown, never compromised; its own failing check still lowers it (M9)", {
+	timeout: 20_000,
+}, async () => {
+	// DESIGN 4.8 V1: Clio does not see a CLI subprocess's tool lane, so a claim it cannot match is unobserved, not ungrounded.
+	const executable = join(root, "bin", "pi");
+	const reportPath = join(root, "pi-report.json");
+	writeFileSync(
+		executable,
+		`#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+for await (const chunk of process.stdin) {}
+const answer = readFileSync(${JSON.stringify(reportPath)}, "utf8");
+for (const event of [
+  { type: "session", id: "pi-session" },
+  { type: "message_end", message: { role: "assistant", model: "fixture", content: [{ type: "text", text: answer }],
+    stopReason: "stop", usage: { input: 8, output: 4, totalTokens: 12 } } },
+  { type: "agent_settled" }
+]) process.stdout.write(JSON.stringify(event) + "\\n");
+`,
+	);
+	chmodSync(executable, 0o755);
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "pi-test", runtime: "pi-cli", defaultModel: "pi-cli-default", trustedUnmediated: true }];
+	settings.fleet.default.target = "pi-test";
+	settings.fleet.default.model = "pi-cli-default";
+	settings.fleet.retry.maxRetries = 0;
+	settings.safety.autonomy = "default";
+	const bundle = makeDispatchBundle(
+		dispatchStubContext({
+			settings,
+			runtime: piCliRuntime,
+			agentTools: ["read", "write"],
+			useRuntimeDefaultAgentBudget: true,
+		}),
+	);
+	await bundle.extension.start();
+	const settle = async (passed: boolean) => {
+		writeFileSync(
+			reportPath,
+			JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
+				mutatedPaths: [],
+				validations: [{ name: "npm test", passed, evidence: passed ? "exit 0" : "exit 1" }],
+				summary: "checked",
+			}),
+		);
+		const run = await bundle.contract.dispatch({
+			agentId: "coder",
+			target: "pi-test",
+			task: "Check the cart",
+			executionRole: "builder",
+			requestOrigin: "user",
+			cwd: root,
+		});
+		return run.finalPromise;
+	};
+	try {
+		const claimed = await settle(true);
+		equal(claimed.validationGrounding?.basis, "unobserved-lane");
+		equal(claimed.verdict?.assurance, "unverified");
+		equal(claimed.outcome, "succeeded", claimed.failureMessage);
+		equal(claimed.verdict?.rules.find((rule) => rule.id === "assurance")?.status, "pass");
+		const failing = await settle(false);
+		equal(failing.verdict?.assurance, "compromised");
+		equal(failing.outcome, "failed");
+		equal(failing.outcomeCode, "assurance_compromised");
+		match(
+			failing.outcomeDetail ?? "",
+			/assurance compromised: the worker's own report lists a failing validation \(npm test\)/u,
+		);
+	} finally {
+		rmSync(reportPath, { force: true });
 		await bundle.extension.stop?.();
 	}
 });
@@ -569,7 +645,7 @@ if (process.argv[2] === "--version") {
 			agentId: "coder",
 			target: "pi-test",
 			task: "Reply PONG",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			requestOrigin: "user",
 			cwd: root,
 		});
@@ -738,7 +814,7 @@ test("a tool-runtime worker in the current checkout keeps the checkout delta on 
 	try {
 		const handle = await bundle.contract.dispatch({
 			agentId: "scout",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			task: "Inspect the fixture.",
 			cwd: root,
 			requestOrigin: "internal",

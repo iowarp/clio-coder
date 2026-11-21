@@ -1,4 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { GRADE_LAYERS, GRADE_RULE_IDS } from "../../src/core/telemetry/run-vocabulary.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -25,6 +27,7 @@ import type { ActionClass } from "../../src/domains/safety/action-classifier.js"
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
+import { settleStubBuilder } from "../harness/dispatch.js";
 import { BUILDER_GRADE, cleanGradeFacts, gradeWork } from "../harness/grade-facts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -393,4 +396,97 @@ it("grades through one rule table in layer order: the first failing rule names t
 	);
 	strictEqual(crashed.outcomeCode, "worker_context_exhausted");
 	strictEqual(crashed.rules.find((rule) => rule.id === "final-output")?.status, "not_reached");
+});
+
+describe("cited-evidence over an evidence packet (M10)", () => {
+	it("grounds a reviewer's passing check in the packet ids it cites, and still exhausts an uncited or unearned pass", () => {
+		const reviewer = {
+			role: "reviewer" as const,
+			obligation: "cited-evidence" as const,
+			contractKind: "review-verdict",
+			toolLaneObserved: true,
+			packet: ["s1.handback", "s1.diff"],
+		};
+		const pass = (cites: string[]) => ({
+			activity: { executed: 0, observations: 0, mutatingSucceeded: false, storeWritten: false },
+			ungroundedChecks: ["the change matches the task"],
+			gateVerdict: {
+				verdict: "pass" as const,
+				checks: [{ name: "the change matches the task", cites, passed: true, command: false, ran: false }],
+			},
+		});
+		strictEqual(gradeWork(pass(["s1.diff"]), reviewer).outcome, "succeeded");
+		match(gradeWork(pass([]), reviewer).detail ?? "", /^obligation cited-evidence unmet: the verdict cites no item/u);
+		match(gradeWork(pass(["s7.diff"]), reviewer).detail ?? "", /does not hold \(s7\.diff\)/u);
+		const { packet: _packet, ...noPacket } = reviewer;
+		const unearned = gradeWork(pass(["s1.diff"]), noPacket);
+		strictEqual(unearned.outcomeCode, "obligation_unmet", "with no packet, a claimed and unrun check stays unearned");
+	});
+
+	it("grounds a command-shaped pass only by a run the gate observed or a verified host check, per check", () => {
+		const reviewer = {
+			role: "reviewer" as const,
+			obligation: "cited-evidence" as const,
+			contractKind: "review-verdict",
+			toolLaneObserved: true,
+			packet: ["s1.handback", "s1.diff", "s1.check.test", "s1.check.lint"],
+			verifiedChecks: ["s1.check.test"],
+		};
+		const npmTest = (cites: string[], ran = false) => ({ name: "npm test", cites, passed: true, command: true, ran });
+		const work = (
+			checks: Array<{ name: string; cites: string[]; passed: boolean; command: boolean; ran: boolean }>,
+			observations = 3,
+		) => ({
+			activity: { executed: observations, observations, mutatingSucceeded: false, storeWritten: false },
+			ungroundedChecks: [],
+			gateVerdict: { verdict: "pass" as const, checks },
+		});
+		// The builder's own handback cannot ground a check the reviewer never ran (4.8).
+		match(gradeWork(work([npmTest(["s1.handback"])]), reviewer).detail ?? "", /claims checks it never ran \(npm test\)/u);
+		strictEqual(gradeWork(work([npmTest(["s1.diff"])]), reviewer).outcomeCode, "obligation_unmet");
+		// A rejected or unverified host check grounds nothing either.
+		strictEqual(gradeWork(work([npmTest(["s1.check.lint"])]), reviewer).outcomeCode, "obligation_unmet");
+		strictEqual(gradeWork(work([npmTest(["s1.check.test"])]), reviewer).outcome, "succeeded");
+		strictEqual(gradeWork(work([npmTest(["s1.diff"], true)]), reviewer).outcome, "succeeded");
+		// Matched per check: one grounded "npm test" does not earn a second, ungrounded one.
+		const twice = gradeWork(work([npmTest(["s1.check.test"]), npmTest(["s1.handback"])]), reviewer);
+		strictEqual(twice.outcomeCode, "obligation_unmet");
+		// A non-command claim rests on the diff it cites; a failed claim needs no corroboration.
+		const reading = { name: "the change matches the task", cites: ["s1.diff"], passed: true, command: false, ran: false };
+		strictEqual(
+			gradeWork(work([reading, { ...npmTest(["s1.handback"]), passed: false }]), reviewer).outcome,
+			"succeeded",
+		);
+		// An unobserved tool lane cannot say an uncited check rests on an observation: unknown, not a silent pass.
+		const blind = { ...reviewer, toolLaneObserved: false };
+		const uncited = gradeWork(work([reading, { ...reading, cites: [] }]), blind);
+		strictEqual(uncited.rules.find((rule) => rule.id === "obligation")?.status, "unknown");
+	});
+});
+
+it("a builder that read, recorded a limitation and changed nothing seals worker_not_done, not succeeded (M-39)", async () => {
+	// Wave-43 run 2krnb50hhugv: 15 reads, one limitation, no write; its finish assessment kept no limitation words.
+	const env = await isolateClioEnv("dispatch-limitation-only-");
+	try {
+		const root = join(env.dir, "project");
+		mkdirSync(root, { recursive: true });
+		const finished = (tool: string) => ({
+			type: "clio_coder_tool_finish",
+			payload: { tool, outcome: "ok", durationMs: 1 },
+		});
+		const { receipt } = await settleStubBuilder({
+			cwd: root,
+			report: { completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [] },
+			events: [finished("read"), finished("limitation")],
+		});
+		strictEqual(receipt.outcome, "failed");
+		strictEqual(receipt.outcomeCode, "worker_not_done");
+		match(receipt.outcomeDetail ?? "", /worker recorded a limitation and changed nothing/u);
+		deepStrictEqual(
+			receipt.verdict?.rules.find((rule) => rule.id === "obligation"),
+			{ id: "obligation", layer: "V3", status: "fail", code: "worker_not_done" },
+		);
+	} finally {
+		env.restore();
+	}
 });

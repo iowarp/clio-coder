@@ -66,6 +66,8 @@ export interface TelemetryRunSummary {
 	taskSummary?: string;
 	budget?: RecordedRunToolBudgetEnvelope;
 	node?: string;
+	/** Another Clio process on this state directory owns the run; this process follows it from the run's directory. */
+	foreign?: true;
 	gate?: { role: string; cycle: number };
 	council?: { group: string; label: string; color?: string; round: number };
 	hostVerification?: "verified" | "rejected" | "skipped" | "not_implicated";

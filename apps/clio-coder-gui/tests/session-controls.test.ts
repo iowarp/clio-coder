@@ -284,10 +284,10 @@ test("a branch switch replays only the chosen branch and a fork continues under 
 	assert.equal((await h.post(`${base}/branch`, { turnId: "a2" }, "switch-a2")).status, 200);
 	const afterSwitch = h.supervisor.get(session.id);
 	assert.deepEqual(
-		afterSwitch.turns.map((turn) => [turn.id, turn.origin, turn.status]),
+		afterSwitch.turns.map((turn) => [turn.id, turn.origin, turn.status, turn.startedAt, turn.finishedAt]),
 		[
-			["replay-1", "replay", "succeeded"],
-			["replay-2", "replay", "succeeded"],
+			["replay-1", "replay", "succeeded", "2026-09-25T12:01:00.000Z", "2026-09-25T12:01:30.000Z"],
+			["replay-2", "replay", "succeeded", "2026-09-25T12:02:00.000Z", "2026-09-25T12:02:30.000Z"],
 		],
 	);
 	const words = afterSwitch.timeline.map((item) => item.text).join(" | ");

@@ -118,7 +118,7 @@ test("projection survives run-row resume and renders an empty board and worker s
 		await openAgentLedger("board");
 		assert.match(renderAgentLedgerBoard("board", p) ?? "", /Assignments:/u);
 		const messages = buildDynamicPromptMessages(
-			{ agentId: "scout", executionRole: "researcher", task: "Inspect", ledger: { id: "board", sequence: 0 } },
+			{ agentId: "scout", executionRole: "explorer", task: "Inspect", ledger: { id: "board", sequence: 0 } },
 			{ ledgerToolAvailable: true, ledgerAssignments: p.assignments },
 		);
 		const text = messages.find((message) => message.id === "dispatch-agent-ledger")?.body ?? "";
@@ -199,7 +199,7 @@ test("members of one board batch share their prompt prefix, so the stagger holds
 		await openAgentLedger("board-batch");
 		const request = {
 			agentId: "scout",
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			task: "Inspect the fixture.",
 			requestOrigin: "internal" as const,
 			ledger: { id: "board-batch", sequence: 0 },
@@ -229,7 +229,7 @@ test("the board roster rides after the shared prompt prefix, in each member's ow
 			buildDynamicPromptMessages(
 				{
 					agentId: "scout",
-					executionRole: "researcher",
+					executionRole: "explorer",
 					task: "Inspect",
 					ledger: { id: "board", sequence: 0 },
 					briefing: "Shared batch briefing.",

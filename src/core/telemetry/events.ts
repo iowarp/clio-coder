@@ -24,6 +24,8 @@ import type {
 	DomainFailedPayload,
 	EvidenceAssessedPayload,
 	ExtensionsLoadIssuePayload,
+	ForeignApprovalChangedPayload,
+	ForeignRunObservedPayload,
 	GitHooksChangedPayload,
 	InternalGitDriftPayload,
 	JobClockResumedPayload,
@@ -75,6 +77,11 @@ export interface JournalDefinition<S extends TSchema = TSchema> {
 	 * emitted without a context is a gap, and one whose session writer closed idle reopens it (#434).
 	 */
 	readonly scope?: "process" | "session";
+	/**
+	 * Earlier versions of the record that sealed journals hold, by version, each read as recorded. A writer only ever
+	 * stamps `version` with `schema`; these exist so history written before a vocabulary change still reads.
+	 */
+	readonly recorded?: Readonly<Record<number, TSchema>>;
 }
 
 /** The payload exists only in the type system; live events carry no runtime schema. */
@@ -92,8 +99,12 @@ function journal<
 		scope?: "process" | "session";
 		// biome-ignore lint/suspicious/noExplicitAny: the projection's own annotation names the live payload type.
 		project?: (payload: any) => Static<S>;
-		/** Bumped only with the old version retired in `envelope.ts`, so a reader counts it rather than skipping it. */
+		/**
+		 * Bumped only with the old version retired in `envelope.ts`, or kept in `recorded`, so a reader counts or reads
+		 * it rather than skipping it.
+		 */
 		version?: number;
+		recorded?: Readonly<Record<number, TSchema>>;
 	},
 >(schema: S, options: O): { durability: "journal"; version: number; schema: S } & O {
 	return { durability: "journal", version: 1, schema, ...options };
@@ -272,7 +283,13 @@ export const EVENTS = {
 	"journal.segment_closed": journal(S.JournalSegmentClosedSchema, { tier: "accountability", cc: "content-free" }),
 	"turn.settled": journal(S.TurnSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"step_pipeline.settled": journal(S.StepPipelineSettledSchema, { tier: "accountability", cc: "content-free" }),
-	"run.settled": journal(S.RunSettledSchema, { tier: "accountability", cc: "content-free" }),
+	// Version 2 names execution roles in the fleet role vocabulary (M12); sealed version 1 records read as recorded.
+	"run.settled": journal(S.RunSettledSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		version: 2,
+		recorded: { 1: S.RunSettledV1Schema },
+	}),
 	"evidence.assessed": journal(S.EvidenceAssessedSchema, {
 		tier: "accountability",
 		cc: "content-free",
@@ -288,7 +305,12 @@ export const EVENTS = {
 		project: projectRunEnqueued,
 	}),
 	"run.started": journal(S.RunStartedSchema, { tier: "accountability", cc: "content-free", project: projectRunStarted }),
-	"route.decided": journal(S.RouteDecidedSchema, { tier: "operational", cc: "content-free" }),
+	"route.decided": journal(S.RouteDecidedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		version: 2,
+		recorded: { 1: S.RouteDecidedV1Schema },
+	}),
 	"gate.decided": journal(S.GateDecidedSchema, { tier: "accountability", cc: "content-free" }),
 	"code_step.settled": journal(S.CodeStepSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"process.started": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
@@ -400,6 +422,7 @@ export const EVENTS = {
 	}),
 	"prompt.prefix_captured": journal(S.PromptPrefixCapturedSchema, { tier: "research", cc: "structural" }),
 	"auth.refreshed": journal(S.AuthRefreshedSchema, { tier: "operational", cc: "content-free" }),
+	"cache.lane_fell_back": journal(S.CacheLaneFellBackSchema, { tier: "operational", cc: "content-free" }),
 	"middleware.fired": journal(S.MiddlewareFiredSchema, { tier: "operational", cc: "content-free" }),
 	"surface.settled": journal(S.SurfaceSettledSchema, { tier: "operational", cc: "content-free" }),
 	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free", version: 2 }),
@@ -509,6 +532,8 @@ export const EVENTS = {
 	"run.progressed": live<DispatchProgressPayload>(),
 	"run.completed": live<DispatchCompletedPayload>(),
 	"run.failed": live<DispatchFailedPayload>(),
+	"run.foreign_observed": live<ForeignRunObservedPayload>(),
+	"approval.foreign_changed": live<ForeignApprovalChangedPayload>(),
 	"compaction.started": live<CompactionPayload>(),
 	"compaction.ended": live<CompactionPayload>(),
 	"middleware.hook_failed": journal(S.MiddlewareHookFailedSchema, {
@@ -584,6 +609,14 @@ export type JournalEventName = {
 export type LiveEventName = Exclude<EventName, JournalEventName>;
 /** The data a journal record of this kind carries, after any projection. */
 export type JournalPayload<N extends JournalEventName> = Static<Definition<N>["schema"]>;
+/** A version the definition keeps only so sealed journals still read, as its schema states it. */
+type RecordedVersionPayload<D> = D extends { readonly recorded: Readonly<Record<number, infer R extends TSchema>> }
+	? Static<R>
+	: never;
+/** A payload as a journal holds it: the current version, or an earlier one the definition still reads as recorded. */
+export type RecordedJournalPayload<N extends JournalEventName> =
+	| JournalPayload<N>
+	| RecordedVersionPayload<Definition<N>>;
 
 /**
  * Journal events whose content the writer stores in `objects/` and cites as `content`, with its size as `bytes`,
@@ -623,6 +656,12 @@ const MESSAGE_STEP_FIELDS: Readonly<
 	carried: ["callId", "attemptId", "attempt"],
 	removed: ["reason"],
 };
+
+/** Whether `data` is the earlier version `kv` of `kind` that sealed journals hold, read as recorded. */
+export function validRecordedPayload(kind: JournalEventName, kv: number, data: unknown): boolean {
+	const schema = journalDefinition(kind).recorded?.[kv];
+	return schema !== undefined && checkRecordSchema(schema, data);
+}
 
 /** Schema validation plus the cross-field invariants that JSON Schema cannot express (#434). */
 export function validPayload<K extends JournalEventName>(kind: K, data: unknown): data is JournalPayload<K> {

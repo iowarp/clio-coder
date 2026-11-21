@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchPreparationOptions, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
 import { readRunResultFacts } from "../../src/domains/dispatch/run-result-facts.js";
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
@@ -27,6 +28,8 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 let env: IsolatedClioEnv;
 let previousCwd: string;
+/** The packet ids the stub reviewer's and judge's checks cite; null for a verdict that cites none (M10). */
+const verdictCites: { value: string[] | null } = { value: ["s1.handback"] };
 beforeEach(async () => {
 	env = await isolateClioEnv("dog-lineage-");
 	previousCwd = process.cwd();
@@ -102,7 +105,14 @@ async function fixture(
 				abort() {},
 				events: (async function* () {
 					if (fail) return;
-					const checks = [{ name: "npm test", passed: true, evidence: "exit 0" }];
+					const checks = [
+						{
+							name: "npm test",
+							passed: true,
+							evidence: "exit 0",
+							...(verdictCites.value !== null ? { cites: verdictCites.value } : {}),
+						},
+					];
 					const answer = spec.task.startsWith("Synthesize the council")
 						? { verdict: "supported", text: "fixture synthesis" }
 						: spec.agentId === "verifier"
@@ -339,6 +349,64 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 	});
 }
 
+for (const cites of [true, false]) {
+	it(`a reviewer receives the builder's evidence packet with ids, and a verdict ${cites ? "citing it passes" : "citing none is exhausted"} (M10)`, {
+		timeout: 30_000,
+	}, async () => {
+		verdictCites.value = cites ? ["s1.handback", "s1.diff"] : null;
+		const f = await fixture();
+		try {
+			for (const args of [
+				["init", "-q"],
+				["add", "input.txt"],
+				[
+					"-c",
+					"user.name=Fixture",
+					"-c",
+					"user.email=fixture@example.invalid",
+					"-c",
+					"core.hooksPath=/dev/null",
+					"commit",
+					"-qm",
+					"base",
+				],
+			])
+				execFileSync("git", args, { stdio: "pipe" });
+			writeFileSync("input.txt", "fixture evidence, edited\n");
+			const result = await withTelemetryContext(
+				{ sessionId: "packet-test", agent: { role: "main", id: "packet-test" } },
+				() =>
+					f.tool.run({
+						agent: "scout",
+						task: "Inspect input.txt",
+						cwd: process.cwd(),
+						review: { reviewer: "verifier", maxCycles: 1 },
+					}),
+			);
+			const reviewer = f.captured.find((request) => request.gate?.role === "reviewer");
+			deepStrictEqual(reviewer?.gate?.packet?.ids, ["s1.handback", "s1.diff"]);
+			match(reviewer?.task ?? "", /Packet ids: s1\.handback, s1\.diff/u);
+			const subject = JSON.parse(
+				(reviewer?.task ?? "").split("\n\n").find((block) => block.startsWith('{"ordinal":')) ?? "{}",
+			);
+			match((reviewer?.task ?? "").split("\n\n").at(-1) ?? "", /drawn only from: s1\.handback, s1\.diff\./u);
+			// The host observed the builder change no path, so the operator's own edit is not its diff.
+			strictEqual(subject.diff.scope, "observed-delta");
+			strictEqual(subject.diff.stat, "no changes");
+			strictEqual(subject.diff.patch, "");
+			const decision = readGateDecisionArtifacts().find(({ artifact }) => artifact.topology === "review")?.artifact;
+			strictEqual(decision?.outcome, cites ? "pass" : "exhausted", JSON.stringify(result).slice(0, 1500));
+			match(
+				decision?.detail ?? "",
+				cites ? /cites=s1\.handback,s1\.diff/u : /obligation cited-evidence unmet: the verdict cites no item/u,
+			);
+		} finally {
+			verdictCites.value = ["s1.handback"];
+			await f.bundle.extension.stop?.();
+		}
+	});
+}
+
 it("a terminal event's readers find the run sealed, with its closing feed rows inside the seal", {
 	timeout: 30_000,
 }, async () => {
@@ -379,7 +447,7 @@ it("model tool JSON cannot author lineage, while a trusted retry keeps its exist
 		const run = await f.bundle.contract.dispatch({
 			agentId: "scout",
 			task: "Inspect input.txt",
-			executionRole: "researcher",
+			executionRole: "explorer",
 			lineage: retry,
 			cwd: process.cwd(),
 		});

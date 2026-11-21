@@ -20,9 +20,12 @@ import {
 import { EstimateMethod, FactSumSchema, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
 import {
+	EXECUTION_ROLE_VOCABULARY,
 	GRADE_LAYERS,
 	GRADE_RULE_IDS,
 	GRADE_RULE_STATUSES,
+	RECORDED_EXECUTION_ROLE_VOCABULARY,
+	RETIRED_EXECUTION_ROLE_VOCABULARY,
 	RUN_ASSURANCES,
 	RUN_HASH_CANONICALIZATIONS,
 	RUN_HASH_SUBJECTS,
@@ -269,6 +272,8 @@ export const CallSettledSchema = Type.Object(
 				sessionPinnedToSse: factSchema(Type.Boolean()),
 				/** Present only when the call's own connection counters were attributable to it (#434). */
 				connectionReused: Type.Optional(factSchema(Type.Boolean())),
+				/** The Copilot session a copilot-sdk call went to, from Clio's own session pool (PV-2). */
+				session: Type.Optional(factSchema(vocabulary(["new", "spare", "continued", "resumed"]))),
 				/** WebSocket failures and SSE fallbacks inside this call, from the same attributable counters (#423). */
 				websocketFailures: Type.Optional(factSchema(count)),
 				sseFallbacks: Type.Optional(factSchema(count)),
@@ -983,6 +988,8 @@ const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null
 /** Diagnostic text a finished run states about itself, clipped and redacted where it is built (#434). */
 const diagnostic = Type.String({ maxLength: 1024 });
 const digest = Type.String({ minLength: 1, maxLength: 256 });
+/** An envelope digest or static head; a head is empty until the host compiles the worker's prompt. */
+const envelopeDigest = Type.String({ maxLength: 256 });
 /** One R7-labelled hash a finished run carries, named by the field it was computed for (`run-hashes.ts`, #434). */
 export const RunHashSchema = Type.Object(
 	{
@@ -1011,252 +1018,167 @@ const SettledBlockedAttemptSchema = Type.Object(
  * and check commands) is content, kept in the run scope's `run-result` object that `result` names, so the seal covers
  * it and a share profile can drop it.
  */
-export const RunSettledSchema = Type.Object(
-	{
-		version: Type.Literal(1),
-		agentId: ExistingId,
-		executionRole: vocabulary(["builder", "reviewer", "judge", "researcher", "verifier", "recovery"]),
-		requestOrigin: nullable(vocabulary(["user", "agent", "internal", "harness"])),
-		identity: nullable(
-			Type.Object({ host: Type.String({ maxLength: 256 }), user: Type.String({ maxLength: 256 }) }, closed),
-		),
-		route: Type.Object(
-			{
-				targetId: ExistingId,
-				wireModelId: ExistingId,
-				runtimeId: ExistingId,
-				runtimeKind: vocabulary(["http", "sdk", "subprocess", "acp-delegation"]),
-			},
-			closed,
-		),
-		node: nullable(Type.Object({ id: ExistingId, kind: vocabulary(["local", "ssh"]) }, closed)),
-		/**
-		 * The route decision the run executed under, as route history and readiness fold it; null when none was observed.
-		 * `executed` is the executed route's whole identity, hashes only, so the fold keys and drift-checks it from this
-		 * record alone (#434).
-		 */
-		routeDecision: nullable(
-			Type.Object(
+function runSettledSchema<const R extends readonly string[]>(roles: R) {
+	return Type.Object(
+		{
+			version: Type.Literal(1),
+			agentId: ExistingId,
+			executionRole: vocabulary(roles),
+			requestOrigin: nullable(vocabulary(["user", "agent", "internal", "harness"])),
+			identity: nullable(
+				Type.Object({ host: Type.String({ maxLength: 256 }), user: Type.String({ maxLength: 256 }) }, closed),
+			),
+			route: Type.Object(
 				{
-					decisionHash: Type.String({ pattern: "^[0-9a-f]{64}$" }),
-					mode: vocabulary(["fixed", "shadow", "active"]),
-					durationMs: duration,
-					constraintsValid: Type.Boolean(),
-					executed: Type.Object(
-						{
-							agentId: ExistingId,
-							specFingerprint: digest,
-							executionRole: vocabulary(["builder", "reviewer", "judge", "researcher", "verifier", "recovery"]),
-							targetId: ExistingId,
-							modelId: ExistingId,
-							runtimeId: ExistingId,
-							nodeId: ExistingId,
-							thinkingLevel: nullable(ExistingId),
-							toolSignature: digest,
-							promptCompositionHash: digest,
-							endpointIdentityHash: digest,
-							settingsFingerprint: digest,
-						},
-						closed,
-					),
+					targetId: ExistingId,
+					wireModelId: ExistingId,
+					runtimeId: ExistingId,
+					runtimeKind: vocabulary(["http", "sdk", "subprocess", "acp-delegation"]),
 				},
 				closed,
 			),
-		),
-		/** The run's retry attempt within its assignment, 0 for the first (`RunLineage.attempt`). */
-		attempt: count,
-		/** Queue wait and user-observed end-to-end time from the run's phase marks; null where a mark is missing. */
-		phaseTiming: Type.Object({ queueWaitMs: nullable(duration), totalEndToEndMs: nullable(duration) }, closed),
-		/** The routing request the run was admitted under, which a continuation it seeds inherits. */
-		routingIntent: Type.Object(
-			{
-				posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
-				maxCostUsd: nullable(Type.Number({ minimum: 0 })),
-				deadlineMs: nullable(duration),
-				minimumQuality: nullable(Type.Number()),
-				requiredCapabilities: Type.Array(ExistingId, { maxItems: 64 }),
-				locality: vocabulary(["local-only", "prefer-local", "any"]),
-				failover: vocabulary(["none", "approved"]),
-			},
-			closed,
-		),
-		startedAt: utc,
-		endedAt: utc,
-		outcome: RunOutcome,
-		outcomeCode: nullable(RunOutcomeCode),
-		/** Null when the host settled a run whose worker never reported an exit. */
-		exitCode: nullable(Type.Integer()),
-		outcomeDetail: nullable(diagnostic),
-		failureMessage: nullable(diagnostic),
-		terminalReason: RunTerminalReason,
-		/** Null when no call telemetry reached the host: unknown, never zero calls (R1, #434). */
-		callIds: Type.Union([Type.Array(CallIdSchema), Type.Null()]),
-		processExitCode: Type.Union([Type.Integer(), Type.Null()]),
-		boundKind: Type.Optional(RunBoundKind),
-		/** How the run's step pipeline ended; absent for a run without a step template and in older journals. */
-		stepPipeline: Type.Optional(StepPipelineSettledSchema),
-		/** Only the worker's repair loop can count its rounds; the host never infers zero (#425). */
-		repairRounds: factSchema(count),
-		frameType: Type.Union([text, Type.Null()]),
-		/** The run's own spend as one fact per quantity; the read model folds the calls for coverage (#434). */
-		usage: UsageSchema,
-		totalTokens: factSchema(count),
-		apiCalls: factSchema(count),
-		pricing: PricingSchema,
-		toolCalls: count,
-		/**
-		 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
-		 * counts the permission asks that were refused without an answer, apart from `blocked`, and `withheld` the calls
-		 * the spent observation pool answered with a notice instead of running (C-17), so a row sums; each is absent when
-		 * there were none.
-		 */
-		tools: Type.Array(
-			Type.Object(
-				{
-					tool: ExistingId,
-					calls: count,
-					ok: count,
-					errors: count,
-					blocked: count,
-					asked: Type.Optional(count),
-					withheld: Type.Optional(count),
-				},
-				closed,
-			),
-			{ maxItems: 256 },
-		),
-		/** The skills the run loaded, in activation order, and who asked for each; never a skill's path or body. */
-		skills: Type.Array(
-			Type.Object({ name: ExistingId, requestSource: nullable(vocabulary(["recipe", "model", "operator"])) }, closed),
-			{ maxItems: 256 },
-		),
-		/** The run's tool calls as the finalizer classified them; null for a run with no tool telemetry. */
-		toolActivity: nullable(
-			Type.Object(
-				{
-					calls: count,
-					succeeded: count,
-					failed: count,
-					blocked: count,
-					mutatingSucceeded: Type.Boolean(),
-					/** The worker wrote at least one blob into a granted store tag; absent when it wrote none. */
-					storeWritten: Type.Optional(Type.Boolean()),
-					/** Calls that started and never finished, so a sealed reader shows them too (FL-6); absent when none. */
-					unfinished: Type.Optional(count),
-					/** Calls the spent observation pool answered without running them (C-17); absent when none. */
-					withheld: Type.Optional(count),
-				},
-				closed,
-			),
-		),
-		/** A read-only recipe admitted against a task that needs a write; null when the pairing was sound. */
-		capabilityMismatch: nullable(
-			Type.Object(
-				{ agentId: ExistingId, capabilityClass: ExistingId, taskType: ExistingId, suggestedAgentId: nullable(ExistingId) },
-				closed,
-			),
-		),
-		/** The tool budget the run ran under, worded as dispatch words it; null when it had none. */
-		budget: nullable(Type.Object({ policy: text, requested: text, effective: text, reasons: text }, closed)),
-		/** What context the run was sent, by size; the hashes are in `hashes`, the content is never kept. */
-		context: Type.Object(
-			{
-				briefingBytes: nullable(count),
-				worker: nullable(
-					Type.Object({ mode: vocabulary(["fork", "splice"]), estimatedTokens: count, omittedMessages: count }, closed),
+			node: nullable(Type.Object({ id: ExistingId, kind: vocabulary(["local", "ssh"]) }, closed)),
+			/**
+			 * The route decision the run executed under, as route history and readiness fold it; null when none was observed.
+			 * `executed` is the executed route's whole identity, hashes only, so the fold keys and drift-checks it from this
+			 * record alone (#434).
+			 */
+			routeDecision: nullable(
+				Type.Object(
+					{
+						decisionHash: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+						mode: vocabulary(["fixed", "shadow", "active"]),
+						durationMs: duration,
+						constraintsValid: Type.Boolean(),
+						executed: Type.Object(
+							{
+								agentId: ExistingId,
+								specFingerprint: digest,
+								executionRole: vocabulary(roles),
+								targetId: ExistingId,
+								modelId: ExistingId,
+								runtimeId: ExistingId,
+								nodeId: ExistingId,
+								thinkingLevel: nullable(ExistingId),
+								toolSignature: digest,
+								promptCompositionHash: digest,
+								endpointIdentityHash: digest,
+								settingsFingerprint: digest,
+							},
+							closed,
+						),
+					},
+					closed,
 				),
-				project: nullable(
-					Type.Object(
-						{
-							tier: vocabulary(["none", "bounded"]),
-							chars: nullable(count),
-							sections: Type.Array(ExistingId, { maxItems: 64 }),
-						},
-						closed,
-					),
+			),
+			/** The run's retry attempt within its assignment, 0 for the first (`RunLineage.attempt`). */
+			attempt: count,
+			/** Queue wait and user-observed end-to-end time from the run's phase marks; null where a mark is missing. */
+			phaseTiming: Type.Object({ queueWaitMs: nullable(duration), totalEndToEndMs: nullable(duration) }, closed),
+			/** The routing request the run was admitted under, which a continuation it seeds inherits. */
+			routingIntent: Type.Object(
+				{
+					posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
+					maxCostUsd: nullable(Type.Number({ minimum: 0 })),
+					deadlineMs: nullable(duration),
+					minimumQuality: nullable(Type.Number()),
+					requiredCapabilities: Type.Array(ExistingId, { maxItems: 64 }),
+					locality: vocabulary(["local-only", "prefer-local", "any"]),
+					failover: vocabulary(["none", "approved"]),
+				},
+				closed,
+			),
+			startedAt: utc,
+			endedAt: utc,
+			outcome: RunOutcome,
+			outcomeCode: nullable(RunOutcomeCode),
+			/** Null when the host settled a run whose worker never reported an exit. */
+			exitCode: nullable(Type.Integer()),
+			outcomeDetail: nullable(diagnostic),
+			failureMessage: nullable(diagnostic),
+			terminalReason: RunTerminalReason,
+			/** Null when no call telemetry reached the host: unknown, never zero calls (R1, #434). */
+			callIds: Type.Union([Type.Array(CallIdSchema), Type.Null()]),
+			processExitCode: Type.Union([Type.Integer(), Type.Null()]),
+			boundKind: Type.Optional(RunBoundKind),
+			/** How the run's step pipeline ended; absent for a run without a step template and in older journals. */
+			stepPipeline: Type.Optional(StepPipelineSettledSchema),
+			/** Only the worker's repair loop can count its rounds; the host never infers zero (#425). */
+			repairRounds: factSchema(count),
+			frameType: Type.Union([text, Type.Null()]),
+			/** The run's own spend as one fact per quantity; the read model folds the calls for coverage (#434). */
+			usage: UsageSchema,
+			totalTokens: factSchema(count),
+			apiCalls: factSchema(count),
+			pricing: PricingSchema,
+			toolCalls: count,
+			/**
+			 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
+			 * counts the permission asks that were refused without an answer, apart from `blocked`, and `withheld` the calls
+			 * the spent observation pool answered with a notice instead of running (C-17), so a row sums; each is absent when
+			 * there were none.
+			 */
+			tools: Type.Array(
+				Type.Object(
+					{
+						tool: ExistingId,
+						calls: count,
+						ok: count,
+						errors: count,
+						blocked: count,
+						asked: Type.Optional(count),
+						withheld: Type.Optional(count),
+					},
+					closed,
 				),
-			},
-			closed,
-		),
-		/** What the provider reported about the model and gateway route of the run's calls, each distinct one once. */
-		upstream: Type.Object({ responseModelIds: nullable(text), gatewayRoutes: nullable(text) }, closed),
-		/**
-		 * Tool calls safety refused, by tool, class and rule; the call's arguments and reason prose are not kept. Records
-		 * written before `guardBlockedAttempts` and `permissionRequestedAttempts` existed list those calls here too.
-		 */
-		blockedAttempts: Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 }),
-		/** Tool calls a tool guard held back, in the same shape; absent when none was and in older journals. */
-		guardBlockedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
-		/** Asks the run refused without an answer, in the same shape; absent when none was and in older journals. */
-		permissionRequestedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
-		/** Permission escalations the run asked for and how they ended; null when none was asked. */
-		escalations: nullable(Type.Object({ requested: count, approved: count, denied: count, timedOut: count }, closed)),
-		/** Information-flow restrictions the run's context carried, which its consumers must keep (`flow-restrictions.ts`). */
-		flowRestrictions: nullable(
-			Type.Object(
-				{
-					version: Type.Literal(1),
-					restrictions: Type.Array(
-						Type.Object(
-							{
-								ruleId: ExistingId,
-								policyHash: Type.String({ maxLength: 256 }),
-								sourceRef: text,
-								recipients: Type.Array(ExistingId, { maxItems: 256 }),
-							},
-							closed,
-						),
-						{ maxItems: 256 },
-					),
-					advisory: Type.Optional(Type.Array(text, { maxItems: 64 })),
-				},
-				closed,
+				{ maxItems: 256 },
 			),
-		),
-		/** Who governed an external peer's tools; null for a run Clio's own tool loop drove. */
-		toolGovernance: nullable(vocabulary(["clio-coder-policy", "agent-managed", "deny-all"])),
-		verification: Type.Object(
-			{
-				state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),
-				basis: vocabulary([
-					"validation-tool",
-					"host-observed-command",
-					"read-only-agent",
-					"no-validation-tool",
-					"retired-by-change",
-					"dispatch-run-record",
-					"acp-external-unobserved",
-					"host-verification",
-					"result-unavailable",
-				]),
-				detail: Type.Optional(text),
-			},
-			closed,
-		),
-		/** Null when the run settled before its result could be judged. */
-		quality: nullable(
-			Type.Object(
+			/** The skills the run loaded, in activation order, and who asked for each; never a skill's path or body. */
+			skills: Type.Array(
+				Type.Object({ name: ExistingId, requestSource: nullable(vocabulary(["recipe", "model", "operator"])) }, closed),
+				{ maxItems: 256 },
+			),
+			/** The run's tool calls as the finalizer classified them; null for a run with no tool telemetry. */
+			toolActivity: nullable(
+				Type.Object(
+					{
+						calls: count,
+						succeeded: count,
+						failed: count,
+						blocked: count,
+						mutatingSucceeded: Type.Boolean(),
+						/** The worker wrote at least one blob into a granted store tag; absent when it wrote none. */
+						storeWritten: Type.Optional(Type.Boolean()),
+						/** Calls that started and never finished, so a sealed reader shows them too (FL-6); absent when none. */
+						unfinished: Type.Optional(count),
+						/** Calls the spent observation pool answered without running them (C-17); absent when none. */
+						withheld: Type.Optional(count),
+					},
+					closed,
+				),
+			),
+			/** A read-only recipe admitted against a task that needs a write; null when the pairing was sound. */
+			capabilityMismatch: nullable(
+				Type.Object(
+					{ agentId: ExistingId, capabilityClass: ExistingId, taskType: ExistingId, suggestedAgentId: nullable(ExistingId) },
+					closed,
+				),
+			),
+			/** The tool budget the run ran under, worded as dispatch words it; null when it had none. */
+			budget: nullable(Type.Object({ policy: text, requested: text, effective: text, reasons: text }, closed)),
+			/** What context the run was sent, by size; the hashes are in `hashes`, the content is never kept. */
+			context: Type.Object(
 				{
-					typedValidations: Type.Array(
-						Type.Object({ sourceId: text, validatorDigest: digest, passed: Type.Boolean() }, closed),
-						{ maxItems: 256 },
+					briefingBytes: nullable(count),
+					worker: nullable(
+						Type.Object({ mode: vocabulary(["fork", "splice"]), estimatedTokens: count, omittedMessages: count }, closed),
 					),
-					responseSchema: Type.Object(
-						{
-							sourceId: nullable(text),
-							schemaDigest: nullable(digest),
-							runtimeEnforceable: Type.Boolean(),
-							enforcementPassed: nullable(Type.Boolean()),
-						},
-						closed,
-					),
-					resultContract: nullable(
+					project: nullable(
 						Type.Object(
 							{
-								sourceId: text,
-								validatorDigest: digest,
-								conformance: vocabulary(["pass", "fail", "not-reached"]),
-								quality: vocabulary(["pass", "fail", "unmeasured"]),
+								tier: vocabulary(["none", "bounded"]),
+								chars: nullable(count),
+								sections: Type.Array(ExistingId, { maxItems: 64 }),
 							},
 							closed,
 						),
@@ -1264,105 +1186,250 @@ export const RunSettledSchema = Type.Object(
 				},
 				closed,
 			),
-		),
-		validationGrounding: nullable(
-			Type.Object(
+			/** What the provider reported about the model and gateway route of the run's calls, each distinct one once. */
+			upstream: Type.Object({ responseModelIds: nullable(text), gatewayRoutes: nullable(text) }, closed),
+			/**
+			 * Tool calls safety refused, by tool, class and rule; the call's arguments and reason prose are not kept. Records
+			 * written before `guardBlockedAttempts` and `permissionRequestedAttempts` existed list those calls here too.
+			 */
+			blockedAttempts: Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 }),
+			/** Tool calls a tool guard held back, in the same shape; absent when none was and in older journals. */
+			guardBlockedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
+			/** Asks the run refused without an answer, in the same shape; absent when none was and in older journals. */
+			permissionRequestedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
+			/** Permission escalations the run asked for and how they ended; null when none was asked. */
+			escalations: nullable(Type.Object({ requested: count, approved: count, denied: count, timedOut: count }, closed)),
+			/** Information-flow restrictions the run's context carried, which its consumers must keep (`flow-restrictions.ts`). */
+			flowRestrictions: nullable(
+				Type.Object(
+					{
+						version: Type.Literal(1),
+						restrictions: Type.Array(
+							Type.Object(
+								{
+									ruleId: ExistingId,
+									policyHash: Type.String({ maxLength: 256 }),
+									sourceRef: text,
+									recipients: Type.Array(ExistingId, { maxItems: 256 }),
+								},
+								closed,
+							),
+							{ maxItems: 256 },
+						),
+						advisory: Type.Optional(Type.Array(text, { maxItems: 64 })),
+					},
+					closed,
+				),
+			),
+			/** Who governed an external peer's tools; null for a run Clio's own tool loop drove. */
+			toolGovernance: nullable(vocabulary(["clio-coder-policy", "agent-managed", "deny-all"])),
+			verification: Type.Object(
 				{
-					claimed: count,
-					grounded: count,
-					ungrounded: Type.Array(text, { maxItems: 64 }),
-					basis: vocabulary(["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]),
+					state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),
+					basis: vocabulary([
+						"validation-tool",
+						"host-observed-command",
+						"read-only-agent",
+						"no-validation-tool",
+						"retired-by-change",
+						"dispatch-run-record",
+						"acp-external-unobserved",
+						"host-verification",
+						"result-unavailable",
+					]),
+					detail: Type.Optional(text),
 				},
 				closed,
 			),
-		),
-		/**
-		 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, or ran and
-		 * failed (x8-2), as the receipt discloses them: the count and up to 5 redacted commands. Absent when none ran and
-		 * in older journals.
-		 */
-		unclassifiedAfterLastCheck: Type.Optional(
-			Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
-		),
-		/**
-		 * The warnings dispatch resolved the run's route with, such as a thinking level the model could not run, so a
-		 * sealed reader names them as the dispatch result did (FL-6). Absent when there were none and in older journals.
-		 */
-		routeWarnings: Type.Optional(Type.Array(diagnostic, { maxItems: 16 })),
-		/**
-		 * Bytes of the run's answer its parent sees at sync, collect and record, fixed at dispatch and told to the
-		 * worker (M3). Absent in older journals, which read as a lone run's budget.
-		 */
-		answerBudgetBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-		/**
-		 * The grader's verdict (fleet M9): the obligation the run owed, each rule's result in layer order with the code
-		 * a failing rule set, and the run's assurance. Absent in journals sealed before M9.
-		 */
-		verdict: Type.Optional(
-			Type.Object(
-				{
-					version: Type.Literal(1),
-					obligation: vocabulary(RUN_OBLIGATIONS),
-					rules: Type.Array(
-						Type.Object(
+			/** Null when the run settled before its result could be judged. */
+			quality: nullable(
+				Type.Object(
+					{
+						typedValidations: Type.Array(
+							Type.Object({ sourceId: text, validatorDigest: digest, passed: Type.Boolean() }, closed),
+							{ maxItems: 256 },
+						),
+						responseSchema: Type.Object(
 							{
-								id: vocabulary(GRADE_RULE_IDS),
-								layer: vocabulary(GRADE_LAYERS),
-								status: vocabulary(GRADE_RULE_STATUSES),
-								code: Type.Optional(RunOutcomeCode),
+								sourceId: nullable(text),
+								schemaDigest: nullable(digest),
+								runtimeEnforceable: Type.Boolean(),
+								enforcementPassed: nullable(Type.Boolean()),
 							},
 							closed,
 						),
-						{ maxItems: 32 },
-					),
-					assurance: vocabulary(RUN_ASSURANCES),
-				},
-				closed,
+						resultContract: nullable(
+							Type.Object(
+								{
+									sourceId: text,
+									validatorDigest: digest,
+									conformance: vocabulary(["pass", "fail", "not-reached"]),
+									quality: vocabulary(["pass", "fail", "unmeasured"]),
+								},
+								closed,
+							),
+						),
+					},
+					closed,
+				),
 			),
-		),
-		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
-		worktree: nullable(
-			Type.Object(
-				{
-					apply: vocabulary(["merge", "preserve"]),
-					applied: Type.Boolean(),
-					snapshot: nullable(vocabulary(["working-tree", "unavailable"])),
-				},
-				closed,
+			validationGrounding: nullable(
+				Type.Object(
+					{
+						claimed: count,
+						grounded: count,
+						ungrounded: Type.Array(text, { maxItems: 64 }),
+						basis: vocabulary([
+							"grounded",
+							"no-command-executed",
+							"unmatched-command",
+							"unattributable-status",
+							"unobserved-lane",
+						]),
+					},
+					closed,
+				),
 			),
-		),
-		/** Orchestrator-run declared checks; their commands and output tails are in the result object. */
-		hostVerification: nullable(
-			Type.Object(
-				{
-					status: vocabulary(["verified", "rejected", "skipped", "not_implicated"]),
-					strategy: vocabulary(["single", "batch-settled"]),
-					checks: count,
-					failed: count,
-					/** Failing checks that also failed on the task base, so they cannot show the change caused them. */
-					failedOnBase: count,
-					/**
-					 * How the checks were answered: run for this run, a pass reused from another run's memo, or not run.
-					 * Only a verdict every check of which executed validates the run. Absent on runs settled before them.
-					 */
-					executed: Type.Optional(count),
-					reused: Type.Optional(count),
-					skipped: Type.Optional(count),
-				},
-				closed,
+			/**
+			 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, or ran and
+			 * failed (x8-2), as the receipt discloses them: the count and up to 5 redacted commands. Absent when none ran and
+			 * in older journals.
+			 */
+			unclassifiedAfterLastCheck: Type.Optional(
+				Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
 			),
-		),
-		/**
-		 * Whether the briefing, worker context and project context the run was sent were recorded consistently, judged
-		 * when the run settled; their hashes are in `hashes`, their text is never kept.
-		 */
-		contextProvenance: vocabulary(["recorded", "invalid", "not_applicable", "unknown"]),
-		hashes: Type.Array(RunHashSchema, { maxItems: 512 }),
-		result: ObjectRefSchema,
-	},
-	closed,
-);
+			/**
+			 * The warnings dispatch resolved the run's route with, such as a thinking level the model could not run, so a
+			 * sealed reader names them as the dispatch result did (FL-6). Absent when there were none and in older journals.
+			 */
+			routeWarnings: Type.Optional(Type.Array(diagnostic, { maxItems: 16 })),
+			/**
+			 * Bytes of the run's answer its parent sees at sync, collect and record, fixed at dispatch and told to the
+			 * worker (M3). Absent in older journals, which read as a lone run's budget.
+			 */
+			answerBudgetBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
+			/**
+			 * The grader's verdict (fleet M9): the obligation the run owed, each rule's result in layer order with the code
+			 * a failing rule set, and the run's assurance. Absent in journals sealed before M9.
+			 */
+			verdict: Type.Optional(
+				Type.Object(
+					{
+						version: Type.Literal(1),
+						obligation: vocabulary(RUN_OBLIGATIONS),
+						rules: Type.Array(
+							Type.Object(
+								{
+									id: vocabulary(GRADE_RULE_IDS),
+									layer: vocabulary(GRADE_LAYERS),
+									status: vocabulary(GRADE_RULE_STATUSES),
+									code: Type.Optional(RunOutcomeCode),
+								},
+								closed,
+							),
+							{ maxItems: 32 },
+						),
+						assurance: vocabulary(RUN_ASSURANCES),
+					},
+					closed,
+				),
+			),
+			/**
+			 * The capability envelope the run ran under (fleet M7) as its receipt sealed it, `staticHead` included, so an audit
+			 * reads what a run was allowed after the fact (M-18). Absent for a run with no envelope and in older journals.
+			 */
+			envelope: Type.Optional(
+				Type.Object(
+					{
+						version: count,
+						digest: envelopeDigest,
+						permitDigest: envelopeDigest,
+						role: ExistingId,
+						skills: Type.Object({ bound: Type.Array(ExistingId, { maxItems: 1024 }), discovery: ExistingId }, closed),
+						read: Type.Object(
+							{ roots: Type.Array(text, { maxItems: 1024 }), outside: Type.Array(text, { maxItems: 1024 }) },
+							closed,
+						),
+						write: Type.Object(
+							{ mode: ExistingId, roots: Type.Array(text, { maxItems: 1024 }), commandsBounded: Type.Boolean() },
+							closed,
+						),
+						exec: Type.Object({ shell: ExistingId, checks: ExistingId }, closed),
+						network: Type.Object(
+							{
+								shell: Type.Boolean(),
+								tools: Type.Array(ExistingId, { maxItems: 1024 }),
+								mcp: Type.Array(ExistingId, { maxItems: 1024 }),
+							},
+							closed,
+						),
+						approval: Type.Object({ autonomy: ExistingId, asks: ExistingId }, closed),
+						sandbox: Type.Object({ backend: ExistingId, confinesWrites: Type.Boolean() }, closed),
+						withheld: Type.Array(
+							Type.Object({ capability: ExistingId, reason: ExistingId, remedy: Type.Optional(text) }, closed),
+							{ maxItems: 1024 },
+						),
+						/** Empty when the host never compiled the worker's prompt. */
+						staticHead: envelopeDigest,
+					},
+					closed,
+				),
+			),
+			/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
+			worktree: nullable(
+				Type.Object(
+					{
+						apply: vocabulary(["merge", "preserve"]),
+						applied: Type.Boolean(),
+						snapshot: nullable(vocabulary(["working-tree", "unavailable"])),
+					},
+					closed,
+				),
+			),
+			/** Orchestrator-run declared checks; their commands and output tails are in the result object. */
+			hostVerification: nullable(
+				Type.Object(
+					{
+						status: vocabulary(["verified", "rejected", "skipped", "not_implicated"]),
+						strategy: vocabulary(["single", "batch-settled"]),
+						checks: count,
+						failed: count,
+						/** Failing checks that also failed on the task base, so they cannot show the change caused them. */
+						failedOnBase: count,
+						/**
+						 * How the checks were answered: run for this run, a pass reused from another run's memo, or not run.
+						 * Only a verdict every check of which executed validates the run. Absent on runs settled before them.
+						 */
+						executed: Type.Optional(count),
+						reused: Type.Optional(count),
+						skipped: Type.Optional(count),
+					},
+					closed,
+				),
+			),
+			/**
+			 * Whether the briefing, worker context and project context the run was sent were recorded consistently, judged
+			 * when the run settled; their hashes are in `hashes`, their text is never kept.
+			 */
+			contextProvenance: vocabulary(["recorded", "invalid", "not_applicable", "unknown"]),
+			hashes: Type.Array(RunHashSchema, { maxItems: 512 }),
+			result: ObjectRefSchema,
+		},
+		closed,
+	);
+}
+/**
+ * `run.settled` version 2: the record a run writes, naming its execution role in the fleet role vocabulary (M12).
+ * Version 1 (`RunSettledV1Schema`) is the same record with the pre-M12 role names, which sealed journals hold.
+ */
+export const RunSettledSchema = runSettledSchema(EXECUTION_ROLE_VOCABULARY);
 export type RunSettled = Static<typeof RunSettledSchema>;
+/** `run.settled` version 1, read from sealed journals as recorded; nothing writes it. */
+export const RunSettledV1Schema = runSettledSchema(RETIRED_EXECUTION_ROLE_VOCABULARY);
+/** A `run.settled` payload as a journal holds it: the current version, or version 1 as recorded. */
+export type RecordedRunSettled = RunSettled | Static<typeof RunSettledV1Schema>;
+/** A `run.settled` of either version, as a read model hands it on: its role is the one recorded. */
+export const RecordedRunSettledSchema = runSettledSchema(RECORDED_EXECUTION_ROLE_VOCABULARY);
 
 /** A number as a judged report writes it: JSON has no spelling for NaN or the infinities, so they are named. */
 const reportedNumber = Type.Union([Type.Number(), vocabulary(["NaN", "Infinity", "-Infinity"])]);
@@ -1480,8 +1547,11 @@ export const RunResultObjectSchema = Type.Object(
 				{
 					path: Type.String(),
 					branch: Type.String(),
+					root: Type.Optional(Type.String()),
+					base: Type.Optional(Type.String()),
 					diffHash: nullable(Type.String()),
 					changedPaths: Type.Optional(Type.Array(Type.String())),
+					deletedPaths: Type.Optional(Type.Array(Type.String())),
 					commit: Type.Optional(Type.String()),
 					reason: Type.Optional(Type.String()),
 					detail: Type.Optional(Type.String()),
@@ -2375,6 +2445,21 @@ export const AuthRefreshedSchema = Type.Object(
 	},
 	closed,
 );
+/**
+ * A main session's prompt cache lane came from this process's own lanes because the cross-process lane store could
+ * not take the claim (M-11), so a concurrent Clio process may route to the same id.
+ */
+export const CacheLaneFellBackSchema = Type.Object(
+	{
+		/** lock-timeout: another holder kept the admission lock past the claim's bound. store-failed: any other error. */
+		reason: vocabulary(["lock-timeout", "store-failed"]),
+		/** The lock budget that ran out; null for a store failure. */
+		timeoutMs: Type.Union([count, Type.Null()]),
+		/** The in-process lane the conversation took instead. */
+		lane: count,
+	},
+	closed,
+);
 export const MESSAGE_STEP = vocabulary([
 	"submitted",
 	"queued",
@@ -2642,62 +2727,63 @@ export const ROUTE_REASONS = [
 	"observer-failure-fixed-route",
 	"unknown",
 ] as const;
-export const EXECUTION_ROLE_VOCABULARY = [
-	"builder",
-	"reviewer",
-	"judge",
-	"researcher",
-	"verifier",
-	"recovery",
-] as const;
-const routeTuple = Type.Object(
-	{
-		agentId: ExistingId,
-		executionRole: vocabulary(EXECUTION_ROLE_VOCABULARY),
-		targetId: ExistingId,
-		modelId: ExistingId,
-		runtimeId: ExistingId,
-		nodeId: ExistingId,
-	},
-	closed,
-);
+function routeTuple<const R extends readonly string[]>(roles: R) {
+	return Type.Object(
+		{
+			agentId: ExistingId,
+			executionRole: vocabulary(roles),
+			targetId: ExistingId,
+			modelId: ExistingId,
+			runtimeId: ExistingId,
+			nodeId: ExistingId,
+		},
+		closed,
+	);
+}
 const finiteOrNull = Type.Union([Type.Number(), Type.Null()]);
 /**
  * One routing decision, in the journal of the session or run that asked (#434). Candidates, verdicts and reasons
  * are the decision's own; prompts, specs and settings appear only through the decision hash.
  */
-export const RouteDecidedSchema = Type.Object(
-	{
-		policyVersion: ExistingId,
-		mode: vocabulary(["fixed", "shadow", "active"]),
-		posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
-		decisionHash: ExistingId,
-		decisionDurationMs: duration,
-		confidence: finiteOrNull,
-		selected: routeTuple,
-		executed: routeTuple,
-		fallbacks: Type.Array(routeTuple),
-		recommendedAgentId: ExistingId,
-		candidates: Type.Array(
-			Type.Object(
-				{
-					route: routeTuple,
-					rejection: Type.Union([vocabulary(ROUTE_HARD_FILTERS), Type.Null()]),
-					/** Null for a rejected candidate, which is never scored. */
-					score: finiteOrNull,
-					dominated: Type.Boolean(),
-					samples: count,
-					ready: Type.Boolean(),
-				},
-				closed,
+function routeDecidedSchema<const R extends readonly string[]>(roles: R) {
+	const route = routeTuple(roles);
+	return Type.Object(
+		{
+			policyVersion: ExistingId,
+			mode: vocabulary(["fixed", "shadow", "active"]),
+			posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
+			decisionHash: ExistingId,
+			decisionDurationMs: duration,
+			confidence: finiteOrNull,
+			selected: route,
+			executed: route,
+			fallbacks: Type.Array(route),
+			recommendedAgentId: ExistingId,
+			candidates: Type.Array(
+				Type.Object(
+					{
+						route: route,
+						rejection: Type.Union([vocabulary(ROUTE_HARD_FILTERS), Type.Null()]),
+						/** Null for a rejected candidate, which is never scored. */
+						score: finiteOrNull,
+						dominated: Type.Boolean(),
+						samples: count,
+						ready: Type.Boolean(),
+					},
+					closed,
+				),
 			),
-		),
-		reasons: Type.Array(Type.Object({ code: vocabulary(ROUTE_REASONS), count: Type.Optional(count) }, closed)),
-		/** Whether the policy would have run another route, and whether the route that ran passed every hard filter. */
-		verdict: Type.Object({ differs: Type.Boolean(), executedAdmissible: Type.Boolean() }, closed),
-	},
-	closed,
-);
+			reasons: Type.Array(Type.Object({ code: vocabulary(ROUTE_REASONS), count: Type.Optional(count) }, closed)),
+			/** Whether the policy would have run another route, and whether the route that ran passed every hard filter. */
+			verdict: Type.Object({ differs: Type.Boolean(), executedAdmissible: Type.Boolean() }, closed),
+		},
+		closed,
+	);
+}
+/** `route.decided` version 2, its routes naming execution roles in the fleet role vocabulary (M12). */
+export const RouteDecidedSchema = routeDecidedSchema(EXECUTION_ROLE_VOCABULARY);
+/** `route.decided` version 1, read from sealed journals as recorded; nothing writes it. */
+export const RouteDecidedV1Schema = routeDecidedSchema(RETIRED_EXECUTION_ROLE_VOCABULARY);
 const sha256OrNull = Type.Union([sha256Hex, Type.Null()]);
 const gateSubject = Type.Object({ runId: ExistingId, digest: sha256OrNull }, closed);
 /** A decided review or compete gate, in the journal of the run the gate's group belongs to (#434). */

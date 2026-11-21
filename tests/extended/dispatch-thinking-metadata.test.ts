@@ -91,7 +91,7 @@ async function setup(beforeMetadata?: () => Promise<void>) {
 		},
 		request: {
 			agentId: "oracle",
-			executionRole: "researcher" as const,
+			executionRole: "explorer" as const,
 			task: "Compute 17 times 19.",
 			target: "worker",
 			model: fixture.modelId,

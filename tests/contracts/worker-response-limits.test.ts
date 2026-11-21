@@ -358,7 +358,7 @@ for (const code of ["worker_turn_timeout", "worker_output_cap_exhausted"] as con
 			const run = await bundle.contract.dispatch({
 				agentId: "scout",
 				task: "Inspect available exports.",
-				executionRole: "researcher",
+				executionRole: "explorer",
 				requestOrigin: "internal",
 			});
 			const receipt = await run.finalPromise;

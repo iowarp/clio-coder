@@ -409,7 +409,7 @@ describe("Hoare contract honesty", () => {
 				try {
 					const run = await bundle.contract.dispatch({
 						agentId: "verifier",
-						executionRole: "verifier",
+						executionRole: "checker",
 						task: "Review identity.c:identity",
 						cwd: root,
 						requestOrigin: "internal",
