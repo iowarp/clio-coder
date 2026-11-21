@@ -469,6 +469,9 @@ export const RUN_FEED_EVENTS = [
 	"clio_coder_permission_resolved",
 	"clio_coder_run_outcome",
 	"clio_coder_steer_received",
+	"clio_coder_helper_result",
+	"clio_coder_helper_result_rejected",
+	"clio_coder_write_record_downgraded",
 	"unknown",
 ] as const;
 export const RUN_FEED_OUTCOMES = [

@@ -1,3 +1,4 @@
+import { runningBuildAt, runningBuildId } from "./build-id.js";
 import { readClioVersion } from "./package-root.js";
 
 /**
@@ -15,6 +16,37 @@ interface BuildProvenance {
 	commit: string;
 	/** The working tree had uncommitted changes at build time. */
 	dirty: boolean;
+}
+
+/** Which build wrote a session or journal: its commit, dirty flag, build id and build time, each when recorded (C-31). */
+export interface BuildStamp {
+	commit?: string;
+	dirty?: boolean;
+	id?: string;
+	builtAt?: string;
+}
+
+/** The running build's stamp, or undefined for a source run that recorded none of it (C-31). */
+export function readBuildStamp(
+	build: BuildProvenance | null = readBuildProvenance(),
+	id: string | null = runningBuildId,
+	builtAt: string | null = runningBuildAt,
+): BuildStamp | undefined {
+	const stamp: BuildStamp = {
+		...(build ? { commit: build.commit, dirty: build.dirty } : {}),
+		...(id ? { id } : {}),
+		...(builtAt ? { builtAt } : {}),
+	};
+	return Object.keys(stamp).length > 0 ? stamp : undefined;
+}
+
+/** `67b3247-dirty built 2026-11-21T00:51:02.000Z (build <id>)`, for `session show` (C-31). */
+export function buildStampText(stamp: BuildStamp): string {
+	return [
+		stamp.commit ? `${stamp.commit}${stamp.dirty ? "-dirty" : ""}` : "commit unknown",
+		...(stamp.builtAt ? [`built ${stamp.builtAt}`] : []),
+		...(stamp.id ? [`(build ${stamp.id})`] : []),
+	].join(" ");
 }
 
 /**

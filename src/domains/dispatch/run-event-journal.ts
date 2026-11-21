@@ -139,8 +139,9 @@ function isSafeRunId(runId: string): boolean {
 function createRunEventJournal(): RunEventJournalSink {
 	const forward = (runId: string, body: RunEventJournalBody, at?: string): void => {
 		if (!isSafeRunId(runId) || !runEventJournalEnabled() || stateRootRemoved()) return;
-		runTelemetryJournal(runId)?.feed(body, RUN_EVENT_JOURNAL_CAP_BYTES);
-		appendRunFeed(runId, body, at);
+		// The feed file numbers the row first, so the journal projection files it under the same seq (C-29).
+		const position = appendRunFeed(runId, body, at);
+		runTelemetryJournal(runId)?.feed(body, RUN_EVENT_JOURNAL_CAP_BYTES, position);
 	};
 	return {
 		open(runId, agentId): void {

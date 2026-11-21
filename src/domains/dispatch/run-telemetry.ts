@@ -14,6 +14,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import type { RunAssessmentContext } from "../evidence/assessment.js";
 import type { CallJournal } from "../telemetry/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
+import type { RunFeedPosition } from "./run-feed.js";
 import type { RunSettlement } from "./run-settlement.js";
 import { runSettledRecord } from "./run-settlement.js";
 
@@ -36,7 +37,8 @@ export interface RunTelemetryJournal {
 	settle(settlement: RunSettlement): Promise<void>;
 	/** A channel failure the host saw, after exit included; a closed journal records nothing (#425). */
 	channel(data: EventPayload<"worker.channel_failed">): void;
-	feed(body: RunEventJournalBody, capBytes: number): void;
+	/** `position` is where the run's feed.jsonl put this row: its seq, and any truncation marker it wrote (C-29). */
+	feed(body: RunEventJournalBody, capBytes: number, position?: RunFeedPosition): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -385,31 +387,41 @@ async function openOwnedRunTelemetry(
 			if (journal.closed) return;
 			writer.enqueue({ kind: "worker.channel_failed", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
 		},
-		feed(body, capBytes) {
+		feed(body, capBytes, position) {
 			if (journal.closed || feedClosed) return;
+			const append = (rowSeq: number, structural: StructuralRunFeedBody): void => {
+				// A conservative bound keeps serialization off the producer stack (#434).
+				feedBytes +=
+					256 +
+					Object.values(structural).reduce<number>(
+						(sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) * 6 : 16),
+						0,
+					);
+				seq = Math.max(seq, rowSeq);
+				writer.enqueue({
+					kind: "run.feed_appended",
+					data: { seq: rowSeq, body: structural },
+					ctx: context,
+					wallMs: Date.now(),
+					mono: performance.now(),
+				});
+			};
+			const truncated = (rowSeq: number): void => {
+				if (dropping) return;
+				dropping = true;
+				append(rowSeq, { kind: "journal_truncated", reason: "per-run size cap", droppedFromSeq: rowSeq });
+			};
+			// The feed file truncated during this append: the journal mirrors its marker and drops what it drops (C-29).
+			if (position?.truncatedSeq !== undefined) truncated(position.truncatedSeq);
 			const structural = structuralFeed(body);
 			if (structural === null) return;
+			// One row, one seq in both stores; a row the feed file did not write takes the journal's next (C-29).
+			const rowSeq = position?.seq !== undefined && position.seq > seq ? position.seq : seq + 1;
 			if (body.kind === "event" && (dropping || feedBytes >= capBytes)) {
-				if (!dropping) {
-					dropping = true;
-					journal.feed({ kind: "journal_truncated", reason: "per-run size cap", droppedFromSeq: seq + 1 }, capBytes);
-				}
+				truncated(rowSeq);
 				return;
 			}
-			// A conservative bound keeps serialization off the producer stack (#434).
-			feedBytes +=
-				256 +
-				Object.values(structural).reduce<number>(
-					(sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) * 6 : 16),
-					0,
-				);
-			writer.enqueue({
-				kind: "run.feed_appended",
-				data: { seq: ++seq, body: structural },
-				ctx: context,
-				wallMs: Date.now(),
-				mono: performance.now(),
-			});
+			append(rowSeq, structural);
 			if (body.kind === "terminal") feedClosed = true;
 		},
 		async flush() {

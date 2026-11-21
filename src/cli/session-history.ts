@@ -26,6 +26,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { buildStampText } from "../core/build-info.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { removeSessionAtRest, renameSessionAtRest, sessionRemovalRefusal } from "../domains/session/at-rest.js";
 import type { SessionMeta } from "../domains/session/contract.js";
@@ -222,6 +223,7 @@ function show(meta: SessionMeta, flags: Record<string, string | boolean | undefi
 		`session ${bundle.meta.id}${meta.name ? ` (${meta.name})` : ""}`,
 		`cwd: ${bundle.meta.cwd}`,
 		`created: ${bundle.meta.createdAt}${bundle.meta.endedAt ? `, ended: ${bundle.meta.endedAt}` : ""}`,
+		...(bundle.meta.build ? [`build: ${bundle.meta.clioCoderVersion} ${buildStampText(bundle.meta.build)}`] : []),
 		...(bundle.meta.parentSessionId ? [`forked from: ${bundle.meta.parentSessionId}`] : []),
 		`entries: ${bundle.entries.length}, messages: ${messages}`,
 		`live: ${owner ? ownerText(owner) : "no"}`,
