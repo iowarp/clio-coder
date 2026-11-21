@@ -19,6 +19,16 @@ export const DEFAULT_QUOTA_CACHE_TTL_MS = 5 * 60_000;
  */
 export const QUOTA_FAILURE_BACKOFF_MS = 60_000;
 
+/** Upper bound on a provider's Retry-After, so a malformed header cannot silence a provider for days. */
+const QUOTA_RETRY_AFTER_CAP_MS = 24 * 60 * 60_000;
+
+/** How long a failed read is held: the failure backoff, or the provider's Retry-After when that asks for longer. */
+function failureHoldMs(ttlMs: number, retryAfterSeconds: number | null | undefined): number {
+	const backoff = Math.min(ttlMs, QUOTA_FAILURE_BACKOFF_MS);
+	if (typeof retryAfterSeconds !== "number" || !Number.isFinite(retryAfterSeconds)) return backoff;
+	return Math.max(backoff, Math.min(retryAfterSeconds * 1000, QUOTA_RETRY_AFTER_CAP_MS));
+}
+
 export interface QuotaCacheOptions {
 	ttlMs?: number;
 	/** Clock source in milliseconds, injected so tests can advance time. */
@@ -39,7 +49,8 @@ export interface QuotaCache {
 	 * value has expired. A failed read falls back to the last good snapshot
 	 * marked stale, so a transient outage does not erase known usage, and is
 	 * itself held: a missing credential until one is detected (or the TTL),
-	 * any other failure for QUOTA_FAILURE_BACKOFF_MS.
+	 * any other failure for QUOTA_FAILURE_BACKOFF_MS or the provider's
+	 * Retry-After, whichever is longer.
 	 */
 	resolve(provider: QuotaProvider): Promise<UsageSnapshot>;
 }
@@ -134,7 +145,7 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 				answer,
 				status: snapshot.status,
 				storedAtMs: now(),
-				holdMs: snapshot.status === "no_credentials" ? ttlMs : Math.min(ttlMs, QUOTA_FAILURE_BACKOFF_MS),
+				holdMs: snapshot.status === "no_credentials" ? ttlMs : failureHoldMs(ttlMs, snapshot.retryAfterSeconds),
 			});
 			return answer;
 		},

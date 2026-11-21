@@ -84,6 +84,38 @@ test("a failed read is held for the failure backoff, then asked again", async ()
 	strictEqual(fake.fetches(), 2);
 });
 
+test("a rate-limited read is held for its Retry-After when that outlasts the failure backoff (C-19)", async () => {
+	let now = 1_000_000;
+	let fetches = 0;
+	const provider: QuotaProvider = {
+		id: "loop-retry-after",
+		displayName: "loop-retry-after",
+		async detect() {
+			return true;
+		},
+		async fetch() {
+			fetches += 1;
+			return {
+				providerId: "loop-retry-after",
+				displayName: "loop-retry-after",
+				status: "error",
+				windows: [],
+				message: "HTTP 429",
+				retryAfterSeconds: 600,
+				fetchedAt: null,
+			};
+		},
+	};
+	const cache = createQuotaCache({ now: () => now });
+	await cache.resolve(provider);
+	now += 61_000;
+	await cache.resolve(provider);
+	strictEqual(fetches, 1, "a 600 s Retry-After must outlast the 60 s backoff");
+	now += 540_000;
+	await cache.resolve(provider);
+	strictEqual(fetches, 2);
+});
+
 test("an unchanged failed poll is journaled once, while each successful poll still marks freshness", () => {
 	const snapshot = (status: UsageSnapshot["status"], provider: string): UsageSnapshot => ({
 		providerId: provider,
