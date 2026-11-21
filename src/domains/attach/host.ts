@@ -122,8 +122,13 @@ interface Client {
 	gone: boolean;
 }
 
+/** How a host notice and a transcript row name an attached client: `attach c2 (apr)`. */
+export function attachActorName(actor: Pick<AttachActor, "clientId" | "label">): string {
+	return `attach ${actor.clientId}${actor.label !== undefined ? ` (${actor.label})` : ""}`;
+}
+
 function who(client: Pick<Client, "id" | "label">): string {
-	return `attach ${client.id}${client.label !== undefined ? ` (${client.label})` : ""}`;
+	return attachActorName({ clientId: client.id, ...(client.label !== undefined ? { label: client.label } : {}) });
 }
 
 function oneLine(text: string): string {

@@ -437,6 +437,8 @@ export type ToolApprovalStateEvent =
 			 * grant or the judge's allow, and its body runs from here.
 			 */
 			state: "judging" | "resumed";
+			/** On `resumed`: who allowed it when that was not the operator at this terminal, as `attach c2 (apr)`. */
+			grantedBy?: string;
 	  };
 
 export type ChatLoopEvent = (
