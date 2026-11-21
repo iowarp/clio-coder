@@ -697,6 +697,8 @@ describe("bulk-lane backpressure", () => {
 		const result = await worker.promise;
 		ok(performance.now() - stopAt < WORKER_PROCESS_CLEANUP_BOUND_MS, "Stop settles within the cleanup bound");
 		strictEqual(result.processCleanup?.incomplete, false);
+		// M-37: the host names the signal it sent, whatever the child's own exit says.
+		strictEqual(result.hostSignals?.[0], "SIGTERM");
 		throws(() => process.kill(-(worker.pid as number), 0), /ESRCH/u);
 		ok((worker.bulkLaneStats?.().retainedFrames ?? 0) <= WORKER_EVENT_QUEUE_HARD_FRAMES);
 	});

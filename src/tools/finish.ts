@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { CompletionFact } from "../domains/middleware/index.js";
 import { StringEnum } from "../engine/ai.js";
+import { claimsToolsGone, TOOLS_OPEN_REFUSAL } from "./limitation.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { effectiveToolCall } from "./surface.js";
 
@@ -305,6 +306,9 @@ export const finishTool: ToolSpec = {
 				kind: "error",
 				message: `finish: state must be one of ${COMPLETION_STATES.join(", ")}, each limitation needs what and why (${COMPLETION_LIMITATION_REASONS.join(", ")}), and unverified and remaining are string arrays`,
 			};
+		// M-37: a finish call that runs proves the tools are open, so a limitation saying they are gone is false.
+		if (completion.limitations.some((entry) => claimsToolsGone(entry.what)))
+			return { kind: "error", message: `finish: ${TOOLS_OPEN_REFUSAL}`, details: { refusal: "tools_open" } };
 		return {
 			kind: "ok",
 			output: declarationText(completion),

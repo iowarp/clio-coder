@@ -37,7 +37,11 @@ export const WALL_HANDBACK_SHARE = 0.85;
 export function wallHandbackOutcomeDetail(input: {
 	reported: boolean;
 	unfinishedTools: ReadonlyArray<{ tool: string; count: number }>;
+	/** The calls the host saw in flight when its abort started, before the abort finished them; null without a snapshot. */
+	runningAtStop: ReadonlyArray<{ tool: string; object?: string }> | null;
 	hostStopped: boolean;
+	/** The signals the host itself delivered to the worker, in order (SIGTERM, then SIGKILL after the grace). */
+	hostSignals: ReadonlyArray<string>;
 	exitCode: number | null;
 	signal: string | null;
 }): string {
@@ -50,13 +54,23 @@ export function wallHandbackOutcomeDetail(input: {
 		].filter((part) => part !== null);
 		return `${share}, but it exited${exit.length === 0 ? "" : ` (${exit.join(", ")})`} before it wrote a report, so it handed back no report`;
 	}
-	const calls = input.unfinishedTools.reduce((sum, entry) => sum + entry.count, 0);
+	// A worker traps SIGTERM and exits 1, so its exit names no signal; the host's own signals and the calls it saw
+	// running are the facts (M-37).
+	const labels =
+		input.runningAtStop !== null && input.runningAtStop.length > 0
+			? input.runningAtStop.map((call) => (call.object === undefined ? call.tool : `${call.tool}: ${call.object}`))
+			: input.unfinishedTools.flatMap((entry) => Array.from({ length: entry.count }, () => entry.tool));
 	const running =
-		calls === 0
+		labels.length === 0
 			? ""
-			: ` with ${calls} tool ${calls === 1 ? "call" : "calls"} (${input.unfinishedTools.map((entry) => entry.tool).join(", ")}) still running`;
-	const stopped = input.signal === null ? "the host stopped it" : `the host stopped it with ${input.signal}`;
-	return `${share}, but it reached the wall clock${running} before it wrote a report; ${stopped}, so it handed back no report`;
+			: ` while ${labels.length} tool ${labels.length === 1 ? "call" : "calls"} (${labels.join(", ")}) ${labels.length === 1 ? "was" : "were"} still running`;
+	const signals =
+		input.hostSignals.length === 0
+			? ""
+			: input.hostSignals.length === 2 && input.hostSignals[0] === "SIGTERM" && input.hostSignals[1] === "SIGKILL"
+				? " with SIGTERM, then SIGKILL when the grace period ran out"
+				: ` with ${input.hostSignals.join(", then ")}`;
+	return `${share}, but it reached the wall clock before it wrote a report; the host stopped it${signals}${running}, so it handed back no report`;
 }
 
 /** What a batch shares, and what a lone run gets. */
