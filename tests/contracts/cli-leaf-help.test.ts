@@ -9,7 +9,6 @@ import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { DEPRECATED_SPELLINGS } from "../../src/cli/deprecations.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const ENTRY = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
@@ -196,8 +195,8 @@ describe("lifecycle leaves refuse with one diagnostic and, under --json, one fai
 	});
 });
 
-// CLI SPEC L12: the root page, the full listing, tombstones before any help interceptor (C1), and deprecated aliases.
-describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, () => {
+// CLI SPEC L12: the root page, the full listing, and the spellings 0.8.5 removed.
+describe("root help and removed spellings", { concurrency: 4 }, () => {
 	it("root --help is at most 45 lines and names the core commands", async () => {
 		const result = await cli(["--help"]);
 		equal(result.status, 0, result.stderr);
@@ -207,7 +206,7 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 		}
 	});
 
-	it("--help --all lists every command path and leaves deprecated spellings out", async () => {
+	it("--help --all lists every command path and no removed spelling", async () => {
 		const result = await cli(["--help", "--all"]);
 		equal(result.status, 0, result.stderr);
 		for (const path of [
@@ -224,15 +223,6 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 		ok(!/clio-coder (fleet drain|fleet resume|targets add|ext |semantic inbox-)/u.test(result.stdout), result.stdout);
 	});
 
-	for (const args of [["context-init"], ["context-init", "--help"], ["fleet", "inspect", "--help"]]) {
-		it(`clio-coder ${args.join(" ")} is a tombstone: exit 2 with a pointer`, async () => {
-			const result = await cli(args);
-			equal(result.status, 2, result.stderr);
-			equal(result.stdout, "");
-			match(result.stderr, /was removed[^\n]*\nuse: clio-coder /u);
-		});
-	}
-
 	it("help run --topics prints the run prose that run --help no longer carries", async () => {
 		const [topics, help] = await Promise.all([cli(["help", "run", "--topics"]), cli(["run", "--help"])]);
 		equal(topics.status, 0, topics.stderr);
@@ -241,60 +231,26 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 		ok(help.stdout.includes("help run --topics"));
 	});
 
-	it("the deprecation table classes every section 9 spelling, nine of them migration", () => {
-		equal(DEPRECATED_SPELLINGS.filter((row) => row.class === "migration").length, 9);
-		for (const row of DEPRECATED_SPELLINGS) {
-			ok(row.notice !== "dispatcher" || row.matches !== undefined, row.old);
-			ok(row.notice === "dispatcher" || row.where !== undefined, row.old);
-		}
-	});
-
-	for (const [old, current] of [
-		[
-			["--acp", "--help"],
-			["acp", "--help"],
-		],
-		[
-			["ext", "--help"],
-			["extensions", "--help"],
-		],
-		[
-			["export", "--help"],
-			["share", "export", "--help"],
-		],
-		[
-			["targets", "workers"],
-			["targets", "profile", "list"],
-		],
-		[
-			["evolve", "--help"],
-			["dev", "evolve", "--help"],
-		],
-	] as const) {
-		it(`clio-coder ${old.join(" ")} equals ${current.join(" ")} plus one deprecation line`, async () => {
-			const [before, after] = await Promise.all([cli(old), cli(current)]);
-			equal(before.status, after.status, before.stderr);
-			equal(before.stdout, after.stdout);
-			const notices = before.stderr.split("\n").filter((line) => line.startsWith("clio-coder: deprecated:"));
-			equal(notices.length, 1, before.stderr);
-			ok(!after.stderr.includes("deprecated"), after.stderr);
+	// No alias, tombstone or deprecation notice survives: each removed spelling is an ordinary usage error.
+	for (const args of [
+		["context-init"],
+		["context-init", "--help"],
+		["fleet", "inspect"],
+		["fleet", "drain", "--json"],
+		["evidence", "build"],
+		["--acp", "--help"],
+		["ext", "--help"],
+		["export", "--help"],
+		["evolve", "--help"],
+		["dev", "share"],
+		["targets", "workers"],
+		["semantic", "inbox-list"],
+	]) {
+		it(`clio-coder ${args.join(" ")} is an ordinary usage error`, async () => {
+			const result = await cli(args);
+			equal(result.status, 2, result.stderr);
+			match(result.stderr, /unknown/iu);
+			ok(!/deprecated|was removed|\nuse: /u.test(result.stderr), result.stderr);
 		});
 	}
-
-	// A migration row: the old spelling keeps its v1 document, which `fleet admission drain --json` does not print.
-	it("clio-coder fleet drain --json keeps its unversioned admission document plus one deprecation line", async () => {
-		const own = makeScratchHome("clio-coder-leaf-drain-");
-		try {
-			const result = await cli(["fleet", "drain", "--json"], own);
-			equal(result.status, 0, result.stderr);
-			const doc = JSON.parse(result.stdout) as { admission: { state: string } };
-			equal(result.stdout, `${JSON.stringify(doc, null, 2)}\n`);
-			equal(Object.keys(doc).join(), "admission");
-			equal(doc.admission.state, "draining");
-			const notices = result.stderr.split("\n").filter((line) => line.startsWith("clio-coder: deprecated:"));
-			equal(notices.length, 1, result.stderr);
-		} finally {
-			own.cleanup();
-		}
-	});
 });

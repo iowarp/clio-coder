@@ -42,7 +42,7 @@ describe("extended/uninstall-without-gui", () => {
 			match(preview.stdout, /clio-coder gui background uninstall && clio-coder gui launcher uninstall/u);
 			doesNotMatch(preview.stdout, /Cannot find module/u);
 
-			const real = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const real = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(real.code, 0);
 			match(real.stdout, /Removed State, except gui/u);
 			// The service's own configuration and the launcher survive; everything else in state is gone.
@@ -60,7 +60,7 @@ describe("extended/uninstall-without-gui", () => {
 	it("stays silent and deletes state whole when there is no graphical file", async () => {
 		const temp = createLifecycleHome("clio-coder-test-uninstall-bare-");
 		try {
-			const real = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const real = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(real.code, 0);
 			doesNotMatch(real.stdout, /[Gg]raphical/u);
 			ok(!existsSync(temp.stateDir));

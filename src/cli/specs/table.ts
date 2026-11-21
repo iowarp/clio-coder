@@ -4,8 +4,8 @@
  * command implementation. Root help and `help --json` read specs only (spec
  * stubs per CLI lane L0; each stub passes to the lane that owns its command).
  *
- * The keys are the `COMMAND_HANDLERS` keys in `src/cli/index.ts`, aliases
- * included; a command added there gets its stub and row here. The stubs were
+ * The keys are the `COMMAND_HANDLERS` keys in `src/cli/index.ts`; a command
+ * added there gets its stub and row here. The stubs were
  * generated from the 0.8.5 root help, the `dev` listing and the handler
  * comments, so `hidden` marks exactly what the default root help leaves out.
  */
@@ -23,7 +23,6 @@ export const COMMAND_SPECS = {
 	targets: () => import("./targets.js"),
 	models: () => import("./models.js"),
 	agents: () => import("./agents.js"),
-	components: () => import("./components.js"),
 	evidence: () => import("./evidence.js"),
 	memory: () => import("./memory.js"),
 	claims: () => import("./claims.js"),
@@ -36,11 +35,8 @@ export const COMMAND_SPECS = {
 	report: () => import("./report.js"),
 	session: () => import("./session.js"),
 	systemone: () => import("./systemone.js"),
-	evolve: () => import("./evolve.js"),
-	flywheel: () => import("./flywheel.js"),
 	dev: () => import("./dev.js"),
 	extensions: () => import("./extensions.js"),
-	ext: () => import("./ext.js"),
 	fleet: () => import("./fleet.js"),
 	playbook: () => import("./playbook.js"),
 	library: () => import("./library.js"),
@@ -50,8 +46,6 @@ export const COMMAND_SPECS = {
 	verifiers: () => import("./verifiers.js"),
 	gui: () => import("./gui.js"),
 	share: () => import("./share.js"),
-	export: () => import("./export.js"),
-	import: () => import("./import.js"),
 	context: () => import("./context.js"),
 	run: () => import("./run.js"),
 	tools: () => import("./tools.js"),

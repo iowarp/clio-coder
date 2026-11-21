@@ -3164,8 +3164,8 @@ export function invokesClioSkillMutation(command: string, excludeLibrary = false
 		if (rootHelp) continue;
 		// `clio-coder dev share` dispatches to `clio-coder share`.
 		if (args[0] === "dev" && args[1] === "share") args = args.slice(1);
-		// `clio-coder import` is the alias of `clio-coder share import`, and
-		// `clio-coder ext` runs the `clio-coder extensions` handler.
+		// Installs before 0.8.5 still accept `clio-coder import` for `share import`
+		// and `clio-coder ext` for `extensions`, so a command naming them is judged as such.
 		if (args[0] === "import") args = ["share", ...args];
 		if (args[0] === "ext") args = ["extensions", ...args.slice(1)];
 		if (

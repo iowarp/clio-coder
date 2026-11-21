@@ -111,7 +111,6 @@ export const TASK_ENVELOPE_KEYS: ReadonlyArray<string> = [
 
 /** Flag spellings that are one flag for conflict purposes. */
 const FLAG_ALIASES: Readonly<Record<string, string>> = {
-	"--session": "--resume",
 	"-r": "--resume",
 	"-o": "--output-last-message",
 };

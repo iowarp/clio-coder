@@ -49,7 +49,6 @@ describe("global startup flags before a subcommand", () => {
 		[["--api-key", "k-123", "doctor"], "--api-key", "doctor"],
 		[["-nc", "fleet", "status"], "-nc", "fleet"],
 		[["--skill", "skill-dir", "share", "inspect", "x.json"], "--skill", "share"],
-		[["--no-skills", "dev", "share", "inspect", "x.json"], "--no-skills", "share"],
 		[["--with-panes", "run", "hello"], "--with-panes", "run"],
 		[["--with-panes", "acp"], "--with-panes", "acp"],
 	] as const) {
@@ -74,19 +73,18 @@ describe("global startup flags before a subcommand", () => {
 		}
 	});
 
-	it("run --resume takes the session, --session is a deprecated alias, and --fork needs a session (SPEC L3)", () => {
+	it("run --resume takes the session, --session is an unknown option, and --fork needs a session (SPEC L3)", () => {
 		const resume = parseRunCliArgs(["--resume", "abc", "--fork", "--name", " beta ", "hello"]);
 		deepStrictEqual(
 			[resume.sessionId, resume.forkSession, resume.sessionName, resume.diagnostics],
 			["abc", true, "beta", []],
 		);
-		const alias = parseRunCliArgs(["--session", "abc", "hello"]);
-		equal(alias.sessionId, "abc");
+		const removed = parseRunCliArgs(["--session", "abc", "hello"]);
+		equal(removed.sessionId, undefined);
 		deepStrictEqual(
-			alias.diagnostics.map((entry) => entry.type),
-			["warning"],
+			removed.diagnostics.map((entry) => [entry.type, entry.slug, entry.message]),
+			[["error", "unknown_flag", "unknown option: --session"]],
 		);
-		match(alias.diagnostics[0]?.message ?? "", /--session is deprecated; use --resume/u);
 		for (const args of [
 			["--fork", "hello"],
 			["--resume", "abc", "--continue", "hello"],
@@ -160,7 +158,6 @@ describe("share", () => {
 
 	for (const [args, flag] of [
 		[["share", "export", "--out", "x.json", "--force"], "--force"],
-		[["export", "--out", "x.json", "-f"], "-f"],
 		[["share", "import", "x.json", "--both"], "--both"],
 		[["share", "import", "x.json", "--prompts"], "--prompts"],
 		[["share", "inspect", "x.json", "--force"], "--force"],
@@ -208,13 +205,12 @@ describe("fleet run", () => {
 	});
 });
 
-describe("run --json and --json-events (removed in 0.8.5)", () => {
-	it("refuses every spelling as unknown_flag naming --output-format, beside any other flag", () => {
+describe("run --json and --json-events", () => {
+	it("refuses each as an ordinary unknown_flag, beside any other flag", () => {
 		for (const [argv, flag] of [
 			[["--json", "Inspect"], "--json"],
-			[["--json-events", "full", "Inspect"], "--json-events"],
-			[["--json-events", "terminal", "Inspect"], "--json-events"],
-			[["--json-events=terminal", "Inspect"], "--json-events"],
+			[["--json-events", "Inspect"], "--json-events"],
+			[["--json-events=terminal", "Inspect"], "--json-events=terminal"],
 			[["--agent", "scout", "--json", "Inspect"], "--json"],
 			[["--output-format", "json", "--json", "Inspect"], "--json"],
 		] as const) {
@@ -222,7 +218,7 @@ describe("run --json and --json-events (removed in 0.8.5)", () => {
 			const errors = parsed.diagnostics.filter((entry) => entry.type === "error");
 			deepStrictEqual(
 				errors.map((entry) => [entry.slug, entry.message]),
-				[["unknown_flag", `unknown option: ${flag} (removed in 0.8.5; use --output-format json|stream-json)`]],
+				[["unknown_flag", `unknown option: ${flag}`]],
 				argv.join(" "),
 			);
 			deepStrictEqual(parsed.messages, ["Inspect"], argv.join(" "));
@@ -327,7 +323,7 @@ describe("run --agent sampling flags", () => {
 
 describe("fleet detach and wait flags (SPEC L7b)", () => {
 	for (const [args, needle] of [
-		[["fleet", "run", "demo", "--detach", "--json"], "--detach"],
+		[["fleet", "run", "demo", "--json"], "unknown fleet run option: --json"],
 		[["fleet", "run", "demo", "--detached-root", "not a root"], "--detached-root"],
 		[["fleet", "wait", "fleet-abc", "--bogus"], "--bogus"],
 		[["fleet", "wait"], "fleet wait"],

@@ -510,12 +510,7 @@ Archives accept `agent` and `playbook` file entry types alongside prompts and sk
 
 When the model runs `clio-coder share import` without `--dry-run`, `clio-coder extensions test` or `clio-coder extensions validate` through its shell, the call asks for one-shot operator confirmation in `default`, because an import installs packages from an archive the model may have written and the other two run a package's own code. `extensions install` stays blocked for the model at `default`. Contained `yolo`, the default, decides these calls as `default` does and refuses where `default` would ask the operator; at unconfined `yolo` only the yolo floor holds. The dispositions are in [skills-marketplace.md](skills-marketplace.md#operator-ownership-of-installed-skills). Share commands exit 0 on success, 1 when the plan carries an error or conflict diagnostic, and 2 for a usage error.
 
-### Aliases and session commands
-
-```bash
-clio-coder export --out project.clio-coder-share.json
-clio-coder import project.clio-coder-share.json --dry-run
-```
+### Session commands
 
 In a session, `/archive export <path>` writes a project-scope archive with every resource class, and `/archive import <path> [--dry-run] [--force]` imports one. `/fleet share` shares a worker result with the main agent and is unrelated to archives.
 

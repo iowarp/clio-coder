@@ -64,17 +64,9 @@ function isPanesPresetId(value: string): value is PanesPresetId {
 	return PANES_PRESETS.some((preset) => preset.id === value);
 }
 
-/**
- * Retired preset spellings that still parse. The files preset shipped as
- * `yazi` in 0.4.0 and 0.4.1, so an operator's muscle memory and any script
- * that says `/panes open yazi` keeps working and lands on the same pane.
- */
-export const PANES_PRESET_ALIASES: Readonly<Record<string, PanesPresetId>> = { yazi: "files" };
-
 /** The canonical preset id for an operator-typed name, or null when it is not a preset. */
 export function resolvePanesPresetId(value: string): PanesPresetId | null {
-	if (isPanesPresetId(value)) return value;
-	return PANES_PRESET_ALIASES[value] ?? null;
+	return isPanesPresetId(value) ? value : null;
 }
 
 /** One pane Clio owns, flattened for display. */
