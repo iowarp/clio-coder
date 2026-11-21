@@ -19,6 +19,18 @@ export type Obligation = RunObligation;
 /** Ruling 5: an unmet obligation is retried once, on another model. */
 export const OBLIGATION_RETRY_LIMIT = 1;
 
+/**
+ * Whether the request asks the run to change nothing: the caller or the turn said read-only, the recipe's class is
+ * read-only, or its contract is a Hoare proof. The only place this is derived; the role and the envelope read it.
+ */
+export function requestedWriteNone(input: {
+	readOnly: boolean | undefined;
+	capabilityClass: string | null | undefined;
+	hoareContract: boolean;
+}): boolean {
+	return input.readOnly === true || input.capabilityClass === "read-only" || input.hoareContract;
+}
+
 export function resolveRunRole(input: {
 	gateRole?: GateTopologyRole | undefined;
 	capabilityClass: string | null;

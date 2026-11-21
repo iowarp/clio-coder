@@ -14,7 +14,7 @@ import {
 import type { CapabilityGate } from "../middleware/capability-gate.js";
 import { createCapabilityGate } from "../middleware/capability-gate.js";
 import type { DispatchRequest } from "./contract.js";
-import { deriveExecutionRole, type ExecutionRole } from "./execution-role.js";
+import { type ExecutionRole, requestRunRole } from "./execution-role.js";
 import type { RouteCandidate } from "./route-decision.js";
 import { type RoutePrior, routePriorForLatencyClass } from "./route-policy.js";
 import type { RouteReadinessReport } from "./route-readiness.js";
@@ -264,47 +264,54 @@ export function agentRouteCandidates(input: {
 	const baselineSpec = byId.get(request.agentId);
 	const auto = request.agentSelection?.mode === "auto";
 	const recovery = (request.lineage?.attempt ?? 0) > 0;
+	// Each alternate takes the role this request would run under seated as it: the one rule, over the request's own
+	// gate position, write scope and contract (DESIGN 4.2).
+	const roleOf = (spec: AgentSpec): ExecutionRole =>
+		requestRunRole({ ...request, agentId: spec.id }, () => ({
+			capabilityClass: spec.capabilityClass,
+			resultContract: spec.resultContract,
+		}));
 	const allowedAgentIds = recovery
 		? [...new Set((request.allowedCandidates ?? []).map((candidate) => candidate.agentId))]
 		: input.mode === "active"
 			? auto
 				? specs
 						.filter((spec) => {
-							const role = deriveExecutionRole({
-								attempt: 0,
-								capabilityClass: spec.capabilityClass,
-								resultContractKind: spec.resultContract.kind,
-							});
+							const role = roleOf(spec);
 							return input.activeAgentRoles.some((pair) => pair.agentId === spec.id && pair.executionRole === role);
 						})
 						.map((spec) => spec.id)
 				: [request.agentId]
 			: null;
 	const baselineAuthority = baselineSpec?.capabilityClass;
-	const candidates = evaluateAgentCandidates(specs, {
-		selectionMode: auto ? "auto" : "explicit",
-		baselineAgentId: request.agentSelection?.baselineAgentId ?? request.agentId,
-		approvedAudiences: ["base", "shadow", "custom"],
-		approvedAuthorities:
-			input.intentOverride !== undefined
-				? [input.intentOverride.requestedAuthority]
-				: auto
-					? (request.agentSelection?.approvedAuthorities ?? [])
-					: baselineAuthority !== undefined &&
-							AGENT_AUTOMATION_AUTHORITIES.includes(baselineAuthority as AgentAutomationAuthority)
-						? [baselineAuthority as AgentAutomationAuthority]
-						: [],
-		requiredTools: [],
-		requiredSkills: [],
-		expectedResultContractKind:
-			input.intentOverride?.expectedResultContractKind ?? (auto ? null : (baselineSpec?.resultContract.kind ?? null)),
-		locality: request.routingIntent?.locality ?? "any",
-		localAgentIds: specs.map((spec) => spec.id),
-		allowedAgentIds,
-		// Always the rules. A decision model never picks for the main agent,
-		// and dispatch never waits on one.
-		features: classifyAgentTask(request.task),
-	});
+	const candidates = evaluateAgentCandidates(
+		specs,
+		{
+			selectionMode: auto ? "auto" : "explicit",
+			baselineAgentId: request.agentSelection?.baselineAgentId ?? request.agentId,
+			approvedAudiences: ["base", "shadow", "custom"],
+			approvedAuthorities:
+				input.intentOverride !== undefined
+					? [input.intentOverride.requestedAuthority]
+					: auto
+						? (request.agentSelection?.approvedAuthorities ?? [])
+						: baselineAuthority !== undefined &&
+								AGENT_AUTOMATION_AUTHORITIES.includes(baselineAuthority as AgentAutomationAuthority)
+							? [baselineAuthority as AgentAutomationAuthority]
+							: [],
+			requiredTools: [],
+			requiredSkills: [],
+			expectedResultContractKind:
+				input.intentOverride?.expectedResultContractKind ?? (auto ? null : (baselineSpec?.resultContract.kind ?? null)),
+			locality: request.routingIntent?.locality ?? "any",
+			localAgentIds: specs.map((spec) => spec.id),
+			allowedAgentIds,
+			// Always the rules. A decision model never picks for the main agent,
+			// and dispatch never waits on one.
+			features: classifyAgentTask(request.task),
+		},
+		roleOf,
+	);
 	const evaluations = candidates.evaluations.map((evaluation) => ({
 		...evaluation,
 		executionRole: recovery ? ("recovery" as const) : evaluation.executionRole,
@@ -399,7 +406,11 @@ function candidateRejections(spec: AgentSpec, intent: AgentTaskIntent): string[]
 }
 
 /** Hard filters first; display-only category is deliberately never read. */
-function evaluateAgentCandidates(specs: ReadonlyArray<AgentSpec>, intent: AgentTaskIntent): AgentCandidateSet {
+function evaluateAgentCandidates(
+	specs: ReadonlyArray<AgentSpec>,
+	intent: AgentTaskIntent,
+	roleOf: (spec: AgentSpec) => ExecutionRole,
+): AgentCandidateSet {
 	if (specs.length > AGENT_CANDIDATE_LIMIT) {
 		throw new Error(
 			`dispatch routing configuration error: agent candidate overflow (${specs.length}/${AGENT_CANDIDATE_LIMIT})`,
@@ -410,11 +421,7 @@ function evaluateAgentCandidates(specs: ReadonlyArray<AgentSpec>, intent: AgentT
 		return {
 			agentId: spec.id,
 			specFingerprint: agentSpecFingerprint(spec),
-			executionRole: deriveExecutionRole({
-				attempt: 0,
-				capabilityClass: spec.capabilityClass,
-				resultContractKind: spec.resultContract.kind,
-			}),
+			executionRole: roleOf(spec),
 			authority: spec.capabilityClass,
 			rejections: candidateRejections(spec, intent),
 			coldPrior: prior,

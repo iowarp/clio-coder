@@ -323,6 +323,7 @@ describe("settings and migration boundary", () => {
 		deepStrictEqual(ids, [
 			"2026-11-21-retired-settings",
 			"2026-11-21-fleet-role-names",
+			"2026-11-21-run-role-populations",
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
@@ -370,7 +371,7 @@ describe("settings and migration boundary", () => {
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock","2026-11-21-fleet-role-names"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock","2026-11-21-fleet-role-names","2026-11-21-run-role-populations"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
@@ -541,6 +542,62 @@ describe("settings and migration boundary", () => {
 			["explorer", "seat", "checker", "builder"],
 		);
 		strictEqual(run.reports?.[id]?.changed.length, 5);
+		deepStrictEqual((await runPending(stateDir)).applied, []);
+	});
+
+	it("moves agent routing pairs and live ledger rows to the role each run's envelope runs under, once (DESIGN 4.2)", async () => {
+		const id = "2026-11-21-run-role-populations";
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((other) => other !== id);
+		writeFileSync(join(scratch.dir, "config", "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const written =
+			"version: 2\n# kept\nfleet:\n  adaptiveRouting:\n    roles: [checker]\n    agentRoles:\n      - { agentId: debugger, executionRole: builder }\n      - { agentId: coder, executionRole: builder }\n      - { agentId: scout, executionRole: explorer }\n      - { agentId: verifier, executionRole: checker }\n      - { agentId: ghost, executionRole: builder }\n";
+		writeFileSync(settingsFile, written, "utf8");
+		mkdirSync(stateDir, { recursive: true });
+		const rows = [
+			{ version: 1, id: "a", agentId: "debugger", executionRole: "builder", envelope: { role: "checker" } },
+			{
+				version: 1,
+				id: "b",
+				agentId: "coder",
+				executionRole: "builder",
+				readOnly: true,
+				permit: { capabilityClass: "workspace-edit" },
+			},
+			{
+				version: 1,
+				id: "c",
+				agentId: "coder",
+				executionRole: "recovery",
+				lineage: { attempt: 1 },
+				envelope: { role: "explorer" },
+			},
+			{ version: 1, id: "d", agentId: "main-agent", executionRole: "builder" },
+			{ version: 1, id: "e", agentId: "debugger", executionRole: "builder", permit: { capabilityClass: "verification" } },
+			{ version: 1, id: "f", agentId: "coder", executionRole: "builder", envelope: { role: "builder" } },
+		];
+		writeFileSync(join(stateDir, "runs.json"), JSON.stringify(rows), "utf8");
+		const run = await runPending(stateDir);
+		deepStrictEqual(run.applied, [id]);
+		const text = readFileSync(settingsFile, "utf8");
+		ok(text.includes("# kept"));
+		deepStrictEqual(parseYaml(text).fleet.adaptiveRouting.agentRoles, [
+			{ agentId: "debugger", executionRole: "checker" },
+			{ agentId: "coder", executionRole: "builder" },
+			{ agentId: "coder", executionRole: "explorer" },
+			{ agentId: "scout", executionRole: "explorer" },
+			{ agentId: "verifier", executionRole: "checker" },
+			{ agentId: "ghost", executionRole: "builder" },
+		]);
+		deepStrictEqual(validateSettings(parseYaml(text)).issues, []);
+		deepStrictEqual(
+			(JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8")) as Array<{ executionRole: string }>).map(
+				(row) => row.executionRole,
+			),
+			["checker", "explorer", "recovery", "builder", "checker", "builder"],
+		);
+		strictEqual(run.reports?.[id]?.changed.length, 4);
 		deepStrictEqual((await runPending(stateDir)).applied, []);
 	});
 

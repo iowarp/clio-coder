@@ -365,10 +365,8 @@ import {
 	type EnvelopeInput,
 	envelopeApproval,
 	envelopeForPermit,
-	envelopeRole,
 	envelopeToolNames,
 	placedInWorktree,
-	requestedWriteNone,
 	resolveWorkerEnvelope,
 	resolveWriteMode,
 	type WithheldCapability,
@@ -386,7 +384,13 @@ import {
 } from "./event-pump.js";
 import type { ExecutionHandoff } from "./execution-handoff.js";
 import { abbreviateHandoffText } from "./execution-handoff.js";
-import { dispatchResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
+import {
+	agentRoleFactsResolver,
+	dispatchResultContract,
+	requestRunRole,
+	routeCorrelationFactsForRun,
+	withAttemptRole,
+} from "./execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
@@ -463,7 +467,14 @@ import {
 	taskRequestsTestRemoval,
 	taskWorktreeCommitMessage,
 } from "./merge-gate.js";
-import { OBLIGATION_RETRY_LIMIT, type Obligation, type RunRole, resolveObligation } from "./obligation.js";
+import {
+	OBLIGATION_RETRY_LIMIT,
+	type Obligation,
+	type RunRole,
+	requestedWriteNone,
+	resolveObligation,
+	resolveRunRole,
+} from "./obligation.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
@@ -2828,10 +2839,12 @@ function resolveDispatchEnvelopeStage(input: {
 	const settings = input.liveSettings;
 	const facts = writeModeInput({ ...input, settings: input.settings });
 	const { confinesWrites } = facts;
-	const role = envelopeRole({
+	// The one role rule over the facts the request was admitted with; `requestRunRole` resolves the same rule at
+	// request time, so the journaled role and the route tuple are this role (DESIGN 4.2).
+	const role = resolveRunRole({
 		gateRole: req.gate?.role,
 		capabilityClass: spec.capabilityClass,
-		writeNone: facts.writeNone,
+		readOnly: facts.writeNone,
 	});
 	const mode = resolveWriteMode(facts);
 	const cwd = req.cwd ?? process.cwd();
@@ -11388,6 +11401,17 @@ export function createDispatchBundle(
 			// Validate before creating worktrees or acquiring writer/capacity leases.
 			previewFixed(req);
 		}
+		// The role is resolved from the request as admitted, a turn's read-only narrowing included, by the rule the
+		// envelope applies, so the journal, the route tuple and the receipt carry the envelope's role (DESIGN 4.2). A
+		// request that already names the recovery population (a fleet repair step) keeps it.
+		if (req.executionRole !== "recovery")
+			req = {
+				...req,
+				executionRole: requestRunRole(
+					req,
+					agentRoleFactsResolver((id) => agents.getSpec(id)),
+				),
+			};
 		// Every attempt takes its own run identity before the writer lease; retries
 		// join the original writer group through lineage.rootRunId (#434).
 		if (placedInOwnWorktree(req)) req = { ...req, worktree: true };

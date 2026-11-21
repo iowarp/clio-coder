@@ -38,8 +38,9 @@ import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep 
 import {
 	type AgentRoleFactsResolver,
 	gateAuthorContractKind,
-	requestExecutionRole,
+	requestRunRole,
 	withAttemptRole,
+	withRunRole,
 } from "./execution-role.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { hasConcurrentAgentSteps } from "./execution-scheduler.js";
@@ -217,11 +218,14 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					throw new Error(`fleet step '${context.stepId}' has no automatable agent authority`);
 				}
 				recipeFingerprints.set(spec.id, agentSpecFingerprint(spec));
-				const requestRole = requestExecutionRole({
-					agentId: context.agentId,
-					resolveFacts: input.roleFacts,
-					...(context.gateRole !== undefined ? { gateRole: context.gateRole } : {}),
-				});
+				const requestRole = requestRunRole(
+					{
+						agentId: context.agentId,
+						readOnly: context.scope === "readonly",
+						...(context.gateRole !== undefined ? { gate: { role: context.gateRole } } : {}),
+					},
+					input.roleFacts,
+				);
 				return {
 					requestedAuthority: spec.capabilityClass,
 					approvedAuthority: spec.capabilityClass,
@@ -443,16 +447,18 @@ export function fleetRouteResolver(
 	turnConstraints?: TurnConstraints,
 ): NonNullable<FleetRunPreviewInput["resolveRoute"]> {
 	return (step) => {
-		const request: DispatchRequest = {
-			agentId: step.agentId,
-			executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
-			task: step.task,
-			...(step.ledger !== undefined ? { ledger: step.ledger } : {}),
-			...(turnConstraints !== undefined ? { turnConstraints } : {}),
-			...(step.scope === "readonly" ? { readOnly: true as const } : {}),
-			...(step.target !== undefined ? { target: step.target } : {}),
-			...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
-		};
+		const request: DispatchRequest = withRunRole(
+			{
+				agentId: step.agentId,
+				task: step.task,
+				...(step.ledger !== undefined ? { ledger: step.ledger } : {}),
+				...(turnConstraints !== undefined ? { turnConstraints } : {}),
+				...(step.scope === "readonly" ? { readOnly: true as const } : {}),
+				...(step.target !== undefined ? { target: step.target } : {}),
+				...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+			},
+			roleFacts,
+		);
 		const resolution = preview?.(request);
 		if (!resolution) return null;
 		const foregroundHeld = resolution.endpoint === undefined ? 0 : (foregroundUsage()[resolution.endpoint.key] ?? 0);

@@ -10,7 +10,7 @@ import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
-import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { type AgentRoleFactsResolver, withRunRole } from "../domains/dispatch/execution-role.js";
 import { COUNCIL_VOTER_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
 import { answerBudgetForBatch } from "../domains/dispatch/handback.js";
 import type { DispatchIntent } from "../domains/dispatch/intent.js";
@@ -209,12 +209,9 @@ function dispatchRequestFromArgs(
 	const auto = requestedAgent === "auto";
 	const agentId =
 		auto || requestedAgent === undefined ? jobBaselineAgentId(task, args, options.hasAgent) : requestedAgent;
-	const request: DispatchRequest = {
+	// The role is resolved once the request is whole, its write scope included (DESIGN 4.2).
+	const request: Omit<DispatchRequest, "executionRole"> = {
 		agentId,
-		executionRole: requestExecutionRole({
-			agentId,
-			...(options.resolveFacts ? { resolveFacts: options.resolveFacts } : {}),
-		}),
 		task,
 		...(auto
 			? {
@@ -420,7 +417,7 @@ function dispatchRequestFromArgs(
 			reason: "task_forbids_writes",
 			message: `task_forbids_writes: the task forbids writing any file, but ${agentId} delivers a written artifact. Dispatch a read-only agent (scout, oracle, researcher) or drop the no-write wording.`,
 		};
-	return { ok: true, request };
+	return { ok: true, request: withRunRole(request, options.resolveFacts) };
 }
 
 export function dispatchRequestsFromArgs(

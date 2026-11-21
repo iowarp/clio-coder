@@ -21,6 +21,7 @@
 
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
+import { type AgentRoleFactsResolver, requestRunRole } from "../domains/dispatch/execution-role.js";
 import { relativizeWorkspaceAbsoluteTokens } from "../domains/dispatch/path-scope.js";
 import { canonicalWriteRoots } from "../domains/dispatch/writer-set.js";
 import { dispatchTaskArgs } from "./dispatch-arguments.js";
@@ -73,16 +74,18 @@ function attachedChecks(request: DispatchRequest): string[] {
 }
 
 /**
- * Run the request read-only. Callers pass only a request carrying no checks: a
- * member's own exclude it, and so do the operator's named checks parse merged in.
+ * Run the request read-only, under the role its narrowed write scope resolves to (a builder recipe runs as an
+ * explorer). Callers pass only a request carrying no checks: a member's own exclude it, and so do the operator's
+ * named checks parse merged in.
  */
-function readOnly(request: DispatchRequest): DispatchRequest {
+function readOnly(request: DispatchRequest, roleFacts: AgentRoleFactsResolver): DispatchRequest {
 	const { resolvedVerification: _checks, ...rest } = request;
-	return {
+	const narrowed: DispatchRequest = {
 		...rest,
 		readOnly: true,
 		...(request.intent !== undefined ? { intent: { ...request.intent, verification: [] } } : {}),
 	};
+	return { ...narrowed, executionRole: requestRunRole(narrowed, roleFacts) };
 }
 
 /** A member admission may run read-only: in place, writing no store tag, no artifact, nothing outside. */
@@ -117,6 +120,7 @@ export interface DispatchNormalizeInput {
 export function normalizeDispatchAdmission(input: DispatchNormalizeInput): string[] {
 	const { args, requests, positions, mode, specs } = input;
 	const classes = new Map(specs.map((spec) => [spec.id, spec.capabilityClass]));
+	const roleFacts: AgentRoleFactsResolver = (id) => specs.find((spec) => spec.id === id) ?? null;
 	const notices: string[] = [];
 	const label = (index: number): string => `task ${positions[index] ?? index + 1} (${requests[index]?.agentId})`;
 	const memberArgs = (index: number): Record<string, unknown> | null =>
@@ -147,7 +151,7 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 		// Normalization never removes a check the operator required: the request stays as parsed and admission
 		// decides, or refuses, with the check in place.
 		if (attachedChecks(request).length > 0) continue;
-		requests[index] = readOnly(request);
+		requests[index] = readOnly(request, roleFacts);
 		if (capabilityClass === "read-only") continue;
 		notices.push(
 			`${NOTICE_PREFIX} ${label(index)} runs read-only: its intent.write_roots: [] declares no writes, so it gets the read-only tool surface and changes no files; declare write roots or use worktree: true for a task that writes.`,
@@ -163,7 +167,7 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 			const itemArgs = memberArgs(index);
 			const capabilityClass = classes.get(request.agentId);
 			if (
-				request.executionRole !== "builder" ||
+				requestRunRole(request, roleFacts) !== "builder" ||
 				capabilityClass === undefined ||
 				capabilityClass === "read-only" ||
 				!mayRunReadOnly(request, itemArgs, capabilityClass) ||
@@ -173,7 +177,7 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 				(request.intent?.expectedOutputs.length ?? 0) > 0
 			)
 				continue;
-			requests[index] = { ...readOnly(request), executionRole: "explorer" };
+			requests[index] = readOnly(request, roleFacts);
 			notices.push(
 				`${NOTICE_PREFIX} ${label(index)} runs read-only as an explorer: a builder in a parallel batch with no intent.write_roots and no expected_outputs is admitted as inspection; declare disjoint write roots or use worktree: true for a task that writes.`,
 			);
