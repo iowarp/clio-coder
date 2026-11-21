@@ -203,6 +203,8 @@ export function classifyFailure(
 	// Ruling 5: an unmet obligation is the model's, even under a deterministic code such as a builder's worker_no_work.
 	if (evidence.obligationUnmet !== undefined) return "model-quality";
 	if (isDeterministicOutcomeCode(code)) return "deterministic-task";
+	// The peer refused this seat's sign-in, as a 401/403 does: another target may serve, this one will not (C-16).
+	if (code === "acp_auth_required") return "target-auth";
 	// #425: an unrepaired result can be retried, but its shape says nothing about endpoint health.
 	if (code === "result_contract_invalid") return "model-quality";
 	if (evidence.qualityGateFailure === true) return "model-quality";

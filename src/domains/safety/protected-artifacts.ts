@@ -103,10 +103,10 @@ export interface ShellToken {
 }
 
 /**
- * Paths a tool call would mutate, derived from the tool's path argument.
- * Returns at most one path today: write/edit when a path arg is present, and
- * the artifact writers' defaults. Bash mutation targets are handled
- * separately through command classification.
+ * Paths a tool call would mutate, derived from the tool's path arguments:
+ * write/edit's path, or every entry of `paths` (the form an ACP call that
+ * names several targets maps to), and the artifact writers' defaults. Bash
+ * mutation targets are handled separately through command classification.
  */
 export function toolMutationPaths(toolName: string, args: Record<string, unknown> | undefined): string[] {
 	if (toolName === ToolNames.Artifact) {
@@ -114,7 +114,10 @@ export function toolMutationPaths(toolName: string, args: Record<string, unknown
 	}
 	if (toolName === ToolNames.Write || toolName === ToolNames.Edit) {
 		const candidate = mutationPathArg(args);
-		return candidate === null ? [] : [candidate];
+		const many = Array.isArray(args?.paths)
+			? args.paths.filter((path): path is string => typeof path === "string" && path.length > 0)
+			: [];
+		return [...(candidate === null ? [] : [candidate]), ...many.filter((path) => path !== candidate)];
 	}
 	return [];
 }
