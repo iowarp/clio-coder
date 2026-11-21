@@ -130,6 +130,17 @@ test("loop guard repeat credit: a slow or changing repeat runs on, a fast identi
 			reasons: [[0, /calling it again returns the same text/u]],
 		},
 		{
+			// FX-48: bash takes no size arguments, so its stagnation refusal names the command, not limit/offset.
+			name: "tells a fast poll that settled on one output to change the command, never naming size arguments",
+			guard: pollGuard,
+			calls: ["pending", "done", "done", "done"].map((output) => poll({ elapsedMs: 100, output })),
+			admitted: [true, true, true, false],
+			reasons: [
+				[0, /the same bash command returned byte-identical output 2 times in a row\. Change the command or stop/u],
+				[0, /limit|offset|size argument/u, false],
+			],
+		},
+		{
 			name: "blocks once a changing tool settles on one result",
 			guard: pollGuard,
 			calls: ["step 1", "step 2", "done", "done", "done"].map(stateful),
