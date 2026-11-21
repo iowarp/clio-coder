@@ -53,7 +53,7 @@ import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playb
 import { redactCommandOutputSecrets } from "../evidence/redact.js";
 import { effectiveScratchRoots } from "../safety/scratch-roots.js";
 import { readVerifiedRun } from "../telemetry/run-record.js";
-import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
+import { CODE_STEP_CAPTURE_MAX_BYTES, CODE_STEP_CLEANUP_FAILURES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { BASE_PREFLIGHT_EXIT, BASE_PREFLIGHT_SCRIPT, baseModulesLinks } from "./host-verification-base.js";
 import { failsTheSameOnBase, hostCheckBaseNote } from "./host-verification-note.js";
@@ -1200,12 +1200,17 @@ async function spawnResolvedCheck(
 	const { outcome, judgement } = chosen as NonNullable<typeof chosen>;
 	const artifactPath = outcome.record.artifactPaths[0];
 	// A command check whose pytest or unittest run collected no test judged nothing: sealed as not run, never a failure
-	// the task is rejected for (CLI-P51).
+	// the task is rejected for (CLI-P51). Only a run that completed on its own, with its whole output and no changed
+	// test run beside it, has a summary that speaks for the exit.
 	const noTests =
 		outcome.launched &&
 		judgement.report === undefined &&
 		(resolvedCheck.kind === undefined || resolvedCheck.kind === "command") &&
-		collectedNoTests(outcome.record.argv, judgement.exitCode);
+		!outcome.record.timedOut &&
+		!outcome.record.outputTruncated &&
+		outcome.record.commandRuns === undefined &&
+		!CODE_STEP_CLEANUP_FAILURES.some((failure) => outcome.report.outputExcerpt.includes(failure)) &&
+		collectedNoTests(outcome.record.argv, judgement.exitCode, outcome.report.outputExcerpt);
 	if (judgement.report?.kind === "numeric-compare") {
 		if (numeric?.inputs !== undefined || numeric?.provenance !== undefined) {
 			judgement.report.provenance = { inputs: inputsBefore, probes };
@@ -1388,10 +1393,24 @@ export async function runHostVerification(input: {
 			return { status: "skipped", reason: "check_not_started", checks: results };
 		}
 	}
+	if (judgedNothingForNoTests(results)) return { status: "skipped", reason: NO_TESTS_COLLECTED_REASON, checks: results };
 	return {
 		status: results.every((check) => check.exitCode === 0) ? "verified" : "rejected",
 		checks: results,
 	};
+}
+
+const NO_TESTS_COLLECTED_REASON = "no_tests_collected";
+
+/**
+ * No check ran a test, and one ran but collected none. Such a run is not `verified`: that status lets the merge gate
+ * land the worktree and the board print a pass, while nothing was judged (CLI-P51).
+ */
+function judgedNothingForNoTests(checks: ReadonlyArray<RunHostVerificationCheck>): boolean {
+	return (
+		checks.some((check) => check.notRun === "no-tests") &&
+		checks.every((check) => check.notRun !== undefined && check.exitCode === 0)
+	);
 }
 
 function implicatedPaths(outputExcerpt: string, checkCwd: string): string[] {
@@ -1725,8 +1744,15 @@ export function createBatchVerificationGate(
 				// `worker-evidence.ts:161` print. An exculpated member's checks array
 				// still carries a non-zero exit code, so it seals its own status
 				// instead of borrowing that claim.
-				status: rejected ? "rejected" : unimplicated ? "not_implicated" : "verified",
+				status: rejected
+					? "rejected"
+					: unimplicated
+						? "not_implicated"
+						: judgedNothingForNoTests(own)
+							? "skipped"
+							: "verified",
 				...(!rejected && unimplicated ? { reason: "batch_settled_not_implicated" } : {}),
+				...(!rejected && !unimplicated && judgedNothingForNoTests(own) ? { reason: NO_TESTS_COLLECTED_REASON } : {}),
 				checks: own,
 				strategy: "batch-settled",
 				// Copied per receipt so no two members of the batch share a mutable array.

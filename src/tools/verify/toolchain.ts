@@ -2,6 +2,7 @@ import {
 	accessSync,
 	closeSync,
 	constants,
+	type Dirent,
 	existsSync,
 	fstatSync,
 	openSync,
@@ -318,39 +319,74 @@ function declaresPytestDependency(document: NonNullable<ReturnType<typeof parseT
 	return poetry.some((table) => table !== null && Object.hasOwn(table, "pytest"));
 }
 
+const TEST_MODULE_RE = /^test.*\.py$|_test\.py$/u;
+/** Directories a test scan never enters: environments, caches and build output, not the project's tests. */
+const TEST_SCAN_SKIPPED = new Set(["node_modules", "__pycache__", "site-packages", "venv", "env", "build", "dist"]);
+const TEST_SCAN_DEPTH = 4;
+const TEST_SCAN_ENTRIES = 5000;
+const TEST_SCAN_FILES = 200;
+
 /**
- * Whether a `.py` file directly in `directory` defines a `unittest.TestCase` subclass. A script-style test file
- * (module-level asserts run as `python3 test_ops.py`) gives unittest nothing to collect, so deriving the check there
- * only ever reports `NO TESTS RAN` (CLI-P51).
+ * The `test*.py` / `*_test.py` modules under `directory`, breadth first: `depth` levels below it, never into hidden,
+ * environment or build directories. `complete` is false when a bound stopped the walk before it saw everything.
  */
-function definesTestCase(workspaceRoot: string, directory: string, names: ReadonlyArray<string>): boolean {
-	return names
-		.filter((name) => name.endsWith(".py"))
-		.slice(0, 200)
-		.some((name) => {
-			const text = regularFileText(path.join(workspaceRoot, directory, name), workspaceRoot);
-			return typeof text === "string" && /^\s*class\s+\w+\s*\([^)]*TestCase\b/mu.test(text);
-		});
+function testModulesUnder(
+	workspaceRoot: string,
+	directory: string,
+	depth: number,
+): { files: string[]; complete: boolean } {
+	const files: string[] = [];
+	let entries = 0;
+	let level = [directory];
+	for (let current = 0; level.length > 0; current += 1) {
+		const next: string[] = [];
+		for (const dir of level) {
+			let dirents: Dirent[];
+			try {
+				dirents = readdirSync(path.join(workspaceRoot, dir), { withFileTypes: true });
+			} catch {
+				// A missing directory is simply not a test directory.
+				continue;
+			}
+			for (const entry of dirents) {
+				entries += 1;
+				if (entries > TEST_SCAN_ENTRIES) return { files, complete: false };
+				if (entry.isFile() && TEST_MODULE_RE.test(entry.name)) files.push(path.join(dir, entry.name));
+				else if (entry.isDirectory() && !entry.name.startsWith(".") && !TEST_SCAN_SKIPPED.has(entry.name))
+					next.push(path.join(dir, entry.name));
+			}
+		}
+		// The root is read one level on purpose; only the scan bound below `tests/` leaves modules unseen.
+		if (current === depth) return { files, complete: depth < TEST_SCAN_DEPTH || next.length === 0 };
+		level = next;
+	}
+	return { files, complete: true };
 }
 
 /**
- * The first conventional test directory holding `test*.py` or `*_test.py`
- * modules and a `unittest.TestCase` subclass, then the root: a flat project keeps `test_calc.py` beside
+ * Whether unittest may find a test case among these modules. A script-style test file (module-level asserts run as
+ * `python3 test_ops.py`) defines no class and no `load_tests`, so deriving the check there only ever reports
+ * `NO TESTS RAN` (CLI-P51). Any class with a base counts, since an aliased `TestCase` import or a project base class
+ * cannot be told apart from its name, and an unread file or a bound that stopped the scan keeps the check: a check
+ * derived in error now answers "no tests collected" rather than failing.
+ */
+function mayDefineTestCases(workspaceRoot: string, modules: { files: string[]; complete: boolean }): boolean {
+	if (!modules.complete || modules.files.length > TEST_SCAN_FILES) return true;
+	return modules.files.some((relative) => {
+		const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
+		return typeof text !== "string" || /^\s*class\s+\w+\s*\(\s*\w|^\s*def\s+load_tests\s*\(/mu.test(text);
+	});
+}
+
+/**
+ * The first conventional test directory holding `test*.py` or `*_test.py` modules (nested ones included under
+ * `tests/` and `test/`) that may define a test case, then the root: a flat project keeps `test_calc.py` beside
  * `calc.py`, and verify found no check there while `python3 -m unittest` passed.
  */
 function unittestStartDirectory(workspaceRoot: string): string | null {
 	for (const directory of ["tests", "test", "."]) {
-		try {
-			const names = readdirSync(path.join(workspaceRoot, directory));
-			if (
-				names.some((name) => /^test.*\.py$|_test\.py$/u.test(name)) &&
-				definesTestCase(workspaceRoot, directory, names)
-			) {
-				return directory;
-			}
-		} catch {
-			// A missing directory is simply not a test directory.
-		}
+		const modules = testModulesUnder(workspaceRoot, directory, directory === "." ? 0 : TEST_SCAN_DEPTH);
+		if (modules.files.length > 0 && mayDefineTestCases(workspaceRoot, modules)) return directory;
 	}
 	return null;
 }

@@ -171,6 +171,7 @@ const HOST_SOURCE =
 
 const HOST_REASONS: Record<string, string> = {
 	worker_not_successful: "The worker did not succeed, so the declared checks did not run.",
+	no_tests_collected: "The test runner collected no tests, so no declared check judged the result.",
 };
 
 /** Why a host check never started; mirrors `hostCheckNotRunNote` in the dispatch domain. */

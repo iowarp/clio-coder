@@ -728,7 +728,12 @@ function claimsHostRerunnableChecks(receipt: RunResult, readOnly: boolean): bool
 
 /** Name the next host step from sealed facts when a worker claimed checks it never ran. */
 export function nextHostValidationAction(receipt: RunResult, readOnly = false): string | null {
-	if (receipt.hostVerification?.status === "verified" || receipt.hostVerification?.checks.length) return null;
+	// A host check that collected no test judged nothing, so it does not stand in for the follow-up (CLI-P51).
+	if (
+		receipt.hostVerification?.status === "verified" ||
+		receipt.hostVerification?.checks.some((check) => check.notRun !== "no-tests")
+	)
+		return null;
 	const grounding = receipt.validationGrounding;
 	if (grounding?.basis !== "no-command-executed" || grounding.ungrounded.length === 0) return null;
 	if (!claimsHostRerunnableChecks(receipt, readOnly)) {

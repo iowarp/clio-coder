@@ -6,6 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
+import { collectedNoTests } from "../../src/tools/verify/scripts.js";
 import { discoverToolchainChecks } from "../../src/tools/verify/toolchain-checks.js";
 
 const roots: string[] = [];
@@ -71,38 +72,81 @@ describe("verify in repositories without package.json", () => {
 			"test_ops.py": "from ops import add\nassert add(1, 2) == 3\nprint('ok')\n",
 		});
 		strictEqual(commandOf(root, "python-unittest"), undefined);
+		// A nested suite under tests/ and an aliased TestCase import still derive it.
+		const nested = workspace({
+			"tests/__init__.py": "",
+			"tests/unit/__init__.py": "",
+			"tests/unit/test_ops.py":
+				"from unittest import TestCase as TC\n\nclass OpsTest(TC):\n\tdef test_add(self):\n\t\tpass\n",
+		});
+		deepStrictEqual(commandOf(nested, "python-unittest")?.slice(-2), ["-s", "tests"]);
 	});
 
-	it("reports a unittest run that collected no test as unavailable, never a failed check (CLI-P51)", async () => {
-		const root = workspace({
-			"tests/test_a.py": TEST_CASE,
-			"bin/python3": "#!/bin/sh\necho 'Ran 0 tests in 0.000s'\necho 'NO TESTS RAN'\nexit 5\n",
-		});
-		chmodSync(join(root, "bin/python3"), 0o755);
-		const previousPath = process.env.PATH;
-		const previousVenv = process.env.VIRTUAL_ENV;
-		process.chdir(root);
-		try {
-			process.env.PATH = join(root, "bin");
-			delete process.env.VIRTUAL_ENV;
-			const result = await verifyTool.run({ check: "python-unittest" });
-			strictEqual(result.kind, "error");
-			strictEqual(result.details?.exitCode, 5);
-			strictEqual(result.details?.noTestsCollected, true);
-			deepStrictEqual(result.details?.judgement, {
-				execution: "unavailable",
-				validation: "not-run",
-				scientificValidity: "not established by this check",
-			});
-			strictEqual(result.details?.unresolved, true, "a run that collected no test judged nothing");
-			match(textOf(result), /no tests collected/u);
-		} finally {
-			if (previousPath === undefined) delete process.env.PATH;
-			else process.env.PATH = previousPath;
-			if (previousVenv === undefined) delete process.env.VIRTUAL_ENV;
-			else process.env.VIRTUAL_ENV = previousVenv;
+	it("reads a pytest or unittest argv from its start, launcher included, before excusing exit 5 (CLI-P51)", () => {
+		const summary = "Ran 0 tests in 0.000s\n\nNO TESTS RAN\n";
+		for (const [argv, runner] of [
+			[["python3", "-m", "unittest", "discover", "-s", "."], true],
+			[["/v/.venv/bin/python3.12", "-B", "-m", "pytest"], true],
+			[["uv", "run", "--no-sync", "pytest"], true],
+			[["uv", "run", "--with", "x", "--", "python", "-m", "pytest"], true],
+			[["poetry", "run", "--", "pytest"], true],
+			[["pipenv", "run", "py.test"], true],
+			[["npm", "run", "pytest"], false],
+			[["./check.sh", "-m", "pytest"], false],
+			[["python3", "tool.py", "-m", "pytest"], false],
+		] as const) {
+			strictEqual(collectedNoTests(argv, 5, summary), runner, argv.join(" "));
 		}
+		strictEqual(
+			collectedNoTests(["python3", "-m", "pytest"], 5, "collected 0 items\n\n== no tests ran in 0.01s ==\n"),
+			true,
+		);
+		strictEqual(collectedNoTests(["python3", "-m", "unittest"], 5, ""), false, "a bare exit 5, as sys.exit(5) gives");
 	});
+
+	for (const [label, summary, noTests] of [
+		[
+			"that collected no test as unavailable, never a failed check",
+			"echo 'Ran 0 tests in 0.000s'\necho 'NO TESTS RAN'",
+			true,
+		],
+		[
+			"whose setUpClass raised (exit 5, FAILED) as a failed check",
+			"echo 'ERROR: setUpClass (test_a.T)'\necho 'Ran 0 tests in 0.000s'\necho 'FAILED (errors=1)'",
+			false,
+		],
+	] as const) {
+		it(`reports a unittest run ${label} (CLI-P51)`, async () => {
+			const root = workspace({
+				"tests/test_a.py": TEST_CASE,
+				"bin/python3": `#!/bin/sh\n${summary}\nexit 5\n`,
+			});
+			chmodSync(join(root, "bin/python3"), 0o755);
+			const previousPath = process.env.PATH;
+			const previousVenv = process.env.VIRTUAL_ENV;
+			process.chdir(root);
+			try {
+				process.env.PATH = join(root, "bin");
+				delete process.env.VIRTUAL_ENV;
+				const result = await verifyTool.run({ check: "python-unittest" });
+				strictEqual(result.kind, "error");
+				strictEqual(result.details?.exitCode, 5);
+				strictEqual(result.details?.noTestsCollected, noTests ? true : undefined);
+				deepStrictEqual(result.details?.judgement, {
+					execution: noTests ? "unavailable" : "failed",
+					validation: noTests ? "not-run" : "exit-code",
+					scientificValidity: "not established by this check",
+				});
+				strictEqual(result.details?.unresolved, noTests ? true : undefined, "only a run that judged nothing is not run");
+				if (noTests) match(textOf(result), /no tests collected/u);
+			} finally {
+				if (previousPath === undefined) delete process.env.PATH;
+				else process.env.PATH = previousPath;
+				if (previousVenv === undefined) delete process.env.VIRTUAL_ENV;
+				else process.env.VIRTUAL_ENV = previousVenv;
+			}
+		});
+	}
 
 	it("follows pytest when the project declares it as a dependency", () => {
 		const root = workspace({
