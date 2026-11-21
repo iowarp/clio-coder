@@ -2074,11 +2074,12 @@ export const TurnContinuedSchema = Type.Object(
 );
 /** Contained yolo's audit (ob-yolo D7): what ran on its own, what it left for the operator, and why it stopped. */
 const autonomyUsage = { toolCalls: count, activeMs: duration, tokens: count };
-export const AutonomyHaltKind = vocabulary(["calls", "minutes", "tokens", "judge"]);
+export const AutonomyHaltKind = vocabulary(["calls", "minutes", "tokens", "judge", "exploration"]);
 export const AutonomyOpenDecisionKind = vocabulary(["judge-block", "no-verdict", "operator-only", "outward-unnamed"]);
 export const AutonomyEndReason = vocabulary([
 	"autonomous-cap",
 	"judge-streak",
+	"exploration_stalled",
 	"shutdown",
 	"left-yolo",
 	"session-changed",

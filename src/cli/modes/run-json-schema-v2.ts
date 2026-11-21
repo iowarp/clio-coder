@@ -10,7 +10,7 @@
  */
 import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
-import { EXIT_CODES } from "../kit/exit-codes.js";
+import { EXIT_CODES, EXPLORATION_STALLED_EXIT_CODE } from "../kit/exit-codes.js";
 import type { RunJsonDispatchedRunOutcome, RunJsonVerifyResult } from "./run-json-schema.js";
 
 export const RUN_RESULT_SCHEMA_VERSION = 2;
@@ -21,7 +21,8 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
  * `run_failed` a failure no narrower code names. `flag_conflict`, `not_configured`, `session_live` (the resumed
  * session is open in another process) and `io` (a path the run needs cannot be opened) are the pre-work refusals with a
  * narrower name of their own. `context_overflow` is a run the context window ended: the post-tool guard or overflow
- * recovery could not make the request fit.
+ * recovery could not make the request fit. `exploration_stalled` is an unattended run the read-streak decision gate
+ * ended: it kept reading after every note and two refused rounds.
  */
 const CAUSE_ORDER = [
 	"interrupted",
@@ -49,6 +50,7 @@ const CAUSE_ORDER = [
 	"provider_error",
 	"context_overflow",
 	"no_answer",
+	"exploration_stalled",
 	"output_limit",
 	"schema_mismatch",
 	"verify_failed",
@@ -128,6 +130,8 @@ function exitCodeFor(cause: RunCause): number {
 		case "max_requests":
 		case "max_tool_calls":
 			return EXIT_CODES.limitReached;
+		case "exploration_stalled":
+			return EXPLORATION_STALLED_EXIT_CODE;
 		default:
 			return EXIT_CODES.failed;
 	}

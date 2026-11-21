@@ -56,12 +56,11 @@ import { createRedactionTally, redactSecretsText } from "../../domains/evidence/
 import { describeMissing, missingFromFailedCall } from "../../domains/lifecycle/setup-status.js";
 import {
 	AUTONOMOUS_CAP_EXIT_CODE,
-	AUTONOMOUS_CAP_REASON,
 	AUTONOMY_JUDGE_STREAK_EXIT_CODE,
 	type AutonomyHalt,
 	type AutonomyReport,
+	autonomyHaltReason,
 	headlessHaltNotice,
-	JUDGE_STREAK_REASON,
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
@@ -99,6 +98,7 @@ import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
+import { EXPLORATION_STALLED_EXIT_CODE } from "../kit/exit-codes.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
 import { sealedFactsNotVerified } from "../run-output.js";
@@ -1961,11 +1961,16 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (halt !== null) {
 		const failureMessage = `clio-coder run: ${headlessHaltNotice(halt, options.autonomy?.() ?? null)}`;
 		terminal = {
-			exitCode: halt.kind === "judge" ? AUTONOMY_JUDGE_STREAK_EXIT_CODE : AUTONOMOUS_CAP_EXIT_CODE,
+			exitCode:
+				halt.kind === "judge"
+					? AUTONOMY_JUDGE_STREAK_EXIT_CODE
+					: halt.kind === "exploration"
+						? EXPLORATION_STALLED_EXIT_CODE
+						: AUTONOMOUS_CAP_EXIT_CODE,
 			outcome: "failed",
 			status: "failed",
 			failureMessage,
-			outcomeDetail: halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON,
+			outcomeDetail: autonomyHaltReason(halt),
 		};
 		stderrMessage = failureMessage;
 	}
