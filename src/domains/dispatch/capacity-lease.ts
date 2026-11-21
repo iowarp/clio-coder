@@ -509,6 +509,14 @@ const MAIN_CACHE_LANE_TTL_MS = 60 * 60_000;
 /** How long a released main lane stays a hint for its conversation: about as long as the backend keeps a prefix. */
 const MAIN_CACHE_LANE_HINT_MS = 60 * 60_000;
 const MAX_MAIN_CACHE_LANES = 1_000;
+/**
+ * How long a main lane claim or release waits for the admission lock before the engine falls back to its own lanes.
+ * Both run synchronously on the main thread at a conversation's first turn, its renewal and its cleanup, so the wait
+ * is a frozen TUI. Every holder of this lock reads and rewrites one bounded JSON file, a few milliseconds even with
+ * an fsync; a one-second budget still covers a queue of several such writers on a slow disk, and a wait past it means
+ * a holder that is stuck, not busy. The cost of giving up is cache affinity only: the turn runs on an in-process lane.
+ */
+export const MAIN_CACHE_LANE_LOCK_TIMEOUT_MS = 1_000;
 
 function lowestFreeCacheLane(file: CapacityStateFile, key: string, preferred?: number): number {
 	const taken = new Set<number>();
@@ -550,6 +558,8 @@ export interface ClaimMainCacheLaneInput {
 	ownerPid?: number;
 	processBirthToken?: string;
 	probe?: LeaseOwnerProbe;
+	/** Lock acquisition budget; the default is the store-wide one. */
+	timeoutMs?: number;
 }
 
 /**
@@ -557,92 +567,107 @@ export interface ClaimMainCacheLaneInput {
  * else the lowest free one, across every process sharing this state dir. Each claim renews the record.
  */
 export function claimMainCacheLane(input: ClaimMainCacheLaneInput): number {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const nowMs = input.nowMs ?? Date.now();
-		const file = readCapacityStateUnsafe();
-		reclaim(file, nowMs, input.probe ?? defaultProbe);
-		const ownerPid = input.ownerPid ?? process.pid;
-		const token = input.processBirthToken ?? processBirthToken(ownerPid);
-		if (!token) throw new Error("dispatch: cannot establish process birth token");
-		const host = hostname();
-		const records = file.cacheLanes ?? [];
-		const at = new Date(nowMs).toISOString();
-		const expiresAt = new Date(nowMs + MAIN_CACHE_LANE_TTL_MS).toISOString();
-		const ours = (record: MainCacheLaneRecord): boolean =>
-			record.releasedAt === undefined &&
-			record.conversation === input.conversation &&
-			record.host === host &&
-			record.ownerPid === ownerPid &&
-			record.processBirthToken === token;
-		const held = records.find((record) => ours(record) && record.key === input.key);
-		if (held !== undefined) {
-			held.expiresAt = expiresAt;
-			writeCapacityStateUnsafe(file);
-			return held.lane;
-		}
-		const hint = [...records]
-			.reverse()
-			.find(
+	const lock = input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {};
+	return withStateFileLockSync(
+		capacityStateLockPath(),
+		() => {
+			const nowMs = input.nowMs ?? Date.now();
+			const file = readCapacityStateUnsafe();
+			reclaim(file, nowMs, input.probe ?? defaultProbe);
+			const ownerPid = input.ownerPid ?? process.pid;
+			const token = input.processBirthToken ?? processBirthToken(ownerPid);
+			if (!token) throw new Error("dispatch: cannot establish process birth token");
+			const host = hostname();
+			const records = file.cacheLanes ?? [];
+			const at = new Date(nowMs).toISOString();
+			const expiresAt = new Date(nowMs + MAIN_CACHE_LANE_TTL_MS).toISOString();
+			const ours = (record: MainCacheLaneRecord): boolean =>
+				record.releasedAt === undefined &&
+				record.conversation === input.conversation &&
+				record.host === host &&
+				record.ownerPid === ownerPid &&
+				record.processBirthToken === token;
+			const held = records.find((record) => ours(record) && record.key === input.key);
+			if (held !== undefined) {
+				held.expiresAt = expiresAt;
+				writeCapacityStateUnsafe(file);
+				return held.lane;
+			}
+			const hint = [...records]
+				.reverse()
+				.find(
+					(record) =>
+						record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key,
+				);
+			// This conversation's other head and its released hints on this key give way to the new claim.
+			const kept = records.filter(
 				(record) =>
-					record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key,
+					!ours(record) &&
+					!(record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key),
 			);
-		// This conversation's other head and its released hints on this key give way to the new claim.
-		const kept = records.filter(
-			(record) =>
-				!ours(record) &&
-				!(record.releasedAt !== undefined && record.conversation === input.conversation && record.key === input.key),
-		);
-		setCacheLanes(file, kept);
-		const lane = lowestFreeCacheLane(file, input.key, hint?.lane);
-		// The oldest hints go first; a full store of live lanes is a claim failure, as a full lease store is.
-		while (kept.length >= MAX_MAIN_CACHE_LANES) {
-			const index = kept.findIndex((record) => record.releasedAt !== undefined);
-			if (index < 0) throw new Error(`dispatch: main cache lane store is full (${kept.length}/${MAX_MAIN_CACHE_LANES})`);
-			kept.splice(index, 1);
-		}
-		kept.push({
-			key: input.key,
-			lane,
-			conversation: input.conversation,
-			host,
-			ownerPid,
-			processBirthToken: token,
-			acquiredAt: at,
-			expiresAt,
-		});
-		setCacheLanes(file, kept);
-		writeCapacityStateUnsafe(file);
-		return lane;
-	});
+			setCacheLanes(file, kept);
+			const lane = lowestFreeCacheLane(file, input.key, hint?.lane);
+			// The oldest hints go first; a full store of live lanes is a claim failure, as a full lease store is.
+			while (kept.length >= MAX_MAIN_CACHE_LANES) {
+				const index = kept.findIndex((record) => record.releasedAt !== undefined);
+				if (index < 0) throw new Error(`dispatch: main cache lane store is full (${kept.length}/${MAX_MAIN_CACHE_LANES})`);
+				kept.splice(index, 1);
+			}
+			kept.push({
+				key: input.key,
+				lane,
+				conversation: input.conversation,
+				host,
+				ownerPid,
+				processBirthToken: token,
+				acquiredAt: at,
+				expiresAt,
+			});
+			setCacheLanes(file, kept);
+			writeCapacityStateUnsafe(file);
+			return lane;
+		},
+		lock,
+	);
 }
 
 /** Release this process's main cache lanes: one conversation's, or all of them when none is named. */
 export function releaseMainCacheLanes(
 	conversation: string | undefined,
-	owner: { ownerPid?: number; processBirthToken?: string; nowMs?: number } = {},
+	owner: { ownerPid?: number; processBirthToken?: string; nowMs?: number; timeoutMs?: number } = {},
 ): void {
 	if (!capacityStateExists()) return;
-	withStateFileLockSync(capacityStateLockPath(), () => {
-		const file = readCapacityStateUnsafe();
-		const ownerPid = owner.ownerPid ?? process.pid;
-		const token = owner.processBirthToken ?? processBirthToken(ownerPid);
-		const at = new Date(owner.nowMs ?? Date.now()).toISOString();
-		let changed = false;
-		for (const record of file.cacheLanes ?? []) {
-			if (record.releasedAt !== undefined || record.host !== hostname() || record.ownerPid !== ownerPid) continue;
-			if (record.processBirthToken !== token) continue;
-			if (conversation !== undefined && record.conversation !== conversation) continue;
-			record.releasedAt = at;
-			changed = true;
-		}
-		if (changed) writeCapacityStateUnsafe(file);
-	});
+	const lock = owner.timeoutMs !== undefined ? { timeoutMs: owner.timeoutMs } : {};
+	withStateFileLockSync(
+		capacityStateLockPath(),
+		() => {
+			const file = readCapacityStateUnsafe();
+			const ownerPid = owner.ownerPid ?? process.pid;
+			const token = owner.processBirthToken ?? processBirthToken(ownerPid);
+			const at = new Date(owner.nowMs ?? Date.now()).toISOString();
+			let changed = false;
+			for (const record of file.cacheLanes ?? []) {
+				if (record.releasedAt !== undefined || record.host !== hostname() || record.ownerPid !== ownerPid) continue;
+				if (record.processBirthToken !== token) continue;
+				if (conversation !== undefined && record.conversation !== conversation) continue;
+				record.releasedAt = at;
+				changed = true;
+			}
+			if (changed) writeCapacityStateUnsafe(file);
+		},
+		lock,
+	);
 }
 
-/** The cross-process lane store the engine's main cache routing claims through (M-11). */
+/**
+ * The cross-process lane store the engine's main cache routing claims through (M-11). It runs on the main thread, so
+ * it waits `MAIN_CACHE_LANE_LOCK_TIMEOUT_MS` for the lock, never the store-wide 20 s.
+ */
 export const mainCacheLaneStore = {
-	claim: (key: string, conversation: string): number => claimMainCacheLane({ key, conversation }),
-	release: (conversation: string | undefined): void => releaseMainCacheLanes(conversation),
+	claim: (key: string, conversation: string): number =>
+		claimMainCacheLane({ key, conversation, timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS }),
+	release: (conversation: string | undefined): void =>
+		releaseMainCacheLanes(conversation, { timeoutMs: MAIN_CACHE_LANE_LOCK_TIMEOUT_MS }),
 };
 /** Inspect/expire the drain inside an admission-state transaction. The caller persists the mutated state. */
 export function activeCapacityDrainUnsafe(file: CapacityStateFile, nowMs: number): CapacityDrain | null {

@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Api, Context, Model, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
 import { registerSessionResourceCleanup } from "@earendil-works/pi-ai";
+import { StateFileLockTimeoutError } from "../../core/state-file-lock.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import { resolvedRequestContext } from "../context.js";
 import type { CodexConfiguration } from "../types.js";
 import type { PinnedPromptPrefix } from "./anthropic-system-split.js";
+import { declareRuntimeNoticeProducer } from "./residency.js";
 
 /** The stable head of one worker request: what its provider can serve from a prefix cache. */
 export interface CacheFamilyInput {
@@ -86,6 +89,40 @@ const localLanesOf = new Map<string, Set<number>>();
 const MAX_MAIN_CONVERSATIONS = 256;
 /** A held store lane is renewed this often, well inside the store's one-hour expiry for owners without a birth token. */
 const STORE_RENEW_MS = 10 * 60_000;
+/** Conversations already told that their lane is this process's own; the host says so once per conversation. */
+const fallbackNoticed = new Set<string>();
+const emitLaneFallbackNotice = declareRuntimeNoticeProducer("main-cache-lane", ["cache-lane-fallback"]);
+
+/**
+ * The store could not take a conversation's claim, so its turn runs on an in-process lane: journal each fallback and
+ * tell the operator once per conversation, in host text, since a concurrent process may now share its routing id.
+ */
+function reportLaneFallback(conversation: string, lane: number, error: unknown, model: Model<Api>): void {
+	const timeoutMs = error instanceof StateFileLockTimeoutError ? error.timeoutMs : null;
+	try {
+		telemetryHub().emit("cache.lane_fell_back", {
+			reason: timeoutMs !== null ? "lock-timeout" : "store-failed",
+			timeoutMs,
+			lane,
+		});
+	} catch {
+		// Telemetry never stops a turn.
+	}
+	if (fallbackNoticed.has(conversation)) return;
+	fallbackNoticed.add(conversation);
+	const why =
+		timeoutMs !== null
+			? `another Clio process held the dispatch admission lock past ${timeoutMs} ms`
+			: `the dispatch admission store failed (${error instanceof Error ? error.message : String(error)})`;
+	emitLaneFallbackNotice({
+		kind: "cache-lane-fallback",
+		level: "info",
+		targetId: model.provider,
+		runtimeId: model.provider,
+		model: model.id,
+		message: `Prompt cache routing for this conversation uses an in-process cache lane: ${why}. A concurrent session on this install may share its cache routing id and read less of its own cache.`,
+	});
+}
 
 function releaseMainLane(conversation: string): void {
 	const held = mainLaneOf.get(conversation);
@@ -111,11 +148,13 @@ function releaseStoreLane(conversation: string | undefined): void {
 registerSessionResourceCleanup((sessionId) => {
 	if (sessionId !== undefined) {
 		releaseMainLane(sessionId);
+		fallbackNoticed.delete(sessionId);
 		return;
 	}
 	const shared = [...mainLaneOf.values()].some((held) => held.shared);
 	mainLaneOf.clear();
 	localLanesOf.clear();
+	fallbackNoticed.clear();
 	if (shared) releaseStoreLane(undefined);
 });
 
@@ -126,9 +165,10 @@ registerSessionResourceCleanup((sessionId) => {
  * lane 0 and share the head's cache; concurrent ones (two herdr lanes or a TUI beside a GUI or ACP host on one
  * install, or several sessions in one host) stop sharing one id, under which live conversations lose their own
  * history more often. The store spans every process of this state dir; when it is absent or fails, the lanes are
- * this process's own.
+ * this process's own. The store waits at most a second for its lock on this thread; a failed claim is journaled and
+ * said once per conversation (`reportLaneFallback`), and a failed renewal keeps the lane the conversation has.
  */
-function claimMainLane(key: string, conversation: string, nowMs = Date.now()): number {
+function claimMainLane(key: string, conversation: string, model: Model<Api>, nowMs = Date.now()): number {
 	const held = mainLaneOf.get(conversation);
 	if (held?.key === key && !(held.shared && nowMs - held.claimedAt >= STORE_RENEW_MS)) return held.lane;
 	if (held?.key === key) {
@@ -148,15 +188,20 @@ function claimMainLane(key: string, conversation: string, nowMs = Date.now()): n
 	releaseMainLane(conversation);
 	if (mainLaneOf.size >= MAX_MAIN_CONVERSATIONS) {
 		const oldest = mainLaneOf.keys().next().value;
-		if (oldest !== undefined) releaseMainLane(oldest);
+		if (oldest !== undefined) {
+			releaseMainLane(oldest);
+			fallbackNoticed.delete(oldest);
+		}
 	}
+	let failure: { error: unknown } | undefined;
 	if (laneStore !== undefined) {
 		try {
 			const lane = laneStore.claim(key, conversation);
 			mainLaneOf.set(conversation, { key, lane, shared: true, claimedAt: nowMs });
 			return lane;
-		} catch {
+		} catch (error) {
 			// An unreadable or locked store must not stop the turn: fall back to this process's own lanes.
+			failure = { error };
 		}
 	}
 	const lanes = localLanesOf.get(key) ?? new Set<number>();
@@ -165,6 +210,7 @@ function claimMainLane(key: string, conversation: string, nowMs = Date.now()): n
 	while (lanes.has(lane)) lane += 1;
 	lanes.add(lane);
 	mainLaneOf.set(conversation, { key, lane, shared: false, claimedAt: nowMs });
+	if (failure !== undefined) reportLaneFallback(conversation, lane, failure.error, model);
 	return lane;
 }
 
@@ -209,7 +255,7 @@ export function withMainCacheRouting<T extends StreamOptions | SimpleStreamOptio
 		tools: tools ?? [],
 	});
 	// At most 60 characters, under the 64 Pi clamps a prompt cache key to.
-	const lane = claimMainLane(JSON.stringify(["main", model.baseUrl, head]), conversation) % 1_000_000;
+	const lane = claimMainLane(JSON.stringify(["main", model.baseUrl, head]), conversation, model) % 1_000_000;
 	return { ...options, sessionId: `clio-coder-m-${head}-${lane}`, [CONVERSATION]: conversation };
 }
 
