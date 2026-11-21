@@ -14,6 +14,11 @@ export interface CallObservation {
 	attemptId?: string;
 	callOutcome: "success" | "error" | "aborted";
 	failure?: CallFailureRecord;
+	/**
+	 * The settlement stamps the adapter wrote on its message (`settlementStamps`, src/domains/telemetry/call-facts.ts),
+	 * for a settlement that rebuilds the message from its usage (#434).
+	 */
+	stamps?: Readonly<Record<string, unknown>>;
 }
 
 // Only these adapters prove that an absent fetch means no send (#430).
