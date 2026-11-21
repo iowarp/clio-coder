@@ -274,6 +274,17 @@ class FakeSession {
 			this.emit("session.idle", {});
 			return;
 		}
+		if (prompt.includes("op:scout-lock")) {
+			// A scout whose one budgeted read locks it, then answers its result in the locked round (M-31).
+			this.usage({ model: "fake-model", apiCallId: "scout-0", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.emit("assistant.message", { messageId: "s0", apiCallId: "scout-0", content: "", toolRequests: [{ toolCallId: "call_scout", name: "read", arguments: { path: "CHAMPIONS.md" } }] });
+			const result = await this.tools.get("read").handler({ path: "CHAMPIONS.md" }, { toolCallId: "call_scout", sessionId: this.sessionId, toolName: "read", arguments: {}, signal: new AbortController().signal });
+			state.toolResults.push({ ...result, injectedBefore: [] });
+			this.usage({ model: "fake-model", apiCallId: "scout-1", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
+			this.emit("assistant.message", { messageId: "s1", apiCallId: "scout-1", content: JSON.stringify({ findings: [{ claim: "names the champions", path: "CHAMPIONS.md", line: 1 }], needsSplit: false, proposedSubtasks: [] }) });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("use tool")) {
 			const result = await this.spill(await this.callTool("call_1"));
 			if (!result) return;
@@ -2296,5 +2307,51 @@ test("a locked Copilot worker round keeps the session's reasoning effort and too
 	} finally {
 		disposeCopilotConversations("m20-worker");
 		models.splice(0, models.length, ...original);
+	}
+});
+
+// M-31: a scout's locked round on Copilot cannot name its result tool, so it keeps that tool declared rather than drop
+// it: the session's tool set never changes and the runtime keeps its cached prefix.
+test("a locked Copilot scout round keeps clio_submit_result declared, so the session's tools never change (M-31)", async () => {
+	const sessionsBefore = fake().sessions.length;
+	const events: Array<{ type: string }> = [];
+	try {
+		const worker = startWorkerRun(
+			{
+				agentId: "scout",
+				sessionId: "m31-scout",
+				systemPrompt: "Read then report.",
+				task: "op:scout-lock: read CHAMPIONS.md, then report.",
+				target: { id: "copilot-worker", runtime: "copilot-sdk" },
+				runtime: copilotSdkRuntime,
+				wireModelId: "fake-model",
+				thinkingLevel: "off",
+				modelCapabilities: { contextWindow: 64000, maxTokens: 4096, tools: true },
+				allowedTools: ["read"],
+				budget: { mode: "enforced", toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 150 },
+				noSkills: true,
+				cwd: process.cwd(),
+				onPermission: "deny",
+				helperResult: true,
+				resultContract: { kind: "scout-report" },
+			},
+			(event) => events.push(event),
+		);
+		strictEqual((await worker.promise).exitCode, 0);
+		const created = fake()
+			.sessions.slice(sessionsBefore)
+			.filter((entry) =>
+				((entry.config as { tools?: Array<{ name: string }> }).tools ?? []).some(
+					(tool) => tool.name === "clio_submit_result",
+				),
+			);
+		strictEqual(created.length, 1, "the locked round continues the work session");
+		const session = created[0] as unknown as { config: { tools?: Array<{ name: string }> }; tools: Map<string, unknown> };
+		const declared = (session.config.tools ?? []).map((tool) => tool.name);
+		ok(declared.includes("clio_submit_result"), "the work phase declared the result tool");
+		deepStrictEqual([...session.tools.keys()], declared, "the tool set the session was created with");
+		strictEqual(events.filter((event) => event.type === "clio_coder_helper_result").length, 1);
+	} finally {
+		disposeCopilotConversations("m31-scout");
 	}
 });
