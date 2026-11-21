@@ -81,7 +81,7 @@ import {
 	foldRunJournal,
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
-import type { telemetryPromptStructure } from "./objects.js";
+import { readStoredRunResult, type telemetryPromptStructure } from "./objects.js";
 import { runSettledDigest } from "./run-digest.js";
 import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 import { verifyTelemetryScope } from "./seal.js";
@@ -3538,7 +3538,8 @@ function scopeObject<T>(
 	if (file === undefined || createHash("sha256").update(file.bytes).digest("hex") !== ref.id.slice("obj_".length))
 		return { state: "missing" };
 	try {
-		const value: unknown = JSON.parse(file.bytes.toString("utf8"));
+		const parsed: unknown = JSON.parse(file.bytes.toString("utf8"));
+		const value = ref.subject === "run-result" ? readStoredRunResult(parsed) : parsed;
 		return check(value) ? { state: "resolved", value } : { state: "missing" };
 	} catch {
 		// Bytes that hash to the id but do not parse were never a stored object.

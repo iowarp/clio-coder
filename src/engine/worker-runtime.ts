@@ -417,6 +417,15 @@ function isAssistantMessage(
 	return "role" in message && message.role === "assistant";
 }
 
+/**
+ * An assistant turn Clio wrote itself, such as the result-contract repair exchange: zero usage marked `callInvoked:
+ * false` and a tool-use stop. A failed call is marked not invoked too, but it stops on `error` or `aborted`.
+ */
+function hostWrittenExchange(message: AgentMessage & { stopReason?: string }): boolean {
+	const usage = (message as { usage?: { callInvoked?: unknown } }).usage;
+	return usage?.callInvoked === false && message.stopReason === "toolUse" && !("failure" in message);
+}
+
 function getTerminalAgentError(messages: AgentMessage[]): string | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
@@ -1551,7 +1560,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Each round sends through engineStreamSimple, whose guard sees the evicted request.
 		delegateGuardsToolArguments: true,
 		streamFn: (currentModel, transcript, streamOptions) => {
-			if (resultContractRepairsQueued > resultContractRepairsStarted) resultContractRepairsStarted += 1;
+			if (resultContractRepairsQueued > resultContractRepairsStarted) {
+				resultContractRepairsStarted += 1;
+				emit({ type: "clio_coder_result_contract_repair", payload: { started: resultContractRepairsStarted } });
+			}
 			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
 			const anthropicCompat =
@@ -2107,7 +2119,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		) {
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
-				workerTelemetry?.settle(event.message);
+				if (!hostWrittenExchange(event.message)) workerTelemetry?.settle(event.message);
 				// This answer is a request the thrash note may have ridden, though the round ends here.
 				thrashOutcome.observe(event);
 				// The middleware round must run before this answer can seal a terminal result (#423).
@@ -2167,7 +2179,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			usage.callInvoked = failure?.invoked ?? true;
 			usage.usageReported = reported;
 		}
-		if (event.type === "message_end" && isAssistantMessage(event.message)) workerTelemetry?.settle(event.message);
+		// A repair exchange Clio wrote into the conversation reached no provider: the round's attempt belongs to the request
+		// that follows it, so it settles no attempt of its own (C-28).
+		if (event.type === "message_end" && isAssistantMessage(event.message) && !hostWrittenExchange(event.message))
+			workerTelemetry?.settle(event.message);
 		// Detect the whole terminal batch before any call is prepared/executed.
 		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
 		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
@@ -3025,6 +3040,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.telemetryContext ? withTelemetryContext(input.telemetryContext, work) : work();
 	const promise = runScoped(async (): Promise<WorkerRunResult> => {
 		try {
+			emit({ type: "clio_coder_result_contract_repair", payload: { started: 0 } });
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();
