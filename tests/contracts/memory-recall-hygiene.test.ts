@@ -82,7 +82,7 @@ function readerFixture(t: TestContext, records: MemoryRecord[]) {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-memory-gate-"));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 	mkdirSync(join(root, "memory"));
-	writeFileSync(memoryStorePath(root), JSON.stringify({ version: 1, records }));
+	writeFileSync(memoryStorePath(root), JSON.stringify({ version: 2, records }));
 	const request: MemoryPromptRequest = {
 		turnId: "1",
 		sessionAuthority: "session-a:0",

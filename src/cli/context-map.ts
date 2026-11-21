@@ -5,7 +5,7 @@ import path from "node:path";
 import { CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
 import { internalGitArgv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
-import { codemapPath, legacyCodewikiPath } from "../domains/context/codewiki/artifact.js";
+import { codemapPath } from "../domains/context/codewiki/artifact.js";
 import { type CodewikiCoordinatedResult, coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
 import { readClioState, writeClioState } from "../domains/context/state.js";
@@ -201,12 +201,10 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 		process.stderr.write("clio-coder context map: could not build a repository index\n");
 		return 1;
 	}
-	// Exactly what this command writes into the workspace: the index (canonical
-	// or the legacy file it may still be reconciling), this run's HTML, and the
-	// fixed default HTML an earlier run without --out left behind.
+	// Exactly what this command writes into the workspace: the index, this run's
+	// HTML, and the fixed default HTML an earlier run without --out left behind.
 	const facts = repositoryFacts(cwd, reconciled.codewiki, reconciled.worker.fingerprint.gitHead, [
 		codemapPath(cwd),
-		legacyCodewikiPath(cwd),
 		target,
 		defaultRepoMapPath(cwd),
 	]);

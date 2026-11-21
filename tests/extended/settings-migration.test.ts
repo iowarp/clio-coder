@@ -21,7 +21,6 @@ import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults
 import { readLifecycleReceipts } from "../../src/core/library-receipts.js";
 import { extensionContentDigest } from "../../src/domains/extensions/integrity.js";
 import { applyPendingMigrationsAtBoot } from "../../src/domains/lifecycle/boot-migrations.js";
-import { convertWorkspaceOnce } from "../../src/domains/lifecycle/canonical-names.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import settingsV2, {
 	SETTINGS_V2_MIGRATION_ID,
@@ -660,44 +659,6 @@ targets:
 		const { convertUserHome } = await import("../../src/domains/lifecycle/canonical-names.js");
 		deepStrictEqual(convertUserHome().changed, []);
 		strictEqual(readFileSync(join(config, "plugins", "state.json"), "utf8"), snapshot);
-	});
-
-	it("converts a workspace's .clio-coder once on first open", () => {
-		const workspace = join(scratch.dir, "workspace");
-		const project = join(workspace, ".clio-coder");
-		mkdirSync(join(project, "fleets"), { recursive: true });
-		writeFileSync(join(project, "fleets", "review.md"), "---\nversion: 1\nname: review\n---\nReview.\n", "utf8");
-		writeFileSync(join(project, "fleets", "commands.yaml"), "version: 1\ncommands: {}\n", "utf8");
-		mkdirSync(join(project, "plugins"), { recursive: true });
-		writeFileSync(
-			join(project, "plugins", "state.json"),
-			JSON.stringify({
-				version: 1,
-				disabled: [],
-				installed: {
-					"review-pack": {
-						kind: "fleet",
-						installedAt: "2026-10-01T00:00:00.000Z",
-						source: "/x",
-						contentDigest: "0".repeat(64),
-					},
-				},
-			}),
-			"utf8",
-		);
-		const first = convertWorkspaceOnce(workspace);
-		ok(first, "the first open converts");
-		ok(existsSync(join(project, "playbooks", "review.md")));
-		ok(existsSync(join(project, "playbooks", "commands.yaml")));
-		ok(!existsSync(join(project, "fleets")));
-		strictEqual(
-			JSON.parse(readFileSync(join(project, "plugins", "state.json"), "utf8")).installed["review-pack"].kind,
-			"playbook",
-		);
-		ok(first.changed.some((line) => line.includes("playbooks")));
-		strictEqual(convertWorkspaceOnce(workspace), null, "a converted workspace is not converted again");
-		mkdirSync(join(project, "fleets"), { recursive: true });
-		strictEqual(convertWorkspaceOnce(workspace), null, "the conversion runs once per workspace");
 	});
 
 	it("merges independent settings updates against the latest durable state", () => {

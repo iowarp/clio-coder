@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { canonicalizeExistingPath } from "./path-canonical.js";
@@ -221,36 +221,6 @@ export function canonicalCheckout(cwd: string): CanonicalCheckout {
 
 export function canonicalProjectRoot(cwd: string): string {
 	return canonicalCheckout(cwd).project;
-}
-
-/** Linked worktrees a project may list before the lookup stops. */
-const LINKED_WORKTREE_LIMIT = 64;
-
-/**
- * The linked worktrees the main checkout at `project` records whose own `.git`
- * pointer resolves back to it, read from Git's files without a subprocess.
- */
-export function linkedWorktreeRoots(project: string): string[] {
-	let names: string[] = [];
-	try {
-		names = readdirSync(join(project, ".git", "worktrees")).sort();
-	} catch {
-		// No linked worktrees, or `.git` is not a directory: none.
-		return [];
-	}
-	const roots: string[] = [];
-	for (const name of names) {
-		if (roots.length >= LINKED_WORKTREE_LIMIT) break;
-		try {
-			const gitFile = readFileSync(join(project, ".git", "worktrees", name, "gitdir"), "utf8").trim();
-			if (!isAbsolute(gitFile)) continue;
-			const root = canonicalizeExistingPath(dirname(gitFile));
-			if (checkoutLink(root).main === project) roots.push(root);
-		} catch {
-			// A pruned or unreadable worktree record names nothing the project vouches for.
-		}
-	}
-	return roots;
 }
 
 /**

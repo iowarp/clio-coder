@@ -4,14 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
-import {
-	codemapPath,
-	codewikiNeedsBackfill,
-	codewikiPath,
-	legacyCodewikiPath,
-	readCodewiki,
-	writeCodewiki,
-} from "./artifact.js";
+import { codemapPath, codewikiNeedsBackfill, codewikiPath, readCodewiki, writeCodewiki } from "./artifact.js";
 import type {
 	CodewikiArtifactRef,
 	CodewikiBuildProgress,
@@ -183,7 +176,7 @@ async function executeInWorker(
 }
 
 function enqueueWorkspace<T>(cwd: string, task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-	const key = legacyCodewikiPath(cwd);
+	const key = codemapPath(cwd);
 	const previous = workspaceTails.get(key) ?? Promise.resolve();
 	let entered = false;
 	const result = previous
@@ -260,7 +253,7 @@ export function coordinateCodewikiWrite(
 			// stays, and is what still decides the race.
 			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
 			return withStateFileLock(
-				legacyCodewikiPath(workspace),
+				codemapPath(workspace),
 				async () => {
 					if (options.requireExisting && !existsSync(codewikiPath(workspace))) return null;
 					const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
@@ -301,7 +294,7 @@ export function coordinateCodewikiExclusive<T>(
 		workspace,
 		() =>
 			withStateFileLock(
-				legacyCodewikiPath(workspace),
+				codemapPath(workspace),
 				() => {
 					signal?.throwIfAborted();
 					return task(workspace);
@@ -340,7 +333,7 @@ export async function reconcileCodewikiCandidate(
  * not follow writers admitted later, so a reader is never starved by a busy queue.
  */
 export async function afterCodewikiWritesAhead(cwd: string): Promise<void> {
-	await workspaceTails.get(legacyCodewikiPath(resolve(cwd)));
+	await workspaceTails.get(codemapPath(resolve(cwd)));
 }
 
 /** Build a preview candidate in the worker without acquiring a writer lease or touching disk. */
@@ -359,9 +352,9 @@ export async function buildCodewikiCandidate(
 export async function drainCodewikiWrites(cwd: string): Promise<void> {
 	const workspace = resolve(cwd);
 	for (;;) {
-		const tail = workspaceTails.get(legacyCodewikiPath(workspace));
+		const tail = workspaceTails.get(codemapPath(workspace));
 		if (!tail) return;
 		await tail;
-		if (workspaceTails.get(legacyCodewikiPath(workspace)) === tail) return;
+		if (workspaceTails.get(codemapPath(workspace)) === tail) return;
 	}
 }

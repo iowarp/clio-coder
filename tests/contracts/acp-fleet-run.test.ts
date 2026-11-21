@@ -6,6 +6,7 @@ import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { Playbook } from "../../src/domains/agents/index.js";
 import { cancelStoredAssignment, registerAssignment } from "../../src/domains/dispatch/assignment-store.js";
+import { executionPlanIdentityHash } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import {
 	agentRoleFactsResolver,
@@ -288,6 +289,7 @@ test("a resume id compiles the replayed prefix into every surface's approval", a
 			cwd: root,
 			fleet: "survey",
 			planHash: fresh.preview.plan.hash,
+			planIdentityHash: executionPlanIdentityHash(fresh.preview.plan),
 			stepIds: fresh.preview.plan.steps.map((step) => step.id),
 			planSteps: [...fresh.preview.plan.steps],
 			vars: { site: "plot-7" },
@@ -356,12 +358,13 @@ test("a resume refuses a root another workspace launched", async () => {
 			});
 		const fresh = compile(other);
 		ok(fresh.ok);
-		const prior = (id: string, cwd?: string): FleetRunRecord => ({
+		const prior = (id: string, cwd: string): FleetRunRecord => ({
 			version: 1,
 			id,
-			...(cwd !== undefined ? { cwd } : {}),
+			cwd,
 			fleet: "survey",
 			planHash: fresh.preview.plan.hash,
+			planIdentityHash: executionPlanIdentityHash(fresh.preview.plan),
 			stepIds: fresh.preview.plan.steps.map((step) => step.id),
 			planSteps: [...fresh.preview.plan.steps],
 			vars: { site: "plot-7" },
@@ -371,15 +374,9 @@ test("a resume refuses a root another workspace launched", async () => {
 			steps: [],
 		});
 		records.set("fleet-aaaaaaaaaaaa", prior("fleet-aaaaaaaaaaaa", other));
-		records.set("fleet-bbbbbbbbbbbb", prior("fleet-bbbbbbbbbbbb"));
 		const foreign = compile(root, "fleet-aaaaaaaaaaaa");
 		ok(!foreign.ok);
 		deepStrictEqual(foreign.diagnostics, [`resume run 'fleet-aaaaaaaaaaaa' ran in ${other}, not ${root}`]);
-		const legacy = compile(root, "fleet-bbbbbbbbbbbb");
-		ok(!legacy.ok);
-		deepStrictEqual(legacy.diagnostics, [
-			`resume run 'fleet-bbbbbbbbbbbb' predates recorded workspaces, so it cannot be resumed in ${root}`,
-		]);
 		ok(compile(other, "fleet-aaaaaaaaaaaa").ok, "the launching workspace still resumes it");
 	} finally {
 		scratch.restore();
@@ -413,6 +410,7 @@ test("a resume refuses a root whose process still runs it", async () => {
 			cwd: root,
 			fleet: "survey",
 			planHash: fresh.preview.plan.hash,
+			planIdentityHash: executionPlanIdentityHash(fresh.preview.plan),
 			stepIds: fresh.preview.plan.steps.map((step) => step.id),
 			planSteps: [...fresh.preview.plan.steps],
 			vars: { site: "plot-7" },

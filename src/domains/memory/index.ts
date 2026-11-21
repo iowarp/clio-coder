@@ -2,7 +2,6 @@ export { proposeMemoryFromClaim, recordClaimRegressions } from "./claim-link.js"
 export { consolidateMemory, type MemoryConsolidation } from "./consolidate.js";
 export type { MemoryPromptSelection, ObservationSourceUnit } from "./contract.js";
 export { buildDispatchMemorySection } from "./dispatch-section.js";
-export { memoryFlowSweepNotice, sweepRestrictedMemory } from "./flow-sweep.js";
 export { completedLessonSource } from "./history-review.js";
 export { lessonSubject } from "./lesson-evidence.js";
 export { createTaskMemoryTelemetrySink, type TaskMemoryTelemetryDecision } from "./memory-events.js";
@@ -50,7 +49,16 @@ export {
 export { proposeMemoryFromEvidence } from "./proposal.js";
 export { markMemoryOffRecording } from "./recording-marker.js";
 export { MemoryRuntime } from "./runtime.js";
-export { loadMemoryRecords, loadMemoryRecordsSync, loadMemoryStore, memoryStatus, memoryStorePath } from "./store.js";
+export {
+	inspectMemoryStoreRepair,
+	loadMemoryRecords,
+	loadMemoryRecordsSync,
+	loadMemoryStore,
+	type MemoryStoreRepair,
+	memoryStatus,
+	memoryStorePath,
+	repairMemoryStore,
+} from "./store.js";
 export { TaskMemoryBank, type TaskMemoryEntry, type TaskMemorySnapshot } from "./task-bank.js";
 export {
 	parseTaskMemoryHandoffSnapshot,
