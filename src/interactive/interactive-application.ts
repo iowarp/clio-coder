@@ -69,7 +69,12 @@ import { runParkedInterview } from "../tools/extension-interview.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
-import { type ArcadeSession, openArcadeOverlay } from "./arcade-overlay.js";
+import {
+	ARCADE_PAUSED_NOTICE,
+	type ArcadeSession,
+	createArcadePhraseScreen,
+	openArcadeOverlay,
+} from "./arcade-overlay.js";
 import { createAttachController } from "./attach-host.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
@@ -97,6 +102,7 @@ import { actionKeyLabel, formatKeyLabel } from "./keybinding-manager.js";
 import { releaseRegularDock, returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
+import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
@@ -1330,6 +1336,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let arcade: ArcadeSession | null = null;
 	const arcadeNeedsOperator = (): boolean =>
 		overlayLifecycle?.getState() === "permission-confirm" || dockTop(tui)?.frame.dockAwaitingInput?.() === true;
+	const noticeArcadePaused = (): void => {
+		notifications.add({ level: "info", key: "arcade:paused", text: ARCADE_PAUSED_NOTICE, ttlMs: 6_000 });
+	};
 	const openArcadeEgg = (text: string): boolean => {
 		if (!isArcadeTrigger(text) || arcade?.isOpen()) return false;
 		if (arcade?.isPaused()) {
@@ -1342,16 +1351,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				});
 			return true;
 		}
-		arcade = openArcadeOverlay(tui, {
-			needsOperator: arcadeNeedsOperator,
-			onPause: () =>
-				notifications.add({
-					level: "info",
-					key: "arcade:paused",
-					text: "Ms. Clio paused: Clio needs you · type the phrase again to play on",
-					ttlMs: 6_000,
-				}),
-		});
+		arcade = openArcadeOverlay(tui, { needsOperator: arcadeNeedsOperator, onPause: noticeArcadePaused });
 		return true;
 	};
 
@@ -1748,6 +1748,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let reportOffers: import("../domains/report/extension.js").ReportOfferWatcher | null = null;
 	let lastOperatorInputAt = Date.now();
 	overlayLifecycle = createOverlayLifecycle({
+		// While the game is paused for a card, its phrase is held back from the card.
+		openAskUserOverlay: (host, card) =>
+			openAskUserOverlay(host, {
+				...card,
+				screenKeys: createArcadePhraseScreen({ active: () => arcade?.isPaused() === true, onPhrase: noticeArcadePaused }),
+			}),
 		lastOperatorInputAt: () => lastOperatorInputAt,
 		dismissNotification: (key) => notifications.dismiss(key),
 		takeReportOffer: () => {
