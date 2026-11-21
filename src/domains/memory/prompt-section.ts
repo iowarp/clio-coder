@@ -36,7 +36,14 @@ export interface MemoryPromptOptions {
 	 * With `relevance`, carry only records the turn plainly concerns
 	 * (`selectRelevantMemory`); `demoted` ids need a stronger match.
 	 */
-	gate?: { demoted?: ReadonlySet<string> };
+	gate?: {
+		demoted?: ReadonlySet<string>;
+		/**
+		 * CLI-P53: an eligible repo record this answers true for (its claim is a check) rides every turn whatever its
+		 * words, inside the same item and token caps. A demoted record still needs the demoted match.
+		 */
+		checkLesson?: (record: MemoryRecord) => boolean;
+	};
 	scopes?: ReadonlyArray<MemoryScope>;
 	tokenBudget?: number;
 	maxItems?: number;
@@ -65,31 +72,36 @@ export interface MemoryPromptDecision {
 	id: string;
 	reason: "selected" | "token-budget" | "item-limit";
 	relevance?: Omit<RankedMemoryCandidate, "record">;
+	/** The record passed the gate as a check lesson, not by sharing the turn's words. */
+	eligibleBy?: "check-command";
 }
 
 /** Diagnostics cover eligible candidates only: excluded records are never scored. */
 export function inspectMemoryPromptSelection(
 	records: ReadonlyArray<MemoryRecord>,
 	options: MemoryPromptOptions = {},
-): { records: MemoryRecord[]; decisions: MemoryPromptDecision[] } {
+): { records: MemoryRecord[]; decisions: MemoryPromptDecision[]; gatedOut: string[] } {
 	const scopes = options.scopes ?? MEMORY_PROMPT_DEFAULT_SCOPES;
 	const tokenBudget = options.tokenBudget ?? MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET;
 	const maxItems = options.maxItems ?? MEMORY_PROMPT_DEFAULT_MAX_ITEMS;
 	if (!Number.isFinite(tokenBudget) || !Number.isFinite(maxItems) || tokenBudget <= 0 || maxItems < 1)
-		return { records: [], decisions: [] };
+		return { records: [], decisions: [], gatedOut: [] };
 	const eligibility = {
 		scopes,
 		activeRepository: options.activeRepository ?? null,
 		activeRuntime: options.activeRuntime ?? null,
 		activeAgent: options.activeAgent ?? null,
 	};
-	const base: LexicalCandidate[] =
-		options.relevance === undefined
-			? eligibleMemoryRecords(records, eligibility).map((record) => ({ record, relevance: undefined }))
-			: (options.gate === undefined
-					? rankMemoryByRelevance(records, eligibility, options.relevance)
-					: selectRelevantMemory(records, eligibility, options.relevance, options.gate.demoted)
-				).map(({ record, ...relevance }) => ({ record, relevance }));
+	let base: LexicalCandidate[];
+	let gatedOut: string[] = [];
+	if (options.relevance === undefined)
+		base = eligibleMemoryRecords(records, eligibility).map((record) => ({ record, relevance: undefined }));
+	else if (options.gate === undefined)
+		base = rankMemoryByRelevance(records, eligibility, options.relevance).map(({ record, ...relevance }) => ({
+			record,
+			relevance,
+		}));
+	else ({ candidates: base, gatedOut } = gatedCandidates(records, eligibility, options.relevance, options.gate));
 	const selected: MemoryRecord[] = [];
 	const decisions: MemoryPromptDecision[] = [];
 	// What the operator told Clio to remember is a standing instruction: it goes first, whatever the turn is about.
@@ -97,7 +109,7 @@ export function inspectMemoryPromptSelection(
 		...base.filter((candidate) => candidate.record.provenance?.sourceKind === "operator-stated"),
 		...base.filter((candidate) => candidate.record.provenance?.sourceKind !== "operator-stated"),
 	];
-	for (const { record, relevance } of ordered) {
+	for (const { record, relevance, eligibleBy } of ordered) {
 		const reason =
 			selected.length >= Math.floor(maxItems)
 				? "item-limit"
@@ -108,15 +120,43 @@ export function inspectMemoryPromptSelection(
 			id: record.id,
 			reason,
 			...(relevance === undefined ? {} : { relevance }),
+			...(eligibleBy === undefined ? {} : { eligibleBy }),
 		});
 		if (reason === "selected") selected.push(record);
 	}
-	return { records: selected, decisions };
+	return { records: selected, decisions, gatedOut };
 }
 
 interface LexicalCandidate {
 	record: MemoryRecord;
 	relevance: Omit<RankedMemoryCandidate, "record"> | undefined;
+	eligibleBy?: "check-command";
+}
+
+/**
+ * The gate's candidates: the records the turn plainly concerns, in the ranking's order, then the eligible repository
+ * check lessons it did not carry (CLI-P53), so a relevant record keeps its place ahead of them under the caps. Every
+ * other eligible record is gated out, by id.
+ */
+function gatedCandidates(
+	records: ReadonlyArray<MemoryRecord>,
+	eligibility: Parameters<typeof selectRelevantMemory>[1],
+	relevance: MemoryRelevanceInput,
+	gate: NonNullable<MemoryPromptOptions["gate"]>,
+): { candidates: LexicalCandidate[]; gatedOut: string[] } {
+	const demoted = gate.demoted ?? new Set<string>();
+	const candidates: LexicalCandidate[] = selectRelevantMemory(records, eligibility, relevance, demoted).map(
+		({ record, ...rest }) => ({ record, relevance: rest }),
+	);
+	const kept = new Set(candidates.map(({ record }) => record.id));
+	const gatedOut: string[] = [];
+	for (const { record, ...rest } of rankMemoryByRelevance(records, eligibility, relevance)) {
+		if (kept.has(record.id)) continue;
+		if (record.scope === "repo" && !demoted.has(record.id) && gate.checkLesson?.(record) === true)
+			candidates.push({ record, relevance: { ...rest, fallback: false }, eligibleBy: "check-command" });
+		else gatedOut.push(record.id);
+	}
+	return { candidates, gatedOut };
 }
 
 /**

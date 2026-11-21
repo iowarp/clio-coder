@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, statSync, truncateSync, uti
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { createMemoryPromptReader, type MemoryPromptRequest } from "../../src/domains/memory/prompt-cache.js";
+import { Value } from "typebox/value";
+import { MemoryObservationRecordedSchema } from "../../src/core/telemetry/schemas.js";
+import type { MemoryPromptSelection } from "../../src/domains/memory/contract.js";
+import {
+	createMemoryPromptReader,
+	type MemoryPromptRequest,
+	memorySelectionFacts,
+} from "../../src/domains/memory/prompt-cache.js";
 import {
 	MEMORY_PROMPT_STORE_MAX_BYTES,
 	memoryStorePath,
@@ -131,6 +138,78 @@ test("gated queries can change at the next turn, with a distinct legacy default"
 	ok(gated(first).includes("Compaction"));
 	ok(gated({ ...first, taskText: "formatting indentation" }).includes("Compaction"));
 	ok(gated({ ...first, turnId: "2", taskText: "formatting indentation" }).includes("Formatting"));
+});
+
+// CLI-P53: a repository lesson whose claim is a check rides every gated turn, inside the caps, and the journal says why.
+test("a repository check lesson reaches an unrelated gated turn inside the caps, and the selection journal names why", (t) => {
+	const f = fixture(t);
+	mkdirSync(join(f.root, ".clio-coder"));
+	mkdirSync(join(f.root, "scripts"));
+	writeFileSync(join(f.root, "scripts", "check.sh"), "#!/bin/sh\nexit 0\n");
+	writeFileSync(
+		join(f.root, ".clio-coder", "verifiers.yaml"),
+		JSON.stringify({
+			version: 2,
+			checks: [
+				{
+					id: "quick",
+					description: "Quick checks",
+					command: ["./scripts/check.sh", "--quick"],
+					cwd: ".",
+					timeoutMs: 5_000,
+					tags: [],
+				},
+			],
+		}),
+	);
+	const lesson = (id: string, text: string, argv: string[]) =>
+		record(text, {
+			id,
+			scope: "repo",
+			repository: { kind: "canonical-path", key: f.root },
+			evidenceRefs: [`command:${id.slice(-1).repeat(64)}`],
+			claim: { kind: "command", command: { assignments: [], argv, key: id.slice(-1).repeat(64) } },
+		});
+	f.save([
+		lesson("mem-000000000000000a", "Validate with make test before handing back.", ["make", "test"]),
+		lesson("mem-000000000000000b", "The quick suite is the real gate here.", ["./scripts/check.sh", "--quick"]),
+		lesson("mem-000000000000000c", "Releases go out through the release script.", ["./scripts/release.sh"]),
+	]);
+	const seen: MemoryPromptSelection[] = [];
+	const read = (maxItems: number) =>
+		createMemoryPromptReader({
+			getDataDir: () => f.root,
+			selection: { maxItems },
+			relevanceGate: {},
+			onSelection: (selection) => seen.push(selection),
+		});
+	const turn = {
+		...f.request,
+		taskText: "Add a triple(x) function to util.py next to double, then run the project checks.",
+	};
+	const section = read(5)(turn);
+	ok(section.includes("make test") && section.includes("quick suite"), section);
+	ok(!section.includes("release script"), "a lesson about a command that is no check stays gated");
+	const rows = (at: number) => {
+		const selection = seen[at];
+		if (selection === undefined) throw new Error("no selection");
+		const facts = memorySelectionFacts(selection);
+		ok(Value.Check(MemoryObservationRecordedSchema, { event: "memory-section-selected", facts }), JSON.stringify(facts));
+		return [...(facts.selection as Array<{ id: string; reason: string }>)].sort((a, b) => a.id.localeCompare(b.id));
+	};
+	deepStrictEqual(rows(0), [
+		{ id: "mem-000000000000000a", decision: "selected", reason: "check-command" },
+		{ id: "mem-000000000000000b", decision: "selected", reason: "check-command" },
+		{ id: "mem-000000000000000c", decision: "withheld", reason: "not-relevant" },
+	]);
+	// The caps are the caps: one item admits one check lesson and names the other's withholding.
+	read(1)(turn);
+	deepStrictEqual(
+		rows(1)
+			.map((row) => row.reason)
+			.sort(),
+		["check-command", "item-limit", "not-relevant"],
+	);
 });
 
 test("bounded snapshot reads refuse oversized storage and validate rather than trusting a revision", (t) => {

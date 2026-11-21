@@ -61,6 +61,7 @@ import {
 	sourceCoverageDigest,
 } from "./observations.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
+import { memorySelectionFacts } from "./prompt-cache.js";
 import { memorySectionBlocks } from "./prompt-section.js";
 import { readDemotedMemoryIds } from "./recall-use.js";
 import { memoryRouteJson } from "./secret-text.js";
@@ -245,6 +246,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	/** The job in flight belongs to a closed session; navigation does not cancel it. */
 	#orphanJob = false;
 	#promptSelection: MemoryPromptSelection | null = null;
+	/** The last selection decision journaled, so a prewarm or rebuilt request repeating it adds no row. */
+	#selectionJournal: string | null = null;
 	/** What the last request carried, so lifecycle rows record changes rather than every request. */
 	#submittedSection: string | null = null;
 	/** Records carried into the turn in progress (section, reminders, recall hits), for recall-versus-use accounting. */
@@ -1345,6 +1348,17 @@ export class MemoryRuntime implements MemoryObservationCommands {
 
 	recordPromptSelection(selection: MemoryPromptSelection): void {
 		this.#promptSelection = structuredClone(selection);
+		// CLI-P53: what the section carried and withheld for this turn, and why, so delivery is read rather than inferred.
+		try {
+			const facts = memorySelectionFacts(selection);
+			const journal = JSON.stringify(facts);
+			if (journal !== this.#selectionJournal) {
+				this.#selectionJournal = journal;
+				this.#event("memory-section-selected", facts, true);
+			}
+		} catch {
+			// The journal is inspection; it never changes what the prompt carries.
+		}
 		// The section is read as a session begins, under every delivery mode, so it fixes what later reminders may carry.
 		const infra = this.#infrastructure;
 		if (infra?.settings().enabled && infra.dataDir && this.#deliveryBaseline?.session !== infra.currentSession?.()?.id) {
