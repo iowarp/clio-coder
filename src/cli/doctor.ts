@@ -46,6 +46,7 @@ import {
 import { workspaceSnapshotRepositoryPresent } from "../domains/workspace-snapshots/store.js";
 import { classifyDefaultTarget, describeVerdict, firstMissing } from "./default-target.js";
 import { copilotSignInReport } from "./doctor-copilot.js";
+import { dispatchAdmissionFindings } from "./doctor-dispatch-admission.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { installationFindings } from "./doctor-installation.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
@@ -555,6 +556,8 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });
+	// The admission store reads one state file; --fix drops records no reader accepts.
+	const admissionChecks = untouched ? [] : dispatchAdmissionFindings({ fix });
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
 	// A checkout repair replaces lazy chunks. Finish every other dynamic check before rebuilding disk.
 	const installChecks = await installationFindings(fix);
@@ -580,6 +583,7 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 		...contractChecks,
 		...scratchChecks,
 		...worktreeChecks,
+		...admissionChecks,
 		...deepChecks,
 	].map(withDoctorCommand);
 }
