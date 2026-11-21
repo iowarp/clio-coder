@@ -1006,11 +1006,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? "autonomy_stop"
 							: state.activeInterruptReason !== null && state.activeInterruptByJobClock
 								? "job_clock"
-								: state.repetitionAbortReason !== null
-									? "repetition"
-									: disposed
-										? "shutdown"
-										: undefined;
+								: state.activeInterruptReason !== null && state.activeInterruptByLoopGuard
+									? "loop_guard"
+									: state.repetitionAbortReason !== null
+										? "repetition"
+										: disposed
+											? "shutdown"
+											: undefined;
 		const settleModelCall = async (
 			message: AgentMessage,
 			unreported: InterruptedUsageEstimate | null = null,
@@ -1084,7 +1086,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 									? "autonomy_stop"
 									: state.activeInterruptReason !== null && state.activeInterruptByJobClock
 										? "job_clock"
-										: "internal",
+										: state.activeInterruptReason !== null && state.activeInterruptByLoopGuard
+											? "loop_guard"
+											: "internal",
 					),
 					lease?.context,
 				);

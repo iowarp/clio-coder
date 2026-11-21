@@ -4655,6 +4655,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptByTriage = options?.source === "triage";
 				state.activeInterruptByAutonomy = options?.source === "autonomy";
 				state.activeInterruptByJobClock = options?.source === "job_clock";
+				state.activeInterruptByLoopGuard = options?.source === "loop_guard";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))

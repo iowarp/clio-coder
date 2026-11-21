@@ -326,6 +326,32 @@ it("a scheduled job's clock ending a turn mid-tool names job_clock as the stop, 
 	}
 });
 
+it("an immediate loop-guard stop mid-tool settles the turn on loop_guard between calls, with no route failure (C-10)", {
+	timeout: 10_000,
+}, async () => {
+	// Unlike the budget roll, a loop_blocked or tool_budget interrupt cancels mid-tool, so the next call is admitted and refused.
+	const f = fixture(1, async (loop, signal) => {
+		loop.cancel({ reason: "Loop guard stopped a repeated call.", source: "loop_guard", auditReason: "loop blocked" });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		ok(signal?.aborted === true);
+	});
+	try {
+		await f.loop.submit("Record the section.");
+		await f.loop.whenSettled();
+		const { turns, calls } = await f.journal();
+		deepStrictEqual(
+			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.stage]),
+			[["aborted", "loop_guard", null]],
+		);
+		ok(
+			calls.every((call) => call.stop?.reason !== "aborted" || call.stop.failure === "loop_guard"),
+			JSON.stringify(calls.map((call) => call.stop)),
+		);
+	} finally {
+		await f.close();
+	}
+});
+
 it("a headless --timeout during a tool after a steer settles the turn on shutdown with every call it opened", {
 	timeout: 10_000,
 }, async () => {

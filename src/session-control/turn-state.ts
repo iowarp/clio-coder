@@ -269,6 +269,8 @@ export interface ChatTurnState {
 	activeInterruptByAutonomy: boolean;
 	/** Whether a scheduled job's own clock ended the run (SC-2), as opposed to a person or the host. Written with the reason. */
 	activeInterruptByJobClock: boolean;
+	/** Whether the loop guard stopped the run mid-tool (C-10), so the refused next call names it. Written with the reason. */
+	activeInterruptByLoopGuard: boolean;
 	/** The provider's nonempty aborted message closes this interrupt without a synthetic second assistant. */
 	interruptedAssistantMessage: AgentMessage | null;
 	/** Accounting for the hollow call carried by the interrupt's closing turn (#430). */
@@ -368,6 +370,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "activeInterruptByTriage"
 	| "activeInterruptByAutonomy"
 	| "activeInterruptByJobClock"
+	| "activeInterruptByLoopGuard"
 	| "activeInterruptReason"
 	| "activeUserTurnId"
 	| "continuation"
@@ -483,6 +486,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		activeInterruptByTriage: false,
 		activeInterruptByAutonomy: false,
 		activeInterruptByJobClock: false,
+		activeInterruptByLoopGuard: false,
 		interruptedAssistantMessage: null,
 		interruptedCall: null,
 		synthesisToolLock: false,
@@ -538,6 +542,7 @@ export function clearActiveInterrupt(
 		| "activeInterruptByTriage"
 		| "activeInterruptByAutonomy"
 		| "activeInterruptByJobClock"
+		| "activeInterruptByLoopGuard"
 	>,
 ): void {
 	state.activeInterruptReason = null;
@@ -545,4 +550,5 @@ export function clearActiveInterrupt(
 	state.activeInterruptByTriage = false;
 	state.activeInterruptByAutonomy = false;
 	state.activeInterruptByJobClock = false;
+	state.activeInterruptByLoopGuard = false;
 }
