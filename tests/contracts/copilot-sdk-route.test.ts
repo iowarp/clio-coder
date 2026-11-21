@@ -799,6 +799,8 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 	settings.context.memory.target = target.id;
 	settings.context.memory.model = "three-levels";
 	const bundle = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+	// A side call leaves an empty spare that opens on its own time (PV-2), so the newest session may be that spare.
+	const asked = () => [...fake().sessions].reverse().find((session) => session.prompts.length > 0);
 	await bundle.extension.start();
 	try {
 		await prepareListedModelCapabilities(bundle.contract, target.id);
@@ -811,19 +813,19 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 			maxTokens: 512,
 			signal: new AbortController().signal,
 		});
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low", "the lowest listed effort, not the default");
+		strictEqual(asked()?.config.reasoningEffort, "low", "the lowest listed effort, not the default");
 		// Another caller that streams with no level keeps the effort out, and an effort sent is always a listed one.
 		const model = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "three-levels", null);
 		await engineStreamSimple(model, normalizeContext({ messages: [user("hello")] }), {
 			sessionId: "off-session",
 		}).result();
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, undefined);
+		strictEqual(asked()?.config.reasoningEffort, undefined);
 		const minimal = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "minimal-levels", null);
 		const sent = await engineStreamSimple(minimal, normalizeContext({ messages: [user("hello")] }), {
 			sessionId: "minimal-session",
 			reasoning: "minimal",
 		}).result();
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "minimal");
+		strictEqual(asked()?.config.reasoningEffort, "minimal");
 		strictEqual(
 			(sent as { clioCoderWireEffort?: string }).clioCoderWireEffort,
 			"minimal",
