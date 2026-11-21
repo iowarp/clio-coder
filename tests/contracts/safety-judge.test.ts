@@ -17,6 +17,7 @@ import {
 	operatorOnlyAsk,
 	type SafetyJudgeCompletion,
 	type SafetyJudgeConfig,
+	type SafetyJudgeOperatorMessage,
 } from "../../src/domains/safety/safety-judge.js";
 import { SANDBOX_ESCAPE_REASON, SANDBOX_ESCAPE_RULE_ID } from "../../src/domains/safety/sandbox-escape.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -194,6 +195,92 @@ test("a scope naming a script directory reaches the judge with the script's own 
 		user,
 	);
 	doesNotMatch(user, /script file this call runs, \/etc/u);
+});
+
+// M-16: an approved escape must reach the judge with its flag, the approval and the script's named write, so a
+// judge that credits the approval admits it without a second card; a write the approval did not name gets no credit.
+test("an approved unsandboxed script reaches the judge with its flag, the approval and the write it names (M-16)", async () => {
+	const base = realpathSync(mkdtempSync(join(tmpdir(), "clio-judge-escape-")));
+	const scratch = join(base, "tmp");
+	mkdirSync(join(scratch, "live"), { recursive: true });
+	const results = join(base, "results", "live.txt");
+	const elsewhere = join(base, "elsewhere", "other.txt");
+	const appender = (target: string) =>
+		`import { appendFile } from "node:fs/promises";\nconst outputPath = '${target}';\nawait appendFile(outputPath, process.argv[2] + "\\n");\n`;
+	writeFileSync(join(scratch, "live", "live3.mjs"), appender(results));
+	writeFileSync(join(scratch, "live", "stray.mjs"), appender(elsewhere));
+	const approval = (question: string, label: string) => ({
+		text: `Asked "${question}", the operator answered: ${label}`,
+		context: `The option "${label}" says: Run both appends and report the recorded lines.`,
+		words: "",
+		asked: { question, chosen: [label] },
+	});
+	const typed = `Now write a node script at ${scratch}/live/live3.mjs that appends one line to ${results}. Run it with label a, then b. If the sandbox gets in the way, ask me before going around it.`;
+	const relative =
+		"The sandbox prevented writing to `results/live.txt`. May I run the script outside the sandbox to append labels `a` and `b`?";
+	let operator: SafetyJudgeOperatorMessage[] = [typed, approval(relative, "Yes, proceed (Recommended)")];
+	const prompts: string[] = [];
+	// A scripted judge that credits an approval only on the facts Clio computed: the flag, the approved escape and the path.
+	const judge = createSafetyJudge({
+		config: () => ({ ...CONFIG, roots: { workspace: join(base, "ws"), scratch: [scratch], temp: null } }),
+		complete: async (request) => {
+			prompts.push(request.user);
+			const credited =
+				/^unsandboxed: true$/mu.test(request.user) &&
+				/^operator-approved escape: /mu.test(request.user) &&
+				request.user.includes(`names ${results} in its text`);
+			return {
+				text: credited
+					? answer("allow", "operator-named", "The approved question names this append.")
+					: answer("block", "unclear", "The approval does not scope this write."),
+			};
+		},
+		operatorMessages: () => operator,
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const review = (scriptName: string) =>
+		judge.review({
+			tool: ToolNames.Bash,
+			args: {
+				command: `node ${scratch}/live/${scriptName} a && node ${scratch}/live/${scriptName} b`,
+				unsandboxed: true,
+			},
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "execute", reasons: [SANDBOX_ESCAPE_REASON] },
+				rejection: { short: "asks", detail: SANDBOX_ESCAPE_REASON, hints: [] },
+				policy: { ruleId: SANDBOX_ESCAPE_RULE_ID, reasons: [SANDBOX_ESCAPE_REASON] } as unknown as SafetyPolicyDecision,
+			},
+			approvalAuthority: "operator",
+		});
+	// The repro: the operator typed the results path and approved a question about the append.
+	strictEqual((await review("live3.mjs")).kind, "allow", prompts.at(-1));
+	ok(
+		(prompts.at(-1) ?? "").includes(
+			`operator-named path: the script ${scratch}/live/live3.mjs this call runs names ${results} in its text, and an operator message spells it verbatim`,
+		),
+		prompts.at(-1),
+	);
+	// Only the approved question spells the path: the approval is the operator's word for it.
+	operator = [
+		`Write ${scratch}/live/live3.mjs and run it twice.`,
+		approval(`May I run the script outside the sandbox to append to ${results}?`, "Yes, proceed"),
+	];
+	strictEqual((await review("live3.mjs")).kind, "allow", prompts.at(-1));
+	ok(
+		(prompts.at(-1) ?? "").includes(
+			`operator-approved path: the script ${scratch}/live/live3.mjs this call runs names ${results} in its text, and a question the operator approved spells it verbatim`,
+		),
+		prompts.at(-1),
+	);
+	// A script whose write the approval did not name, and a declined question, get no credit.
+	strictEqual((await review("stray.mjs")).kind, "block");
+	doesNotMatch(prompts.at(-1) ?? "", /operator-(?:named|approved) path/u);
+	operator = [typed, approval(relative, "No, stop")];
+	strictEqual((await review("live3.mjs")).kind, "block");
+	doesNotMatch(prompts.at(-1) ?? "", /operator-approved escape/u);
 });
 
 test("a write to an outside path the operator spelled reaches the judge as an operator-named path, not shared config", async () => {

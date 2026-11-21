@@ -2,9 +2,12 @@
 
 import { createInterface } from "node:readline/promises";
 import {
+	ADOPTION_KINDS,
 	type AdoptionKind,
 	applyInteropAdoption,
 	detectInteropAgents,
+	INTEROP_AGENT_KINDS,
+	type InteropAdoptionPlan,
 	type InteropAgentId,
 	interopAgentKind,
 	planInteropAdoption,
@@ -15,6 +18,56 @@ import { writeCliFailure } from "./kit/json-out.js";
 import type { ErrorSlug } from "./kit/slugs.js";
 
 const ADOPT_PATH = ["interop", "adopt"] as const;
+
+/** A plan entry as the CLI prints it: no reviewed bytes, and an MCP server's env as keys only. */
+function publicEntry({ files: _files, server, ...entry }: InteropAdoptionPlan["entries"][number]) {
+	return {
+		...entry,
+		...(server
+			? {
+					server: {
+						id: server.id,
+						command: server.command,
+						args: server.args,
+						envKeys: Object.keys(server.env).sort(),
+						...(server.cwd !== undefined ? { cwd: server.cwd } : {}),
+					},
+				}
+			: {}),
+	};
+}
+
+/**
+ * The configure flow's migration step: one reviewed plan per detected host
+ * with an inventory, each applied only on an explicit yes. Without a way to
+ * answer it prints the plans and writes nothing.
+ */
+export async function runInteropAdoptionReview(io: {
+	rl: { question(query: string): Promise<string> } | null;
+}): Promise<number> {
+	const report = await detectInteropAgents({ inventory: true });
+	let offered = 0;
+	let failed = false;
+	for (const kind of INTEROP_AGENT_KINDS) {
+		const inventory = report.agents.find((agent) => agent.kind === kind.id && agent.presence !== "absent")?.inventory;
+		if (!kind.inventory || !inventory || inventory.items.length === 0) continue;
+		const plan = planInteropAdoption({ host: kind.id, inventory });
+		if (!plan.entries.some((entry) => entry.action === "install")) continue;
+		offered++;
+		process.stdout.write(`\n${renderInteropAdoptionPlan(plan)}\n`);
+		if (io.rl === null) continue;
+		const yes = (await io.rl.question(`Adopt from ${kind.label}? [y/N] `)).trim().toLowerCase() === "y";
+		if (!yes) continue;
+		const result = applyInteropAdoption(plan, true);
+		for (const id of result.installed) process.stdout.write(`Installed ${id}\n`);
+		for (const diagnostic of result.diagnostics) process.stderr.write(`${diagnostic}\n`);
+		if (result.diagnostics.length > 0) failed = true;
+	}
+	if (offered === 0) process.stdout.write("Nothing new to adopt from other coding agents.\n");
+	else if (io.rl === null)
+		process.stdout.write("\nRun `clio-coder interop adopt <host>` on a terminal to adopt any of these.\n");
+	return failed ? 1 : 0;
+}
 
 function failure(path: ReadonlyArray<string>, slug: ErrorSlug, message: string, json: boolean, code = 2): number {
 	writeCliFailure({ path, slug, message, json });
@@ -27,11 +80,12 @@ Detected external coding agents and how far each one is wired.
 
 Subcommands:
   inspect [--json]              show host inventory and connection state
-  adopt <host> [--kind skill|agent|prompt|plugin] [--project|--user]
+  adopt <host> [--kind skill|agent|prompt|plugin|mcp] [--project|--user]
                [--yes] [--dry-run] [--json]
-                                review and adopt safe resources; --json prints
-                                the plan and its result as one document and
-                                asks on stderr
+                                review and adopt a host's skills, agents,
+                                prompts, plugins and stdio MCP servers in one
+                                plan; --json prints the plan and its result as
+                                one document and asks on stderr
 
 Notes:
   inspect changes no host or project files and starts no agent session. Wiring a detected agent
@@ -78,8 +132,8 @@ async function runAdopt(args: ReadonlyArray<string>): Promise<number> {
 		const arg = args[i] as string;
 		if (arg === "--kind" || arg.startsWith("--kind=")) {
 			const next = arg === "--kind" ? args[++i] : arg.slice("--kind=".length);
-			if (!next || !["skill", "agent", "prompt", "plugin"].includes(next)) {
-				return failure(ADOPT_PATH, "usage", "--kind must be one of skill, agent, prompt, plugin", json);
+			if (!next || !(ADOPTION_KINDS as ReadonlyArray<string>).includes(next)) {
+				return failure(ADOPT_PATH, "usage", `--kind must be one of ${ADOPTION_KINDS.join(", ")}`, json);
 			}
 			filter = next as AdoptionKind;
 		} else if (arg === "--project" || arg === "--user") {
@@ -117,7 +171,7 @@ async function runAdopt(args: ReadonlyArray<string>): Promise<number> {
 		host: plan.host,
 		scope: plan.scope,
 		dryRun,
-		entries: plan.entries.map(({ files: _files, ...entry }) => entry),
+		entries: plan.entries.map(publicEntry),
 		unknown: inventory.diagnostics,
 		installed,
 		diagnostics,

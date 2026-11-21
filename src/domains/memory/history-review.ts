@@ -68,9 +68,10 @@ export function completedLessonSource(ledger: readonly SessionEntry[], root: str
 			task.some((entry) => entry.kind === "message" && entry.role === "tool_result") &&
 			lastMessage?.kind === "message" &&
 			lastMessage.role === "assistant" &&
-			(typeof terminal.text === "string" ? terminal.text.trim().length > 0 : Array.isArray(terminal.content)) &&
-			(terminal.stopReason === undefined || terminal.stopReason === "stop") &&
-			!(Array.isArray(terminal.content) && terminal.content.some((block) => record(block).type === "toolCall"))
+			(declaredWithReply(terminal, task) ||
+				((typeof terminal.text === "string" ? terminal.text.trim().length > 0 : Array.isArray(terminal.content)) &&
+					(terminal.stopReason === undefined || terminal.stopReason === "stop") &&
+					!(Array.isArray(terminal.content) && terminal.content.some((block) => record(block).type === "toolCall"))))
 		) {
 			const source = renderCompletedLessonSource(task, root);
 			if (source) return source;
@@ -78,6 +79,26 @@ export function completedLessonSource(ledger: readonly SessionEntry[], root: str
 		end = index;
 	}
 	return null;
+}
+
+/**
+ * A turn `finish` ended closes on the host's synthesized row, which carries no text. It completes its task when the
+ * turn wrote the reply the finish declares: a non-empty text block in the finish response or, for a pinned declaration
+ * round, in a response before it (the host's own headless rule, `bareFinishVerdict`).
+ */
+function declaredWithReply(terminal: Record<string, unknown>, task: readonly SessionEntry[]): boolean {
+	if (terminal.terminalToolResult !== true || terminal.toolName !== ToolNames.Finish) return false;
+	return task.some((entry) => {
+		if (entry.kind !== "message" || entry.role !== "assistant") return false;
+		const content = record(entry.payload).content;
+		return (
+			Array.isArray(content) &&
+			content.some((block) => {
+				const part = record(block);
+				return part.type === "text" && typeof part.text === "string" && part.text.trim().length > 0;
+			})
+		);
+	});
 }
 
 function renderCompletedLessonSource(entries: readonly SessionEntry[], root: string): CompletedLessonSource | null {

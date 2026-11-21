@@ -381,7 +381,10 @@ export function createProvidersBundle(
 		};
 		const authTarget = resolveAuthTarget(target, desc);
 		// The runtime probes read the environment for any name listed in credentialsPresent; a refused target gets none.
-		if (authStore.statusForTarget(authTarget, { includeFallback: false }).refused) {
+		const authStatus = authStore.statusForTarget(authTarget, { includeFallback: false });
+		// The variable a trusted project named is unset: its URL gets no request at all, discovery included.
+		if (authStatus.refused && authTarget.projectKeyEnvVar) throw new Error(authStatus.detail ?? "key variable unset");
+		if (authStatus.refused) {
 			probeCtx.credentialsPresent = new Set();
 			probeCtx.credentialRefused = true;
 			return probeCtx;

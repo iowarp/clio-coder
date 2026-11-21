@@ -24,7 +24,7 @@ import type { SafetyDecision } from "./contract.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import { shellCommandSteps } from "./protected-artifacts.js";
 import { redactSecretString } from "./redaction.js";
-import { SANDBOX_ESCAPE_REASON, SANDBOX_ESCAPE_RULE_ID } from "./sandbox-escape.js";
+import { asksToLeaveSandbox, SANDBOX_ESCAPE_REASON, SANDBOX_ESCAPE_RULE_ID } from "./sandbox-escape.js";
 
 /** Ledger entry type of one session escape scope grant. */
 export const ESCAPE_SCOPE_CUSTOM_TYPE = "clio-coder.escape-scope";
@@ -77,11 +77,12 @@ const SCOPE_SCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 /**
- * The reach of one escape: every script it runs, where it runs and what environment it sets. Null for a
- * call that does not leave the sandbox, runs anything but script files, redirects into a file, or runs a
- * script that is not a readable regular file inside `roots` (the workspace and scratch roots).
+ * The reach of one escape: every script it runs, where it runs and what environment it sets. For a call that
+ * leaves the sandbox but runs anything but script files, redirects into a file, or runs a script that is not a
+ * readable regular file inside `roots` (the workspace and scratch roots), why no scope exists, completing
+ * "Clio offers no session option for this call because". Null for a call that does not leave the sandbox.
  */
-function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase: string): EscapeScope | null {
+function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase: string): EscapeScope | string | null {
 	const args = call.args;
 	if (args?.unsandboxed !== true) return null;
 	const cwd = path.resolve(cwdBase, typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : ".");
@@ -95,48 +96,53 @@ function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase
 		envShown[name] = shown;
 		return true;
 	};
+	const unfixedEnv = "its environment assignments are not one fixed set of names and values";
 	if (call.tool === ToolNames.RunScript) {
-		if (typeof args.script !== "string" || args.script.length === 0) return null;
+		if (typeof args.script !== "string" || args.script.length === 0) return "it names no script file";
 		spelled.push(args.script);
 		const env = args.env;
 		if (env !== undefined) {
-			if (env === null || typeof env !== "object" || Array.isArray(env)) return null;
+			if (env === null || typeof env !== "object" || Array.isArray(env)) return unfixedEnv;
 			for (const [name, value] of Object.entries(env as Record<string, unknown>)) {
-				if (!ENV_NAME.test(name) || typeof value !== "string") return null;
+				if (!ENV_NAME.test(name) || typeof value !== "string") return unfixedEnv;
 				// run_script records keys, never values, so the card names the key alone.
-				if (!assign(name, value, "…")) return null;
+				if (!assign(name, value, "…")) return unfixedEnv;
 			}
 		}
 	} else if (call.tool === ToolNames.Bash) {
-		if (typeof args.command !== "string" || args.command.trim().length === 0) return null;
+		if (typeof args.command !== "string" || args.command.trim().length === 0) return "it runs no command";
 		const steps = shellCommandSteps(args.command);
-		if (steps.length === 0) return null;
+		if (steps.length === 0) return "Clio cannot read its command as steps";
 		for (const step of steps) {
-			if (step.truncatingRedirects.length > 0) return null;
+			if (step.truncatingRedirects.length > 0) return "it redirects output into a file";
 			const operand = stepScriptOperand(step);
-			if (operand === undefined) return null;
+			if (operand === undefined) return "a step of its command runs something other than a script file";
 			spelled.push(operand);
 			for (const assignment of step.assignments ?? []) {
 				const at = assignment.indexOf("=");
 				const name = assignment.slice(0, at);
 				const value = assignment.slice(at + 1);
-				if (!assign(name, value, redactSecretString(value))) return null;
+				if (!assign(name, value, redactSecretString(value))) return unfixedEnv;
 			}
 		}
 	} else {
-		return null;
+		return "a session option covers only bash and run_script calls";
 	}
 	const scripts = new Map<string, string>();
 	for (const operand of spelled) {
 		const file = canonicalizePath(path.resolve(cwd, operand));
-		if (file === null || !roots.some((root) => isSameOrDescendant(file, root))) return null;
+		if (file === null) return `its script ${redactSecretString(operand)} does not resolve to a file`;
+		if (!roots.some((root) => isSameOrDescendant(file, root))) {
+			return `its script ${file} lies outside the workspace and scratch roots`;
+		}
 		if (scripts.has(file)) continue;
+		const unreadable = `its script ${file} is not a readable file of at most 16 MiB that Clio can hash`;
 		try {
 			const stat = statSync(file);
-			if (!stat.isFile() || stat.size > SCOPE_SCRIPT_MAX_BYTES) return null;
+			if (!stat.isFile() || stat.size > SCOPE_SCRIPT_MAX_BYTES) return unreadable;
 			scripts.set(file, digest(readFileSync(file)));
 		} catch {
-			return null;
+			return unreadable;
 		}
 	}
 	return {
@@ -159,7 +165,8 @@ function deriveEscapeScope(
 	roots: ReadonlyArray<string>,
 	cwdBase: string = process.cwd(),
 ): EscapeScope | null {
-	return escapeReach(call, roots, cwdBase);
+	const reach = escapeReach(call, roots, cwdBase);
+	return typeof reach === "string" ? null : reach;
 }
 
 /**
@@ -174,7 +181,7 @@ function escapeScopeCovers(
 	cwdBase: string = process.cwd(),
 ): boolean {
 	const reach = escapeReach(call, roots, cwdBase);
-	if (reach === null || reach.cwd !== scope.cwd) return false;
+	if (reach === null || typeof reach === "string" || reach.cwd !== scope.cwd) return false;
 	const covered = reach.scripts.every((script) =>
 		scope.scripts.some((granted) => granted.path === script.path && granted.sha256 === script.sha256),
 	);
@@ -273,6 +280,11 @@ export interface EscapeScopeLedgerPort {
 export interface EscapeScopeLedger {
 	/** The scope a session-scope option offers for this ask, or null when only the one-call approval applies. */
 	scopeFor(call: ClassifierCall, decision: SafetyDecision): EscapeScope | null;
+	/**
+	 * For a sandbox escape that gets no session option, why not, completing "Clio offers no session option for
+	 * this call because"; null for a call that is no escape or that has an option.
+	 */
+	noScopeReason(call: ClassifierCall, decision: SafetyDecision): string | null;
 	/** The grant that covers this ask, or null. */
 	covering(call: ClassifierCall, decision: SafetyDecision): EscapeScopeGrant | null;
 	/** Records a grant the operator chose for the current session. */
@@ -313,6 +325,18 @@ export function createEscapeScopeLedger(port: EscapeScopeLedgerPort): EscapeScop
 			if (!onlyAsksToLeaveSandbox(decision)) return null;
 			try {
 				return deriveEscapeScope(call, port.roots());
+			} catch {
+				return null;
+			}
+		},
+		noScopeReason(call, decision) {
+			if (call.args?.unsandboxed !== true || !asksToLeaveSandbox(decision)) return null;
+			if (!onlyAsksToLeaveSandbox(decision)) {
+				return "it needs approval for more than leaving the sandbox, and a session option answers only that";
+			}
+			try {
+				const reach = escapeReach(call, port.roots(), process.cwd());
+				return typeof reach === "string" ? reach : null;
 			} catch {
 				return null;
 			}

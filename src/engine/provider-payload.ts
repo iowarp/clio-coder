@@ -275,6 +275,11 @@ function textOnlyRound(
  * Responses APIs honor none too and keep their declarations: Codex sends them
  * as the first input item, so removing them made every locked round miss the
  * whole cached prefix.
+ *
+ * The Copilot SDK has no tool choice, and replacing a live session's tools
+ * (setTools) made its locked round read none of the cached prefix (M-20). The
+ * round keeps the session's tools; the lock directive rides the prompt and the
+ * worker's synthesis lockout refuses a call at admission.
  */
 function toolsRemovedRound(
 	model: EngineModel,
@@ -291,6 +296,7 @@ function toolsRemovedRound(
 	) {
 		return { context, options: { ...options, toolChoice: "none" } };
 	}
+	if (model.api === "copilot-sdk") return { context, options };
 	return { context: { ...resolved, tools: [] }, options: withPayloadEdit(options, withoutToolSurface) };
 }
 

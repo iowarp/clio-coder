@@ -247,6 +247,7 @@ const entries = {
 	"context/handbook-compile-worker": "src/domains/context/handbook-compile-worker.ts",
 	"context/sister-compile-worker": "src/domains/context/sister-compile-worker.ts",
 	"data/scientific-worker": "src/tools/data/scientific-worker.ts",
+	"browser/driver": "src/tools/browser/driver.ts",
 };
 
 export default defineConfig({

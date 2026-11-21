@@ -333,7 +333,7 @@ export const NESTED_LEAVES: ReadonlyArray<readonly [string, string, string]> = [
 	["telemetry tokens", "", "telemetry tokens --session <id> [--by-source] [--json]"],
 	["telemetry verify", "", "telemetry verify <session | scope-dir | archive> [--imported <install-id>] [--json]"],
 	["telemetry why-stopped", "", "telemetry why-stopped <session> [--json]"],
-	["tools install", "provision a vendored tool (claude-sdk, copilot-sdk or herdr)", "tools install claude-sdk"],
+	["tools install", "provision a vendored tool (claude-sdk, copilot-sdk, browser or herdr)", "tools install claude-sdk"],
 	["tools list", "the pinned tool table and where each tool resolves", "tools list [--json]"],
 	["tools remove", "delete every vendored version of a tool", "tools remove <id>|--all [--json]"],
 	["tools reset-profile", "regenerate a tool's CLIO Coder profile on next use", "tools reset-profile <id> [--json]"],

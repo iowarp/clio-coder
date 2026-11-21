@@ -108,6 +108,59 @@ test("after Trust all, each project connection names the key or sign-in it still
 	}
 });
 
+test("a project target names its key variable: the card says it sends $NAME to the url, and only the name is kept after trust", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-card-");
+	const saved = process.env.TEAM_KEY;
+	delete process.env.TEAM_KEY;
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		writeFileSync(
+			join(workspace, ".clio-coder", "settings.yaml"),
+			[
+				"targets:",
+				"  - id: team",
+				"    runtime: openai-compat",
+				"    url: https://llm.team.example.org/v1",
+				"    auth:",
+				"      apiKeyEnvVar: TEAM_KEY",
+				"      apiKeyRef: openai",
+				"      headers: { authorization: Bearer sk-inline }",
+				"",
+			].join("\n"),
+		);
+		const untrusted = readStrictLayeredSettings(workspace);
+		strictEqual(
+			untrusted.settings.targets.some((target) => target.id === "team"),
+			false,
+			"an untrusted project's key name is not read",
+		);
+		const model = buildProjectTrustCard(workspace);
+		ok(model);
+		const text = renderProjectTrustCard(model).join("\n");
+		ok(text.includes("connection team sends $TEAM_KEY to https://llm.team.example.org/v1"), text);
+		trustProjectCard(model);
+		const trusted = readStrictLayeredSettings(workspace);
+		deepStrictEqual(trusted.settings.targets.find((target) => target.id === "team")?.auth, { apiKeyEnvVar: "TEAM_KEY" });
+		deepStrictEqual(
+			trusted.issues
+				.filter((issue) => issue.message.startsWith("credentials are not allowed"))
+				.map((issue) => issue.path)
+				.sort(),
+			["targets[0].auth.apiKeyRef", "targets[0].auth.headers"],
+		);
+		deepStrictEqual(projectConnectionNeeds(workspace, trusted.settings), [
+			"target team reads its key from $TEAM_KEY, which is not set in this shell.",
+		]);
+		process.env.TEAM_KEY = "team-secret";
+		deepStrictEqual(projectConnectionNeeds(workspace, readStrictLayeredSettings(workspace).settings), []);
+	} finally {
+		if (saved === undefined) delete process.env.TEAM_KEY;
+		else process.env.TEAM_KEY = saved;
+		home.restore();
+	}
+});
+
 test("a launch with the project trusted, as after /trust restarts into the session, names the connection needs too", async () => {
 	const home = await isolateClioEnv("clio-coder-trust-card-");
 	const saved = process.env.OPENAI_API_KEY;

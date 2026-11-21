@@ -5,6 +5,7 @@ import {
 	type InteropAgentId,
 	type InteropPresence,
 	interopAgentKind,
+	isAdoptableKind,
 	type PeerModeCapability,
 	peerModeCapabilities,
 } from "../domains/interop/index.js";
@@ -107,7 +108,7 @@ async function interopInspectSnapshot(now: () => number = Date.now): Promise<Int
 							...(marketplace ? { marketplace } : {}),
 							...(installation ? { installation } : {}),
 							...(enabled !== undefined ? { enabled } : {}),
-							adoption: ["hook", "mcp", "executable", "output-style"].includes(kind) ? "not adoptable" : "review required",
+							adoption: isAdoptableKind(kind) ? "review required" : "not adoptable",
 						})),
 					}
 				: null,

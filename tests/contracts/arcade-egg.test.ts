@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isArcadeTrigger } from "../../src/domains/session/easter-eggs.js";
 import { createArcadeState, steerArcade, tickArcade } from "../../src/interactive/arcade-game.js";
-import { arcadeSize, openArcadeOverlay, renderArcade } from "../../src/interactive/arcade-overlay.js";
+import {
+	ARCADE_PAUSED_NOTICE,
+	arcadeSize,
+	createArcadePhraseScreen,
+	openArcadeOverlay,
+	renderArcade,
+} from "../../src/interactive/arcade-overlay.js";
+import { createAskUserViewForTesting } from "../../src/interactive/overlays/ask-user.js";
 
 describe("arcade egg", () => {
 	it("opens only on its trigger phrase", () => {
@@ -151,5 +158,28 @@ describe("arcade egg", () => {
 		assert.equal(running.size, 1);
 		session.close();
 		assert.equal(running.size, 0);
+	});
+
+	it("keeps the phrase out of the ask_user card a paused game stepped aside for (M-14)", async () => {
+		assert.match(ARCADE_PAUSED_NOTICE, /answer Clio, then type the phrase to play on$/u);
+		let paused = true;
+		let phrases = 0;
+		const screenKeys = createArcadePhraseScreen({ active: () => paused, onPhrase: () => phrases++ });
+		const view = createAskUserViewForTesting({ rows: 40, screenKeys });
+		const pending = view.ask([
+			{ header: "Color", question: "Pick a color for the probe", options: [{ label: "Red" }, { label: "Blue" }] },
+		]);
+		// Its "n" was the card's note key, and Enter recorded "Red; sert coin".
+		for (const key of "insert coin") view.handleInput(key);
+		view.handleInput("\r");
+		assert.equal(phrases, 1);
+		// A key that leaves the phrase lets the held ones through ahead of it, in order.
+		view.handleInput("c");
+		view.handleInput("\x1b[B");
+		paused = false;
+		view.handleInput("\r");
+		const result = await pending;
+		assert.equal(result.answers[0]?.answer, "Blue");
+		assert.equal(phrases, 1);
 	});
 });

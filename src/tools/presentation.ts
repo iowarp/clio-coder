@@ -75,6 +75,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Git]: FOLDED,
 	[ToolNames.Verify]: FOLDED,
 	[ToolNames.RunScript]: FOLDED,
+	[ToolNames.Browser]: FOLDED,
 	[ToolNames.Dispatch]: FOLDED,
 	[ToolNames.Monitor]: FOLDED,
 	[ToolNames.Steer]: FOLDED,
@@ -643,6 +644,18 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		verbs: CLASS_VERBS.execute,
 		object: (args) => code(scriptCommand(args)),
 		consumes: ["interpreter", "interpreter_args", "script", "args"],
+	},
+	[ToolNames.Browser]: {
+		class: "execute",
+		verbs: CLASS_VERBS.execute,
+		object: (args) =>
+			plain(
+				joinDefined(
+					`browser ${text(args, "op") ?? ""}`.trim(),
+					text(args, "url") ?? text(args, "endpoint") ?? text(args, "command") ?? text(args, "target") ?? text(args, "page"),
+				),
+			),
+		consumes: ["op", "url", "endpoint", "page", "target", "script", "file", "command"],
 	},
 	[ToolNames.Verify]: {
 		class: "execute",

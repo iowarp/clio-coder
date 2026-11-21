@@ -67,6 +67,9 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// run_script runs one interpreter over one workspace script and projects
 	// itself to a bash command for the policy engine; execute class, sequential.
 	[ToolNames.RunScript]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
+	// browser drives a persistent headless session; its safetyCall projects every op to the driver command, so
+	// admission contains it as bash and the session worker starts inside that sandbox.
+	[ToolNames.Browser]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
 	[ToolNames.Dispatch]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
 	[ToolNames.Job]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
 	// monitor never mutates a run, so it stays read class and parallel.
@@ -175,6 +178,8 @@ const MEMORY_NOTE_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryNote]);
 const REPORT_BOUND_TOOLS = new Set<ToolName>([ToolNames.Report]);
 /** Registered only on the orchestrator registry: the main agent declares completion here, a worker in its report. */
 const FINISH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Finish]);
+/** Registered only on the orchestrator registry with the network plane: workers get the browser after the fleet partitions land. */
+const BROWSER_BOUND_TOOLS = new Set<ToolName>([ToolNames.Browser]);
 /** Registered only in Clio's own checkout, so no host can require it; workers still exclude it as interactive. */
 const SELF_REPO_BOUND_TOOLS = new Set<ToolName>([ToolNames.RestartSession]);
 
@@ -200,7 +205,8 @@ export function isWorkerSurfaceExcludedTool(name: ToolName): boolean {
 		MEMORY_RECALL_BOUND_TOOLS.has(name) ||
 		MEMORY_NOTE_BOUND_TOOLS.has(name) ||
 		REPORT_BOUND_TOOLS.has(name) ||
-		FINISH_BOUND_TOOLS.has(name)
+		FINISH_BOUND_TOOLS.has(name) ||
+		BROWSER_BOUND_TOOLS.has(name)
 	);
 }
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
@@ -293,6 +299,7 @@ export function validateBuiltinToolPolicy(
 		if (MEMORY_NOTE_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (REPORT_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (FINISH_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (BROWSER_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (SELF_REPO_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {

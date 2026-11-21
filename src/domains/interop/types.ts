@@ -147,7 +147,8 @@ export type InteropResourceKind =
 	| "output-style"
 	| "hook"
 	| "mcp"
-	| "executable";
+	| "executable"
+	| "instructions";
 export interface InteropInventoryItem {
 	kind: InteropResourceKind;
 	name: string;
@@ -167,6 +168,8 @@ export interface InteropInventory {
 }
 export interface InteropInventoryLayout {
 	userRoot: string;
+	/** Instruction files the agent loads into every session, relative to its user root. */
+	userInstructions?: string[];
 	additionalUserRoots?: string[];
 	xdgConfigSubdir?: string;
 	homeEnv?: string;

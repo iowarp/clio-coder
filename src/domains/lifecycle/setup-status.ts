@@ -1,3 +1,5 @@
+import { unsetKeyVariableSentence } from "../../core/project-target-urls.js";
+
 /**
  * One answer to "can this home chat, and if not, what is the one missing thing?".
  *
@@ -154,7 +156,7 @@ export function describeMissing(
 			return { sentence: options.inSession ? `${sentence} (or press Enter on /config)` : sentence, command };
 		}
 		case "env":
-			return { sentence: `${missing.target} reads its key from ${missing.variable}, which is not set in this shell.` };
+			return { sentence: unsetKeyVariableSentence(missing.target, missing.variable) };
 		case "unreachable":
 			return {
 				sentence: `${missing.target} at ${missing.url} did not answer (${missing.detail}). Start the server, or change the address with /config.`,

@@ -32,6 +32,7 @@ import { CopyButton, JsonTreeView, offersJsonTree } from "../render/Markdown.js"
 import { statusGlyph } from "./activity.js";
 import { ELAPSED_TITLE } from "./chat-turn.js";
 import { DiffView } from "./Diff.js";
+import { type ToolImagesView, toolImagesView } from "./tool-image-model.js";
 import {
 	formatLocation,
 	type MatchGroup,
@@ -256,6 +257,27 @@ function ChainSteps({ steps }: { steps: readonly ToolStep[] }) {
 	);
 }
 
+/** Images the call returned, drawn in the card, and screenshot files it named instead, as their paths. */
+function ToolImages({ view }: { view: ToolImagesView }) {
+	if (view.images.length === 0 && view.links.length === 0) return null;
+	return (
+		<div className="tool-card__images">
+			{view.images.map((image) => (
+				<img className="tool-card__image" key={image.key} src={image.src} alt={image.alt} loading="lazy" />
+			))}
+			{view.links.length === 0 ? null : (
+				<p className="tool-card__locations">
+					{view.links.map((link) => (
+						<code className="tool-card__location" key={link.key} title={link.label}>
+							{link.path}
+						</code>
+					))}
+				</p>
+			)}
+		</div>
+	);
+}
+
 function RawDisclosure({ item }: { item: TimelineItem }) {
 	const [open, setOpen] = useState(false);
 	return (
@@ -378,6 +400,7 @@ export const ToolCard = memo(function ToolCard({ item, options, agent = null, el
 					{card.note === null ? null : <p className="tool-card__note">{card.note}</p>}
 					<Locations locations={card.locations} headline={card.headline} />
 					<Body card={card} status={item.status} />
+					<ToolImages view={toolImagesView(item, card.name)} />
 					<RawDisclosure item={item} />
 				</div>
 			) : null}

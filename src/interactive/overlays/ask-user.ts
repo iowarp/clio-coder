@@ -122,6 +122,11 @@ const COMPACT_BODY_FITS: ReadonlyArray<BodyFit> = [
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
+	/**
+	 * Sees each key first and returns the keys the card acts on, in order. A paused arcade game holds its phrase back
+	 * this way, so the phrase is never recorded as an answer.
+	 */
+	screenKeys?: (data: string) => readonly string[];
 }
 
 /** How a round is put in front of the operator beyond its questions. */
@@ -776,15 +781,18 @@ class AskUserOverlayView implements Component {
 		return true;
 	}
 	handleInput(data: string): void {
+		// Any key says the operator is here, the guarded and the screened ones included: the
+		// round waits for them from now on.
+		if (this.phase === "asking" && this.countdown !== null) {
+			this.countdown.hold();
+			this.deps.requestRender();
+		}
+		for (const key of this.deps.screenKeys?.(data) ?? [data]) this.actOnInput(key);
+	}
+	private actOnInput(data: string): void {
 		if (this.phase !== "asking") {
 			if (matchesKey(data, "escape")) this.deps.onCancel();
 			return;
-		}
-		// Any key says the operator is here, the guarded ones included: the
-		// round waits for them from now on.
-		if (this.countdown !== null) {
-			this.countdown.hold();
-			this.deps.requestRender();
 		}
 		const question = this.currentQuestion();
 		const state = this.currentState();
@@ -1992,9 +2000,11 @@ export function createAskUserViewForTesting(deps: {
 	rows: number;
 	tui?: TUI;
 	onCancel?: () => void;
+	screenKeys?: OpenAskUserOverlayDeps["screenKeys"];
 }): AskUserViewForTesting {
 	const view = new AskUserOverlayView({
 		onCancel: deps.onCancel ?? (() => {}),
+		...(deps.screenKeys ? { screenKeys: deps.screenKeys } : {}),
 		getTerminalRows: () => deps.rows,
 		requestRender: () => {},
 		...(deps.tui ? { tui: deps.tui } : {}),
