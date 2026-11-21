@@ -64,12 +64,14 @@ The text listing notes on stderr how many records wait for review. Both listings
 note on stderr how many records the store set aside as invalid; --json also
 lists them under "invalid" with their issues. Listing never moves them.
 
-consolidate tidies the store by rule, with no model call: records of one claim
-merge (other wordings kept as revisions), lessons of this repository whose
-command no longer resolves or whose quoted span left its file here are demoted
-to notes (an operator-approved one is only reported as withheld), and notes
-the automatic tier wrote with no evidence, verdict or delivery are dropped.
-Operator decisions are never changed. It runs only when you run it.
+consolidate tidies the records this checkout would use by rule, with no model
+call; another repository's records, an earlier one at this path included, are
+left alone. Records of one claim merge (other wordings kept as revisions),
+lessons of this repository whose command no longer resolves or whose quoted
+span left its file here are demoted to notes (an operator-approved one is only
+reported as withheld), and notes the automatic tier wrote with no evidence,
+verdict or delivery are dropped. Operator decisions are never changed. It runs
+only when you run it.
 `;
 
 type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune" | "consolidate";

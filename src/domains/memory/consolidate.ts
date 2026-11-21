@@ -12,6 +12,8 @@
  * - drops notes nobody decided on that carry no command or source evidence, came from the automatic tier rather than
  *   an author, and were never observed or delivered.
  *
+ * The pass sees the records retrieval would let into this checkout (`repositoryApplies` over the fingerprinted
+ * identity): another repository's records, an earlier repository at this same path included, are left as they are.
  * An operator-approved or operator-rejected record is never merged, demoted, dropped or rewritten. A store and
  * checkout with nothing to do are left byte for byte as they were, so a second run started beside the first, which
  * waits on the store lock and reads the consolidated store, changes nothing.
@@ -20,7 +22,12 @@
 import { canonicalCheckout } from "../../core/project-root.js";
 import { boundedVerdicts, operatorDecided } from "./guardian-gate.js";
 import { checkoutDeliveryCheck } from "./lesson-projection.js";
-import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
+import {
+	canonicalMemoryRepositoryIdentity,
+	cloneMemoryRecord,
+	primeMemoryRepositoryFingerprint,
+	repositoryApplies,
+} from "./operations.js";
 import { memoryClaimKey, memoryRevision, revisionAuthor } from "./promotion.js";
 import { mutateMemoryRecords } from "./store.js";
 import { MEMORY_REVISIONS_MAX, type MemoryObservation, type MemoryRecord, type MemoryRevision } from "./types.js";
@@ -57,6 +64,8 @@ export async function consolidateMemory(
 	options: MemoryConsolidationOptions,
 ): Promise<MemoryConsolidation> {
 	const at = (options.now ?? new Date()).toISOString();
+	// The identity retrieval uses: its fingerprint tells this repository from an earlier one at the same path.
+	primeMemoryRepositoryFingerprint(options.cwd);
 	const repository = canonicalMemoryRepositoryIdentity(options.cwd);
 	const check = checkoutDeliveryCheck(canonicalCheckout(options.cwd).checkout);
 	return mutateMemoryRecords<MemoryConsolidation>(dataDir, (records) => {
@@ -71,8 +80,9 @@ export async function consolidateMemory(
 		};
 		const replaced = new Map<string, MemoryRecord>();
 		const removed = new Set<string>();
+		const inScope = records.filter((record) => repositoryApplies(record, repository));
 
-		for (const group of claimGroups(records)) {
+		for (const group of claimGroups(inScope)) {
 			const [first, ...rest] = [...group].sort(survivorOrder);
 			if (first === undefined || rest.length === 0) continue;
 			const survivor = cloneMemoryRecord(first);
@@ -85,11 +95,10 @@ export async function consolidateMemory(
 			replaced.set(survivor.id, survivor);
 		}
 
-		for (const original of records) {
+		for (const original of inScope) {
 			if (removed.has(original.id)) continue;
 			const record = replaced.get(original.id) ?? original;
-			if (!record.approved || record.scope !== "repo" || repository === null || record.repository?.key !== repository.key)
-				continue;
+			if (!record.approved || record.scope !== "repo") continue;
 			const failed = check(record);
 			if (failed === null) continue;
 			const reason = `failed its delivery check: ${failed}`;
@@ -107,7 +116,7 @@ export async function consolidateMemory(
 			outcome.demoted += 1;
 		}
 
-		for (const original of records) {
+		for (const original of inScope) {
 			if (removed.has(original.id)) continue;
 			if (!droppable(replaced.get(original.id) ?? original)) continue;
 			removed.add(original.id);
