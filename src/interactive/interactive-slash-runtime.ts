@@ -8,6 +8,7 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
+import type { AttachOperations } from "../domains/attach/host.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
@@ -234,6 +235,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openView: (filter?: string) => void;
 	/** Pane-layer operations behind `/panes`. Absent when the mux resolved to `none`. */
 	panes?: PanesOperations;
+	/** The attach socket behind `/attach`. Absent outside the interactive terminal. */
+	attach?: AttachOperations;
 	/** The music pane behind `/music`. Absent when the session started without panes. */
 	music?: MusicOperations;
 	/** The shared job control behind `/loop`. Absent where no session-owned job host exists. */
@@ -687,6 +690,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		openView: deps.openView,
 		...(deps.panes ? { panes: deps.panes } : {}),
+		...(deps.attach ? { attach: deps.attach } : {}),
 		...(deps.music ? { music: deps.music } : {}),
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
 		setThinkingLevel: (level) => {

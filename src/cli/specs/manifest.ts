@@ -258,6 +258,7 @@ export const NESTED_LEAVES: ReadonlyArray<readonly [string, string, string]> = [
 	["semantic search", "", "semantic search <query> [--limit <1..20>] [filters]"],
 	["semantic status", "", "semantic status"],
 	["session artifacts", "", "session artifacts <session> [read <id>] [--all-projects] [--json]"],
+	["session attach", "", "session attach <id> [--role observer|approver|pair] [--label <name>] [--json]"],
 	["session compact", "", "session compact <session> [--instructions <text>] [--json]"],
 	["session export", "", "session export <session> [--format md|html|jsonl] [--out <path>] [--all-projects] [--json]"],
 	["session fork", "", "session fork <session> [--at <turnId>] [--name <name>] [--json]"],
