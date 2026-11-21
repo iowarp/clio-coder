@@ -471,13 +471,19 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
 	}
 	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge, and none asks for a
-	// workspace snapshot: after the leading temp cd a relative operand is placed under the temp root.
+	// workspace snapshot: after the leading temp cd a relative operand is placed under the temp root. Steps are read up to
+	// the delete, so a later pipe, link or program does not move it, and after an earlier program an entry directly in
+	// the temp root is still placed, since rm never follows its last component.
 	for (const command of [
 		'B=$TMPDIR/base; mkdir -p "$B"; rm -rf "$B"',
 		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
 		'H=$(mktemp -d); rm -rf "$H"',
 		'cd "$TMPDIR" && mkdir -p probe-rows && rm -rf probe-rows',
+		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
+		'set -e; B="$TMPDIR/base-w8"; rm -rf "$B"; mkdir -p "$B"; git archive HEAD | tar -x -C "$B"; ln -s "$PWD/node_modules" "$B/node_modules"',
+		`cd ${process.cwd()} && B=$TMPDIR/base && rm -rf $B && mkdir -p $B`,
+		'H=$(mktemp -d); node -e 1 > "$H/out"; rm -rf "$H"',
 	]) {
 		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
@@ -501,6 +507,22 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		} finally {
 			process.env.TMPDIR = temp;
 		}
+	}
+	// Contained yolo hands the judge its default decision, whose scope holds the scratch roots: a delete a failed cd leaves
+	// in the workspace gets what the same delete written plainly gets, and the judge's reason names the workspace path.
+	const contained = { ...atDefault, scratchRoots: [realpathSync(temp)], snapshots: false };
+	for (const [command, plain] of [
+		['cd "$TMPDIR"; rm -rf .git', "rm -rf .git"],
+		['cd "$TMPDIR"\nrm -rf .git', "rm -rf .git"],
+		['cd "$TMPDIR" || rm -rf .git', "rm -rf .git"],
+		['cd "$TMPDIR" && mkdir -p x; rm -rf .git', "rm -rf .git"],
+		['cd "$TMPDIR"\nrm -rf src', "rm -rf src"],
+	] as const) {
+		const chained = engine.evaluate(bash(command), "default", contained);
+		const bare = engine.evaluate(bash(plain), "default", contained);
+		strictEqual(`${chained.kind}/${chained.reasonCode}`, `${bare.kind}/${bare.reasonCode}`, command);
+		const first = (reasons: ReadonlyArray<string>) => reasons.find((reason) => reason.trim().length > 0);
+		strictEqual(first(chained.reasons), first(bare.reasons), command);
 	}
 	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
 	const linkDir = mkdtempSync(join(temp, "xr43-"));
@@ -533,10 +555,21 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'B=$TMPDIR/base; read B < /dev/null; rm -rf "$B"',
 		"B='$TMPDIR/base'; rm -rf \"$B\"",
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H/etc"',
-		// The shell rewrites PWD and OLDPWD on cd, and a later cd drops every pin.
+		// The shell rewrites PWD and OLDPWD on cd.
 		`PWD=$TMPDIR; cd ${process.cwd()}; rm -f "$PWD/fixture.txt"`,
 		`OLDPWD=$TMPDIR; cd ${process.cwd()}; rm -f "$OLDPWD/fixture.txt"`,
-		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
+		// A pin dies when it may not hold where the delete runs: a skipped or subshell assignment, a reassignment without a
+		// plain `NAME=`, a trap, or a path a program run before it may have linked.
+		'false || B=$TMPDIR/base && rm -rf "$B"',
+		`cd ${process.cwd()} && B=$TMPDIR/base; rm -rf "$B"`,
+		'B=$TMPDIR/base | true; rm -rf "$B"',
+		'B=$TMPDIR/base; B=/etc >/dev/null; rm -rf "$B"',
+		'B=$TMPDIR/base; B[0]=/etc; rm -rf "$B"',
+		'B=$TMPDIR/base; : $((B=0)); rm -rf "$B"',
+		'B=$TMPDIR/base; exec {B}>/dev/null; rm -rf "$B"',
+		"B=$TMPDIR/base; trap 'B=/etc' DEBUG; rm -rf \"$B\"",
+		`B=$TMPDIR/base; ln -s ${process.cwd()} "$B/a"; rm -rf "$B/a/src"`,
+		'B=$TMPDIR/base; node -e 1; rm -rf "$B/"',
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
