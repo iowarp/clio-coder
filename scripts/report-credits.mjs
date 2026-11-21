@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const REPOSITORY = "iowarp/clio-coder";
 const BLOCK_TAG = "clio-coder-report";
 export const CHAMPIONS_HEADER =
-	"# Champions\n\nThank you to everyone who reported a problem and asked to be credited. Every report made Clio Coder better.\n\n";
+	"# Champions\n\nThank you to everyone who reported a problem and asked to be credited. Every report made CLIO Coder better.\n\n";
 
 /** The first report block's `credit:` value, or null without a block. */
 export function blockCredit(body) {
