@@ -18,6 +18,7 @@ import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS, YOLO_CONFINEMENTS } from "../domains/safety/autonomy.js";
 import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
+import { validationWrapperProblem } from "../domains/safety/validation-wrappers.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
@@ -2247,6 +2248,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					const memory = context.memory;
 					issues.unknownKeys("context.memory", memory, [
 						"enabled",
+						"sideShare",
 						"observations",
 						"surfaces",
 						"target",
@@ -2260,6 +2262,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("enabled" in memory) {
 						const parsed = expectBoolean(issues, "context.memory.enabled", memory.enabled);
 						if (parsed !== undefined) settings.context.memory.enabled = parsed;
+					}
+					if ("sideShare" in memory) {
+						const parsed = expectNumber(issues, "context.memory.sideShare", memory.sideShare, { min: 0 });
+						if (parsed !== undefined) settings.context.memory.sideShare = parsed;
 					}
 					if ("observations" in memory) {
 						if (!isPlainObject(memory.observations)) issues.add("context.memory.observations", "expected a map");
@@ -2277,13 +2283,30 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!isPlainObject(memory.surfaces))
 							issues.add("context.memory.surfaces", `expected a map, got ${describe(memory.surfaces)}`);
 						else {
-							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe"]);
+							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe", "delivery", "correct", "bank"]);
 							if ("observe" in memory.surfaces) {
 								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
 									"off",
 									"on",
 								] as const);
 								if (parsed !== undefined) settings.context.memory.surfaces.observe = parsed;
+							}
+							if ("delivery" in memory.surfaces) {
+								const parsed = expectEnum(issues, "context.memory.surfaces.delivery", memory.surfaces.delivery, [
+									"off",
+									"section",
+									"decision",
+									"broadcast",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces.delivery = parsed;
+							}
+							for (const key of ["correct", "bank"] as const) {
+								if (!(key in memory.surfaces)) continue;
+								const parsed = expectEnum(issues, `context.memory.surfaces.${key}`, memory.surfaces[key], [
+									"rules",
+									"model",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces[key] = parsed;
 							}
 						}
 					}
@@ -2470,9 +2493,9 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const parsed = expectStringArray(issues, "safety.validationWrappers", safety.validationWrappers);
 				if (parsed !== undefined) {
 					settings.safety.validationWrappers = parsed.filter((entry) => {
-						const valid = entry.trim().length > 0 && entry === entry.trim();
-						if (!valid) issues.add("safety.validationWrappers", `${JSON.stringify(entry)}: not a script path or name`);
-						return valid;
+						const problem = validationWrapperProblem(entry);
+						if (problem !== null) issues.add("safety.validationWrappers", `${JSON.stringify(entry)}: ${problem}`);
+						return problem === null;
 					});
 				}
 			}

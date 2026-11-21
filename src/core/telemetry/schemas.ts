@@ -2744,6 +2744,7 @@ export const MemoryStepDecidedSchema = Type.Object(
 			"quota_window",
 			"quota_retry",
 			"time_budget",
+			"side_share",
 			"client_error",
 			"information_flow_blocked",
 			"no_client",
@@ -2800,6 +2801,7 @@ export const MemoryObservationRecordedSchema = Type.Object(
 			"lesson-retention-deferred",
 			"lesson-retention-orphan",
 			"lesson-retention-restored",
+			"lesson-withheld",
 			"lessons-retained",
 			"memory-recall-results",
 			"memory-reminders-submitted",
@@ -2818,6 +2820,8 @@ export const MemoryObservationRecordedSchema = Type.Object(
 		facts: Type.Object(
 			{
 				count: Type.Optional(count),
+				/** Admitted reminder bytes, on `memory-reminders-submitted`. */
+				bytes: Type.Optional(count),
 				grounded: Type.Optional(count),
 				ungrounded: Type.Optional(count),
 				rejected: Type.Optional(count),

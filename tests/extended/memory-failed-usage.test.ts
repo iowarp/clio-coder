@@ -191,6 +191,8 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			const reminders: string[] = [];
 			const proposals: unknown[] = [];
 			const registration = createMemoryInterventionRegistration({
+				// These pin the model tiers, which ship off (`rules`) as a policy choice.
+				surfaces: { correct: "model", bank: "model" },
 				bank,
 				telemetry: createTaskMemoryTelemetrySink(),
 				getModelClient: routing.getModelClient,
@@ -475,6 +477,8 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 	const reasons: string[] = [];
 	const routes: Array<string | undefined> = [];
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		...callbacks,
 		telemetry: {
@@ -504,6 +508,8 @@ for (const ending of ["silent", "malformed", "abort", "deadline", "scope-change"
 		let attempts = 0;
 		let fallbackAttempts = 0;
 		const registration = createMemoryInterventionRegistration({
+			// These pin the model tiers, which ship off (`rules`) as a policy choice.
+			surfaces: { correct: "model", bank: "model" },
 			bank,
 			timeoutMs: 20,
 			getModelClient: () => ({
@@ -544,6 +550,8 @@ test("fallback shares the original deadline and cancellation discards its late c
 	let fallbackSignal: AbortSignal | undefined;
 	const bank = new TaskMemoryBank();
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		timeoutMs: 50,
 		getModelClient: () => ({
@@ -612,6 +620,8 @@ test("a failed fallback capacity read preserves the dedicated call's result and 
 		backend: null,
 	};
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank: new TaskMemoryBank(),
 		getModelClient: () => ({
 			complete: async (request) => {

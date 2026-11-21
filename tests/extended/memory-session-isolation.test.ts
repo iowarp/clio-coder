@@ -22,6 +22,8 @@ test("dispatch memory projects public arguments without changing private call id
 	const bank = new TaskMemoryBank();
 	let prompt = "";
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getModelClient: () => ({
 			complete: async (request) => {
@@ -92,6 +94,8 @@ test("a memory completion from session A must not populate session B", async () 
 	const reminders: Array<{ sessionId: string; message: string }> = [];
 	const proposals: Array<{ sessionId: string; entries: ReadonlyArray<TaskMemoryEntry> }> = [];
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getSettings() {
 			if (sessionId !== bankSessionId) {
@@ -129,6 +133,8 @@ test("clearing the bank on a session change must also isolate tool trajectory", 
 	let bankSessionId = sessionId;
 	let nextPrompt = "";
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getSettings() {
 			if (sessionId !== bankSessionId) {
@@ -203,6 +209,8 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 		const proposals: Array<{ sessionId: string | undefined; entries: ReadonlyArray<TaskMemoryEntry> }> = [];
 		const reminders: string[] = [];
 		const registration = createMemoryInterventionRegistration({
+			// These pin the model tiers, which ship off (`rules`) as a policy choice.
+			surfaces: { correct: "model", bank: "model" },
 			bank,
 			getModelClient: () => ({
 				complete: (request) => {
@@ -267,6 +275,8 @@ test("tree reads, same-session resume, forward turns and compaction preserve mem
 	const completion = deferred<TaskMemoryModelResponse>();
 	let request: TaskMemoryModelRequest | undefined;
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getModelClient: () => ({
 			complete: (input) => {
@@ -306,6 +316,8 @@ test("reset clears pending tools, cadence, failures, triggers, activity and comp
 	const bank = new TaskMemoryBank();
 	const prompts: string[] = [];
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		everyNTools: 2,
 		getModelClient: () => ({
@@ -354,6 +366,8 @@ test("shutdown releases the detached policy without awaiting an abort-ignoring m
 	const bus = createTelemetryHub();
 	const completion = deferred<TaskMemoryModelResponse>();
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getModelClient: () => ({ complete: () => completion.promise }),
 	});
@@ -431,6 +445,8 @@ test("timeout backoff resets, while settings toggles, busy endpoints and reminde
 	let timeout = true;
 	let calls = 0;
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getSettings: () => ({ enabled, everyNTools: 2, windowSteps: 8, maxTokens: 2000, timeoutMs: 1000 }),
 		backgroundEndpointBusy: () => busy,
@@ -484,6 +500,8 @@ test("operator cancellation revokes a pending memory step without erasing comple
 	let calls = 0;
 	const reminders: string[] = [];
 	const registration = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank,
 		getModelClient: () => ({
 			complete: (request) => {

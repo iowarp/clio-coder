@@ -13,6 +13,7 @@ import type { ThinkingLevel } from "../../core/defaults.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolveMemoryRoute } from "../../core/session-routing.js";
 import type { MemorySurfaceId } from "../../core/side-surfaces.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { noCallRunUsageFacts, pricingBasisFields, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
@@ -48,8 +49,8 @@ import { ceilChars, estimateAgentContextTokens } from "../session/context-accoun
 import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import type { CallJournalOptions } from "../telemetry/call-scope.js";
 import { openCallScope } from "../telemetry/call-scope.js";
-import type { BackgroundRouteFacts } from "./background-budget.js";
-import { decideBackgroundStep } from "./background-budget.js";
+import type { BackgroundRouteFacts, SideShareFacts, SideShareHeld } from "./background-budget.js";
+import { decideBackgroundStep, foldSideShare, SIDE_SHARE_EXEMPT } from "./background-budget.js";
 import { OBSERVATION_PROMPT } from "./observations.js";
 import type { TaskMemoryModelClient, TaskMemoryModelRequest, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import {
@@ -94,6 +95,123 @@ interface BackgroundBudgetInputs {
 	settings: Readonly<ClioSettings>;
 	/** Priced session spend; absent where no session ledger exists, which reads as none. */
 	sessionSpendUsd?: () => number;
+	/** The session's side-share governor; absent where no session journal is read, which admits. */
+	sideShare?: SideShareGovernor;
+}
+
+/** The session journal the governor reads: the session's call records once they are settled. */
+export interface SideShareJournal {
+	sessionId: string | null;
+	records: readonly TelemetryRecord[];
+}
+
+/**
+ * The telemetry the governor reads, structurally the telemetry contract: a barrier that flushes every queued record and
+ * waits for the live view's seed, then that view. Without the barrier a resumed session's view is the unseeded buffer
+ * and its count would restart at zero.
+ */
+export interface SideShareTelemetry {
+	settledSessionSpend(): Promise<unknown>;
+	read?: { live(): { sessionId: string; callRecords(): TelemetryRecord[] } | null };
+}
+
+/** The journaled call a memory request is, as the routing wrapper opened it. */
+export interface SideShareAttempt {
+	/** The session whose journal records the call; null for a call the process journal records. */
+	sessionId: string | null;
+	callId: string;
+}
+
+/**
+ * The side-share governor of one process (memory design 4.1), shared by every routing instance a call journal serves so
+ * a call held by one counts for the others. Its counters fold from the session's own settled journal on each decision.
+ */
+export interface SideShareGovernor {
+	/**
+	 * The current session's settled journal; read before a decision, never between the decision and its hold. When it
+	 * cannot be read it names the current session with no records, so that session's holds and admissions still count.
+	 */
+	journal(): Promise<SideShareJournal>;
+	/** What the governor reads for a call of `purpose`: that journal plus the calls this process holds for its session. */
+	facts(
+		journal: SideShareJournal,
+		purpose: MemorySurfaceId,
+		memory: Readonly<ClioSettings["context"]["memory"]>,
+	): SideShareFacts;
+	/**
+	 * Hold an admitted call's output budget, taken in the step that admitted it. Releasing it keeps a session-journaled
+	 * call counted until that journal shows the call settled, so a call is never between held and recorded.
+	 */
+	hold(purpose: MemorySurfaceId, maxTokens: number, attempt: SideShareAttempt | undefined): () => void;
+}
+
+/** Request budgets of the calls this process made, so a settlement without usage is charged its own budget. */
+const SIDE_SHARE_BUDGETS_LIMIT = 1024;
+/** A released call whose settlement never reaches the journal stops counting after this long. */
+const SIDE_SHARE_SETTLING_MS = 60_000;
+
+function createSideShareGovernor(
+	telemetry: () => SideShareTelemetry | undefined,
+	currentOrigin: () => CallJournalOptions["origin"] | undefined,
+): SideShareGovernor {
+	type Held = SideShareHeld & { sessionId: string | null; releasedAt: number | null };
+	const held = new Set<Held>();
+	const budgets = new Map<string, number>();
+	/**
+	 * Automatic calls this process admitted per session. A floor under the journal's count: with the journal unreadable
+	 * the free calls stay three, and past them a zero main denominator refuses (fails closed).
+	 */
+	const admitted = new Map<string | null, number>();
+	const currentSession = (): string | null => currentOrigin()?.id ?? null;
+	return {
+		async journal() {
+			const unreadable = (): SideShareJournal => ({ sessionId: currentSession(), records: [] });
+			const source = telemetry();
+			if (!source) return unreadable();
+			try {
+				await source.settledSessionSpend();
+				const view = source.read?.live();
+				return view ? { sessionId: view.sessionId, records: view.callRecords() } : unreadable();
+			} catch {
+				return unreadable();
+			}
+		},
+		facts(journal, purpose, memory) {
+			const now = Date.now();
+			for (const call of held)
+				if (call.releasedAt !== null && now - call.releasedAt > SIDE_SHARE_SETTLING_MS) held.delete(call);
+			// A call held for another session (before /new or /resume), or for no session at all, is not this session's.
+			const own = [...held].filter((call) => call.sessionId === journal.sessionId);
+			const { facts, covered } = foldSideShare(
+				journal.records,
+				own,
+				(callId) => budgets.get(callId) ?? memory.maxOutputTokens,
+			);
+			for (const call of covered) if ((call as Held).releasedAt !== null) held.delete(call as Held);
+			return {
+				share: memory.sideShare,
+				automatic: !SIDE_SHARE_EXEMPT.has(purpose),
+				...facts,
+				automaticCalls: Math.max(facts.automaticCalls, admitted.get(journal.sessionId) ?? 0),
+			};
+		},
+		hold(purpose, maxTokens, attempt) {
+			const sessionId = attempt === undefined ? currentSession() : attempt.sessionId;
+			const call: Held = { purpose, maxTokens, callId: attempt?.callId ?? null, sessionId, releasedAt: null };
+			held.add(call);
+			if (!SIDE_SHARE_EXEMPT.has(purpose)) admitted.set(sessionId, (admitted.get(sessionId) ?? 0) + 1);
+			if (call.callId !== null) {
+				budgets.set(call.callId, maxTokens);
+				if (budgets.size > SIDE_SHARE_BUDGETS_LIMIT) budgets.delete(budgets.keys().next().value as string);
+			}
+			return () => {
+				// Only a session journal will show the settlement: an unjournaled call, or one the process journal records,
+				// stops counting when it finishes.
+				if (call.callId === null || call.sessionId === null) held.delete(call);
+				else call.releasedAt = Date.now();
+			};
+		},
+	};
 }
 
 function backgroundRouteFacts(
@@ -122,9 +240,14 @@ export function createBackgroundMemoryModelClient(
 	fallbackOnly = false,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 	sessionSpendUsd?: () => number,
+	sideShare?: SideShareGovernor,
 ): BackgroundMemoryRoute | null {
 	if (!settings.context.memory.enabled) return null;
-	const budget: BackgroundBudgetInputs = { settings, ...(sessionSpendUsd === undefined ? {} : { sessionSpendUsd }) };
+	const budget: BackgroundBudgetInputs = {
+		settings,
+		...(sessionSpendUsd === undefined ? {} : { sessionSpendUsd }),
+		...(sideShare === undefined ? {} : { sideShare }),
+	};
 	const memoryRoute = resolveMemoryRoute(settings);
 	const configuredTarget = memoryRoute.target?.trim();
 	const configuredModel = memoryRoute.model?.trim();
@@ -345,7 +468,10 @@ function prepareBackgroundMemoryRoute(
 			// disturbance even when a timeout means the usage sink never sees it.
 			complete: async (request) => {
 				let usageObserved = false;
+				let releaseHold: (() => void) | undefined;
 				try {
+					// The governor reads the settled journal first, so nothing awaits between its decision and its hold.
+					const shareJournal = budget?.sideShare === undefined ? undefined : await budget.sideShare.journal();
 					// Decided before the metadata probe, auth or any byte leaves, so a
 					// skipped step costs nothing; the next cadence tick decides again.
 					const nowMs = Date.now();
@@ -379,6 +505,11 @@ function prepareBackgroundMemoryRoute(
 							ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
 						},
 						quota: routeQuota,
+						...(budget?.sideShare === undefined || shareJournal === undefined
+							? {}
+							: {
+									sideShare: budget.sideShare.facts(shareJournal, request.purpose, budget.settings.context.memory),
+								}),
 						endpoint: {
 							occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
 							admissionLimit:
@@ -393,6 +524,8 @@ function prepareBackgroundMemoryRoute(
 						}
 						throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
 					}
+					// In the step that admitted it, so a concurrent decision on another routing instance already counts it.
+					releaseHold = budget?.sideShare?.hold(request.purpose, request.maxTokens, request.sideShareAttempt);
 					await prepareBackgroundModelMetadata(providers, targetId, request.signal);
 					const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId, thinkingLevel);
 					if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
@@ -526,6 +659,8 @@ function prepareBackgroundMemoryRoute(
 							failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
 						});
 					throw error;
+				} finally {
+					releaseHold?.();
 				}
 			},
 		},
@@ -581,14 +716,17 @@ export function createMemoryFlowAdmission(
 /**
  * Each memory step is a journaled call, in its session's journal or the
  * process journal (#434). Undefined when telemetry cannot journal or the
- * target no longer resolves.
+ * target no longer resolves. With `sideShareTelemetry`, the telemetry that
+ * holds the session's settled call journal, it also carries the process's
+ * side-share governor.
  */
 export function createBackgroundCallJournal(
 	providers: ProvidersContract,
 	acquireTelemetrySession: () => CallJournalOptions["acquire"] | undefined,
 	currentOrigin: () => CallJournalOptions["origin"] | undefined,
-): (targetId: string, modelId: string, purpose: MemorySurfaceId) => CallJournalOptions | undefined {
-	return (targetId, modelId, purpose) => {
+	sideShareTelemetry?: () => SideShareTelemetry | undefined,
+): BackgroundCallJournal {
+	const journal = (targetId: string, modelId: string, purpose: MemorySurfaceId): CallJournalOptions | undefined => {
 		const origin = currentOrigin();
 		const acquire = acquireTelemetrySession();
 		const target = providers.getTarget(targetId);
@@ -606,7 +744,17 @@ export function createBackgroundCallJournal(
 			rates: pricing.rates,
 		};
 	};
+	return sideShareTelemetry === undefined
+		? journal
+		: Object.assign(journal, { sideShare: createSideShareGovernor(sideShareTelemetry, currentOrigin) });
 }
+
+/** Opens a memory call's journal options; the governor, when present, is shared by every routing instance using it. */
+export type BackgroundCallJournal = ((
+	targetId: string,
+	modelId: string,
+	purpose: MemorySurfaceId,
+) => CallJournalOptions | undefined) & { readonly sideShare?: SideShareGovernor };
 
 const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
 
@@ -628,7 +776,7 @@ export function createBackgroundMemoryRouting(
 	announceFallback = true,
 	/** Priced session spend the metered budget adds a step's projected cost to. */
 	sessionSpendUsd?: () => number,
-	callJournal?: (targetId: string, modelId: string, purpose: MemorySurfaceId) => CallJournalOptions | undefined,
+	callJournal?: BackgroundCallJournal,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
@@ -645,10 +793,14 @@ export function createBackgroundMemoryRouting(
 					api: options ? (providers.getRuntime(options.runtimeId)?.apiFamily ?? "unknown") : "unknown",
 					id: destination?.modelId ?? "unknown",
 				});
+				let attempt: SideShareAttempt | undefined;
 				const callTelemetry = {
 					...scope,
 					startAttempt() {
 						const identity = scope.startAttempt();
+						// The first attempt names the call the side-share governor holds; it stays held until that attempt settles.
+						if (identity && options && attempt === undefined)
+							attempt = { sessionId: options.origin?.id ?? null, callId: identity.callId };
 						if (identity && options?.origin) {
 							try {
 								request.onCall?.({ ...identity, sessionId: options.origin.id, repoIdentity: options.origin.cwdHash });
@@ -664,6 +816,7 @@ export function createBackgroundMemoryRouting(
 						client.complete({
 							...request,
 							callTelemetry,
+							...(attempt === undefined ? {} : { sideShareAttempt: attempt }),
 							onUsage: (usage) => {
 								if (!scope.identity() && usage.failure)
 									scope.settle({ stopReason: request.signal.aborted ? "aborted" : "error", failure: usage.failure });
@@ -721,6 +874,7 @@ export function createBackgroundMemoryRouting(
 							false,
 							admitModelFlow,
 							sessionSpendUsd,
+							callJournal?.sideShare,
 						);
 			noteFallback();
 			clientFailure = null;
@@ -749,6 +903,7 @@ export function createBackgroundMemoryRouting(
 				true,
 				admitModelFlow,
 				sessionSpendUsd,
+				callJournal?.sideShare,
 			);
 			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
 			noteFallback();

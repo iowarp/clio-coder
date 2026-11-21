@@ -487,6 +487,10 @@ const MENU_ROWS = new Set([
 	"chat.steering.triage.enabled",
 	"fleet.worktrees.root",
 	"context.memory.surfaces.observe",
+	"context.memory.surfaces.delivery",
+	"context.memory.surfaces.correct",
+	"context.memory.surfaces.bank",
+	"context.memory.sideShare",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -548,6 +552,9 @@ const CHOICES: Record<string, readonly string[]> = {
 	"chat.steering.triage.thinkingLevel": THINKING_LEVELS,
 	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"context.memory.surfaces.observe": ["off", "on"],
+	"context.memory.surfaces.delivery": ["off", "section", "decision", "broadcast"],
+	"context.memory.surfaces.correct": ["rules", "model"],
+	"context.memory.surfaces.bank": ["rules", "model"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -646,6 +653,22 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Continuity preparation",
 		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Starts only near a compaction that would send history to a separate summary request. Needs proactive memory on; off by default.",
 	],
+	"context.memory.surfaces.delivery": [
+		"Lesson delivery",
+		"Where kept lessons reach the model: off, the Memory section only, the section plus reminders at decision points (a failed command, a verification gap, a touched file, the turn's task), or those plus the first-change broadcast. Decision by default; memory_recall works in every mode.",
+	],
+	"context.memory.surfaces.correct": [
+		"Correction tier",
+		"Rules, the default, warns after a repeated failure with no model call. Model also asks the memory model after two tool errors in a row or a loop-guard block. Rules by default as a policy choice: the model tier was measured costing calls without producing reminders.",
+	],
+	"context.memory.surfaces.bank": [
+		"Task bank tier",
+		"Rules, the default, records failures and operator statements in the task bank with no model call. Model also asks the memory model to maintain the bank every cadence of tool calls. Rules by default as a policy choice: the model tier's product was rarely read.",
+	],
+	"context.memory.sideShare": [
+		"Memory side share",
+		"After three automatic memory calls, a session skips more while its memory output tokens (and premium units, where the route reports them) exceed this share of its main output. Calls you ask for, such as remember, are never skipped. 0 turns the governor off.",
+	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",
 		"How much the memory model reasons before it writes a memory step. Off, the default, asks for no reasoning; reasoning spends the memory output budget, and a model that cannot use the chosen level gets its nearest supported one, as in chat.",
@@ -728,7 +751,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.validationWrappers": [
 		"Validation wrappers",
-		"Wrapper scripts that run a check with the words after them, such as a test-slot or CI launcher: a path matches that script, a bare name its basename. A command starting with one counts as the check it runs, so a finish after it is not assessed as unvalidated. echo and printf never count.",
+		"Wrapper scripts that run a check with the words after them, such as a test-slot or CI launcher: a path matches that script, a bare name its basename. A command starting with one counts as the check it runs, so a finish after it is not assessed as unvalidated; the run still counts as a change, since the wrapper may write. A file writer, a shell, an interpreter, echo, cat, xargs and similar words are refused.",
 	],
 	"fleet.keepPeerInstructionFiles": [
 		"Peers that keep their own instruction files",

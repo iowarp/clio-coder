@@ -22,7 +22,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let policyEngine: SafetyPolicyEngine | null = null;
 	let loopState: LoopDetectorState = createLoopState();
 	let unsubscribeSessionParked: (() => void) | null = null;
-	let unsubscribeWrappers: (() => void) | null = null;
 
 	function activePolicyEngine(): SafetyPolicyEngine {
 		policyEngine ??= createSafetyPolicyEngine();
@@ -45,11 +44,10 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	const extension: DomainExtension = {
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
-			// The shell reader looks through the declared wrappers when it names a check (FX-44); a change applies at once.
+			// The shell reader looks through the declared wrappers when it names a check (FX-44). It reads them from the live
+			// snapshot each time, which a reload replaces before any change listener or bus subscriber runs.
 			const config = context.getContract("config");
-			setValidationWrappers(config?.get().safety.validationWrappers ?? []);
-			unsubscribeWrappers =
-				config?.onChange("hotReload", ({ settings }) => setValidationWrappers(settings.safety.validationWrappers)) ?? null;
+			setValidationWrappers(config === undefined ? [] : () => config.get().safety.validationWrappers);
 			unsubscribeSessionParked = context.bus.subscribe("session.parked", () => {
 				// Authorship is per session: the next session asks again for the parked one's outside files.
 				clearSessionAuthoredFiles();
@@ -58,8 +56,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		async stop() {
 			unsubscribeSessionParked?.();
 			unsubscribeSessionParked = null;
-			unsubscribeWrappers?.();
-			unsubscribeWrappers = null;
+			// The list is process-wide, so a stopped domain leaves none behind for the next one in this process.
+			setValidationWrappers([]);
 		},
 	};
 

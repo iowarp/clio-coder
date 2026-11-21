@@ -60,14 +60,14 @@ import { writeSettledRun } from "../harness/settled-run.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
 
-/** An operator-approved repository lesson as the store projects one. */
-const keptLesson = (id: string, lesson: string) =>
+/** An operator-approved repository lesson as the store projects one; `refs` are its evidence refs. */
+const keptLesson = (id: string, lesson: string, refs: string[] = []) =>
 	projectKeptLesson({
 		id,
 		scope: "repo",
 		key: id,
 		lesson,
-		evidenceRefs: [],
+		evidenceRefs: refs,
 		appliesWhen: [],
 		avoidWhen: [],
 		confidence: 1,
@@ -171,12 +171,23 @@ test("memory list --json prints each record's review fields, pending and approve
 					approved: true,
 					approval: { by: "guardian", at: "2026-09-22T00:00:00.000Z" },
 				},
+				// FX-42: a record the validator sets aside is reported, not hidden, and listing writes nothing.
+				{ ...base, id: "mem-legacy-1", key: "legacy", lesson: "Legacy lesson.", approved: false },
 			],
 		}),
 	);
+	const stored = readFileSync(memoryStorePath(dataDir), "utf8");
 	const listed = run(["list", "--json"]);
 	strictEqual(listed.status, 0, listed.stdout + listed.stderr);
-	const records = (JSON.parse(listed.stdout) as { records: Record<string, unknown>[] }).records;
+	const envelope = JSON.parse(listed.stdout) as { records: Record<string, unknown>[]; invalid: unknown[] };
+	deepStrictEqual(
+		envelope.invalid.map((item) => (item as { record: { id: string } }).record.id),
+		["mem-legacy-1"],
+	);
+	match(listed.stderr, /1 memory record set aside as invalid: .*records\.json: \$\.records\[3\]\.id: /);
+	strictEqual(readFileSync(memoryStorePath(dataDir), "utf8"), stored);
+	ok(!existsSync(join(dataDir, "memory", "records.invalid.json")));
+	const records = envelope.records;
 	deepStrictEqual(records.map((record) => [record.id, record.approved]).sort(), [
 		["mem-00000000000000b1", false],
 		["mem-00000000000000b2", true],
@@ -217,6 +228,7 @@ test("memory list --json prints each record's review fields, pending and approve
 	const all = run(["list"]);
 	ok(all.stdout.startsWith("3 memory records\n"), all.stdout);
 	ok(all.stderr.includes("1 memory record pending review"), all.stderr);
+	ok(all.stderr.includes("1 memory record set aside as invalid"), all.stderr);
 });
 
 test("propose --from-evidence refuses a run or dispatching session that carries a flow label", async () => {
@@ -379,6 +391,8 @@ test("an approved command lesson surfaces once at the first non-documentation ed
 	const held: string[] = [];
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
+		// The first-change broadcast is the documented opt-in, `context.memory.surfaces.delivery: broadcast`.
+		getDelivery: () => "broadcast",
 		getKeptLessons: () => [keptLesson("mem-recipe", `Validation requires \`${COMMAND}\`.`)],
 		onDurableLessonOutcomes: (outcome) => {
 			delivered.push(...outcome.delivered);
@@ -422,7 +436,9 @@ test("a failing variant of a remembered recipe gets the recipe on its failed res
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
 		workspaceRoot: () => root,
-		getKeptLessons: () => [keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`)],
+		getKeptLessons: () => [
+			keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`, [commandEvidenceRef(COMMAND)]),
+		],
 		onDurableLessonOutcomes: (outcome) => delivered.push(...outcome.delivered),
 	});
 	const failed = (command: string, id: string) =>
@@ -459,7 +475,9 @@ test("a verification gap and a read of the lesson's own file each bring the reci
 		createMemoryInterventionRegistration({
 			bank: new TaskMemoryBank(),
 			workspaceRoot: () => root,
-			getKeptLessons: () => [keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`)],
+			getKeptLessons: () => [
+				keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`, [commandEvidenceRef(COMMAND)]),
+			],
 			telemetry: { record: (row) => triggers.push(...row.triggerReasons) },
 		});
 	const verify = make();
