@@ -5839,6 +5839,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					options.readSessionEntries(session.id),
 					options.session.leafId(session.id),
 					session.id,
+					canonicalCwd,
 					workspaceMeta(session.id).target,
 				);
 			} catch (error) {
