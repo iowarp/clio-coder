@@ -498,7 +498,8 @@ plan may report successful packages alongside failures, and any diagnostic exits
 | Prompt or command | Markdown body becomes a CLIO Coder prompt. Host execution settings and other frontmatter are omitted; the description and argument hint are retained. |
 | Agent or subagent | Markdown persona or TOML `developer_instructions` becomes a CLIO Coder agent limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so. |
 | Plugin | Accepts a valid portable root `plugin.json`, or a supported `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` package. CLIO Coder adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, playbooks, and non-text files are omitted. Dependencies on removed components cause a skip. Package `requires` declarations are preserved; required packages must already be installed, active, and valid in the destination scope. Missing requirements are named in the plan, checked again after approval, and never imported automatically. |
-| Hook, MCP server, executable module, output style | Listed as not adoptable, with a reason. Nothing is registered or executed. |
+| MCP server | A stdio server becomes an entry in your `mcp.yaml` (a project `.mcp.json` server goes to `.clio-coder/mcp.yaml`, which still needs `clio-coder mcp trust`); remote transports, `${VAR}` expansion and env pass-through lists are skipped with a reason, and the plan shows env keys, never values. |
+| Hook, user instruction file, executable module, output style | Listed as not adoptable, with a reason. Nothing is registered or executed. |
 
 A source tree is read to at most 12 directory levels, 2048 files, and 16 MiB of text; a larger tree is refused.
 

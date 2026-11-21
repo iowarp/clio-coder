@@ -1878,6 +1878,14 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				},
 			},
 			{
+				label: "Adopt from Claude Code, Codex and other agents",
+				hint: "reviews skills, agents, prompts and MCP servers",
+				run: async (io) => {
+					const { runInteropAdoptionReview } = await import("./interop.js");
+					await runInteropAdoptionReview({ rl: io.rl });
+				},
+			},
+			{
 				label: "Library remote sync",
 				controlPath: "integrations.library.sync",
 				hint: "toggle",

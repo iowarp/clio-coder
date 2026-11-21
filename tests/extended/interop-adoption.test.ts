@@ -1,9 +1,15 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { applyInteropAdoption, planInteropAdoption } from "../../src/domains/interop/adopt.js";
+import { clioConfigDir } from "../../src/core/xdg.js";
+import { loadMcpServerConfig } from "../../src/domains/gateway/mcp/index.js";
+import {
+	applyInteropAdoption,
+	planInteropAdoption,
+	renderInteropAdoptionPlan,
+} from "../../src/domains/interop/adopt.js";
 import { detectInteropAgents } from "../../src/domains/interop/detect.js";
 import { discoverInteropInventory } from "../../src/domains/interop/inventory.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
@@ -278,6 +284,46 @@ describe("interop discovery and adoption", () => {
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd });
 		strictEqual(plan.entries.length, 2);
 		ok(plan.entries.every((entry) => entry.action === "skip"));
+	});
+	it("maps stdio MCP servers into Clio's user mcp.yaml and names what it does not migrate", () => {
+		file(
+			".claude.json",
+			JSON.stringify({
+				mcpServers: {
+					Files: { type: "stdio", command: "node", args: ["srv.js"], env: { TOKEN: "never-show-this" } },
+					remote: { type: "http", url: "https://example.invalid/mcp" },
+					expand: { command: "node", env: { KEY: ["$", "{HOME}"].join("") } },
+				},
+			}),
+		);
+		file(".claude/settings.json", JSON.stringify({ hooks: { PreToolUse: [{ command: "do-not-run" }] } }));
+		file(".claude/CLAUDE.md", "Prefer small diffs.\n");
+		file(".codex/config.toml", '[mcp_servers.docs]\ncommand = "uvx"\nargs = ["docs-mcp"]\n');
+		const plan = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
+		const entry = (kind: string, name: string) =>
+			plan.entries.find((item) => item.item.kind === kind && item.item.name === name);
+		strictEqual(entry("mcp", "Files")?.action, "install");
+		strictEqual(entry("mcp", "Files")?.id, "files");
+		ok(entry("mcp", "remote")?.reason.includes("stdio servers only"));
+		ok(entry("mcp", "expand")?.reason.includes("expands environment variables"));
+		ok(entry("hook", "PreToolUse")?.reason.startsWith("Not migrated"));
+		ok(entry("instructions", "CLAUDE.md")?.reason.startsWith("Not migrated"));
+		ok(!renderInteropAdoptionPlan(plan).includes("never-show-this"));
+		deepStrictEqual(applyInteropAdoption(plan, true), { installed: ["mcp:files"], diagnostics: [] });
+		const codex = planInteropAdoption({ host: "codex", inventory: inventory("codex"), cwd });
+		deepStrictEqual(applyInteropAdoption(codex, true).installed, ["mcp:docs"]);
+		const configFile = path.join(clioConfigDir(), "mcp.yaml");
+		strictEqual(statSync(configFile).mode & 0o777, 0o600);
+		const loaded = loadMcpServerConfig({ cwd });
+		deepStrictEqual(
+			loaded.servers.map((server) => [server.id, server.command, server.args, server.env]),
+			[
+				["files", "node", ["srv.js"], { TOKEN: "never-show-this" }],
+				["docs", "uvx", ["docs-mcp"], {}],
+			],
+		);
+		const again = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
+		ok(again.entries.find((item) => item.item.name === "Files")?.reason.startsWith("Already declared"));
 	});
 	it("requires approval, keeps origins and pins, skips duplicates and does not change the source", () => {
 		const source = file(".claude/skills/example/SKILL.md", skill);
