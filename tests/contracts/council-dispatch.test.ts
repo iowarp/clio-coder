@@ -376,6 +376,12 @@ test("a council member's one-line preview skips a code-fence line (FX-19.3)", ()
 	strictEqual(councilAnswerGist("tabs win\n```json\n{}\n```"), "tabs win");
 });
 
+test("a member answer with an empty findings array and no report shape is not previewed as no findings (FX-21)", () => {
+	strictEqual(councilAnswerGist('{"findings":[],"verdict":"yes","text":"tabs win"}'), "yes: tabs win");
+	strictEqual(councilAnswerGist('{"findings":[],"answer":"tabs win"}'), '{"findings":[],"answer":"tabs win"}');
+	strictEqual(councilAnswerGist('{"findings":[],"needsSplit":false}'), "No findings reported.");
+});
+
 test("a judge council admits round 2 and the judge when host text names an endpoint or a result object (bt-47 CF-a, CF-b)", async () => {
 	const seated: DispatchRequest[] = [];
 	let next = 0;
