@@ -164,10 +164,12 @@ const OBSERVATION_RESERVED_ARTIFACTS = 4;
 const OBSERVATION_WRAPPER_TOKENS = 48;
 const OBSERVATION_MIN_NOTE_TOKENS = 64;
 /**
- * No preparation until pressure is within this share of the window below the
- * automatic fold's trigger: a session that never nears a fold never pays for
- * notes it cannot use. Uncalibrated: calibrating it needs held-out sessions that
- * do and do not fold naturally, scored for false preparations and missed folds.
+ * No preparation until pressure is within this share of the automatic fold's
+ * trigger: a session that never nears a fold never pays for notes it cannot
+ * use. A share of the trigger, not of the window: a 1M route's trigger caps at
+ * 0.40 of its window, where a window share started observing 150K tokens early
+ * (C-5). Uncalibrated: calibrating it needs held-out sessions that do and do
+ * not fold naturally, scored for false preparations and missed folds.
  */
 const OBSERVATION_FOLD_MARGIN = 0.15;
 /**
@@ -531,10 +533,12 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				this.#feedback.durableOutcomes(input);
 			},
 			onDeliveryOutcomes: (outcomes, final) => {
-				this.#event("reminder-outcomes", {
-					final,
-					outcomes: outcomes.map((outcome) => ({ kind: outcome.kind, ids: outcome.entries.map((entry) => entry.id) })),
-				});
+				// A final settlement with nothing decided is bookkeeping, not an outcome worth a journal row (C-32).
+				if (outcomes.length > 0)
+					this.#event("reminder-outcomes", {
+						final,
+						outcomes: outcomes.map((outcome) => ({ kind: outcome.kind, ids: outcome.entries.map((entry) => entry.id) })),
+					});
 				this.#feedback.settleDeliveries(outcomes, final);
 			},
 			onKnowledgeReview: (review) => this.#feedback.reviewKnowledge(review),
@@ -755,7 +759,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				this.#lastReason = `fold-${projection.path}`;
 				return null;
 			}
-			if (projection.pressure < projection.trigger - OBSERVATION_FOLD_MARGIN) {
+			if (projection.pressure < projection.trigger * (1 - OBSERVATION_FOLD_MARGIN)) {
 				this.#lastReason = "below-margin";
 				return null;
 			}
@@ -1078,10 +1082,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		const infra = this.#infrastructure;
 		if (!infra?.settings().enabled || !infra.lessonSource || this.#disposed) return null;
 		// Completion retention is the side author's (DESIGN 4.4): off unless `lessons: side`, and for the live session
-		// armed only by a fix pair it saw. A closed session's retention was armed when it ran.
+		// armed only by an evidence arm it saw (a fix pair, or a declared `done` with a passed check). A closed session's
+		// retention was armed when it ran.
 		if (infra.settings().surfaces.lessons !== "side") return null;
 		const current = this.#registration?.captureMemoryAuthority()?.scope ?? null;
-		const armed = (this.#registration?.fixPairCount() ?? 0) > 0;
+		const armed = (this.#registration?.sideArmCount() ?? 0) > 0;
 		const currentSource = current && !orphanOnly && armed ? infra.lessonSource() : null;
 		if (current && currentSource) {
 			this.#lastRetention = { scope: current, source: currentSource };

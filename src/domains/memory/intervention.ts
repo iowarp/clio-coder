@@ -13,16 +13,18 @@ import {
 	RESOLVED_DISPATCH_PLAN_ARGUMENT,
 } from "../../tools/dispatch-plan.js";
 import {
+	isRefusalToolResultError,
 	legacyToolResultDigest,
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
-import { gatewayChainReceipts } from "../../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { headForRedaction } from "../evidence/redact.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
 import { hashToolCall } from "../safety/loop-detector.js";
+import { callChangesTree, checkPassedForCall } from "../safety/run-effects.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
@@ -208,6 +210,8 @@ export interface MemoryInterventionSettings {
 
 const CALL_DESCRIPTION_MAX_CHARS = 180;
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
+/** A firing that delivered an approved lesson matched it; the registration's own evidence names a failure recurrence. */
+const DURABLE_LESSON_EVIDENCE = "match:durable-lesson@task-memory";
 /**
  * Operator wording that asks for the same command to run again. A repeat the
  * operator requested in the current turn is the task, not a repeated mistake
@@ -492,8 +496,11 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	 * given is null; one given that binds to nothing is refused with the reason.
 	 */
 	noteEvidence(args: Pick<MemoryNoteArgs, "note" | "command" | "path">): MemoryNoteEvidence | { refused: string };
-	/** Fix pairs rules capture saw in this session scope; completion retention under `lessons: side` is armed by one. */
-	fixPairCount(): number;
+	/**
+	 * Evidence arms rules capture saw in this session scope (fix pairs, and a declared `done` with a passed check);
+	 * completion retention under `lessons: side` is armed by one.
+	 */
+	sideArmCount(): number;
 	/** Invalidate pending content and discard all transient session/branch state. */
 	reset(): void;
 	/** Invalidate immediately without waiting for the model; refuse further work. */
@@ -595,9 +602,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * `memory_note` quote is checked against exactly these lines while the file is unchanged.
 	 */
 	const shownReads = new Map<string, ShownRead[]>();
-	/** Fix pairs since the last side lesson pass, and in the whole scope. */
-	let fixPairsSinceLessonPass = 0;
-	let fixPairsInScope = 0;
+	/** Evidence arms (fix pairs, verified declared `done`s) since the last side lesson pass, and in the whole scope. */
+	let armsSinceLessonPass = 0;
+	let armsInScope = 0;
+	/** A check passed in this operator turn: a declared `done` beside it is the third side arm (DESIGN 4.4, MD14). */
+	/**
+	 * The step of this operator turn's last passed check, and of the session's last change of the tree: a declared
+	 * `done` beside a check no change came after is the third side arm (DESIGN 4.4, MD14).
+	 */
+	let checkStepThisTurn = 0;
+	let lastTreeChangeStep = 0;
+	/** Orders every check and change those two record, a gateway chain's steps included. */
+	let evidenceSequence = 0;
 	/** Operator turns in this scope, and the one the last side lesson pass ran in: at most one pass per turn. */
 	let turnSequence = 0;
 	let lessonPassTurn = -1;
@@ -637,6 +653,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	// The budget refused the last launch. The guardian's idle wake must not ask
 	// again before the next turn boundary, or a refused step would loop.
 	let lastLaunchSkipped = false;
+	/** The current after_tool evaluation delivered approved lessons, so its firing names that match (C-32). */
+	let lessonDelivered = false;
 	let consecutiveErrors = 0;
 	let lastPromptedBoundary: string | null = null;
 	let lastInjectedMessage: string | null = null;
@@ -791,7 +809,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			if (args.path !== undefined) return shownQuote(args.note, args.path, root);
 			return null;
 		},
-		fixPairCount: () => fixPairsInScope,
+		sideArmCount: () => armsInScope,
 		reset,
 		dispose(): void {
 			disposed = true;
@@ -801,7 +819,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		description: "maintain bounded task execution memory and selectively remind after repeated failures or compaction",
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
 		evidence: "count:failure-recurrence@task-memory",
-		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
 			observeSession(input);
 			if (input.hook === "turn_end" || input.hook === "turn_start") lastLaunchSkipped = false;
 			if (input.hook === "turn_end") notifyTurnBoundary("end");
@@ -812,13 +830,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					case "before_tool":
 						observeBeforeTool(input);
 						return NO_EFFECTS;
-					case "after_tool":
-						return observeAfterTool(input);
+					case "after_tool": {
+						lessonDelivered = false;
+						const effects = observeAfterTool(input);
+						if (lessonDelivered && effects.length > 0) context?.evidence?.(DURABLE_LESSON_EVIDENCE);
+						return effects;
+					}
 					case "turn_end": {
 						if (input.metadata?.stopReason === "aborted") {
 							cancelStoppedTurn();
 							return NO_EFFECTS;
 						}
+						observeDeclaration(input);
 						// Middleware continuations can evaluate turn_end again without any
 						// completed tools. They are not new memory boundaries and must not
 						// replace the prior operator-visible outcome or emit telemetry.
@@ -855,6 +878,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							operatorAskedRepeat = false;
 							turnLog.length = 0;
 							turnSequence += 1;
+							checkStepThisTurn = 0;
 						}
 						if (input.text?.trim()) {
 							// Bounded first: this runs synchronously at turn start on a prompt of any length.
@@ -1132,13 +1156,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const priorToolsSinceLessonPass = toolsSinceLessonPass;
 		const priorShellStepsSinceLessonPass = shellStepsSinceLessonPass;
 		const consolidates = triggers.includes("turn_end") || triggers.includes("idle_review");
-		const priorFixPairs = fixPairsSinceLessonPass;
+		const priorArms = armsSinceLessonPass;
 		const priorLessonPassTurn = lessonPassTurn;
 		toolsSinceMemoryStep = 0;
 		if (consolidates) {
 			toolsSinceLessonPass = 0;
 			shellStepsSinceLessonPass = 0;
-			fixPairsSinceLessonPass = 0;
+			armsSinceLessonPass = 0;
 			lessonPassTurn = turnSequence;
 		}
 		consecutiveErrors = 0;
@@ -1165,7 +1189,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					if (consolidates) {
 						toolsSinceLessonPass += priorToolsSinceLessonPass;
 						shellStepsSinceLessonPass += priorShellStepsSinceLessonPass;
-						fixPairsSinceLessonPass += priorFixPairs;
+						armsSinceLessonPass += priorArms;
 						lessonPassTurn = priorLessonPassTurn;
 					}
 					lastLaunchYielded = false;
@@ -1186,7 +1210,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					if (consolidates) {
 						toolsSinceLessonPass += priorToolsSinceLessonPass;
 						shellStepsSinceLessonPass += priorShellStepsSinceLessonPass;
-						fixPairsSinceLessonPass += priorFixPairs;
+						armsSinceLessonPass += priorArms;
 						lessonPassTurn = priorLessonPassTurn;
 					}
 					lastPromptedBoundary = null;
@@ -1220,12 +1244,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 
 	/**
 	 * The side-model lesson pass is an opt-in (`lessons: side`) armed by evidence, not activity (DESIGN 4.4): a fix
-	 * pair since the last pass, and at most one pass per operator turn, whether it runs at the turn's end or idle.
+	 * pair, or a `finish` declaration of `done` in an operator turn with a passed check (MD14), since the last pass, and
+	 * at most one pass per operator turn, whether it runs at the turn's end or idle.
 	 */
 	function sideLessonArmed(): boolean {
 		return (
 			lessonsMode() === "side" &&
-			fixPairsSinceLessonPass > 0 &&
+			armsSinceLessonPass > 0 &&
 			lessonPassTurn !== turnSequence &&
 			toolsSinceLessonPass >= MEMORY_INTERVENTION_TURN_END_MIN_TOOLS
 		);
@@ -1237,6 +1262,70 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 
 	function lessonsMode(): MemoryLessonsMode {
 		return settings().surfaces.lessons ?? DEFAULT_SETTINGS.context.memory.surfaces.lessons;
+	}
+
+	/**
+	 * A turn's typed `finish` declaration, never its reply text (MD14). The bank's status becomes the declared state and
+	 * its `remaining` items, the progress a compaction hands back. Under `lessons: side` a declared `done` in an operator
+	 * turn whose check passed is an evidence arm; a `done` without one arms nothing.
+	 */
+	function observeDeclaration(input: MiddlewareHookInput): void {
+		const state = input.metadata?.completionState;
+		if (state !== "done" && state !== "partly_done" && state !== "not_done") return;
+		const remaining = input.metadata?.completionRemaining;
+		const items = typeof remaining === "string" ? remaining.split("\n").filter((item) => item.length > 0) : [];
+		// The model's own words reach the bank, its file and a restored context only through the memory route's redaction.
+		const open = items.length > 0 ? redactForMemoryRoute(headForRedaction(items.join("; "), 4_096)) : "";
+		deps.bank.updateStatus(`declared ${state}${open.length > 0 ? `; remaining: ${open}` : ""}`);
+		if (state !== "done" || checkStepThisTurn <= lastTreeChangeStep || lessonsMode() !== "side") return;
+		checkStepThisTurn = 0;
+		armsSinceLessonPass += 1;
+		armsInScope += 1;
+	}
+
+	/**
+	 * A call that settled ok and passed a check that speaks for it (the safety domain's reader) is this turn's latest
+	 * check; any other call that ran and changed the tree, a shell mutation included, is the latest change. A refused or
+	 * blocked call ran nothing and changes nothing. A chain's steps count each as its own call, in order: every leaf call
+	 * takes the next number of one sequence, so an edit then a check in one chain leaves the check standing.
+	 */
+	function noteCheckOrChange(
+		toolName: string,
+		rawArgs: Record<string, unknown> | undefined,
+		details: MiddlewareHookInput["toolResultDetails"],
+		settled: { ok: boolean; ran: boolean; actionClass: string | undefined },
+	): void {
+		const children = gatewayChainReceipts(toolName, { details });
+		if (children.length > 0) {
+			for (const child of children) {
+				const childDetails = isPlainRecord(child.result.details) ? child.result.details : {};
+				const admitted = child.admission.decision === "allowed" && child.admission.outcome !== "blocked";
+				const ok = admitted && child.admission.outcome === "ok" && childDetails.kind === "ok";
+				const ran = ok || (admitted && !isRefusalToolResultError({ kind: "error", details: childDetails }));
+				noteCheckOrChange(child.capability, child.args, childDetails, {
+					ok,
+					ran,
+					actionClass: child.admission.actionClass,
+				});
+			}
+			return;
+		}
+		const call = effectiveToolCall(toolName, rawArgs, details);
+		const args = call.args === undefined ? undefined : { ...call.args };
+		const root = workspaceRoot();
+		if (settled.ok && checkPassedForCall(call.toolName, args, details, root)) {
+			evidenceSequence += 1;
+			checkStepThisTurn = evidenceSequence;
+			return;
+		}
+		if (!settled.ran) return;
+		if (
+			(settled.ok && WORKSPACE_CHANGING_CLASSES.has(String(settled.actionClass))) ||
+			callChangesTree(call.toolName, args, root)
+		) {
+			evidenceSequence += 1;
+			lastTreeChangeStep = evidenceSequence;
+		}
 	}
 
 	/** A lone shell invocation failed from the workspace root: it waits for a success that fixes it. */
@@ -1273,8 +1362,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (failed.key !== segment.key && !fixPairOf(failed, segment)) return;
 		failedForFix.delete(subject.key);
 		if (failed.key === segment.key || lessonsMode() === "off") return;
-		fixPairsSinceLessonPass += 1;
-		fixPairsInScope += 1;
+		armsSinceLessonPass += 1;
+		armsInScope += 1;
 		try {
 			deps.onFixPair?.({ failed, fixed: segment });
 		} catch {
@@ -1391,8 +1480,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		observedReads.clear();
 		failedForFix.clear();
 		shownReads.clear();
-		fixPairsSinceLessonPass = 0;
-		fixPairsInScope = 0;
+		armsSinceLessonPass = 0;
+		armsInScope = 0;
+		checkStepThisTurn = 0;
+		lastTreeChangeStep = 0;
+		evidenceSequence = 0;
 		turnSequence = 0;
 		lessonPassTurn = -1;
 		trajectory.length = 0;
@@ -2018,6 +2110,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
 		if (command !== null && successfulShellReceipt(input.metadata?.resultKind === "ok", input.toolResultDetails))
 			rememberSucceededCommand(command, input.toolArgs?.cwd);
+		{
+			const kind = input.metadata?.resultKind;
+			noteCheckOrChange(input.toolName ?? "", input.toolArgs, input.toolResultDetails, {
+				ok: kind === "ok",
+				ran: kind === "ok" || (kind === "error" && !isRefusalToolResultError({ kind, details: input.toolResultDetails })),
+				actionClass: typeof input.metadata?.actionClass === "string" ? input.metadata.actionClass : undefined,
+			});
+		}
 		const root = workspaceRoot();
 		const readPath =
 			prepared.toolName === ToolNames.Read && outcome === "ok" && typeof input.toolArgs?.path === "string"
@@ -2286,6 +2386,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			noTokens,
 			process.hrtime.bigint(),
 		);
+		lessonDelivered = true;
 		return [{ kind: "annotate_tool_result", message: offer.content, severity: "info" }];
 	}
 

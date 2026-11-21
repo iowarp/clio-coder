@@ -68,7 +68,7 @@ export const SIZE_BUDGETS = [
 		class: "library+examples+models+root files",
 		match: (path) =>
 			!path.includes("/") ||
-			["library/", "examples/", "models/"].some((prefix) => path.startsWith(prefix)) ||
+			["library/", "examples/", "models/", "schemas/"].some((prefix) => path.startsWith(prefix)) ||
 			[".claude-plugin/marketplace.json", "bin/clio-coder.cjs", "assets/clio-mark-gui.webp"].includes(path) ||
 			path.startsWith("assets/windows-launcher/") ||
 			path.startsWith("assets/core-host/") ||

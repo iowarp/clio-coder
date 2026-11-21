@@ -534,12 +534,15 @@ function listedLevelsOf(model: Model<Api>): readonly string[] | undefined {
 
 /**
  * The `reasoningEffort` for the resolved thinking level. The level was already mapped onto the listed set, so
- * each passes through by name. Off sends `none` only where the listing offers it; elsewhere the effort is omitted.
+ * each passes through by name, minimal as itself where the listing names it. Off sends `none` only where the listing
+ * offers it; elsewhere the effort is omitted, and a caller that wants the least reasoning names that level (the
+ * memory route does, C-2).
  */
 function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | undefined): string | undefined {
 	if (!model.reasoning) return undefined;
 	switch (options?.reasoning) {
 		case "minimal":
+			return listedLevelsOf(model)?.includes("minimal") ? "minimal" : "low";
 		case "low":
 			return "low";
 		case "medium":
