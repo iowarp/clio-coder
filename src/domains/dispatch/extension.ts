@@ -454,7 +454,7 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
-import { dispatchOwnership, owningSessionPhrase, sessionAncestorIds } from "./ownership.js";
+import { dispatchOwnership, sessionAncestorIds } from "./ownership.js";
 import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
@@ -4518,15 +4518,39 @@ export function createDispatchBundle(
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
 	});
-	/** The session an ask belongs to when that is not the current one, which alone may answer it (bt-11 f), else null. */
+	/** Asks a fork adopted from the parked session that held them, by request id; a brokered ask's record holds its own. */
+	const adoptedAsks = new Map<string, { runId: string; sessionId: string }>();
+	/**
+	 * The session an ask belongs to when that is not the current one, which alone may answer it, else null. An ask
+	 * whose holder is an ancestor of the current session is orphaned: one process runs one session, so the holder is
+	 * parked and the ask lives only here. The fork adopts it the way it inherits a collect (bt-11), and from then on
+	 * the parent no longer holds it. Steering and cancelling the run stay with the session that dispatched it.
+	 */
 	function foreignAskOwner(runId: string, requestId: string): string | null {
+		const brokered = grantBroker.get(requestId);
 		const ownerSessionId =
-			grantBroker.get(requestId)?.ownerSessionId ?? currentAssignmentRun(runId)?.req.ownerSessionId ?? null;
+			brokered?.ownerSessionId ??
+			adoptedAsks.get(requestId)?.sessionId ??
+			currentAssignmentRun(runId)?.req.ownerSessionId ??
+			null;
 		const current = contract.owner?.();
-		return ownerSessionId === null || current === undefined || ownerSessionId === current.sessionId
-			? null
-			: ownerSessionId;
+		if (ownerSessionId === null || current === undefined || ownerSessionId === current.sessionId) return null;
+		if (current.sessionId === null || !dispatchOwnership(current).inherits({ sessionId: ownerSessionId })) {
+			return ownerSessionId;
+		}
+		if (brokered === null) adoptedAsks.set(requestId, { runId, sessionId: current.sessionId });
+		else if (grantBroker.adopt(requestId, current.sessionId) === null) return ownerSessionId;
+		return null;
 	}
+	const dropAdoptedAsks = (runId: string): void => {
+		for (const [requestId, adopted] of adoptedAsks) if (adopted.runId === runId) adoptedAsks.delete(requestId);
+	};
+	/** Sessions a fork parked, whose brokered asks wait for the fork's open to adopt or revoke them. */
+	const forkParkedSessionIds: Array<string | null> = [];
+	/** The current session adopts every brokered ask an ancestor left pending, so its main agent and card see them. */
+	const adoptOrphanedGrants = (): void => {
+		for (const record of grantBroker.list({ state: "pending" })) foreignAskOwner(record.runId, record.requestId);
+	};
 	const workerApprovalWindows = createWorkerApprovalWindows({
 		now: monotonicNow,
 		onChange: ({ runId, agentId, requestId }, view) => {
@@ -9251,6 +9275,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_permission_resolved" && typeof event.payload?.requestId === "string") {
 				workerApprovalWindows.settle(event.payload.requestId);
+				adoptedAsks.delete(event.payload.requestId);
 			}
 			if (
 				event.type === "clio_coder_permission_resolved" &&
@@ -9952,6 +9977,7 @@ export function createDispatchBundle(
 				const finalCallUsage = callUsage?.snapshot();
 				if (finalCallUsage) tokenMeter.usage = finalCallUsage;
 				workerApprovalWindows.settleRun(envelope.id);
+				dropAdoptedAsks(envelope.id);
 				// The worker is gone: every grant it held settles now, after its last
 				// execution report drained. Retries run as new attempts with new requests.
 				if (grantAttempt !== undefined) {
@@ -12041,14 +12067,28 @@ export function createDispatchBundle(
 			// revoke what they hold; a run's own exit and abort revoke at the run.
 			grantUnsubscribes.push(
 				context.bus.subscribe("session.parked", (payload) => {
+					// A fork adopts what its parent held (bt-11); the fork's own open, next, revokes only what it did not adopt.
+					if (payload.reason === "fork") {
+						forkParkedSessionIds.push(payload.sessionId);
+						return;
+					}
 					grantBroker.revokeSession(
 						payload.sessionId,
 						`the owning session was ${payload.reason === "close" ? "closed" : "parked"}`,
 					);
 				}),
 				// A fork, or a /resume back to the dispatching session, changes who may answer an open ask.
-				context.bus.subscribe("session.created", () => workerApprovalWindows.republish()),
-				context.bus.subscribe("session.reattached", () => workerApprovalWindows.republish()),
+				context.bus.subscribe("session.created", () => {
+					adoptOrphanedGrants();
+					for (const sessionId of forkParkedSessionIds.splice(0)) {
+						grantBroker.revokeSession(sessionId, "the owning session was parked");
+					}
+					workerApprovalWindows.republish();
+				}),
+				context.bus.subscribe("session.reattached", () => {
+					adoptOrphanedGrants();
+					workerApprovalWindows.republish();
+				}),
 				context.bus.subscribe("session.ended", () => {
 					const sessions = new Set(grantBroker.list({ state: "pending" }).map((record) => record.ownerSessionId));
 					for (const sessionId of sessions) grantBroker.revokeSession(sessionId, "the owning session ended");
@@ -12900,10 +12940,9 @@ export function createDispatchBundle(
 			}
 		},
 		workerPermissionRefusal(runId, requestId) {
-			const ownerSessionId = foreignAskOwner(runId, requestId);
-			const owner = contract.owner?.();
-			if (ownerSessionId === null || owner === undefined) return null;
-			return `run '${runId}' belongs to ${owningSessionPhrase(dispatchOwnership(owner), ownerSessionId)}; only the session that dispatched it can answer its approvals, steer it or cancel it. /resume ${ownerSessionId} to answer it`;
+			const holder = foreignAskOwner(runId, requestId);
+			if (holder === null) return null;
+			return `the ask is held by session ${holder} (run '${runId}'); only that session can answer it. /resume ${holder} to answer it`;
 		},
 		resolveWorkerPermission(runId, requestId, decision) {
 			const refusal = contract.workerPermissionRefusal?.(runId, requestId) ?? null;

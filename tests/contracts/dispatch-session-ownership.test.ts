@@ -15,6 +15,7 @@ import {
 import { dispatchOwnership } from "../../src/domains/dispatch/ownership.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { finishedDetachedBatchIds, openDetachedBatchViews } from "../../src/domains/middleware/dispatch-nudge.js";
+import { grantEffectDescriptor, grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
 import { seedForkCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { DispatchArtifactProvider } from "../../src/interactive/view/artifacts.js";
@@ -136,6 +137,19 @@ async function openSession(
 function okResult(result: ToolResult): Extract<ToolResult, { kind: "ok" }> {
 	if (result.kind !== "ok") throw new Error(`expected ok, got ${JSON.stringify(result)}`);
 	return result;
+}
+
+async function callAs(
+	contract: DispatchContract,
+	sessionId: string,
+	tool: string,
+	args: Record<string, unknown>,
+): Promise<ToolResult> {
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: process.cwd() }) });
+	registerAllTools(registry, { mcpCapabilities: false, dispatch: contract });
+	const verdict = await registry.invoke({ tool, args }, { sessionId });
+	if (verdict.kind !== "ok") throw new Error(`${tool} was not admitted: ${JSON.stringify(verdict)}`);
+	return verdict.result;
 }
 
 function errorMessage(result: ToolResult): string {
@@ -271,6 +285,129 @@ describe("dispatch session ownership", () => {
 			await stranger.stop();
 			await fork.stop();
 			await parent.stop();
+		}
+	});
+
+	it("a fork adopts its parent's pending worker asks like a collect, and the parent no longer holds them (bt-11)", async () => {
+		let session: { id: string; parent: string | null } = { id: "session-p", parent: null };
+		// Main mode routes a main-routed run's asks through the grant broker (judge mode denies them with no judge here).
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.permissions.mode = "main";
+		const context = dispatchStubContext({ settings });
+		let plainAsked = false;
+		context.bus.subscribe("approval.requested", (payload) => {
+			if (payload.requestId === "ask-p") plainAsked = true;
+		});
+		const effect = grantEffectDescriptor("bash", { command: "touch out.txt" });
+		const sent: unknown[] = [];
+		const grantSent: unknown[] = [];
+		let finish!: (value: SpawnedWorkerResult) => void;
+		const done = new Promise<SpawnedWorkerResult>((resolve) => {
+			finish = resolve;
+		});
+		const bundle = makeDispatchBundle(context, {
+			getSessionId: () => session.id,
+			getSessionParentId: () => session.parent,
+			spawnWorker: (spec, opts) => {
+				const grant = spec.escalation?.grant;
+				return {
+					pid: null,
+					promise: done,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					abort: () => finish({ exitCode: null, signal: "SIGTERM" }),
+					send: (value) => {
+						(grant === undefined ? sent : grantSent).push(value);
+						return true;
+					},
+					events: (async function* () {
+						if (grant === undefined) {
+							yield {
+								type: "clio_coder_permission_escalated",
+								payload: { requestId: "ask-p", tool: "bash", summary: "touch out.txt", timeoutMs: 120_000 },
+							};
+						} else {
+							opts?.onGrantRequest?.({
+								requestId: "grant-p",
+								attemptToken: grant.attemptToken,
+								attempt: grant.attempt,
+								tool: "bash",
+								actionClass: "execute",
+								authority: "main",
+								argDigest: grantEffectDigest(effect),
+								effect,
+								summary: "bash requires execute confirmation",
+								reasons: [],
+								timeoutMs: 120_000,
+							});
+						}
+						await done;
+					})(),
+				};
+			},
+		});
+		await bundle.extension.start();
+		const { contract } = bundle;
+		const handle = await contract.dispatch({
+			agentId: "scout",
+			executionRole: "researcher",
+			task: "Inspect isolated fixture evidence.",
+			cwd: projectA,
+			requestOrigin: "internal",
+			resultContractOverride: { kind: "provenance-report" },
+		});
+		const brokered = await contract.dispatch({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "Touch out.txt.",
+			cwd: projectA,
+			requestOrigin: "agent",
+			mainGrantRoute: { kind: "yield" },
+		});
+		const pendingGrants = (sessionId: string) =>
+			contract.grants?.list({ sessionId, pendingOnly: true }).map((view) => view.runId) ?? [];
+		try {
+			for (let i = 0; i < 400 && !(plainAsked && pendingGrants("session-p").length > 0); i++) {
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			deepStrictEqual(pendingGrants("session-p"), [brokered.runId]);
+			strictEqual(
+				contract.workerPermissionRefusal?.(handle.runId, "ask-p"),
+				null,
+				"the dispatching session holds its ask",
+			);
+			// /fork in the same process: the parent is parked, so nobody else can ever answer its asks.
+			context.bus.emit("session.parked", { sessionId: "session-p", reason: "fork", at: Date.now() });
+			session = { id: "session-f", parent: "session-p" };
+			context.bus.emit("session.created", { sessionId: "session-f", cwdHash: "fixture", at: Date.now() });
+			deepStrictEqual(pendingGrants("session-f"), [brokered.runId], "the fork adopts the brokered ask, not a revoked one");
+			deepStrictEqual(pendingGrants("session-p"), []);
+			deepStrictEqual(grantSent, [], "the fork's open denied nothing");
+			strictEqual(contract.workerPermissionRefusal?.(handle.runId, "ask-p"), null, "the fork adopts the orphaned ask");
+			session = { id: "session-p", parent: null };
+			const refusal = contract.workerPermissionRefusal?.(handle.runId, "ask-p") ?? "";
+			match(
+				refusal,
+				/^the ask is held by session session-f \(run '[^']+'\); only that session can answer it\. \/resume session-f to answer it$/,
+			);
+			throws(() => contract.resolveWorkerPermission?.(handle.runId, "ask-p", "approve"), /held by session session-f/);
+			session = { id: "session-x", parent: null };
+			match(
+				contract.workerPermissionRefusal?.(handle.runId, "ask-p") ?? "",
+				/held by session session-f/,
+				"a stranger never adopts",
+			);
+			session = { id: "session-f", parent: "session-p" };
+			contract.resolveWorkerPermission?.(handle.runId, "ask-p", "approve");
+			deepStrictEqual(sent, [{ type: "permission_decision", requestId: "ask-p", decision: "approve" }]);
+			match(
+				errorMessage(await callAs(contract, "session-f", ToolNames.Steer, { run_id: handle.runId, action: "cancel" })),
+				/belongs to session session-p, which this session was forked from;/,
+				"adopting the ask does not adopt the run",
+			);
+		} finally {
+			finish({ exitCode: 0, signal: null });
+			await Promise.allSettled([handle.finalPromise, brokered.finalPromise]);
+			await bundle.extension.stop?.();
 		}
 	});
 
