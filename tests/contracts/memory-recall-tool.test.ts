@@ -166,6 +166,43 @@ describe("memory_recall tool", () => {
 			bash("ls", true);
 			for (const command of ["ls", check(" --help")])
 				ok("refused" in (memory.noteEvidence({ note: "x", command }) ?? {}), `${command} is no evidence`);
+			// CLI-P52: a verify run vouches for the argv it ran from the root once it passes; a failed run is named, a run
+			// outside the root vouches for nothing.
+			const verify = (argv: string[], exitCode: number, cwd = root) =>
+				after("verify", { check: "md6-make" }, exitCode === 0, "execute", {
+					check: "md6-make",
+					argv,
+					cwd,
+					exitCode,
+					judgement: { execution: exitCode === 0 ? "succeeded" : "failed", validation: "exit-code" },
+				});
+			verify(["make", "md6-test"], 2);
+			deepStrictEqual(memory.noteEvidence({ note: "x", command: "make md6-test" }), {
+				refused:
+					"`make md6-test` ran through verify check `md6-make` in this session and did not pass, so it is no evidence; fix it and run it again, or leave command out",
+			});
+			verify(["make", "md6-test"], 0);
+			const verified = memory.noteEvidence({ note: "x", command: "make md6-test" });
+			strictEqual(verified !== null && "kind" in verified ? verified.kind : null, "command");
+			verify(["make", "md6-sub"], 0, join(root, "tests"));
+			ok("refused" in (memory.noteEvidence({ note: "x", command: "make md6-sub" }) ?? {}), "a run below the root");
+			// A runner that never launched ran nothing, so the refusal does not name verify.
+			after("verify", { check: "md6-gone" }, false, "execute", {
+				check: "md6-gone",
+				argv: ["make", "md6-gone"],
+				cwd: root,
+				launched: false,
+				judgement: { execution: "unavailable", validation: "not-run" },
+			});
+			deepStrictEqual(memory.noteEvidence({ note: "x", command: "make md6-gone" }), {
+				refused:
+					"`make md6-gone` has not succeeded from the workspace root in this session; run it first, or leave command out",
+			});
+			// A check that runs a shell string vouches for that whole invocation, never the chain inside it.
+			verify(["sh", "-c", "make md6-a && make md6-b"], 0);
+			ok("refused" in (memory.noteEvidence({ note: "x", command: "make md6-a" }) ?? {}), "a quoted chain");
+			const whole = memory.noteEvidence({ note: "x", command: "sh -c 'make md6-a && make md6-b'" });
+			strictEqual(whole !== null && "kind" in whole ? whole.kind : null, "command");
 			ok("refused" in (memory.noteEvidence({ note: "x", path: "README.md" }) ?? {}), "an unread path binds nothing");
 			// A read binds only the lines it showed, and a quote it never showed is refused, never replaced.
 			const info = statSync(join(root, "README.md"));

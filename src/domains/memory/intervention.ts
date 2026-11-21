@@ -37,6 +37,8 @@ import {
 	receiptVouches,
 	sameCommandIdentity,
 	successfulShellReceipt,
+	verifyReceiptCommand,
+	verifyRunPassed,
 } from "./command-evidence.js";
 import {
 	type MemoryCommitScope,
@@ -588,6 +590,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	const succeededCommands = new Set<string>();
 	/** The evidence identity of every segment those receipts vouch for, by key; nothing else satisfies a command claim. */
 	const succeededSegments = new Map<string, CommandSegment>();
+	/** Keys of commands a verify run executed from the root without passing, to the check id that ran them (CLI-P52). */
+	const unpassedVerifyChecks = new Map<string, string>();
 	/**
 	 * Excerpts of successful read results, by repository-relative path, exactly
 	 * as the turn log showed them to the lesson pass. A source-cited lesson is
@@ -796,10 +800,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			if (args.command !== undefined) {
 				const claim = commandSegment(args.command, root);
 				const ran = claim === null ? undefined : succeededSegments.get(claim.key);
-				if (ran === undefined)
+				if (ran === undefined) {
+					const check = claim === null ? undefined : unpassedVerifyChecks.get(claim.key);
 					return {
-						refused: `\`${args.command}\` has not succeeded from the workspace root in this session; run it first, or leave command out`,
+						refused:
+							check === undefined
+								? `\`${args.command}\` has not succeeded from the workspace root in this session; run it first, or leave command out`
+								: `\`${args.command}\` ran through verify${check ? ` check \`${check}\`` : ""} in this session and did not pass, so it is no evidence; fix it and run it again, or leave command out`,
 					};
+				}
 				if (!exercisesWork(ran))
 					return {
 						refused: `\`${args.command}\` is a help, version or always-succeeding command, so it is no evidence; leave command out`,
@@ -1477,6 +1486,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		turnLog.length = 0;
 		succeededCommands.clear();
 		succeededSegments.clear();
+		unpassedVerifyChecks.clear();
 		observedReads.clear();
 		failedForFix.clear();
 		shownReads.clear();
@@ -2110,6 +2120,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
 		if (command !== null && successfulShellReceipt(input.metadata?.resultKind === "ok", input.toolResultDetails))
 			rememberSucceededCommand(command, input.toolArgs?.cwd);
+		if (prepared.toolName === ToolNames.Verify)
+			noteVerifyRun(input.metadata?.resultKind === "ok", input.toolResultDetails);
 		{
 			const kind = input.metadata?.resultKind;
 			noteCheckOrChange(input.toolName ?? "", input.toolArgs, input.toolResultDetails, {
@@ -2204,6 +2216,28 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			settleDurableLessons(segment);
 			pairFix(segment);
 		}
+	}
+
+	/**
+	 * A verify run is a receipt for the argv it executed from the root (CLI-P52): a pass vouches for that command as a
+	 * successful shell receipt of it would. A run that did not pass vouches for nothing; it is kept only so a later
+	 * memory_note naming its command can say why it is refused.
+	 */
+	function noteVerifyRun(settledOk: boolean, details: unknown): void {
+		const root = workspaceRoot();
+		const command = verifyReceiptCommand(details, root);
+		if (command === null) return;
+		const keys = commandSegments(command, root).map((segment) => segment.key);
+		if (verifyRunPassed(settledOk, details)) {
+			for (const key of keys) unpassedVerifyChecks.delete(key);
+			rememberSucceededCommand(command, undefined);
+			return;
+		}
+		// A run that never launched (an unavailable runner) did not run the command, so the refusal does not name it.
+		if (!isPlainRecord(details) || details.launched === false) return;
+		if (isPlainRecord(details.judgement) && details.judgement.execution === "unavailable") return;
+		const check = typeof details.check === "string" ? details.check : "";
+		for (const key of keys) setBounded(unpassedVerifyChecks, key, check, VERIFIED_COMMAND_LIMIT);
 	}
 
 	/**
@@ -2452,6 +2486,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				);
 				continue;
 			}
+			// The same verify rule a direct call meets: the run's own judgement decides, never the chain's wrapper.
+			if (child.capability === ToolNames.Verify)
+				noteVerifyRun(child.admission.outcome === "ok" && child.admission.decision === "allowed", details);
 			const path =
 				settled && child.capability === ToolNames.Read && typeof child.args.path === "string"
 					? repositoryRelativePath(child.args.path, [workspaceRoot()])
