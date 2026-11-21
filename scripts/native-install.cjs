@@ -141,6 +141,8 @@ function launchReceipts() {
 	return path.join(clioRoot("state"), "launches");
 }
 
+const PROBES = new Set(["version", "--version", "-v", "help", "--help", "-h"]);
+
 function inside(root, file) {
 	if (typeof file !== "string" || !path.isAbsolute(file)) return false;
 	const rel = path.relative(root, file);
@@ -684,7 +686,9 @@ async function main() {
 		}
 		const removing = path.join(root, ".install-lock", "uninstall");
 		if (fs.existsSync(removing)) throw new Error("Uninstall is in progress; retry after it exits");
-		let receipt = path.join(launchReceipts(), `${process.pid}.json`);
+		// A version or help answer is a read-only probe (fleet preflight runs one on a remote node):
+		// it writes no receipt, so it never creates the state root. Every other launch keeps one.
+		let receipt = PROBES.has(args[0]) ? null : path.join(launchReceipts(), `${process.pid}.json`);
 		// Publish before importing, then recheck activation. A launcher paused across upgrades
 		// must follow the new manifest rather than importing a prefix collection just removed.
 		for (;;) {

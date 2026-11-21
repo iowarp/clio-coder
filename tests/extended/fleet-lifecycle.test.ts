@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
+import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
@@ -452,20 +453,28 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}
 		scratch = await newScratchClioHome("clio-coder-preflight-readonly-");
 		const ssh = join(scratch, "ssh");
 		const remoteState = join(scratch, "absent-state");
+		// The node's `clio-coder` is this workspace's build, never whatever the host PATH holds.
+		const bin = join(scratch, "bin");
+		mkdirSync(bin);
+		const cli = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
+		writeFileSync(join(bin, "clio-coder"), `#!/bin/sh\nexec '${process.execPath}' '${cli}' "$@"\n`);
+		chmodSync(join(bin, "clio-coder"), 0o755);
 		writeFileSync(
 			ssh,
 			`#!/bin/sh
 for arg; do command="$arg"; done
 export XDG_STATE_HOME='${remoteState}'
+export PATH='${bin}':"$PATH"
 exec sh -c "$command"
 `,
 		);
 		chmodSync(ssh, 0o755);
-		await runFleetNodePreflight(
+		const record = await runFleetNodePreflight(
 			{ id: "test", host: "test.invalid", clioCoderVersionCommand: `printf '${readClioVersion()}'` },
 			scratch,
 			{ sshBinary: ssh },
 		);
+		deepStrictEqual(record.remoteWorkerSpecs, record.localWorkerSpecs, "the workspace build answered the probe");
 		strictEqual(existsSync(remoteState), false);
 	});
 
