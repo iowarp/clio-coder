@@ -1437,6 +1437,18 @@ test("a side call leaves one spare session, and the next side call of its config
 			connectionReused: notReported,
 		});
 		strictEqual(two?.stop.reason, "stop");
+		// The seat billing and served model the stream stamped reach the judge's journal too.
+		const seat = {
+			provider: "github-copilot",
+			premiumRequests: { kind: "measured", value: 1, source: "provider" },
+			nanoAiu: { kind: "measured", value: 100, source: "provider" },
+			modelCalls: counted(1),
+		};
+		const served = { kind: "measured", value: "fake-model", source: "provider" };
+		for (const call of [one, two]) {
+			deepStrictEqual(call?.billing, seat);
+			deepStrictEqual(call?.target.reportedModel, served);
+		}
 		deepStrictEqual(transport(two), {
 			kind: "subprocess",
 			continuation: counted("full"),

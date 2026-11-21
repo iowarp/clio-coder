@@ -26,23 +26,34 @@ export function reportedModelFromMessage(message: unknown): Fact<string> {
 		: { kind: "unknown", reason: observation.state === "not-reported" ? "provider-omitted" : "not-observed" };
 }
 
-/** The message fields `transportFacts` reads, which an adapter stamps on the message it settles. */
-const TRANSPORT_STAMPS = [
+/**
+ * The message fields an adapter stamps on the message it settles that `callSettlementFromMessage` and
+ * `reportedModelFromMessage` read: transport, response id, wire effort, Clio's abort reason, seat billing and the
+ * served model. Usage, stop reason and failure are not stamps; a caller that rebuilds the message sets them itself.
+ */
+const SETTLEMENT_STAMPS = [
 	"codexTransport",
 	"anthropicResponse",
 	"copilotSession",
 	"copilotContinuation",
 	"clioCoderRequestBytes",
 	"clioCoderPromptCacheKey",
+	"responseId",
+	"clioCoderWireEffort",
+	"clioCoderAbortReason",
+	"copilotBilling",
+	"responseModelIdObservation",
+	"servedModel",
 ] as const;
 
 /**
- * The transport stamps on one message, for a caller that settles from usage it read off that message: the side request
- * admission rebuilds its message, and without these its call reads as an unknown transport (#434).
+ * The settlement stamps on one message, for a caller that settles from usage it read off that message: the side request
+ * admission rebuilds its message, and without these its call reads as an unknown transport, no seat billing and an
+ * unobserved model (#434).
  */
-export function transportStamps(message: unknown): Record<string, unknown> {
+export function settlementStamps(message: unknown): Record<string, unknown> {
 	const raw = record(message);
-	return Object.fromEntries(TRANSPORT_STAMPS.flatMap((key) => (raw[key] !== undefined ? [[key, raw[key]]] : [])));
+	return Object.fromEntries(SETTLEMENT_STAMPS.flatMap((key) => (raw[key] !== undefined ? [[key, raw[key]]] : [])));
 }
 
 /**

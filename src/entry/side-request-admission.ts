@@ -136,8 +136,8 @@ export function createSideRequestAdmission(deps: {
 		const account = (usage: LlmRequestUsage | null, observation?: CallObservation): void => {
 			if (settled) return;
 			settle({
-				// The adapter's transport stamps, which the rebuilt message would otherwise drop (#434).
-				...observation?.transport,
+				// The adapter's settlement stamps (transport, billing, model), which the rebuilt message would otherwise drop (#434).
+				...observation?.stamps,
 				stopReason:
 					observation?.callOutcome === "aborted"
 						? "aborted"
