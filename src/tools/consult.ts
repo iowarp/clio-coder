@@ -45,6 +45,7 @@ import {
 	createObservationPathFilter,
 	observationBudgetExhausted,
 	releaseObservation,
+	reportPoolDelivery,
 	reserveObservation,
 } from "./observation.js";
 import { resolveReadPath, toPosixPath } from "./path-utils.js";
@@ -545,6 +546,9 @@ async function readEvidenceFiles(
 			realPaths.push(file.real);
 			spent += Buffer.byteLength(file.text, "utf8");
 		}
+		// Refunded, not finalized, yet the call read what it named: a headless run's pool hears it returned (CLI-P42).
+		releaseObservation(reservation);
+		reportPoolDelivery(reservation);
 		return { files, skipped, realPaths };
 	} finally {
 		releaseObservation(reservation);
@@ -799,6 +803,8 @@ async function gatherFiles(
 				spent += Buffer.byteLength(gathering.items[file.key] ?? "", "utf8");
 			}
 		}
+		releaseObservation(reservation);
+		reportPoolDelivery(reservation);
 		return null;
 	} finally {
 		releaseObservation(reservation);

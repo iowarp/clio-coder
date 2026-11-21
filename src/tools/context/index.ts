@@ -1041,6 +1041,28 @@ export function createContextTool(
 				return { kind: "error", message: 'context: scope="budget" accepts only scope; it inspects the current request.' };
 			}
 			if (scope === "semantic" && !deps.semantic?.isEnabled()) return semanticUnavailable();
+			// The settings scope's own refusals come first, so an invalid call is never counted as a pool refusal (CLI-P42).
+			const getSettings = deps.getSettings;
+			const offset = args.offset === undefined ? 0 : args.offset;
+			const limit = args.limit === undefined ? 12 : args.limit;
+			if (scope === "settings") {
+				if (!getSettings)
+					return {
+						kind: "error",
+						message:
+							"An authoritative live settings snapshot is unavailable in this run. Ask the user to open /settings or run clio-coder config inspect; do not infer current limits from defaults.",
+					};
+				if (
+					typeof offset !== "number" ||
+					!Number.isSafeInteger(offset) ||
+					offset < 0 ||
+					typeof limit !== "number" ||
+					!Number.isSafeInteger(limit) ||
+					limit < 1 ||
+					limit > 12
+				)
+					return { kind: "error", message: "Use a non-negative integer offset and a limit from 1 to 12." };
+			}
 			const selfCap =
 				scope === "semantic"
 					? 16 * 1024
@@ -1063,27 +1085,9 @@ export function createContextTool(
 			if (scope === "semantic" && deps.semantic) {
 				return runSemanticScope(deps.semantic, args, cwdFromDeps(deps), reservation, options);
 			}
-			if (scope === "settings") {
-				if (!deps.getSettings)
-					return {
-						kind: "error",
-						message:
-							"An authoritative live settings snapshot is unavailable in this run. Ask the user to open /settings or run clio-coder config inspect; do not infer current limits from defaults.",
-					};
-				const offset = args.offset === undefined ? 0 : args.offset;
-				const limit = args.limit === undefined ? 12 : args.limit;
-				if (
-					typeof offset !== "number" ||
-					!Number.isSafeInteger(offset) ||
-					offset < 0 ||
-					typeof limit !== "number" ||
-					!Number.isSafeInteger(limit) ||
-					limit < 1 ||
-					limit > 12
-				)
-					return { kind: "error", message: "Use a non-negative integer offset and a limit from 1 to 12." };
+			if (scope === "settings" && getSettings && typeof offset === "number" && typeof limit === "number") {
 				const snapshot = settingsAwareness(
-					deps.getSettings(),
+					getSettings(),
 					typeof args.query === "string" ? args.query : "",
 					offset,
 					limit,
