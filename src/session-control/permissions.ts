@@ -10,6 +10,8 @@ export interface PermissionResolution {
 	payload: PermissionResolvedPayload;
 	reason?: string;
 	grantRequestedBy?: string;
+	/** The operator chose the parked escape's session option (M-7): the grant also grants its scope. */
+	sessionScope?: true;
 	/** TUI approval-state projection must run after the audit event and before release. */
 	beforeRelease?: () => void;
 }
@@ -32,6 +34,7 @@ export function resolvePermission(
 				actionClass: resolution.payload.actionClass as ActionClass,
 				...(resolution.payload.requestId !== undefined ? { requestId: resolution.payload.requestId } : {}),
 				requestedBy: resolution.grantRequestedBy,
+				...(resolution.sessionScope === true ? { sessionScope: true as const } : {}),
 			});
 		case "deny": {
 			// A deny that someone decided refuses the call. One settled by a

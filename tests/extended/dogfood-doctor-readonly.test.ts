@@ -186,35 +186,43 @@ describe("contracts/DOG-001 doctor credential reads", () => {
 		deepStrictEqual(readdirSync(join(root, "config")), ["credentials.yaml"]);
 	});
 
-	it("warns on a Windows credentials ACL that grants another principal and names it (FX-24)", () => {
+	it("warns on a Windows credentials ACL that grants another principal and names it, by SID (FX-24)", () => {
 		const file = "C:\\clio-rl1-acltest\\config\\credentials.yaml";
 		const account = { name: "ZBOOK\\akougk", sid: "S-1-5-21-1-2-3-1001" };
-		const listing = (aces: string[]): string =>
-			`${file} ${aces.join(`\r\n${" ".repeat(file.length + 1)}`)}\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`;
-		const owned = ["NT AUTHORITY\\SYSTEM:(F)", "BUILTIN\\Administrators:(I)(F)", "ZBOOK\\akougk:(F)"];
-		deepStrictEqual(windowsCredentialsFinding(file, { output: listing(owned) }, account), {
+		// The DACL icacls /save writes names principals by SID or SDDL alias, never by a localized name.
+		const owned = "D:PAI(A;;FA;;;SY)(A;ID;FA;;;BA)(A;;FA;;;S-1-5-21-1-2-3-1001)";
+		deepStrictEqual(windowsCredentialsFinding(file, { dacl: owned }, account), {
 			ok: true,
 			name: "credentials",
 			detail: file,
 		});
 		const finding = windowsCredentialsFinding(
 			file,
-			{ output: listing([...owned, "BUILTIN\\Users:(I)(RX)", "Everyone:(DENY)(W)"]) },
+			{ dacl: `${owned}(A;ID;0x1200a9;;;BU)(D;;FW;;;WD)(A;OICIIO;FA;;;CO)` },
 			account,
 		);
 		strictEqual(finding.level, "warn");
 		strictEqual(finding.name, "credentials");
 		match(finding.detail, /ACL also grants BUILTIN\\Users \(run `clio-coder doctor --fix`/);
-		// FX-29: an explicit grant (no (I)) is named the same way, and a fix that removed it says so.
+		// FX-29: an explicit grant is named the same way, an unknown SID as itself, and a fix that removed it says so.
 		match(
-			windowsCredentialsFinding(file, { output: listing([...owned, "BUILTIN\\Users:(R)"]) }, account).detail,
-			/ACL also grants BUILTIN\\Users \(run/,
+			windowsCredentialsFinding(
+				file,
+				{ dacl: `${owned}(A;;FR;;;S-1-5-32-545)(A;;0x1301bf;;;S-1-5-21-9-9-9-1234)` },
+				account,
+			).detail,
+			/ACL also grants BUILTIN\\Users, S-1-5-21-9-9-9-1234 \(run/,
 		);
-		deepStrictEqual(windowsCredentialsFinding(file, { output: listing(owned) }, account, ["BUILTIN\\Users"]), {
+		deepStrictEqual(windowsCredentialsFinding(file, { dacl: owned }, account, ["BUILTIN\\Users"]), {
 			ok: true,
 			name: "credentials",
 			detail: `${file}; removed BUILTIN\\Users from its ACL`,
 		});
+		strictEqual(
+			windowsCredentialsFinding(file, { dacl: owned }, { name: "akougk", sid: null }).level,
+			"warn",
+			"without the account's SID the DACL cannot be checked",
+		);
 	});
 
 	it("reads the committed snapshot while a writer holds the lock without disturbing the writer", async () => {

@@ -13,6 +13,11 @@ import { modelEndpointKey, registerForegroundStream } from "../domains/providers
 import type { OneShotPort } from "../domains/providers/one-shot.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import {
+	createEscapeScopeLedger,
+	ESCAPE_SCOPE_CUSTOM_TYPE,
+	type EscapeScopeLedger,
+} from "../domains/safety/escape-scope.js";
+import {
 	createSafetyJudge,
 	resolveSafetyJudgeConfig,
 	type SafetyJudgeCompletion,
@@ -327,7 +332,7 @@ export function createSafetyJudgeHost(deps: {
 	screen?: SafetyJudgeScreen;
 	/** Either escalation threshold was reached; contained yolo ends its run on it (ob-yolo D4). */
 	onEscalation?: (note: SafetyJudgeNote) => void;
-}): SafetyJudgeSeat {
+}): SafetyJudgeSeat & { escapeScopes: EscapeScopeLedger } {
 	const seat = createSafetyJudge({
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
 		complete: deps.complete,
@@ -368,5 +373,39 @@ export function createSafetyJudgeHost(deps: {
 	return {
 		review: (subject) => withJudgeCallCapture(() => seat.review(subject)),
 		operatorApproved: () => seat.operatorApproved(),
+		escapeScopes: createEscapeScopeHost(deps),
 	};
+}
+
+/**
+ * The session's sandbox-escape scopes (M-7) on the session ledger beside the judge's notes: a grant the operator
+ * picks is one hidden custom entry, read back for the rest of the session, a resumed one included. A scoped
+ * script must lie in the workspace or the scratch roots the judge reads scripts in.
+ */
+function createEscapeScopeHost(deps: {
+	settings: () => Readonly<ClioSettings>;
+	session: () => SessionContract | undefined;
+}): EscapeScopeLedger {
+	return createEscapeScopeLedger({
+		session: () => deps.session()?.current()?.id ?? null,
+		entries: () => {
+			const session = deps.session();
+			return session?.current() ? session.readEntries() : [];
+		},
+		append: (grant) => {
+			const session = deps.session();
+			if (session === undefined || !session.current()) throw new Error("no session ledger to record the grant on");
+			session.appendEntry({
+				kind: "custom",
+				customType: ESCAPE_SCOPE_CUSTOM_TYPE,
+				parentTurnId: null,
+				display: false,
+				data: grant,
+			});
+		},
+		roots: () => {
+			const roots = resolveSafetyJudgeConfig(deps.settings()).roots;
+			return roots === undefined ? [process.cwd()] : [roots.workspace, ...roots.scratch];
+		},
+	});
 }

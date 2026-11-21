@@ -147,6 +147,10 @@ export interface ApprovalAnswerer {
 
 export interface OverlayPermissionLifecycle {
 	confirm(): void;
+	/** Whether the card on screen offers its sandbox escape's session option (M-7). */
+	canConfirmForSession(): boolean;
+	/** Approve the parked escape and grant the scope its session option shows for the rest of the session. */
+	confirmForSession(): void;
 	cancel(): void;
 	/**
 	 * Deny the parked call and end the turn that keeps asking. Escape answers one
@@ -347,6 +351,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const foreignWorkers = new Map<string, WorkerEscalationEntry>();
 	const foreignNoticeIds = new Set<string>();
 	let confirmed = false;
+	/** The operator chose the session option of the escape on screen (M-7), so the grant carries its scope. */
+	let confirmedForSession = false;
 	let denied = false;
 	let stopping = false;
 	let withdrawingWorker = false;
@@ -745,12 +751,14 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		pendingPermission = null;
 		pendingWorker = null;
 		const wasConfirmed = confirmed;
+		const forSession = confirmedForSession;
 		const wasDenied = denied;
 		const wasTimedOut = timedOut;
 		const answerer = answeredBy;
 		const decidedBy = answerer?.decidedBy ?? "operator";
 		answeredBy = null;
 		confirmed = false;
+		confirmedForSession = false;
 		denied = false;
 		timedOut = null;
 		// Closing a modal is not an operator decision. Re-present the parked
@@ -807,6 +815,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 						at: Date.now(),
 					},
 					grantRequestedBy: "tool:one_shot",
+					...(forSession && permission.meta?.escapeScope !== undefined ? { sessionScope: true as const } : {}),
 					beforeRelease: () => {
 						if (permission.meta?.toolCallId !== undefined)
 							deps.applyApprovalState({
@@ -862,6 +871,13 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		confirm: () => {
 			if (pendingPermission === null && pendingWorker === null) return;
 			confirmed = true;
+			deps.closeOverlay();
+		},
+		canConfirmForSession: () => pendingWorker === null && pendingPermission?.meta?.escapeScope !== undefined,
+		confirmForSession: () => {
+			if (pendingWorker !== null || pendingPermission?.meta?.escapeScope === undefined) return;
+			confirmed = true;
+			confirmedForSession = true;
 			deps.closeOverlay();
 		},
 		cancel: () => {

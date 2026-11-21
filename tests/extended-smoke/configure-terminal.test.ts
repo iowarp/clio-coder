@@ -217,7 +217,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("The endpoint rejected that key");
 			await tty.expect("API key (saved locally");
 			tty.send(`quick-key${ENTER}`);
-			await tty.expect("Choose the model for Clio");
+			await tty.expect("Choose the model for CLIO Coder");
 			ok(!tty.screen().includes("embeddings"));
 			tty.send("no-matching-model");
 			await tty.expect("No matching models");
@@ -314,7 +314,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		try {
 			await tty.expect("Endpoint URL");
 			tty.send(ENTER);
-			await tty.expect("Choose the model for Clio");
+			await tty.expect("Choose the model for CLIO Coder");
 			ok(!tty.screen().includes("API key"));
 			tty.send(DOWN + ENTER);
 			await tty.expect("Ready to connect");
@@ -475,7 +475,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			const index = (picked - initial + entries.length) % entries.length;
 			ok(index >= 0);
 			tty.send(DOWN.repeat(index) + ENTER);
-			await tty.expect("How should Clio get the API key?");
+			await tty.expect("How should CLIO Coder get the API key?");
 			tty.send(`\x1b[A${ENTER}`);
 			await tty.expect("Paste the API key");
 			tty.send(`second-test-key${ENTER}`);
@@ -483,12 +483,12 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(CLEAR + url + ENTER);
 			await tty.expect("Which model?");
 			tty.send(DOWN + ENTER);
-			await tty.expect("Review what Clio could verify");
+			await tty.expect("Review what CLIO Coder could verify");
 			deepStrictEqual(parse(readFileSync(file, "utf8")), before, "a draft must not write settings");
 			strictEqual(readFileSync(credentialsFile, "utf8"), originalCredentials, "pasted keys wait for Save");
 			ok(tty.screen().includes("No generation or quality/tool tests."));
 			ok(tty.screen().includes("GPU/VRAM and model fit not checked."));
-			ok(tty.screen().slice(tty.screen().lastIndexOf("Review what Clio could verify")).split("\n").length <= 24);
+			ok(tty.screen().slice(tty.screen().lastIndexOf("Review what CLIO Coder could verify")).split("\n").length <= 24);
 			tty.send(DOWN + ENTER);
 			await tty.expect("Connection details");
 			tty.send(ENTER);
@@ -501,11 +501,11 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("usable CPUs");
 			await tty.expect("GPU/VRAM and model fit not checked.");
 			tty.send(ENTER);
-			await tty.expect("Review what Clio could verify");
+			await tty.expect("Review what CLIO Coder could verify");
 			tty.send(BACK);
 			await tty.expect("Which model?");
 			tty.send(ENTER);
-			await tty.expect("Review what Clio could verify");
+			await tty.expect("Review what CLIO Coder could verify");
 			tty.send(ENTER);
 			await tty.expect("target openai-compat saved");
 			await tty.expect("Edit a target");
@@ -519,7 +519,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(ENTER);
 			await tty.expect("Which provider or app do you use?");
 			tty.send(ENTER);
-			await tty.expect("How should Clio get the API key?");
+			await tty.expect("How should CLIO Coder get the API key?");
 			tty.send(ENTER);
 			await tty.expect("Where is the server?");
 			tty.send(ENTER);
@@ -527,7 +527,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(DOWN + ENTER);
 			await tty.expect("Context window in tokens");
 			tty.send(ENTER);
-			await tty.expect("Review what Clio could verify");
+			await tty.expect("Review what CLIO Coder could verify");
 			tty.send(ENTER);
 			await tty.expect("Edit a target");
 			await tty.quit();
@@ -586,7 +586,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		// cwd and HOME are the same folder, which the workspace check treats as the home folder.
 		const tty = terminal(home, [], noKeys, 24, []);
 		try {
-			await tty.expect("Clio needs a model");
+			await tty.expect("CLIO Coder needs a model");
 			await tty.expect("What do you have?");
 			strictEqual(tty.screen().includes("This is your home folder"), false, tty.screen());
 			tty.send(BACK);

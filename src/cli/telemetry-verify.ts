@@ -32,7 +32,7 @@ async function verifyArchive(path: string, json: boolean): Promise<number> {
 		const manifest = check.manifest;
 		process.stdout.write(
 			check.failure === null && manifest
-				? `verified archive ${path}: ${manifest.scopes.length} scope(s), profile ${manifest.profile}, source ${manifest.installId}, Clio ${manifest.clioCoderVersion}\n`
+				? `verified archive ${path}: ${manifest.scopes.length} scope(s), profile ${manifest.profile}, source ${manifest.installId}, CLIO Coder ${manifest.clioCoderVersion}\n`
 				: `failed archive ${path}: ${check.failure}\n`,
 		);
 	}

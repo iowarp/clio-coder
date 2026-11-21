@@ -1356,6 +1356,22 @@ test("a rewritten history seeds a fresh session; a side call never disturbs the 
 	match(fake().sessions.at(-1)?.prompts[0] ?? "", /conversation-history[\s\S]*compacted summary/);
 });
 
+test("a side call leaves one spare session, and the next side call of its configuration runs there (PV-2)", async () => {
+	const side = (text: string) =>
+		engineStreamSimple(model, normalizeContext({ systemPrompt: "Side judge.", messages: [user(text)] }), {}).result();
+	try {
+		const start = fake().sessions.length;
+		strictEqual((await side("judge one")).stopReason, "stop");
+		ok(await eventually(() => fake().sessions.length === start + 2), "the side call's own session and one spare");
+		strictEqual((await side("judge two")).stopReason, "stop");
+		match(fake().sessions[start + 1]?.prompts[0] ?? "", /judge two/, "the second side call ran on the spare");
+		ok(await eventually(() => fake().sessions.length === start + 3), "taking the spare leaves a new one");
+		strictEqual(fake().sessions[start + 2]?.prompts.length, 0, "and the new spare is still empty");
+	} finally {
+		disposeCopilotConversations("default");
+	}
+});
+
 test("a synced tool result the working set rewrote reseeds in full; an unchanged history stays a delta (bt-47 drv-r4a)", async () => {
 	const key = "rewrite-session";
 	disposeCopilotConversations(key);

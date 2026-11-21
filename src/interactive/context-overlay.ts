@@ -478,7 +478,6 @@ export function openContextOverlay(
 	const unsubscribes: Array<() => void> = [];
 	if (options?.bus) {
 		unsubscribes.push(options.bus.subscribe("context.pruned", refresh));
-		unsubscribes.push(options.bus.subscribe("context.warning_raised", refresh));
 	}
 	// A settled call's journal batch lands just after its chat event; repaint when it does, at most 10 Hz.
 	if (options?.telemetry) {

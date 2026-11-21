@@ -54,10 +54,10 @@ export interface InteropInspectAgent {
 	 * True when the facts moved since the decision was taken.
 	 *
 	 * A standing answer suppresses re-proposal only while the facts it was made
-	 * against still hold, so this is what says Clio Coder will ask again.
+	 * against still hold, so this is what says CLIO Coder will ask again.
 	 */
 	readonly decisionStale: boolean;
-	/** True when Clio Coder would offer to wire this agent on the next review. */
+	/** True when CLIO Coder would offer to wire this agent on the next review. */
 	readonly proposed: boolean;
 	/** True when wiring it would fetch the adapter from the network on first use. */
 	readonly needsNetworkInstall: boolean;

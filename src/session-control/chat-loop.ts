@@ -145,6 +145,7 @@ import {
 	type SessionEntry,
 	SKILL_CONTEXT_STATE,
 } from "../domains/session/entries.js";
+import { absentOutputs, namedOutputs } from "../domains/session/output-obligations.js";
 import { readPromptCompileRecords } from "../domains/session/prompt-manifest.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import type { RetrySettings } from "../domains/session/retry.js";
@@ -203,6 +204,7 @@ import {
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import { createHostInserts } from "./host-inserts.js";
 import { loopGuardContinuationDetail, TOOL_LOCK_RESET_DETAIL } from "./loop-guard-interrupt.js";
+import { withSettledHistory } from "./message-list-digest.js";
 import { createMessagePath } from "./message-path.js";
 import { continuityContextFromSession, continuityRenderTime } from "./model-session-replay.js";
 import type { NoticeSource } from "./notice-source.js";
@@ -227,7 +229,6 @@ import { createSteerInterrupter } from "./steer-interrupt.js";
 import {
 	parseTriageAnswer,
 	runTriageRound,
-	TRIAGE_MAX_TOKENS,
 	TRIAGE_RESPONSE_SCHEMA,
 	TRIAGE_SCHEMA_NAME,
 	TRIAGE_SYSTEM_PROMPT,
@@ -237,6 +238,7 @@ import {
 	triageFloor,
 	triageKindFor,
 	triageLabelsFor,
+	triageMaxTokens,
 	triageMayInterrupt,
 	triageSnapshotMatches,
 	triageUserText,
@@ -1531,6 +1533,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
 	// A headless run's observation pool rolls once spent instead of capping the run (CLI-P42); attended turns keep theirs.
 	const headlessObservation = deps.headless === true ? createHeadlessObservationPool() : null;
+	// M-4: the outputs this session's operator prompts named with an `output: <path>` line that do not exist now.
+	const missingOutputs = (): string[] =>
+		absentOutputs(
+			namedOutputs(activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined)),
+			process.cwd(),
+		);
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
@@ -1648,6 +1656,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
 		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
+		missingOutputs,
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
 		queueHostMessage: (text, source, rule) => queues.queueHostMessage(text, source, rule),
 	});
@@ -1888,8 +1897,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				? undefined
 				: { kind: entry.kind, ...(entry.origin !== undefined ? { origin: entry.origin } : {}) };
 		},
-		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
-			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
+		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport, responsesDiagnostic) =>
+			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport, responsesDiagnostic),
 		telemetry: deps.telemetry,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
@@ -2057,6 +2066,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						? repetitionRecoveryStage(state)
 						: null;
 				if (repetitionStage !== null) attemptRetryForecast = repetitionRecoveryForecast(repetitionStage);
+				// A thinking-only output-limit stop whose one recovery follows closes an attempt too, so the footer does not
+				// read "Output limit" before the recovered turn's own outcome (f-repeat).
+				else if (
+					attemptRetryForecast === null &&
+					state.activeInterruptReason === null &&
+					state.activeUserTurnId !== null &&
+					state.thinkingLengthRecoveryTurnId !== state.activeUserTurnId &&
+					isThinkingOnlyLengthStop(event.message)
+				)
+					attemptRetryForecast = { attempt: 1, maxAttempts: 1, recovery: true };
 				if (attemptRetryForecast !== null) Object.assign(event, { retryPending: attemptRetryForecast });
 			}
 			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {
@@ -2109,6 +2128,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		telemetry: deps.telemetry,
 		scheduling: deps.scheduling,
 		headless: deps.headless,
+		missingOutputs,
 		createAgent,
 		noteMainRequest: (runtime, request, stream) => {
 			keepalive.noteRequest(runtime, request, stream);
@@ -3108,9 +3128,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							previous: state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : "",
 							entries: asked,
 						}),
-						maxTokens: TRIAGE_MAX_TOKENS,
+						maxTokens: triageMaxTokens(resolved.thinkingLevel),
 						// A schema-bound classification; reasoning only spends the output budget, so
-						// `chat.steering.triage.thinkingLevel` defaults to off.
+						// `chat.steering.triage.thinkingLevel` defaults to off, and a raised level gets its own room.
 						thinkingLevel: resolved.thinkingLevel,
 						responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
 						runtimeId: resolved.runtimeId,
@@ -3628,6 +3648,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
+					state.finishOutputRefused = false;
 					state.turnReplied = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
 					if (options.machineTurn === undefined) headlessObservation?.reset(options.hostRun?.runId);
@@ -3869,16 +3890,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					});
 
 				let turnSnapshot = captureTurnSnapshot("pending");
-				let admission = context.refreshLiveBudget(submittedText);
 				// The window-fit gate reads the A4 count, so a request Pi's clamp would refuse compacts first.
-				const fitInput = (view: typeof admission): number | null =>
+				const fitInput = (view: LiveBudgetView): number | null =>
 					view.inputTokens === null
 						? null
 						: (context.overflowFitTokens?.(agentRuntime, submittedText, view.inputTokens) ?? view.inputTokens);
+				// The publication and the fit count read one history, so the second matches the first's check by identity (SC-6).
+				const admit = (): { view: LiveBudgetView; input: number | null } =>
+					withSettledHistory(() => {
+						const view = context.refreshLiveBudget(submittedText);
+						return { view, input: fitInput(view) };
+					});
+				const first = admit();
+				let admission = first.view;
 				// The output reserve shrinks as input grows, so it is resolved at the count the gate chose.
 				const fitReserve = (input: number | null): number | null =>
 					input === null ? null : resolveFitOutputReserve(agentRuntime, input);
-				const firstInput = fitInput(admission);
+				const firstInput = first.input;
 				if (
 					admission.effectiveWindow !== null &&
 					!requestFits(firstInput, fitReserve(firstInput), admission.effectiveWindow)
@@ -3925,8 +3953,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					if (!admissionCurrent()) return;
 					submittedText = composeSubmittedText();
-					admission = context.refreshLiveBudget(submittedText);
-					const admittedInput = fitInput(admission);
+					const admitted = admit();
+					admission = admitted.view;
+					const admittedInput = admitted.input;
 					const admittedReserve = fitReserve(admittedInput);
 					if (
 						admission.effectiveWindow !== null &&
