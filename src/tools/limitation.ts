@@ -44,7 +44,7 @@ function trimString(value: unknown): string | null {
  * of a 2 min run reporting "the tool window closed" with no handback fired (M-37).
  */
 const TOOLS_GONE_CLAIMS: ReadonlyArray<RegExp> = [
-	/\btool[- ]window\b/iu,
+	/\btool[- ]window\s+(?:(?:was|is|has|had)\s+(?:been\s+)?)?(?:closed|withdrawn|ended|expired|gone|shut)\b/iu,
 	/\b(?:my|the|your|its|all)\s+tools\s+(?:(?:were|are|have|had|has)\s+(?:been\s+)?|got\s+)?(?:closed|withdrawn|removed|revoked|taken away|cut off|locked|gone|disabled)\b/iu,
 	/\btool access\s+(?:(?:was|is|has|had)\s+(?:been\s+)?)?(?:closed|ended|withdrawn|removed|revoked|cut off|gone)\b/iu,
 	/\b(?:withdrew|withdrawn|revoked|removed|lost)\s+(?:my|the|your|its|all)\s+(?:tools|tool access)\b/iu,
