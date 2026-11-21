@@ -1,4 +1,5 @@
 export { proposeMemoryFromClaim, recordClaimRegressions } from "./claim-link.js";
+export { consolidateMemory, type MemoryConsolidation } from "./consolidate.js";
 export type { MemoryPromptSelection, ObservationSourceUnit } from "./contract.js";
 export { buildDispatchMemorySection } from "./dispatch-section.js";
 export { memoryFlowSweepNotice, sweepRestrictedMemory } from "./flow-sweep.js";

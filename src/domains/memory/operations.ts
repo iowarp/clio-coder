@@ -360,7 +360,7 @@ function canonicalActiveRepository(
 	return canonical;
 }
 
-function repositoryApplies(record: MemoryRecord, activeRepository: MemoryRepositoryIdentity | null): boolean {
+export function repositoryApplies(record: MemoryRecord, activeRepository: MemoryRepositoryIdentity | null): boolean {
 	if (record.scope !== "repo") return true;
 	if (activeRepository === null) return false;
 

@@ -2282,7 +2282,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!isPlainObject(memory.surfaces))
 							issues.add("context.memory.surfaces", `expected a map, got ${describe(memory.surfaces)}`);
 						else {
-							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe", "delivery", "correct", "bank"]);
+							issues.unknownKeys("context.memory.surfaces", memory.surfaces, [
+								"observe",
+								"delivery",
+								"correct",
+								"bank",
+								"history",
+							]);
 							if ("observe" in memory.surfaces) {
 								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
 									"off",
@@ -2306,6 +2312,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 									"model",
 								] as const);
 								if (parsed !== undefined) settings.context.memory.surfaces[key] = parsed;
+							}
+							if ("history" in memory.surfaces) {
+								const parsed = expectEnum(issues, "context.memory.surfaces.history", memory.surfaces.history, [
+									"off",
+									"on",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces.history = parsed;
 							}
 						}
 					}

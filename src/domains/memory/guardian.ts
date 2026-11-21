@@ -14,7 +14,9 @@
  *   1. Pending live work after a turn has settled: triggers that yielded to
  *      occupancy, or shell activity no lesson pass has seen.
  *   2. Repository history: the current repository's and its linked worktrees'
- *      earlier sessions, read incrementally from durable cursors.
+ *      earlier sessions, read incrementally from durable cursors, only while
+ *      `context.memory.surfaces.history` is `on` (`historyMining`). Off, the
+ *      default, the guardian parks once live work is done and opens no history.
  *
  * Past the deepest horizon there is no deeper history to open, but the main
  * checkout and its linked worktrees keep writing sessions while this one sits
@@ -112,6 +114,11 @@ export interface MemoryGuardianDeps {
 	live: Pick<MemoryInterventionRegistration, "pendingWork" | "runIdleStep" | "stepInFlight">;
 	/** History source for the current session and repository, rebuilt when either changes. */
 	historySource(): HistoryReviewSource | null;
+	/**
+	 * Whether idle steps mine earlier sessions for new lessons (`surfaces.history`). Read on every step; false parks the
+	 * guardian after live work without opening a history source, so it makes no `memory.history` call.
+	 */
+	historyMining(): boolean;
 	/** Its own routed client: capacity and fallback state must not race the boundary steps' client. */
 	client: MemoryGuardianClient;
 	settings(): { maxTokens: number; timeoutMs: number };
@@ -274,6 +281,12 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			const outcome = await deps.live.runIdleStep();
 			if (stepGeneration !== generation) return null;
 			return afterOutcome(outcome);
+		}
+		if (!deps.historyMining()) {
+			// Mining is off: nothing past live work runs, and a later `on` rebuilds the source from its cursors.
+			source = null;
+			setState("idle");
+			return null;
 		}
 		const scope = deps.scopeKey();
 		if (scope !== sourceScope) {
