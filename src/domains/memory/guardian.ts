@@ -148,6 +148,12 @@ export interface MemoryGuardianDeps {
 	 * re-ran the review its last process lost at exit before anyone asked anything of it (ACP-6).
 	 */
 	awaitFirstTurn?: boolean;
+	/**
+	 * Whether a session is bound now. The TUI creates its session after the first prompt's turn start, and `/new` parks it
+	 * until the next prompt; a review run meanwhile bills no session (C-20). Arming waits for a turn that finds one bound,
+	 * and an unbound moment runs nothing. Unwired means always bound.
+	 */
+	sessionBound?(): boolean;
 }
 
 export interface MemoryGuardian {
@@ -184,6 +190,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	let source: HistoryReviewSource | null = null;
 	let sourceScope: string | null = null;
 	let armed = deps.awaitFirstTurn !== true;
+	const bound = (): boolean => deps.sessionBound?.() !== false;
 
 	const setState = (next: TaskMemoryGuardianState): void => {
 		if (next === current) return;
@@ -252,6 +259,11 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	async function step(stepGeneration: number): Promise<number | null> {
 		if (!deps.enabled()) {
 			setState("off");
+			return null;
+		}
+		if (!bound()) {
+			// The turn that binds the next session wakes the guardian again.
+			setState("idle");
 			return null;
 		}
 		if (parkedUnavailable) {
@@ -377,10 +389,10 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		if (deps.client.backgroundEndpointBusy()) return "yielded";
 		const live = deps.settings();
 		const bank = new TaskMemoryBank();
-		const run = (selected: TaskMemoryModelClient): Promise<TaskMemoryPolicyResult> => {
+		const run = async (selected: TaskMemoryModelClient) => {
 			const started = process.hrtime.bigint();
 			const before = bank.snapshot();
-			return runTaskMemoryPolicy(bank, selected, {
+			const result = await runTaskMemoryPolicy(bank, selected, {
 				purpose: "memory.history",
 				isCurrent,
 				signal: controller.signal,
@@ -401,31 +413,55 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 						.map(({ id, text }) => ({ id, text })),
 					trajectoryMaxChars: depth.maxChars,
 				},
-			}).then((result) => {
-				record(result, selected, started, taskMemoryBankDelta(before, bank.snapshot()));
-				return result;
 			});
+			return { result, selected, started, ended: process.hrtime.bigint(), before };
 		};
-		let result = await run(client);
-		if ((result.reason === "client_error" || result.reason === "information_flow_blocked") && isCurrent()) {
+		// Recorded once the attempt's bank writes are done: the recipes added below are this step's writes too.
+		const recordAttempt = (attempt: Awaited<ReturnType<typeof run>>): void =>
+			record(
+				attempt.result,
+				attempt.selected,
+				attempt.ended - attempt.started,
+				taskMemoryBankDelta(attempt.before, bank.snapshot()),
+			);
+		let attempt = await run(client);
+		if (
+			(attempt.result.reason === "client_error" || attempt.result.reason === "information_flow_blocked") &&
+			isCurrent()
+		) {
 			let fallback: TaskMemoryModelClient | null = null;
 			try {
 				fallback = deps.client.getFallbackModelClient();
 			} catch {
 				fallback = null;
 			}
-			if (fallback !== null && !deps.client.backgroundEndpointBusy()) result = await run(fallback);
+			if (fallback !== null && !deps.client.backgroundEndpointBusy()) {
+				recordAttempt(attempt);
+				attempt = await run(fallback);
+			}
 		}
-		if (!isCurrent()) return "none";
-		if (result.reason === "endpoint_busy" || result.reason === "endpoint_preempted") return "yielded";
-		if (BACKGROUND_SKIP_REASONS.has(result.reason as BackgroundSkipReason)) return "skipped";
-		if (result.reason === "client_error" || result.reason === "information_flow_blocked" || result.reason === "no_client")
-			return "unavailable";
-		// A malformed envelope is a rejected answer, not a review: committing it
-		// would retire the excerpt with nothing learned from it.
-		if (result.decision === "timeout" || result.decision === "malformed") {
-			historyUnanswered += 1;
-			return historyUnanswered >= HISTORY_UNANSWERED_LIMIT ? "unavailable" : "ran";
+		const { result } = attempt;
+		const early = ((): MemoryStepLaunchOutcome | null => {
+			if (!isCurrent()) return "none";
+			if (result.reason === "endpoint_busy" || result.reason === "endpoint_preempted") return "yielded";
+			if (BACKGROUND_SKIP_REASONS.has(result.reason as BackgroundSkipReason)) return "skipped";
+			if (
+				result.reason === "client_error" ||
+				result.reason === "information_flow_blocked" ||
+				result.reason === "no_client"
+			)
+				return "unavailable";
+			// A malformed envelope is a rejected answer, not a review: committing it
+			// would retire the excerpt with nothing learned from it.
+			if (result.decision === "timeout" || result.decision === "malformed") {
+				historyUnanswered += 1;
+				return historyUnanswered >= HISTORY_UNANSWERED_LIMIT ? "unavailable" : "ran";
+			}
+			return null;
+		})();
+		if (early !== null) {
+			recordAttempt(attempt);
+			return early;
 		}
 		historyUnanswered = 0;
 		// Recipes the excerpt's own receipts prove join whatever the model kept; its silence does not drop them.
@@ -441,6 +477,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				!recipeAlreadyClaimed(recipe, kept)
 			)
 				bank.saveKnowledge(recipe.content, { durable: true, evidenceCommand: recipe.command });
+		recordAttempt(attempt);
 		const lessons = bank.snapshot().knowledge.filter((entry) => entry.durable === true);
 		const root = deps.workspaceRoot();
 		const commandVerified: string[] = [];
@@ -483,7 +520,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	function record(
 		result: TaskMemoryPolicyResult,
 		client: TaskMemoryModelClient,
-		started: bigint,
+		elapsed: bigint,
 		bankDelta: TaskMemoryBankDelta,
 	): void {
 		try {
@@ -503,7 +540,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				citedEntries: 0,
 				inputTokens: result.inputTokens,
 				outputTokens: result.outputTokens,
-				latencyMs: Number(process.hrtime.bigint() - started) / 1_000_000,
+				latencyMs: Number(elapsed) / 1_000_000,
 				...(client.route === undefined ? {} : { route: client.route }),
 				...(result.resumeAt === undefined ? {} : { resumeAt: result.resumeAt }),
 			});
@@ -524,8 +561,12 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		state: () => current,
 		wake(reason) {
 			if (disposed) return;
-			if (reason === "turn-end" || reason === "turn-start") armed = true;
-			if (!armed) return;
+			if ((reason === "turn-end" || reason === "turn-start") && bound()) armed = true;
+			if (!armed) {
+				// Unarmed, nothing runs, but a disabled guardian still says so (C-20).
+				if (!deps.enabled()) setState("off");
+				return;
+			}
 			if (reason === "turn-end" || reason === "turn-start") {
 				idleSinceMs = performance.now();
 				discoveryMs = DISCOVERY_MIN_MS;
@@ -541,6 +582,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		reset() {
 			if (disposed) return;
 			retire();
+			// `/new` parks the session: a guardian that waits for a first turn waits for the next bound one.
+			if (deps.awaitFirstTurn === true && !bound()) armed = false;
 			setState(deps.enabled() ? "idle" : "off");
 			if (armed) schedule(WAKE_DEBOUNCE_MS);
 		},

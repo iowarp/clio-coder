@@ -783,3 +783,54 @@ test("an ACP host's guardian starts no history review before the first turn, at 
 	await settle();
 	assert.ok(steps > 0, "the first turn arms the guardian");
 });
+
+test("a TUI guardian reviews no history until a turn has bound a session, and none after /new before the next one (C-20)", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	let steps = 0;
+	let bound = false;
+	let enabled = false;
+	const guardian = createMemoryGuardian({
+		enabled: () => enabled,
+		isForegroundActive: () => {
+			steps += 1;
+			return false;
+		},
+		live: { pendingWork: () => false, stepInFlight: () => false, runIdleStep: async () => "none" },
+		historyMining: () => true,
+		historySource: () => null,
+		client: {} as never,
+		settings: () => ({ maxTokens: 2_000, timeoutMs: 1_000 }),
+		workspaceRoot: () => process.cwd(),
+		getKeptLessons: () => [],
+		onHistoryLessons() {},
+		onStateChange() {},
+		scopeKey: () => "tui-session",
+		awaitFirstTurn: true,
+		sessionBound: () => bound,
+	});
+	t.after(() => guardian.dispose());
+	const settle = async () => {
+		t.mock.timers.runAll();
+		await new Promise((resolve) => setImmediate(resolve));
+	};
+	guardian.wake("ready");
+	assert.equal(guardian.state(), "off", "a disabled guardian says so before any turn");
+	enabled = true;
+	// The first prompt's turn_start fires before the TUI creates its session; a turn refused there binds none.
+	guardian.wake("turn-start");
+	await settle();
+	guardian.wake("turn-end");
+	await settle();
+	assert.equal(steps, 0);
+	bound = true;
+	guardian.wake("turn-end");
+	await settle();
+	assert.ok(steps > 0, "a turn that bound its session arms the guardian");
+	// /new parks the session and resets memory: nothing runs until a turn binds the next session.
+	bound = false;
+	const before = steps;
+	guardian.reset();
+	guardian.wake("settings");
+	await settle();
+	assert.equal(steps, before);
+});
