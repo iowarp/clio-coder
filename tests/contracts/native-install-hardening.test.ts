@@ -322,6 +322,52 @@ test("activation moves a POSIX launcher to the new Node and collects the old run
 	assert.equal(existsSync(join(f.root, "runtime/node-v24.0.0-linux-x64")), process.platform !== "linux");
 });
 
+test("an upgrade runs the candidate's own doctor --fix, prints what it removed, and a failed repair activates nothing", {
+	skip: process.platform === "win32",
+}, (t) => {
+	const f = fixture(t);
+	mkdirSync(join(f.root, "runtime/node/bin"), { recursive: true });
+	const node = join(f.root, "runtime/node/bin/node");
+	symlinkSync(process.execPath, node);
+	const config = join(f.root, "home/config");
+	mkdirSync(config, { recursive: true });
+	// A fake doctor: the first --fix removes a retired key and drops a record, a later one finds nothing.
+	const doctor = `const fs=require("node:fs"),p=require("node:path"),a=process.argv.slice(2),c=${JSON.stringify(config)};
+if(a[0]==="--version"){console.log("candidate");process.exit(0)}
+fs.appendFileSync(p.join(c,"calls"),a.join(" ")+"\\n");
+const fixed=a.includes("--fix")&&!fs.existsSync(p.join(c,"done"));if(fixed)fs.writeFileSync(p.join(c,"done"),"");
+const broken=fs.existsSync(p.join(c,"unfixable"));
+const findings=[{ok:!broken,name:"settings.yaml",detail:broken?"x.y: unknown key":"ok"},...(fixed?[{ok:true,name:"settings.yaml retired keys",detail:"removed context.memory.observations"},{ok:true,name:"memory store",detail:"rewrote records.json (version 1) keeping 0 records and dropping 1 this build cannot read"}]:[])];
+console.log(JSON.stringify({ok:!broken,fix:a.includes("--fix"),findings}));process.exit(broken?1:0);`;
+	const candidate = (version: string) => {
+		const dir = f.prefix(version);
+		mkdirSync(join(dir, suffix, "dist/cli"), { recursive: true });
+		writeFileSync(join(dir, suffix, "dist/cli/index.js"), doctor);
+		return dir;
+	};
+	const activate = (prefix: string) =>
+		f.run("activate", node, "24", "linux-x64", prefix, f.record.launcher, "latest", "-", "0", "1");
+	const a = activate(candidate("0.6.2"));
+	assert.equal(a.status, 0, a.stderr);
+	assert.match(a.stdout, /home repair: settings\.yaml retired keys: removed context\.memory\.observations/u);
+	assert.match(a.stdout, /home repair: memory store: rewrote .*dropping 1/u);
+	assert.match(readFileSync(join(config, "calls"), "utf8"), /^doctor --fix --json$/mu);
+	const b = activate(candidate("0.6.3"));
+	assert.equal(b.status, 0, b.stderr);
+	assert.match(b.stdout, /home repair: nothing to remove/u);
+	writeFileSync(join(config, "unfixable"), "");
+	const before = readFileSync(join(f.root, "install.json"), "utf8");
+	const c = activate(candidate("0.6.4"));
+	assert.notEqual(c.status, 0);
+	assert.match(
+		c.stderr,
+		/x\.y: unknown key[\s\S]*previous installation remains active\. The new version's doctor --fix ran/u,
+	);
+	assert.doesNotMatch(c.stderr, /retry the installer/u);
+	// Rollback keeps its target: the failed activation left the manifest it found.
+	assert.equal(readFileSync(join(f.root, "install.json"), "utf8"), before);
+});
+
 test("a pin records where it came from and keeps its first date across reinstalls of the same pin", {
 	skip: process.platform === "win32",
 }, (t) => {

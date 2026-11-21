@@ -1075,6 +1075,8 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 			# An older version rejects keys a newer one wrote, and its own doctor --fix exits 1 and changes nothing.
 			fail "candidate checks failed; previous install remains active. CLIO Coder $installed_version is older than the active $active_version, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $installed_version, remove the keys named above from settings.yaml, then rerun this installer."
 		fi
+		# With post-install the candidate's helper ran its own doctor --fix against this home and named above what it could not repair.
+		[ "$post_install" = 1 ] && fail "candidate checks failed; previous install remains active. The lines above name what failed."
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 		fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
 	}
