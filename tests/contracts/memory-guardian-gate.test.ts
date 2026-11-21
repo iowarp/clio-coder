@@ -14,6 +14,7 @@ import {
 	recordClaimSession,
 	recordMemoryObservations,
 } from "../../src/domains/memory/guardian-gate.js";
+import { checkoutDeliveryCheck } from "../../src/domains/memory/lesson-projection.js";
 import {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
@@ -270,6 +271,49 @@ describe("memory guardian gate", () => {
 		const out = `node fixture.mjs --out ${join(tmpdir(), "elsewhere", "out.txt")}`;
 		await rejects(session("s10", { kind: "command", command: pattern(out) }, []), /outside its repository/u);
 		strictEqual(claimPathRefusal({ kind: "command", command: pattern(out, 3) }, repo), null);
+		// CLI-P25: a stored lesson binding a path outside its checkout, written before the write-time rule, is refused at
+		// delivery too, so it reaches no session's prompt or reminder.
+		const bound: MemoryRecord = {
+			id: "mem-00000000000000b1",
+			scope: "repo",
+			key: "bound",
+			lesson: `Write the report with \`${out}\`.`,
+			evidenceRefs: [commandEvidenceRef(out)],
+			appliesWhen: [],
+			avoidWhen: [],
+			confidence: 0.6,
+			createdAt: "2026-10-01T00:00:00.000Z",
+			approved: true,
+			repository: { kind: "canonical-path", key: repo },
+		};
+		ok(checkoutDeliveryCheck(repo)(bound)?.includes("outside its repository checkout"));
+		// Delivery judges what the record binds, never where its reader keeps scratch: a declared scratch parameter under
+		// another session's scratch root is delivered, a global lesson may name a machine-wide tool, and a legacy record
+		// keyed by a subdirectory reads its own repository's paths as its own.
+		const deliver = checkoutDeliveryCheck(repo);
+		const elsewhere = "node fixture.mjs --out /srv/other-scratch/out.txt";
+		const lesson = (command: string) => ({ lesson: `Run \`${command}\`.`, evidenceRefs: [commandEvidenceRef(command)] });
+		const scratchParameter = { kind: "command" as const, command: pattern(elsewhere, 3) };
+		strictEqual(deliver({ ...bound, id: "mem-00000000000000b2", ...lesson(elsewhere), claim: scratchParameter }), null);
+		const tool = "node /opt/tools/lint.mjs";
+		const { repository: _repository, ...unscoped } = bound;
+		strictEqual(deliver({ ...unscoped, id: "mem-00000000000000b3", scope: "global", ...lesson(tool) }), null);
+		mkdirSync(join(repo, "sub"), { recursive: true });
+		const inside = `node ${join(repo, "fixture.mjs")} --mode native`;
+		const subdirectory = { kind: "canonical-path" as const, key: join(repo, "sub") };
+		strictEqual(deliver({ ...bound, id: "mem-00000000000000b4", ...lesson(inside), repository: subdirectory }), null);
+		// Only the reader's scratch roots go unjudged: a program under /tmp, and a scratch parameter inside the checkout,
+		// are refused at delivery as at write.
+		const scratchProgram = "/tmp/session-a/run-check.sh --mode native";
+		const program = { kind: "command" as const, command: pattern(scratchProgram) };
+		ok(
+			deliver({ ...bound, id: "mem-00000000000000b5", ...lesson(scratchProgram), claim: program })?.includes(
+				"outside its repository checkout",
+			),
+		);
+		const intoCheckout = `node fixture.mjs --out ${join(repo, "out.txt")}`;
+		const checkoutParameter = { kind: "command" as const, command: pattern(intoCheckout, 3) };
+		ok(deliver({ ...bound, id: "mem-00000000000000b6", ...lesson(intoCheckout), claim: checkoutParameter }) !== null);
 
 		// The legacy reader: a store written before claims is read as it is, and its first mutation keeps the count.
 		const legacyDir = scratch();

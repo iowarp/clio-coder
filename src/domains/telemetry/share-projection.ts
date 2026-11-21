@@ -848,6 +848,7 @@ export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
 	"diff:mutating-turn@board-scope",
 	"flag:untrustedInstructionMarkers@tool-result",
 	"match:completed-dispatch@user-turn",
+	"match:durable-lesson@task-memory",
 	"match:guidance-entry@turn",
 	"match:marketplace-capability@task",
 	"observer:file-mutation@tool-result",

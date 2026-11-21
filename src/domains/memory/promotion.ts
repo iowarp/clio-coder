@@ -319,11 +319,30 @@ export function claimPathRefusal(
 	repositoryRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
 ): string | null {
+	return pathRefusal(claim, repositoryRoot, [tmpdir(), "/tmp", "/var/tmp", ...scratchRoots]);
+}
+
+/**
+ * The same rule at delivery, for a record written before it (CLI-P25), minus the judgement that needs the writer's
+ * scratch roots: its TMPDIR and settings are not the reader's, so a declared scratch parameter is not asked to lie under
+ * the reader's roots. Everything else stands: a scratch parameter inside the checkout or another worktree, a program
+ * under /tmp or /var/tmp, and a path of another worktree or checkout, or outside the repository, are refused. Whatever
+ * passed at write passes here.
+ */
+export function claimDeliveryPathRefusal(claim: MemoryClaim, repositoryRoot: string): string | null {
+	return pathRefusal(claim, repositoryRoot, ["/tmp", "/var/tmp"], false);
+}
+
+/** `writerRoots` false: the scratch roots are not the writer's, so a scratch parameter's placement under them is unjudged. */
+function pathRefusal(
+	claim: MemoryClaim,
+	repositoryRoot: string,
+	scratchRoots: ReadonlyArray<string>,
+	writerRoots = true,
+): string | null {
 	const root = landedPath(repositoryRoot);
 	const worktrees = (relatedRepositoryRoots(root)?.roots ?? []).map(landedPath).filter((other) => other !== root);
-	const scratch = [...new Set([tmpdir(), "/tmp", "/var/tmp", ...scratchRoots].filter((dir) => isAbsolute(dir)))].map(
-		landedPath,
-	);
+	const scratch = [...new Set(scratchRoots.filter((dir) => isAbsolute(dir)))].map(landedPath);
 	const within = (path: string, dir: string) => path === dir || strictlyInside(path, dir);
 	const inWorktree = (target: string) => worktrees.some((other) => within(target, other));
 	const inRepository = (target: string) =>
@@ -333,7 +352,7 @@ export function claimPathRefusal(
 	const underScratch = (target: string) => scratch.some((dir) => within(target, dir));
 	const refused = ({ path, use }: { path: string; use: "word" | "program" | "scratch" }): boolean => {
 		const target = landedPath(resolve(root, path));
-		if (use === "scratch") return !underScratch(target) || within(target, root) || inWorktree(target);
+		if (use === "scratch") return within(target, root) || inWorktree(target) || (writerRoots && !underScratch(target));
 		if (inRepository(target)) return false;
 		if (use === "word") return true;
 		return underScratch(target) || inWorktree(target) || enclosingRepository(target) !== null;
@@ -360,7 +379,9 @@ export function claimPathRefusal(
 	const bad = paths.find(refused);
 	if (bad === undefined) return null;
 	return bad.use === "scratch"
-		? "memory note declares a scratch parameter that holds no path under a scratch root"
+		? writerRoots
+			? "memory note declares a scratch parameter that holds no path under a scratch root"
+			: "memory note declares a scratch parameter that holds a path of a repository checkout"
 		: `memory note binds a path outside its repository checkout: ${bad.path}`;
 }
 

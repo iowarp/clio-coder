@@ -208,6 +208,8 @@ export interface MemoryInterventionSettings {
 
 const CALL_DESCRIPTION_MAX_CHARS = 180;
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
+/** A firing that delivered an approved lesson matched it; the registration's own evidence names a failure recurrence. */
+const DURABLE_LESSON_EVIDENCE = "match:durable-lesson@task-memory";
 /**
  * Operator wording that asks for the same command to run again. A repeat the
  * operator requested in the current turn is the task, not a repeated mistake
@@ -637,6 +639,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	// The budget refused the last launch. The guardian's idle wake must not ask
 	// again before the next turn boundary, or a refused step would loop.
 	let lastLaunchSkipped = false;
+	/** The current after_tool evaluation delivered approved lessons, so its firing names that match (C-32). */
+	let lessonDelivered = false;
 	let consecutiveErrors = 0;
 	let lastPromptedBoundary: string | null = null;
 	let lastInjectedMessage: string | null = null;
@@ -801,7 +805,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		description: "maintain bounded task execution memory and selectively remind after repeated failures or compaction",
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
 		evidence: "count:failure-recurrence@task-memory",
-		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
 			observeSession(input);
 			if (input.hook === "turn_end" || input.hook === "turn_start") lastLaunchSkipped = false;
 			if (input.hook === "turn_end") notifyTurnBoundary("end");
@@ -812,8 +816,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					case "before_tool":
 						observeBeforeTool(input);
 						return NO_EFFECTS;
-					case "after_tool":
-						return observeAfterTool(input);
+					case "after_tool": {
+						lessonDelivered = false;
+						const effects = observeAfterTool(input);
+						if (lessonDelivered && effects.length > 0) context?.evidence?.(DURABLE_LESSON_EVIDENCE);
+						return effects;
+					}
 					case "turn_end": {
 						if (input.metadata?.stopReason === "aborted") {
 							cancelStoppedTurn();
@@ -2286,6 +2294,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			noTokens,
 			process.hrtime.bigint(),
 		);
+		lessonDelivered = true;
 		return [{ kind: "annotate_tool_result", message: offer.content, severity: "info" }];
 	}
 

@@ -672,6 +672,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		unregister();
 		await journal.close();
 	});
+	const steps: Parameters<ReturnType<typeof createTaskMemoryTelemetrySink>["record"]>[0][] = [];
 	let recorded!: () => void;
 	const completed = new Promise<void>((resolve) => {
 		recorded = resolve;
@@ -699,7 +700,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		client: {
 			getModelClient: () => ({
 				complete: async () => ({
-					text: "<operations>[]</operations>",
+					text: '<operations>[{"op":"save_lesson","content":"The earlier test command failed."}]</operations>',
 					usage: {
 						targetId: "history-target",
 						attributedModelId: "history-model",
@@ -728,6 +729,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		scopeKey: () => "current-session",
 		telemetry: {
 			record(step) {
+				steps.push(step);
 				sink.record(step);
 				recorded();
 			},
@@ -741,6 +743,8 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	const spend = readTaskMemorySpendSummary(stateDir);
 	assert.equal(spend.llmSteps, 1);
 	assert.equal(spend.totalTokens.unknownCount, 1);
+	// C-20: the step's bank delta is what the review wrote, not a constant zero.
+	assert.deepEqual(steps[0]?.bankDelta.knowledge, { added: 1, updated: 0, deleted: 0 });
 });
 
 test("an ACP host's guardian starts no history review before the first turn, at boot or on a reopen (ACP-6)", async (t) => {
@@ -778,4 +782,66 @@ test("an ACP host's guardian starts no history review before the first turn, at 
 	guardian.wake("turn-start");
 	await settle();
 	assert.ok(steps > 0, "the first turn arms the guardian");
+});
+
+test("a TUI guardian reviews no history until a turn has bound a session, and none after /new before the next one (C-20)", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	let steps = 0;
+	let bound = false;
+	let enabled = false;
+	const guardian = createMemoryGuardian({
+		enabled: () => enabled,
+		isForegroundActive: () => {
+			steps += 1;
+			return false;
+		},
+		live: { pendingWork: () => false, stepInFlight: () => false, runIdleStep: async () => "none" },
+		historyMining: () => true,
+		historySource: () => null,
+		client: {} as never,
+		settings: () => ({ maxTokens: 2_000, timeoutMs: 1_000 }),
+		workspaceRoot: () => process.cwd(),
+		getKeptLessons: () => [],
+		onHistoryLessons() {},
+		onStateChange() {},
+		scopeKey: () => "tui-session",
+		awaitFirstTurn: true,
+		sessionBound: () => bound,
+	});
+	t.after(() => guardian.dispose());
+	const settle = async () => {
+		t.mock.timers.runAll();
+		await new Promise((resolve) => setImmediate(resolve));
+	};
+	guardian.wake("ready");
+	assert.equal(guardian.state(), "off", "a disabled guardian says so before any turn");
+	enabled = true;
+	guardian.wake("settings");
+	assert.equal(guardian.state(), "idle", "enabled before any turn, it is idle again");
+	// The first prompt's turn_start fires before the TUI creates its session; a turn refused there binds none.
+	guardian.wake("turn-start");
+	await settle();
+	guardian.wake("turn-end");
+	await settle();
+	assert.equal(steps, 0);
+	bound = true;
+	guardian.wake("turn-end");
+	await settle();
+	assert.ok(steps > 0, "a turn that bound its session arms the guardian");
+	// /new parks the old session while it is still current, then creates the new one: nothing runs until a turn of
+	// the new session. ACP's session/close then session/new parks with the old session current too.
+	const before = steps;
+	guardian.reset();
+	guardian.wake("settings");
+	await settle();
+	assert.equal(steps, before);
+	bound = false;
+	guardian.reset();
+	bound = true;
+	guardian.wake("settings");
+	await settle();
+	assert.equal(steps, before);
+	guardian.wake("turn-end");
+	await settle();
+	assert.ok(steps > before, "the new session's first turn arms it");
 });
