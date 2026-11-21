@@ -5768,9 +5768,84 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			return false;
 		}
 	};
+	/**
+	 * A reopen of the session this process already hosts serves that session instead of refusing it as a second one:
+	 * resume answers its current state, and load replays its branch first. The hosted session keeps the client MCP
+	 * servers and ceiling it opened with, and nothing reopens under an active prompt.
+	 */
+	const reopenHosted = async (params: unknown, session: AcpServerSession, replayToClient: boolean) => {
+		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
+		assertNoAdditionalDirectories(request.additionalDirectories);
+		canonicalSessionCwd(request.cwd);
+		if (requestCeiling(request) !== undefined) {
+			throw new AcpRequestError(-32602, "an open session keeps the ceiling it was opened with", {
+				code: "invalid_params",
+			});
+		}
+		if (parseClientMcpServers(request.mcpServers, replayToClient).length > 0) {
+			throw new AcpRequestError(-32602, "an open session keeps the client MCP servers it was opened with", {
+				code: "invalid_params",
+			});
+		}
+		if (
+			options.session === undefined ||
+			options.readSessionEntries === undefined ||
+			options.buildReplayMessages === undefined ||
+			options.chat.resetForSession === undefined
+		) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		if (session.activePrompt !== null || options.chat.isStreaming() || contextCommandInFlight !== null) {
+			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
+		}
+		if (activeShell !== null) {
+			throw new AcpRequestError(-32602, "a shell line is running; wait for it or cancel it first", {
+				code: "shell_active",
+			});
+		}
+		let replay: PreparedAcpReplay | undefined;
+		if (replayToClient) {
+			try {
+				replay = prepareAcpReplay(
+					options.readSessionEntries(session.id),
+					options.session.leafId(session.id),
+					session.id,
+					workspaceMeta(session.id).target,
+				);
+			} catch (error) {
+				throw loadFailure(error);
+			}
+		}
+		const ceilingEcho = applySessionCeiling(session);
+		announceCommands(session.id);
+		if (replay !== undefined) {
+			for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
+			replayDispatchTerminals(replay.runs);
+		}
+		const reopened = {
+			...sessionConfig(session),
+			_meta: {
+				...ceilingEcho,
+				[ACP_SESSION_META_KEY]: sessionResultMeta(
+					session,
+					true,
+					replay !== undefined ? { turns: replay.turns, truncated: replay.truncated } : undefined,
+				),
+				...(await workspaceResultMeta()),
+				...trustResultMeta(session.cwd),
+			},
+		};
+		setImmediate(() => publishReadouts(session.id));
+		return reopened;
+	};
 	const restoreSession = async (params: unknown, replayToClient: boolean) => {
 		requireInitialized();
 		requireAuthenticated();
+		const hosted =
+			isRecord(params) && boundSessionId !== null && params.sessionId === boundSessionId
+				? sessions.get(boundSessionId)
+				: undefined;
+		if (hosted !== undefined && !closingSessions.has(hosted.id)) return reopenHosted(params, hosted, replayToClient);
 		return withSessionSlot(async () => {
 			const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
 			// Composed exactly like session/new; without one the operator's limits apply.

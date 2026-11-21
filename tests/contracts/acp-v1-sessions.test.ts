@@ -661,6 +661,58 @@ test("ACP replay parts one message's text blocks on a blank line, as the live st
 	}
 });
 
+test("ACP resume and load of the session the process already hosts serve it, and refuse a reopen under an active prompt", async () => {
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const peer = fixture([
+		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "status?" },
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "a1",
+			parentTurnId: "u1",
+			timestamp,
+			payload: { content: [{ type: "text", text: "All green." }], stopReason: "stop" },
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const reopen = { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] };
+		await peer.call("session/resume", reopen);
+		const replayed = () =>
+			peer.updates.filter(
+				(params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk",
+			).length;
+		// A second resume of the hosted session answers its state, with no replay and no chat reset.
+		const resumed = (await peer.call("session/resume", reopen)) as { modes: { currentModeId: string } };
+		strictEqual(resumed.modes.currentModeId, "default");
+		strictEqual(peer.resets, 1);
+		strictEqual(replayed(), 0);
+		// A load of it replays the branch before answering.
+		await peer.call("session/load", reopen);
+		strictEqual(replayed(), 1);
+		strictEqual(peer.resets, 1);
+		await rejects(
+			peer.call("session/resume", {
+				...reopen,
+				mcpServers: [{ name: "fixture", command: process.execPath, args: [], env: [] }],
+			}),
+			/client MCP servers it was opened with/u,
+		);
+		const prompt = peer.call("session/prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "Hi" }] });
+		await Promise.resolve();
+		await rejects(peer.call("session/load", reopen), (err: AcpRequestError) => err.detail.code === "prompt_active");
+		// Another session is still refused while this one is open.
+		await rejects(
+			peer.call("session/load", { ...reopen, sessionId: "session-2" }),
+			(err: AcpRequestError) => err.detail.code === "session_limit",
+		);
+		await peer.call("session/close", { sessionId: "session-1" });
+		await prompt;
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP replay parts two assistant messages of one turn on one blank line, as the live stream does", async () => {
 	// bt-session-res J9: live sent "files.\n\nDone:", replay sent "files." and "Done:" with nothing between them.
 	const timestamp = "2026-09-25T12:00:00.000Z";
