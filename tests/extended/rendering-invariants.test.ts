@@ -1,4 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS, type OutputStyle } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
@@ -13,10 +16,12 @@ import {
 	WORKER_TOOL_NAME_LIMIT,
 } from "../../src/domains/telemetry/worker-progress.js";
 import {
+	getCapabilities,
 	getKeybindings,
 	InstrumentedTuiAltScreen,
 	InstrumentedTuiMainScreen,
 	ScrollView,
+	setCapabilities,
 	setKeybindings,
 	stripTerminalSequences,
 	type Terminal,
@@ -1056,6 +1061,49 @@ describe("stream presentation timing", () => {
 });
 
 describe("Pi TUI compatibility", () => {
+	it("draws a tool's screenshot inline on a graphics terminal, from its image or its file, and adds nothing elsewhere", () => {
+		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-card-shot-"));
+		const shot = join(dir, "001-look-1280x800.png");
+		writeFileSync(shot, Buffer.from(png, "base64"));
+		const previous = getCapabilities();
+		const text = { type: "text", text: `browser look page p1\nscreenshots:\n  ${shot} (1280x800)` };
+		const withImage: ToolExecutionFinished = {
+			toolName: "browser",
+			toolCallId: "shot-inline",
+			args: { op: "look", screenshot: true },
+			result: { content: [text, { type: "image", mimeType: "image/png", data: png }], details: { shots: [shot] } },
+			isError: false,
+		};
+		// A text-only route sent the model no image; the card reads the file the result names.
+		const pathOnly: ToolExecutionFinished = {
+			...withImage,
+			toolCallId: "shot-path",
+			result: { content: [text], details: { shots: [shot] } },
+		};
+		const kittyRows = (call: ToolExecutionFinished, opts = {}) =>
+			renderToolExecution(call, 100, opts).filter((row) => row.includes("\u001b_G"));
+		try {
+			setCapabilities({ ...previous, images: "kitty" });
+			strictEqual(kittyRows(withImage).length, 1);
+			strictEqual(kittyRows(pathOnly).length, 1);
+			strictEqual(kittyRows(withImage, { unbounded: true }).length, 0, "an export writes no image escapes");
+			// The live panel draws a settled card through the preview: Standard shows the screenshot, Compact keeps one row.
+			const preview = (style: "compact" | "standard") =>
+				renderToolPreview(pathOnly, 100, transcriptDetail(style)).filter((row) => row.includes("\u001b_G")).length;
+			strictEqual(preview("standard"), 1);
+			strictEqual(preview("compact"), 0);
+			setCapabilities({ ...previous, images: "iterm2" });
+			ok(renderToolExecution(pathOnly, 100).some((row) => row.includes("\u001b]1337;File=")));
+			setCapabilities({ ...previous, images: null });
+			const plain = renderToolExecution(withImage, 100);
+			ok(!plain.some((row) => row.includes("\u001b_G") || row.includes("\u001b]1337;")));
+			match(stripTerminalSequences(plain.join("\n")), /screenshots:[\s\S]*\[image image\/png · 70B\]/u);
+		} finally {
+			setCapabilities(previous);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 	it("keeps context legend percentages on their row through frame resizing and refresh", () => {
 		let onEvent!: (event: { type: string }) => void;
 		let messageTokens = 1000;
