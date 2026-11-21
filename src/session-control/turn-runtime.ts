@@ -19,6 +19,7 @@ import { observationTracing, traceObservation } from "../domains/memory/observat
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
+import { missingOutputRefusal } from "../domains/session/output-obligations.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
 import { cachePhysics, journaledStructure, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
@@ -330,6 +331,8 @@ export interface TurnRuntimeDeps {
 	telemetry?: TelemetryContract | undefined;
 	scheduling?: SchedulingContract | undefined;
 	headless?: boolean | undefined;
+	/** The outputs the session's operator prompts named that do not exist now (M-4); finish(done) is refused once over them. */
+	missingOutputs?: (() => string[]) | undefined;
 	createAgent: typeof createEngineAgent;
 	/** Every main-turn request as sent, for the hosted cache keepalive (#423). */
 	noteMainRequest?: (
@@ -1175,6 +1178,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let requiredToolReminder: string | null = null;
 		// FX-40: bare finish calls admitted after their user turn's one refusal; each result records the missing reply.
 		const bareFinishCalls = new Set<string>();
+		// M-4: the first finish(done) of an operator prompt while an output its session named is absent does not run.
+		const missingOutputGate = (toolCall: { name: string; arguments: unknown }) => {
+			if (state.finishOutputRefused) return undefined;
+			const effective = effectiveToolCall(toolCall.name, toolCall.arguments);
+			if (effective.toolName !== ToolNames.Finish || effective.args?.state !== "done") return undefined;
+			const missing = deps.missingOutputs?.() ?? [];
+			if (missing.length === 0) return undefined;
+			state.finishOutputRefused = true;
+			return { block: true as const, reason: missingOutputRefusal(missing) };
+		};
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		// The user turn the run started under, so a call a steer moved to its own entry settles with it (bt-26 N2h).
@@ -1393,7 +1406,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					repliedThisTurn: state.turnReplied,
 				});
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
-				if (verdict !== "refuse") return undefined;
+				if (verdict !== "refuse") return missingOutputGate(toolCall);
 				state.finishReplyRefused = true;
 				const active = state.activeUserTurnId;
 				// Keyed like turnCalls (bt-26 N2h): a refusal after a steer settles under the user turn the run started under.

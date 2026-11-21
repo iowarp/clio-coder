@@ -49,6 +49,8 @@ export interface OpenAICompatToolCallScript {
 	id?: string;
 	/** Sent as the `function.arguments` string instead of `arguments`, so a test can send malformed JSON. */
 	rawArguments?: string;
+	/** Reply text streamed in the same response, before the call. */
+	text?: string;
 }
 
 export interface OpenAICompatFixtureOptions {
@@ -164,6 +166,16 @@ export async function startOpenAICompatFixture(
 					? options.toolCall
 					: null;
 		if (script !== null) {
+			if (script.text !== undefined)
+				res.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-clio-tool",
+						object: "chat.completion.chunk",
+						created: 1,
+						model: "mock-model",
+						choices: [{ index: 0, delta: { role: "assistant", content: script.text } }],
+					})}\n\n`,
+				);
 			res.write(
 				`data: ${JSON.stringify({
 					id: "chatcmpl-clio-tool",

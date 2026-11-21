@@ -25,6 +25,8 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
  * ended: it kept reading after every note and two refused rounds. `no_reply_text` is a main run that `finish` ended
  * with no reply text after its one refusal of a bare finish (CLI-P49): its completion is `partly_done` and there is no
  * answer.
+ * `missing_output` is a run whose session named an output (`output: <path>`, `--output`) that does not exist at the seal
+ * (M-4).
  */
 const CAUSE_ORDER = [
 	"interrupted",
@@ -53,6 +55,7 @@ const CAUSE_ORDER = [
 	"context_overflow",
 	"no_answer",
 	"no_reply_text",
+	"missing_output",
 	"exploration_stalled",
 	"output_limit",
 	"schema_mismatch",
@@ -355,7 +358,13 @@ export interface RunCompletionV2 {
 	state: "done" | "partly_done" | "not_done" | "unknown";
 	/** The open obligations that lowered a `done` claim. */
 	facts?: Array<
-		"unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task" | "observation_budget" | "refused_check"
+		| "unvalidated_mutation"
+		| "failed_check"
+		| "uncollected_run"
+		| "open_task"
+		| "observation_budget"
+		| "missing_output"
+		| "refused_check"
 	>;
 	limitations: Array<{ what: string; why: string }>;
 	unverified: string[];

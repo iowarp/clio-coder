@@ -39,6 +39,9 @@ Flags:
                             writes a v2 session frame, the event frames, then that envelope
   -o, --output-last-message <path>
                             with --output-format json|stream-json, write the final answer there on exit 0
+  --output <path>           repeatable: a file the run must write; the prompt gets an "output: <path>" line,
+                            finish(done) is refused once while it is absent, and a run that ends without it
+                            exits 1 with cause missing_output
   --output-schema <file.json>
                             the final answer must be one JSON object valid against this schema (root type
                             object, $ref only to #/$defs/, at most 64 KiB; else exit 2 schema_unsupported).

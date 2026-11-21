@@ -440,6 +440,7 @@ const WORK_CODES: ReadonlyArray<RunCauseCode> = [
 	"context_overflow",
 	"no_answer",
 	"no_reply_text",
+	"missing_output",
 	"output_limit",
 	"noop",
 	"limitation",
