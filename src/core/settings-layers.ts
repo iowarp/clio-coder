@@ -39,6 +39,7 @@ import {
 	type SettingsMutator,
 	SettingsValidationError,
 	settingsPath,
+	settingsReadPath,
 	updateSavedSettingsDocument,
 	validateSettings,
 } from "./config.js";
@@ -982,7 +983,7 @@ function validateLayerStack(
  */
 export function readLayeredSettings(cwd: string | null, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
 	const issues: SettingsLayerIssue[] = [];
-	const userFile = options.userPath ?? settingsPath();
+	const userFile = options.userPath ?? settingsReadPath();
 	const user = readRawLayer("user", userFile, issues);
 	const prepared = prepareProjectLayers(cwd, issues, user.blob);
 	const { settings, sources } = validateLayerStack(user, prepared, issues);

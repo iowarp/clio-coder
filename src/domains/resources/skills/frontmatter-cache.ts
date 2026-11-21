@@ -17,7 +17,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readClioVersion } from "../../../core/package-root.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import { clioCacheDir } from "../../../core/xdg.js";
+import { clioCacheDir, clioCachePath } from "../../../core/xdg.js";
 
 const CACHE_FILE = "skill-frontmatter.json";
 const CACHE_FORMAT = 1;
@@ -66,7 +66,8 @@ export async function withFrontmatterCacheReadOnly<T>(work: () => Promise<T>): P
 
 function cacheFilePath(): string | null {
 	try {
-		return path.join(clioCacheDir(), CACHE_FILE);
+		// Resolving the creating root would make the cache root and its marker in a fresh home.
+		return path.join(readOnlyDepth > 0 ? clioCachePath() : clioCacheDir(), CACHE_FILE);
 	} catch {
 		// No usable cache root (unwritable XDG dir): parsing uncached is still correct.
 		return null;
