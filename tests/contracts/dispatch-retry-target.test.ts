@@ -72,6 +72,8 @@ async function retryFleet(
 	vision: ReadonlySet<string>,
 	options: {
 		failure?: string;
+		/** A typed outcome code each failing worker reports before it exits. */
+		failureCode?: string;
 		windows?: Readonly<Record<string, number>>;
 		maxRetries?: number;
 		report?: object;
@@ -147,6 +149,8 @@ async function retryFleet(
 				abort: () => {},
 				send: () => true,
 				events: (async function* () {
+					if (result.exitCode !== 0 && options.failureCode !== undefined)
+						yield { type: "clio_coder_run_outcome", payload: { outcomeCode: options.failureCode } };
 					if (result.exitCode === 0)
 						yield {
 							type: "message_end",
@@ -431,6 +435,25 @@ describe("context overflow retry", () => {
 			strictEqual(
 				assignment?.outcomeDetail,
 				"context overflow not retried because no eligible route has a context window larger than 8192 on default/gpt-4o",
+			);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("retries a run that exhausted its context once onto a larger window (M8)", async () => {
+		const fleet = await retryFleet(["default", "small", "big"], new Set(["default", "small"]), new Set(), {
+			failure: "worker_context_exhausted: the run's context passed its usable window",
+			failureCode: "worker_context_exhausted",
+			windows: { default: 8192, small: 4096, big: 32768 },
+		});
+		try {
+			const assignment = await settle(fleet, REQUEST);
+			deepStrictEqual(fleet.spawned, ["default", "big"]);
+			strictEqual(assignment?.status, "succeeded");
+			deepStrictEqual(
+				assignment?.attempts.map((attempt) => attempt.retryReason),
+				[null, "context-overflow: 8192 -> 32768 on big/gpt-4o"],
 			);
 		} finally {
 			await fleet.bundle.extension.stop?.();
