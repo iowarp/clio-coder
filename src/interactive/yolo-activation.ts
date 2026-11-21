@@ -1,4 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
+import { sandboxAvailability } from "../core/sandbox/availability.js";
+import { yoloContainmentNotes } from "../core/sandbox/main-session.js";
 import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import type { AskUserHandler, AskUserQuestion } from "../tools/ask-user.js";
 
@@ -22,14 +24,18 @@ export const YOLO_DECLINE_LABEL = "Stay at default";
 export const YOLO_UNCONFINED_ACCEPT_LABEL = "Run yolo unconfined";
 export const YOLO_UNCONFINED_DECLINE_LABEL = "Keep yolo contained";
 
-/** The acceptance card, asked through the existing ask_user card. */
-function yoloAcceptanceQuestion(): AskUserQuestion {
+/** The acceptance card, asked through the existing ask_user card; its sandbox and judge lines say what this host runs. */
+function yoloAcceptanceQuestion(settings: ClioSettings | undefined): AskUserQuestion {
+	const safety = settings?.safety;
+	const judgeOn = safety?.judge.enabled !== false;
+	const notes = yoloContainmentNotes(safety?.sandbox ?? "auto", sandboxAvailability(), judgeOn);
+	const risky = "risky calls (leaving the sandbox, writes outside the workspace, destructive git, pushes and publishes)";
 	return {
 		header: "Yolo",
 		question: [
 			"Turn on yolo? It runs long jobs without approval stops:",
 			"- No approval cards: a call that would need your approval is refused back to Clio instead. Clio still asks you questions (interviews, plan closes, choices only you can make); one nobody answers in time takes its recommended option unless that option leaves the workspace.",
-			"- Commands stay in the OS sandbox: the workspace and scratch roots are writable, credentials and secret files are hidden. Risky calls (leaving the sandbox, writes outside the workspace, destructive git, pushes and publishes) go to the safety judge, which allows only what your request asked for.",
+			`- ${notes.backend !== null ? `Commands stay in the ${notes.backend} OS sandbox: the workspace and scratch roots are writable, credentials and secret files are hidden.` : `Commands run without an OS sandbox (${notes.why}), as default runs them; credentials and secret files are not hidden from them.`} ${judgeOn ? `The safety judge reviews ${risky} and allows only what your request asked for.` : `The safety judge is off (safety.judge.enabled), so ${risky} are refused.`}`,
 			"- The floor still blocks deleting /, your home directory or a system tree, mkfs, writes to a block device, fork bombs, and writes into Clio's own state. Rules in an approved .clio-coder/safety.yaml hold.",
 			"- Workspace snapshots and the telemetry journals stay on, so /rewind can restore files. Yolo is refused as root outside a container.",
 			"You accept once; safety.yoloAccepted in your user settings records it.",
@@ -96,7 +102,7 @@ export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 			// The operator just asked for yolo, so the card may replace /settings;
 			// at boot it waits for a free screen instead of closing anything.
 			if (takeScreen) deps.prepareScreen();
-			const result = await deps.ask([yoloAcceptanceQuestion()]);
+			const result = await deps.ask([yoloAcceptanceQuestion(deps.getSettings())]);
 			if (result.unavailable === true) {
 				deps.notify(
 					"info",
