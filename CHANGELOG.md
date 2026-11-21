@@ -20,45 +20,49 @@ CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-
 
 ### Breaking changes
 
+0.8.5 has one spelling for each command and flag. The earlier spellings below are gone, with no aliases: each is an unknown command or flag and exits 2.
+
+**Headless `run`**
+
 - `clio-coder run` reads stdin only when `-` is passed. Use `run -` to take the task from stdin, or `run "<task>" -` to append stdin after the task as a `<stdin>` block. A pipe without `-` is ignored, and `run` with neither a task nor `-` exits 2 `empty_task`.
-- `clio-coder run --json` and `--json-events` are removed and exit 2. Use `--output-format json` for one result document or `--output-format stream-json` for the event stream that ends with the `run_end` envelope.
-- `clio-coder playbook validate` exits 2 for an invalid playbook, in text and `--json`, matching `fleet run`. Check for 2 where a script checked for 1.
-- `clio-coder fleet verify` prints a text verdict by default. Pass `--json` for the document.
-- Five commands and two `/loop` verbs are removed and exit 2 or are refused. [Removed](#removed) lists each with its replacement.
-- `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh`, `report sweep` and `telemetry share sweep`.
-- Reviewing earlier sessions for memory is off by default. Set `context.memory.surfaces.history: on` to turn it on.
+- `run --json` and `run --json-events` are removed. Use `--output-format json` for one result document or `--output-format stream-json` for the event stream that ends with the `run_end` envelope.
+- `run --session <id>` is removed. Use `run --resume <id|prefix|name>`.
 - The printed answer of a headless run is every reply of the final user turn, joined, without the commentary written beside tool calls. Text stdout, `-o` and `result.text` all carry that one answer.
 
-### Removed
+**Removed commands and flags**
 
-- `clio-coder context-init`: use `clio-coder context init`.
-- `clio-coder context-index`: use `clio-coder context index`.
-- `clio-coder context-clear`: use `clio-coder context reset`.
-- `clio-coder fleet inspect`: use `clio-coder fleet status --json [--all]` or `clio-coder telemetry inspect --run <runId> --json`.
-- `clio-coder evidence build`: every run is assessed when it settles, so use `clio-coder evidence inspect <runId>`.
-- `clio-coder run --json` and `--json-events`: use `--output-format json` or `--output-format stream-json`.
-- `/loop list` and `/loop cancel`: use `/loop` and `/loop stop <id> --now`.
+| Removed | Use |
+| --- | --- |
+| `clio-coder --acp` | `clio-coder acp` |
+| `clio-coder ext` | `clio-coder extensions` |
+| `clio-coder export`, `clio-coder import` | `clio-coder share export`, `clio-coder share import` |
+| `clio-coder context-init`, `context-index`, `context-clear` | `clio-coder context init`, `context index`, `context reset` |
+| `clio-coder components`, `evolve`, `flywheel` | `clio-coder dev components`, `dev evolve`, `dev flywheel` |
+| `fleet run --json` | `fleet run --output-format stream-json` |
+| `fleet drain`, `fleet resume` | `fleet admission drain`, `fleet admission open` |
+| `fleet inspect` | `fleet status --json [--all]` or `telemetry inspect --run <runId> --json` |
+| `evidence build` | `evidence inspect <runId>`; every run is assessed when it settles |
+| `targets add` | `clio-coder configure` |
+| `targets fleet`, `targets workers` | `targets profile list` |
+| `targets worker <args>` | `targets profile <args>` |
+| `reset --force`, `uninstall --force` | `reset --yes`, `uninstall --yes` |
+| `tools status --reset-profile` | `tools reset-profile <id>` |
+| `verifiers --cwd` | `verifiers --check-cwd` |
+| `semantic inbox-add`, `inbox-list`, `inbox-remove`, `inbox-preview` | `semantic inbox add`, `list`, `remove`, `preview` |
+| `/loop list`, `/loop cancel` | `/loop`, `/loop stop <id> --now` |
 
-A removed command exits 2 with a pointer to its replacement, even with `--help`.
+**Changed behaviour**
 
-### Deprecated
+- `clio-coder playbook validate` exits 2 for an invalid playbook, in text and `--json`, matching `fleet run`. Check for 2 where a script checked for 1.
+- `clio-coder fleet verify` prints a text verdict by default. Pass `--json` for the document.
+- `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh`, `report sweep` and `telemetry share sweep`.
+- Reviewing earlier sessions for memory is off by default. Set `context.memory.surfaces.history: on` to turn it on.
 
-Each spelling below still runs, prints one `clio-coder: deprecated:` line on stderr, and is removed in 0.9.0.
+### Upgrading
 
-- `run --session <id>`: use `run --resume <id>`. Removed in 0.9.0.
-- `--acp`: use `acp`. Removed in 0.9.0.
-- `ext`: use `extensions`. Removed in 0.9.0.
-- `export` and `import`: use `share export` and `share import`. Removed in 0.9.0.
-- `fleet run --json`: use `fleet run --output-format stream-json`. Removed in 0.9.0.
-- `fleet drain` and `fleet resume`: use `fleet admission drain` and `fleet admission open`. Removed in 0.9.0.
-- `targets add`: use `configure`. Removed in 0.9.0.
-- `targets fleet` and `targets workers`: use `targets profile list`. Removed in 0.9.0.
-- `targets worker <args>`: use `targets profile <args>`. Removed in 0.9.0.
-- `reset --force` and `uninstall --force`: use `--yes`. Removed in 0.9.0.
-- `tools status --reset-profile`: use `tools reset-profile <id>`. Removed in 0.9.0.
-- `verifiers --cwd`: use `verifiers --check-cwd`. Removed in 0.9.0.
-- `semantic inbox-add`, `inbox-list`, `inbox-remove` and `inbox-preview`: use `semantic inbox add|list|remove|preview`. Removed in 0.9.0.
-- `components`, `evolve` and `flywheel`: use `dev components`, `dev evolve` and `dev flywheel`. Removed in 0.9.0.
+- Upgrade with `clio-coder upgrade` or by running the installer again. Both migrate your settings to the 0.8.5 names automatically, so there is nothing to edit by hand.
+- Update scripts and CI jobs that call `clio-coder run`: add `-` where a task is piped in, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, and read the result from the `run_end` envelope.
+- Replace any spelling in the table above in scripts, aliases and editor configuration.
 
 ### Added
 

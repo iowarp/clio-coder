@@ -30,7 +30,7 @@ No root and no account. The first launch connects a model.
 <p align="center">
   <a href="#why-clio-coder">Why</a> ·
   <a href="#built-for-science-and-hpc">Science and HPC</a> ·
-  <a href="#new-in-084">New in 0.8.4</a> ·
+  <a href="#new-in-085">New in 0.8.5</a> ·
   <a href="#get-started"><strong>Get started</strong></a> ·
   <a href="#what-you-can-do">Tour</a> ·
   <a href="#models">Models</a> ·
@@ -47,7 +47,8 @@ No root and no account. The first launch connects a model.
   Copilot subscriptions you already pay for. `/model` switches the
   conversation, and your project rules, tools and sessions stay the same.
 - **One agent, four ways in.** `clio-coder` in the terminal,
-  `clio-coder run` for scripts and CI with exit codes and JSONL,
+  `clio-coder run` for scripts and CI with typed exit codes and one
+  versioned JSON result,
   `clio-coder acp` for editors that speak the Agent Client Protocol, and
   `clio-coder gui` for the desktop alpha. All four share the same
   connections, project rules and tool policy.
@@ -114,42 +115,45 @@ without root, older glibc, `module load`, proxies and
 [shared login nodes](docs/guide/hpc-clusters.md#shared-login-nodes). Then see
 [Slurm](docs/guide/slurm.md) and the [store](docs/guide/store.md).
 
-## New in 0.8.4
+## New in 0.8.5
 
-- **Headless pipelines that ask the author.** `clio-coder run --answers answers.yaml`
-  answers an extension's interview steps and `operator_only` questions from a
-  file. A question the file does not cover ends the run with exit 5 instead of
-  being guessed.
-- **One prompt template for every model tier.** A template can cap a turn's
-  tool calls and output (`budget`), run one step per turn (`turnPolicy`), limit
-  that policy to small or uncached routes (`when`), and carry a body per tier
-  (`variants`). `models.<id>.tier` pins a model's tier.
-- **Extensions shape what the model sees.** An extension can attach up to four
-  of its tools to every request, pin a context block of up to 8 KB, return a
-  short summary with a `detail_ref` the model pages through, and declare tools
-  `readOnly` or `idempotent` for the loop guard.
-- **Leaner context on small windows.** On a window under about 52K tokens,
-  working-set eviction now acts at the compaction trigger, before any paid
-  summary. On routes without prompt caching, a tool result that a later
-  identical call replaced is evicted to a recallable marker. `clio-coder context working-set --verify <session>`
-  checks each request against the record taken when it was sent.
-- **See where the tokens go.** `clio-coder telemetry tokens --session <id> --by-source`
-  splits each turn's input across the system prompt, skills, tool schemas,
-  tool results and history. `clio-coder models` lists each route's thinking
-  levels.
-- **Compare models on one project.** `clio-coder campaign run` runs a seeded
-  project across a roster of models and reports, per entry, how the run ended,
-  the gates it reached, refusals, tokens and wall time.
-- **Steadier judged checks.** Numerical comparisons and reproductions can
-  repeat up to five times under a seed and report the spread, and a run's
-  sealed result keeps each judged check's report.
-- **More for editors and workers.** ACP clients can switch the model and,
-  when branching is on, fork a session. A `count` tool gives workers without
-  a shell a file's words, lines and bytes.
+- **A command line scripts can depend on.** `clio-coder run --output-format json`
+  prints one versioned result with the answer, exit code, outcome, typed
+  causes, checks and usage. `stream-json` streams the events and ends with the
+  same result, and `clio-coder schema run-result` prints its JSON Schema.
+- **Runs that say how they ended.** The agent declares `done`, `partly_done`
+  or `not_done` with its limitations. CLIO Coder records that claim beside its
+  own assessment and lowers a `done` that left unvalidated changes or a
+  failing check. `run --exit-code` turns anything short of done into exit 1.
+- **Limits and a preview for every run.** `--max-requests`, `--max-tool-calls`,
+  `--max-cost-usd`, `--timeout 15m`, `--sandbox required` and
+  `--require-priced` bound one run. `--dry-run` prints the route, tools,
+  sandbox and limits without calling a model.
+- **Structured answers.** `run --output-schema schema.json` makes the answer
+  one JSON object that CLIO Coder validates before the run exits 0.
+- **Sessions, fleets and settings from the shell.**
+  `clio-coder session history|show|export|fork|compact`, `run --resume` with
+  `--fork`, `fleet run --detach` with `fleet wait`, and
+  `clio-coder config get|set|unset`.
+- **Workers routed by job and graded by role.** A dispatch goes to the agent
+  whose job it is, a built-in `reviewer` judges diffs, and each role owes a
+  kind of evidence. A worker that returns without it is retried once on
+  another model.
+- **Memory that has to be demonstrated.** A note is a claim tied to a command
+  that succeeded or a file that was read. Stored lessons are checked against
+  the repository before they reach the model, and automatic memory spending is
+  capped at a share of the session.
+- **One more agent to delegate to.** The Antigravity CLI joins Claude Code,
+  Codex, OpenCode and Pi, with model and thinking selection, live steering and
+  questions that reach you.
+- **Zarr and ADIOS2.** The `data` tool reads Zarr v2 and v3 stores and
+  inspects ADIOS2 BP4 and BP5 directories.
 
-0.8.4 writes session format 7: once 0.8.4 resumes a session, 0.8.3 refuses
-it. `CLIO_CODER_LEGACY_MASK` is gone. Read the
-[Upgrade notes](CHANGELOG.md#upgrade-notes) before upgrading.
+0.8.5 has one spelling for each command and flag, and earlier spellings are
+gone: `run` reads stdin only when you pass `-`, `--output-format` replaces
+`--json`, and `--resume` replaces `--session`. The installer and
+`clio-coder upgrade` migrate your settings. Read the
+[breaking changes](CHANGELOG.md#breaking-changes) before upgrading.
 
 > **Pre-1.0.** The terminal is the primary interface, and the desktop app is
 > in alpha. Commands and settings can change between minor releases, so read
@@ -503,12 +507,17 @@ text.
 | --- | --- |
 | `--read-only` | Refuse writes and edits, run shell commands only in the read-only OS sandbox (refused where none is available), and delegate only to runtimes that enforce read-only. |
 | `--output-format json\|stream-json` | `stream-json` streams JSONL on stdout: a `session` header first, one `run_end` envelope last, carrying `exitCode`, `outcome` and `result.text`; `json` writes the envelope alone. Read the result from `run_end`. |
-| `--timeout <seconds>` | Wall-clock limit for the run; exit 124 on expiry. |
+| `--timeout <duration>` | Wall-clock limit for the run, such as `90s` or `15m`; exit 124 on expiry. |
 | `--max-cost-usd <N>` | Stop when priced spend reaches the cap; exit 4. |
+| `--max-requests <N>`, `--max-tool-calls <N>` | Cap the main agent's model requests and tool calls; exit 4. |
+| `--dry-run` | Print the route, tools, sandbox and limits, then exit 0 without calling a model. |
 | `--target <id>`, `--model <id>` | One-run connection and model. |
 | `--cwd <dir>` | Run as if started in `<dir>`. |
-| `--session <id>`, `--continue` | Append the turn to an existing session. |
-| `--verify "<cmd>"` | An acceptance check for this run, repeatable. |
+| `--resume <id\|prefix\|name>`, `--continue` | Append the turn to an existing session. `--fork` branches a new session from it. |
+| `--verify "<cmd>"` | An acceptance check for this run, repeatable. `--fail-on-verify` exits 1 when one fails. |
+| `--exit-code` | Exit 1 when the run was assessed `partly_done` or `not_done`. |
+| `--output-schema <file.json>` | Require the answer to be one JSON object valid against the schema; exit 1 on a mismatch. |
+| `-` | Read the task from stdin. Stdin is ignored without it. |
 | `--answers <file.yaml>` | Answer the author-only questions (extension interviews and `operator_only` questions) from this file. |
 
 | Exit code | Meaning |
@@ -517,7 +526,7 @@ text.
 | 1 | The run failed: an error, a refused command that left nothing done, a failed verifier verdict, or a worker result that was not merged. |
 | 2 | Usage or configuration: an unknown flag, target or model, no usable chat route, or a task piped to bare `clio-coder`. |
 | 3 | A dispatched worker was ended by permission refusals, or a yolo run was ended by repeated safety-judge blocks. |
-| 4 | The priced spend ceiling, `--max-cost-usd` or a yolo run's autonomous budget stopped the run. |
+| 4 | The priced spend ceiling, `--max-cost-usd`, `--max-requests`, `--max-tool-calls` or a yolo run's autonomous budget stopped the run. |
 | 5 | `--answers` met an author question the file did not script. |
 | 124 | `--timeout` expired. |
 | 129, 130, 143 | SIGHUP, SIGINT or SIGTERM ended the run. |
