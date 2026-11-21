@@ -634,6 +634,12 @@ export interface MemorySurfaceSettings {
 	 * as a policy choice: 818 lane model calls, a product read by restoration 11 times.
 	 */
 	bank: "rules" | "model";
+	/**
+	 * Mining earlier sessions of the repository for new lessons while the session is idle. Off by default as a policy
+	 * choice: archive filings were 36 grounded against 184 ungrounded, from sessions reviewing each other.
+	 * `clio-coder memory consolidate` is the explicit, model-free pass over the store either way.
+	 */
+	history: "off" | "on";
 }
 
 export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
@@ -911,7 +917,7 @@ export const DEFAULT_SETTINGS = {
 		memory: {
 			enabled: true,
 			sideShare: 0.15,
-			surfaces: { observe: "off", delivery: "decision", correct: "rules", bank: "rules" },
+			surfaces: { observe: "off", delivery: "decision", correct: "rules", bank: "rules", history: "off" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1147,6 +1153,7 @@ context:
       delivery: decision
       correct: rules
       bank: rules
+      history: off
     target: null
     model: null
     thinkingLevel: off

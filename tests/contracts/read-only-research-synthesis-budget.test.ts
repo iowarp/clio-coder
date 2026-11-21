@@ -2,8 +2,14 @@ import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { cloneRunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import {
+	cloneRunToolBudgetEnvelope,
+	formatBudgetPolicy,
+	resolveToolBudgetEnvelope,
+} from "../../src/domains/dispatch/budget-envelope.js";
 
+import { readSettledRun } from "../../src/domains/telemetry/run-record.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -61,6 +67,12 @@ test("native research locks after call 36 while keeping the hard cap and truthfu
 	const lowerCap = resolveToolBudgetEnvelope({ ...baseline, hardCap: 30 });
 	equal(lowerCap.effective.toolCalls, 30);
 	equal(lowerCap.effective.hardCap, 30);
+	// C-27: the authored 18/4 is a default, not the exact bound; the record names the 36 the run enforces.
+	equal(formatBudgetPolicy(envelope), "scout recipe default 18/4; read-only research allowance 36/4, synthesis=on");
+	equal(
+		formatBudgetPolicy(resolveToolBudgetEnvelope({ ...baseline, recipeId: "context-bootstrap" })),
+		"context-bootstrap exact 18/4, synthesis=on",
+	);
 });
 
 test("coding and external workers retain advisory per-tool behavior", () => {
@@ -90,6 +102,7 @@ for (const agentId of ["scout", "provenance"] as const) {
 					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 					abort: () => {},
 					events: (async function* () {
+						yield { type: "clio_coder_result_contract_repair", payload: { started: 0 } };
 						for (let i = 0; i < 36; i++) {
 							yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
 						}
@@ -124,6 +137,14 @@ for (const agentId of ["scout", "provenance"] as const) {
 			equal(receipt.budget?.enforcement.perTool, "enforced");
 			const stored = bundle.contract.getRun(run.runId);
 			ok(stored);
+			// C-28: the worker's own report of no repair round settles as a measured 0, not unknown.
+			const settled = readSettledRun(clioStateDir(), run.runId)?.settled;
+			equal(settled?.repairRounds.display, "0");
+			deepStrictEqual((settled?.repairRounds.fact as { coverage?: unknown } | undefined)?.coverage, {
+				estimated: 0,
+				measured: 1,
+				unknown: 0,
+			});
 		} finally {
 			await bundle.extension.stop?.();
 		}

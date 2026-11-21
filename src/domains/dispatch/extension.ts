@@ -8865,6 +8865,8 @@ export function createDispatchBundle(
 		let externalTelemetry: RunResultDraft["externalTelemetry"];
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
+		// The native worker's own repair-round count; it stays unreported for every other runtime (C-28).
+		let reportedRepairRounds: number | undefined;
 		const trustedOutcomeDetails = new Map<RunOutcomeCode, string>();
 		// What the run's context carries: the inherited set, grown by the worker's
 		// own restricted reads as it reports them. Only a mediated runtime's
@@ -9025,6 +9027,11 @@ export function createDispatchBundle(
 			if (event.type === "clio_coder_flow_restrictions" && acceptsOutcomeCodeEvents) {
 				const reported = (event.payload as { set?: unknown } | undefined)?.set;
 				if (isFlowRestrictionSet(reported)) trustedFlow = mergeFlowRestrictions(trustedFlow, reported);
+			}
+			if (event.type === "clio_coder_result_contract_repair" && lifecycle.runtimeKind === "http") {
+				const started = (event.payload as { started?: unknown } | undefined)?.started;
+				if (typeof started === "number" && Number.isSafeInteger(started) && started >= 0)
+					reportedRepairRounds = Math.max(reportedRepairRounds ?? 0, started);
 			}
 			if (
 				event.type === "clio_coder_run_outcome" &&
@@ -10723,6 +10730,7 @@ export function createDispatchBundle(
 						processExitCode: result.exitCode,
 						frameType: result.channelFailure ?? null,
 						usage: finalCallUsage?.facts,
+						...(reportedRepairRounds !== undefined ? { repairRounds: reportedRepairRounds } : {}),
 					},
 				);
 				// Host-verified reproduce and numeric-compare verdicts become claims in the operator's project, keyed by the
