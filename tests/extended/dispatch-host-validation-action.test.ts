@@ -107,6 +107,53 @@ describe("dispatch host validation action", () => {
 		}
 	});
 
+	it("counts an expected output a merged task worktree changed as written once the worktree is gone (M-17)", () => {
+		const envelope = fixtureEnvelope("run-merged");
+		const draft = fixtureReceiptDraft(envelope);
+		const gone = join(tmpdir(), "clio-coder-merged-worktree-removed");
+		draft.reproducibility = {
+			cwd: gone,
+			safetyPolicy: {
+				version: 1,
+				rulePackHash: null,
+				rulePackVersion: null,
+				projectPolicyPath: null,
+				projectPolicyHash: null,
+				projectPolicyValid: null,
+			},
+		};
+		draft.worktree = {
+			path: gone,
+			branch: "clio-coder/task/run-merged",
+			diffHash: "hash",
+			changedPaths: ["a.js"],
+			commit: "96abc3e",
+			apply: "merge",
+			applied: true,
+		};
+		draft.intent = {
+			version: 2,
+			readRoots: [],
+			writeRoots: [],
+			relevantPaths: [],
+			pathProvenance: [],
+			expectedOutputs: ["a.js", "b.js"],
+			verification: [],
+		};
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
+		const run = {
+			receipt,
+			integrity: { state: "verified" as const, by: "producer" as const },
+			summary: { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId },
+		};
+		match(formatDispatchOutput("parallel", [run], 16_384), /^expected_outputs run-merged: not written \["b\.js"\];/m);
+	});
+
 	it("leads an ungrounded worker return with the next host check sequence", () => {
 		const run = ungroundedRun();
 		const output = formatDispatchOutput("parallel", [run], 16_384);
