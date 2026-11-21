@@ -2,89 +2,127 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readSettings, validateSettingsFile } from "../../src/core/config.js";
+import { readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
-import { repairSettingsCoercions } from "../../src/core/settings-repair.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
+import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-// Two validated keys that nothing read: a delegated agent's permission ask is
-// decided at once, and entry labels were never displayed. A user file still
-// naming one loads, the key is ignored, and validation lists it as retired so
-// doctor can name it; it must never block loading or an upgrade. The v2
-// spelling of the compaction turn mask retires the same way.
-test("user settings load with retired v2 keys and list them as retired", async (t) => {
-	const home = await isolateClioEnv("clio-retired-keys-");
+// The reader used to ignore retired keys and read old spellings. `clio-coder upgrade`
+// (and boot, after a background update) now rewrites the user file once, keeps the
+// previous one beside it and reports every change, so nothing is tolerated at read time.
+test("the retired-settings migration rewrites a home's settings, reports each change and keeps a backup", async (t) => {
+	const home = await isolateClioEnv("clio-retired-settings-");
 	t.after(() => home.restore());
 	const file = join(home.dir, "config", "settings.yaml");
 	mkdirSync(join(home.dir, "config"), { recursive: true });
-	const cases = [
-		{
-			yaml:
-				"version: 2\nintegrations:\n  externalAgents:\n    entries:\n      - { id: peer, command: peer, permissionTimeoutMs: 5000 }\n",
-			path: "integrations.externalAgents.entries[0].permissionTimeoutMs",
-		},
-		{
-			yaml:
-				"version: 2\nintegrations:\n  externalAgents:\n    entries:\n      - { id: peer, command: peer, labels: { team: a } }\n",
-			path: "integrations.externalAgents.entries[0].labels",
-		},
-		{
-			yaml: "version: 2\ncontext:\n  compaction:\n    excludeLastTurns: 3\n",
-			path: "context.compaction.excludeLastTurns",
-		},
-	];
-	for (const { yaml, path } of cases) {
-		writeFileSync(file, yaml);
-		readSettings();
-		const validation = validateSettingsFile();
-		strictEqual(validation.issues.length, 0, `${path}: ${JSON.stringify(validation.issues)}`);
-		const hits = validation.retired.filter((entry) => entry.path === path);
-		strictEqual(hits.length, 1, `${path}: ${JSON.stringify(validation.retired)}`);
-		ok((hits[0]?.reason ?? "").length > 0);
-	}
-});
+	const before = [
+		"# Keep this comment",
+		"version: 2",
+		"turnControl:",
+		"  workflows: [orientation, direction, ledger-facts, detached-collection]",
+		"  orientation:",
+		"    maxSplit: 2",
+		"targets:",
+		'  - { id: local, runtime: llamacpp, url: "http://127.0.0.1:1" }',
+		"fleet:",
+		"  decisionProfiles: {}",
+		"  speculativeDispatch: true",
+		"  nodes:",
+		"    - { id: box, host: box, clioEntry: /opt/clio }",
+		"systemOne:",
+		"  use: [fast]",
+		"  engines:",
+		"    fast: { kind: llm, target: local, mode: logprobs }",
+		"  sites: {}",
+		"  cuts: {}",
+		"  record: true",
+		"context:",
+		"  compaction:",
+		"    excludeLastTurns: 3",
+		"telemetry:",
+		"  research:",
+		"    systemOneDataset: true",
+		"interface:",
+		"  exitSummary: full # kept inline comment",
+		"  outputDetail: verbose",
+		"  panes:",
+		"    enabled: true",
+		"integrations:",
+		"  externalAgents:",
+		"    entries:",
+		"      - id: peer",
+		"        command: peer",
+		"        permissionTimeoutMs: 5000",
+		"        labels: { team: a }",
+		"chat:",
+		"  model: kept",
+		"",
+	].join("\n");
+	writeFileSync(file, before);
+	ok(validateSettingsFile().issues.length > 0, "the reader no longer tolerates the old file");
 
-// `init` wrote `systemOne: { engines: {}, sites: {}, cuts: {} }`, so every existing home names a key since retired.
-test("an old engine mode is a tombstone: the engine still loads and every value reads as batch", async (t) => {
-	const home = await isolateClioEnv("clio-retired-engine-mode-");
-	t.after(() => home.restore());
-	const file = join(home.dir, "config", "settings.yaml");
-	mkdirSync(join(home.dir, "config"), { recursive: true });
-	for (const mode of ["auto", "logprobs", "answer", "batch"]) {
-		writeFileSync(
-			file,
-			`version: 2\ntargets:\n  - { id: local, runtime: llamacpp, url: "http://127.0.0.1:1" }\nsystemOne:\n  use: [fast, local]\n  engines:\n    fast: { kind: llm, target: local, mode: ${mode} }\n`,
+	const report = await retiredSettings.up(home.dir);
+
+	strictEqual(readFileSync(`${file}.retired.bak`, "utf8"), before);
+	const after = readFileSync(file, "utf8");
+	ok(after.startsWith("# Keep this comment\n"), after);
+	ok(after.includes("# kept inline comment"), after);
+	deepStrictEqual(validateSettingsFile().issues, []);
+	const settings = readSettings();
+	deepStrictEqual(settings.turnControl.workflows, ["detached-collection"]);
+	strictEqual(settings.interface.exitSummary, "standard");
+	strictEqual(settings.interface.outputDetail, "detailed");
+	strictEqual(settings.fleet.nodes[0]?.clioCoderEntry, "/opt/clio");
+	strictEqual(settings.integrations.externalAgents.entries[0]?.command, "peer");
+	ok(after.includes("chat:\n  model: kept\n"), after);
+	ok(!("mode" in (settings.systemOne.engines.fast ?? {})));
+	for (const gone of ["decisionProfiles", "speculativeDispatch", "sites:", "cuts:", "record:", "excludeLastTurns"])
+		ok(!after.includes(gone), `${gone} remains:\n${after}`);
+	// A section the migration emptied goes with its last key.
+	ok(!after.includes("telemetry:") && !after.includes("panes:") && !after.includes("compaction:"), after);
+
+	ok(report, "the migration reports");
+	deepStrictEqual(report.attention, []);
+	ok(report.changed[0]?.startsWith("What changed for you in settings.yaml"), report.changed[0]);
+	for (const line of [
+		"Removed turnControl.orientation:",
+		"Removed orientation from turnControl.workflows",
+		"Removed fleet.decisionProfiles:",
+		"Removed systemOne.engines.fast.mode:",
+		"Removed integrations.externalAgents.entries[0].labels:",
+		"interface.exitSummary: full → standard",
+		"interface.outputDetail: verbose → detailed",
+		"Renamed fleet.nodes[0].clioEntry to fleet.nodes[0].clioCoderEntry",
+	])
+		ok(
+			report.changed.some((entry) => entry.startsWith(line)),
+			`${line} missing from:\n${report.changed.join("\n")}`,
 		);
-		const validation = validateSettingsFile();
-		ok(validation.retired.some((entry) => entry.path === "systemOne.engines.fast.mode"));
-		const { systemOne } = readSettings();
-		ok(!("mode" in (systemOne.engines.fast ?? {})));
-		strictEqual(String(systemOne.use), "fast,local");
-	}
+
+	// Run again on its own output: nothing left to change, nothing written.
+	writeFileSync(`${file}.retired.bak`, "untouched");
+	deepStrictEqual(await retiredSettings.up(home.dir), { changed: [], attention: [] });
+	strictEqual(readFileSync(`${file}.retired.bak`, "utf8"), "untouched");
 });
 
-test("a retired systemOne key never blocks loading: an empty cuts is silent and the rest are listed", async (t) => {
-	const home = await isolateClioEnv("clio-retired-system-one-");
-	t.after(() => home.restore());
-	const file = join(home.dir, "config", "settings.yaml");
-	mkdirSync(join(home.dir, "config"), { recursive: true });
-	const cases: ReadonlyArray<{ line: string; retired: string | null }> = [
-		{ line: "cuts: {}", retired: null },
-		{ line: "cuts: { jev-1.14.0: { turn.direct: 0.5 } }", retired: "systemOne.cuts" },
-		{ line: "record: true", retired: "systemOne.record" },
-		{ line: "retentionDays: 30", retired: "systemOne.retentionDays" },
-		{ line: "maxMiB: 100", retired: "systemOne.maxMiB" },
-	];
-	for (const { line, retired } of cases) {
-		writeFileSync(file, `version: 2\nsystemOne:\n  engines: {}\n  sites: {}\n  ${line}\n`);
-		readSettings();
-		const validation = validateSettingsFile();
-		strictEqual(validation.issues.length, 0, `${line}: ${JSON.stringify(validation.issues)}`);
-		const listed = validation.retired.filter((entry) => entry.path.startsWith("systemOne.")).map((entry) => entry.path);
-		strictEqual(JSON.stringify(listed), JSON.stringify(retired === null ? [] : [retired]), line);
-	}
+test("with the read path gone, a retired key is an ordinary unknown key and an old spelling is refused", () => {
+	const { issues } = validateSettings({
+		version: 2,
+		orchestrator: { target: "x" },
+		fleet: { speculativeDispatch: true },
+		interface: { exitSummary: "full", outputDetail: "minimal" },
+	});
+	deepStrictEqual(
+		issues.map((issue) => `${issue.path}: ${issue.message}`),
+		[
+			"orchestrator: unknown key",
+			"fleet.speculativeDispatch: unknown key",
+			"interface.outputDetail: expected compact, standard, or detailed",
+			"interface.exitSummary: expected auto, brief, standard, report, or off",
+		],
+	);
 });
 
 test("the v1 migration drops the retired per-agent keys and records why", () => {
@@ -98,42 +136,6 @@ test("the v1 migration drops the retired per-agent keys and records why", () => 
 	strictEqual(Object.hasOwn(entries[0] ?? {}, "labels"), false);
 	ok(result.dropped.some((line) => line.startsWith("integrations.externalAgents.entries[0].permissionTimeoutMs:")));
 	ok(result.dropped.some((line) => line.startsWith("integrations.externalAgents.entries[0].labels:")));
-});
-
-test("doctor removes retired keys in flow and block settings without losing adjacent values", async (t) => {
-	const home = await isolateClioEnv("clio-retired-repair-");
-	t.after(() => home.restore());
-	const file = join(home.dir, "config", "settings.yaml");
-	mkdirSync(join(home.dir, "config"), { recursive: true });
-	for (const entries of [
-		"      - { id: peer, command: peer, permissionTimeoutMs: 5000, labels: { team: a } }\n",
-		"      - id: peer\n        command: peer\n        permissionTimeoutMs: 5000\n        labels: { team: a }\n",
-	]) {
-		writeFileSync(file, "# Keep this comment\nversion: 2\nintegrations:\n  externalAgents:\n    entries:\n" + entries);
-		const result = repairSettingsCoercions();
-		strictEqual(result.removed?.length, 2);
-		strictEqual(validateSettingsFile().retired.length, 0);
-		strictEqual(readSettings().integrations.externalAgents.entries[0]?.command, "peer");
-		ok(readFileSync(file, "utf8").startsWith("# Keep this comment\n"));
-	}
-});
-
-test("doctor removes a section its last retired key emptied, so the repaired home still loads", async (t) => {
-	const home = await isolateClioEnv("clio-retired-emptied-");
-	t.after(() => home.restore());
-	const file = join(home.dir, "config", "settings.yaml");
-	mkdirSync(join(home.dir, "config"), { recursive: true });
-	writeFileSync(
-		file,
-		"# Keep this comment\nversion: 2\nturnControl:\n  orientation:\n    maxSplit: 2\nfleet:\n  speculativeDispatch: true\ntelemetry:\n  research:\n    systemOneDataset: true\nchat:\n  model: kept\n",
-	);
-	const result = repairSettingsCoercions();
-	strictEqual(result.removed?.length, 3);
-	strictEqual(readFileSync(file, "utf8"), "# Keep this comment\nversion: 2\nchat:\n  model: kept\n");
-	const after = validateSettingsFile();
-	strictEqual(after.issues.length, 0);
-	strictEqual(after.retired.length, 0);
-	ok(readSettings());
 });
 
 // A name in SETTINGS_FIELD_NAMES is shared verbatim by telemetry share, so a name no schema

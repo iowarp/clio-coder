@@ -288,7 +288,7 @@ While the composer is empty its placeholder follows the mode: `A parked call is 
 
 ### 4.5 Exit Summary
 
-A clean interactive exit prints a branded session summary in the island frame, per `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`). `auto` follows output detail: compact gives brief, standard gives standard, and detailed gives report. Legacy `full` normalizes to standard ([defaults.ts](../../src/core/defaults.ts)). In regular mode the last frame stays in scrollback, so the exit frame drops the dock, the composer with its rails and the footer included, and the summary follows the transcript ([layout.ts](../../src/interactive/layout.ts)). Contents, timing and suppression are in [Exit summary](../guide/commands-and-modes.md#exit-summary).
+A clean interactive exit prints a branded session summary in the island frame, per `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`). `auto` follows output detail: compact gives brief, standard gives standard, and detailed gives report. `clio-coder upgrade` rewrote the older `full` to `standard`. In regular mode the last frame stays in scrollback, so the exit frame drops the dock, the composer with its rails and the footer included, and the summary follows the transcript ([layout.ts](../../src/interactive/layout.ts)). Contents, timing and suppression are in [Exit summary](../guide/commands-and-modes.md#exit-summary).
 
 ---
 

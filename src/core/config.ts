@@ -242,16 +242,9 @@ export interface SettingsCoercion extends SettingsScalarRepair {
 	to: "on" | "off";
 }
 
-/** A key retired without a replacement: it is ignored, never blocks loading, and doctor names it. */
-export interface SettingsRetiredKey {
-	path: string;
-	reason: string;
-}
-
 class Issues {
 	readonly list: SettingsIssue[] = [];
 	readonly coercions: SettingsCoercion[] = [];
-	readonly retired: SettingsRetiredKey[] = [];
 
 	add(path: string, message: string, repair?: SettingsScalarRepair): void {
 		this.list.push({ path, message, ...(repair !== undefined ? { repair } : {}) });
@@ -259,10 +252,6 @@ class Issues {
 
 	coerced(coercion: SettingsCoercion): void {
 		this.coercions.push(coercion);
-	}
-
-	retire(path: string, reason: string): void {
-		this.retired.push({ path, reason });
 	}
 
 	unknownKeys(path: string, raw: Record<string, unknown>, known: ReadonlyArray<SettingsFieldName>): void {
@@ -981,8 +970,8 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 	// The panes keys shipped for exactly one release (v0.4.0, the day before
 	// this rework) but they did ship, and each has a direct v2 successor with
 	// an identical value domain, so they move like everything else. The
-	// retired agents/keepFailed pair and the `panes` root itself stay in
-	// SETTINGS_V1_RETIRED-adjacent handling via V1_ONLY_ROOTS.
+	// retired agents/keepFailed pair and the `panes` root are dropped by the
+	// v1 migrator.
 	["panes.enabled", "interface.panes.enabled"],
 	["panes.notifications", "interface.panes.notifications"],
 	["panes.journal", "fleet.history.journal"],
@@ -1028,8 +1017,10 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"compaction.excludeLastTurns": EXCLUDE_LAST_TURNS_RETIRED,
 	"delegation.agents[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
 	"delegation.agents[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
-	// Version-2 keys retired without a replacement. They share this table so a
-	// file naming one gets the same targeted removal message.
+	// Version-2 keys retired without a replacement. The validator reads none of
+	// them: `2026-11-21-retired-settings` removed each from the user file and
+	// reported this reason, and a file that still names one gets "unknown key".
+	// A key retired after that migration shipped needs a migration of its own.
 	"integrations.externalAgents.entries[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
 	"integrations.externalAgents.entries[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
 	"context.compaction.excludeLastTurns": EXCLUDE_LAST_TURNS_RETIRED,
@@ -1047,117 +1038,8 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
 	"interface.panes.enabled":
 		"Clio always opens its own private pane host when the terminal allows it; --with-panes joins an existing host instead",
+	"systemOne.engines.*.mode": "every llm engine reads as one batch request",
 } as const);
-
-const RETIRED_TURN_CONTROL_WORKFLOWS: ReadonlySet<unknown> = new Set(["orientation", "direction", "ledger-facts"]);
-
-const V1_ONLY_ROOTS = new Set<SettingsFieldName>([
-	"identity",
-	"autonomy",
-	"runtimePlugins",
-	"orchestrator",
-	"background",
-	"memory",
-	"watchdog",
-	"workers",
-	"routing",
-	"scope",
-	"modelSelector",
-	"budget",
-	"defaults",
-	"theme",
-	"terminal",
-	"skills",
-	"library",
-	"attribution",
-	"delegation",
-	"keybindings",
-	"compaction",
-	"prewarm",
-	"panes",
-	"retry",
-	"guardrails",
-]);
-
-interface PatternMatch {
-	path: string;
-}
-
-function pathPatternSegments(pattern: string): string[] {
-	return pattern.split(".");
-}
-
-function patternMatches(value: unknown, pattern: string): PatternMatch[] {
-	const out: PatternMatch[] = [];
-	const visit = (current: unknown, segments: ReadonlyArray<string>, path: string): void => {
-		const segment = segments[0];
-		if (segment === undefined) {
-			out.push({ path });
-			return;
-		}
-		const rest = segments.slice(1);
-		if (segment === "*") {
-			if (!isPlainObject(current)) return;
-			for (const [key, child] of Object.entries(current)) visit(child, rest, path ? `${path}.${key}` : key);
-			return;
-		}
-		const list = segment.endsWith("[]");
-		const key = list ? segment.slice(0, -2) : segment;
-		if (!isPlainObject(current) || !(key in current)) return;
-		const child = current[key];
-		const nextPath = path ? `${path}.${key}` : key;
-		if (!list) {
-			visit(child, rest, nextPath);
-			return;
-		}
-		if (!Array.isArray(child)) return;
-		for (let index = 0; index < child.length; index += 1) visit(child[index], rest, `${nextPath}[${index}]`);
-	};
-	visit(value, pathPatternSegments(pattern), "");
-	return out;
-}
-
-function isEmptyPlainObject(parent: unknown, key: string): boolean {
-	if (!isPlainObject(parent)) return false;
-	const value = parent[key];
-	return isPlainObject(value) && Object.keys(value).length === 0;
-}
-
-function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void {
-	const reportedRoots = new Set<string>();
-	for (const [from, to] of SETTINGS_V1_PATH_MOVES) {
-		for (const match of patternMatches(raw, from)) {
-			issues.add(match.path, `retired settings-v1 path; use ${to} in version 2`);
-			reportedRoots.add(match.path.split(/[.[]/u)[0] ?? match.path);
-		}
-	}
-	for (const [path, reason] of Object.entries(SETTINGS_V1_RETIRED_PATHS)) {
-		for (const match of patternMatches(raw, path)) {
-			// `init` wrote `fleet.decisionProfiles: {}` from 0.5.3 through 0.5.7, so an empty map is
-			// the default shape of every upgraded file and carries no configuration to lose.
-			if (path === "fleet.decisionProfiles" && isEmptyPlainObject(raw.fleet, "decisionProfiles")) continue;
-			// The same default shape: `init` wrote `systemOne.cuts: {}` and `sites: {}` until they were retired.
-			if (path === "systemOne.cuts" && isEmptyPlainObject(raw.systemOne, "cuts")) continue;
-			if (path === "systemOne.sites" && isEmptyPlainObject(raw.systemOne, "sites")) continue;
-			// A key with no replacement does nothing, so it must never block loading or an
-			// upgrade: a 0.5.x interop setup wrote entries[].permissionTimeoutMs by default and
-			// the 0.6.0 installer refused every such home. It is ignored and doctor names it.
-			issues.retire(match.path, reason);
-			reportedRoots.add(match.path.split(/[.[]/u)[0] ?? match.path);
-		}
-	}
-	for (const root of V1_ONLY_ROOTS) {
-		if (root in raw && !reportedRoots.has(root)) {
-			const replacements = new Set(
-				SETTINGS_V1_PATH_MOVES.filter(([from]) => from.split(/[.[]/u)[0] === root).map(
-					([, to]) => to.split(/[.[]/u)[0] ?? to,
-				),
-			);
-			const hint = replacements.size > 0 ? `; use ${[...replacements].join(" or ")} in version 2` : "";
-			issues.add(root, `retired settings-v1 namespace${hint}; migrate this document with \`clio-coder upgrade\``);
-		}
-	}
-}
 
 function validateRoute(
 	issues: Issues,
@@ -1234,8 +1116,6 @@ function validateExternalAgent(
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return null;
 	}
-	// permissionTimeoutMs and labels are retired; they stay known here so the
-	// tombstone's removal message is the one issue their path gets.
 	issues.unknownKeys(path, value, [
 		"id",
 		"command",
@@ -1244,12 +1124,10 @@ function validateExternalAgent(
 		"env",
 		"connectTimeoutMs",
 		"turnTimeoutMs",
-		"permissionTimeoutMs",
 		"stallTimeoutMs",
 		"toolGovernance",
 		"trustedUnmediated",
 		"projectContext",
-		"labels",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
 	const command = "command" in value ? expectString(issues, `${path}.command`, value.command) : undefined;
@@ -1332,7 +1210,6 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 		"identityFile",
 		"clioCoderEntry",
 		"clioCoderVersionCommand",
-		"clioEntry",
 		"labels",
 		"maxWorkers",
 		"residency",
@@ -1423,8 +1300,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	// All but the first two are retired; listed so a tombstone is all they report and an old file still loads.
-	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites", "cuts", "record", "retentionDays", "maxMiB"]);
+	issues.unknownKeys("systemOne", raw, ["use", "engines"]);
 	const next = settings.systemOne;
 	if ("use" in raw) {
 		if (raw.use === null) next.use = null;
@@ -1452,7 +1328,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					issues.add(path, `expected a map, got ${describe(value)}`);
 					continue;
 				}
-				issues.unknownKeys(path, value, ["kind", "target", "model", "mode", "profile"]);
+				issues.unknownKeys(path, value, ["kind", "target", "model", "profile"]);
 				const kind = expectEnum(issues, `${path}.kind`, value.kind, SYSTEM_ONE_ENGINE_KINDS);
 				const target = expectString(issues, `${path}.target`, value.target);
 				if (kind === undefined || target === undefined) continue;
@@ -1467,8 +1343,6 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					const model = expectString(issues, `${path}.model`, value.model);
 					if (model !== undefined) engine.model = model;
 				}
-				// Whatever an old file says, every llm engine now reads as one batch request.
-				if ("mode" in value) issues.retire(`${path}.mode`, "every llm engine reads as one batch request");
 				if ("profile" in value) {
 					// An unknown profile is refused rather than read as generic: it would ask
 					// the model questions its contract was never checked against.
@@ -1485,7 +1359,6 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 }
 
 const TELEMETRY_CAPTURE_FLAGS = ["content", "deltas", "providerHeaders", "busTrace"] as const;
-const RETIRED_TELEMETRY_CAPTURE_FLAGS = ["systemOneDataset"] as const;
 
 function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings): void {
 	if (!isPlainObject(raw)) {
@@ -1503,10 +1376,7 @@ function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("telemetry.research", `expected a map, got ${describe(raw.research)}`);
 		return;
 	}
-	issues.unknownKeys("telemetry.research", raw.research, [
-		...TELEMETRY_CAPTURE_FLAGS,
-		...RETIRED_TELEMETRY_CAPTURE_FLAGS,
-	]);
+	issues.unknownKeys("telemetry.research", raw.research, TELEMETRY_CAPTURE_FLAGS);
 	for (const flag of TELEMETRY_CAPTURE_FLAGS) {
 		if (!(flag in raw.research)) continue;
 		const parsed = expectBoolean(issues, `telemetry.research.${flag}`, raw.research[flag]);
@@ -1577,7 +1447,6 @@ const TOP_LEVEL_KEYS = [
 	"report",
 	"prompts",
 	"models",
-	...V1_ONLY_ROOTS,
 ] as const;
 
 export interface SettingsValidationResult {
@@ -1585,8 +1454,6 @@ export interface SettingsValidationResult {
 	issues: SettingsIssue[];
 	/** YAML 1.1 booleans read as on/off levels. Loading still succeeds; doctor reports them. */
 	coercions: SettingsCoercion[];
-	/** Keys retired without a replacement. Loading still succeeds; doctor reports them. */
-	retired: SettingsRetiredKey[];
 }
 
 /**
@@ -1601,9 +1468,8 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	const settings = cloneValue(DEFAULT_SETTINGS);
 	if (!isPlainObject(raw)) {
 		issues.add("(root)", `expected a map, got ${describe(raw)}`);
-		return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
+		return { settings, issues: issues.list, coercions: issues.coercions };
 	}
-	reportV1Tombstones(issues, raw);
 	issues.unknownKeys("", raw, TOP_LEVEL_KEYS);
 	if ("version" in raw && raw.version !== 2) {
 		issues.add("version", `expected 2, got ${describe(raw.version)}; run \`clio-coder upgrade\` for version 1`);
@@ -1612,17 +1478,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.turnControl)) issues.add("turnControl", `expected a map, got ${describe(raw.turnControl)}`);
 		else {
 			const control = raw.turnControl;
-			// `interpretation` and `orientation` are retired; listed so a tombstone is all they report.
-			issues.unknownKeys("turnControl", control, ["workflows", "interpretation", "orientation"]);
+			issues.unknownKeys("turnControl", control, ["workflows"]);
 			if ("workflows" in control) {
 				if (!Array.isArray(control.workflows))
 					issues.add("turnControl.workflows", `expected a list, got ${describe(control.workflows)}`);
 				else {
 					const workflows: ClioSettings["turnControl"]["workflows"] = [];
 					for (const [index, value] of control.workflows.entries()) {
-						// `init` wrote these into every home, so a retired value is dropped in silence, like
-						// an empty `systemOne.cuts`. It never blocks loading and it carries no configuration.
-						if (RETIRED_TURN_CONTROL_WORKFLOWS.has(value)) continue;
 						const parsed = expectEnum(issues, `turnControl.workflows[${index}]`, value, TURN_CONTROL_WORKFLOWS);
 						if (parsed !== undefined) workflows.push(parsed);
 					}
@@ -1805,13 +1667,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		else {
 			rawFleet = raw.fleet;
 			issues.unknownKeys("fleet", rawFleet, [
-				// Retired; listed so its tombstone message is the only one reported.
-				"decisionProfiles",
 				"default",
 				"profiles",
 				"rosters",
 				"agentProfiles",
-				"speculativeDispatch",
 				"defaultNode",
 				"adaptiveRouting",
 				"nodes",
@@ -2209,7 +2068,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					issues.add("context.compaction", `expected a map, got ${describe(context.compaction)}`);
 				else {
 					const compaction = context.compaction;
-					// `excludeLastTurns` stays known only so its retirement entry, not "unknown key", names it.
 					issues.unknownKeys("context.compaction", compaction, [
 						"provider",
 						"maxTokens",
@@ -2217,7 +2075,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"threshold",
 						"model",
 						"systemPrompt",
-						"excludeLastTurns",
 					]);
 					if ("auto" in compaction) {
 						const parsed = expectBoolean(issues, "context.compaction.auto", compaction.auto);
@@ -2689,7 +2546,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (!isPlainObject(ui.panes)) issues.add("interface.panes", `expected a map, got ${describe(ui.panes)}`);
 				else {
 					const panes = ui.panes;
-					issues.unknownKeys("interface.panes", panes, ["enabled", "notifications", "layout", "workers", "files"]);
+					issues.unknownKeys("interface.panes", panes, ["notifications", "layout", "workers", "files"]);
 					if ("notifications" in panes) {
 						const parsed = expectEnum(issues, "interface.panes.notifications", panes.notifications, [
 							"failures",
@@ -2900,12 +2757,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	if ("prompts" in raw) validatePrompts(issues, raw.prompts, settings);
 	if ("models" in raw) validateModels(issues, raw.models, settings);
 
-	return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
+	return { settings, issues: issues.list, coercions: issues.coercions };
 }
 
 export function validateSettingsFile(): SettingsValidationResult {
 	const path = join(resolveClioDirs().config, "settings.yaml");
-	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [], coercions: [], retired: [] };
+	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [], coercions: [] };
 	// The read and the parse fail for separate reasons: reporting `chmod 000` as
 	// invalid YAML is a false statement about the file and points at the wrong repair.
 	const read = readSettingsDocument(path);
@@ -2920,7 +2777,6 @@ export function validateSettingsFile(): SettingsValidationResult {
 				},
 			],
 			coercions: [],
-			retired: [],
 		};
 	}
 	if (read.kind === "invalid") {
@@ -2928,7 +2784,6 @@ export function validateSettingsFile(): SettingsValidationResult {
 			settings: cloneValue(DEFAULT_SETTINGS),
 			issues: [{ path: "(root)", message: `invalid YAML: ${yamlErrorSummary(read.error)}`, kind: "syntax" }],
 			coercions: [],
-			retired: [],
 		};
 	}
 	const parsed = read.document;

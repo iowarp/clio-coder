@@ -180,7 +180,7 @@ The journal keeps a content-free `system_one.decided` record per ask: the point,
 
 ## Retired settings
 
-These keys are ignored when they load, reported by `clio-coder doctor` under `settings.yaml retired keys` and removed by `clio-coder doctor --fix`: `systemOne.sites`, `systemOne.cuts`, `systemOne.record`, `systemOne.retentionDays`, `systemOne.maxMiB`, `systemOne.engines.<name>.mode`, `telemetry.research.systemOneDataset`, `fleet.decisionProfiles`, `fleet.speculativeDispatch`, `turnControl.interpretation` and `turnControl.orientation`. [Configuration Reference](configuration-reference.md) lists the reason for each. To keep what a retired binding did, name the engine with `systemOne.use`.
+`clio-coder upgrade` removed these keys from the user `settings.yaml`, and a file that still names one is refused as an unknown key: `systemOne.sites`, `systemOne.cuts`, `systemOne.record`, `systemOne.retentionDays`, `systemOne.maxMiB`, `systemOne.engines.<name>.mode`, `telemetry.research.systemOneDataset`, `fleet.decisionProfiles`, `fleet.speculativeDispatch`, `turnControl.interpretation` and `turnControl.orientation`. [Configuration Reference](configuration-reference.md) lists the reason for each. To keep what a retired binding did, name the engine with `systemOne.use`.
 
 ## Failure behavior
 

@@ -145,8 +145,8 @@ interface:
 
 `--with-panes` applies only to the interactive session; given before a
 subcommand such as `run` it is refused with exit 2. The retired
-`interface.panes.enabled` key is ignored when present: `clio-coder doctor` names
-it and `doctor --fix` removes it. The retired `--no-panes` flag is an unknown
+`interface.panes.enabled` key was removed by `clio-coder upgrade`; a file that
+still names it is refused as an unknown key. The retired `--no-panes` flag is an unknown
 option (exit 2), and `clio-coder panes workspace` is gone.
 
 Guest mode needs three things, checked in this order: `HERDR_ENV=1` in the

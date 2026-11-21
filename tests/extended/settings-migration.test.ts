@@ -119,7 +119,7 @@ describe("settings and migration boundary", () => {
 		ok(belowToolResultMinimum.issues.some((issue) => issue.path === "context.toolResultMaxBytes"));
 
 		const invalid = validateSettings({ version: 2, orchestrator: { target: "legacy" }, mystery: true });
-		ok(invalid.issues.some((issue) => issue.path === "orchestrator.target"));
+		ok(invalid.issues.some((issue) => issue.path === "orchestrator" && issue.message === "unknown key"));
 		ok(invalid.issues.some((issue) => issue.path === "mystery"));
 		strictEqual(invalid.settings.chat.target, null, "retired paths never execute as aliases");
 
@@ -360,6 +360,7 @@ targets:
 		const retiredPanes = "2026-09-01-retire-panes-knobs";
 		deepStrictEqual(ids, [
 			SETTINGS_V2_MIGRATION_ID,
+			"2026-11-21-retired-settings",
 			retiredPanes,
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
@@ -413,7 +414,7 @@ targets:
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
 		strictEqual(current?.ok, true);
 		strictEqual(current?.level, undefined);
-		ok(current?.detail.includes("already satisfy 2 unrecorded"));
+		ok(current?.detail.includes("already satisfy 3 unrecorded"));
 		strictEqual(readFileSync(manifest, "utf8"), recorded);
 		strictEqual(readFileSync(settingsFile, "utf8"), "version: 2\n");
 		for (const settings of ["version: 1\n", "version: 2\npanes: { agents: off }\n", "version: [\n"]) {

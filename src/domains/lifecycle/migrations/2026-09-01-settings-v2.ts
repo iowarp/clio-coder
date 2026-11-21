@@ -11,6 +11,7 @@ import {
 } from "../../../core/config.js";
 import { SETTINGS_FILE_MODE } from "../../../core/defaults.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import { dropRetiredSettings } from "./2026-11-21-retired-settings.js";
 import type { Migration } from "./index.js";
 
 export const SETTINGS_V2_MIGRATION_ID = "2026-09-01-settings-v2";
@@ -322,6 +323,12 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 	);
 	migrateFleetNodeAliases(transform);
 	dropRetiredExternalAgentKeys(transform);
+	// The strict reader no longer tolerates retired version-2 keys, so a v1 file
+	// that carries one is cleaned here, before the validation below.
+	const retired = dropRetiredSettings(transform.document);
+	transform.document = retired.document;
+	transform.dropped.push(...retired.changed);
+	transform.notes.push(...retired.attention);
 
 	if (transform.collisions.length > 0) throw new SettingsV2CollisionError(transform.collisions);
 	transform.document.version = 2;

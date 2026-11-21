@@ -149,10 +149,10 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `safety.judge.environment` | `[]` | List of facts about the operator's environment, in their own words, that the judge reads. | hot reload |
 | `safety.judge.allow` | `[]` | List of allow rules appended to the judge's defaults. | hot reload |
 | `safety.judge.deny` | `[]` | List of block rules appended to the judge's defaults. | hot reload |
-| `interface.exitSummary` | `"auto"` | `auto`, `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail` (`compact` gives `brief`, `detailed` gives `report`, otherwise `standard`). `brief` prints the model, total tokens and cost, `standard` the visit's activity and usage, `report` a one-page report, `off` only how to resume. `full` is read as `standard`. Read at the next exit. | hot reload |
+| `interface.exitSummary` | `"auto"` | `auto`, `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail` (`compact` gives `brief`, `detailed` gives `report`, otherwise `standard`). `brief` prints the model, total tokens and cost, `standard` the visit's activity and usage, `report` a one-page report, `off` only how to resume. `clio-coder upgrade` rewrote the older `full` to `standard`. Read at the next exit. | hot reload |
 | `interface.demo` | `true` | Boolean. Tier-bounded welcome and learning tips; off starts with an identity header. Immediate controls, motion preferences and stream pacing are independent. | hot reload |
 | `interface.terminalProgress` | `false` | Boolean. Running-task progress in terminals that show tab or taskbar badges. | next turn |
-| `interface.outputDetail` | `"standard"` | `compact`, `standard` or `detailed`, labelled Minimal, Default and Detailed. Governs terminal presentation, not model reasoning. `minimal`, `default` and `verbose` are accepted as synonyms. | hot reload |
+| `interface.outputDetail` | `"standard"` | `compact`, `standard` or `detailed`, labelled Minimal, Default and Detailed. Governs terminal presentation, not model reasoning. `clio-coder upgrade` rewrote the older `minimal`, `default` and `verbose`. | hot reload |
 | `interface.mode` | `"regular"` | `regular` keeps scrollback; `fullscreen` uses the alternate screen with a sticky composer and footer. | restart required |
 | `interface.fullscreenScrollbar` | `"auto"` | `hidden`, `auto` or `always`. | restart required |
 | `interface.smoothStreaming` | `"auto"` | `off`, `auto` or `on`. Presentation-only pacing of streamed text and thinking. | hot reload |
@@ -382,7 +382,7 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 
 ## Retired keys and values
 
-`SETTINGS_V1_RETIRED_PATHS` in [`src/core/config.ts`](../../src/core/config.ts) lists keys removed with no replacement. A retired key never blocks loading, in any layer: the file loads, the key is ignored, `clio-coder doctor` warns that it is retired and ignored and names the reason below, and `clio-coder doctor --fix` removes it from the user `settings.yaml`. A renamed path from the [key map](#version-1-to-version-2-key-map) is different: a user `settings.yaml` that still uses one is refused with a message naming the version-2 path. The v1 migrator drops the version-1 entries and records the reason in its migration report.
+`SETTINGS_V1_RETIRED_PATHS` in [`src/core/config.ts`](../../src/core/config.ts) lists keys removed with no replacement. `clio-coder upgrade` (migration `2026-11-21-retired-settings`) removed each one from the user `settings.yaml`, reported it with the reason below and kept the previous file as `settings.yaml.retired.bak`. The reader no longer tolerates them: a retired key, like a renamed path from the [key map](#version-1-to-version-2-key-map), is an unknown key. The v1 migrator drops the version-1 entries and records the reason in its migration report.
 
 | Retired path | Reason |
 | --- | --- |

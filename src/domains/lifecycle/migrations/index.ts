@@ -42,6 +42,7 @@ import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
 import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import approvalsToConfig from "./2026-11-02-approvals-to-config.js";
 import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
+import retiredSettings from "./2026-11-21-retired-settings.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -89,8 +90,13 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 // migrations (`2026-08-18-lmstudio-runtime-id`, `2026-09-18-ollama-runtime-id`)
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
+//
+// `retiredSettings` sits right after the v2 rewrite: the strict reader stopped
+// tolerating retired keys, so it must run before any migration that reads
+// settings through `readSettings`.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	settingsV2,
+	retiredSettings,
 	retirePanesKnobs,
 	playbooksAndPackages,
 	acpAdapters,

@@ -32,6 +32,7 @@ import { extensionContentDigest } from "../extensions/integrity.js";
 import { extensionBaseDir, installExtension, listInstalledExtensions } from "../extensions/state.js";
 import type { ExtensionScope } from "../extensions/types.js";
 import { migrateSettingsV1Document } from "../lifecycle/migrations/2026-09-01-settings-v2.js";
+import { dropRetiredSettings } from "../lifecycle/migrations/2026-11-21-retired-settings.js";
 
 export type ShareScope = "project" | "user";
 export type ShareEntryType = "project-context" | "prompt" | "skill" | "agent" | "playbook" | "settings" | "extension";
@@ -237,6 +238,9 @@ function normalizedSettingsFragment(parsed: unknown): Record<string, unknown> {
 		normalized = migrateSettingsV1Document(parsed).document;
 	} else if (parsed.version !== 2) {
 		throw new Error(`settings fragment version must be 1 or 2, got ${String(parsed.version)}`);
+	} else {
+		// An archive is immutable history: a fragment an older release wrote still imports.
+		normalized = dropRetiredSettings(parsed).document;
 	}
 	const validation = validateSettings(normalized);
 	if (validation.issues.length > 0) {

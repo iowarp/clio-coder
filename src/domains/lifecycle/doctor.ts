@@ -646,23 +646,6 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				),
 			});
 		}
-		if (validation.retired.length > 0) {
-			// Retired keys with no replacement do nothing; loading proceeds, so this warns.
-			findings.push({
-				ok: true,
-				level: "warn",
-				name: "settings.yaml retired keys",
-				detail: foldDetail(
-					`${validation.retired.map((entry) => entry.path).join(", ")} retired and ignored (${validation.retired[0]?.reason ?? ""}); run \`clio-coder doctor --fix\``,
-				),
-			});
-		}
-		if (settingsRepair?.removed?.length)
-			findings.push({
-				ok: true,
-				name: "settings.yaml retired keys",
-				detail: `removed ${settingsRepair.removed.join(", ")}`,
-			});
 		const retiredValues = validation.issues.flatMap((issue) => (issue.repair !== undefined ? [issue.repair] : []));
 		if (retiredValues.length > 0) {
 			findings.push({
@@ -780,7 +763,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const availableMigrations = listMigrations().map((migration) => migration.id);
 	const appliedMigrations = new Set(migrationRead.manifest.applied);
 	const satisfiedMigrations = new Set(
-		currentSettingsValid ? ["2026-09-01-settings-v2", "2026-09-01-retire-panes-knobs"] : [],
+		currentSettingsValid
+			? ["2026-09-01-settings-v2", "2026-11-21-retired-settings", "2026-09-01-retire-panes-knobs"]
+			: [],
 	);
 	const unrecordedMigrations = availableMigrations.filter((id) => !appliedMigrations.has(id));
 	const pendingMigrations = unrecordedMigrations.filter((id) => !satisfiedMigrations.has(id));
