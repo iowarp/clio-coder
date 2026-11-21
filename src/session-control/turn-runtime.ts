@@ -2,6 +2,7 @@ import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
+import { requestedThinking } from "../core/telemetry/call-effort.js";
 import { mainAgent } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -1130,6 +1131,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					},
 					roundKind: textOnly ? "text-only" : choice.kind === "required" ? "required" : "normal",
 					toolChoice: textOnly ? "none" : choice.kind === "required" ? { name: choice.toolName } : "auto",
+					...requestedThinking(localRuntime.agent.state.thinkingLevel),
 				},
 				journalLease.context,
 			);

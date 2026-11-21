@@ -1,4 +1,5 @@
 import { trackCallFetch } from "../core/call-failure.js";
+import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import { normalizeContext } from "./context.js";
@@ -144,7 +145,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 }
 
 async function runPrewarmAttempt(input: PrewarmRoundInput, scope: CallScope): Promise<PrewarmRoundResult> {
-	scope.startAttempt({ roundKind: "normal", toolChoice: "auto" });
+	scope.startAttempt({ roundKind: "normal", toolChoice: "auto", ...requestedThinking(input.state.thinkingLevel) });
 	// pi-agent-core maps `thinkingLevel: "off"` onto an absent `reasoning`; the
 	// pre-warm has to make the same mapping or the thinking composition resolves
 	// against a different level and the rendered template moves.
