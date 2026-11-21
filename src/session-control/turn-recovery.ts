@@ -778,8 +778,12 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				: agentRuntime.agent.subscribe?.((event) => {
 						if (recovered || event.type !== "message_end" || event.message.role !== "assistant") return;
 						if (event.message.stopReason === "error" || event.message.stopReason === "aborted") return;
+						// A late answer after Esc, /new or /resume belongs to a turn nobody owns now.
+						if (cancelled()) return;
 						recovered = true;
 						recordRetryStatus({ phase: "recovered", attempt, maxAttempts, ...waitFacts(chainProviderWaits, false) });
+						attempt = 0;
+						maxAttempts = 0;
 						chainAttempt = 0;
 						chainOwnRetries = 0;
 						chainProviderWaits = 0;
@@ -802,6 +806,22 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					if (await retryAuth({ stopReason: "error", errorMessage: message })) return true;
 				}
 				if (!retryable(classified) || !mayAttempt(chainOwnRetries + 1, message)) {
+					if (recovered) {
+						// A fresh failure after this ladder recovered entered no ladder: it shows as a failure, not as an exhaustion.
+						ensureFailureVisibleAndPersisted({
+							stopReason: "error",
+							errorMessage: message,
+							message: {
+								role: "assistant",
+								content: [{ type: "text", text: "" }],
+								stopReason: "error",
+								errorMessage: message,
+								timestamp: Date.now(),
+							} as AgentMessage,
+						});
+						pruneFailedAssistantFromContext(agentRuntime.agent);
+						return true;
+					}
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt,
@@ -854,6 +874,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			}
 			if (classified.kind === "auth" && (await retryAuth(nextFailure))) return true;
 			if (!retryable(classified, nextFailure.message)) {
+				pruneFailedAssistantFromContext(agentRuntime.agent);
+				return true;
+			}
+			// After a recovery the counters are fresh, so a failure that may not retry never entered a ladder to exhaust.
+			if (recovered && !mayAttempt(chainOwnRetries + 1, nextFailure.errorMessage, nextFailure.message)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}
