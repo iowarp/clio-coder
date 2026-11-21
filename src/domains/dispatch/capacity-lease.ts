@@ -6,12 +6,15 @@ import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from ".
 import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import {
 	FILE_LOCK_ACQUIRE_TIMEOUT_MS,
+	type StateFileLockOptions,
+	StateFileLockTimeoutError,
 	withStateFileLockSection,
 	withStateFileLockSync,
 } from "../../core/state-file-lock.js";
 import { clioStateDir, clioStatePath } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { endpointLabel, foregroundStreamUsage, maxConcurrentRequestsRemedy } from "../providers/endpoint-capacity.js";
+import { AdmissionLockBusyError } from "./admission-error.js";
 import type { DispatchReservationRecord } from "./reservation-store.js";
 
 export { processBirthToken } from "../../core/process-identity.js";
@@ -981,7 +984,21 @@ export interface AcquireCapacityLeaseInput {
 	onAcquiredUnderLock?: (state: CapacityStateFile) => void;
 }
 export function acquireCapacityLease(input: AcquireCapacityLeaseInput): CapacityLease {
-	return withStateFileLockSync(capacityStateLockPath(), () => acquireCapacityLeaseUnsafe(input));
+	return withAdmissionLockSync(() => acquireCapacityLeaseUnsafe(input));
+}
+
+/** An admission lock wait that ran out, as the typed refusal admission reports; any other error unchanged. */
+export function admissionLockRefusal(error: unknown): unknown {
+	return error instanceof StateFileLockTimeoutError ? new AdmissionLockBusyError(error.message) : error;
+}
+
+/** The admission store lock for an admission entry point: a bounded wait whose timeout is a typed refusal (M-35). */
+export function withAdmissionLockSync<T>(fn: () => T, options: Pick<StateFileLockOptions, "timeoutMs"> = {}): T {
+	try {
+		return withStateFileLockSync(capacityStateLockPath(), fn, options);
+	} catch (error) {
+		throw admissionLockRefusal(error);
+	}
 }
 /** The caller holds the capacity state lock; a throw leaves the stored state untouched. */
 export function acquireCapacityLeaseUnsafe(input: AcquireCapacityLeaseInput): CapacityLease {
@@ -1134,7 +1151,7 @@ export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwne
 	endpoints: Readonly<Record<string, number>>;
 	endpointHolders: Readonly<Record<string, EndpointCapacityHolders>>;
 } {
-	return withStateFileLockSync(capacityStateLockPath(), () => capacityLeaseUsageUnsafe(options));
+	return withAdmissionLockSync(() => capacityLeaseUsageUnsafe(options));
 }
 
 /** Fresh usage for async admission: wait for the same lock without blocking callbacks. */

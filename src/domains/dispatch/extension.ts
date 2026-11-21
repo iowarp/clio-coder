@@ -489,7 +489,6 @@ import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
-	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
 	planQueueSlot,
@@ -500,6 +499,7 @@ import {
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
 import {
@@ -12360,8 +12360,9 @@ export function createDispatchBundle(
 				}),
 			);
 			// No in-memory executor survives a process restart, so every active
-			// side-store lease from an earlier bundle is orphaned and must expire.
-			cleanupDispatchReservations({ startup: true, nowMs: now() });
+			// side-store lease from an earlier bundle is orphaned and must expire. Boot never waits on the admission lock
+			// for it (M-35): a held lock leaves the sweep to the first plan admission.
+			sweepDispatchReservationsAtStartup(now());
 			const runLedger = openLedger({
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");

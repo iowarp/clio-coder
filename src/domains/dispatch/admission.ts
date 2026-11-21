@@ -9,6 +9,7 @@ import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-erro
 import { createAdmissionQueue } from "./admission-queue.js";
 import {
 	acquireCapacityLeaseUnsafe,
+	admissionLockRefusal,
 	type CapacityLease,
 	type CapacityLimits,
 	capacityLeaseUsageUnsafe,
@@ -468,8 +469,9 @@ export function createCapacityAdmissionController(options: {
 	/** The lock itself could not be taken; fail the candidates a pass would have tried. */
 	const failCandidates = (error: unknown): void => {
 		// Each candidate used to take the lock in turn and fail the same way, one
-		// acquisition budget apiece; fail the same candidates once.
-		const failure = error instanceof Error ? error : new Error(String(error));
+		// acquisition budget apiece; fail the same candidates once. A lock wait that ran out is the typed busy refusal.
+		const refusal = admissionLockRefusal(error);
+		const failure = refusal instanceof Error ? refusal : new Error(String(refusal));
 		queue.admitNext(now(), (request) => {
 			queue.fail(request.requestId, failure);
 			return false;
