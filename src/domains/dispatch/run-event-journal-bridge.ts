@@ -167,6 +167,9 @@ function toolEntry(type: string, payload: Record<string, unknown>, at: string): 
 		...(verb !== undefined ? { verb } : {}),
 		...(object !== undefined ? { detail: action?.truncated === true ? `${object}…` : object } : {}),
 		...(finished && (outcome === "ok" || outcome === "error" || outcome === "blocked") ? { outcome } : {}),
+		...(finished && outcome === "ok" && payload.notExecuted === "observation_budget"
+			? { notExecuted: "observation_budget" as const }
+			: {}),
 		...(finished && durationMs !== undefined ? { durationMs } : {}),
 		...(finished && outcome !== "ok" && reason !== undefined ? { reason } : {}),
 	};

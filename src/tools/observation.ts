@@ -8,6 +8,7 @@ import { OBSERVATION_WIDTH_SCALE_CEILING } from "../core/turn-budget-width.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import type { ImageContent } from "../engine/types.js";
 import type { ObservationPoolEvent, ToolInvokeOptions, ToolResult } from "./registry.js";
+import { toolResultContextText } from "./result-disposition.js";
 import { offloadPointer, writeToolOffload } from "./result-shaping.js";
 import { formatSize } from "./truncate.js";
 import { byteLength } from "./truncate-utf8.js";
@@ -95,14 +96,34 @@ const BUDGET_TRACK_LIMIT = 256;
  */
 const MAX_EXHAUSTED_NOTICES_PER_TURN = 3;
 
+/**
+ * Refused calls one model response gets before its next refused sibling fails terminally (C-17). The turn streak
+ * counts a wide batch once, so without this a model could send thirty parallel reads into a spent pool three batches
+ * running. Four is one more than the turn's streak: a batch of four honest parallel reads is not a retry loop.
+ */
+const MAX_EXHAUSTED_NOTICES_PER_BATCH = 4;
+
+/**
+ * `details.notExecuted` on an observation call the spent turn pool stopped before it ran (C-17). The result stays
+ * `kind:"ok"` so the model reads the notice as it always has; `ToolFinishEvent.notExecuted` carries the type to
+ * tool stats, which count the call withheld.
+ */
+export const OBSERVATION_BUDGET_NOT_EXECUTED = "observation_budget" as const;
+
 interface TurnBudgetState {
 	/** Bytes settled calls actually returned this turn. */
 	usedBytes: number;
 	/** Bytes in-flight sibling calls hold until they settle; never counted as returned. */
 	reservedBytes: number;
 	lastSeenAt: number;
-	/** Consecutive exhausted-pool short-circuits; reset by any call that got a slice. */
+	/** Consecutive tool batches with an exhausted-pool short-circuit; reset by any call that got a slice. */
 	exhaustedStreak: number;
+	/** The model response whose short-circuit last counted toward the streak, so its siblings count once (C-17). */
+	exhaustedBatch: string | null;
+	/** Refusals in `exhaustedBatch`, against MAX_EXHAUSTED_NOTICES_PER_BATCH. */
+	batchRefusals?: number;
+	/** The model calls (`ToolInvokeOptions.observationCall`) refused in `exhaustedBatch`; a chain step repeats one. */
+	batchCalls?: WeakSet<object>;
 }
 
 const turnBudgets = new Map<string, TurnBudgetState>();
@@ -141,6 +162,10 @@ export interface ObservationReservation {
 	 * exhausted reservation it is present only when it did the rolling, and it counts that tool call's refusals.
 	 */
 	poolEvent?: (event: ObservationPoolEvent) => void;
+	/** The model response this call belongs to (`ToolInvokeOptions.correlationId`); its siblings share one refusal count. */
+	batch?: string;
+	/** The model tool call this belongs to (`ToolInvokeOptions.observationCall`), shared by a gateway chain's steps. */
+	call?: object;
 }
 
 /**
@@ -348,7 +373,13 @@ export function reserveObservation(
 			...tracked,
 		};
 	}
-	const state = turnBudgets.get(key) ?? { usedBytes: 0, reservedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
+	const state = turnBudgets.get(key) ?? {
+		usedBytes: 0,
+		reservedBytes: 0,
+		lastSeenAt: Date.now(),
+		exhaustedStreak: 0,
+		exhaustedBatch: null,
+	};
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(key, state);
 	pruneBudgetMap();
@@ -361,6 +392,8 @@ export function reserveObservation(
 				: pooled
 					? () => poolEvent("refused")
 					: undefined;
+		const batch = options?.correlationId;
+		const call = options?.observationCall;
 		return {
 			key,
 			limitBytes,
@@ -375,11 +408,16 @@ export function reserveObservation(
 			...bound,
 			...(roll === undefined ? {} : { roll }),
 			...(pooled ? { poolEvent } : {}),
+			...(batch === undefined ? {} : { batch }),
+			...(call === undefined ? {} : { call }),
 		};
 	}
 	// A call that got a slice is progress, so the exhausted streak starts over.
 	// Only an unbroken run of short-circuits reaches the terminal failure.
 	state.exhaustedStreak = 0;
+	state.exhaustedBatch = null;
+	delete state.batchRefusals;
+	delete state.batchCalls;
 	const callCapBytes = Math.min(askBytes, remaining);
 	return {
 		key,
@@ -415,10 +453,34 @@ export function commitObservationReservation(reservation: ObservationReservation
 		reservedBytes: reservation.reservedBeforeBytes,
 		lastSeenAt: Date.now(),
 		exhaustedStreak: 0,
+		exhaustedBatch: null,
 	};
 	state.reservedBytes += reservation.callCapBytes;
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(reservation.key, state);
+}
+
+/**
+ * Grow a granted reservation toward `bytes` (never past its self cap) from what the pool has left (C-17). A read sized
+ * from its file's stat learns only after opening the file that it renders an image, a document or a bundled doc's
+ * index, whose size the stat does not bound. A pool short of the growth leaves the call limited, as at reservation.
+ */
+export function widenObservationReservation(reservation: ObservationReservation, bytes: number): void {
+	if (reservation.exhausted || reservation.settled) return;
+	const target = Math.min(reservation.selfCapBytes, bytes);
+	if (target <= reservation.callCapBytes) return;
+	if (reservation.key === null) {
+		reservation.callCapBytes = target;
+		return;
+	}
+	const state = turnBudgets.get(reservation.key);
+	if (state === undefined) return;
+	const remaining = Math.max(0, reservation.limitBytes - state.usedBytes - state.reservedBytes);
+	const extra = Math.min(target - reservation.callCapBytes, remaining);
+	reservation.callCapBytes += extra;
+	if (reservation.committed) state.reservedBytes += extra;
+	reservation.limited = reservation.callCapBytes < target;
+	state.lastSeenAt = Date.now();
 }
 
 /**
@@ -451,11 +513,47 @@ function recordSpentBytes(reservation: ObservationReservation, bytes: number): v
 		reservedBytes: reservation.reservedBeforeBytes + heldBytes,
 		lastSeenAt: Date.now(),
 		exhaustedStreak: 0,
+		exhaustedBatch: null,
 	};
 	state.reservedBytes = Math.max(0, state.reservedBytes - heldBytes);
 	state.usedBytes += bytes;
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(reservation.key, state);
+}
+
+/**
+ * What each tracked observation charged its turn pool, by the envelope its result carries, until the registry has
+ * shaped the result for the model (C-17). A session cap (`context.toolResultMaxBytes`) or a disposition can cut a
+ * result after its tool finalized it; the pool must pay for what the model received, not for what the tool rendered.
+ */
+const pendingCharges = new WeakMap<object, { reservation: ObservationReservation; chargedBytes: number }>();
+
+function trackCharge(observation: Observation, reservation: ObservationReservation, chargedBytes: number): void {
+	if (reservation.key !== null) pendingCharges.set(observation, { reservation, chargedBytes });
+}
+
+/**
+ * Settle an observation's pool charge to the bytes of the shaped result the model receives (C-17): its context text
+ * and any images it still carries. Called on every shaped result; one that carries no tracked envelope is left alone.
+ * A charge only ever falls, so a result shaped twice (a gateway call's inner and outer pass) settles at the smaller.
+ * `deliveredBytes` names what reached the model when a later layer cut the shaped result again (a gateway chain's
+ * aggregate cap) or withheld it whole (a flow restriction, 0).
+ */
+export function settleObservationCharge(result: ToolResult, deliveredBytes?: number): void {
+	const observation = result.details?.observation;
+	if (observation === null || typeof observation !== "object") return;
+	const pending = pendingCharges.get(observation);
+	if (pending === undefined || pending.reservation.key === null) return;
+	const images = result.kind === "ok" ? (result.images ?? []) : [];
+	const delivered =
+		deliveredBytes ??
+		byteLength(toolResultContextText(result)) + images.reduce((bytes, image) => bytes + byteLength(image.data), 0);
+	if (delivered >= pending.chargedBytes) return;
+	const state = turnBudgets.get(pending.reservation.key);
+	if (state === undefined) return;
+	state.usedBytes = Math.max(0, state.usedBytes - (pending.chargedBytes - delivered));
+	state.lastSeenAt = Date.now();
+	pending.chargedBytes = delivered;
 }
 
 function budgetDetails(reservation: ObservationReservation): ObservationBudgetDetails | null {
@@ -467,15 +565,42 @@ function budgetDetails(reservation: ObservationReservation): ObservationBudgetDe
 	};
 }
 
-/** Count this short-circuit against the turn's run of them. Untracked calls never escalate. */
-function bumpExhaustedStreak(key: string | null): number {
-	if (key === null) return 1;
+/**
+ * Count this short-circuit against the turn's run of them (C-17). Parallel siblings of one model response count once,
+ * so a wide batch that meets a spent pool is one attempt, not four; a gateway chain's sequential steps are one model
+ * call refused again, and each counts, as at df75c10aa. A batch's refused calls past MAX_EXHAUSTED_NOTICES_PER_BATCH
+ * escalate on their own. Untracked calls never escalate; an unbatched call counts each time.
+ */
+function bumpExhaustedStreak(
+	key: string | null,
+	batch: string | undefined,
+	call: object | undefined,
+): { streak: number; batchRefusals: number; unit: "tool batch" | "call" } {
+	if (key === null) return { streak: 1, batchRefusals: 1, unit: "call" };
 	const state = turnBudgets.get(key);
-	if (state === undefined) return 1;
-	state.exhaustedStreak += 1;
+	if (state === undefined) return { streak: 1, batchRefusals: 1, unit: "call" };
 	state.lastSeenAt = Date.now();
-	turnBudgets.set(key, state);
-	return state.exhaustedStreak;
+	if (batch === undefined) {
+		state.exhaustedStreak += 1;
+		state.exhaustedBatch = null;
+		return { streak: state.exhaustedStreak, batchRefusals: 1, unit: "call" };
+	}
+	if (batch !== state.exhaustedBatch) {
+		state.exhaustedStreak += 1;
+		state.exhaustedBatch = batch;
+		state.batchRefusals = 1;
+		state.batchCalls = new WeakSet(call === undefined ? [] : [call]);
+		return { streak: state.exhaustedStreak, batchRefusals: 1, unit: "tool batch" };
+	}
+	state.batchRefusals = (state.batchRefusals ?? 0) + 1;
+	const calls = state.batchCalls ?? new WeakSet<object>();
+	state.batchCalls = calls;
+	let unit: "tool batch" | "call" = "tool batch";
+	if (call !== undefined && calls.has(call)) {
+		state.exhaustedStreak += 1;
+		unit = "call";
+	} else if (call !== undefined) calls.add(call);
+	return { streak: state.exhaustedStreak, batchRefusals: state.batchRefusals, unit };
 }
 
 function bumpCallRefusals(poolEvent: (event: ObservationPoolEvent) => void): number {
@@ -509,15 +634,22 @@ export function observationBudgetExhausted(input: {
 	// the model is told the call waits for it instead of being asked to re-plan or summarize (XR-6).
 	const rolled = reservation.roll !== undefined;
 	reservation.roll?.();
-	const streak = !rolled
-		? bumpExhaustedStreak(reservation.key)
-		: reservation.poolEvent !== undefined
-			? bumpCallRefusals(reservation.poolEvent)
-			: 1;
-	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
+	const counted = !rolled
+		? bumpExhaustedStreak(reservation.key, reservation.batch, reservation.call)
+		: {
+				streak: reservation.poolEvent !== undefined ? bumpCallRefusals(reservation.poolEvent) : 1,
+				batchRefusals: 1,
+				unit: "call" as const,
+			};
+	const { streak, batchRefusals } = counted;
+	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN || batchRefusals > MAX_EXHAUSTED_NOTICES_PER_BATCH) {
+		const which =
+			streak > MAX_EXHAUSTED_NOTICES_PER_TURN
+				? `This is the ${streak}th ${counted.unit} to hit it`
+				: `This tool batch sent ${batchRefusals} calls into it`;
 		const message =
 			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
-			`This is the ${streak}th call to hit it, so no observation tool can return content until the ` +
+			`${which}, so no observation tool can return content until the ` +
 			`next turn. Do not retry this call and do not substitute another one. Re-plan with what you ` +
 			`already have: say what you found, name what is still unread, and propose the next step.`;
 		recordSpentBytes(reservation, byteLength(message));
@@ -547,7 +679,9 @@ export function observationBudgetExhausted(input: {
 		format: input.format ?? "text",
 		...(budget !== null ? { budget } : {}),
 	};
-	return { kind: "ok", output, details: { observation } };
+	trackCharge(observation, reservation, shownBytes);
+	// The notice reaches the model as text, but the call did no work: tool stats count it withheld, not ok (C-17).
+	return { kind: "ok", output, details: { observation, notExecuted: OBSERVATION_BUDGET_NOT_EXECUTED } };
 }
 
 export interface ObservationInput {
@@ -716,6 +850,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		...(offloadPath !== null ? { offloadPath } : {}),
 		...(budget !== null ? { budget } : {}),
 	};
+	trackCharge(observation, input.reservation, shownBytes);
 	return {
 		kind: "ok",
 		output,

@@ -9,8 +9,10 @@
  *
  * Invariants (pinned by tests/contracts/dispatch.test.ts):
  *   - Each recognized outcome (ok|error|blocked) increments its own bucket and
- *     count, so count == ok + errors + blocked whenever every recorded finish
- *     carried an outcome. The worker ToolFinishEvent always does; a synthetic
+ *     count, so count == ok + errors + blocked + withheld whenever every recorded
+ *     finish carried an outcome. An `ok` finish the spent observation pool
+ *     stopped before it ran (`notExecuted: "observation_budget"`, C-17) counts
+ *     withheld instead of ok. The worker ToolFinishEvent always does; a synthetic
  *     finish without an outcome increments count only.
  *   - totalDurationMs accumulates only finite non-negative durations.
  *   - snapshot is sorted by tool-name UTF-16 code unit ascending so receipt
@@ -27,6 +29,8 @@ export interface ToolFinishPayload {
 	durationMs?: number;
 	outcome?: "ok" | "error" | "blocked";
 	actionClass?: string;
+	/** An `ok` call that did no work (C-17); see `ToolFinishEvent.notExecuted`. */
+	notExecuted?: string | undefined;
 }
 
 export interface ToolStartPayload {
@@ -58,6 +62,18 @@ function blankStat(tool: string): ToolCallStat {
 	return { tool, count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0 };
 }
 
+/**
+ * The `details.notExecuted` type a tool result carries when its call returned a notice without running (C-17), for
+ * the stats folds that see the result rather than the finish event: a gateway chain's steps and a headless run.
+ */
+export function resultNotExecuted(result: unknown): string | undefined {
+	if (result === null || typeof result !== "object") return undefined;
+	const details = (result as { details?: unknown }).details;
+	if (details === null || typeof details !== "object") return undefined;
+	const value = (details as { notExecuted?: unknown }).notExecuted;
+	return typeof value === "string" ? value : undefined;
+}
+
 export function recordToolFinish(stats: Map<string, ToolCallStat>, payload: ToolFinishPayload): void {
 	if (typeof payload.tool !== "string") return;
 	const existing = stats.get(payload.tool) ?? blankStat(payload.tool);
@@ -65,7 +81,9 @@ export function recordToolFinish(stats: Map<string, ToolCallStat>, payload: Tool
 	if (typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0) {
 		existing.totalDurationMs += payload.durationMs;
 	}
-	if (payload.outcome === "ok") existing.ok += 1;
+	if (payload.outcome === "ok" && payload.notExecuted === "observation_budget")
+		existing.withheld = (existing.withheld ?? 0) + 1;
+	else if (payload.outcome === "ok") existing.ok += 1;
 	else if (payload.outcome === "error") existing.errors += 1;
 	else if (payload.outcome === "blocked") existing.blocked += 1;
 	// The store tool's class depends on its op, so the tool name alone reads a
@@ -114,18 +132,26 @@ export function summarizeToolActivity(
 	classify: (tool: string) => ActionClass,
 ): ToolActivitySummary {
 	const summary: ToolActivitySummary = { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false };
+	let withheld = 0;
 	for (const stat of stats.values()) {
 		if (stat.tool === "clio_submit_result") continue;
 		summary.calls += stat.count;
 		summary.succeeded += stat.ok;
 		summary.failed += stat.errors;
 		summary.blocked += stat.blocked;
+		withheld += stat.withheld ?? 0;
 		if (stat.ok > 0 && MUTATING_ACTION_CLASSES.has(classify(stat.tool))) {
 			summary.mutatingSucceeded = true;
 		}
 		if (stat.tool === "store" && (stat.okWrites ?? 0) > 0) summary.storeWritten = true;
 	}
+	if (withheld > 0) summary.withheld = withheld;
 	return summary;
+}
+
+/** Calls that ran: a notice the spent observation pool returned in a call's place ran nothing (C-17). */
+export function executedCalls(activity: Pick<ToolActivitySummary, "calls" | "withheld">): number {
+	return activity.calls - (activity.withheld ?? 0);
 }
 
 /**
@@ -136,8 +162,12 @@ export function summarizeToolActivity(
  */
 export function zeroSuccessfulToolNote(activity: ToolActivitySummary): string | null {
 	if (activity.succeeded > 0) return null;
-	if (activity.calls === 0) return "completed without executing any tools";
-	return `completed without a successful tool call (${activity.calls} attempted: ${activity.failed} failed, ${activity.blocked} blocked)`;
+	const withheld = activity.withheld ?? 0;
+	if (executedCalls(activity) === 0)
+		return withheld > 0
+			? `completed without executing any tools (${withheld} withheld by the observation budget)`
+			: "completed without executing any tools";
+	return `completed without a successful tool call (${activity.calls} attempted: ${activity.failed} failed, ${activity.blocked} blocked${withheld > 0 ? `, ${withheld} withheld` : ""})`;
 }
 
 /**
@@ -284,7 +314,7 @@ export function workerNoWorkDetail(input: {
 		const reason = input.limitationDetail?.trim() || report;
 		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
 	}
-	if (input.toolLaneObserved !== false && input.activity.calls === 0) {
+	if (input.toolLaneObserved !== false && executedCalls(input.activity) === 0) {
 		return "worker executed no tools, so it did none of its assignment";
 	}
 	// A worker that found nothing to change says so; one incidental refusal on the way does not undo that finish.
@@ -302,11 +332,12 @@ export function workerNoWorkDetail(input: {
  * subprocess whose tool lane Clio cannot see.
  */
 export function readScopedNoToolsReason(input: {
-	activity: Pick<ToolActivitySummary, "calls">;
+	activity: Pick<ToolActivitySummary, "calls" | "withheld">;
 	obligation: Obligation;
 	toolLaneObserved: boolean;
 }): string | null {
-	if (input.obligation !== "observed-evidence" || !input.toolLaneObserved || input.activity.calls > 0) return null;
+	if (input.obligation !== "observed-evidence" || !input.toolLaneObserved || executedCalls(input.activity) > 0)
+		return null;
 	return "obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited";
 }
 

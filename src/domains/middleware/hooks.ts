@@ -414,7 +414,12 @@ export interface HookReceipt {
 	kind: UserHookKind | "runtime";
 	outcome: UserHookOutcome | "runtime-ok" | "runtime-failed" | "runtime-timeout";
 	effectKinds?: string[];
+	/** With `runs`, the total over the runs this receipt stands for. */
 	durationMs?: number;
+	/** Present when one receipt stands for several effect-free runs of a hook in one turn (C-33). */
+	runs?: number;
+	/** With `runs`, the longest of those runs. */
+	maxDurationMs?: number;
 	/** The command hook's own wall-clock limit, so a receipt shows how close a run came to it. */
 	timeoutMs?: number;
 	exitCode?: number;

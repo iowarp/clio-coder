@@ -40,6 +40,7 @@ import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import { createExtensionKeyValueHost, extensionDataPaths } from "./runtime-state.js";
 import { type ExtensionGlobWatch, watchExtensionGlobs } from "./runtime-watch.js";
+import { pruneOrphanedExtensionSessionState } from "./session-state.js";
 import { validateSkin } from "./skin-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import { type ActiveExtensionWorkspace, ExtensionSurfaceModel } from "./surface-model.js";
@@ -82,6 +83,11 @@ export interface OperatorRuntimeV2Options {
 	onReload?: (result: OperatorReloadResult, reason: ReloadReason) => void;
 	/** Explicit headless invocation starts only its selected owner. */
 	onlyId?: string;
+	/**
+	 * False in a host that serves no session of its own, the worker hook host: only a main session's host removes the
+	 * state of deleted sessions at startup (C-35).
+	 */
+	pruneOrphanedSessionState?: boolean;
 	/**
 	 * False for an extension the operator muted. Checked at every entry point,
 	 * so a mute takes effect at once while the reload that unloads it waits for
@@ -549,6 +555,9 @@ export class OperatorExtensionRuntimeV2 {
 			const key = contextKey(context);
 			const list = this.list();
 			this.inventory = list;
+			// A session host starts once per process: state its deleted sessions left behind goes then (C-35).
+			if (reason === "startup" && this.options.onlyId === undefined && this.options.pruneOrphanedSessionState !== false)
+				pruneOrphanedExtensionSessionState((this.options.stateDir ?? clioStateDir)(), context.sessionId);
 			if (reason !== "startup") await this.closeSession(reason);
 			// Every instance restarts; state and the picture are host-held, so nothing is lost but in-flight work.
 			this.retireAll(reason);

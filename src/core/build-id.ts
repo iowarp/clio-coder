@@ -5,3 +5,5 @@
  * under tsx and tests see null.
  */
 export const runningBuildId: string | null = null;
+/** When that build started, as an ISO timestamp; served with the id, null for source runs. */
+export const runningBuildAt: string | null = null;

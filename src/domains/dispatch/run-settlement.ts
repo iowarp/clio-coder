@@ -360,6 +360,7 @@ export function settleFinishedRun(
 					errors: stat.errors,
 					blocked: stat.blocked - refusedAsks,
 					...(refusedAsks > 0 ? { asked: refusedAsks } : {}),
+					...((stat.withheld ?? 0) > 0 ? { withheld: stat.withheld } : {}),
 				};
 			}),
 			skills: (receipt.skillActivations ?? [])

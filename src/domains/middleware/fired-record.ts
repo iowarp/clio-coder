@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { telemetryContext, withToolTelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import { unboundTelemetrySession } from "../../core/telemetry/producer.js";
 import {
 	type MiddlewareFiredRule,
 	type MiddlewareHookResult,
@@ -59,9 +60,11 @@ export function recordFiredRules(
 	const result = withFiringIds(given);
 	try {
 		const { input } = result;
+		// A fresh session's first turn fires before the session exists; its firings wait for it (CLI-P47).
+		const sessionId = input.sessionId ?? (input.runId === undefined ? unboundTelemetrySession() : undefined);
 		const ctx = withToolTelemetryContext(
 			{
-				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				...(sessionId !== undefined ? { sessionId } : {}),
 				...(input.runId !== undefined ? { runId: input.runId } : {}),
 				...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 				...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),

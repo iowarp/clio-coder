@@ -120,9 +120,12 @@ describe("evidence integrity boundary", () => {
 		match(labels, /refused_cause=approval_timeout:1 \(a call waited for approval and no one answered in time\)/u);
 	});
 
-	it("counts every refused ask out of the sealed tools row, past the 50 the receipt lists (SC-2)", () => {
+	it("counts every refused ask and withheld notice out of the sealed tools row, past the 50 the receipt lists (SC-2, C-17)", () => {
 		const draft = fixtureReceiptDraft(fixtureEnvelope("asks-past-the-list"));
-		draft.toolStats = [{ tool: "bash", count: 61, ok: 0, errors: 0, blocked: 61, totalDurationMs: 1 }];
+		draft.toolStats = [
+			{ tool: "bash", count: 61, ok: 0, errors: 0, blocked: 61, totalDurationMs: 1 },
+			{ tool: "read", count: 5, ok: 2, errors: 0, blocked: 0, withheld: 3, totalDurationMs: 1 },
+		];
 		draft.safety = {
 			decisions: { allowed: 0, blocked: 1, permissionRequested: 60 },
 			blockedAttempts: [{ tool: "bash" }],
@@ -147,6 +150,14 @@ describe("evidence integrity boundary", () => {
 			asked: 60,
 		});
 		deepStrictEqual(settle(), { tool: "bash", calls: 61, ok: 0, errors: 0, blocked: 11, asked: 50 });
+		// A notice the spent observation pool returned in a call's place stays on its row as `withheld` (C-17).
+		const sealed = settleFinishedRun(draft, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: 0,
+			frameType: null,
+			usage: undefined,
+		}).facts.tools[1];
+		deepStrictEqual(sealed, { tool: "read", calls: 5, ok: 2, errors: 0, blocked: 0, withheld: 3 });
 	});
 
 	it("keeps unfinished calls and route warnings on the sealed record, so a sealed reader shows them too (FL-6)", () => {
@@ -200,7 +211,7 @@ describe("evidence integrity boundary", () => {
 		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /mutations:yes/u);
 	});
 
-	it("does not call a run whose validation failed a first-pass success (FL-3, bt-48-9)", () => {
+	it("judges first-pass success by the validation a run owed (FL-3, bt-48-9, C-37)", () => {
 		const draft = fixtureReceiptDraft(fixtureEnvelope("validation-failed-first-pass"));
 		draft.quality.resultContract = {
 			sourceId: `agent-result-contract:mutation-report:${"a".repeat(64)}`,
@@ -232,6 +243,58 @@ describe("evidence integrity boundary", () => {
 		strictEqual(settlement.facts.outcome, "succeeded");
 		strictEqual(assessed.data.trust.validationGrounding.state, "failed");
 		strictEqual(assessed.data.firstPassSuccess, false);
+		// C-37: a finish record that counted no paths outweighs no other change signal, such as an ACP delegation's
+		// successful script edit or a headless run's merged dispatch worktree its host observed.
+		const unvalidated = fixtureReceiptDraft(fixtureEnvelope("changed-without-counted-paths"));
+		const firstPass = (observedChange: boolean) => {
+			const settled = settleFinishedRun(unvalidated, {
+				terminal: { terminalReason: "completed" },
+				processExitCode: 0,
+				frameType: null,
+				usage: undefined,
+			});
+			const runCtx = { ...ctx, runId: unvalidated.runId, agent: { role: "worker" as const, id: unvalidated.runId } };
+			const clock = { t: unvalidated.endedAt, mono: 1 };
+			const noMutation = {
+				decision: "ok" as const,
+				reason: "no_mutation" as const,
+				rigor: "normal" as const,
+				mutatedPaths: 0,
+				evidenceKinds: [],
+			};
+			return assessRun(unvalidated.runId, {
+				records: [
+					makeTelemetryRecord(
+						"completion.evaluated",
+						{ ...noMutation, verification: { passedChecks: [], acceptance: [] } },
+						runCtx,
+						clock,
+					),
+					makeTelemetryRecord(
+						"run.settled",
+						{ ...settled.facts, result: telemetryObjectRef("run-result", settled.result) },
+						runCtx,
+						clock,
+					),
+				],
+				context: {
+					sessionId: null,
+					cwd: "/repo",
+					attempt: 0,
+					decisionRefs: [],
+					pipeline: null,
+					personaOverride: null,
+					observedChange,
+				},
+				gateDecisions: [],
+				decisions: null,
+			})?.data.firstPassSuccess;
+		};
+		unvalidated.toolActivity = { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: true };
+		strictEqual(firstPass(false), false);
+		unvalidated.toolActivity = { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false };
+		strictEqual(firstPass(true), false);
+		strictEqual(firstPass(false), true);
 	});
 
 	it("treats run ids as identities, never paths", async () => {

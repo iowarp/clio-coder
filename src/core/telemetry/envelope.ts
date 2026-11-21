@@ -39,7 +39,25 @@ export const SegmentHeaderSchema = Type.Object(
 			closed,
 		),
 		clockOrigin: ClockOriginSchema,
-		writer: Type.Object({ clioCoderVersion: Type.String(), piVersion: Type.String() }, closed),
+		writer: Type.Object(
+			{
+				clioCoderVersion: Type.String(),
+				piVersion: Type.String(),
+				/** The build that wrote the segment, when the bundle recorded one; a source run writes none (C-31). */
+				build: Type.Optional(
+					Type.Object(
+						{
+							commit: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+							dirty: Type.Optional(Type.Boolean()),
+							id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+							builtAt: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+						},
+						closed,
+					),
+				),
+			},
+			closed,
+		),
 		/**
 		 * The scope's hash chain head when this segment opened, on the first header of every segment a rotation opened,
 		 * so the rotated segments form one chain. The scope's first segment starts the chain and carries none (#434).
