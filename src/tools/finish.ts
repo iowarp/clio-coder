@@ -172,7 +172,7 @@ export function bareFinishVerdict(
 }
 
 /** Whether an assistant response carries a non-empty text block: the typed reply fact, never its wording. */
-export function hasReplyText(message: { content?: unknown }): boolean {
+function hasReplyText(message: { content?: unknown }): boolean {
 	return (
 		Array.isArray(message.content) &&
 		message.content.some(

@@ -44,6 +44,7 @@ import { prefixBlocksOf } from "./prefix-blocks.js";
  */
 
 import { performance } from "node:perf_hooks";
+import { replySegment } from "../cli/modes/answer-segments.js";
 import type { BackendCompletionTimings, CacheRequestStructure } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
@@ -97,7 +98,6 @@ import {
 	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
-	hasReplyText,
 	withoutReplyResult,
 } from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
@@ -1393,7 +1393,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
 				if (verdict !== "refuse") return undefined;
 				state.finishReplyRefused = true;
-				const refusedTurn = state.activeUserTurnId;
+				const active = state.activeUserTurnId;
+				// Keyed like turnCalls (bt-26 N2h): a refusal after a steer settles under the user turn the run started under.
+				const refusedTurn = active && (steeredTurns.get(active) ?? runTurnId ?? active);
 				if (refusedTurn) bareFinishRefusals.set(refusedTurn, (bareFinishRefusals.get(refusedTurn) ?? 0) + 1);
 				return { block: true, reason: FINISH_WITHOUT_REPLY_REFUSAL };
 			},
@@ -2007,7 +2009,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			lastActivityAt = eventClock;
 			let enrichedEvent = event;
 			if (event.type === "message_end" && event.message.role === "assistant") {
-				if (hasReplyText(event.message)) state.turnReplied = true;
 				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
 				const cutOff = outputLimitCutOffToolCallIds(event.message);
 				for (const id of cutOff) cutOffToolCalls.add(id);
@@ -2114,7 +2115,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					if (attached.includes(tool)) return true;
 					return attached.includes("gateway") && (deps.gatewayCapabilityNames?.().includes(tool) ?? false);
 				});
+				// CLI-P49: the turn has replied exactly when the headless answer has a segment, read by the same typed
+				// predicate after the written-calls stamp: no narration beside a work call, failed message or dead markup.
+				if (replySegment(event.message) !== null) state.turnReplied = true;
 			}
+			// Every user message starts the turn whose replies are the answer, as the headless reader counts it (CLI-P43), so
+			// a continuation's prompt clears the reply the bare-finish check reads too.
+			if (event.type === "message_end" && event.message.role === "user") state.turnReplied = false;
 			// The run's start and end name the operator turn its calls journal under, so the transcript receipt reads
 			// that turn's spend from the read model (#434 §11.3).
 			if ((enrichedEvent.type === "agent_start" || enrichedEvent.type === "agent_end") && state.activeUserTurnId)
