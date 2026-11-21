@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
+import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
+import memoryFlowSweep from "../../src/domains/lifecycle/migrations/2026-11-21-memory-flow-sweep.js";
 import {
 	commandSegment,
 	parseSourceEvidenceRef,
@@ -22,10 +24,10 @@ import {
 import { consolidateMemory } from "../../src/domains/memory/consolidate.js";
 import { type MemoryFlowSweepPorts, sweepRestrictedMemory } from "../../src/domains/memory/flow-sweep.js";
 import { createMemoryGuardian } from "../../src/domains/memory/guardian.js";
-import { approveMemoryRecord } from "../../src/domains/memory/operations.js";
 import { claimCommand, claimNote, memoryRecordFromPromotion } from "../../src/domains/memory/promotion.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import type { MemoryRecord, MemoryRepositoryIdentity } from "../../src/domains/memory/types.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const LABEL_AT = "2026-06-02T00:00:00.000Z";
 const BEFORE = "2026-06-01T00:00:00.000Z";
@@ -100,7 +102,7 @@ test("the sweep rejects what its source's label or the project's rules say, and 
 		record("already-rejected", { source: "labeled", approved: false, rejectedAt: BEFORE }),
 	]);
 	try {
-		const rejected = await sweepRestrictedMemory(h.dataDir, h.stateDir, ports);
+		const rejected = await sweepRestrictedMemory(h.dataDir, ports);
 		deepStrictEqual(named(rejected), [
 			"after-label",
 			"at-label",
@@ -121,32 +123,29 @@ test("the sweep rejects what its source's label or the project's rules say, and 
 	}
 });
 
-test("a finished sweep never runs again, so an operator's restore stands", async () => {
-	const h = home([record("after-label", { source: "labeled" })]);
-	try {
-		const [id] = (await sweepRestrictedMemory(h.dataDir, h.stateDir, ports)) ?? [];
-		strictEqual(names.get(id ?? ""), "after-label");
-		await approveMemoryRecord(h.dataDir, id ?? "");
-		strictEqual(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports), null);
-		const [restored] = loadMemoryRecordsSync(h.dataDir);
-		strictEqual(restored?.approved, true);
-		strictEqual(restored?.rejectedAt, undefined);
-	} finally {
-		rmSync(h.root, { recursive: true, force: true });
-	}
+test("the migration sweeps once, and a home whose boot already finished the sweep loses only the marker", async (t) => {
+	const env = await isolateClioEnv("clio-memory-flow-sweep-");
+	t.after(() => env.restore());
+	const marker = join(clioStateDir(), "memory", "flow-sweep-v1.json");
+	mkdirSync(join(clioStateDir(), "memory"), { recursive: true });
+	writeFileSync(marker, "{}\n");
+	mkdirSync(join(clioDataDir(), "memory"), { recursive: true });
+	const stored = JSON.stringify({ version: 2, records: [record("after-label", { source: "labeled" })] });
+	writeFileSync(memoryStorePath(clioDataDir()), stored);
+	deepStrictEqual(await memoryFlowSweep.up(clioStateDir()), { changed: [], attention: [] });
+	strictEqual(existsSync(marker), false);
+	strictEqual(readFileSync(memoryStorePath(clioDataDir()), "utf8"), stored, "the finished sweep is not repeated");
 });
 
-test("an unreadable store leaves no marker and the next boot finishes the work", async () => {
+test("an unreadable store fails the sweep, and the next run finishes the work", async () => {
 	const h = home("{ not json");
 	try {
-		await rejects(sweepRestrictedMemory(h.dataDir, h.stateDir, ports));
-		strictEqual(existsSync(join(h.stateDir, "memory", "flow-sweep-v1.json")), false);
+		await rejects(sweepRestrictedMemory(h.dataDir, ports));
 		writeFileSync(
 			memoryStorePath(h.dataDir),
 			JSON.stringify({ version: 2, records: [record("after-label", { source: "labeled" })] }),
 		);
-		deepStrictEqual(named(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports)), ["after-label"]);
-		strictEqual(existsSync(join(h.stateDir, "memory", "flow-sweep-v1.json")), true);
+		deepStrictEqual(named(await sweepRestrictedMemory(h.dataDir, ports)), ["after-label"]);
 	} finally {
 		rmSync(h.root, { recursive: true, force: true });
 	}
@@ -156,8 +155,7 @@ test("an empty or missing store finishes with nothing rejected", async () => {
 	const h = home([]);
 	try {
 		rmSync(memoryStorePath(h.dataDir));
-		deepStrictEqual(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports), []);
-		strictEqual(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports), null);
+		deepStrictEqual(await sweepRestrictedMemory(h.dataDir, ports), []);
 		strictEqual(existsSync(memoryStorePath(h.dataDir)), false, "the sweep creates no store");
 	} finally {
 		rmSync(h.root, { recursive: true, force: true });

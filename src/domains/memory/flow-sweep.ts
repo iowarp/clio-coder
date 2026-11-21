@@ -1,14 +1,13 @@
-import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { rejectMemoryRecords } from "./operations.js";
 import { loadMemoryRecordsSync } from "./store.js";
 import type { MemoryRecord } from "./types.js";
 
 /**
  * Releases before 0.6.8 filed lessons from sessions under an information-flow restriction, with no label, and they reach
- * every later route. One pass withdraws them. Nothing filed since can need it, because every filing path now refuses a
- * labeled source, so a marker ends the work for good and an operator's `memory approve` afterwards stands.
+ * every later route. The `2026-11-21-memory-flow-sweep` upgrade migration withdraws them once. Nothing filed since can
+ * need it, because every filing path now refuses a labeled source, so the migration manifest ends the work for good and
+ * an operator's `memory approve` afterwards stands.
  */
 const SWEEP_LOCK_TIMEOUT_MS = 2_000;
 
@@ -19,7 +18,8 @@ export interface MemoryFlowSweepPorts {
 	repositoryDeclaresFlowRules(repositoryPath: string): boolean;
 }
 
-function memoryFlowSweepMarkerPath(stateDir: string): string {
+/** Where the sweep's marker lived while it ran at boot; the migration removes it. */
+export function memoryFlowSweepMarkerPath(stateDir: string): string {
 	return join(stateDir, "memory", "flow-sweep-v1.json");
 }
 
@@ -64,27 +64,12 @@ function restrictedMemoryRecordIds(records: ReadonlyArray<MemoryRecord>, ports: 
 	return ids;
 }
 
-/**
- * Run the sweep unless its marker exists. Returns the ids it rejected, or null when an earlier pass already finished.
- * Throws with no marker written when the store or the marker cannot be handled, so the next boot tries again.
- */
+/** Withdraw the restricted lessons and return their ids. Throws when the store cannot be read or written. */
 export async function sweepRestrictedMemory(
 	dataDir: string,
-	stateDir: string,
 	ports: MemoryFlowSweepPorts,
 	now: Date = new Date(),
-): Promise<string[] | null> {
-	const marker = memoryFlowSweepMarkerPath(stateDir);
-	if (existsSync(marker)) return null;
+): Promise<string[]> {
 	const ids = restrictedMemoryRecordIds(loadMemoryRecordsSync(dataDir), ports);
-	const rejected =
-		ids.size > 0 ? await rejectMemoryRecords(dataDir, ids, now, { timeoutMs: SWEEP_LOCK_TIMEOUT_MS }) : [];
-	safeResourceWrite(marker, `${JSON.stringify({ version: 1, at: now.toISOString(), rejected }, null, 2)}\n`, {
-		mode: 0o600,
-	});
-	return rejected;
-}
-
-export function memoryFlowSweepNotice(count: number): string {
-	return `Memory withdrew ${count} lesson${count === 1 ? "" : "s"} filed from sessions under an information-flow restriction. Review with clio-coder memory list; clio-coder memory approve <id> restores one.`;
+	return ids.size > 0 ? await rejectMemoryRecords(dataDir, ids, now, { timeoutMs: SWEEP_LOCK_TIMEOUT_MS }) : [];
 }
