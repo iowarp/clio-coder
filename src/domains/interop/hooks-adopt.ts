@@ -3,7 +3,8 @@
  * `hooks/hooks.json`, Codex `hooks/hooks.json`; both use the same
  * `{hooks: {<Event>: [{matcher, hooks: [{type: "command", command, timeout}]}]}}`
  * shape) ported onto Clio's command hooks: the same shell command, fed the
- * event as JSON on stdin, blocking with exit 2. A user source lands in the
+ * event as JSON on stdin in the source agent's dialect (its tool names and
+ * `tool_input` shapes), blocking with exit 2 or a JSON decision. A user source lands in the
  * user's `<config>/hooks.yaml`; a project source lands in the project's
  * `.clio-coder/hooks.yaml`, which keeps its own workspace-trust review.
  * What Clio cannot state the same way (a regex matcher, an MCP tool matcher,
@@ -16,12 +17,14 @@ import path from "node:path";
 import { parseDocument, stringify as stringifyYaml } from "yaml";
 import { clioProjectRoot } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import {
+	dialectToolNames,
+	isUserHookDialect,
 	loadUserHooks,
 	USER_HOOK_COMMAND_TIMEOUT_MAX_MS,
 	USER_HOOKS_FILENAME,
+	type UserHookDialect,
 	type UserHookOrigin,
 } from "../middleware/index.js";
 import { inventoryText } from "./inventory.js";
@@ -45,22 +48,6 @@ const EVENTS: Readonly<
 	Stop: { on: "turn_end", as: "none" },
 };
 
-/** Claude Code and Codex tool names to Clio's. */
-const TOOLS: Readonly<Record<string, string>> = {
-	Bash: ToolNames.Bash,
-	shell: ToolNames.Bash,
-	Read: ToolNames.Read,
-	Write: ToolNames.Write,
-	Edit: ToolNames.Edit,
-	MultiEdit: ToolNames.Edit,
-	apply_patch: ToolNames.Edit,
-	Glob: ToolNames.Find,
-	Grep: ToolNames.Grep,
-	LS: ToolNames.Ls,
-	WebFetch: ToolNames.WebFetch,
-	Task: ToolNames.Dispatch,
-};
-
 function record(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -72,24 +59,17 @@ function slug(text: string): string {
 		.replace(/[^a-z0-9]+/g, "-");
 }
 
-/** The Clio tool list a matcher names, with the payload names scripts expect; a string is why it cannot. */
-function mapMatcher(matcher: unknown): { tools?: string[]; toolNameMap: Record<string, string> } | string {
-	const reverse = (names: ReadonlyArray<string>): Record<string, string> => {
-		const map: Record<string, string> = {};
-		for (const name of names) {
-			const clio = TOOLS[name];
-			if (clio !== undefined && map[clio] === undefined) map[clio] = name;
-		}
-		return map;
-	};
-	if (matcher === undefined || matcher === "" || matcher === "*") return { toolNameMap: reverse(Object.keys(TOOLS)) };
+/** The Clio tools a matcher names in the source agent's dialect; a string is why it cannot. */
+function mapMatcher(matcher: unknown, dialect: UserHookDialect): { tools?: string[] } | string {
+	const tools = dialectToolNames(dialect);
+	if (matcher === undefined || matcher === "" || matcher === "*") return {};
 	if (typeof matcher !== "string") return "its matcher is not a string";
 	if (!/^[A-Za-z_]+(\|[A-Za-z_]+)*$/.test(matcher))
 		return `its matcher ${JSON.stringify(matcher)} is a pattern, not a list of tool names`;
 	const names = matcher.split("|");
-	const unknown = names.filter((name) => TOOLS[name] === undefined);
+	const unknown = names.filter((name) => tools[name] === undefined);
 	if (unknown.length > 0) return `CLIO Coder has no tool matching ${unknown.join(", ")}`;
-	return { tools: [...new Set(names.map((name) => TOOLS[name] as string))], toolNameMap: reverse(names) };
+	return { tools: [...new Set(names.map((name) => tools[name] as string))] };
 }
 
 function destinationOf(scope: "user" | "project", cwd: string): { path: string; origin: UserHookOrigin; root: string } {
@@ -102,6 +82,9 @@ function destinationOf(scope: "user" | "project", cwd: string): { path: string; 
 export function mapForeignHooks(item: InteropInventoryItem, host: InteropAgentId, cwd: string): HookAdoptionMapping {
 	const event = EVENTS[item.name];
 	if (event === undefined) return { ok: false, reason: `Not adoptable: CLIO Coder has no hook point for ${item.name}.` };
+	if (!isUserHookDialect(host))
+		return { ok: false, reason: `Not adoptable: CLIO Coder does not speak the ${host} hook protocol.` };
+	const dialect = host;
 	let groups: unknown;
 	try {
 		const data: unknown = JSON.parse(inventoryText(item.path));
@@ -120,9 +103,9 @@ export function mapForeignHooks(item: InteropInventoryItem, host: InteropAgentId
 			notes.push(`${where} skipped: no hooks list`);
 			return;
 		}
-		let tools: { tools?: string[]; toolNameMap: Record<string, string> } | undefined;
+		let tools: { tools?: string[] } | undefined;
 		if (event.on === "before_tool" || event.on === "after_tool") {
-			const mapped = mapMatcher(group.matcher);
+			const mapped = mapMatcher(group.matcher, dialect);
 			if (typeof mapped === "string") {
 				notes.push(`${where} skipped: ${mapped}`);
 				return;
@@ -157,8 +140,8 @@ export function mapForeignHooks(item: InteropInventoryItem, host: InteropAgentId
 				timeoutMs: Math.min(USER_HOOK_COMMAND_TIMEOUT_MAX_MS, Math.round(seconds * 1000)),
 				as: event.as,
 				eventName: item.name,
+				dialect,
 				...(tools?.tools ? { tools: tools.tools } : {}),
-				...(tools && Object.keys(tools.toolNameMap).length > 0 ? { toolNameMap: tools.toolNameMap } : {}),
 				...(event.once ? { once: event.once } : {}),
 			});
 		});

@@ -369,7 +369,7 @@ describe("interop discovery and adoption", () => {
 						timeoutMs: 3000,
 						as: "none",
 						eventName: "PreToolUse",
-						toolNameMap: { bash: "Bash" },
+						dialect: "claude-code",
 					},
 				],
 			],

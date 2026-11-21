@@ -22,6 +22,13 @@
 
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
+import {
+	dialectOutputEffects,
+	dialectToolCall,
+	isUserHookDialect,
+	USER_HOOK_DIALECTS,
+	type UserHookDialect,
+} from "./hook-dialect.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import {
 	type DeclarableMiddlewareEffect,
@@ -144,8 +151,8 @@ export interface NormalizedCommandHook {
 	as: "annotate" | "reminder" | "none";
 	/** `hook_event_name` in the stdin payload; the Clio event when unset. */
 	eventName?: string;
-	/** Clio tool name to the name the payload's `tool_name` carries, for scripts written against another agent. */
-	toolNameMap?: Record<string, string>;
+	/** Another agent's hook protocol: its tool names and `tool_input` shapes on stdin, its JSON decisions on stdout. */
+	dialect?: UserHookDialect;
 }
 
 export interface NormalizedPromptHook {
@@ -263,13 +270,12 @@ function normalizeCommandSpec(
 		}
 		spec.eventName = raw.eventName;
 	}
-	if (raw.toolNameMap !== undefined) {
-		const map = raw.toolNameMap;
-		if (!isRecord(map) || !Object.values(map).every((value) => typeof value === "string" && value.length > 0)) {
-			issues.push("command.toolNameMap must map tool names to non-empty strings");
+	if (raw.dialect !== undefined) {
+		if (!isUserHookDialect(raw.dialect)) {
+			issues.push(`command.dialect must be ${USER_HOOK_DIALECTS.map((name) => JSON.stringify(name)).join(" or ")}`);
 			return null;
 		}
-		spec.toolNameMap = { ...(map as Record<string, string>) };
+		spec.dialect = raw.dialect;
 	}
 	return spec;
 }
@@ -589,20 +595,25 @@ function receiptExtension(source: UserHookExtensionSource): HookReceiptExtension
 
 /**
  * The event a command hook reads as one JSON object on stdin, in the field
- * names coding-agent hook scripts already parse. Tool arguments and results
- * are Clio's own shapes; a result that would push the payload past its cap is
- * left out and flagged.
+ * names coding-agent hook scripts already parse. A dialect names the tool and
+ * shapes its arguments as that agent does; results stay Clio's own shapes. A
+ * result that would push the payload past its cap is left out and flagged.
  */
 function hookPayload(hook: NormalizedUserHook, spec: NormalizedCommandHook, input: MiddlewareHookInput): string {
-	const toolName = input.toolName === undefined ? undefined : (spec.toolNameMap?.[input.toolName] ?? input.toolName);
+	const call =
+		input.toolName === undefined
+			? undefined
+			: spec.dialect !== undefined
+				? dialectToolCall(spec.dialect, input.toolName, input.toolArgs)
+				: { name: input.toolName, input: input.toolArgs };
 	const payload: Record<string, unknown> = {
 		hook_event_name: spec.eventName ?? hook.on,
 		...(input.sessionId !== undefined ? { session_id: input.sessionId } : {}),
 		...(input.turnId !== undefined ? { turn_id: input.turnId } : {}),
 		...(input.runId !== undefined ? { run_id: input.runId } : {}),
 		cwd: spec.cwd ?? process.cwd(),
-		...(toolName !== undefined ? { tool_name: toolName } : {}),
-		...(input.toolArgs !== undefined ? { tool_input: input.toolArgs } : {}),
+		...(call !== undefined ? { tool_name: call.name } : {}),
+		...(call?.input !== undefined ? { tool_input: call.input } : {}),
 		...(input.toolResultDetails !== undefined ? { tool_response: input.toolResultDetails } : {}),
 		...(hook.on === "turn_start" && input.text !== undefined ? { prompt: input.text } : {}),
 		...(hook.on === "turn_end" && input.text !== undefined ? { last_assistant_message: input.text } : {}),
@@ -660,6 +671,22 @@ function evaluateHook(
 		return [];
 	}
 	const outcome: UserHookOutcome = result.code === 0 ? "command-ok" : "command-failed";
+	// A dialect hook that exits 0 may answer in JSON on stdout, which decides as exit 2 does.
+	const decided =
+		result.code === 0 && hook.spec.dialect !== undefined
+			? dialectOutputEffects(hook.on, result.stdout, hook.id, USER_HOOK_COMMAND_OUTPUT_MAX_CHARS)
+			: null;
+	if (decided !== null) {
+		deps.recordReceipt({
+			...base,
+			outcome,
+			exitCode: 0,
+			outputChars: output.length,
+			...timing,
+			...(decided.length > 0 ? { effectKinds: decided.map((effect) => effect.kind) } : {}),
+		});
+		return decided;
+	}
 	// Exit 2 blocks: its standard error (else its output) is the reason the model or the operator reads.
 	const effect =
 		result.code === USER_HOOK_BLOCK_EXIT_CODE

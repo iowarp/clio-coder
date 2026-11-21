@@ -1342,7 +1342,7 @@ describe("user hook applicability", () => {
 			as: "none",
 			eventName: "PreToolUse",
 			tools: ["bash"],
-			toolNameMap: { bash: "Bash" },
+			dialect: "claude-code",
 		});
 		const call = { hook: "before_tool" as const, sessionId: "s1", toolName: "bash", toolArgs: { command: "rm -rf x" } };
 		deepStrictEqual(pre.evaluate(call), [{ kind: "block_tool", reason: "no rm here", severity: "hard-block" }]);
@@ -1397,6 +1397,109 @@ describe("user hook applicability", () => {
 		} finally {
 			rmSync(configDir, { recursive: true, force: true });
 		}
+	});
+
+	it("speaks the claude-code and codex hook dialects: their tool_input names and JSON decisions (EX-4)", () => {
+		const inputs: Array<string | undefined> = [];
+		let stdout = "";
+		const runCommand: UserHookCommandRunner = (_argv, runOptions) => {
+			inputs.push(runOptions.input);
+			return { code: 0, timedOut: false, stdout, stderr: "" };
+		};
+		const build = (raw: Record<string, unknown>) => {
+			const hook = normalizeUserHook(
+				{ kind: "command", argv: ["/bin/sh", "-c", "x"], as: "none", ...raw },
+				source,
+				options,
+			).hook;
+			ok(hook, JSON.stringify(raw));
+			return userHookToRegistration(hook, { recordReceipt: () => {}, runCommand });
+		};
+		const sent = () => JSON.parse(inputs.at(-1) ?? "{}") as Record<string, unknown>;
+		const claude = build({ id: "claude", on: "before_tool", dialect: "claude-code" });
+		const call = (toolName: string, toolArgs: Record<string, unknown>) => ({
+			hook: "before_tool" as const,
+			toolName,
+			toolArgs,
+		});
+		claude.evaluate(call("edit", { path: "a.env", edits: [{ oldText: "x", newText: "y" }] }));
+		deepStrictEqual(
+			[sent().tool_name, sent().tool_input],
+			["Edit", { file_path: "a.env", old_string: "x", new_string: "y" }],
+		);
+		claude.evaluate(
+			call("edit", {
+				path: "a",
+				edits: [
+					{ oldText: "1", newText: "2" },
+					{ oldText: "3", newText: "4" },
+				],
+			}),
+		);
+		deepStrictEqual(
+			[sent().tool_name, sent().tool_input],
+			[
+				"MultiEdit",
+				{
+					file_path: "a",
+					edits: [
+						{ old_string: "1", new_string: "2" },
+						{ old_string: "3", new_string: "4" },
+					],
+				},
+			],
+		);
+		claude.evaluate(call("write", { path: "b", content: "c" }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Write", { file_path: "b", content: "c" }]);
+		claude.evaluate(call("read", { path: "r", offset: 3, limit: 9 }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Read", { file_path: "r", offset: 3, limit: 9 }]);
+		claude.evaluate(call("find", { pattern: "*.ts", path: "src" }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Glob", { pattern: "*.ts", path: "src" }]);
+		const codex = build({ id: "codex", on: "before_tool", dialect: "codex" });
+		codex.evaluate(call("bash", { command: "ls" }));
+		deepStrictEqual([sent().tool_name, sent().tool_input], ["Bash", { command: "ls" }]);
+		codex.evaluate(call("edit", { path: "a.env", edits: [{ oldText: "x", newText: "y" }] }));
+		strictEqual(sent().tool_name, "apply_patch");
+		ok(String((sent().tool_input as { command?: unknown }).command).includes("*** Update File: a.env\n@@\n-x\n+y"));
+		// Exit 0 with JSON on stdout decides like exit 2 does; plain stdout stays ignored under as: none.
+		const bash = call("bash", { command: "cat .env" });
+		stdout = "not json";
+		deepStrictEqual(claude.evaluate(bash), []);
+		stdout = JSON.stringify({
+			hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "secrets stay closed" },
+		});
+		deepStrictEqual(claude.evaluate(bash), [
+			{ kind: "block_tool", reason: "secrets stay closed", severity: "hard-block" },
+		]);
+		deepStrictEqual(codex.evaluate(bash), [
+			{ kind: "block_tool", reason: "secrets stay closed", severity: "hard-block" },
+		]);
+		stdout = JSON.stringify({ decision: "block", reason: "legacy block" });
+		deepStrictEqual(claude.evaluate(bash), [{ kind: "block_tool", reason: "legacy block", severity: "hard-block" }]);
+		stdout = JSON.stringify({ hookSpecificOutput: { permissionDecision: "allow" } });
+		deepStrictEqual(claude.evaluate(bash), [], "allow grants nothing past Clio's own admission");
+		stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: "touches generated files" } });
+		deepStrictEqual(claude.evaluate(bash), [
+			{ kind: "annotate_tool_result", message: "touches generated files", severity: "info" },
+		]);
+		const prompt = build({ id: "prompt", on: "turn_start", as: "reminder", dialect: "claude-code" });
+		deepStrictEqual(prompt.evaluate({ hook: "turn_start" }), []);
+		stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: "ask for a reproduction" } });
+		return Promise.resolve(prompt.evaluateAsync?.({ hook: "turn_start", text: "fix it" })).then(async (effects) => {
+			deepStrictEqual(effects, [{ kind: "inject_reminder", message: "ask for a reproduction" }]);
+			stdout = JSON.stringify({ decision: "block", reason: "say what broke" });
+			deepStrictEqual(await prompt.evaluateAsync?.({ hook: "turn_start", text: "fix it" }), [
+				{ kind: "block_tool", reason: "say what broke", severity: "hard-block" },
+			]);
+			const stop = build({ id: "stop", on: "turn_end", dialect: "codex" });
+			stdout = JSON.stringify({ decision: "block", reason: "run the failing tests again" });
+			const continued = stop.evaluate({ hook: "turn_end", text: "done" });
+			strictEqual(continued[0]?.kind, "request_continuation");
+			ok(JSON.stringify(continued).includes("run the failing tests again"));
+			ok(
+				issuesFor({ on: "before_tool", kind: "command", argv: ["x"], dialect: "zed" }).some((i) => i.includes("dialect")),
+			);
+		});
 	});
 
 	it("surfaces a command hook's first-run stall and receipts a thrown hook as failed, not skipped (D2-3)", () => {

@@ -36,6 +36,7 @@ export {
 } from "./dispatch-nudge.js";
 export type { MiddlewareBundle, MiddlewareBundleOptions, MiddlewareDomain } from "./extension.js";
 export { createEnvHookBudgetTracker, createMiddlewareBundle, createMiddlewareDomain } from "./extension.js";
+export { dialectToolNames, isUserHookDialect, type UserHookDialect } from "./hook-dialect.js";
 export type {
 	HookReceipt,
 	HookReceiptExtension,
