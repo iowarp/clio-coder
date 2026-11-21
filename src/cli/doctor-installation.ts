@@ -41,7 +41,7 @@ export async function installationFindings(fix: boolean): Promise<DoctorFinding[
 				});
 				missing = missingBuildFiles(installation.root);
 				rebuildFailed = result.exitCode !== 0;
-				repair = rebuildFailed ? "rebuild failed. " : "rebuilt; restart existing Clio sessions. ";
+				repair = rebuildFailed ? "rebuild failed. " : "rebuilt; restart existing CLIO Coder sessions. ";
 			} catch (error) {
 				rebuildFailed = true;
 				repair = `rebuild failed: ${error instanceof Error ? error.message : String(error)}. `;

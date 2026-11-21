@@ -405,10 +405,10 @@ function hints(paint: BoardPaint, parts: ReadonlyArray<string>, width: number): 
 const EMPTY_BOARD = [
 	"No workers in this session yet.",
 	"",
-	"Dispatch one from Clio:",
+	"Dispatch one from CLIO Coder:",
 	"  /run <agent> <task>    one worker on a task",
 	"  /fleet run <playbook>      a playbook",
-	"  or ask Clio to delegate the work.",
+	"  or ask CLIO Coder to delegate the work.",
 	"",
 	"Cards appear here as workers start.",
 ];

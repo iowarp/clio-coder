@@ -113,6 +113,9 @@ export interface InteractiveInputRuntimeDeps {
 		getState(): OverlayState;
 		closeOverlay(): void;
 		confirmPermission(): void;
+		/** The live card offers its sandbox escape's session option, and choosing it (M-7). */
+		canConfirmPermissionForSession?(): boolean;
+		confirmPermissionForSession?(): void;
 		/** The live card opened within the settle window, so Enter does not allow yet. */
 		isPermissionSettling?(): boolean;
 		cancelPermission?(): void;
@@ -305,6 +308,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			return [
 				...builtins,
 				{ key: "x", label: "Stop turn", run: deps.overlay.stopTurnFromPermission },
+				...(deps.overlay.canConfirmPermissionForSession?.() === true
+					? [{ key: "p", label: "Approve for this session", run: () => deps.overlay.confirmPermissionForSession?.() }]
+					: []),
 				{
 					key: "t",
 					label: deps.overlay.isShowingPermissionTerms?.() ? "Hide terms" : "Show terms",
@@ -568,6 +574,8 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				{
 					cancelPermission: () => deps.overlay.cancelPermission?.(),
 					confirmPermission: () => deps.overlay.confirmPermission(),
+					canConfirmPermissionForSession: () => deps.overlay.canConfirmPermissionForSession?.() ?? false,
+					confirmPermissionForSession: () => deps.overlay.confirmPermissionForSession?.(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					composerHasDraft: () => deps.editor.getText().length > 0,
 					explainHeldDraft: () => deps.explainDraftUnderApproval?.(deps.editor.getText()),

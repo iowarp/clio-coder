@@ -14,6 +14,7 @@
  * nothing here imports TUI code.
  */
 
+import path from "node:path";
 import { awkOnlyPrints, commandName, sedOnlyPrints, wrappedCommand } from "../core/command-words.js";
 import {
 	resolveGuardrail,
@@ -24,6 +25,7 @@ import {
 	workerToolCallCapExceededReason,
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
+import { withoutLeadingCdTo } from "../core/leading-cd.js";
 import { markHostAuthored } from "../core/message-accounting.js";
 import { EXPLORATION_TOOL_NAMES, READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
 import { systemReminderBlock, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
@@ -185,9 +187,24 @@ function guardEventContext(input: MiddlewareHookInput) {
 	});
 }
 
+/**
+ * A bash call keyed as the command after a leading `cd` into the directory it already runs in, the base bash itself
+ * resolves, so `cd <root> && npm test` and `npm test` are one repeat (XR-9). What runs is untouched.
+ */
+function repeatArgs(
+	tool: string,
+	args: Readonly<Record<string, unknown>> | undefined,
+): Readonly<Record<string, unknown>> | undefined {
+	if (tool !== ToolNames.Bash || typeof args?.command !== "string") return args;
+	const base =
+		typeof args.cwd === "string" && args.cwd.length > 0 ? path.resolve(process.cwd(), args.cwd) : process.cwd();
+	const command = withoutLeadingCdTo(args.command, base);
+	return command === args.command ? args : { ...args, command };
+}
+
 function callIdentity(tool: string, args: Record<string, unknown> | undefined): string {
 	const git = tool === ToolNames.Git && args !== undefined ? gitCallIdentity(args) : null;
-	return hashToolCall(tool, git ?? args ?? {});
+	return hashToolCall(tool, git ?? repeatArgs(tool, args) ?? {});
 }
 
 /**
@@ -372,7 +389,7 @@ export function callRepeatsAsRead(
 
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
 	const reduced: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(args ?? {})) {
+	for (const [key, value] of Object.entries(repeatArgs(tool, args) ?? {})) {
 		if (!SIZE_ONLY_ARG_KEYS.has(key)) reduced[key] = value;
 	}
 	return hashToolCall(tool, reduced);
@@ -2091,10 +2108,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// the capability and its own arguments. Unwrapping from arguments
 			// alone keeps before_tool and after_tool fingerprints identical, and
 			// the repeat fingerprint is re-derived the same way so the repeat
-			// detector and the success memory share one identity (#F8).
+			// detector and the success memory share one identity (#F8). A bash call
+			// is re-derived too, so a leading cd into its own directory drops (XR-9).
 			const unwrapped = effectiveToolCall(hookInput.toolName ?? "", hookInput.toolArgs);
 			const input: MiddlewareHookInput =
-				unwrapped.viaGateway || unwrapped.toolName === ToolNames.Git
+				unwrapped.viaGateway || unwrapped.toolName === ToolNames.Git || unwrapped.toolName === ToolNames.Bash
 					? {
 							...hookInput,
 							toolName: unwrapped.toolName,

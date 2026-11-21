@@ -936,7 +936,7 @@ export async function runUpgradeCommand(
 			const stake = target === null ? null : stakeInstall(target, installation, dirs.cache);
 			if (stake !== null && "holders" in stake) {
 				presenter.fail(
-					"Other Clio Coder processes of this install are running; nothing was replaced",
+					"Other CLIO Coder processes of this install are running; nothing was replaced",
 					stake.holders.join("\n"),
 				);
 				presenter.commandAdvice(

@@ -28,7 +28,7 @@ export function copilotSignInFinding(check: CopilotSignInCheck, active = true): 
 				ok: !active,
 				...(active ? {} : { level: "warn" as const }),
 				name: NAME,
-				detail: `not signed in: run \`copilot login\` or \`gh auth login\`, then \`clio-coder doctor\` again; Clio never signs in to Copilot itself${
+				detail: `not signed in: run \`copilot login\` or \`gh auth login\`, then \`clio-coder doctor\` again; CLIO Coder never signs in to Copilot itself${
 					check.keychainChecked
 						? ""
 						: ". The system keychain was not checked because no operator is present to answer its prompt; run `clio-coder doctor` in a terminal to check it"
