@@ -444,8 +444,8 @@ export interface RunLedgerProjection {
 	readRoots: ReadonlyArray<string>;
 	writeRoots: ReadonlyArray<string>;
 	scopeSource: "intent" | "legacy-write-roots" | "none";
-	/** Check tools (bash, verify, run_script) withheld because the write roots have no OS sandbox enforcing them. */
-	checksWithheld?: ReadonlyArray<string>;
+	/** Capabilities the run's envelope withheld, each with why and what would keep it (M7). */
+	withheld?: ReadonlyArray<import("./envelope.js").WithheldCapability>;
 }
 
 export interface RunEnvelope {
@@ -759,6 +759,29 @@ export interface RunResultSafetySummary {
 	};
 	/** Worker runtime limitations. Worker receipts always carry it; main-agent receipts omit it. */
 	runtimeLimitations?: ReadonlyArray<string>;
+	/**
+	 * The capability envelope a native, SDK or subprocess worker ran under (fleet M7): its role, where it wrote, and
+	 * every capability a layer withheld. The worker's tools are the permit ceiling's; `permitDigest` binds the two.
+	 */
+	envelope?: {
+		version: number;
+		digest: string;
+		permitDigest: string;
+		role: import("./obligation.js").RunRole;
+		skills: { bound: ReadonlyArray<string>; discovery: import("./envelope.js").EnvelopeSkillDiscovery };
+		read: { roots: ReadonlyArray<string>; outside: ReadonlyArray<string> };
+		write: {
+			mode: import("./envelope.js").EnvelopeWriteMode;
+			roots: ReadonlyArray<string>;
+			commandsBounded: boolean;
+		};
+		exec: { shell: import("./envelope.js").EnvelopeShell; checks: import("./envelope.js").EnvelopeChecks };
+		network: { shell: boolean; tools: ReadonlyArray<string>; mcp: ReadonlyArray<string> };
+		approval: import("./envelope.js").EnvelopeApproval;
+		sandbox: { backend: import("./envelope.js").EnvelopeSandboxBackend; confinesWrites: boolean };
+		withheld: ReadonlyArray<import("./envelope.js").WithheldCapability>;
+		staticHead: string;
+	};
 	/**
 	 * The immutable permit a native, SDK or subprocess worker ran under. An ACP
 	 * receipt carries a record-only one; main-agent receipts omit it.

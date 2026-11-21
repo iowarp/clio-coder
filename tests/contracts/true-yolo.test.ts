@@ -39,7 +39,7 @@ import { evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js
 import type { GrantRecord } from "../../src/domains/dispatch/grant-broker.js";
 import { compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
-import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
+import { type ClassifierCall, resolveScratchDeleteOperands } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import {
 	admissionAutonomy,
@@ -472,13 +472,22 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
 	}
 	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge, and none asks for a
-	// workspace snapshot: after the leading temp cd a relative operand is placed under the temp root.
+	// workspace snapshot: after the leading temp cd a relative operand is placed under the temp root. Row 287: read on the
+	// parsed command, steps count in order, so a later pipe, link or program does not move a delete, an earlier program
+	// still lets an entry directly in the temp root be placed, and a cd that lands or stops its `&&` run moves the base.
 	for (const command of [
 		'B=$TMPDIR/base; mkdir -p "$B"; rm -rf "$B"',
 		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
 		'H=$(mktemp -d); rm -rf "$H"',
 		'cd "$TMPDIR" && mkdir -p probe-rows && rm -rf probe-rows',
+		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
+		'set -e; B="$TMPDIR/base-w8"; rm -rf "$B"; mkdir -p "$B"; git archive HEAD | tar -x -C "$B"; ln -s "$PWD/node_modules" "$B/node_modules"',
+		`cd ${process.cwd()} && B=$TMPDIR/base && rm -rf $B && mkdir -p $B`,
+		'H=$(mktemp -d); node -e 1 > "$H/out"; rm -rf "$H"',
+		'B=$TMPDIR/base; rm -rf "$B" 2>/dev/null; mkdir -p "$B"',
+		'cd -- "$TMPDIR" && rm -rf probe-rows',
+		'B=$TMPDIR/a; rm -rf "$B"; B=$TMPDIR/b; rm -rf "$B"',
 	]) {
 		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
@@ -515,6 +524,48 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	// never an ask, so no judge sees it, and an operator who named the command does not clear it. A delete a failed cd
 	// leaves in the workspace gets what the same delete written plainly gets.
 	const contained = { ...atDefault, scratchRoots: [realpathSync(temp)], snapshots: false };
+	// Row 287: a relative delete after a cd keeps its workspace reading (and so its snapshot ask) unless the cd lands or
+	// stops the `&&` run; only an `&&` run from a proven cd places it under the temp root.
+	for (const [command, placed] of [
+		['set -euo pipefail; cd "$TMPDIR" && rm -rf probe-rows; echo done', true],
+		['B=$TMPDIR/xr43-run; mkdir -p "$B" && cd "$B" && rm -rf src', true],
+		['! cd "$TMPDIR" && rm -rf src', false],
+		['cd "$TMPDIR" | rm -rf src', false],
+		['cd "$TMPDIR" & rm -rf src', false],
+		['cd "$TMPDIR" && cd - && rm -rf src', false],
+		['cd "$TMPDIR" && cd .. && rm -rf src', false],
+		['cd "$TMPDIR" && pushd . && rm -rf src', false],
+		['cd "$TMPDIR" && rm -rf probe-rows; rm -rf src', false],
+		[`ln -s ${cwd} "$TMPDIR/xr43-lw" && cd "$TMPDIR/xr43-lw" && rm -rf src`, false],
+	] as const) {
+		const reasons = engine.evaluate(bash(command), "default", contained).reasons.join("; ");
+		strictEqual(/deletes [^;]*src with no workspace snapshot/u.test(reasons), !placed, `${command}: ${reasons}`);
+	}
+	// Row 287 (neon finding 1): a program after the temp cd may link anything below it, so neither the cd rewrite nor its
+	// base survives and the delete keeps the reading it has at b1c4855bf.
+	mkdirSync(join(temp, "dir"), { recursive: true });
+	for (const target of ["sub/.git", "sub/target"]) {
+		const command = `D="$TMPDIR/dir"\ncd "$D" && python3 -c 'import os; os.symlink("${cwd}", "sub")' && rm -rf ${target}`;
+		const decision = engine.evaluate(bash(command), "default", contained);
+		strictEqual(`${decision.kind}/${decision.reasonCode}`, "ask/damage-control:delete-outside-workspace", command);
+	}
+	// Neon finding 2: bash translates a `$"..."` locale string through TEXTDOMAIN, so it never names a scratch path.
+	mkdirSync(join(temp, "safe"), { recursive: true });
+	const textDomain = `TEXTDOMAINDIR=${temp}/mo\nTEXTDOMAIN=x\n`;
+	const localeDelete = `${textDomain}rm -rf $"${temp}/safe"`;
+	strictEqual(resolveScratchDeleteOperands(localeDelete).command, localeDelete);
+	// Neon finding 3: a glob or brace operand the projection leaves unplaced is read by the walk from the cd base, where
+	// `*\/..` climbs out or `*` expands through a link, so the leading temp cd is no base for it.
+	mkdirSync(join(temp, "run"), { recursive: true });
+	symlinkSync(cwd, join(temp, "run", "link"));
+	t.after(() => rmSync(join(temp, "run", "link"), { force: true }));
+	const up = ["..", "..", "..", "home", "user", "important"].join("/");
+	for (const command of [
+		`cd ${temp}/run && mkdir a && rm -rf {a,b}/${up}`,
+		`cd ${temp}/run && rm -rf */important`,
+		`cd ${temp}/run && mkdir a && rm -rf */${up}`,
+	])
+		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 	// Row 261 final (r261c): the floor gaps the second review found, each red at the bounce-1 head.
 	symlinkSync(".git", join(cwd, "gitlink261"));
 	t.after(() => rmSync(join(cwd, "gitlink261"), { force: true }));
@@ -713,7 +764,28 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'B=$TMPDIR/base; exec {B}>/dev/null; rm -rf "$B"',
 		"B=$TMPDIR/base; trap 'B=/etc' DEBUG; rm -rf \"$B\"",
 		`B=$TMPDIR/base; ln -s ${process.cwd()} "$B/a"; rm -rf "$B/a/src"`,
+		// Row 287: anything the parsed reading cannot vouch for, a deeper path after a program, an unset, append, nameref,
+		// `${B:=...}`, a prefix on a special builtin, a split value or a background job, keeps the pin dead.
+		'B=$TMPDIR/base; node -e 1; rm -rf "$B/x"',
+		'B=$TMPDIR/base; unset B; rm -rf "$B/src"',
+		'B=$TMPDIR/base; B+=/../..; rm -rf "$B"',
+		'B=$TMPDIR/base; declare -n B=PWD; rm -rf "$B"',
+		'B=$TMPDIR/base; ${B:=/etc}; rm -rf "$B"',
+		'H=$(mktemp -d; cd /); rm -rf "$H"',
+		'B=$TMPDIR/base; B=/etc :; rm -rf "$B"',
+		'B="$TMPDIR/base dir"; rm -rf $B',
+		'B=$TMPDIR/base & rm -rf "$B"',
+		// Red-team round: a mktemp template the shell splits, a pin `||` skips, a line continuation that rebinds a pin or
+		// TMPDIR, and a link a program plants after the temp cd.
+		"D=$(mktemp -d -t 'a b.XXXXXX'); rm -rf $D",
+		'B=/etc\nfalse && B="$TMPDIR/sub" || rm -rf "$B"',
+		'B="$TMPDIR/sub"\nB\\\n=/etc\nrm -rf "$B"',
+		'TM\\\nPDIR=/etc\nrm -rf "$TMPDIR/x"',
+		`cd "$TMPDIR" && python3 -c 'import os; os.symlink("/etc", "link")' && rm -rf link/*`,
 		'B=$TMPDIR/base; node -e 1; rm -rf "$B/"',
+		// Neon round: a locale string bash translates through TEXTDOMAIN names no fixed cd landing or mktemp.
+		`${textDomain}cd $"${temp}/safe" && rm -rf foo`,
+		`${textDomain}D=$($"mktemp" -d "$TMPDIR/a.XXX") && rm -rf "$D"`,
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);

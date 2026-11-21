@@ -14,7 +14,7 @@ import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump
 import { summarizeToolActivity, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import { approvedIdentityForSpec } from "../../src/domains/dispatch/worker-protocol.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
-import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
+import { parseWorkerSpec, workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -236,16 +236,15 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 		spawnWorker(spec) {
 			const parsed = parseWorkerSpec(JSON.parse(JSON.stringify(spec)));
 			strictEqual(parsed.helperResult, true);
-			strictEqual(spec.readOnly, true);
-			ok(
-				!spec.allowedTools.includes("write") && !spec.allowedTools.includes("edit") && !spec.allowedTools.includes("bash"),
-			);
+			strictEqual(spec.envelope.write.mode, "none");
+			const tools = workerSpecToolNames(spec);
+			ok(!tools.includes("write") && !tools.includes("edit") && !tools.includes("bash"));
 			throws(() => parseWorkerSpec({ ...spec, helperResult: false }), /helperResult/);
 			throws(() => parseWorkerSpec({ ...spec, resultContract: { kind: "artifact-report" } }), /helperResult/);
 			strictEqual(
 				approvedIdentityForSpec(spec).toolSignature,
 				attestedToolSignature({
-					allowedTools: spec.allowedTools,
+					allowedTools: workerSpecToolNames(spec),
 					toolsSupported: true,
 					helperResult: true,
 					...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),

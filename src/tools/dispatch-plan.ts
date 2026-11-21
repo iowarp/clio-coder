@@ -110,6 +110,10 @@ export interface DispatchPlanTaskView {
 	checkedAtRun?: ReadonlyArray<string>;
 	/** The bounds that stop this run (cost estimate, or wall clock and tool ceiling on an unpriced route). */
 	limits?: string;
+	/** Where the run writes, from its envelope (M7). */
+	writes?: string;
+	/** Capabilities the run's envelope withheld, one line each (M7). */
+	withheld?: ReadonlyArray<string>;
 }
 
 export interface DispatchPlanView {
@@ -168,6 +172,8 @@ export interface ResolvedDispatchPlanArtifact {
 				| "resolvedVerification"
 				| "checkedAtRun"
 				| "limits"
+				| "writes"
+				| "withheld"
 			> &
 			Required<
 				Pick<
@@ -489,6 +495,8 @@ function renderPlanText(
 		}
 		if (task.record === true) lines.push("    record=true (bounded redacted display asciicast)");
 		if (task.limits !== undefined) lines.push(`    limits: ${safeField(task.limits)}`);
+		if (task.writes !== undefined) lines.push(`    writes: ${safeField(task.writes)}`);
+		for (const line of task.withheld ?? []) lines.push(`    withheld: ${safeField(line)}`);
 		for (const note of task.checkedAtRun ?? []) lines.push(`    checked at run: ${safeField(note)}`);
 		if (task.worktree === true)
 			lines.push(
@@ -597,6 +605,8 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"resolvedVerification",
 		"checkedAtRun",
 		"limits",
+		"writes",
+		"withheld",
 	]);
 	if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
 	for (const key of [
@@ -661,6 +671,14 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	)
 		return false;
 	if (value.limits !== undefined && (typeof value.limits !== "string" || value.limits.length === 0)) return false;
+	if (value.writes !== undefined && (typeof value.writes !== "string" || value.writes.length === 0)) return false;
+	if (
+		value.withheld !== undefined &&
+		(!Array.isArray(value.withheld) ||
+			value.withheld.length === 0 ||
+			!value.withheld.every((line) => typeof line === "string" && line.length > 0))
+	)
+		return false;
 	if (value.worktree !== undefined && value.worktree !== true) return false;
 	if (value.apply !== undefined && value.apply !== "merge" && value.apply !== "preserve") return false;
 	if (value.apply !== undefined && value.worktree !== true) return false;
@@ -935,6 +953,8 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			...(task.record !== undefined ? { record: task.record } : {}),
 			...(task.checkedAtRun !== undefined ? { checkedAtRun: [...task.checkedAtRun] } : {}),
 			...(typeof task.limits === "string" ? { limits: task.limits } : {}),
+			...(typeof task.writes === "string" ? { writes: task.writes } : {}),
+			...(task.withheld !== undefined ? { withheld: [...task.withheld] } : {}),
 			...(task.context !== undefined ? { context: parseWorkerContextPolicy(task.context) } : {}),
 			...(task.workerContext !== undefined ? { workerContext: structuredClone(task.workerContext) } : {}),
 			...(task.worktree === true

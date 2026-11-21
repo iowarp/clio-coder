@@ -178,7 +178,7 @@ describe("native worker MCP capabilities", () => {
 			strictEqual(
 				preview.toolSignature,
 				createHash("sha256")
-					.update(JSON.stringify([...TOOLS, ToolNames.Edit, ToolNames.Write].sort()))
+					.update(JSON.stringify([...TOOLS, ToolNames.CodeNav, ToolNames.Edit, ToolNames.Write].sort()))
 					.digest("hex"),
 			);
 		} finally {
@@ -675,7 +675,7 @@ describe("native worker MCP capabilities", () => {
 					executionRole: "builder",
 					intent: scope.intent,
 				}),
-				/missing required tools: mcp_fake__echo; declared write roots \S*src\/a\.ts have no OS sandbox enforcing them here, so mcp_fake__echo is withheld\. Enable safety\.sandbox/,
+				/missing required tools: mcp_fake__echo; declared write roots \S*src\/a\.ts have no OS sandbox or worktree binding commands to them here, so mcp_fake__echo is withheld\. Enable safety\.sandbox/,
 			);
 		} finally {
 			await bundle.extension.stop?.();

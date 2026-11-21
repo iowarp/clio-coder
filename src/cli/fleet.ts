@@ -26,7 +26,6 @@ import { factKnownValue } from "../core/telemetry/known.js";
 import { sumFactSums } from "../core/telemetry/pricing.js";
 import { renderPricingSum, renderUsdLimit, renderUsdSum } from "../core/telemetry/render.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
-import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import {
 	AgentsDomainModule,
@@ -40,13 +39,6 @@ import {
 } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
-import {
-	formatBudgetPolicy,
-	formatBudgetReasons,
-	formatBudgetRequest,
-	formatEffectiveBudget,
-	type RunToolBudgetEnvelope,
-} from "../domains/dispatch/budget-envelope.js";
 import { clearRootCancelRequest, readRootCancelRequest } from "../domains/dispatch/cancel-requests.js";
 import { capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
@@ -72,8 +64,6 @@ import {
 	readFleetRun,
 } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
-import { openLedger } from "../domains/dispatch/state.js";
-import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -86,14 +76,11 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { budgetRemainingText, budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
-import { fleetTotals, runTelemetry } from "../domains/telemetry/read-model.js";
 import { answerFleetHelp, FLEET_HELP as HELP } from "./fleet-help.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
-import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
-import { admissionStatus, type FleetAdmissionStatus, writeStatusFooter, writeStatusHeader } from "./fleet-status.js";
+import { admissionStatus, type FleetAdmissionStatus, runFleetStatus } from "./fleet-status.js";
 import { parseDuration } from "./kit/duration.js";
 import { EXIT_CODES } from "./kit/exit-codes.js";
 import { parseCommandFlags } from "./kit/flags.js";
@@ -903,89 +890,6 @@ async function finishFleetRun(
 	return result.exitCode;
 }
 
-// ---------------------------------------------------------------------------
-// status
-// ---------------------------------------------------------------------------
-
-function isProcessAlive(pid: number | null): boolean {
-	if (pid === null || !Number.isFinite(pid) || pid <= 0) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM";
-	}
-}
-
-function rowHeartbeat(row: RunEnvelope): "alive" | "stale" | "dead" | "n/a" {
-	if (row.status === "stale") return "stale";
-	if (row.status === "dead") return "dead";
-	return isProcessAlive(row.pid) ? "alive" : "dead";
-}
-
-function statusSnapshot(all = false) {
-	const nowMs = Date.now();
-	const scope = fleetInspectionScope(all);
-	const rows = openLedger().list().filter(scope.seesRun);
-	const records = rows.map((row) => ({
-		row,
-		telemetry: runTelemetry(row.id, loadRunTelemetrySource(clioStateDir(), row.id), { now: new Date(nowMs) }),
-	}));
-	return {
-		generatedAt: new Date(nowMs).toISOString(),
-		admission: admissionStatus(capacityDrain(nowMs)),
-		running: records
-			.filter(({ row }) => row.endedAt === null && (row.status === "running" || row.status === "stale"))
-			.map(({ row, telemetry }) => ({
-				runId: row.id,
-				agentId: row.agentId,
-				budget: row.budget ?? null,
-				runtimeKind: row.runtimeKind,
-				outcomePhase: row.status,
-				heartbeat: rowHeartbeat(row),
-				lineage: row.lineage ?? { parentRunId: null, rootRunId: row.id, attempt: 0, depth: 0 },
-				startedAt: row.startedAt,
-				elapsed: telemetry.activity.elapsed,
-				tokens: telemetry.tokens,
-				usd: telemetry.row.usd,
-				node: row.node?.id ?? "local",
-			})),
-		retrying: [] as Array<Record<string, unknown>>,
-		totals: fleetTotals(records.map(({ telemetry }) => telemetry)),
-	};
-}
-
-function runStatus(args: ReadonlyArray<string>): number {
-	const unknown = args.find((arg) => arg !== "--json" && arg !== "--all");
-	if (unknown) return fail(`status: unknown flag: ${unknown}`);
-	const snapshot = statusSnapshot(args.includes("--all"));
-	if (args.includes("--json")) {
-		process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
-		return 0;
-	}
-	writeStatusHeader(process.stdout, snapshot.generatedAt, snapshot.admission);
-	if (snapshot.running.length === 0) {
-		process.stdout.write("running: none\n");
-	} else {
-		process.stdout.write("running:\n");
-		for (const row of snapshot.running) {
-			const lineage = row.lineage;
-			process.stdout.write(
-				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${row.elapsed.display}  ${row.usd.display}\n`,
-			);
-			const budget = row.budget as RunToolBudgetEnvelope | null;
-			if (budget !== null) {
-				process.stdout.write(`    recipe policy: ${formatBudgetPolicy(budget)}\n`);
-				process.stdout.write(`    requested envelope: ${formatBudgetRequest(budget)}\n`);
-				process.stdout.write(`    effective envelope: ${formatEffectiveBudget(budget)}\n`);
-				process.stdout.write(`    clamp or escalation reason: ${formatBudgetReasons(budget)}\n`);
-			}
-		}
-	}
-	writeStatusFooter(process.stdout, snapshot.retrying, snapshot.totals);
-	return 0;
-}
-
 function writeAdmissionText(admission: FleetAdmissionStatus): void {
 	if (admission.state === "draining") {
 		process.stdout.write(
@@ -1192,7 +1096,7 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			}
 		}
 		case "status":
-			return runStatus(args.slice(1));
+			return runFleetStatus(args.slice(1));
 		case "decisions":
 			return (await import("./fleet-decisions.js")).runFleetDecisions(args.slice(1));
 		case "verify":

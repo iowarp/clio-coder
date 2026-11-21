@@ -12,9 +12,9 @@ import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import claudeSdkRuntime from "../../src/domains/providers/runtimes/claude/claude-sdk.js";
 import { createClioToolBridge } from "../../src/engine/claude/clio-tool-bridge.js";
 import { emitClaudeToolPermissionDecision, mapClaudeToolCall } from "../../src/engine/claude/tool-safety.js";
-import { attestedToolSignature, createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { attestedToolNames, attestedToolSignature, createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { toolSignatureOf } from "../../src/worker/protocol.js";
-import type { WorkerSpec } from "../../src/worker/spec-contract.js";
+import { type WorkerSpec, workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -35,9 +35,10 @@ function claudeSdkSettings() {
 function spawnOnClaudeSdk(
 	settings = claudeSdkSettings(),
 	extra: Partial<Parameters<typeof makeDispatchBundle>[1]> = {},
+	runtime: typeof claudeSdkRuntime | null = claudeSdkRuntime,
 ) {
 	const specs: WorkerSpec[] = [];
-	const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: claudeSdkRuntime }), {
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings, ...(runtime !== null ? { runtime } : {}) }), {
 		...extra,
 		spawnWorker: (spec): SpawnedWorker => {
 			specs.push(spec);
@@ -86,26 +87,85 @@ describe("claude-sdk: Clio context, artifact and verify tools", () => {
 				const spec = specs[0];
 				ok(spec, `${agentId} must reach worker creation on claude-sdk`);
 				strictEqual(spec.runtimeId, "claude-sdk");
-				for (const tool of carries) ok(spec.allowedTools.includes(tool), `${agentId} must carry ${tool}`);
+				for (const tool of carries) ok(workerSpecToolNames(spec).includes(tool), `${agentId} must carry ${tool}`);
 				// Read-only is enforced per call at the permission gate, not by trimming the surface.
-				strictEqual(spec.readOnly === true, readOnly);
+				strictEqual(spec.envelope.write.mode === "none", readOnly);
 				// #449: the worker's own projection must sign exactly what admission approved.
 				strictEqual(
 					attestedToolSignature({
-						allowedTools: spec.allowedTools,
+						allowedTools: workerSpecToolNames(spec),
 						toolsSupported: true,
-						...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 						agentId: spec.agentId,
 						task: spec.task,
 						runtime: spec.runtime,
 					}),
-					toolSignatureOf(spec.allowedTools),
+					toolSignatureOf(workerSpecToolNames(spec)),
 				);
 			} finally {
 				await bundle.extension.stop?.();
 			}
 		});
 	}
+
+	// M7 acceptance: on both runtimes the worker attests, and its prompt's tool contract names, exactly the envelope.
+	const nativeSettings = () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: "native-worker", runtime: "openai", defaultModel: "gpt-4o" }];
+		settings.fleet.default = { ...settings.fleet.default, target: "native-worker", model: "gpt-4o" };
+		return settings;
+	};
+	const runtimes = [
+		["native", () => spawnOnClaudeSdk(nativeSettings(), {}, null)],
+		["claude-sdk", () => spawnOnClaudeSdk()],
+	] as const;
+	const recipes = [
+		{ agentId: "architect", readOnly: false },
+		{ agentId: "coder", readOnly: true },
+		{ agentId: "debugger", readOnly: false },
+		{ agentId: "verifier", readOnly: false },
+		{ agentId: "documenter", readOnly: true },
+		{ agentId: "tester", readOnly: true },
+	] as const;
+	it("attests, and tells the prompt, exactly the envelope's tools for 6 recipes on native and claude-sdk (M7)", async () => {
+		for (const [runtimeName, spawn] of runtimes) {
+			for (const { agentId, readOnly } of recipes) {
+				const { bundle, specs } = spawn();
+				await bundle.extension.start();
+				try {
+					const handle = await bundle.contract.dispatch({
+						agentId,
+						task: "Inspect src/parser.ts and report on the tokenizer.",
+						executionRole: "builder",
+						requestOrigin: "user",
+						...(readOnly ? { readOnly: true } : {}),
+					});
+					await handle.finalPromise.catch(() => undefined);
+					const spec = specs[0];
+					const label = `${agentId} on ${runtimeName}`;
+					ok(spec, `${label} must reach worker creation`);
+					strictEqual(spec.runtimeId === "claude-sdk", runtimeName === "claude-sdk", label);
+					const envelopeTools = [...spec.envelope.tools.direct, ...spec.envelope.tools.gateway].sort();
+					ok(envelopeTools.length > 0, label);
+					const attested = attestedToolNames({
+						allowedTools: workerSpecToolNames(spec),
+						toolsSupported: true,
+						agentId: spec.agentId,
+						task: spec.task,
+						runtime: spec.runtime,
+					});
+					deepStrictEqual([...attested].sort(), envelopeTools, `${label}: attested tools`);
+					const contract = /^Admitted canonical tools: (.+)\. This is your complete tool authority/mu.exec(
+						spec.systemPrompt,
+					);
+					ok(contract, `${label}: the prompt renders a tool contract`);
+					const prompted = [...(contract[1] ?? "").matchAll(/`([^`]+)`/gu)].map((entry) => entry[1]).sort();
+					deepStrictEqual(prompted, envelopeTools, `${label}: prompt tool contract`);
+				} finally {
+					await bundle.extension.stop?.();
+				}
+			}
+		}
+	});
 
 	it("names coder --read-only in a shadow refusal only when the route admits it", async () => {
 		const { bundle, specs } = spawnOnClaudeSdk();

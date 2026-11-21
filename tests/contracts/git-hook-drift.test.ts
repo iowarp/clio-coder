@@ -220,8 +220,7 @@ test("the worker sandbox keeps the configured hooks directory inside its writabl
 		readOnly: false,
 		cwd,
 		writeBoundaries: [],
-		allowedTools: [],
-		networkSetting: false,
+		network: false,
 		gitHooksDirs: gitHookDirectories(cwd).directories,
 	});
 	ok(spec?.readOnlyPaths.includes(join(cwd, ".githooks")), JSON.stringify(spec?.readOnlyPaths));

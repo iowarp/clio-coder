@@ -9,8 +9,13 @@ import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js"
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import { workerPermitDigest } from "../../src/worker/protocol.js";
-import { parseWorkerSpec, WORKER_SPEC_HOOKLESS_VERSION, type WorkerSpec } from "../../src/worker/spec-contract.js";
+import { workerEnvelopeDigest, workerPermitDigest } from "../../src/worker/protocol.js";
+import {
+	envelopePermissionMode,
+	parseWorkerSpec,
+	WORKER_SPEC_HOOKLESS_VERSION,
+	type WorkerSpec,
+} from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -24,9 +29,9 @@ test("a yolo session dispatches a default worker as version 8 and rejects a wire
 		spawnWorker(spec) {
 			started = true;
 			strictEqual("autonomy" in spec, false);
-			strictEqual(spec.readOnly, undefined);
-			strictEqual(parseWorkerSpec(spec).readOnly, undefined);
-			// A spec without extension hooks stays version 8, so a node one release behind still serves it.
+			strictEqual(spec.envelope.write.mode, "workspace");
+			strictEqual(parseWorkerSpec(spec).envelope.write.mode, "workspace");
+			// A spec without extension hooks takes the hookless version.
 			strictEqual(spec.specVersion, WORKER_SPEC_HOOKLESS_VERSION);
 			throws(
 				() => parseWorkerSpec({ ...spec, specVersion: WORKER_SPEC_HOOKLESS_VERSION - 1 }),
@@ -277,26 +282,43 @@ async function sealedCoderSpec(prefix: string) {
 	}
 }
 
+/** Seal the spec's envelope again over its current permit, as the host would. */
+function resealEnvelope(spec: WorkerSpec): void {
+	const { digest: _old, ...body } = { ...spec.envelope, permitDigest: spec.permit.digest };
+	spec.envelope = { ...body, digest: workerEnvelopeDigest(body) };
+}
+
 test("a worker refuses a permit or tool surface edited after the host sealed it", async () => {
 	const sealed = await sealedCoderSpec("clio-permit-seal-");
 	strictEqual(parseWorkerSpec(structuredClone(sealed)).permit.digest, sealed.permit.digest);
 	const widened = structuredClone(sealed);
 	widened.permit.ceiling.tools = [...widened.permit.ceiling.tools, ToolNames.Dispatch].sort();
 	throws(() => parseWorkerSpec(widened), /WorkerSpec\.permit\.digest does not match the permit/u);
-	const outside = structuredClone(sealed);
-	outside.allowedTools = [...outside.allowedTools, ToolNames.Dispatch];
-	throws(() => parseWorkerSpec(outside), /WorkerSpec\.allowedTools exceed the permit ceiling: dispatch/u);
+	const edited = structuredClone(sealed);
+	edited.envelope = {
+		...edited.envelope,
+		tools: { ...edited.envelope.tools, direct: [...edited.envelope.tools.direct, ToolNames.Dispatch] },
+	};
+	throws(() => parseWorkerSpec(edited), /WorkerSpec\.envelope\.digest does not match the envelope/u);
+	const outside = structuredClone(edited);
+	resealEnvelope(outside);
+	throws(() => parseWorkerSpec(outside), /WorkerSpec\.envelope tools exceed the permit ceiling: dispatch/u);
 });
 
 test("escalate is refused, never downgraded, where the runtime cannot park a call", async () => {
 	const parked = await sealedCoderSpec("clio-permit-escalate-");
-	parked.onPermission = "escalate";
 	parked.permit.allowance = { ...parked.permit.allowance, asks: "main", approvalAuthority: "operator" };
 	parked.permit.digest = workerPermitDigest(parked.permit);
-	strictEqual(parseWorkerSpec(structuredClone(parked)).onPermission, "escalate");
+	parked.envelope = { ...parked.envelope, approval: { ...parked.envelope.approval, asks: "operator" } };
+	resealEnvelope(parked);
+	strictEqual(envelopePermissionMode(parseWorkerSpec(structuredClone(parked)).envelope.approval), "escalate");
 	parked.permit.ceiling.enforcement = { ...parked.permit.ceiling.enforcement, grantPauseResume: false };
 	parked.permit.digest = workerPermitDigest(parked.permit);
-	throws(() => parseWorkerSpec(parked), /escalate needs a runtime that can park a call/u);
+	resealEnvelope(parked);
+	throws(
+		() => parseWorkerSpec(parked),
+		/routes asks to a decision, but permit\.ceiling\.enforcement\.grantPauseResume is false/u,
+	);
 	throws(
 		() => startClaudeSdkWorkerRun({ onPermission: "escalate" } as unknown as WorkerRunInput, () => {}),
 		/escalate is unsupported on the Claude SDK runtime/u,

@@ -4,6 +4,7 @@ import { isMcpToolName, mcpToolName, ToolNames } from "../../core/tool-names.js"
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool } from "../../core/turn-constraints.js";
 import { canonicalJson, workerPermitDigest } from "../../worker/protocol.js";
+import { capabilityClassExcludes } from "../agents/role-class.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import type { RuntimeEnforcement } from "../providers/index.js";
 import { readOnlyWorkAdmitted } from "../providers/runtime-enforcement.js";
@@ -200,7 +201,7 @@ export function mainGrantsUnavailable(allowance: Pick<WorkerPermitAllowance, "as
 export const MAIN_GRANTS_UNAVAILABLE_REASON =
 	"main-agent grants reach only native local workers (fleet.permissions.mode=main); the ask is denied, not sent to the operator";
 
-/** Why a tool list exceeds a capability class's direct ceiling, per the review's class table. */
+/** Why a tool list exceeds a capability class's ceiling, read from the one role class table. */
 function capabilityClassCeilingErrors(
 	capabilityClass: AgentCapabilityClass,
 	tools: ReadonlyArray<string>,
@@ -224,38 +225,8 @@ function capabilityClassCeilingErrors(
 			errors.push(`${tool} is orchestrator-only and no worker runtime mediates it`);
 			continue;
 		}
-		switch (capabilityClass) {
-			case "read-only":
-				if (action !== "read") errors.push(`read-only ceiling excludes ${action} tool ${tool}`);
-				break;
-			case "artifact-write":
-				if (
-					action === "execute" ||
-					action === "system_modify" ||
-					action === "destructive" ||
-					action === "git_destructive"
-				) {
-					errors.push(`artifact-write ceiling excludes ${action} tool ${tool}`);
-				} else if (action === "write" && tool !== ToolNames.Artifact) {
-					errors.push(`artifact-write ceiling allows only the artifact write, not ${tool}`);
-				}
-				break;
-			case "verification":
-				if (
-					action === "write" ||
-					action === "system_modify" ||
-					action === "destructive" ||
-					action === "git_destructive" ||
-					tool === ToolNames.Bash
-				) {
-					errors.push(`verification ceiling excludes ${tool}; checks run through typed verification`);
-				}
-				break;
-			case "workspace-edit":
-			case "orchestration":
-			case "internal":
-				break;
-		}
+		const reason = capabilityClassExcludes(capabilityClass, tool, action);
+		if (reason !== null) errors.push(`${capabilityClass} ceiling ${reason}`);
 		if (attested !== undefined && errors.length > before) {
 			errors[errors.length - 1] +=
 				` (MCP server '${attested.serverId}' gives it class ${action}; the server's trust record or declaration sets that class: clio-coder mcp trust ${attested.serverId} --action-class <class>, or toolActionClasses in its declaration)`;

@@ -182,7 +182,7 @@ describe("worker boundary", () => {
 			runtimeId: "openai",
 			wireModelId: "gpt-5",
 			target: { id: "frontier", url: "https://api.example/v1/" },
-			allowedTools: ["read", "verify"],
+			envelope: { tools: { direct: ["read", "verify"], gateway: [] } },
 		};
 		const approved = approvedIdentityForSpec(workerSpec);
 		const attestation = { protocolVersion: WORKER_PROTOCOL_VERSION, ...approved };
@@ -455,7 +455,7 @@ const bulkFixtureSpec = {
 	runtimeId: "fixture",
 	target: { id: "fixture", url: "http://127.0.0.1:1" },
 	wireModelId: "fixture",
-	allowedTools: [],
+	envelope: { tools: { direct: [], gateway: [] }, write: { mode: "none", roots: [], commandsBounded: false } },
 } as unknown as WorkerSpec;
 
 /**
@@ -509,13 +509,10 @@ describe("worker channel facts", () => {
 				entry,
 				"process.stderr.write('[cache] '+(require('node:module').getCompileCacheDir() ?? 'disabled')+'\\n'); process.exit(0);\n",
 			);
-			const worker = spawnNativeWorker(
-				{ ...bulkFixtureSpec, readOnly: true },
-				{
-					workerEntryPath: entry,
-					env: { ...process.env, NODE_COMPILE_CACHE: cache },
-				},
-			);
+			const worker = spawnNativeWorker(bulkFixtureSpec, {
+				workerEntryPath: entry,
+				env: { ...process.env, NODE_COMPILE_CACHE: cache },
+			});
 			const result = await worker.promise;
 			// Read-only leaves user files alone; the bytecode cache is Clio's own.
 			ok((result.stderrTail ?? "").includes(`[cache] ${cache}`), result.stderrTail);
@@ -568,7 +565,7 @@ describe("worker channel facts", () => {
 			worker = createSshWorkerTransport(
 				{ id: "fake", host: "fake.invalid" },
 				{ sshBinary: ssh, shutdownGraceMs: 200 },
-			).spawn({ ...bulkFixtureSpec, readOnly: true }, { onAnnounce: () => announced() });
+			).spawn(bulkFixtureSpec, { onAnnounce: () => announced() });
 			await ready;
 			worker.abort();
 			await worker.promise;
@@ -901,7 +898,7 @@ describe("worker admission", () => {
 			runtimeId: "fixture",
 			target: { id: "fixture", url: "http://127.0.0.1:1" },
 			wireModelId: "fixture",
-			allowedTools: [],
+			envelope: { tools: { direct: [], gateway: [] } },
 		} as unknown as WorkerSpec;
 		const approved = approvedIdentityForSpec(spec);
 		// Heartbeats on a fixed interval, announces only when told to, and echoes
