@@ -176,10 +176,11 @@ function foldInto(survivor: MemoryRecord, other: MemoryRecord): void {
 		if (seen === undefined || item.at < seen.at) verdicts.set(key, { ...item });
 	}
 	const joined = boundedVerdicts([...verdicts.values()].sort((left, right) => left.at.localeCompare(right.at)));
+	// Read every delivery fact, the legacy `delivered` observations included, before the observations are replaced.
+	const lastDelivered = latest(survivor.lastDeliveredAt, other.lastDeliveredAt, ...deliveredAt(survivor, other));
 	if (joined.length > 0) survivor.observations = joined;
 	else Reflect.deleteProperty(survivor, "observations");
 	if (deliveries > 0) survivor.deliveredCount = deliveries;
-	const lastDelivered = latest(survivor.lastDeliveredAt, other.lastDeliveredAt, ...deliveredAt(survivor, other));
 	if (lastDelivered !== undefined) survivor.lastDeliveredAt = lastDelivered;
 	const lastVerified = latest(survivor.lastVerifiedAt, other.lastVerifiedAt);
 	if (lastVerified !== undefined) survivor.lastVerifiedAt = lastVerified;
