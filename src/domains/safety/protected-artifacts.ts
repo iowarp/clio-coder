@@ -1117,6 +1117,22 @@ const HEREDOC_INERT_READERS: ReadonlySet<string> = new Set([
 /** Variables whose value changes what a later command word runs or how a line splits. */
 const HEREDOC_DANGEROUS_NAMES =
 	/^(?:PATH|BASH_ENV|ENV|IFS|CDPATH|SHELLOPTS|BASHOPTS|PROMPT_COMMAND|BASH_FUNC_.*|LD_PRELOAD|LD_LIBRARY_PATH)$/u;
+/** Words before a command that run nothing themselves: grouping, negation and the reserved words around a command. */
+const HEREDOC_LEADING_WORDS: ReadonlySet<string> = new Set([
+	"{",
+	"}",
+	"!",
+	"if",
+	"then",
+	"else",
+	"elif",
+	"fi",
+	"do",
+	"done",
+	"while",
+	"until",
+	"time",
+]);
 /** Declaring words that only set the plain variables they name. */
 const HEREDOC_SETTERS: ReadonlySet<string> = new Set(["export", "declare", "typeset", "local", "readonly"]);
 
@@ -1148,15 +1164,24 @@ function heredocDataTrusted(text: string, outputs: ReadonlyArray<string>): boole
 		const targets = segment.flatMap((token, index) =>
 			token.operator && SHELL_WRITE_REDIRECTIONS.has(token.value) ? [segment[index + 1]?.value ?? ""] : [],
 		);
-		const head = words[0];
 		const raw = (token: ShellToken): string => text.slice(token.start, token.end);
+		// Read past what runs nothing itself, braces, `!`, reserved words and assignments, to the command (r261f-2).
+		let at = 0;
+		for (; at < words.length; at += 1) {
+			const word = words[at] as ShellToken;
+			const assignment = /^([A-Za-z_]\w*)\+?=/u.exec(raw(word));
+			if (assignment !== null) {
+				if (HEREDOC_DANGEROUS_NAMES.test(assignment[1] ?? "")) return false;
+				continue;
+			}
+			if (raw(word) !== word.value || !HEREDOC_LEADING_WORDS.has(word.value)) break;
+		}
+		const head = words[at];
+		const args = words.slice(at + 1);
 		if (head !== undefined) {
-			const assignment = /^([A-Za-z_]\w*)\+?=/u.exec(head.value);
-			if (raw(head) !== head.value && assignment === null) return false;
-			if (/[$`]/u.test(head.value) && assignment === null) return false;
-			if (assignment !== null && HEREDOC_DANGEROUS_NAMES.test(assignment[1] ?? "")) return false;
+			if (raw(head) !== head.value || /[$`]/u.test(head.value)) return false;
 			if (HEREDOC_SETTERS.has(head.value)) {
-				for (const word of words.slice(1)) {
+				for (const word of args) {
 					if (word.value.startsWith("-")) continue;
 					const name = /^([A-Za-z_]\w*)(?:\+?=|$)/u.exec(raw(word));
 					if (name === null || HEREDOC_DANGEROUS_NAMES.test(name[1] ?? "")) return false;
@@ -1166,7 +1191,7 @@ function heredocDataTrusted(text: string, outputs: ReadonlyArray<string>): boole
 		}
 		const copies =
 			targets.some((target) => written.has(target)) ||
-			(head?.value === "tee" && words.slice(1).some((word) => written.has(word.value)));
+			(head?.value === "tee" && args.some((word) => written.has(word.value)));
 		if (copied && head !== undefined) {
 			// After a copy nothing may run it, rewrite it elsewhere, or be named like it.
 			if (segment.some((token) => /[$`]/u.test(raw(token)) || (token.substitutions?.length ?? 0) > 0)) return false;
@@ -1174,7 +1199,7 @@ function heredocDataTrusted(text: string, outputs: ReadonlyArray<string>): boole
 			if (!HEREDOC_INERT_READERS.has(head.value) || names.has(basenameToken(head.value))) return false;
 			if (targets.some((target) => !written.has(target) && target !== "/dev/null" && !/^(?:\d+-?|-)$/u.test(target)))
 				return false;
-			if (head.value === "tee" && words.slice(1).some((word) => !word.value.startsWith("-") && !written.has(word.value)))
+			if (head.value === "tee" && args.some((word) => !word.value.startsWith("-") && !written.has(word.value)))
 				return false;
 		}
 		if (copies) copied = true;

@@ -572,6 +572,12 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		"$'sh\\x6fpt' -s expand_aliases; $'\\x61lias' echo=sh\necho <<'EOF'\ncat credentials.yaml >&2\nEOF",
 		"P=PA; export \"${P}TH=/tmp/evil\"\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
 		"(. evil.sh); echo <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		// Row 261 last pass (r261e, r261f).
+		"P=PA; { export \"${P}TH=/tmp/evil\"; }\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		'echo foo"TMPDIR" && rm -rf "$TMPDIR/x"',
+		"cat > a.txt <<'EOF'\nrm /tmp/foo\nEOF\ngit reset --hard",
+		"git reset --hard && env -S 'rm /tmp/foo'",
+		"git reset --hard && echo /tmp/foo | xargs rm",
 	];
 	for (const command of failOpens261) {
 		const bare = engine.evaluate(bash(command), "default", { ...contained, sandbox: false });
