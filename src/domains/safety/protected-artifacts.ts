@@ -5211,17 +5211,12 @@ function pastTimeOptions(segment: ReadonlyArray<string>, start: number): number 
 	return next;
 }
 
-/**
- * The index past a declared wrapper at `index` and its leading options; with `values`, a separate option that may take
- * a value (`-s 1`, `--slot 1`) takes the word after it too, since nothing here knows the wrapper's own options.
- */
-function pastWrapperOptions(segment: ReadonlyArray<string>, index: number, values = false): number {
+/** The index past a declared wrapper at `index` and its leading options. */
+function pastWrapperOptions(segment: ReadonlyArray<string>, index: number): number {
 	let next = index + 1;
 	for (let option = segment[next]; option?.startsWith("-") === true; option = segment[next]) {
 		next += 1;
 		if (option === "--") break;
-		const value = segment[next];
-		if (values && /^(?:-[A-Za-z]+|--[\w-]+)$/u.test(option) && value !== undefined && !value.startsWith("-")) next += 1;
 	}
 	return next;
 }
@@ -5266,10 +5261,10 @@ function checkBehindWrapper(
  * wrapper standing at `index`, its leading options and the built-in prefixes after it, as `timeout` or `nice` is read
  * through; null when no declared wrapper stands there or nothing follows it. An undeclared script stays opaque.
  */
-function pastDeclaredWrapper(argv: ReadonlyArray<string>, index: number, cwd?: string, values = false): number | null {
+function pastDeclaredWrapper(argv: ReadonlyArray<string>, index: number): number | null {
 	const word = argv[index];
-	if (word === undefined || !isValidationWrapper(word, cwd)) return null;
-	return builtinCommandIndex(argv, pastWrapperOptions(argv, index, values));
+	if (word === undefined || !isValidationWrapper(word)) return null;
+	return builtinCommandIndex(argv, pastWrapperOptions(argv, index));
 }
 
 /** `text` with each span replaced by spaces, so offsets and every other character stay where they were. */
@@ -5280,29 +5275,66 @@ function blankedSpans(text: string, spans: ReadonlyArray<{ start: number; end: n
 	return out;
 }
 
-/** A word that may stand as a command word in a nested script (`sh -c '...'`, `$(...)`), with the option words after it. */
-const NESTED_COMMAND_WORD = /(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+-[^\s'"();&|`<>]*)*)/gu;
-/** The same, with each option taking the plain word after it as its value (`-s 1`, `-qs 1`). */
-const NESTED_COMMAND_WORD_VALUES =
-	/(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+-[^\s'"();&|`<>]*(?:[ \t]+[^\s'"();&|`<>-][^\s'"();&|`<>]*)?)*)/gu;
+/** More candidate command starts than this behind one wrapper are not tried; the last one tried stands for the rest. */
+const WRAPPER_START_CANDIDATES = 8;
+
+/**
+ * Where the command behind a declared wrapper at `index` may start (r261f-3). Nothing here knows the wrapper's options,
+ * so each separate option may take the next plain word as its value or not: every plain word after an option is a
+ * candidate, up to the first plain word no option precedes. `-s 1 -q rm -rf .git` may run `1`, `rm` or `.git`.
+ */
+function wrapperCommandStarts(argv: ReadonlyArray<string>, index: number): number[] {
+	const starts: number[] = [];
+	let valueNext = false;
+	for (let at = index + 1; at < argv.length; at += 1) {
+		const word = argv[at] as string;
+		if (word === "--") {
+			starts.push(at + 1);
+			break;
+		}
+		if (word.startsWith("-") && word !== "-") {
+			valueNext = !word.includes("=");
+			continue;
+		}
+		starts.push(at);
+		if (!valueNext) break;
+		valueNext = false;
+	}
+	return starts.length > 0 ? starts : [argv.length];
+}
+
+/** A word that may stand as a command word in a nested script (`sh -c '...'`, `$(...)`), with the plain words after it. */
+const NESTED_COMMAND_WORD = /(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+[^\s'"();&|`<>]+)*)/gu;
 
 /**
  * The readings of a command with its declared validation wrappers blanked out, so the rails read what they run (FX-46):
  * `scripts/test-slot.sh rm -rf .git` reads as `rm -rf .git`. A wrapper at a top-level command position is blanked with
- * its leading options, once with each option read as a flag and once with a separate option taking the word after it
- * as its value (`-s 1`), since nothing here knows the wrapper's options; redirections between them stay. A wrapper word
- * anywhere else, inside `sh -c '...'` or a substitution, is blanked as text with the option words after it. A word is
- * a wrapper by the call's own working directory. Empty when no declared wrapper stands anywhere. Admission judges every
- * reading beside the command as written and keeps the strictest, so a reading only tightens.
+ * its leading options up to each place its command may start ({@link wrapperCommandStarts}), one reading per
+ * candidate; redirections between them stay. A wrapper word anywhere else, inside `sh -c '...'` or a substitution, is
+ * blanked as text the same way. A word is a wrapper by the call's own working directory. Empty when no declared
+ * wrapper stands anywhere. Admission judges every reading beside the command as written and merges them, so a reading
+ * only tightens.
  */
 export function declaredWrapperReadings(command: string, cwd: string = process.cwd()): string[] {
 	const entries = validationWrappers();
 	if (entries.length === 0) return [];
 	const names = new Set(entries.map((entry) => basenameToken(entry.replace(/\\/gu, "/"))));
 	const readings = new Set<string>();
-	for (const values of [false, true]) {
+	const segments = splitSegments(scanShellLike(command, true));
+	const nested = [...command.matchAll(NESTED_COMMAND_WORD)].flatMap((match) => {
+		const word = match[2] ?? "";
+		if (!names.has(basenameToken(word.replace(/\\/gu, "/"))) || !isValidationWrapper(word, cwd)) return [];
+		const start = match.index + (match[1] ?? "").length;
+		const tail = match[3] ?? "";
+		const after = [...tail.matchAll(/\S+/gu)].map((rest) => ({ value: rest[0], at: start + word.length + rest.index }));
+		const end = start + word.length + tail.length;
+		const starts = wrapperCommandStarts([word, ...after.map((rest) => rest.value)], 0);
+		return [{ start, ends: starts.map((at) => after[at - 1]?.at ?? end) }];
+	});
+	for (let rank = 0; rank < WRAPPER_START_CANDIDATES; rank += 1) {
+		let more = false;
 		const blanks: Array<{ start: number; end: number }> = [];
-		for (const segment of splitSegments(scanShellLike(command, true))) {
+		for (const segment of segments) {
 			// Words only: a redirection operator and its target are not argv, and stay in the reading.
 			const words = segment.filter(
 				(token, at) =>
@@ -5311,24 +5343,22 @@ export function declaredWrapperReadings(command: string, cwd: string = process.c
 			const argv = words.map((token) => token.value);
 			let index = builtinCommandIndex(argv);
 			for (let hop = 0; index !== null && hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
-				const next = pastDeclaredWrapper(argv, index, cwd, values);
-				if (next === null) break;
-				for (const word of words.slice(index, next)) blanks.push({ start: word.start, end: word.end });
-				index = next;
+				const word = argv[index];
+				if (word === undefined || !isValidationWrapper(word, cwd)) break;
+				const starts = wrapperCommandStarts(argv, index);
+				if (starts.length > rank + 1) more = true;
+				const start = starts[Math.min(rank, starts.length - 1)] as number;
+				for (const token of words.slice(index, start)) blanks.push({ start: token.start, end: token.end });
+				index = builtinCommandIndex(argv, start);
 			}
 		}
 		if (blanks.length > 0) readings.add(blankedSpans(command, blanks));
-	}
-	// Nested, the wrapper is blanked once with its options read as flags and once with each taking a value (r261c-13).
-	for (const pattern of [NESTED_COMMAND_WORD, NESTED_COMMAND_WORD_VALUES]) {
-		const nested: Array<{ start: number; end: number }> = [];
-		for (const match of command.matchAll(pattern)) {
-			const word = match[2] ?? "";
-			if (!names.has(basenameToken(word.replace(/\\/gu, "/"))) || !isValidationWrapper(word, cwd)) continue;
-			const start = match.index + (match[1] ?? "").length;
-			nested.push({ start, end: start + word.length + (match[3] ?? "").length });
-		}
-		if (nested.length > 0) readings.add(blankedSpans(command, nested));
+		const spans = nested.map(({ start, ends }) => {
+			if (ends.length > rank + 1) more = true;
+			return { start, end: ends[Math.min(rank, ends.length - 1)] as number };
+		});
+		if (spans.length > 0) readings.add(blankedSpans(command, spans));
+		if (!more) break;
 	}
 	readings.delete(command);
 	return [...readings];

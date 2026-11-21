@@ -2117,6 +2117,9 @@ test("a declared validation wrapper is judged by what it runs, at least as stric
 		"scripts/slot.sh >/dev/null -q rm -rf .git",
 		"sh -c 'scripts/slot.sh rm -rf .git'",
 		"sh -c 'scripts/slot.sh -s 1 rm -rf .git'",
+		// r261f-3: each option is read on its own, so a value one takes never hides the next.
+		"scripts/slot.sh -s 1 -q rm -rf .git",
+		"sh -c 'scripts/slot.sh -s 1 -q rm -rf .git'",
 	])
 		strictEqual(verdicts(command)[2], git, command);
 	strictEqual(engine.evaluate(bash("scripts/slot.sh rm -rf src"), "default", contained).recoverable, true);
