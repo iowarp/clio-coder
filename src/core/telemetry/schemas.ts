@@ -553,6 +553,7 @@ export const MIDDLEWARE_EFFECTS = vocabulary([
 	"lock_tools",
 	"notify_operator",
 	"rewrite_tool_input",
+	"request_approval",
 ]);
 export const SYSTEM_ONE_OUTCOME = vocabulary([
 	"answered",
@@ -1976,7 +1977,7 @@ export const ToolSettledSchema = Type.Object(
 		 */
 		fileExt: Type.Optional(vocabulary(TOOL_FILE_KINDS)),
 		/** The declared kind of the check a verify call ran (`src/tools/verify/catalog.ts`). */
-		checkKind: Type.Optional(vocabulary(["command", "numeric-compare", "perf-budget", "reproduce"])),
+		checkKind: Type.Optional(vocabulary(["command", "numeric-compare", "perf-budget", "reproduce", "browser"])),
 		/** The skill a context call loaded; an operator-chosen name, so a share anonymizes it like a rule id. */
 		skill: Type.Optional(ExistingId),
 		/** The capabilities a gateway call or chain invoked, so the tool mix sees `data` or `web_fetch` behind it. */

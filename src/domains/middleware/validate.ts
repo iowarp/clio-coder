@@ -66,6 +66,11 @@ function readMiddlewareEffect(
 			const key = readRequiredString(value, `${path}.key`, issues);
 			return message === null || key === null ? null : { kind: "notify_operator", message, key };
 		}
+		case "request_approval": {
+			rejectUnexpectedFields(value, path, ["kind", "reason"], issues);
+			const reason = readRequiredString(value, `${path}.reason`, issues);
+			return reason === null ? null : { kind: "request_approval", reason };
+		}
 	}
 }
 

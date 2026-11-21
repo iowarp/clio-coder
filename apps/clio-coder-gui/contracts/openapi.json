@@ -18404,7 +18404,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -19441,7 +19441,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -19536,7 +19536,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -19586,7 +19586,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 									}
 								}
 							}
@@ -19964,24 +19964,7 @@
 											"required": ["mimeType", "data"],
 											"properties": {
 												"mimeType": {
-													"anyOf": [
-														{
-															"type": "string",
-															"const": "image/png"
-														},
-														{
-															"type": "string",
-															"const": "image/jpeg"
-														},
-														{
-															"type": "string",
-															"const": "image/gif"
-														},
-														{
-															"type": "string",
-															"const": "image/webp"
-														}
-													]
+													"$ref": "#/components/schemas/Union_0887f58f"
 												},
 												"data": {
 													"type": "string",
@@ -20127,7 +20110,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -24431,12 +24414,6 @@
 			}
 		},
 		"schemas": {
-			"Array_029d694f": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_admission_durationMs_id_14614bbc"
-				}
-			},
 			"Array_0608acf6": {
 				"type": "array",
 				"items": {
@@ -24805,11 +24782,25 @@
 					"$ref": "#/components/schemas/Object_passed_sourceId_validatorDigest_d555b71d"
 				}
 			},
+			"Array_b103590f": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_data_mimeType_30aaac04"
+				},
+				"maxItems": 4
+			},
 			"Array_b41770ba": {
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_key_label_resetsAt_0c3b4eb1"
 				}
+			},
+			"Array_c4986126": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_name_path_ab196e53"
+				},
+				"maxItems": 4
 			},
 			"Array_c52271ac": {
 				"type": "array",
@@ -24945,6 +24936,12 @@
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_origin_path_present_1faa671d"
+				}
+			},
+			"Array_ec251890": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_admission_durationMs_id_f3588fe7"
 				}
 			},
 			"Array_f176b569": {
@@ -26087,7 +26084,7 @@
 										"minimum": 1
 									},
 									"item": {
-										"$ref": "#/components/schemas/Object_admission_durationMs_id_14614bbc"
+										"$ref": "#/components/schemas/Object_admission_durationMs_id_f3588fe7"
 									}
 								},
 								"additionalProperties": false
@@ -27519,11 +27516,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_durationMs_id_14614bbc": {
+			"Object_admission_durationMs_id_f3588fe7": {
 				"type": "object",
 				"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_6d801be1"
+					"$ref": "#/components/schemas/Shape_cad93800"
 				},
 				"additionalProperties": false
 			},
@@ -29972,7 +29969,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_ca3d01fc": {
+			"Object_config_contextWork_fleet_76d1073b": {
 				"type": "object",
 				"required": [
 					"id",
@@ -29989,7 +29986,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_9c33d84c"
+					"$ref": "#/components/schemas/Shape_0b89ddbb"
 				},
 				"additionalProperties": false
 			},
@@ -30286,6 +30283,21 @@
 						"patternProperties": {
 							"^.*$": {}
 						}
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_data_mimeType_30aaac04": {
+				"type": "object",
+				"required": ["mimeType", "data"],
+				"properties": {
+					"mimeType": {
+						"$ref": "#/components/schemas/Union_0887f58f"
+					},
+					"data": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 1048576
 					}
 				},
 				"additionalProperties": false
@@ -31749,6 +31761,21 @@
 					"outputTokensPerSecond": {
 						"type": "number",
 						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_name_path_ab196e53": {
+				"type": "object",
+				"required": ["path", "name"],
+				"properties": {
+					"path": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 1024
 					}
 				},
 				"additionalProperties": false
@@ -33453,6 +33480,66 @@
 					"$ref": "#/components/schemas/Object_measured_missing_p50_14460945"
 				}
 			},
+			"Shape_0b89ddbb": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_ec251890"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_fb7031ee"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_ae8338fe"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_c9ef4f17"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_0f2fda0b": {
 				"id": {
 					"type": "string",
@@ -34655,69 +34742,6 @@
 					"$ref": "#/components/schemas/Union_5e8ad8cd"
 				}
 			},
-			"Shape_6d801be1": {
-				"id": {
-					"type": "string"
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"sequence": {
-					"type": "integer"
-				},
-				"kind": {
-					"$ref": "#/components/schemas/Union_c22e678b"
-				},
-				"text": {
-					"type": "string"
-				},
-				"status": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"title": {
-					"type": "string"
-				},
-				"toolKind": {
-					"type": "string"
-				},
-				"toolCallId": {
-					"type": "string"
-				},
-				"locations": {
-					"$ref": "#/components/schemas/Array_752b64bf"
-				},
-				"rawInput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"rawOutput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"partialOutput": {
-					"type": "string",
-					"maxLength": 32768
-				},
-				"durationMs": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"admission": {
-					"type": "string",
-					"maxLength": 128
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
 			"Shape_6fd9e1cd": {
 				"usd": {
 					"$ref": "#/components/schemas/Union_5d603e2a"
@@ -35073,66 +35097,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_warning_a8b9b759"
-				}
-			},
-			"Shape_9c33d84c": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_029d694f"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_fb7031ee"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_ae8338fe"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_c9ef4f17"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_9c58459b": {
@@ -36381,6 +36345,75 @@
 					"$ref": "#/components/schemas/Object_data_kind_version_faaa767e"
 				}
 			},
+			"Shape_cad93800": {
+				"id": {
+					"type": "string"
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"sequence": {
+					"type": "integer"
+				},
+				"kind": {
+					"$ref": "#/components/schemas/Union_c22e678b"
+				},
+				"text": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"title": {
+					"type": "string"
+				},
+				"toolKind": {
+					"type": "string"
+				},
+				"toolCallId": {
+					"type": "string"
+				},
+				"locations": {
+					"$ref": "#/components/schemas/Array_752b64bf"
+				},
+				"rawInput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"rawOutput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"partialOutput": {
+					"type": "string",
+					"maxLength": 32768
+				},
+				"durationMs": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"admission": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"images": {
+					"$ref": "#/components/schemas/Array_b103590f"
+				},
+				"imageLinks": {
+					"$ref": "#/components/schemas/Array_c4986126"
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
+				}
+			},
 			"Shape_cb204b5f": {
 				"autonomy": {
 					"$ref": "#/components/schemas/Union_19fa529e"
@@ -37549,7 +37582,8 @@
 													"require_tool",
 													"lock_tools",
 													"notify_operator",
-													"rewrite_tool_input"
+													"rewrite_tool_input",
+													"request_approval"
 												]
 											}
 										},
@@ -38031,6 +38065,26 @@
 					{
 						"type": "string",
 						"const": "remove"
+					}
+				]
+			},
+			"Union_0887f58f": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "image/png"
+					},
+					{
+						"type": "string",
+						"const": "image/jpeg"
+					},
+					{
+						"type": "string",
+						"const": "image/gif"
+					},
+					{
+						"type": "string",
+						"const": "image/webp"
 					}
 				]
 			},

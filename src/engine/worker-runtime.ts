@@ -225,11 +225,16 @@ const GRANT_MCP_DESCRIPTION_CHARS = 1000;
  */
 const REJECTED_HELPER_RESULT_MAX_CHARS = 16 * 1024;
 
-/** APIs whose request renders the reasoning effort ahead of the input; a locked round there keeps the run's level. */
+/**
+ * APIs whose request renders the reasoning effort ahead of the input, so a locked round there keeps the run's level.
+ * On copilot-sdk a changed effort is a setModel on the live session, after which Copilot read none of its cached
+ * prefix (M-20).
+ */
 const REASONING_PREFIX_APIS: ReadonlySet<string> = new Set([
 	"openai-responses",
 	"openai-codex-responses",
 	"azure-openai-responses",
+	"copilot-sdk",
 ]);
 
 /** An MCP tool's trust class and registered description for a worker's grant request, else undefined. */
@@ -1927,7 +1932,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attemptOptions;
 						// Responses APIs render the reasoning effort ahead of the whole input, and Pi sends the model's off effort
 						// (and no encrypted reasoning) when the level is dropped, so a locked round there keeps the run's level:
-						// dropping it made a Codex round miss every cached token and turned thinking off mid-run (FL-16).
+						// dropping it made a Codex round miss every cached token and turned thinking off mid-run (FL-16). On copilot-sdk
+						// the dropped level became a setModel on the live session, which read none of its cached prefix (M-20).
 						const source = boundWorkerResponse(
 							currentModel,
 							attemptContext,

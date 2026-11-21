@@ -21,6 +21,7 @@ export const MIDDLEWARE_EFFECT_KINDS = [
 	"require_tool",
 	"lock_tools",
 	"notify_operator",
+	"request_approval",
 ] as const;
 
 export type MiddlewareEffectKind = (typeof MIDDLEWARE_EFFECT_KINDS)[number];
@@ -111,6 +112,13 @@ export type MiddlewareEffect =
 	 * surface can replace or rate-limit repeats.
 	 */
 	| { kind: "notify_operator"; message: string; key: string }
+	/**
+	 * Ask the operator before the call runs, as another agent's hook `ask` does.
+	 * The registry parks the call on the same approval card, safety-judge review
+	 * and refusal path as an admission ask; a call that already carries an
+	 * approval runs without a second one. Applies at before_tool only.
+	 */
+	| { kind: "request_approval"; reason: string }
 	/**
 	 * Replacement arguments for the call about to run. Only an extension
 	 * runtime hook emits it, in the awaited before_tool phase, and it is not
