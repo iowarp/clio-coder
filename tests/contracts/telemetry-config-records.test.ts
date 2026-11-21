@@ -19,6 +19,7 @@ import { grantTelemetryConsent } from "../../src/domains/telemetry/consent.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import { readTelemetryObject } from "../../src/domains/telemetry/objects.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { JOURNAL_IDLE_CLOSE_MS } from "../../src/domains/telemetry/session-journals.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { telemetryCall } from "../harness/telemetry-view.js";
 
@@ -190,6 +191,43 @@ it("a session created after boot binds the live read model, which folds its call
 		strictEqual(live.sessionId, origin.id);
 		strictEqual(contract.sessionSpend().usd, 0.25);
 	} finally {
+		await extension.stop?.();
+		env.restore();
+	}
+});
+
+it("the live session's writer stays open while idle, and an unchanged reopen records no second snapshot (C-18)", async () => {
+	const env = await isolateClioEnv("clio-coder-live-writer-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const config = { get: () => settings, onChange: () => () => {} } as unknown as ConfigContract;
+	const bus = createTelemetryHub();
+	const { contract, extension } = createTelemetryBundle({
+		bus,
+		getContract: (name: string) => (name === "config" ? config : undefined),
+	} as DomainContext);
+	const live = { id: "live-writer", cwdHash: "live-repo" };
+	const other = { id: "other-writer", cwdHash: "live-repo" };
+	const open = (id: string) => openCallJournalHealth().some(({ owner }) => owner === `session:${id}`);
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		await extension.start();
+		bus.emit("session.created", { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
+		await contract.flush();
+		await (await contract.acquireTelemetrySession?.(other, { role: "main", id: other.id }))?.release();
+		mock.timers.tick(JOURNAL_IDLE_CLOSE_MS);
+		for (let turn = 0; turn < 50 && open(other.id); turn += 1) await setImmediate();
+		strictEqual(open(other.id), false, "a session no one works in still closes idle");
+		ok(open(live.id), "the live session keeps its writer between turns");
+		await (await contract.acquireTelemetrySession?.(other, { role: "main", id: other.id }))?.release();
+		await extension.stop?.();
+		const records = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), other.id))).records;
+		strictEqual(
+			records.filter(({ record }) => record.k === "config.snapshotted").length,
+			1,
+			"a reopen under the settings already journaled snapshots nothing new",
+		);
+	} finally {
+		mock.timers.reset();
 		await extension.stop?.();
 		env.restore();
 	}

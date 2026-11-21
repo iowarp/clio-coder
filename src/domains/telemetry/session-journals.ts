@@ -75,13 +75,17 @@ interface Entry {
 	idle?: NodeJS.Timeout | undefined;
 	/** The session closed; its last release seals the scope and closes the writer instead of idling (#434). */
 	sealRequested?: boolean;
+	/** When its last lease released, so the health windows still stop once the session goes quiet (C-18). */
+	quietSince?: number;
 }
 
 /**
  * How long a writer stays open after its last lease. Every lease cycle that
  * closed the writer reopened it on the next call: a full read and scan of the
  * journal plus a new segment header, 23 ms at 150 calls and 78 ms at 600 in a
- * probe, on the thread that runs the turn (#434).
+ * probe, on the thread that runs the turn (#434). The live session's writer
+ * never idles out: background work on a slower cadence reopened it all session
+ * long (C-18); it closes at the session's close or at shutdown.
  */
 export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 /** Sessions whose origin a writer set remembers for reopening; an ACP server hosts a few at most. */
@@ -94,8 +98,12 @@ export function createSessionJournals(
 	capture?: SessionCapture,
 	/** Runs once per writer open, before any lease proceeds, so its records lead the writer's first batch (#434). */
 	opened?: (origin: TelemetrySessionOrigin, sessionDirectory: string, journal: CallJournal) => Promise<void>,
+	/** Runs on every lease, so process work that follows session activity (health windows) can resume (C-18). */
+	leased?: () => void,
 ) {
 	const entries = new Map<string, Entry>();
+	/** The session whose writer stays open between leases until it closes or another becomes live (C-18). */
+	let live: string | null = null;
 	/** Sessions this process has leased, so a session fact naming one can reopen its writer (#434). */
 	const origins = new Map<string, TelemetrySessionOrigin>();
 	let versions: Promise<SegmentHeader["writer"]> | undefined;
@@ -133,6 +141,13 @@ export function createSessionJournals(
 		});
 		return entry.closing;
 	};
+	const armIdle = (id: string, entry: Entry): void => {
+		entry.idle = setTimeout(() => {
+			entry.idle = undefined;
+			if (entry.users === 0) void close(id, entry);
+		}, JOURNAL_IDLE_CLOSE_MS);
+		entry.idle.unref();
+	};
 	const acquire = async (
 		origin: TelemetrySessionOrigin,
 		agent: TelemetryAgent,
@@ -145,6 +160,11 @@ export function createSessionJournals(
 			return { context, journaled: false, async release() {} };
 		}
 		const directory = telemetrySessionDirectory(stateDir, origin.id);
+		try {
+			leased?.();
+		} catch {
+			report();
+		}
 		origins.delete(origin.id);
 		origins.set(origin.id, origin);
 		if (origins.size > KNOWN_ORIGINS) origins.delete(origins.keys().next().value as string);
@@ -270,6 +290,7 @@ export function createSessionJournals(
 					report();
 				}
 				if (owned.users !== 0 || owned.closing || owned.idle) return;
+				owned.quietSince = performance.now();
 				if (owned.sealRequested) {
 					// The last lease drained: seal and close at once, since an idle writer still receives health samples
 					// and any later record would make the closed session live again (#434).
@@ -277,19 +298,35 @@ export function createSessionJournals(
 					await close(origin.id, owned, true);
 					return;
 				}
-				owned.idle = setTimeout(() => {
-					owned.idle = undefined;
-					if (owned.users === 0) void close(origin.id, owned);
-				}, JOURNAL_IDLE_CLOSE_MS);
-				owned.idle.unref();
+				if (origin.id !== live) armIdle(origin.id, owned);
 			},
 		};
 	};
 	return {
 		acquire,
+		/**
+		 * Name the live session, or none. Its writer stays open between leases; the one it replaces idles out as any
+		 * other session's does (C-18).
+		 */
+		keepOpen(sessionId: string | null): void {
+			const previous = live;
+			live = sessionId;
+			if (previous === null || previous === sessionId) return;
+			const entry = entries.get(previous);
+			if (entry && entry.users === 0 && !entry.closing && !entry.idle) armIdle(previous, entry);
+		},
+		/** Whether a writer is leased or released within the idle window, which is what health sampling follows (C-18). */
+		busy(): boolean {
+			const now = performance.now();
+			return [...entries.values()].some(
+				(entry) =>
+					entry.open === true &&
+					(entry.users > 0 || (entry.quietSince !== undefined && now - entry.quietSince < JOURNAL_IDLE_CLOSE_MS)),
+			);
+		},
 		/** The origin of a session this process leased recently, or undefined for one it never wrote. */
 		knownOrigin: (sessionId: string): TelemetrySessionOrigin | undefined => origins.get(sessionId),
-		/** Sessions whose writer is open now; a closed writer records its settings again when it reopens (#434). */
+		/** Sessions whose writer is open now; a closed writer reopens with its settings when they changed (#434, C-18). */
 		openSessions(): Array<{
 			origin: TelemetrySessionOrigin;
 			sessionDirectory: string;
