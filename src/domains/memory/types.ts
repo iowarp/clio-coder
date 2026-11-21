@@ -1,7 +1,4 @@
-/**
- * The store version, the only one this build reads or writes. A version-1 store, from before claim identity, is
- * rewritten once by the `2026-11-21-memory-store-v2` upgrade migration.
- */
+/** The store version, the only one this build reads or writes. */
 export const MEMORY_VERSION = 2;
 
 export const MEMORY_SCOPES = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"] as const;

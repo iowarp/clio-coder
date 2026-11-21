@@ -5,12 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { BackgroundStepDecision, BackgroundStepFacts } from "../../src/domains/memory/background-budget.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
-import {
-	commandEvidenceRef,
-	commandSegment,
-	commandTextHash,
-	sourceEvidenceRef,
-} from "../../src/domains/memory/command-evidence.js";
+import { commandEvidenceRef, commandSegment, sourceEvidenceRef } from "../../src/domains/memory/command-evidence.js";
 import {
 	type ClaimReceipt,
 	claimDemonstration,
@@ -34,7 +29,6 @@ import {
 } from "../../src/domains/memory/promotion.js";
 import { selectMemoryForPrompt } from "../../src/domains/memory/prompt-section.js";
 import { insertMemoryRecordIfAbsent, loadMemoryRecords } from "../../src/domains/memory/store.js";
-import { upgradeMemoryStore } from "../../src/domains/memory/store-upgrade.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { proposeInjectedTaskMemory } from "../../src/domains/memory/task-bank-promotion.js";
 import { loadTaskBankSnapshot, saveTaskBankSnapshot } from "../../src/domains/memory/task-bank-store.js";
@@ -327,7 +321,8 @@ describe("memory guardian gate", () => {
 		const checkoutParameter = { kind: "command" as const, command: pattern(intoCheckout, 3) };
 		ok(deliver({ ...bound, id: "mem-00000000000000b6", ...lesson(intoCheckout), claim: checkoutParameter }) !== null);
 
-		// The store reads one shape. A version-1 store is refused by name until the upgrade migration rewrites it once.
+		// The store reads one shape: another envelope version is refused, and a record in an older shape is set aside and
+		// dropped by the next write.
 		const legacyDir = scratch();
 		const portRef = sourceEvidenceRef("README.md", "the port is 8080");
 		const shortRef = (ref: string) => ref.slice(0, ref.indexOf("#") + 17);
@@ -344,85 +339,38 @@ describe("memory guardian gate", () => {
 			approved: false,
 			repository: { kind: "canonical-path", key: repo },
 		};
-		const legacyStore = [
-			{
-				...legacy,
-				evidenceRefs: [`command:${commandTextHash(VALIDATE)}`],
-				observations: [
-					...["2026-10-02", "2026-10-03", "2026-10-04"].map((day, index) => ({
-						at: `${day}T00:00:00.000Z`,
-						sessionId: `l${index}`,
-						kind: "delivered",
-					})),
-					{ at: "2026-10-05T00:00:00.000Z", sessionId: "l5", kind: "held" },
-				],
-			},
+		const at = "2026-10-02T00:00:00.000Z";
+		const oldShapes = [
 			{
 				...legacy,
 				id: "mem-00000000000000a2",
+				key: "delivered",
+				observations: [{ at, sessionId: "l0", kind: "delivered" }],
+			},
+			{ ...legacy, id: "mem-00000000000000a3", key: "unscoped", observations: [{ at, sessionId: "l5", kind: "held" }] },
+			{
+				...legacy,
+				id: "mem-00000000000000a4",
 				key: "port",
 				lesson: "README.md says the port is 8080.",
 				evidenceRefs: [shortRef(portRef)],
 			},
-			{
-				...legacy,
-				id: "mem-00000000000000a3",
-				key: "gone",
-				lesson: "Port noted.",
-				evidenceRefs: [shortRef(portRef), "session:s1"],
-			},
-			{ ...legacy, id: "mem-00000000000000a4", key: "only", lesson: "Port noted.", evidenceRefs: [shortRef(portRef)] },
 		];
 		const legacyPath = join(legacyDir, "memory", "records.json");
 		mkdirSync(join(legacyDir, "memory"), { recursive: true });
-		const legacyText = `${JSON.stringify({ version: 1, records: legacyStore }, null, 2)}\n`;
-		writeFileSync(legacyPath, legacyText);
-		await rejects(loadMemoryRecords(legacyDir), /version 1 .*clio-coder upgrade/u);
-		const report = await upgradeMemoryStore(legacyDir);
-		strictEqual(readFileSync(`${legacyPath}.memory-v2.bak`, "utf8"), legacyText);
-		for (const line of [
-			"Rewrote the store from version 1 to 2.",
-			"Rewrote 1 command evidence ref from a text hash to evidence identity.",
-			"Rewrote 1 source ref from a 16-character span hash to the full digest.",
-			"Removed source refs whose quoted span could no longer be recovered",
-			"Moved 3 delivered observations into the delivery counters.",
-			"Removed 1 verdict that named no claim revision; no gate counted them.",
-		])
-			ok(
-				report.changed.some((entry) => entry.startsWith(line)),
-				`${line} missing from:\n${report.changed.join("\n")}`,
-			);
-		ok(report.changed.some((entry) => entry.includes("mem-00000000000000a3, mem-00000000000000a4.")));
-		ok(report.attention[0]?.startsWith("1 memory record the current shape refuses moved to records.invalid.json"));
-		const quarantined = JSON.parse(readFileSync(join(legacyDir, "memory", "records.invalid.json"), "utf8"));
+		writeFileSync(legacyPath, JSON.stringify({ version: 1, records: [legacy] }));
+		await rejects(loadMemoryRecords(legacyDir), /\$\.version: expected 2 .*doctor --fix/u);
+		writeFileSync(legacyPath, JSON.stringify({ version: 2, records: [legacy, ...oldShapes] }));
 		deepStrictEqual(
-			quarantined.map((item: { record: { id: string } }) => item.record.id),
-			["mem-00000000000000a4"],
+			(await loadMemoryRecords(legacyDir)).map((item) => item.id),
+			[legacy.id],
 		);
-		const upgraded = await loadMemoryRecords(legacyDir);
-		const byId = new Map(upgraded.map((item) => [item.id, item]));
-		const upgradedLegacy = byId.get(legacy.id);
-		deepStrictEqual(upgradedLegacy?.evidenceRefs, [commandEvidenceRef(VALIDATE)]);
-		strictEqual(upgradedLegacy?.claim?.kind, "command", "the claim its refs made is stored");
-		strictEqual(upgradedLegacy?.deliveredCount, 3);
-		strictEqual(upgradedLegacy?.lastDeliveredAt, "2026-10-04T00:00:00.000Z");
-		strictEqual(upgradedLegacy?.observations, undefined);
-		deepStrictEqual(byId.get("mem-00000000000000a2")?.evidenceRefs, [portRef]);
-		deepStrictEqual(byId.get("mem-00000000000000a2")?.claim, {
-			kind: "source",
-			path: "README.md",
-			spanHash: portRef.slice(-64),
-		});
-		deepStrictEqual(byId.get("mem-00000000000000a3")?.evidenceRefs, ["session:s1"]);
-		deepStrictEqual(await upgradeMemoryStore(legacyDir), { changed: [], attention: [] }, "a second run finds nothing");
 		await recordMemoryObservations(legacyDir, [{ memoryId: legacy.id, sessionId: "l9", kind: "held" }]);
-		const migrated = JSON.parse(readFileSync(legacyPath, "utf8"));
-		strictEqual(migrated.version, 2);
+		const written = JSON.parse(readFileSync(legacyPath, "utf8"));
 		deepStrictEqual(
-			migrated.records
-				.find((item: { id: string }) => item.id === legacy.id)
-				.observations.map((item: { kind: string }) => item.kind),
-			["held"],
+			written.records.map((item: { id: string }) => item.id),
+			[legacy.id],
+			"the next write drops every record in an old shape",
 		);
 
 		// At capacity: every operator decision and lesson stays, a note with no evidence goes before an older one with it.

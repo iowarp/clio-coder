@@ -568,9 +568,6 @@ async function readReviewedHandoff(path: string): Promise<ReviewedTaskMemoryHand
 	if (info.size > 1_000_000) throw new Error(`task-memory handoff exceeds 1000000 bytes: ${path}`);
 	const snapshot = parseTaskMemoryHandoffSnapshot(await readFile(path, "utf8"));
 	if (snapshot === null) throw new Error(`task-memory handoff is invalid: ${path}`);
-	if (snapshot.version !== 2) {
-		throw new Error("task-memory handoff lacks source session and evidence provenance; create a new redacted handoff");
-	}
 	return snapshot;
 }
 

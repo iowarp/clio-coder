@@ -270,26 +270,6 @@ function spanDigest(text: string): string {
 	return createHash("sha256").update(compact(text)).digest("hex");
 }
 
-/**
- * The full digest a short pinned hash stood for, recovered the way delivery finds a span: from a run of the lesson's
- * own words, then from whole-line windows of the file. Null unless exactly one digest has that prefix. Only the memory
- * store upgrade asks, for `source:` refs written before refs carried the full hash.
- */
-export function recoverSpanDigest(lesson: string, prefix: string, content: string | null): string | null {
-	const found = new Set<string>();
-	const words = compact(lesson).split(" ");
-	for (let start = 0; start < words.length; start++)
-		for (let end = start; end < Math.min(words.length, start + SPAN_WINDOW_WORDS); end++)
-			for (const candidate of spanCandidates(words.slice(start, end + 1).join(" "))) {
-				const digest = spanDigest(candidate);
-				if (digest.startsWith(prefix)) found.add(digest);
-			}
-	if (found.size === 0 && content !== null)
-		for (const digest of lineWindowDigests(content)) if (digest.startsWith(prefix)) found.add(digest);
-	const [only] = found;
-	return found.size === 1 && only !== undefined ? only : null;
-}
-
 /** Outer delimiters a lesson's prose may wrap a quoted span in, each with its closer. */
 const SPAN_DELIMITERS: Readonly<Record<string, string>> = { "`": "`", '"': '"', "'": "'", "(": ")", "[": "]" };
 /** Sentence punctuation the prose may put after a quoted span. */

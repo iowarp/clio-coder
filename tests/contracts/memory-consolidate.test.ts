@@ -1,43 +1,28 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	realpathSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
-import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
-import memoryFlowSweep from "../../src/domains/lifecycle/migrations/2026-11-21-memory-flow-sweep.js";
 import {
 	commandSegment,
 	parseSourceEvidenceRef,
 	sourceEvidenceRef,
 } from "../../src/domains/memory/command-evidence.js";
 import { consolidateMemory } from "../../src/domains/memory/consolidate.js";
-import { type MemoryFlowSweepPorts, sweepRestrictedMemory } from "../../src/domains/memory/flow-sweep.js";
 import { createMemoryGuardian } from "../../src/domains/memory/guardian.js";
 import { claimCommand, claimNote, memoryRecordFromPromotion } from "../../src/domains/memory/promotion.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import type { MemoryRecord, MemoryRepositoryIdentity } from "../../src/domains/memory/types.js";
-import { isolateClioEnv } from "../harness/scratch-env.js";
 
-const LABEL_AT = "2026-06-02T00:00:00.000Z";
 const BEFORE = "2026-06-01T00:00:00.000Z";
 const AFTER = "2026-06-03T00:00:00.000Z";
 const DELIVERED_AT = "2026-06-04T00:00:00.000Z";
 
-const scratchRoot = mkdtempSync(join(tmpdir(), "memory-flow-sweep-repos-"));
+const scratchRoot = mkdtempSync(join(tmpdir(), "memory-consolidate-repos-"));
 after(() => rmSync(scratchRoot, { recursive: true, force: true }));
 const CLEAN_REPO = realpathSync(mkdtempSync(join(scratchRoot, "clean-")));
-const RULED_REPO = realpathSync(mkdtempSync(join(scratchRoot, "ruled-")));
 
 /** A record shaped the way filing writes one, named here so an assertion can say which case it reads. */
 const names = new Map<string, string>();
@@ -65,19 +50,9 @@ function record(name: string, fields: Partial<MemoryRecord> & { source?: string;
 	if (source === undefined) Reflect.deleteProperty(shaped, "provenance");
 	return shaped;
 }
-const named = (ids: ReadonlyArray<string> | null | undefined) => (ids ?? []).map((id) => names.get(id)).sort();
-
-const ports: MemoryFlowSweepPorts = {
-	sessionFirstLabelAt: (sessionId) => {
-		if (sessionId === "labeled") return LABEL_AT;
-		if (sessionId === "clean") return null;
-		throw new Error("session not found");
-	},
-	repositoryDeclaresFlowRules: (path) => path === RULED_REPO,
-};
 
 function home(records: MemoryRecord[] | string) {
-	const root = mkdtempSync(join(tmpdir(), "memory-flow-sweep-"));
+	const root = mkdtempSync(join(tmpdir(), "memory-consolidate-"));
 	const dataDir = join(root, "data");
 	const stateDir = join(root, "state");
 	mkdirSync(join(dataDir, "memory"), { recursive: true });
@@ -87,80 +62,6 @@ function home(records: MemoryRecord[] | string) {
 	);
 	return { root, dataDir, stateDir };
 }
-
-test("the sweep rejects what its source's label or the project's rules say, and keeps the rest", async () => {
-	const h = home([
-		record("after-label", { source: "labeled" }),
-		record("at-label", { source: "labeled", createdAt: LABEL_AT }),
-		record("before-label", { source: "labeled", createdAt: BEFORE }),
-		record("clean-source", { source: "clean" }),
-		record("proposed-after-label", { source: "labeled", approved: false }),
-		record("missing-no-rules", { source: "gone" }),
-		record("missing-under-rules", { source: "gone", repo: RULED_REPO }),
-		record("unrecorded-no-rules", {}),
-		record("unrecorded-under-rules", { repo: RULED_REPO }),
-		record("already-rejected", { source: "labeled", approved: false, rejectedAt: BEFORE }),
-	]);
-	try {
-		const rejected = await sweepRestrictedMemory(h.dataDir, ports);
-		deepStrictEqual(named(rejected), [
-			"after-label",
-			"at-label",
-			"missing-under-rules",
-			"proposed-after-label",
-			"unrecorded-under-rules",
-		]);
-		const kept = new Map(loadMemoryRecordsSync(h.dataDir).map((item) => [names.get(item.id), item]));
-		strictEqual(kept.size, 10, "every record stays on disk");
-		strictEqual(kept.get("after-label")?.approved, false);
-		ok(kept.get("after-label")?.rejectedAt);
-		strictEqual(kept.get("before-label")?.approved, true);
-		strictEqual(kept.get("clean-source")?.approved, true);
-		strictEqual(kept.get("missing-no-rules")?.approved, true);
-		strictEqual(kept.get("already-rejected")?.rejectedAt, BEFORE);
-	} finally {
-		rmSync(h.root, { recursive: true, force: true });
-	}
-});
-
-test("the migration sweeps once, and a home whose boot already finished the sweep loses only the marker", async (t) => {
-	const env = await isolateClioEnv("clio-memory-flow-sweep-");
-	t.after(() => env.restore());
-	const marker = join(clioStateDir(), "memory", "flow-sweep-v1.json");
-	mkdirSync(join(clioStateDir(), "memory"), { recursive: true });
-	writeFileSync(marker, "{}\n");
-	mkdirSync(join(clioDataDir(), "memory"), { recursive: true });
-	const stored = JSON.stringify({ version: 2, records: [record("after-label", { source: "labeled" })] });
-	writeFileSync(memoryStorePath(clioDataDir()), stored);
-	deepStrictEqual(await memoryFlowSweep.up(clioStateDir()), { changed: [], attention: [] });
-	strictEqual(existsSync(marker), false);
-	strictEqual(readFileSync(memoryStorePath(clioDataDir()), "utf8"), stored, "the finished sweep is not repeated");
-});
-
-test("an unreadable store fails the sweep, and the next run finishes the work", async () => {
-	const h = home("{ not json");
-	try {
-		await rejects(sweepRestrictedMemory(h.dataDir, ports));
-		writeFileSync(
-			memoryStorePath(h.dataDir),
-			JSON.stringify({ version: 2, records: [record("after-label", { source: "labeled" })] }),
-		);
-		deepStrictEqual(named(await sweepRestrictedMemory(h.dataDir, ports)), ["after-label"]);
-	} finally {
-		rmSync(h.root, { recursive: true, force: true });
-	}
-});
-
-test("an empty or missing store finishes with nothing rejected", async () => {
-	const h = home([]);
-	try {
-		rmSync(memoryStorePath(h.dataDir));
-		deepStrictEqual(await sweepRestrictedMemory(h.dataDir, ports), []);
-		strictEqual(existsSync(memoryStorePath(h.dataDir)), false, "the sweep creates no store");
-	} finally {
-		rmSync(h.root, { recursive: true, force: true });
-	}
-});
 
 test("memory consolidate merges one claim's records, demotes dead evidence by rule, and leaves operator decisions and other repositories alone; history mining is off unless asked", async () => {
 	// A repository whose working tree changed since its lessons were kept: the README's port moved, and the release

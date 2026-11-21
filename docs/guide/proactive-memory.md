@@ -759,15 +759,6 @@ carries a label or its dispatching session does. Text recorded before the label 
 filed or gain evidence: history review stops at the label, and a retention already
 running, an interrupted one for a task finished before the label or a record already filed holds only what came before it. See [Information flow](information-flow.md).
 
-Releases before 0.6.8 could file a restricted session's lessons with no label. The upgrade migration
-`2026-11-21-memory-flow-sweep` (run by `clio-coder upgrade`, or once at the first boot after a background update)
-checks the store once, with memory on or off. It rejects a record whose
-source session took a label at or before the record was filed. In a repository whose project declares source rules
-it also rejects a record whose source session is gone, unreadable or never recorded. The migration report names each one.
-A rejected record stays on disk and reaches no route: review it with `clio-coder memory list` and restore one with
-`clio-coder memory approve <id>`. The migration manifest keeps the check from running again; one that cannot finish
-is retried by the next upgrade or boot.
-
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its
 own known usage under its actual target/model and emits its own telemetry outcome;
@@ -1001,9 +992,9 @@ never reviewed becomes eligible for `memory prune --stale` after 30 days. When t
 store reaches its 500-record cap, unpromoted notes make room, those without
 evidence before evidence-backed ones and then the one observed longest ago
 first. A lesson and a record you approved or rejected are never evicted. An
-invalid record is moved to `records.invalid.json` with one notice instead of
-disabling memory, and `clio-coder memory list` reports how many records were set
-aside. The repository
+invalid record, including one in a shape older builds wrote, is skipped with one
+notice instead of disabling memory and is dropped by the next store write;
+`clio-coder memory list` reports how many records were set aside. The repository
 a lesson belongs to is the repository root plus its root commit, and a linked
 worktree shares it only when the main repository registers that worktree; see
 [Repository-scoped identity](../architecture/evidence-and-memory.md#repository-scoped-identity).
@@ -1061,10 +1052,8 @@ the source session, its evidence reference, the runtime ID and redaction facts.
 Ordinary turns receive no snapshot. The skill writes the handoff to
 `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md`, an ignored project path;
 private status and secret-shaped values do not cross the export boundary. The
-parser also accepts the older `clio-task-memory` fence language and `version: 1`
-snapshots in handoff files written by earlier builds. Version 1 snapshots seed
-a bank unless the project declares information-flow source rules, and cannot be
-promoted, because they carry no source provenance.
+parser reads only the `clio-coder-task-memory` fence with a `version: 2`
+snapshot; any other handoff block is ignored.
 `clio-coder context reset` removes `.clio-coder/handoffs/`.
 
 When `/resume` restores a session with an id different from the previous one,

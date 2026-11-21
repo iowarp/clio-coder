@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { withStateFileLock } from "../../core/state-file-lock.js";
+import { withStateFileLock, withStateFileLockSync } from "../../core/state-file-lock.js";
 import {
 	AGENT_NOTE_EVIDENCE_PREFIX,
 	MEMORY_VERSION,
@@ -18,8 +18,6 @@ export const MEMORY_STALE_APPROVED_DAYS = 180;
 export const MEMORY_STALE_UNAPPROVED_DAYS = 30;
 /** Prompt compilation fails closed above this read ceiling; store writers are unchanged. */
 export const MEMORY_PROMPT_STORE_MAX_BYTES = 16 * 1024 * 1024;
-/** Quarantined records kept beside the store; the oldest fall off first. */
-export const MEMORY_INVALID_RECORDS_MAX = 100;
 
 interface InvalidMemoryRecord {
 	record: unknown;
@@ -90,10 +88,6 @@ export function memoryStorePath(dataDir: string): string {
 	return join(memoryRoot(dataDir), "records.json");
 }
 
-function memoryInvalidRecordsPath(dataDir: string): string {
-	return join(memoryRoot(dataDir), "records.invalid.json");
-}
-
 export async function loadMemoryRecords(dataDir: string): Promise<MemoryRecord[]> {
 	return (await loadMemoryStore(dataDir)).records;
 }
@@ -133,9 +127,9 @@ function readParsedStoreSync(dataDir: string): ParsedMemoryStore {
 
 /**
  * The envelope must be valid; a record that is not is set aside rather than
- * failing every read, and moves to `records.invalid.json` on the next write.
- * A store a newer build wrote is never touched, and neither is a version-1 store: the memory store upgrade migration
- * rewrites that one, and until it has run the store reads as an error naming `clio-coder upgrade`.
+ * failing every read, and is dropped by the next write.
+ * A store of any other version, newer or older, is never touched; it reads as an error, and `clio-coder doctor --fix`
+ * rewrites an older one with only the records this build reads.
  */
 function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	const parsed = parseJson(raw, source);
@@ -147,10 +141,10 @@ function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	if (typeof envelope.version === "number" && envelope.version > MEMORY_VERSION) {
 		throw new Error(`memory store version ${envelope.version} is newer than this build supports (${MEMORY_VERSION})`);
 	}
-	if (envelope.version === 1)
-		throw new Error("memory store version 1 is from before claim identity; run `clio-coder upgrade` to rewrite it");
 	if (envelope.version !== MEMORY_VERSION)
-		throw new Error(`memory store invalid: $.version: expected ${MEMORY_VERSION}`);
+		throw new Error(
+			`memory store invalid: $.version: expected ${MEMORY_VERSION} (run \`clio-coder doctor --fix\` to drop what this build cannot read)`,
+		);
 	if (extra.length > 0) throw new Error(`memory store invalid: $.${extra[0]}: unexpected field`);
 	if (!Array.isArray(envelope.records)) throw new Error("memory store invalid: $.records: expected array");
 	const records: MemoryRecord[] = [];
@@ -163,26 +157,97 @@ function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	if (invalid.length > 0 && !noticedInvalidStores.has(source)) {
 		noticedInvalidStores.add(source);
 		pendingStoreNotices.push(
-			`memory store: ${invalid.length} invalid record${invalid.length === 1 ? "" : "s"} skipped; moved to ${join(dirname(source), "records.invalid.json")} on the next store write`,
+			`memory store: ${invalid.length} invalid record${invalid.length === 1 ? "" : "s"} skipped; dropped by the next store write`,
 		);
 	}
 	return { records: sortMemoryRecords(records), invalid };
 }
 
-export function quarantineInvalidRecordsUnlocked(dataDir: string, invalid: ReadonlyArray<InvalidMemoryRecord>): void {
-	const path = memoryInvalidRecordsPath(dataDir);
-	let existing: unknown[] = [];
+export interface MemoryStoreRepair {
+	path: string;
+	/** The version the store was at; the repair writes the current one. */
+	fromVersion: number | null;
+	kept: number;
+	dropped: number;
+	/** Files earlier builds kept beside the store, deleted by the repair. */
+	removedFiles: string[];
+}
+
+/** Files earlier builds wrote under the memory roots and this build never reads. */
+function retiredMemoryFiles(dataDir: string, stateDir: string): string[] {
+	return [join(memoryRoot(dataDir), "records.invalid.json"), join(stateDir, "memory", "flow-sweep-v1.json")];
+}
+
+/**
+ * What `clio-coder doctor --fix` would change in the memory store, read-only: an older envelope, records this build
+ * does not read, and retired files beside it. Null when there is nothing to repair; a newer or unparseable store is
+ * never touched.
+ */
+export function inspectMemoryStoreRepair(dataDir: string, stateDir: string): MemoryStoreRepair | null {
+	return planMemoryStoreRepair(dataDir, stateDir)?.repair ?? null;
+}
+
+function planMemoryStoreRepair(
+	dataDir: string,
+	stateDir: string,
+): { repair: MemoryStoreRepair; records: MemoryRecord[] | null } | null {
+	const path = memoryStorePath(dataDir);
+	const removedFiles = retiredMemoryFiles(dataDir, stateDir).filter((file) => existsSync(file));
+	let records: MemoryRecord[] | null = null;
+	let fromVersion: number | null = null;
+	let dropped = 0;
+	let raw: string | null = null;
 	try {
-		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-		if (Array.isArray(parsed)) existing = parsed;
-	} catch {
-		// Missing or unreadable: start a fresh quarantine file.
+		raw = readFileSync(path, "utf8");
+	} catch (error) {
+		if (!isErrorWithCode(error) || error.code !== "ENOENT") throw error;
 	}
-	const at = new Date().toISOString();
-	const entries = [...existing, ...invalid.map((item) => ({ quarantinedAt: at, ...item }))].slice(
-		-MEMORY_INVALID_RECORDS_MAX,
-	);
-	safeResourceWrite(path, `${JSON.stringify(entries, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	if (raw !== null) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			parsed = null;
+		}
+		const envelope =
+			typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+		if (
+			envelope !== null &&
+			typeof envelope.version === "number" &&
+			envelope.version <= MEMORY_VERSION &&
+			Array.isArray(envelope.records)
+		) {
+			const kept: MemoryRecord[] = [];
+			for (const value of envelope.records) {
+				const result = validateMemoryRecord(value);
+				if (result.valid) kept.push(result.record);
+				else dropped += 1;
+			}
+			const extra = Object.keys(envelope).some((key) => key !== "version" && key !== "records");
+			if (envelope.version !== MEMORY_VERSION || dropped > 0 || extra) {
+				records = kept;
+				fromVersion = envelope.version;
+			}
+		}
+	}
+	if (records === null && removedFiles.length === 0) return null;
+	return { repair: { path, fromVersion, kept: records?.length ?? 0, dropped, removedFiles }, records };
+}
+
+/**
+ * Rewrite an older or partly unreadable store as the current version with only the records this build reads, and
+ * delete the retired files beside it. Records are kept as written; nothing is converted.
+ */
+export function repairMemoryStore(dataDir: string, stateDir: string): MemoryStoreRepair | null {
+	return withStateFileLockSync(memoryStorePath(dataDir), () => {
+		const plan = planMemoryStoreRepair(dataDir, stateDir);
+		if (plan === null) return null;
+		if (plan.records !== null) {
+			writeMemoryRecordsUnlocked(dataDir, plan.records, new Set(plan.records.map((record) => record.id)));
+		}
+		for (const file of plan.repair.removedFiles) rmSync(file, { force: true });
+		return plan.repair;
+	});
 }
 
 function writeMemoryRecordsUnlocked(
@@ -264,7 +329,6 @@ export async function mutateMemoryRecords<T>(
 			options.signal?.throwIfAborted();
 			if (options.isCurrent?.() === false) throw new Error("memory write lost content authority");
 			if ("records" in outcome) {
-				if (parsed.invalid.length > 0) quarantineInvalidRecordsUnlocked(dataDir, parsed.invalid);
 				writeMemoryRecordsUnlocked(dataDir, outcome.records, new Set(parsed.records.map((record) => record.id)));
 			}
 			return outcome.result;
