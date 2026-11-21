@@ -1789,11 +1789,11 @@ function modelCatalogOverlayFindings(workspaceRoot: string): DoctorFinding[] {
 	return [
 		loaded,
 		...overlays.problems().map(
-			(problem): DoctorFinding => ({
+			({ path, message }): DoctorFinding => ({
 				ok: true,
 				level: "warn",
 				name: "model catalog file",
-				detail: `${problem}; this file is skipped, the other overlay files still apply; fix or remove it, then rerun \`clio-coder doctor\``,
+				detail: `${path}: ${message}; this file is skipped, the other overlay files still apply; fix or remove it, then rerun \`clio-coder doctor\``,
 			}),
 		),
 	];
