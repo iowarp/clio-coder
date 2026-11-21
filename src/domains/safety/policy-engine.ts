@@ -2192,8 +2192,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const other = own === decision ? through : decision;
 		const note = `a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`;
 		const reasons = [...new Set([...(own === through ? [note] : []), ...own.reasons, ...other.reasons])];
+		// A sandbox either reading runs in stays, the read-only one when both name one (r261c-14).
+		const sandboxes = [decision.shellSandbox, through.shellSandbox].filter((box) => box !== undefined);
+		const shellSandbox = sandboxes.find((box) => box.readOnly === true) ?? sandboxes[0];
 		return {
 			...own,
+			...(shellSandbox !== undefined ? { shellSandbox } : {}),
 			...(decision.command !== undefined ? { command: decision.command } : {}),
 			...(decision.recoverable === true || through.recoverable === true ? { recoverable: true as const } : {}),
 			reasons,

@@ -2107,11 +2107,19 @@ test("a declared validation wrapper is judged by what it runs, at least as stric
 	// from the call's own working directory.
 	for (const command of [
 		"scripts/slot.sh -s 1 rm -rf .git",
+		"scripts/slot.sh -qs 1 rm -rf .git",
 		"scripts/slot.sh >/dev/null -q rm -rf .git",
 		"sh -c 'scripts/slot.sh rm -rf .git'",
+		"sh -c 'scripts/slot.sh -s 1 rm -rf .git'",
 	])
 		strictEqual(verdicts(command)[2], git, command);
 	strictEqual(engine.evaluate(bash("scripts/slot.sh rm -rf src"), "default", contained).recoverable, true);
+	// r261c-14: an ask/ask tie keeps the sandbox the call as written runs in.
+	const pushed = engine.evaluate(bash("scripts/slot.sh git push --force"), "default", contained);
+	setValidationWrappers([]);
+	const pushedAsWritten = engine.evaluate(bash("scripts/slot.sh git push --force"), "default", contained);
+	setValidationWrappers(["scripts/slot.sh"]);
+	if (pushedAsWritten.shellSandbox !== undefined) deepStrictEqual(pushed.shellSandbox, pushedAsWritten.shellSandbox);
 	strictEqual(verdicts(`scripts/slot.sh ${outside}`)[2], verdicts(outside)[2]);
 	process.chdir(savedCwd);
 	try {

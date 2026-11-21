@@ -5188,7 +5188,7 @@ function pastWrapperOptions(segment: ReadonlyArray<string>, index: number, value
 		next += 1;
 		if (option === "--") break;
 		const value = segment[next];
-		if (values && /^(?:-[A-Za-z]|--[\w-]+)$/u.test(option) && value !== undefined && !value.startsWith("-")) next += 1;
+		if (values && /^(?:-[A-Za-z]+|--[\w-]+)$/u.test(option) && value !== undefined && !value.startsWith("-")) next += 1;
 	}
 	return next;
 }
@@ -5249,6 +5249,9 @@ function blankedSpans(text: string, spans: ReadonlyArray<{ start: number; end: n
 
 /** A word that may stand as a command word in a nested script (`sh -c '...'`, `$(...)`), with the option words after it. */
 const NESTED_COMMAND_WORD = /(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+-[^\s'"();&|`<>]*)*)/gu;
+/** The same, with each option taking the plain word after it as its value (`-s 1`, `-qs 1`). */
+const NESTED_COMMAND_WORD_VALUES =
+	/(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+-[^\s'"();&|`<>]*(?:[ \t]+[^\s'"();&|`<>-][^\s'"();&|`<>]*)?)*)/gu;
 
 /**
  * The readings of a command with its declared validation wrappers blanked out, so the rails read what they run (FX-46):
@@ -5283,14 +5286,17 @@ export function declaredWrapperReadings(command: string, cwd: string = process.c
 		}
 		if (blanks.length > 0) readings.add(blankedSpans(command, blanks));
 	}
-	const nested: Array<{ start: number; end: number }> = [];
-	for (const match of command.matchAll(NESTED_COMMAND_WORD)) {
-		const word = match[2] ?? "";
-		if (!names.has(basenameToken(word.replace(/\\/gu, "/"))) || !isValidationWrapper(word, cwd)) continue;
-		const start = match.index + (match[1] ?? "").length;
-		nested.push({ start, end: start + word.length + (match[3] ?? "").length });
+	// Nested, the wrapper is blanked once with its options read as flags and once with each taking a value (r261c-13).
+	for (const pattern of [NESTED_COMMAND_WORD, NESTED_COMMAND_WORD_VALUES]) {
+		const nested: Array<{ start: number; end: number }> = [];
+		for (const match of command.matchAll(pattern)) {
+			const word = match[2] ?? "";
+			if (!names.has(basenameToken(word.replace(/\\/gu, "/"))) || !isValidationWrapper(word, cwd)) continue;
+			const start = match.index + (match[1] ?? "").length;
+			nested.push({ start, end: start + word.length + (match[3] ?? "").length });
+		}
+		if (nested.length > 0) readings.add(blankedSpans(command, nested));
 	}
-	if (nested.length > 0) readings.add(blankedSpans(command, nested));
 	readings.delete(command);
 	return [...readings];
 }
