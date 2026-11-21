@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runFleetCancel } from "../../src/cli/fleet-cancel.js";
+import { runFleetWait } from "../../src/cli/fleet-wait.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { getStoredAssignment, registerAssignment } from "../../src/domains/dispatch/assignment-store.js";
 import {
@@ -19,7 +20,7 @@ import {
 	writeFleetResult,
 	writeFleetRootRecord,
 } from "../../src/domains/dispatch/fleet-root-record.js";
-import { openLedger } from "../../src/domains/dispatch/state.js";
+import { openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -166,6 +167,51 @@ describe("fleet cancel requests", () => {
 		const malformed = await cancel(["bad id!", "--json"]);
 		const failure = JSON.parse(malformed.out);
 		deepStrictEqual([malformed.code, failure.ok, failure.error.code], [2, false, "usage"]);
+	});
+
+	it("answers fleet wait on an orphaned root with the plan hash its run record bound (c-l7b-r)", async () => {
+		ensureClioState();
+		writeFleetRootRecord({ rootId: "fleet-cc0001", playbook: "demo", cwd: scratch.dir });
+		await writeFleetRun({
+			version: 1,
+			id: "fleet-cc0001",
+			fleet: "demo",
+			planHash: "b".repeat(64),
+			planIdentityHash: "c".repeat(64),
+			cwd: scratch.dir,
+			stepIds: ["step"],
+			planSteps: [],
+			vars: {},
+			startedAt: new Date().toISOString(),
+			endedAt: null,
+			resumedFrom: null,
+			steps: [],
+		});
+		// The owner is this process on another boot, so the record reads as orphaned.
+		const ownerFile = join(clioStateDir(), "fleet-runs", "owners", "fleet-cc0001.json");
+		const owned = JSON.parse(readFileSync(ownerFile, "utf8"));
+		owned.owner.bootId = "another-boot";
+		owned.owner.birthToken = "another-birth";
+		writeFileSync(ownerFile, JSON.stringify(owned));
+		const record = readFleetRootRecord("fleet-cc0001");
+		strictEqual(record !== null && fleetRootState(record, false), "orphaned");
+		const written: string[] = [];
+		const write = process.stdout.write;
+		const writeErr = process.stderr.write;
+		process.stdout.write = ((chunk: string) => {
+			written.push(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		process.stderr.write = (() => true) as typeof process.stderr.write;
+		let code: number;
+		try {
+			code = await runFleetWait(["fleet-cc0001", "--json"]);
+		} finally {
+			process.stdout.write = write;
+			process.stderr.write = writeErr;
+		}
+		const document = JSON.parse(written.join(""));
+		deepStrictEqual([code, document.causes[0]?.code, document.planHash], [1, "owner_gone", "b".repeat(64)]);
 	});
 
 	// A hosted worker publishes the main run as its lineage root, and a running attempt is not yet among the

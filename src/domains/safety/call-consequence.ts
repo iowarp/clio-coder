@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
+import { canonicalizePath } from "../../core/path-canonical.js";
 import { storeReplacedBlob } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
@@ -9,7 +10,8 @@ import { autonomyCallInputs } from "./autonomy-inputs.js";
 import { describeBashCallConsequences, type PathKind } from "./command-consequence.js";
 import { outwardShellReason } from "./containment.js";
 import type { SafetyDecision } from "./contract.js";
-import { shellCommandSteps } from "./protected-artifacts.js";
+import { isSameOrDescendant } from "./path-policy.js";
+import { type ShellCommandStep, shellCommandSteps } from "./protected-artifacts.js";
 
 /** What exists at `path` once resolved against `cwd`; null when it does not, or cannot be read. */
 function pathKindIn(cwd: string): (path: string) => PathKind {
@@ -104,6 +106,83 @@ export function projectScriptConsequences(call: ClassifierCall): string[] {
 		lines.push(`runs package.json script "${name}", repository data that executes as written: ${bodies.join("; ")}`);
 	}
 	return lines;
+}
+
+/** A script file a call runs, as the safety judge reads it: the canonical path, its size and its head. */
+export interface ScriptFileRun {
+	path: string;
+	bytes: number;
+	head: string;
+}
+
+/** Commands whose first operand is a script file they execute. */
+const SCRIPT_INTERPRETERS: ReadonlySet<string> = new Set([
+	"node",
+	"bash",
+	"sh",
+	"zsh",
+	"dash",
+	"python",
+	"python3",
+	"deno",
+	"bun",
+	"tsx",
+	"perl",
+	"ruby",
+]);
+/** Flags after which an interpreter runs inline code or a module, not a file. */
+const INLINE_FLAGS: ReadonlySet<string> = new Set(["-c", "-e", "-p", "-m", "--eval", "--print"]);
+/** How much of a script the judge reads, and the largest script it opens. */
+export const SCRIPT_HEAD_BYTES = 4096;
+const SCRIPT_MAX_BYTES = 1024 * 1024;
+const SCRIPTS_READ = 2;
+
+/**
+ * The script file one shell step executes, as spelled: the command word when it names a file by path, or
+ * an interpreter's first operand (`node probe.mjs`, `bun run x.ts`). Undefined for any other step, an
+ * inline `-c` script included.
+ */
+export function stepScriptOperand(step: ShellCommandStep): string | undefined {
+	if (step.commandPath !== undefined) return step.commandPath;
+	if (!SCRIPT_INTERPRETERS.has(basename(step.executable))) return undefined;
+	if (step.args.some((word) => INLINE_FLAGS.has(word))) return undefined;
+	const operands = step.args.filter((word) => !word.startsWith("-"));
+	return operands[0] === "run" ? operands[1] : operands[0];
+}
+
+/**
+ * The script files a bash or run_script call executes, read where they lie inside `roots` (the workspace and
+ * scratch roots), so approving a directory of scripts is not approving an unread file (M-5). A file outside them,
+ * a link out of them, a binary or an inline `-c` script is not read. Each head is raw: the reader redacts it.
+ */
+export function scriptFilesRun(call: ClassifierCall, roots: ReadonlyArray<string>): ScriptFileRun[] {
+	const cwd = resolve(process.cwd(), typeof call.args?.cwd === "string" ? call.args.cwd : ".");
+	const spelled: string[] = [];
+	if (call.tool === ToolNames.RunScript && typeof call.args?.script === "string") spelled.push(call.args.script);
+	else if (call.tool === ToolNames.Bash && typeof call.args?.command === "string") {
+		for (const step of shellCommandSteps(call.args.command)) {
+			const operand = stepScriptOperand(step);
+			if (operand !== undefined) spelled.push(operand);
+		}
+	}
+	const found: ScriptFileRun[] = [];
+	for (const raw of spelled) {
+		if (found.length >= SCRIPTS_READ) break;
+		const file = canonicalizePath(resolve(cwd, raw));
+		if (file === null || found.some((script) => script.path === file)) continue;
+		if (!roots.some((root) => isSameOrDescendant(file, root))) continue;
+		try {
+			const stat = statSync(file);
+			if (!stat.isFile() || stat.size > SCRIPT_MAX_BYTES) continue;
+			const bytes = readFileSync(file);
+			const head = bytes.subarray(0, SCRIPT_HEAD_BYTES);
+			if (head.includes(0)) continue;
+			found.push({ path: file, bytes: stat.size, head: head.toString("utf8") });
+		} catch {
+			// An unreadable script stays unread; the judge decides on the command alone, as before.
+		}
+	}
+	return found;
 }
 
 /**

@@ -618,7 +618,17 @@ function shapeTextToolResult(
 	};
 }
 
-/** Image bytes share the same payload cap as text, including after annotation. */
+/** The note that stands in for images a result could not carry. */
+export function imageOmissionNotice(omitted: number): string {
+	return omitted > 0
+		? `[${omitted} image(s) omitted: model capability, context policy, or tool result byte cap.]\n`
+		: "";
+}
+
+/**
+ * Image bytes share the same payload cap as text, including after annotation. A tool whose policy names
+ * `imageMaxBytes` carries images up to that combined cap while its text keeps the tighter `maxBytes`.
+ */
 export function shapeToolResult(
 	spec: ToolSpec,
 	result: ToolResult,
@@ -630,6 +640,15 @@ export function shapeToolResult(
 	const hardMaxBytes = maxBytesFor(spec, context);
 	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes, requestedDisposition);
 	const maxBytes = Math.min(hardMaxBytes, disposition?.context.maxBytes ?? hardMaxBytes);
+	const configuredImageMax = spec.metadata?.resultSizePolicy?.imageMaxBytes;
+	const imageMaxBytes =
+		typeof configuredImageMax === "number" && Number.isFinite(configuredImageMax) && configuredImageMax > maxBytes
+			? Math.min(
+					Math.floor(configuredImageMax),
+					context?.toolResultMaxBytes ?? Number.POSITIVE_INFINITY,
+					disposition?.context.maxBytes ?? Number.POSITIVE_INFINITY,
+				)
+			: maxBytes;
 	const images: NonNullable<typeof result.images> = [];
 	let imageBytes = 0;
 	for (const image of result.images) {
@@ -637,16 +656,15 @@ export function shapeToolResult(
 		if (
 			acceptsImageInput({ vision: context?.supportsImages }) &&
 			disposition?.context.mode !== "metadata-only" &&
-			bytes + imageBytes < maxBytes - 512
+			bytes + imageBytes < imageMaxBytes - 512
 		) {
 			images.push(image);
 			imageBytes += bytes;
 		}
 	}
 	const omitted = result.images.length - images.length;
-	const notice =
-		omitted > 0 ? `[${omitted} image(s) omitted: model capability, context policy, or tool result byte cap.]\n` : "";
-	const remaining = Math.max(1, maxBytes - imageBytes);
+	const notice = imageOmissionNotice(omitted);
+	const remaining = Math.max(1, Math.min(maxBytes, imageMaxBytes - imageBytes));
 	const shaped = shapeTextToolResult(
 		spec,
 		{ ...result, output: notice + result.output, images },

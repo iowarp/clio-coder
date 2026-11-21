@@ -15,6 +15,7 @@ import {
 	readFleetResult,
 	readFleetRootRecord,
 } from "../domains/dispatch/fleet-root-record.js";
+import { readFleetRun } from "../domains/dispatch/state.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { parseDuration } from "./kit/duration.js";
 import { EXIT_CODES } from "./kit/exit-codes.js";
@@ -60,7 +61,11 @@ function parseArgs(args: ReadonlyArray<string>): WaitArgs | string {
 	return { token, json, timeoutMs };
 }
 
-/** A fleet result for a root that has none persisted: its owner is gone, or the wait gave up while it runs. */
+/**
+ * A fleet result for a root that has none persisted: its owner is gone, or the wait gave up while it runs. The plan
+ * hash is the one the root's run record bound, which fleet_started and fleet list carry; null only when the owner
+ * stopped before it wrote that record.
+ */
 function unsettledDocument(
 	record: FleetRootRecord,
 	exitCode: number,
@@ -72,7 +77,7 @@ function unsettledDocument(
 		schemaVersion: 1,
 		rootId: record.rootId,
 		playbook: record.playbook,
-		planHash: null,
+		planHash: readFleetRun(record.rootId)?.planHash ?? null,
 		exitCode,
 		completion,
 		// Nothing sealed, so there is no verdict to report.

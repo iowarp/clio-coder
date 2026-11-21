@@ -24,6 +24,7 @@ import { getAtPath } from "../core/session-routing.js";
 import { applyControlValue, type SettingControl, settingControl } from "../core/settings-controls.js";
 import {
 	readLayeredSettings,
+	readStrictLayeredSettings,
 	type SettingsOrigin,
 	settingsSourceFor,
 	settingsValueFor,
@@ -164,8 +165,25 @@ interface Reading {
 	trusted?: boolean;
 }
 
+/**
+ * A user settings.yaml that fails validation is refused whole, so a value read from it or from the defaults that
+ * replace it would misstate what runs (FX-47). The refusal names the file and its issues.
+ */
+class UserSettingsInvalidError extends Error {}
+
+function refuseInvalidUser(file: string, issues: ReadonlyArray<{ path: string; message: string }>): never {
+	const listed = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+	throw new UserSettingsInvalidError(`${file} failed validation, so CLIO Coder reads none of it: ${listed}`);
+}
+
 function getEffective(path: string, cwd: string): Reading {
-	const layered = readLayeredSettings(cwd);
+	let layered: ReturnType<typeof readLayeredSettings>;
+	try {
+		layered = readStrictLayeredSettings(cwd);
+	} catch (error) {
+		if (error instanceof SettingsValidationError) refuseInvalidUser(settingsPath(), error.issues);
+		throw error;
+	}
 	const source = sourceOf(settingsSourceFor(layered.sources, path));
 	const file = layered.layers.find((layer) => layer.origin === source)?.path;
 	return {
@@ -179,6 +197,8 @@ function getEffective(path: string, cwd: string): Reading {
 
 function getUser(path: string): Reading {
 	const { file, document } = readUserDocument();
+	const issues = validateSettings(document).issues;
+	if (issues.length > 0) refuseInvalidUser(file, issues);
 	const value = settingsValueFor(document, path);
 	if (value === undefined) throw new SettingNotFoundError(`${path} is not set in ${file}`);
 	return { path, scope: "user", value, source: "user", file };
@@ -289,6 +309,7 @@ function renderValue(value: unknown): string {
 function failureOf(error: unknown): { slug: ErrorSlug; code: number } {
 	if (error instanceof SettingUsageError) return { slug: "usage", code: EXIT_CODES.notStarted };
 	if (error instanceof SettingNotFoundError) return { slug: "not_found", code: EXIT_CODES.failed };
+	if (error instanceof UserSettingsInvalidError) return { slug: "not_configured", code: EXIT_CODES.failed };
 	if (error instanceof StateFileLockTimeoutError) return { slug: "busy", code: EXIT_CODES.notReady };
 	return { slug: "io", code: EXIT_CODES.failed };
 }

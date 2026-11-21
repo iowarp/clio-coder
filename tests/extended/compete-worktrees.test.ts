@@ -24,6 +24,7 @@ import {
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchSchemaCompositionFor } from "../../src/tools/dispatch-schema.js";
 import { readTool } from "../../src/tools/read.js";
+import { workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -131,11 +132,11 @@ for (const agent of ["scout", "coder"] as const) {
 					events: (async function* () {
 						if (judge) {
 							// This is the admitted production spec, with a source-only worker seam.
-							ok(spec.readOnly === true);
-							ok(spec.allowedTools.includes(ToolNames.Read));
+							ok(spec.envelope.write.mode === "none");
+							ok(workerSpecToolNames(spec).includes(ToolNames.Read));
 							const policy = createWorkerSafety({
 								cwd,
-								...(spec.writeRoots === undefined ? {} : { writeRoots: spec.writeRoots }),
+								...(spec.envelope.write.roots.length === 0 ? {} : { writeRoots: spec.envelope.write.roots }),
 								...(spec.protectedArtifactState === undefined
 									? {}
 									: { protectedArtifactState: { artifacts: [...spec.protectedArtifactState.artifacts] } }),

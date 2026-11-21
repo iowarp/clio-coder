@@ -56,7 +56,7 @@ function legacyGitRefsFinding(cwd: string): DoctorFinding {
 		refs = [];
 	}
 	if (refs.length === 0) {
-		return { ok: true, name: "naming git refs", detail: "no legacy Clio Coder task or compete refs found" };
+		return { ok: true, name: "naming git refs", detail: "no legacy CLIO Coder task or compete refs found" };
 	}
 	const shown = refs.slice(0, 20);
 	return {
@@ -96,7 +96,7 @@ function legacyWorktreeMarkerFinding(cwd: string): DoctorFinding {
 		detail:
 			legacy === 0
 				? "active worktree markers use canonical identifiers"
-				: `${legacy} active legacy worktree markers Clio no longer recognizes; remove their worktrees and branches by hand`,
+				: `${legacy} active legacy worktree markers CLIO Coder no longer recognizes; remove their worktrees and branches by hand`,
 	};
 }
 

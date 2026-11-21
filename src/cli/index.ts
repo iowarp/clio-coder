@@ -222,7 +222,7 @@ function nodeVersionError(): { message: string; detail: string } | null {
 			return {
 				message: `clio-coder requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}.`,
 				detail:
-					"Distro and cluster module Node builds are often older. Install Clio with its own Node, no root needed: curl -fsSL https://coder.iowarp.ai/install.sh | sh. Or set CLIO_CODER_NODE to a Node 22.19+ binary, or install one with nvm, fnm or conda-forge and reinstall with its npm.",
+					"Distro and cluster module Node builds are often older. Install CLIO Coder with its own Node, no root needed: curl -fsSL https://coder.iowarp.ai/install.sh | sh. Or set CLIO_CODER_NODE to a Node 22.19+ binary, or install one with nvm, fnm or conda-forge and reinstall with its npm.",
 			};
 		}
 	}
@@ -430,9 +430,8 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 			// The group help answers from a leaf, before fleet.js and its domain graph load.
 			const help = (await import("./fleet-help.js")).answerFleetHelp(subArgs);
 			if (help !== null) return help;
-			// A status with no ledger rows answers from a leaf too; with rows it needs per-run telemetry from fleet.js.
-			const status = await (await import("./fleet-status.js")).answerFleetStatus(subArgs);
-			if (status !== null) return status;
+			// Status answers from a leaf too, ledger rows and their run journals included.
+			if (subArgs[0] === "status") return (await import("./fleet-status.js")).runFleetStatus(subArgs.slice(1));
 			return (await import("./fleet.js")).runFleetCommand(subArgs);
 		},
 	],

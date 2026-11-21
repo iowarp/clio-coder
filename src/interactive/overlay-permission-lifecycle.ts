@@ -139,6 +139,10 @@ export interface OverlayPermissionLifecycleDeps {
 
 export interface OverlayPermissionLifecycle {
 	confirm(): void;
+	/** Whether the card on screen offers its sandbox escape's session option (M-7). */
+	canConfirmForSession(): boolean;
+	/** Approve the parked escape and grant the scope its session option shows for the rest of the session. */
+	confirmForSession(): void;
 	cancel(): void;
 	/**
 	 * Deny the parked call and end the turn that keeps asking. Escape answers one
@@ -155,6 +159,15 @@ export interface OverlayPermissionLifecycle {
 	notePresence(): void;
 	/** Worker asks waiting behind the card on screen, so its count names them. */
 	queuedWorkerAsks(): number;
+	/** The card on screen now, main or worker, or null. */
+	cardOnScreen(): ApprovalRequestView | null;
+	/**
+	 * Answer the card on screen when it is `requestId`, as Enter or Escape would, recording `decidedBy` as who
+	 * decided. False, and nothing changes, when that request is not the card on screen.
+	 */
+	answerOnScreen(requestId: string, decision: "approve" | "deny", decidedBy: string): boolean;
+	/** Called with the card's view each time a card takes the screen. */
+	onCardShown(listener: (view: ApprovalRequestView) => void): () => void;
 	onPermissionOverlayClosed(): void;
 	/**
 	 * Re-present whatever is still parked once no overlay holds the screen. A
@@ -303,6 +316,19 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		view: ApprovalRequestView;
 	} | null = null;
 	let pendingWorker: WorkerEscalationEntry | null = null;
+	let pendingWorkerView: ApprovalRequestView | null = null;
+	/** Who answered the card on screen when it was not the operator at this terminal. */
+	let answeredBy: string | null = null;
+	const cardListeners = new Set<(view: ApprovalRequestView) => void>();
+	const cardShown = (view: ApprovalRequestView): void => {
+		for (const listener of cardListeners) {
+			try {
+				listener(view);
+			} catch {
+				// An observer of the card never changes what happens to it.
+			}
+		}
+	};
 	const workerQueue: WorkerEscalationEntry[] = [];
 	const announcedRequestIds = new Set<string>();
 	/** Worker escalations already surfaced, so one request parks the operator once. */
@@ -316,6 +342,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const foreignWorkers = new Map<string, WorkerEscalationEntry>();
 	const foreignNoticeIds = new Set<string>();
 	let confirmed = false;
+	/** The operator chose the session option of the escape on screen (M-7), so the grant carries its scope. */
+	let confirmedForSession = false;
 	let denied = false;
 	let stopping = false;
 	let withdrawingWorker = false;
@@ -480,9 +508,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			return false;
 		}
 		pendingWorker = entry;
+		pendingWorkerView = view;
 		pendingPermission = null;
 		confirmed = false;
 		denied = false;
+		answeredBy = null;
+		cardShown(view);
 		return true;
 	};
 	const refusalOf = (entry: WorkerEscalationEntry): string | null =>
@@ -656,6 +687,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			pendingWorker = null;
 			confirmed = false;
 			denied = false;
+			answeredBy = null;
+			cardShown(view);
 		}) ?? (() => {});
 
 	const unsubscribeWorker = deps.bus.subscribe("approval.requested", (payload) => {
@@ -709,9 +742,13 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		pendingPermission = null;
 		pendingWorker = null;
 		const wasConfirmed = confirmed;
+		const forSession = confirmedForSession;
 		const wasDenied = denied;
 		const wasTimedOut = timedOut;
+		const decidedBy = answeredBy ?? "operator";
+		answeredBy = null;
 		confirmed = false;
+		confirmedForSession = false;
 		denied = false;
 		timedOut = null;
 		// Closing a modal is not an operator decision. Re-present the parked
@@ -761,13 +798,14 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 						...(permission.meta?.sessionId !== undefined ? { sessionId: permission.meta.sessionId } : {}),
 						...(permission.meta?.turnId !== undefined ? { turnId: permission.meta.turnId } : {}),
 						origin: "main",
-						decidedBy: "operator",
+						decidedBy,
 						tool: permission.call.tool,
 						actionClass: permission.decision.classification.actionClass,
 						requestedBy: "tool",
 						at: Date.now(),
 					},
 					grantRequestedBy: "tool:one_shot",
+					...(forSession && permission.meta?.escapeScope !== undefined ? { sessionScope: true as const } : {}),
 					beforeRelease: () => {
 						if (permission.meta?.toolCallId !== undefined)
 							deps.applyApprovalState({
@@ -796,7 +834,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 						...(permission?.meta?.sessionId !== undefined ? { sessionId: permission.meta.sessionId } : {}),
 						...(permission?.meta?.turnId !== undefined ? { turnId: permission.meta.turnId } : {}),
 						origin: "main",
-						decidedBy: "operator",
+						decidedBy,
 						...(permission
 							? { tool: permission.call.tool, actionClass: permission.decision.classification.actionClass }
 							: {}),
@@ -822,6 +860,13 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		confirm: () => {
 			if (pendingPermission === null && pendingWorker === null) return;
 			confirmed = true;
+			deps.closeOverlay();
+		},
+		canConfirmForSession: () => pendingWorker === null && pendingPermission?.meta?.escapeScope !== undefined,
+		confirmForSession: () => {
+			if (pendingWorker !== null || pendingPermission?.meta?.escapeScope === undefined) return;
+			confirmed = true;
+			confirmedForSession = true;
 			deps.closeOverlay();
 		},
 		cancel: () => {
@@ -867,6 +912,20 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			if (changed) deps.requestRender();
 		},
 		queuedWorkerAsks: () => workerQueue.length,
+		cardOnScreen: () => pendingPermission?.view ?? (pendingWorker !== null ? pendingWorkerView : null),
+		answerOnScreen: (requestId, decision, by) => {
+			const onScreen = pendingPermission?.meta?.requestId ?? pendingWorker?.requestId;
+			if (onScreen === undefined || onScreen !== requestId || stopping) return false;
+			answeredBy = by;
+			if (decision === "approve") confirmed = true;
+			else denied = true;
+			deps.closeOverlay();
+			return true;
+		},
+		onCardShown: (listener) => {
+			cardListeners.add(listener);
+			return () => cardListeners.delete(listener);
+		},
 		onPermissionOverlayClosed,
 		retryPending,
 		dispose: () => {
@@ -876,6 +935,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			dispatchWindows.clear();
 			heldWorkerCeilings.clear();
 			foreignWorkers.clear();
+			cardListeners.clear();
 			unsubscribePermission();
 			unsubscribeAdmissionReview();
 			unsubscribeWorker();

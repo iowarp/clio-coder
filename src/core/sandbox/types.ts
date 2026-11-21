@@ -81,6 +81,11 @@ export interface SandboxEnvPolicy {
 	secretNames: ReadonlyArray<string>;
 	/** A target declares `auth.headers`, so Clio's settings.yaml holds literal keys and the main-session sandbox masks it. */
 	maskSettings?: true;
+	/**
+	 * Main session only: credential files its contained commands may read, the login files of the targets
+	 * `safety.liveCheckTargets` names. Their masks are left off, so they show read-only; every other mask stays.
+	 */
+	revealFiles?: ReadonlyArray<string>;
 }
 
 /** A path hidden from the sandboxed process. Only existing paths can be masked. */

@@ -8,6 +8,7 @@ import {
 	resolvePathBoundary,
 } from "../../core/path-boundary.js";
 import type { DispatchRequest } from "./contract.js";
+import type { WithheldCapability } from "./envelope.js";
 import type { RunLedgerProjection } from "./types.js";
 
 /** Path-like tokens retained for requests that do not carry typed intent. */
@@ -587,7 +588,7 @@ export function inferredScopeParentTokenNotice(scope: DispatchPathScope): Inferr
 export function runLedgerProjection(
 	req: DispatchRequest,
 	scope: DispatchPathScope,
-	checksWithheld: ReadonlyArray<string> = [],
+	withheld: ReadonlyArray<WithheldCapability> = [],
 ): RunLedgerProjection {
 	const source = req.intent !== undefined ? "intent" : (req.writeRoots?.length ?? 0) > 0 ? "legacy-write-roots" : "none";
 	return {
@@ -596,6 +597,6 @@ export function runLedgerProjection(
 		readRoots: req.intent !== undefined ? [...req.intent.readRoots] : [],
 		writeRoots: source === "none" ? [] : [...scope.writeBoundaries],
 		scopeSource: source,
-		...(checksWithheld.length > 0 ? { checksWithheld: [...checksWithheld] } : {}),
+		...(withheld.length > 0 ? { withheld: withheld.map((entry) => ({ ...entry })) } : {}),
 	};
 }

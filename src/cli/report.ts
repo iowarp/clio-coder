@@ -377,7 +377,7 @@ function formatReportPreview(plan: ReportPlan, bundled: boolean, id: string): st
 		RULE("end of body"),
 		plan.maskSummary,
 		plan.bundle !== null
-			? `The diagnostic bundle is uploaded encrypted to the Clio Coder maintainers, as a secret gist in your GitHub account that the report names. Only the maintainers can open it. clio-coder report forget ${id} or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days old, Clio deletes it the next time you run clio-coder report or clio-coder telemetry share.`
+			? `The diagnostic bundle is uploaded encrypted to the CLIO Coder maintainers, as a secret gist in your GitHub account that the report names. Only the maintainers can open it. clio-coder report forget ${id} or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days old, CLIO Coder deletes it the next time you run clio-coder report or clio-coder telemetry share.`
 			: bundled
 				? "The diagnostic bundle stays on this machine; sending does not upload it."
 				: "No diagnostic bundle is attached.",
@@ -507,7 +507,7 @@ async function confirmAndSend(
 	// Set only in a command a Clio session's bash started below yolo; --yes there would send text nobody reviewed.
 	const ceiling = io.env.CLIO_CODER_AUTONOMY_CEILING;
 	if (!options.dryRun && options.yes && ceiling !== undefined && ceiling !== "") {
-		io.err("nothing sent: --yes is refused in a command a Clio session started; send it from your own terminal\n");
+		io.err("nothing sent: --yes is refused in a command a CLIO Coder session started; send it from your own terminal\n");
 		return 2;
 	}
 	if (!options.dryRun && options.share === true && fromSession) {
@@ -655,7 +655,7 @@ async function confirmAndSend(
 					});
 					io.out(formatReportPreview(plan, bundled, draft.id));
 					const added = plan.masks.reduce((sum, mask) => sum + mask.count, 0) - before;
-					if (added > 0) io.out(`Clio masked ${added} more value${added === 1 ? "" : "s"} in your edit.\n`);
+					if (added > 0) io.out(`CLIO Coder masked ${added} more value${added === 1 ? "" : "s"} in your edit.\n`);
 				}
 				continue;
 			}
@@ -692,7 +692,7 @@ async function confirmAndSend(
 			// An old build's maintainer key has expired (SF-20): only the box is skipped, the report still goes.
 			if (!(error instanceof Error && error.message === SHARE_KEY_EXPIRED)) throw error;
 			io.err(
-				`No .box written: the maintainers' key this Clio Coder carries expired after ${SHARE_RECIPIENT.notAfter}; run clio-coder upgrade to seal bundles again. Sending the report without it.\n`,
+				`No .box written: the maintainers' key this CLIO Coder carries expired after ${SHARE_RECIPIENT.notAfter}; run clio-coder upgrade to seal bundles again. Sending the report without it.\n`,
 			);
 		}
 		if (box !== null)
@@ -728,7 +728,7 @@ async function confirmAndSend(
 				return allowed.includes(options.onDuplicate) ? options.onDuplicate : "stop";
 			if (!interactive) return "stop";
 			const picked = await promptSelect<DuplicateChoice>({
-				heading: "What should Clio do?",
+				heading: "What should CLIO Coder do?",
 				choices: choices.map((choice) => ({ value: choice.value, label: choice.label })),
 				backLabel: "cancel",
 				clearOnExit: true,

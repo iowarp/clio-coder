@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { TSchema } from "typebox";
+import { prepareBoundedImage } from "../../core/file-references.js";
 import { neutralizeFraming } from "../../core/reminder-framing.js";
 import { workerSandboxApplies } from "../../core/sandbox/worker-process.js";
 import type { DynamicToolName } from "../../core/tool-names.js";
@@ -27,14 +28,24 @@ import {
 	resolveMcpServers,
 	writeMcpServerCatalog,
 } from "../../domains/gateway/mcp/index.js";
+import { acceptsImageInput } from "../../domains/providers/image-input.js";
 import type { ActionClass, ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../../domains/safety/contract.js";
 import { mcpServerPolicyRefusal } from "../../domains/safety/denial.js";
 import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
 import type { WorkerMcpAttestation } from "../../domains/safety/worker-permit.js";
 import type { ImageContent } from "../../engine/types.js";
-import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
+import {
+	commitObservationReservation,
+	finalizeObservation,
+	releaseObservation,
+	reserveObservation,
+} from "../observation.js";
+import { readMaxBytes } from "../read.js";
+import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
 import { nestedBlockedResult } from "../registry.js";
+import { imageOmissionNotice } from "../result-shaping.js";
+import { byteLength } from "../truncate-utf8.js";
 
 /** An ACP client's declaration lives only for its hosted session. */
 export interface McpClientServerSpec {
@@ -514,6 +525,49 @@ function imageBlocks(result: McpToolCallResult): ImageContent[] {
 	return images;
 }
 
+/**
+ * An MCP image (a browser screenshot) gets the image budget and pool charge `read` gives an image file: each one is
+ * encoded through prepareBoundedImage into what remains of that budget, and one that still cannot fit is omitted
+ * with the shaping notice. Shaping settles the charge to what the model receives.
+ */
+async function boundedImageResult(
+	tool: string,
+	output: string,
+	details: Record<string, unknown>,
+	images: ImageContent[],
+	options: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
+	const reservation = reserveObservation(readMaxBytes(), options);
+	commitObservationReservation(reservation);
+	try {
+		let budget =
+			Math.min(reservation.callCapBytes, options?.toolResultMaxBytes ?? readMaxBytes()) -
+			Math.min(byteLength(output), MCP_RESULT_CONTEXT_BYTES) -
+			512;
+		const bounded: ImageContent[] = [];
+		for (const image of images) {
+			const encoded = budget > 0 ? await prepareBoundedImage(Buffer.from(image.data, "base64"), budget) : null;
+			if (encoded === null) continue;
+			bounded.push(encoded);
+			budget -= byteLength(encoded.data);
+		}
+		return finalizeObservation({
+			tool,
+			unit: "results",
+			output: imageOmissionNotice(images.length - bounded.length) + output,
+			images: bounded,
+			shownCount: 1,
+			totalCount: 1,
+			truncated: false,
+			details,
+			reservation,
+			...(options ? { options } : {}),
+		});
+	} finally {
+		releaseObservation(reservation);
+	}
+}
+
 export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): McpCapabilitySource {
 	const registry = options.registry;
 	const clientFactory = options.clientFactory ?? createMcpStdioClient;
@@ -691,6 +745,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				resultSizePolicy: {
 					kind: "bounded",
 					maxBytes: MCP_RESULT_CONTEXT_BYTES,
+					// An image is bounded by read's image budget, never by the text bound its base64 cannot fit.
+					imageMaxBytes: readMaxBytes(),
 					followUpHint:
 						"Call again with a narrower query or the server's own limit/page arguments, or read the offloaded file in windows.",
 				},
@@ -735,10 +791,13 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						});
 					}
 					const images = imageBlocks(result);
+					// Server text cannot open or close a host frame (a reminder block or a middleware note), as bash and web_fetch output cannot.
+					const output = neutralizeFraming(result.text);
+					if (images.length > 0 && acceptsImageInput({ vision: invokeOptions?.supportsImages }))
+						return await boundedImageResult(name, output, details, images, invokeOptions);
 					return {
 						kind: "ok",
-						// Server text cannot open or close a host frame (a reminder block or a middleware note), as bash and web_fetch output cannot.
-						output: neutralizeFraming(result.text),
+						output,
 						details,
 						...(images.length > 0 ? { images } : {}),
 					};

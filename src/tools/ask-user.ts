@@ -10,6 +10,8 @@ import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { type AutonomyExposure, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
 import { classifyDecisionPresentation, decisionFactsForAnswer } from "../domains/safety/decision-presentation.js";
+import { ESCAPE_SCOPE_OPTION_PREFIX } from "../domains/safety/escape-scope.js";
+import { namesLeavingSandbox } from "../domains/safety/sandbox-escape.js";
 import { StringEnum } from "../engine/ai.js";
 import type {
 	AskUserToolPolicy,
@@ -1124,6 +1126,36 @@ function prepareAskUserArguments(args: Record<string, unknown>): Record<string, 
 	return { ...args, questions: questions.map((entry) => (typeof entry === "string" ? { question: entry } : entry)) };
 }
 
+/**
+ * The questions with the host's session-scope option (M-7): an agent-written option that claims the option's
+ * prefix is dropped from every question, and the offer, when there is one, joins the first single-choice
+ * question that names leaving the sandbox, last, so it is never the recommended or default pick.
+ */
+function withEscapeScopeOption(
+	questions: AskUserQuestion[],
+	offer: { label: string; description: string } | undefined,
+): AskUserQuestion[] {
+	const claims = (option: AskUserOption): boolean => option.label.trim().startsWith(ESCAPE_SCOPE_OPTION_PREFIX);
+	const cleaned = questions.map((question) =>
+		question.options?.some(claims) === true
+			? { ...question, options: question.options.filter((option) => !claims(option)) }
+			: question,
+	);
+	if (offer === undefined) return cleaned;
+	const index = cleaned.findIndex(
+		(question) =>
+			question.multi_select !== true && question.options !== undefined && namesLeavingSandbox(question.question),
+	);
+	const target = cleaned[index];
+	if (target === undefined) return cleaned;
+	const next = [...cleaned];
+	next[index] = {
+		...target,
+		options: [...(target.options ?? []), { label: offer.label, description: offer.description }],
+	};
+	return next;
+}
+
 export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
@@ -1172,20 +1204,23 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			if (call.action === "complete") {
 				return completeInterview(policy, "complete", options, call.summary, call.decisions ?? []);
 			}
-			const questions = (call.questions ?? []).map((question) => {
-				if (!policy.planOnly || !/^carry out this plan\?/iu.test(question.question.trim())) return question;
-				return {
-					...question,
-					multi_select: false,
-					options: [
-						{ label: "Keep the plan (Recommended)", description: "Finish with the plan; make no edits." },
-						...(question.options ?? [])
-							.filter((option) => !/^(?:keep\b|revise\b)/iu.test(option.label))
-							.map((option) => ({ ...option, label: option.label.replace(/\s*\(Recommended\)/giu, "") })),
-						{ label: "Revise the plan first", description: "Adjust the plan before deciding." },
-					],
-				};
-			});
+			const questions = withEscapeScopeOption(
+				(call.questions ?? []).map((question) => {
+					if (!policy.planOnly || !/^carry out this plan\?/iu.test(question.question.trim())) return question;
+					return {
+						...question,
+						multi_select: false,
+						options: [
+							{ label: "Keep the plan (Recommended)", description: "Finish with the plan; make no edits." },
+							...(question.options ?? [])
+								.filter((option) => !/^(?:keep\b|revise\b)/iu.test(option.label))
+								.map((option) => ({ ...option, label: option.label.replace(/\s*\(Recommended\)/giu, "") })),
+							{ label: "Revise the plan first", description: "Adjust the plan before deciding." },
+						],
+					};
+				}),
+				options?.escapeScopeOffer,
+			);
 			const exposure = mergePolicyExposure(policy, call.exposure ?? DEFAULT_AUTONOMY_EXPOSURE);
 			if (call.max_rounds !== undefined) {
 				const nextLimit = policy.callCount === 0 ? call.max_rounds : Math.max(policy.maxCalls, call.max_rounds);
@@ -1256,6 +1291,16 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					timedOut === undefined
 						? normalized
 						: { ...normalized, answers: resolveUnattendedAnswers(questions, normalized.answers, exposure) };
+				// Only the operator's own pick of the host's option grants the escape scope (M-7): never Clio's pick for
+				// an absent operator, a cancelled round, or anything typed.
+				const offer = options?.escapeScopeOffer;
+				if (
+					offer !== undefined &&
+					timedOut === undefined &&
+					result.cancelled !== true &&
+					result.answers.some((answer) => answer.auto !== true && answer.options?.includes(offer.label) === true)
+				)
+					offer.accept();
 				const answeredAt = new Date().toISOString();
 				policy.callCount += 1;
 				policy.askedQuestionKeys.add(key);

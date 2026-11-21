@@ -7,6 +7,8 @@
  * obligation. Pure: no I/O, no clock.
  */
 
+import { capabilityClassRole } from "../agents/role-class.js";
+import { isAgentCapabilityClass } from "../agents/spec.js";
 import type { GateTopologyRole } from "./execution-role.js";
 
 export type RunRole = "explorer" | "builder" | "checker" | "reviewer" | "judge" | "seat";
@@ -24,7 +26,9 @@ export function resolveRunRole(input: {
 	if (input.gateRole === "reviewer") return "reviewer";
 	if (input.gateRole === "judge" || input.gateRole === "synthesis") return "judge";
 	if (input.gateRole === "member") return "seat";
-	if (input.capabilityClass === "verification") return "checker";
+	// The role class table names the class a checker runs as; every other worker class reads or builds.
+	if (isAgentCapabilityClass(input.capabilityClass) && capabilityClassRole(input.capabilityClass) === "checker")
+		return "checker";
 	return input.readOnly ? "explorer" : "builder";
 }
 

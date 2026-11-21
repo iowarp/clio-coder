@@ -30,11 +30,18 @@ import { readTaskWorktreeGitLayout } from "./worktree-git.js";
  * running unsandboxed.
  */
 let active: WorkerSandboxSpec | null = null;
+let envelopeConfinesWrites = false;
 let unavailableReported = false;
 let socketFallbackReported = false;
 
-export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefined): void {
+/**
+ * Install this worker's sandbox policy and the host's word on whether it confines the worker's writes, which the
+ * envelope sealed (`sandbox.confinesWrites`, fleet M7). The worker never re-derives that fact; a spec that expects a
+ * backend this node lacks is refused before any command runs.
+ */
+export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefined, confinesWrites = false): void {
 	active = spec ?? null;
+	envelopeConfinesWrites = spec !== undefined && confinesWrites;
 	unavailableReported = false;
 	socketFallbackReported = false;
 }
@@ -88,13 +95,11 @@ export function workerSandboxReadableRoots(): string[] {
 
 /**
  * True when every command this worker spawns runs under bubblewrap bound to
- * the spec's writable roots, the same test dispatch applies before it offers
- * shell and verify to a write-confined worker.
+ * the spec's writable roots: the envelope's `sandbox.confinesWrites`, the same
+ * fact dispatch read before it offered shell and verify to a rooted worker.
  */
 export function workerSandboxConfinesWrites(): boolean {
-	if (active === null) return false;
-	const availability = sandboxAvailability();
-	return availability.available && availability.backend === "bwrap";
+	return active !== null && envelopeConfinesWrites;
 }
 
 /**

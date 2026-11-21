@@ -173,9 +173,10 @@ export function runtimeAttachesGateway(runtime: { readonly kind: string; readonl
 
 /**
  * Add `gateway` to a capability list that names any gateway-placed capability.
- * The dispatch admission filter and the worker's `effectiveToolNames` both
- * apply this rule to the same admitted list, which is what keeps the
- * orchestrator's approved tool signature equal to the one the worker attests.
+ * The envelope resolver applies it once to a worker's list (fleet M7) and the
+ * worker attests exactly those names, which keeps the orchestrator's approved
+ * tool signature equal to the one the worker attests; the main session's
+ * `effectiveToolNames` applies it to its own registry.
  * A list that reaches nothing behind the gateway gains nothing.
  */
 export function withGatewayForCapabilities(names: ReadonlyArray<ToolName>): ToolName[] {

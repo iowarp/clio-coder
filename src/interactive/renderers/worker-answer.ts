@@ -314,7 +314,7 @@ export function presentSettledWorkerAnswer(
 
 /**
  * A Markdown code-fence line (three or more backticks or tildes, any info string): it says how an answer is formatted,
- * not what it says, so a one-line preview skips it. The same test as the council grid's compact row (FX-19).
+ * not what it says, so a one-line preview skips it (FX-19).
  */
 function isCodeFenceLine(line: string): boolean {
 	return /^(?:`{3,}|~{3,})/u.test(line.trim());
@@ -327,7 +327,12 @@ function isCodeFenceLine(line: string): boolean {
 export function councilAnswerGist(answer: string): string {
 	const typed = councilMemberAnswerLines(answer);
 	const first = typed?.find((line) => line.trim().length > 0 && !line.startsWith("  "));
-	const prose = answer.split("\n").find((row) => row.trim().length > 0 && !isCodeFenceLine(row));
+	// An object of no known report shape still reads as what it says, on one line, not as its opening brace.
+	const object = first === undefined ? exactWorkerAnswerObject(answer) : null;
+	const prose =
+		object !== null
+			? JSON.stringify(object)
+			: answer.split("\n").find((row) => row.trim().length > 0 && !isCodeFenceLine(row));
 	const line = (first ?? prose ?? "").replace(/^-\s*/u, "").trim();
 	return safeWorkerAnswerText(line);
 }
@@ -358,11 +363,14 @@ function ballotAnswer(value: Record<string, unknown>): PresentedContractAnswer |
 	return { lines: [text === null ? verdict : `${verdict}: ${text}`] };
 }
 
-/** A scout-shaped answer that misses a field the full report needs still has a claim a person can read. */
+/**
+ * A scout-shaped answer that misses a field the full report needs still has a claim a person can read. An empty
+ * `findings` alone says nothing about the shape, so it is not read as a report that found nothing (FX-21).
+ */
 function firstFindingClaim(value: Record<string, unknown>): PresentedContractAnswer | null {
 	if (!Array.isArray(value.findings)) return null;
 	const first: unknown = value.findings[0];
-	if (!isObject(first)) return value.findings.length === 0 ? { lines: ["No findings reported."] } : null;
+	if (!isObject(first)) return null;
 	const claim = reportString(first.claim);
 	return claim === null ? null : { lines: [claim] };
 }

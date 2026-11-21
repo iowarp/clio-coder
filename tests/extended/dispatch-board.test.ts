@@ -85,8 +85,9 @@ it("previews a council member's first real line on the compact body, past a code
 	const group = { group: "review", members, synthesis: null, status, round: 1, elapsed: "3s" };
 	const rows = councilGroupBody(theme, group, 80, 2).map(stripTerminalSequences);
 	strictEqual(rows.length, 2, rows.join("\n"));
-	ok(rows[0]?.includes('{"verdict": "ship"}'), rows[0]);
-	ok(!rows[0]?.includes("```"), rows[0]);
+	// The compact row shows the gist the chat card shows: a ballot reads as its verdict, never as its fence or brace.
+	ok(rows[0]?.includes("ship"), rows[0]);
+	ok(!rows[0]?.includes("```") && !rows[0]?.includes("{"), rows[0]);
 });
 
 const IDENTITY: DispatchEnqueuedPayload = {

@@ -374,8 +374,9 @@ describe("harness extension executable capabilities", () => {
 			ok(preview);
 			// The command is a gateway capability, so the admitted surface gains
 			// `gateway` on both sides: the plan the orchestrator approves and the
-			// surface the worker attests are computed from the same rule.
-			const surface = [...allowedTools, ToolNames.Gateway];
+			// surface the worker attests are computed from the same rule. Every role
+			// row holds `code_nav`, so it joins whatever the recipe lists.
+			const surface = [...allowedTools, ToolNames.CodeNav, ToolNames.Gateway];
 			equal(
 				preview.toolSignature,
 				createHash("sha256")
@@ -383,7 +384,7 @@ describe("harness extension executable capabilities", () => {
 					.digest("hex"),
 			);
 			equal(
-				attestedToolSignature({ allowedTools, toolsSupported: true, agentId: "coder", task: request.task }),
+				attestedToolSignature({ allowedTools: surface, toolsSupported: true, agentId: "coder", task: request.task }),
 				toolSignatureOf(surface),
 			);
 			disableExtension("fixture", { cwd: data.cwd, scope: "user" });

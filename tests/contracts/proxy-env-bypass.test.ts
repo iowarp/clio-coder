@@ -6,9 +6,9 @@ import { type AssistantMessage, createAssistantMessageEventStream } from "@earen
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { installProxyFromEnv, proxyEnvSummary, proxyForUrl } from "../../src/core/proxy-env.js";
 import { observeAnthropicResponse } from "../../src/engine/apis/anthropic-response.js";
-import { observeCodexTransport } from "../../src/engine/apis/codex-transport.js";
 import { withProxyConnectionNote } from "../../src/engine/apis/proxy-connection-error.js";
 import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
+import { observeResponsesTransport } from "../../src/engine/apis/responses-transport.js";
 import type { Api, Model } from "../../src/engine/types.js";
 
 let proxyHits = 0;
@@ -116,7 +116,7 @@ test("Anthropic, Responses, Codex and Ollama connection errors name the proxy wi
 	const results = [
 		await observeAnthropicResponse(anthropic.model, undefined, anthropic.invoke).result(),
 		await observeResponsesModelId(responses.model, undefined, responses.invoke).result(),
-		await observeCodexTransport(codex.model, undefined, codex.invoke).result(),
+		await observeResponsesTransport(codex.model, undefined, codex.invoke).result(),
 	];
 	for (const message of results) {
 		strictEqual(

@@ -235,8 +235,8 @@ takes eight actions: `list`, `show`, `open`, `handoff`, `send`, `wait`, `read` a
 
 The pane opens on the workspace directory with the keyboard in it. Yazi's default
 keys apply: move with the arrow keys or `j`/`k`, enter a directory with `l` or `Enter`, go up with
-`h`, and mark several files with `Space`. CLIO Coder's managed profile adds three keys. `Ctrl+Y` sends the selection to
-CLIO Coder, `Enter` on a file sends the selection as `Ctrl+Y` does, and `Alt+E` hides the pane and returns the keyboard to CLIO Coder. In pick mode `Enter` on a file sends the selection and closes the pane.
+`h`, and mark several files with `Space`. CLIO Coder's managed profile adds three keys and changes two. `Ctrl+Y` sends the selection to
+CLIO Coder, `Enter` on a file sends the selection as `Ctrl+Y` does, and `Alt+E` hides the pane and returns the keyboard to CLIO Coder. Yazi's `;` and `:` shell prompts start with a redirect, so a typed command's output is discarded (`;`) or goes to the terminal (`:`), never into the pane's event stream. In pick mode `Enter` on a file sends the selection and closes the pane.
 
 What arrives in the composer is appended to the draft, never submitted. A
 file becomes `@src/a.ts`; a directory (shown with a trailing `/`) or a path with spaces is inserted as
