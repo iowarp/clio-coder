@@ -2861,15 +2861,43 @@ function parseContract(
 			throw new Error(`agent recipe: ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+	// A gate's packet ids are coordinator-authored (M10): a WorkerSpec may carry them, a recipe may not.
+	const packetIds = (): string[] | null | undefined => {
+		const packet = record.packet;
+		if (packet === undefined) return undefined;
+		if (
+			!callerBoundArtifacts ||
+			!Array.isArray(packet) ||
+			packet.length === 0 ||
+			packet.length > 256 ||
+			!packet.every((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 256)
+		)
+			return null;
+		return [...packet];
+	};
+	if (record.kind === "review-verdict" && kinds.includes(record.kind) && record.packet !== undefined) {
+		const packet = packetIds();
+		if (!only("kind", "packet") || packet === null || packet === undefined)
+			throw new Error(`agent recipe: ${sourcePath}: review-verdict accepts only kind, and a WorkerSpec's packet ids`);
+		return { kind: "review-verdict", packet };
+	}
 	if (record.kind === "judge-verdict" && kinds.includes(record.kind)) {
 		const candidates = record.candidates;
+		const packet = packetIds();
 		if (
-			!only("kind", "candidates") ||
+			!only("kind", "candidates", "packet") ||
+			packet === null ||
 			(candidates !== undefined &&
 				(typeof candidates !== "number" || !Number.isSafeInteger(candidates) || candidates < 1 || candidates > 64))
 		)
-			throw new Error(`agent recipe: ${sourcePath}: judge-verdict accepts only kind and candidates (1..64)`);
-		return { kind: "judge-verdict", ...(candidates !== undefined ? { candidates } : {}) };
+			throw new Error(
+				`agent recipe: ${sourcePath}: judge-verdict accepts only kind, candidates (1..64) and a WorkerSpec's packet ids`,
+			);
+		return {
+			kind: "judge-verdict",
+			...(candidates !== undefined ? { candidates } : {}),
+			...(packet !== undefined ? { packet } : {}),
+		};
 	}
 	if (record.kind === "verifier-report" && kinds.includes(record.kind)) {
 		if (!only("kind", "assurance") || (record.assurance !== undefined && !isHoareAssurance(record.assurance)))

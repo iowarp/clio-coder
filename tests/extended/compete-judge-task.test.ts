@@ -1,10 +1,12 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import {
 	gateCitationViolation,
+	parseResultContract,
+	parseWorkerResultContract,
 	resultContractRepairUserMessage,
 	resultContractResponseSchema,
 	resultContractShape,
@@ -289,6 +291,13 @@ it("names the packet ids where a gate writes its verdict, binds cites to them, a
 		null,
 	);
 	deepStrictEqual(judge, { kind: "judge-verdict", candidates: 2, packet: ids });
+	// The worker reads the contract it is validated against back from its spec; a recipe can never declare packet ids.
+	deepStrictEqual(parseWorkerResultContract(judge, "spec"), judge);
+	deepStrictEqual(parseWorkerResultContract({ kind: "review-verdict", packet: ["s1.diff"] }, "spec"), {
+		kind: "review-verdict",
+		packet: ["s1.diff"],
+	});
+	throws(() => parseResultContract({ kind: "review-verdict", packet: ["s1.diff"] }, "recipe.md"), /packet ids/u);
 	const reviewer = dispatchResultContract(
 		{ agentId: "reviewer", gate: { role: "reviewer", subjects: [{}], packet: { ids: ["s1.handback", "s1.diff"] } } },
 		null,

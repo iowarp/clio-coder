@@ -394,3 +394,26 @@ it("grades through one rule table in layer order: the first failing rule names t
 	strictEqual(crashed.outcomeCode, "worker_context_exhausted");
 	strictEqual(crashed.rules.find((rule) => rule.id === "final-output")?.status, "not_reached");
 });
+
+describe("cited-evidence over an evidence packet (M10)", () => {
+	it("grounds a reviewer's passing check in the packet ids it cites, and still exhausts an uncited or unearned pass", () => {
+		const reviewer = {
+			role: "reviewer" as const,
+			obligation: "cited-evidence" as const,
+			contractKind: "review-verdict",
+			toolLaneObserved: true,
+			packet: ["s1.handback", "s1.diff"],
+		};
+		const pass = (cites: string[]) => ({
+			activity: { executed: 0, observations: 0, mutatingSucceeded: false, storeWritten: false },
+			ungroundedChecks: ["the change matches the task"],
+			gateVerdict: { verdict: "pass" as const, checks: [{ name: "the change matches the task", cites }] },
+		});
+		strictEqual(gradeWork(pass(["s1.diff"]), reviewer).outcome, "succeeded");
+		match(gradeWork(pass([]), reviewer).detail ?? "", /^obligation cited-evidence unmet: the verdict cites no item/u);
+		match(gradeWork(pass(["s7.diff"]), reviewer).detail ?? "", /does not hold \(s7\.diff\)/u);
+		const { packet: _packet, ...noPacket } = reviewer;
+		const unearned = gradeWork(pass(["s1.diff"]), noPacket);
+		strictEqual(unearned.outcomeCode, "obligation_unmet", "with no packet, a claimed and unrun check stays unearned");
+	});
+});

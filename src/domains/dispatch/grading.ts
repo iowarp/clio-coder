@@ -308,9 +308,17 @@ function checkCitedEvidence(facts: WorkFacts, contract: GradeContract): RuleChec
 				`${plural(uncited.length, "check", "checks")} ${uncited.join(", ")} ${plural(uncited.length, "cites", "cite")} no packet item and the gate observed nothing itself`,
 			);
 	}
-	if (contract.role === "reviewer" && verdict?.verdict === "pass" && facts.ungroundedChecks.length > 0)
+	// A check resting on cited packet items is grounded by the packet (4.8: a reason cites an item of the packet or an
+	// observation the gate made); only an uncited check the reviewer claims to have run and never ran is unearned.
+	const citing = new Set(
+		packet === undefined
+			? []
+			: (verdict?.checks ?? []).filter((check) => check.cites.length > 0).map((check) => check.name),
+	);
+	const unearned = facts.ungroundedChecks.filter((name) => !citing.has(name));
+	if (contract.role === "reviewer" && verdict?.verdict === "pass" && unearned.length > 0)
 		return citedEvidenceUnmet(
-			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${facts.ungroundedChecks.join(", ")})`,
+			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${unearned.join(", ")})`,
 		);
 	return PASS;
 }
