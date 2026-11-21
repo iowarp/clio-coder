@@ -10669,10 +10669,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/settings": {
+		"/api/settings": {
 			"get": {
-				"operationId": "workspaceSettings",
-				"summary": "Effective settings and each leaf's origin layer",
+				"operationId": "settingsReport",
+				"summary": "Effective settings and each leaf's origin layer; without a workspace, the user layer alone",
 				"security": [
 					{
 						"bearer": []
@@ -10680,9 +10680,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -10727,10 +10727,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/settings/controls": {
+		"/api/settings/controls": {
 			"get": {
 				"operationId": "settingsControls",
-				"summary": "The engine's setting controls with the app's write policy, timing and origin",
+				"summary": "The engine's setting controls with the app's write policy, timing and origin; without a workspace, the user layer alone",
 				"security": [
 					{
 						"bearer": []
@@ -10738,9 +10738,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -10959,9 +10959,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -19351,6 +19351,50 @@
 											},
 											"lastActivityAt": {
 												"type": "string"
+											},
+											"liveElsewhere": {
+												"type": "object",
+												"required": ["surface", "since", "host", "pid", "stale", "canTakeOver"],
+												"properties": {
+													"surface": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "terminal"
+															},
+															{
+																"type": "string",
+																"const": "headless"
+															},
+															{
+																"type": "string",
+																"const": "app"
+															},
+															{
+																"type": "string",
+																"const": "process"
+															}
+														]
+													},
+													"since": {
+														"type": "string"
+													},
+													"host": {
+														"type": "string",
+														"maxLength": 255
+													},
+													"pid": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"stale": {
+														"type": "boolean"
+													},
+													"canTakeOver": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
 											}
 										},
 										"additionalProperties": false
@@ -19537,6 +19581,197 @@
 							"application/json": {
 								"schema": {
 									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions/{sessionId}/transcript": {
+			"get": {
+				"operationId": "storedTranscript",
+				"summary": "A saved session's history as Markdown, read from its ledger without starting an engine",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "sessionId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["markdown", "turns", "truncated"],
+									"properties": {
+										"markdown": {
+											"type": "string",
+											"maxLength": 1048576
+										},
+										"turns": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions/{sessionId}/take-over": {
+			"post": {
+				"operationId": "takeOverSession",
+				"summary": "End the other process holding a saved session (clio-coder session terminate) so this app can resume it",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "sessionId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["released", "message"],
+									"properties": {
+										"released": {
+											"type": "boolean"
+										},
+										"message": {
+											"type": "string",
+											"maxLength": 2048
+										}
+									},
+									"additionalProperties": false
 								}
 							}
 						},
@@ -19870,6 +20105,71 @@
 												},
 												"additionalProperties": false
 											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/presence": {
+			"get": {
+				"operationId": "sessionPresence",
+				"summary": "Whether this server holds the session, so a page can ask before reading a snapshot it may not have",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["open"],
+									"properties": {
+										"open": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false

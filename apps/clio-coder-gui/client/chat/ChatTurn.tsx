@@ -156,7 +156,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 			: described;
 	// A turn row stuck at "running" in a session that is no longer open is a record, not activity.
 	const working = live && isWorking(status.state) && (session.state === "open" || session.state === "starting");
-	const request = requestView(turn);
+	const request = requestView(turn, row);
 	const author = responseAuthor(turn);
 	const startedAt = turnStartedAt(row);
 	const prompt = request.missing ? null : request.text;
@@ -166,7 +166,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 		<article
 			className={`chat-turn${live ? " is-live" : " is-settled"}${turn.origin === "replay" ? " is-replay" : ""}`}
 			data-turn-id={turn.turnId}
-			aria-label={turnAriaLabel(turn)}
+			aria-label={turnAriaLabel(turn, row)}
 			tabIndex={-1}
 		>
 			{/* The request is the operator's own words on a quiet ground. Who wrote it is announced, not

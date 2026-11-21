@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -298,6 +298,92 @@ for (const scenario of scenarios) {
 		}
 	});
 }
+
+// M-31: a scout that submits an empty result before reading keeps its read tools for the repair and is told to read.
+test("internal helper: a premature empty scout submission repairs by reading", { timeout: 15000 }, async () => {
+	const env = await isolateClioEnv("clio-helper-evidence-repair-");
+	const previousCwd = process.cwd();
+	process.chdir(env.dir);
+	writeFileSync(join(env.dir, "mod.js"), "export function alpha() {}\n");
+	const grounded = {
+		findings: [{ claim: "exports alpha", path: "mod.js", line: 1 }],
+		needsSplit: false,
+		proposedSubtasks: [],
+	};
+	const rounds = [
+		[submit({ findings: [], needsSplit: false, proposedSubtasks: [] })],
+		[{ name: "read", arguments: JSON.stringify({ path: "mod.js" }) }, write],
+		[submit(grounded)],
+	];
+	const requests: Array<{
+		tools?: unknown;
+		messages: Array<{ role: string; content: unknown }>;
+		tool_choice?: unknown;
+	}> = [];
+	const events: Array<AgentEvent | ClioWorkerEvent> = [];
+	let worker: WorkerRunHandle | undefined;
+	const server = createServer(async (req, res) => {
+		requests.push(JSON.parse(await readRequestBody(req)));
+		const round = rounds[requests.length - 1] ?? [submit({ findings: [] })];
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			`data: ${JSON.stringify({ model: "fixture", choices: [{ index: 0, delta: { role: "assistant", tool_calls: round.map((call, index) => ({ index, id: `call_${requests.length}_${index}`, type: "function", function: call })) }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
+		);
+	});
+	try {
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		worker = startWorkerRun(
+			{
+				agentId: "scout",
+				systemPrompt: "Inspect and return a Scout report.",
+				task: "Read only mod.js and report the exported function name.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "fixture",
+				thinkingLevel: "off",
+				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
+				allowedTools: ["read", "write"],
+				writeRoots: [env.dir],
+				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+				helperResult: true,
+				resultContract: { kind: "scout-report" },
+			},
+			(event) => events.push(event),
+		);
+		const result = await worker.promise;
+		strictEqual(result.exitCode, 0, JSON.stringify(result));
+		strictEqual(requests.length, 3);
+		// The repair round keeps the work phase's tool declarations and does not force the handoff.
+		deepStrictEqual(requests[1]?.tools, requests[0]?.tools);
+		ok(
+			JSON.stringify(requests[1]?.tool_choice ?? null).includes("clio_submit_result") === false,
+			"evidence repair must not force the terminal handoff",
+		);
+		ok(/read the inputs the assignment names/i.test(JSON.stringify(requests[1]?.messages.at(-1))));
+		const read = events.find((event) => event.type === "tool_execution_end" && event.toolName === "read");
+		ok(read?.type === "tool_execution_end");
+		strictEqual(read.isError, false);
+		// Only reading reopens: the write beside it is refused at admission.
+		ok(
+			JSON.stringify(events.find((event) => event.type === "tool_execution_end" && event.toolName === "write")).includes(
+				"evidence repair",
+			),
+		);
+		strictEqual(existsSync(join(env.dir, "forbidden.txt")), false);
+		const accepted = events.filter((event) => event.type === "clio_coder_helper_result");
+		strictEqual(accepted.length, 1);
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		await closeServer(server);
+		process.chdir(previousCwd);
+		env.restore();
+	}
+});
 
 test("tool-disabled targets attest no terminal helper tool", () => {
 	strictEqual(

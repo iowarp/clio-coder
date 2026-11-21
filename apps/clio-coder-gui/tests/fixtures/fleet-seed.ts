@@ -20,7 +20,7 @@ for (let i = 0; i < 150; i++) {
 	await writeFleetRun({
 		version: 1,
 		id: `fleet-${String(i).padStart(3, "0")}`,
-		cwd: process.cwd(),
+		cwd: process.argv[2] ?? "",
 		fleet: "Fixture verification",
 		planHash: "a".repeat(64),
 		planIdentityHash: "a".repeat(64),

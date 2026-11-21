@@ -1,13 +1,24 @@
+import { hostname } from "node:os";
 import { Value } from "typebox/value";
-import { SessionSummary } from "../../contracts/sessions.js";
+import { type LiveElsewhere, SessionSummary, StoredTranscript, type TakeOverResult } from "../../contracts/sessions.js";
 import { ACP_SESSION_LIST_METHOD, ACP_SESSION_META_KEY, AcpSessionList } from "../../contracts/wire.js";
 import type { Supervisor } from "../acp/supervisor.js";
 import type { WorkerHost } from "../worker/host.js";
+import type { CliRunner } from "./cli-runner.js";
 import { AppProblem } from "./problem.js";
 import type { WorkspaceService } from "./workspaces.js";
 
 const unreadable = () => new AppProblem("unavailable", "The saved task list could not be read.");
 const notFound = () => new AppProblem("not_found", "Session was not found in this workspace's ledger.");
+const SURFACE_WORDS: Readonly<Record<LiveElsewhere["surface"], string>> = {
+	terminal: "It is live in the terminal",
+	headless: "It is running headless",
+	app: "It is open in another app",
+	process: "It is open in another process",
+};
+const holderText = (live: LiveElsewhere) => `${SURFACE_WORDS[live.surface]} (pid ${live.pid} on ${live.host})`;
+const liveConflict = (live: LiveElsewhere) =>
+	new AppProblem("conflict", `${holderText(live)}. Take it over to continue here.`);
 export class SessionService {
 	private readonly historyReads = new Map<
 		string,
@@ -17,6 +28,8 @@ export class SessionService {
 		readonly supervisor: Supervisor,
 		readonly workspaces: WorkspaceService,
 		private readonly reads: WorkerHost,
+		/** Runs `session terminate` for Take over; absent in a server that cannot take a session over. */
+		private readonly cli?: CliRunner,
 	) {}
 	async history(workspaceId: string, signal?: AbortSignal): Promise<SessionSummary[]> {
 		signal?.throwIfAborted();
@@ -65,12 +78,17 @@ export class SessionService {
 		const raw = await this.reads.call("sessions.list", { cwd: path });
 		signal.throwIfAborted();
 		if (!Array.isArray(raw)) throw unreadable();
+		// This app's own engine children hold the sessions it has open; those are not open elsewhere.
+		const own = new Set((await this.supervisor.children.rows()).map((row) => row.pid));
+		const local = hostname();
 		return raw.map((row: unknown) => {
 			const projected = Value.Clean(SessionSummary, {
 				...(typeof row === "object" && row !== null ? row : {}),
 				workspaceId,
 			});
 			if (!Value.Check(SessionSummary, projected)) throw unreadable();
+			const live = projected.liveElsewhere;
+			if (live && live.host === local && own.has(live.pid)) delete projected.liveElsewhere;
 			return projected;
 		});
 	}
@@ -124,7 +142,39 @@ export class SessionService {
 	}
 	async load(workspaceId: string, id: string) {
 		const saved = await this.find(workspaceId, id);
+		if (saved.liveElsewhere) throw liveConflict(saved.liveElsewhere);
 		return this.supervisor.open(workspaceId, id, saved.name);
+	}
+	/** The saved history, readable while another process holds the session. */
+	async transcript(workspaceId: string, id: string): Promise<StoredTranscript> {
+		const { path } = await this.workspaces.get(workspaceId);
+		const value = Value.Clean(StoredTranscript, await this.reads.call("sessions.transcript", { cwd: path, id }));
+		if (!Value.Check(StoredTranscript, value))
+			throw new AppProblem("unavailable", "The saved transcript returned an invalid projection.");
+		return value;
+	}
+	/**
+	 * Take over: the holder is asked to end through `clio-coder session terminate`, which it obeys on its next beat
+	 * and reports in its own window (#439). A holder whose heartbeat is stale cannot answer, so only then is the
+	 * session force-released. The result says whether it is free now; a holder on another host may need a beat.
+	 */
+	async takeOver(workspaceId: string, id: string): Promise<TakeOverResult> {
+		if (!this.cli) throw new AppProblem("unsupported", "This server cannot take a session over.");
+		const { path } = await this.workspaces.get(workspaceId);
+		const before = (await this.find(workspaceId, id)).liveElsewhere;
+		if (!before) return { released: true, message: "No other process holds this task." };
+		if (!before.canTakeOver)
+			throw new AppProblem(
+				"conflict",
+				`${holderText(before)} without a live record, so it cannot be asked to end. Close it there first.`,
+			);
+		const answer = await this.cli.run({ kind: "session.terminate", id, force: before.stale }, path);
+		const message =
+			typeof answer === "object" && answer !== null && typeof (answer as { message?: unknown }).message === "string"
+				? (answer as { message: string }).message.slice(0, 2048)
+				: "The other process was asked to end.";
+		const after = (await this.readHistory(workspaceId, new AbortController().signal)).find((row) => row.id === id);
+		return { released: !after?.liveElsewhere, message };
 	}
 	async ledgerCommand(id: string, action: "label" | "delete", workspaceId?: string, label?: string) {
 		const workspace = workspaceId ?? this.supervisor.get(id).workspaceId;

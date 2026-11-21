@@ -111,6 +111,27 @@ if (mode === "editor") {
 	const termination = getTerminationCoordinator();
 	termination.onPersist(() => loaded.stop(), { timeoutMs: 300 });
 	await termination.shutdown(0);
+} else if (mode === "heartbeat") {
+	// A session held the way a TUI holds one: live record beating, the one shutdown path behind SIGTERM.
+	const { configureSessionHeartbeat, startSessionHeartbeat } = await import("../../../src/domains/session/heartbeat.js");
+	const termination = getTerminationCoordinator();
+	configureSessionHeartbeat({
+		surface: "tui",
+		terminate: (notice) => {
+			termination.notice(notice);
+			void termination.shutdown(143);
+		},
+		signalNotice: (explain) => termination.explainSignal(explain),
+	});
+	termination.installSignalHandlers();
+	const writer = { fenced: false, fence: noop, fenceWhen: noop };
+	const stop = startSessionHeartbeat({
+		meta: { id: command, cwd: root, cwdHash: "fixture" },
+		writer,
+	} as unknown as Parameters<typeof startSessionHeartbeat>[0]);
+	termination.onPersist(() => stop());
+	writeFileSync(join(root, "ready"), "yes");
+	setInterval(noop, 1000);
 } else if (mode === "budget") {
 	const termination = getTerminationCoordinator();
 	termination.onDrain(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeoutMs: 300 });

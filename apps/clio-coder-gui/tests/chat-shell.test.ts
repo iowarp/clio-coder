@@ -100,6 +100,17 @@ test("requestView states a missing prompt rather than leaving a headless respons
 	const blank = turnOf([item({ id: "c", kind: "user", text: "   " })]);
 	assert.equal(requestView(blank).text, EMPTY_PROMPT);
 	assert.equal(requestView(blank).missing, true);
+
+	// A request the ledger dated (a terminal's turn after Take over, any task reopened) is the operator's own, shown as
+	// asked, not as an undated earlier record.
+	const recorded = turnOf([item({ id: "d", kind: "user", text: "Say hi.", origin: "replay" })]);
+	assert.deepEqual(requestView(recorded, { startedAt: "2026-11-21T18:35:46.000Z" }), {
+		heading: "You",
+		text: "Say hi.",
+		missing: false,
+		replay: false,
+	});
+	assert.equal(requestView(recorded, { startedAt: null }).replay, true);
 });
 
 test("turnAriaLabel never repeats a stated absence as though it were the operator's words", () => {

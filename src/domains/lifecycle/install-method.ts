@@ -11,6 +11,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { xdgBaseDir } from "../../core/xdg.js";
+import { APPLY_MIGRATIONS_COMMAND } from "./migrations/registry-ids.js";
 
 const PACKAGE_NAME = "@iowarp/clio-coder";
 const DIST_CLI_SUFFIX = join("dist", "cli", "index.js");
@@ -397,5 +398,5 @@ export function installationCommand(
 		return action === "upgrade"
 			? `cd ${shellQuote(installation.root)}\ngit fetch --tags\n# Check out the desired release tag, then:\npnpm run install:local`
 			: `# Remove this checkout after unlinking its launcher:\n# ${shellQuote(installation.root)}`;
-	return `# Use the original package manager for ${shellQuote(installation.root)}.${action === "upgrade" ? "\n# Then run clio-coder upgrade --post-install." : ""}`;
+	return `# Use the original package manager for ${shellQuote(installation.root)}.${action === "upgrade" ? `\n# Then run ${APPLY_MIGRATIONS_COMMAND}.` : ""}`;
 }

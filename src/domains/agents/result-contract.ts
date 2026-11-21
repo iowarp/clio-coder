@@ -1155,7 +1155,7 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 	// is the explicit exception: it reports that the task did not fit, so it
 	// carries subtasks instead of findings.
 	if (findings.length === 0 && !value.needsSplit) {
-		return degrade("Scout result must carry at least one cited finding, or set needsSplit");
+		return degrade(SCOUT_NO_FINDING_REASON);
 	}
 	if (value.needsSplit && findings.length > 0) {
 		return degrade("Scout split recommendations carry typed subtasks instead of findings");
@@ -1277,7 +1277,7 @@ function validateScoutCitation(
 					: `this run read only ${spans.map(([start, end]) => `${start}-${end}`).join(", ")}`;
 			return {
 				ok: false,
-				reason: `Scout citation is not grounded in a live read: ${citation.path}:${citation.line} (${observed})`,
+				reason: `${SCOUT_UNGROUNDED_REASON}: ${citation.path}:${citation.line} (${observed})`,
 			};
 		}
 	}
@@ -1289,6 +1289,41 @@ function validateScoutCitation(
 
 /** How many refused citations one repair message names before it counts the rest. */
 const SCOUT_CITATION_REFUSALS_NAMED = 8;
+
+const SCOUT_NO_FINDING_REASON = "Scout result must carry at least one cited finding, or set needsSplit";
+const SCOUT_UNGROUNDED_REASON = "Scout citation is not grounded in a live read";
+
+/**
+ * Explorer reports held to the observed-evidence obligation: their findings are only as good as what the run read.
+ * One that arrives before any tool ran is refused at the worker, where the run can still read, instead of being sealed
+ * failed by the dispatch obligation after the run is over (M-31).
+ */
+const OBSERVED_EXPLORER_KINDS: ReadonlySet<string> = new Set([
+	"scout-report",
+	"provenance-report",
+	"research-report",
+	"context-handbook",
+]);
+const UNOBSERVED_REPORT_REASON =
+	"This report was submitted before any tool ran, so none of it rests on anything this run observed";
+
+/** The refusal for an explorer report submitted before the run executed a tool, or null when none applies. */
+export function unobservedExplorerReportReason(kind: string, toolsExecuted: number): string | null {
+	return toolsExecuted === 0 && OBSERVED_EXPLORER_KINDS.has(kind) ? UNOBSERVED_REPORT_REASON : null;
+}
+
+/**
+ * Whether a refusal says the result lacks evidence the run could still gather by reading (M-31): an explorer report
+ * submitted before anything ran, no cited finding at all, or a citation outside every span the run read. A repair for
+ * one of these keeps the read tools; every other refusal is about the result's form.
+ */
+export function resultContractEvidenceShortfall(reason: string): boolean {
+	return (
+		reason.includes(UNOBSERVED_REPORT_REASON) ||
+		reason.includes(SCOUT_NO_FINDING_REASON) ||
+		reason.includes(SCOUT_UNGROUNDED_REASON)
+	);
+}
 
 /**
  * Every citation on a strictly conforming result has to ground. One that does
