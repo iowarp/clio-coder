@@ -17,6 +17,12 @@ export const UNIX_SOCKET_FILTER_FD = 9;
 /** A `unixSocketFilter` that reads the program from the launch's stdin, so probing support writes no file. */
 export const UNIX_SOCKET_FILTER_STDIN = "-";
 
+/** The descriptor bwrap writes its JSON status records on under the retrying launcher. */
+const STATUS_FD = 8;
+
+/** Where the retrying launcher keeps the caller's stdout while the first attempt's status is read. */
+const STDOUT_FD = 7;
+
 /** The shell argv both exec seams hand the sandbox for a bash command string. */
 export function sandboxCommandArgv(command: SandboxCommand): string[] {
 	return "argv" in command ? [...command.argv] : ["/bin/bash", "-o", "pipefail", "-c", command.shell];
@@ -78,23 +84,56 @@ export function buildBwrapInvocation(
 	for (const [key, value] of Object.entries(spec.setEnv ?? {})) args.push("--setenv", key, value);
 	for (const key of spec.unsetEnv ?? []) args.push("--unsetenv", key);
 	if (spec.unixSocketFilter !== undefined) args.push("--seccomp", String(UNIX_SOCKET_FILTER_FD));
+	// Masks are mounts onto a host path, and a host program that renames a new file over that path while bwrap sets
+	// up (Copilot CLI and Claude Code rewrite their configs so) makes bwrap abort the launch. A stdin filter is read
+	// once, so that launch, used only to probe, keeps the single attempt.
+	const retry = spec.maskedPaths.length > 0 && spec.unixSocketFilter !== UNIX_SOCKET_FILTER_STDIN;
+	if (retry) args.push("--json-status-fd", String(STATUS_FD));
 	args.push("--chdir", spec.cwd, "--", ...sandboxCommandArgv(spec.command));
-	if (spec.unixSocketFilter === undefined) return { file: bwrapPath, args };
+	if (spec.unixSocketFilter === undefined && !retry) return { file: bwrapPath, args };
 	// bwrap takes a seccomp program only as an open descriptor. A shell opens
 	// the program file on it and execs bwrap in its own place, so every caller
 	// keeps spawning one self-contained argv with its own stdio; bwrap reads
 	// and closes the descriptor before the command starts.
 	const fd = UNIX_SOCKET_FILTER_FD;
-	const source = spec.unixSocketFilter === UNIX_SOCKET_FILTER_STDIN ? `${fd}<&0 0</dev/null` : `${fd}<"$filter"`;
+	const source =
+		spec.unixSocketFilter === undefined
+			? ""
+			: spec.unixSocketFilter === UNIX_SOCKET_FILTER_STDIN
+				? ` ${fd}<&0 0</dev/null`
+				: ` ${fd}<"$filter"`;
 	return {
 		file: "/bin/sh",
 		args: [
 			"-c",
-			`filter=$1; shift; exec "$@" ${source}`,
+			retry ? retryingLaunch(source) : `filter=$1; shift; exec "$@"${source}`,
 			"clio-coder-sandbox",
-			spec.unixSocketFilter,
+			spec.unixSocketFilter ?? "",
 			bwrapPath,
 			...args,
 		],
 	};
+}
+
+/**
+ * The launcher script for a launch with masks. The first attempt runs as the
+ * shell's child with bwrap's status records on a pipe. bwrap writes an
+ * `exit-code` record whenever the command ran, whatever its exit, and a setup
+ * failure exits 1 without one, so only that case runs the same launch again,
+ * once, in the shell's own place; any other outcome exits with bwrap's own
+ * code, which is the command's. The command never inherits the status pipe.
+ * The payload's process groups stay one level below the launcher, where
+ * signal.ts looks for them.
+ */
+function retryingLaunch(source: string): string {
+	return [
+		"filter=$1; shift",
+		`exec ${STDOUT_FD}>&1`,
+		`status=$("$@" ${STATUS_FD}>&1 1>&${STDOUT_FD} ${STDOUT_FD}>&-${source})`,
+		"code=$?",
+		`case $status in *'"exit-code"'*) exit "$code" ;; esac`,
+		'[ "$code" -eq 1 ] || exit "$code"',
+		"echo 'clio-coder-sandbox: bwrap could not mount a secret mask, likely a file a host program replaced while it started; running the launch again once' >&2",
+		`exec "$@" ${STATUS_FD}>/dev/null ${STDOUT_FD}>&-${source}`,
+	].join("\n");
 }

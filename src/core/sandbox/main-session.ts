@@ -818,7 +818,18 @@ export function planMainSandboxSpawn(
 		[...baseMasks, ...secretMasks],
 	);
 	const masks = [...baseMasks, ...secretMasks, ...sockets.masks];
-	const aliased = availability.backend === "bwrap" ? withMountAliases(masks) : masks;
+	const aliased =
+		availability.backend === "bwrap"
+			? withMountAliases(masks, undefined, [
+					physicalSandboxPath(cwd),
+					physicalSandboxPath(policy.secretRoots.workspace),
+					...policy.secretRoots.scratchRoots.map(physicalSandboxPath),
+					...(policy.secretRoots.sourceCheckout !== undefined
+						? [physicalSandboxPath(policy.secretRoots.sourceCheckout)]
+						: []),
+					...physicalPolicy.writableRoots,
+				])
+			: masks;
 	if (aliased instanceof Error) {
 		return {
 			kind: "refused",

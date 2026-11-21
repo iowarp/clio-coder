@@ -1,11 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runBashCommand } from "../../src/core/bash-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { buildBwrapInvocation } from "../../src/core/sandbox/bwrap.js";
 import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
 import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
 import { withMountAliases } from "../../src/core/sandbox/mount-aliases.js";
@@ -158,6 +159,105 @@ test("a secret an enclosing sandbox already bound /dev/null over gains no aliase
 	];
 	// The real file's second mount is still an alias; the device's other binds are not.
 	deepStrictEqual(withMountAliases(masks, mountinfo), [...masks, { path: join(root, "b", "secret"), kind: "file" }]);
+});
+
+// C-38: on WSL2 every home secret also had a /dev/null bind under /mnt/wslg/distro, a second mount of the root.
+test("a second mount of the root holding no run root is masked once as a directory instead of per secret", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-mount-rootview-")));
+	const distro = join(root, "distro");
+	mkdirSync(join(distro, "home", "u"), { recursive: true });
+	const mountinfo = join(root, "mountinfo");
+	writeFileSync(
+		mountinfo,
+		["1 0 8:48 / / rw - ext4 /dev/sdd rw", `40 1 8:48 / ${distro} rw - ext4 /dev/sdd rw`].join("\n"),
+	);
+	const secret = join(root, "secret.json");
+	writeFileSync(secret, "{}");
+	mkdirSync(join(distro, root), { recursive: true });
+	writeFileSync(join(distro, secret), "{}");
+	const masks = [{ path: secret, kind: "file" as const }];
+	deepStrictEqual(withMountAliases(masks, mountinfo, ["/w"]), [...masks, { path: distro, kind: "directory" }]);
+	// A view that holds a run root stays visible, and each secret in it keeps its own mask.
+	deepStrictEqual(withMountAliases(masks, mountinfo, [join(distro, "home", "u")]), [
+		...masks,
+		{ path: join(distro, secret), kind: "file" },
+	]);
+});
+
+// Row 262: a host program renaming a file over a masked path while bwrap starts aborts the launch.
+test("a masked launch runs again once only when bwrap failed before the command started", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-bwrap-retry-")));
+	const fake = join(root, "bwrap");
+	// Stands in for bwrap: MODE picks the first attempt's outcome, the attempt count is kept in a file.
+	writeFileSync(
+		fake,
+		[
+			"#!/bin/sh",
+			`n=$(cat ${root}/count 2>/dev/null || echo 0); n=$((n + 1)); echo $n > ${root}/count`,
+			'if [ "$n" = 1 ] && [ "$MODE" = setup ]; then echo "bwrap: Can\'t bind mount /oldroot/dev/null on x" >&2; exit 1; fi',
+			`echo '{ "child-pid": 2 }' >&8`,
+			'echo "payload ran $n"',
+			'code=0; [ "$MODE" = fails ] && code=1',
+			`echo '{ "exit-code": '"$code"' }' >&8; exit $code`,
+		].join("\n"),
+		{ mode: 0o755 },
+	);
+	const spec = (maskedPaths: Array<{ path: string; kind: "file" }>) => ({
+		command: { argv: ["/bin/true"] },
+		cwd: root,
+		writableRoots: [],
+		network: true,
+		maskedPaths,
+	});
+	const launch = (mode: string, masked = true) => {
+		writeFileSync(join(root, "count"), "0");
+		const { file, args } = buildBwrapInvocation(spec(masked ? [{ path: "/x", kind: "file" }] : []), fake);
+		return spawnSync(file, args, { encoding: "utf8", env: { ...process.env, MODE: mode } });
+	};
+	const setup = launch("setup");
+	strictEqual(setup.status, 0, setup.stderr);
+	match(setup.stdout, /^payload ran 2$/mu);
+	match(setup.stderr, /running the launch again once/u);
+	// The command started and exited 1: bwrap's exit-code record says so, and it never runs twice.
+	const fails = launch("fails");
+	strictEqual(fails.status, 1);
+	match(fails.stdout, /^payload ran 1$/mu);
+	ok(!fails.stderr.includes("again"), fails.stderr);
+	// Without a mask there is nothing to race, so bwrap runs alone and a setup failure stands.
+	const plain = buildBwrapInvocation(spec([]), fake);
+	strictEqual(plain.file, fake);
+	strictEqual(launch("setup", false).status, 1);
+});
+
+test("under bwrap a masked launch's timeout and abort still reach the command through the launcher shell", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const isolated = await isolateClioEnv("clio-masked-launch-signal-");
+	t.after(() => isolated.restore());
+	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-masked-launch-")));
+	writeFileSync(join(cwd, ".env"), "API=fake\n");
+	const shellSandbox = mainSandboxPolicy({ workspace: cwd, scratchRoots: [] });
+	const plan = planMainSandboxSpawn(shellSandbox, { argv: ["/bin/true"] }, cwd);
+	ok(plan.kind === "sandboxed" && plan.file === "/bin/sh", "a launch with masks goes through the launcher");
+	const command = (marker: string) =>
+		`trap 'echo got-term > ${marker}; exit 0' TERM; echo ready; while :; do sleep 0.1; done`;
+	const timedOut = await runBashCommand(command(join(cwd, "timeout.txt")), { cwd, shellSandbox, timeoutMs: 3000 });
+	strictEqual(timedOut.timedOut, true);
+	ok(existsSync(join(cwd, "timeout.txt")), "the timeout's SIGTERM reached the command");
+	const controller = new AbortController();
+	const aborted = await runBashCommand(command(join(cwd, "abort.txt")), {
+		cwd,
+		shellSandbox,
+		signal: controller.signal,
+		onOutput: (_target, text) => {
+			if (text.includes("ready")) controller.abort();
+		},
+	});
+	strictEqual(aborted.aborted, true);
+	ok(existsSync(join(cwd, "abort.txt")), "the abort's SIGTERM reached the command");
 });
 
 test("task worktrees nested in a checkout past the walk budget leave its .env and their own secrets masked", () => {

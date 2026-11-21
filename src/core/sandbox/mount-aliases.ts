@@ -48,11 +48,15 @@ function within(parent: string, child: string): string | null {
 /**
  * Every other path that reaches a masked path's file through another mount of
  * the same filesystem, such as WSL2's `/mnt/wslg/distro` second mount of the
- * root. A mask covers one path, so each alias needs its own. A mount of a
- * subtree inside a masked directory is an alias too. Masks are realpaths.
+ * root, with the mount it goes through. A mask covers one path, so each alias
+ * needs its own. A mount of a subtree inside a masked directory is an alias
+ * too. Masks are realpaths.
  */
-function maskAliases(masks: ReadonlyArray<SandboxMaskedPath>, mounts: ReadonlyArray<MountRecord>): SandboxMaskedPath[] {
-	const aliases: SandboxMaskedPath[] = [];
+function maskAliases(
+	masks: ReadonlyArray<SandboxMaskedPath>,
+	mounts: ReadonlyArray<MountRecord>,
+): Array<SandboxMaskedPath & { via: MountRecord }> {
+	const aliases: Array<SandboxMaskedPath & { via: MountRecord }> = [];
 	for (const mask of masks) {
 		let serving: MountRecord | undefined;
 		for (const mount of mounts) {
@@ -75,20 +79,44 @@ function maskAliases(masks: ReadonlyArray<SandboxMaskedPath>, mounts: ReadonlyAr
 					: mask.kind === "directory" && within(fsPath, mount.root) !== null
 						? mount.mountPoint
 						: null;
-			if (alias !== null && alias !== mask.path) aliases.push({ path: alias, kind: mask.kind });
+			if (alias !== null && alias !== mask.path) aliases.push({ path: alias, kind: mask.kind, via: mount });
 		}
 	}
 	return aliases;
 }
 
 /**
+ * A second mount of the whole root filesystem, such as WSL2's
+ * `/mnt/wslg/distro`, that holds none of `roots`: everything in it is reachable
+ * at `/`, so a command loses nothing when it is hidden as one directory.
+ */
+function collapsibleRootView(
+	mount: MountRecord,
+	mounts: ReadonlyArray<MountRecord>,
+	roots: ReadonlyArray<string>,
+): boolean {
+	return (
+		mount.root === "/" &&
+		mount.mountPoint !== "/" &&
+		mounts.some((other) => other.mountPoint === "/" && other.root === "/" && other.device === mount.device) &&
+		!roots.some((root) => within(mount.mountPoint, root) !== null || within(root, mount.mountPoint) !== null)
+	);
+}
+
+/**
  * The masks plus every existing alias of them on this host, or an Error when
  * the mount table cannot be read: a sandbox that cannot see its aliases would
- * leave secrets readable, so callers refuse the command instead.
+ * leave secrets readable, so callers refuse the command instead. An alias
+ * through a second mount of the root that encloses none of `roots` (the
+ * workspace, scratch and writable roots, the cwd) is covered by masking that
+ * mount once as a directory instead of binding over each file in it: every
+ * file bind is one more mount a host program renaming the file can break
+ * (C-38), and the directory hides every alias at once.
  */
 export function withMountAliases(
 	masks: ReadonlyArray<SandboxMaskedPath>,
 	mountinfo: string = MOUNTINFO,
+	roots: ReadonlyArray<string> = [],
 ): SandboxMaskedPath[] | Error {
 	let mounts: MountRecord[];
 	try {
@@ -105,13 +133,22 @@ export function withMountAliases(
 	// Its "aliases" would be every other bind of that device, /dev/null itself
 	// included, and a mask there leaves the command a read-only /dev/null.
 	const secretBearing = masks.filter((mask) => !isDeviceNode(mask.path));
-	for (const alias of maskAliases(secretBearing, mounts)) {
+	const aliases = maskAliases(secretBearing, mounts).map((alias) =>
+		collapsibleRootView(alias.via, mounts, roots)
+			? { path: alias.via.mountPoint, kind: "directory" as const }
+			: { path: alias.path, kind: alias.kind },
+	);
+	// Directory masks go first, so the file aliases they enclose need no mask of their own.
+	aliases.sort((a, b) => Number(b.kind === "directory") - Number(a.kind === "directory"));
+	for (const alias of aliases) {
 		if (seen.has(alias.path) || hiddenBy.some((dir) => within(dir, alias.path) !== null)) continue;
 		seen.add(alias.path);
 		try {
 			// bwrap cannot create a mount point on the read-only root, so only
 			// existing aliases are masked, each by what it is.
-			result.push({ path: alias.path, kind: statSync(alias.path).isDirectory() ? "directory" : "file" });
+			const kind = statSync(alias.path).isDirectory() ? "directory" : "file";
+			result.push({ path: alias.path, kind });
+			if (kind === "directory") hiddenBy.push(alias.path);
 		} catch {
 			// An alias shadowed by another mount or gone since is not reachable there.
 		}
