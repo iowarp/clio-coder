@@ -231,25 +231,33 @@ export const RATE_LIMIT_WAIT_BUDGET_MS = 3_600_000;
 /** The most stated waits one chain sits out, however short each one is. */
 export const PROVIDER_WAIT_LIMIT = 30;
 
-const RATE_LIMIT_PATTERN =
-	/rate.?limit|too many requests|(?<![a-z0-9.$])429(?![a-z0-9])|overloaded|server_busy|model is at capacity|high demand/i;
+const CAPACITY_PATTERN = /overloaded|server_busy|model is at capacity|high demand/i;
 
-/** A provider asking for time. Quota and billing exhaustion stay terminal, because waiting does not clear them. */
-export function isRateLimitErrorMessage(errorMessage: string | null | undefined): boolean {
+const NAMED_RATE_LIMIT_PATTERN = /rate.?limit|too many requests|(?<![a-z0-9.$])429(?![a-z0-9])/i;
+
+/** The engine reads this failure as one a later attempt may clear: not Clio's own ceiling, a Harmony final or a refusal. */
+function isTransientProviderMessage(errorMessage: string | null | undefined): errorMessage is string {
 	if (!errorMessage || errorMessage.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return false;
 	if (isHarmonyTerminalFailure(errorMessage) || isCopilotRefusal(errorMessage)) return false;
-	return isEngineRetryableAssistantError(errorMessage) && RATE_LIMIT_PATTERN.test(errorMessage);
+	return isEngineRetryableAssistantError(errorMessage);
+}
+
+/**
+ * A provider naming a rate limit, which only time clears. Quota and billing exhaustion stay terminal, because waiting
+ * does not clear them. Overload wording is not a rate limit: a server that says it is busy gets the capped ladder a 500
+ * gets, since waiting out the hour on it hammered a down endpoint 425 times at 200 ms (M-9).
+ */
+export function isRateLimitErrorMessage(errorMessage: string | null | undefined): boolean {
+	return isTransientProviderMessage(errorMessage) && NAMED_RATE_LIMIT_PATTERN.test(errorMessage);
 }
 
 /** What a target's refusal says it is waiting on. Only its own words count: a bare 503 names nothing. */
 export type RetryWaitCause = "model-loading" | "capacity" | "rate-limit";
 
-const NAMED_RATE_LIMIT_PATTERN = /rate.?limit|too many requests|(?<![a-z0-9.$])429(?![a-z0-9])/i;
-
 export function retryWaitCause(failure: RecoveryFailure): RetryWaitCause | null {
 	if (failure.kind === "model-loading") return "model-loading";
-	if (!isRateLimitErrorMessage(failure.message)) return null;
-	return NAMED_RATE_LIMIT_PATTERN.test(failure.message) ? "rate-limit" : "capacity";
+	if (isRateLimitErrorMessage(failure.message)) return "rate-limit";
+	return isTransientProviderMessage(failure.message) && CAPACITY_PATTERN.test(failure.message) ? "capacity" : null;
 }
 
 /**
