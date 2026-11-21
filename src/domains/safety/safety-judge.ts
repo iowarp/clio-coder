@@ -278,6 +278,11 @@ export type SafetyJudgeOutcome =
 			latencyMs: number;
 			/** The refused tool result the model reads. */
 			refusal: string;
+			/**
+			 * The refusal without its retry route: what the judge blocked and why, and an escalation. A caller that
+			 * offers its own remedy (a session option for a sandbox escape) composes it after this, never after the route.
+			 */
+			account: string;
 			/** What would allow the call, for the structured denial account. */
 			allowedBy: string;
 	  }
@@ -667,13 +672,15 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					after.escalated = true;
 					note({ kind: "escalation", tool: subject.tool, reason: escalationReason(after), ...counts, ...position });
 				}
+				const compound = refusedBashCompound(subject, parsed.reason);
 				return {
 					kind: "block",
 					rule: parsed.rule,
 					reason: parsed.reason,
 					build,
 					latencyMs,
-					refusal: safetyJudgeRefusal(subject.tool, parsed, after.escalated, refusedBashCompound(subject, parsed.reason)),
+					refusal: safetyJudgeRefusal(subject.tool, parsed, after.escalated, compound),
+					account: safetyJudgeRefusal(subject.tool, parsed, after.escalated, compound, false),
 					allowedBy:
 						"an operator message must name this action, so ask the operator for it in your reply; the judge hands a call to the operator itself only after repeated blocks.",
 				};
@@ -785,19 +792,24 @@ function compoundRoute(compound: RefusedCompound): string {
 	].join("\n");
 }
 
-/** The refused tool result the model reads for a block. */
+/** The refused tool result the model reads for a block; without `route`, only the account a caller adds its remedy to. */
 function safetyJudgeRefusal(
 	tool: string,
 	verdict: { rule: string; reason: string },
 	escalated: boolean,
 	compound: RefusedCompound | null,
+	route = true,
 ): string {
 	return [
 		`Clio's safety judge blocked this ${tool} call (rule ${verdict.rule}): ${verdict.reason}`,
 		"The judge reviewed this call against the operator's own messages and did not find this action authorized.",
-		compound === null
-			? "Do not retry this call or a reworded form of it. Take a route that stays inside the workspace and scratch roots, or record this open decision for your final reply and continue with the rest of the task."
-			: compoundRoute(compound),
+		...(!route
+			? []
+			: compound === null
+				? [
+						"Do not retry this call or a reworded form of it. Take a route that stays inside the workspace and scratch roots, or record this open decision for your final reply and continue with the rest of the task.",
+					]
+				: [compoundRoute(compound)]),
 		...(escalated
 			? ["The judge has blocked repeatedly, so the next call that needs approval goes to the operator."]
 			: []),
