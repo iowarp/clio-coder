@@ -138,7 +138,8 @@ const HOST_NOTES = /(?:^|\n+)\[middleware:[a-z-]+\][\s\S]*$/u;
  * produced before storing it, while the tool call ids it answered with are stable. A tool result's content is:
  * Copilot keeps every result it was handed, so a result the working set later stubs or cuts must not match its
  * synced form, or the next step continues over the full body Clio no longer counts (bt-47 drv-r4a). Host notes
- * trailing a result are left out, as a request-only note on the last result must not reseed the next step.
+ * trailing a result are left out, as a request-only note on the last result must not reseed the next step; so is
+ * the whitespace before them, which the note's separator joins with the body's own trailing newlines (M-20).
  */
 function fingerprint(message: CoreMessage): string | null {
 	switch (message.role) {
@@ -153,7 +154,7 @@ function fingerprint(message: CoreMessage): string | null {
 			return `a:${ids.join(",")}`;
 		}
 		case "toolResult": {
-			const text = textOf(message.content).replace(HOST_NOTES, "");
+			const text = textOf(message.content).replace(HOST_NOTES, "").trimEnd();
 			const images = imagesOf(message.content).map((image) => hash(image.data));
 			return `r:${message.toolCallId}:${message.isError ? "e" : "o"}:${hash(text)}:${images.join(",")}`;
 		}
@@ -810,9 +811,20 @@ function narrationOf(reasoningBlocks: unknown): string[] {
 	return said;
 }
 
+/**
+ * The session a step's request went to, as Clio's own pool knows it: `new` (createSession for this step), `spare`
+ * (a PV-2 pooled session holding nothing), `continued` (an open one holding the transcript), `resumed` (resumeSession
+ * on one an earlier process left).
+ */
+type CopilotSessionOrigin = "new" | "spare" | "continued" | "resumed";
+
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
-	readonly message: AssistantMessage & { copilotBilling?: CopilotStepBilling; copilotContinuation?: "delta" | "full" };
+	readonly message: AssistantMessage & {
+		copilotBilling?: CopilotStepBilling;
+		copilotContinuation?: "delta" | "full";
+		copilotSession?: CopilotSessionOrigin;
+	};
 	private textIndex: number | null = null;
 	private thinkingIndex: number | null = null;
 	private started = false;
@@ -844,6 +856,8 @@ class Step {
 	onDetach: ((step: Step) => void) | null = null;
 	/** Whether this step's request continued a session holding the transcript (delta) or carried all of it (full). */
 	continuation: "delta" | "full" | null = null;
+	/** Which Copilot session this step's request went to: one it opened, a pooled spare, one it continued or resumed. */
+	session: CopilotSessionOrigin | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
 	onFinish:
 		| ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[]; toolNames: string[] }) => void)
@@ -1126,6 +1140,8 @@ class Step {
 		}
 		// Read by the prompt-cache record: a full request after a continued one explains the cache it re-wrote.
 		if (this.continuation !== null) this.message.copilotContinuation = this.continuation;
+		// Read by the call's transport facts (`src/domains/telemetry/call-facts.ts`).
+		if (this.session !== null) this.message.copilotSession = this.session;
 		if (stop === "stop" || stop === "toolUse") {
 			this.message.stopReason = stop;
 			this.stream.push({ type: "done", reason: stop, message: this.message });
@@ -1463,6 +1479,7 @@ async function runStep(
 	const fresh = lastSeen ? core.slice(core.indexOf(lastSeen) + 1) : core;
 
 	let bound = false;
+	let origin: CopilotSessionOrigin = continued ? "continued" : reused ? "spare" : "new";
 	const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
 	const session = { model: model.id, systemMessage: systemPrompt, tools, reasoningEffort, contextTier };
 	try {
@@ -1480,6 +1497,7 @@ async function runStep(
 				if (opened) {
 					// Its record stays until something is sent, so a step cancelled before then keeps it resumable.
 					continued = true;
+					origin = "resumed";
 					opened.persisted = true;
 					persistedByKey.set(key, opened);
 				}
@@ -1549,6 +1567,7 @@ async function runStep(
 		}
 		unpersist(active);
 		step.continuation = continued ? "delta" : "full";
+		step.session = origin;
 		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort || active.contextTier !== contextTier) {
 			// The tier is named whenever either side is long_context, so leaving it returns the session to default.
 			const tierOption = contextTier === "long_context" || active.contextTier === "long_context" ? { contextTier } : {};

@@ -54,6 +54,7 @@ import {
 import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js";
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
+import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
@@ -252,6 +253,20 @@ class FakeSession {
 		}
 		if (prompt.includes("op:metrics-fail-once")) this.metricsFailOnce = true;
 		if (prompt.includes("op:slow-metrics")) this.metricsDelayOnce = 1500;
+		if (prompt.includes("op:call-in-lock")) {
+			// A worker whose one budgeted call locks it into synthesis, and a model that calls again in the locked round.
+			const name = [...this.tools.keys()][0];
+			for (const [index, [toolCallId, path]] of [["call_work", "CHAMPIONS.md"], ["call_locked", "README.md"]].entries()) {
+				this.usage({ model: "fake-model", apiCallId: "lock-" + index, inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+				this.emit("assistant.message", { messageId: "k" + index, apiCallId: "lock-" + index, content: "", toolRequests: [{ toolCallId, name, arguments: { path } }] });
+				const result = await this.tools.get(name).handler({ path }, { toolCallId, sessionId: this.sessionId, toolName: name, arguments: {}, signal: new AbortController().signal });
+				state.toolResults.push({ ...result, injectedBefore: [] });
+			}
+			this.usage({ model: "fake-model", apiCallId: "lock-2", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
+			this.emit("assistant.message", { messageId: "k2", apiCallId: "lock-2", content: "report: known evidence" });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("use tool")) {
 			const result = await this.spill(await this.callTool("call_1"));
 			if (!result) return;
@@ -1361,9 +1376,29 @@ test("a side call leaves one spare session, and the next side call of its config
 		engineStreamSimple(model, normalizeContext({ systemPrompt: "Side judge.", messages: [user(text)] }), {}).result();
 	try {
 		const start = fake().sessions.length;
-		strictEqual((await side("judge one")).stopReason, "stop");
+		const transport = (message: AssistantMessage) => {
+			const { kind, continuation, session, connectionReused } = callSettlementFromMessage(message, "none").transport;
+			return { kind, continuation, session, connectionReused };
+		};
+		const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" });
+		const notReported = { kind: "unknown", reason: "provider-omitted" };
+		const one = await side("judge one");
+		strictEqual(one.stopReason, "stop");
+		deepStrictEqual(transport(one), {
+			kind: "subprocess",
+			continuation: counted("full"),
+			session: counted("new"),
+			connectionReused: notReported,
+		});
 		ok(await eventually(() => fake().sessions.length === start + 2), "the side call's own session and one spare");
-		strictEqual((await side("judge two")).stopReason, "stop");
+		const two = await side("judge two");
+		strictEqual(two.stopReason, "stop");
+		deepStrictEqual(transport(two), {
+			kind: "subprocess",
+			continuation: counted("full"),
+			session: counted("spare"),
+			connectionReused: notReported,
+		});
 		match(fake().sessions[start + 1]?.prompts[0] ?? "", /judge two/, "the second side call ran on the spare");
 		ok(await eventually(() => fake().sessions.length === start + 3), "taking the spare leaves a new one");
 		strictEqual(fake().sessions[start + 2]?.prompts.length, 0, "and the new spare is still empty");
@@ -1386,6 +1421,15 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	// A note that rode only on the request that delivered the result is not a rewrite.
 	const next = await step({ tools: [readTool], messages: [...held, user("next")] }, key);
 	strictEqual((next as { copilotContinuation?: string }).copilotContinuation, "delta");
+	const continued = callSettlementFromMessage(next, "none").transport;
+	deepStrictEqual(
+		[continued.kind, continued.continuation, continued.session],
+		[
+			"subprocess",
+			{ kind: "measured", value: "delta", source: "local-count" },
+			{ kind: "measured", value: "continued", source: "local-count" },
+		],
+	);
 	strictEqual(fake().sessions.length, start + 1);
 	deepStrictEqual(fake().sessions.at(-1)?.prompts.slice(1), ["next"], "the delta carries only the new turn");
 
@@ -2086,6 +2130,73 @@ test("steering triage at thinking off on a Copilot model that cannot turn thinki
 		loop.dispose();
 		await loop.whenSettled();
 		await providers.extension.stop?.();
+		models.splice(0, models.length, ...original);
+	}
+});
+
+// M-20: a locked synthesis round on Copilot keeps the session's effort and tool set, so the runtime keeps its cached
+// prefix; a tool call there is refused at admission by the worker's synthesis lockout. The work read ends in a newline, so
+// the locked round's tail note must not change that result's transcript identity, or the refused call reseeds a session.
+test("a locked Copilot worker round keeps the session's reasoning effort and tools, and refuses a call (M-20)", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "locked-levels",
+		capabilities: { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } },
+		supportedReasoningEfforts: ["low", "medium", "high"],
+	});
+	const sessionsBefore = fake().sessions.length;
+	try {
+		const worker = startWorkerRun(
+			{
+				agentId: "coder",
+				sessionId: "m20-worker",
+				systemPrompt: "Read then report.",
+				task: "op:call-in-lock: read CHAMPIONS.md, then report.",
+				target: { id: "copilot-worker", runtime: "copilot-sdk" },
+				runtime: copilotSdkRuntime,
+				wireModelId: "locked-levels",
+				thinkingLevel: "high",
+				modelCapabilities: {
+					contextWindow: 64000,
+					maxTokens: 4096,
+					tools: true,
+					reasoning: true,
+					reasoningLevels: ["low", "medium", "high"],
+				},
+				allowedTools: ["read"],
+				budget: { mode: "enforced", toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 150 },
+				noSkills: true,
+				cwd: process.cwd(),
+				onPermission: "deny",
+			},
+			() => {},
+		);
+		strictEqual((await worker.promise).exitCode, 0);
+		// Count only this worker's model: an earlier test's side call leaves a spare (PV-2) that may open in this window.
+		const created = fake()
+			.sessions.slice(sessionsBefore)
+			.filter((entry) => entry.config.model === "locked-levels");
+		strictEqual(created.length, 1, "the locked round continues the work session");
+		const session = created[0] as unknown as {
+			config: { reasoningEffort?: string; tools?: Array<{ name: string }> };
+			switches?: unknown[];
+			tools: Map<string, unknown>;
+		};
+		strictEqual(session.config.reasoningEffort, "high");
+		strictEqual(session.switches, undefined, "no setModel on the locked round");
+		deepStrictEqual(
+			[...session.tools.keys()],
+			(session.config.tools ?? []).map((tool) => tool.name),
+			"the tool set the session was created with",
+		);
+		const [work, locked] = fake().toolResults.slice(-2);
+		match(work?.textResultForLlm ?? "", /# Champions/);
+		strictEqual(locked?.resultType, "failure", "the locked round's call never runs");
+		match(locked?.textResultForLlm ?? "", /exploration tools are now disabled/);
+	} finally {
+		disposeCopilotConversations("m20-worker");
 		models.splice(0, models.length, ...original);
 	}
 });
