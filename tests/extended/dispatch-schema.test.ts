@@ -67,8 +67,7 @@ describe("dispatch schema composition", () => {
 				readOnly: false,
 				cwd: workspace,
 				writeBoundaries: [`${workspace}/src/`],
-				allowedTools: [],
-				networkSetting: false,
+				network: false,
 				dependencyRoots: granted.extraReadRoots ?? [],
 			});
 			assert.ok(spec?.readableRoots.includes(realpathSync(outside)));

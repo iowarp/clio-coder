@@ -1,3 +1,4 @@
+import { type WithheldCapability, withheldLines } from "./envelope.js";
 import type { DispatchIntent } from "./intent.js";
 
 /** Render intent fields that describe required results rather than observed facts. */
@@ -23,24 +24,26 @@ export function renderDispatchIntentRequirements(intent: DispatchIntent | undefi
 }
 
 /**
- * Tell a worker which check tools its write roots cost it. The rail cannot
- * police a shell no OS sandbox confines, so bash and verify are withheld.
- * Left unsaid, a worker told to "run the tests" spent 40 code_nav calls
- * looking for a way to run them (kvlog exercise, r5), and parallel coders
- * reported only after collect that they had no shell (CLI-H2). Rendered from
- * the tools admission actually withheld, so a worker that kept bash under an
- * OS sandbox is never told it lacks one (p8/S1).
+ * Tell a worker what its envelope withheld and why. Left unsaid, a worker told to "run the tests" spent 40 code_nav
+ * calls looking for a way to run them (kvlog exercise, r5), and parallel coders reported only after collect that they
+ * had no shell (CLI-H2). Rendered from the envelope's own withheld entries, so a worker that kept bash under an OS
+ * sandbox or in its own worktree is never told it lacks one (p8/S1).
  */
-export function renderChecksWithheldNotice(
-	withheld: ReadonlyArray<string>,
+export function renderWithheldNotice(
+	withheld: ReadonlyArray<WithheldCapability>,
 	intent: DispatchIntent | undefined,
 ): string | null {
 	if (withheld.length === 0) return null;
-	const declared = (intent?.verification.length ?? 0) > 0;
-	return [
-		"# Checks withheld",
-		`${withheld.join(", ")} ${withheld.length === 1 ? "is" : "are"} withheld from this run: its write roots have no OS sandbox enforcing them, so you cannot run tests, builds, or scripts yourself. Write the code and the tests and re-read them. End your report with the files you changed and the checks you could not run, by name; ${declared ? "the host runs the declared checks after you finish and records the result on the run record" : "the dispatcher runs them after you finish"}.`,
-	].join("\n");
+	const lines = ["# Withheld from this run", ...withheldLines(withheld).map((line) => `- ${line}`)];
+	const checks = withheld.filter((entry) => entry.reason === "write-roots-unconfined").map((entry) => entry.capability);
+	if (checks.length > 0) {
+		const declared = (intent?.verification.length ?? 0) > 0;
+		lines.push(
+			"",
+			`Without ${checks.join(", ")} you cannot run tests, builds, or scripts yourself. Write the code and the tests and re-read them. End your report with the files you changed and the checks you could not run, by name; ${declared ? "the host runs the declared checks after you finish and records the result on the run record" : "the dispatcher runs them after you finish"}.`,
+		);
+	}
+	return lines.join("\n");
 }
 
 /** Build the reviewer assignment from the same requirements the builder received. */

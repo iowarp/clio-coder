@@ -116,7 +116,7 @@ function clioBridgeToolDefinitions(input: ClioToolBridgeInput): BridgedToolDefin
 	});
 	const agentTools = resolveAgentTools({
 		registry,
-		allowedTools: tools,
+		envelopeTools: tools,
 		includeInteractiveTools: false,
 		attachCapabilitiesDirectly: true,
 		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),

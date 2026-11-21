@@ -8,6 +8,7 @@ import { createProvidersBundle } from "../../src/domains/providers/extension.js"
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
@@ -117,7 +118,7 @@ test("cold worker freezes discovered gateway controls before the actual engine r
 		strictEqual(spec.target.id, "worker");
 		strictEqual(spec.wireModelId, f.fixture.modelId);
 		strictEqual(spec.thinkingLevel, "off");
-		const input = { ...spec, runtime: litellm, cwd: f.env.dir };
+		const input = { ...spec, allowedTools: workerSpecToolNames(spec), runtime: litellm, cwd: f.env.dir };
 		// The controlled spawn seam captures production admission's exact input;
 		// run the real worker engine against the HTTP fixture without a recipe report.
 		delete input.resultContract;

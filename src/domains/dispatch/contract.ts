@@ -342,6 +342,10 @@ export interface DispatchPlanTaskResolution {
 	checkedAtRun?: ReadonlyArray<string>;
 	/** The bounds that stop this run, as the plan card states them: cost estimate or, unpriced, the timers and tool ceiling it has. */
 	limits?: string;
+	/** Where the run writes, from its envelope (M7): read-only, roots, its own worktree and what merges back, or workspace. */
+	writes?: string;
+	/** One line per capability the run's envelope withheld, with why and what would keep it (M7). */
+	withheld?: ReadonlyArray<string>;
 }
 
 /**

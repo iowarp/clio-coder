@@ -675,7 +675,7 @@ describe("native worker MCP capabilities", () => {
 					executionRole: "builder",
 					intent: scope.intent,
 				}),
-				/missing required tools: mcp_fake__echo; declared write roots \S*src\/a\.ts have no OS sandbox enforcing them here, so mcp_fake__echo is withheld\. Enable safety\.sandbox/,
+				/missing required tools: mcp_fake__echo; declared write roots \S*src\/a\.ts have no OS sandbox or worktree binding commands to them here, so mcp_fake__echo is withheld\. Enable safety\.sandbox/,
 			);
 		} finally {
 			await bundle.extension.stop?.();

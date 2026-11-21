@@ -119,8 +119,9 @@ describe("gateway on the worker surface", () => {
 			ok(preview);
 			const surface = [...RECIPE_TOOLS, ToolNames.Gateway].sort();
 			strictEqual(preview.toolSignature, createHash("sha256").update(JSON.stringify(surface)).digest("hex"));
+			// The worker attests its sealed envelope's names, which already carry gateway (M7).
 			const attested = attestedToolSignature({
-				allowedTools: RECIPE_TOOLS,
+				allowedTools: surface,
 				toolsSupported: true,
 				agentId: "coder",
 				task: request.task,

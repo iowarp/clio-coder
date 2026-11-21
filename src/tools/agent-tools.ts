@@ -5,9 +5,11 @@
  * agent can execute. Every wrapper routes through a `ToolRegistry.invoke(...)`
  * call so the orchestrator's chat loop and worker subprocesses share the same
  * safety + confirmation admission path instead of calling `spec.run(...)`
- * directly. Both surfaces resolve their tools here, so they cannot drift: the
- * executable surface and the attested tool signature are computed by the same
- * `effectiveToolNames` narrowing in this file.
+ * directly. Both surfaces resolve their tools here, so they cannot drift. The
+ * main session narrows its registry with `effectiveToolNames`; a worker takes
+ * its sealed envelope's names through `envelopeSurfaceNames`, which narrows
+ * nothing, so its executable surface and its attested signature are the
+ * envelope's (fleet M7).
  *
  * The engine validates attached schemas. A projected schema is then checked
  * against the canonical schema before admission. Inside the agent loop pi-ai's
@@ -221,6 +223,12 @@ export interface ResolveAgentToolsInput {
 	 * (the Claude SDK bridge), so a gateway-placed capability stays callable.
 	 */
 	attachCapabilitiesDirectly?: boolean;
+	/**
+	 * A worker's sealed envelope names (fleet M7). When present they are the whole surface: the envelope already
+	 * applied role, profile, deny list, runtime and host, so no profile, turn or allow-list narrowing runs again, and
+	 * the execution ceiling is the same list.
+	 */
+	envelopeTools?: ReadonlyArray<string>;
 }
 
 export interface InvokeWorkerToolOptions {
@@ -773,7 +781,11 @@ function toAgentTool(
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	const specs: ToolSpec[] = [];
-	const names = effectiveToolNames(input);
+	const names =
+		input.envelopeTools !== undefined
+			? envelopeSurfaceNames(input.registry, input.envelopeTools)
+			: effectiveToolNames(input);
+	const ceiling = input.envelopeTools !== undefined ? names : input.allowedTools;
 	const surface = new Set<string>(names);
 	for (const name of names) {
 		const spec = input.registry.get(name);
@@ -790,9 +802,21 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	const invokeOptions = (toolCallId?: string) => ({
 		...input.invokeOptions?.(toolCallId),
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
-		...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+		...(ceiling ? { allowedTools: ceiling } : {}),
 	});
 	return specs.map((spec) => toAgentTool(spec, input.registry, input.telemetry, invokeOptions));
+}
+
+/**
+ * A worker's capability surface: its envelope's names this registry can serve (fleet M7). Nothing is narrowed here;
+ * a name this build does not register drops out, so the signature the worker attests shows the drift to the host.
+ * An MCP capability registers only once its server connects, on its first call, so an admitted MCP name counts as
+ * served wherever the gateway that reaches it is registered.
+ */
+export function envelopeSurfaceNames(registry: ToolRegistry, names: ReadonlyArray<string>): ToolName[] {
+	const served = new Set<string>([...registry.listRegistered(), ...registry.listGateway().map((spec) => spec.name)]);
+	const gateway = registry.get(ToolNames.Gateway) !== undefined;
+	return [...new Set(names)].filter((name) => served.has(name) || (gateway && isMcpToolName(name))) as ToolName[];
 }
 
 /**

@@ -114,6 +114,12 @@ export interface TaskWorktreeReceipt {
 	 * like `leftUncommitted`.
 	 */
 	changedAfterCommit?: { count: number; paths: string[] };
+	/**
+	 * Changes the run left outside its declared write roots: tracked files it changed and files it authored there.
+	 * Only the roots merge back (fleet M7, ruling 3); these stay in the kept worktree for the operator. Bounded like
+	 * `leftUncommitted`.
+	 */
+	outsideRoots?: { count: number; paths: string[] };
 }
 
 /** Receipt reason for a task worktree whose HEAD no longer names its own task branch (F5). */
@@ -277,6 +283,8 @@ export interface WorktreeCommit {
 	ignoredAuthored: string[];
 	/** The commit and stamps from that same post-commit listing, for guarded cleanup. */
 	accounted: TaskWorktreePreview;
+	/** With `mergeRoots`: what changed outside them and stays uncommitted, top-relative and sorted. */
+	outsideRoots: string[];
 }
 
 /** How many left-out paths a receipt names; the count still covers all of them. */
@@ -355,19 +363,34 @@ export function commitWorktreePath(
 	path: string,
 	identity: string,
 	message: string,
-	scope: { authoredPaths: Iterable<string> | null; excludedPaths?: ReadonlyArray<string> },
+	scope: {
+		authoredPaths: Iterable<string> | null;
+		excludedPaths?: ReadonlyArray<string>;
+		/**
+		 * Absolute write boundaries the commit is limited to (fleet M7): changes outside them stay in the worktree,
+		 * uncommitted. Absent, or a root that is the worktree itself, takes the whole tree.
+		 */
+		mergeRoots?: ReadonlyArray<string>;
+	},
 ): WorktreeCommit {
 	const excludedPaths = scope.excludedPaths ?? [];
+	const roots = mergeRootSpecs(path, scope.mergeRoots);
+	const inRoots = (entry: string): boolean =>
+		roots === null || roots.some((root) => entry === root || entry.startsWith(`${root}/`));
 	// Runtime state can already be staged by a worker. Reset only these exact
 	// index entries, leaving their working files and every authored path intact.
 	if (excludedPaths.length > 0) {
 		git(path, ["reset", "-q", "HEAD", "--", ...excludedPaths.map((entry) => `:(top,literal)${entry}`)]);
 	}
-	git(path, ["add", "-u", "--", ".", ...excludedPaths.map((entry) => `:(top,exclude,literal)${entry}`)]);
+	// A worker may have staged a path outside its roots; only the roots merge back, so it leaves the index.
+	if (roots !== null)
+		git(path, ["reset", "-q", "HEAD", "--", ":(top).", ...roots.map((root) => `:(top,exclude,literal)${root}`)]);
+	const addSpecs = roots === null ? ["."] : roots.map((root) => `:(top,literal)${root}`);
+	git(path, ["add", "-u", "--", ...addSpecs, ...excludedPaths.map((entry) => `:(top,exclude,literal)${entry}`)]);
 	const excluded = new Set(excludedPaths);
 	const untracked = untrackedPaths(path).filter((entry) => !excluded.has(entry));
 	const authored = scope.authoredPaths === null ? new Set(untracked) : worktreeRelativePaths(path, scope.authoredPaths);
-	const take = untracked.filter((entry) => authored.has(entry));
+	const take = untracked.filter((entry) => authored.has(entry) && inRoots(entry));
 	for (let index = 0; index < take.length; index += GIT_PATHSPEC_BATCH) {
 		const batch = take.slice(index, index + GIT_PATHSPEC_BATCH);
 		git(path, ["add", "--", ...batch.map((entry) => `:(top,literal)${entry}`)]);
@@ -386,17 +409,51 @@ export function commitWorktreePath(
 	}
 	const leftUncommitted = untrackedPaths(path).filter((entry) => !excluded.has(entry));
 	const ignoredAuthored = ignoredAuthoredPaths(path, scope.authoredPaths, excludedPaths);
-	const { stamps } = untrackedState(path, leftUncommitted);
+	// What the run meant to change outside its roots: tracked edits, and files it authored there. A byproduct
+	// (a cache, a build output) stays the leftUncommitted it always was.
+	const outsideRoots =
+		roots === null
+			? []
+			: [
+					...new Set([
+						...nullDelimitedPaths(gitBytes(path, ["diff", "--name-only", "-z", "HEAD"])),
+						...leftUncommitted.filter((entry) => authored.has(entry) && !inRoots(entry)),
+					]),
+				].sort();
+	const outside = new Set(outsideRoots);
+	// An authored file outside the roots is left out of what cleanup accounted for, so the worktree holding it is
+	// kept rather than removed; tracked edits keep it as uncommitted changes already.
+	const { stamps } = untrackedState(
+		path,
+		leftUncommitted.filter((entry) => !outside.has(entry)),
+	);
 	return {
 		committed,
-		leftUncommitted,
+		leftUncommitted: leftUncommitted.filter((entry) => !outside.has(entry)),
 		ignoredAuthored,
 		accounted: {
 			commit: git(path, ["rev-parse", "HEAD"]),
 			untracked: stamps,
 			...(ignoredAuthored.length > 0 ? { ignored: ignoredAuthored } : {}),
 		},
+		outsideRoots,
 	};
+}
+
+/** Top-relative spellings of the roots inside the worktree, or null when a root covers the whole tree. */
+function mergeRootSpecs(path: string, mergeRoots: ReadonlyArray<string> | undefined): string[] | null {
+	if (mergeRoots === undefined || mergeRoots.length === 0) return null;
+	const specs = [
+		...worktreeRelativePaths(
+			path,
+			mergeRoots.map((root) => root.replace(/\/+$/u, "")),
+		),
+	];
+	const whole = mergeRoots.some((root) => {
+		const rel = relative(resolve(path), resolve(root));
+		return rel.length === 0;
+	});
+	return whole || specs.length === 0 ? null : specs.map((spec) => spec.replace(/\/+$/u, "")).sort();
 }
 
 /** Tracked files Clio wrote over in a task worktree for one run, with what to put back. */
@@ -1381,6 +1438,8 @@ export function applyTaskWorktree(input: {
 	 * see `commitWorktreePath`.
 	 */
 	authoredPaths: Iterable<string> | null;
+	/** The run's write boundaries when only they merge back (fleet M7); see `commitWorktreePath`. */
+	mergeRoots?: ReadonlyArray<string>;
 	/**
 	 * Merge exactly the commit an earlier pass pinned and an operator was shown,
 	 * instead of committing the working tree again. Refused unless the branch
@@ -1402,6 +1461,7 @@ export function applyTaskWorktree(input: {
 	let leftUncommitted: string[];
 	let ignoredAuthored: string[];
 	let accounted: TaskWorktreePreview;
+	let outsideRoots: string[] = [];
 	if (input.preview !== undefined) {
 		commit = input.preview.commit;
 		// Nothing is committed now, so every untracked file stays out of this merge.
@@ -1430,9 +1490,10 @@ export function applyTaskWorktree(input: {
 			worktree.path,
 			COMMIT_IDENTITY,
 			authored !== undefined && authored.length > 0 ? `${authored}\n\n${taskLine}` : taskLine,
-			{ authoredPaths: input.authoredPaths },
+			{ authoredPaths: input.authoredPaths, ...(input.mergeRoots !== undefined ? { mergeRoots: input.mergeRoots } : {}) },
 		);
 		leftUncommitted = committed.leftUncommitted;
+		outsideRoots = committed.outsideRoots;
 		ignoredAuthored = committed.ignoredAuthored;
 		// Pin the commit the snapshot produced. Everything after this reads and
 		// merges that immutable id, so a branch moved later cannot swap it (F5).
@@ -1444,9 +1505,16 @@ export function applyTaskWorktree(input: {
 		accounted = committed.accounted;
 	}
 	input.onAccounted?.(accounted);
-	const receipt = {
+	const outsideReport = leftUncommittedReport(outsideRoots);
+	const receipt: TaskWorktreeReceipt = {
 		...committedReceipt(worktree, commit, input.apply),
 		...leftUncommittedField([...new Set([...leftUncommitted, ...ignoredAuthored])].sort()),
+		...(outsideReport !== undefined
+			? {
+					outsideRoots: outsideReport,
+					detail: `changes outside the write roots stay uncommitted in worktree ${worktree.path}, which is kept: ${outsideReport.paths.join(", ")}${outsideReport.count > outsideReport.paths.length ? ` and ${outsideReport.count - outsideReport.paths.length} more` : ""}`,
+				}
+			: {}),
 	};
 	if (input.apply === "preserve") return receipt;
 	const protectedChanges = protectedPathsChangedByWorktreeBranch(worktree.root, commit, input.protectedPaths ?? []);
@@ -1482,7 +1550,11 @@ export function applyTaskWorktree(input: {
 	const landedCommit = git(worktree.root, ["rev-parse", "HEAD"]);
 	if ((receipt.changedPaths?.length ?? 0) === 0) {
 		// Merging a branch at its base moves nothing, so the destination's own head is not this run's landing.
-		return { ...receipt, applied: true, detail: "nothing merged: the task branch holds no change beyond its base" };
+		return {
+			...receipt,
+			applied: true,
+			detail: `nothing merged: the task branch holds no change beyond its base${receipt.detail !== undefined ? `; ${receipt.detail}` : ""}`,
+		};
 	}
 	const ignoredNote =
 		ignoredAuthored.length === 0
@@ -1491,7 +1563,7 @@ export function applyTaskWorktree(input: {
 	return {
 		...receipt,
 		applied: true,
-		detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}${ignoredNote}`,
+		detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}${ignoredNote}${receipt.detail !== undefined ? `; ${receipt.detail}` : ""}`,
 	};
 }
 

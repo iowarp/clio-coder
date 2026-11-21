@@ -1,9 +1,10 @@
 import { doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { WithheldCapability } from "../../src/domains/dispatch/envelope.js";
 import type { DispatchIntent } from "../../src/domains/dispatch/intent.js";
 import {
-	renderChecksWithheldNotice,
 	renderDispatchIntentRequirements,
+	renderWithheldNotice,
 } from "../../src/domains/dispatch/intent-requirements.js";
 
 function intent(overrides: Partial<DispatchIntent>): DispatchIntent {
@@ -19,6 +20,10 @@ function intent(overrides: Partial<DispatchIntent>): DispatchIntent {
 	};
 }
 
+function unconfined(...tools: string[]): WithheldCapability[] {
+	return tools.map((capability) => ({ capability, reason: "write-roots-unconfined" }));
+}
+
 describe("declared result requirements", () => {
 	it("tells a write-confined worker which check tools it lost and that the host runs the checks", () => {
 		const withRequirements = intent({
@@ -26,16 +31,17 @@ describe("declared result requirements", () => {
 			expectedOutputs: ["src/compaction.ts"],
 			verification: [{ check: "typecheck", timeoutMs: 120_000 }],
 		});
-		const notice = renderChecksWithheldNotice(["bash", "verify"], withRequirements);
-		match(notice ?? "", /bash, verify are withheld/u);
+		const notice = renderWithheldNotice(unconfined("bash", "verify"), withRequirements);
+		match(notice ?? "", /^- bash: the write roots have no sandbox or worktree/mu);
+		match(notice ?? "", /Without bash, verify you cannot run tests/u);
 		match(notice ?? "", /the host runs the declared checks/u);
 		match(renderDispatchIntentRequirements(withRequirements) ?? "", /typecheck must pass/u);
 		// Write roots alone still produce the notice: no requirements block carries it (CLI-H2).
-		match(renderChecksWithheldNotice(["bash"], intent({ writeRoots: ["a.js"] })) ?? "", /bash is withheld/u);
+		match(renderWithheldNotice(unconfined("bash"), intent({ writeRoots: ["a.js"] })) ?? "", /Without bash you/u);
 	});
 
 	it("drops the notice when admission withheld nothing", () => {
-		strictEqual(renderChecksWithheldNotice([], intent({ writeRoots: ["src/duration.js"] })), null);
+		strictEqual(renderWithheldNotice([], intent({ writeRoots: ["src/duration.js"] })), null);
 		const block = renderDispatchIntentRequirements(
 			intent({ writeRoots: ["src/duration.js"], expectedOutputs: ["src/duration.js"] }),
 		);
