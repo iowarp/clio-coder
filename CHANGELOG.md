@@ -184,7 +184,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 - A long run of reads with no change, plan, question or dispatch gets a note asking what the agent now knows at 25 reads, and a firmer one at 40 and 60 asking for the smallest defensible change, a plan or a stop. Writer workers follow the same rule.
 - When a turn's reads span three or more areas of the repository, the agent is advised once to send one parallel `scout` dispatch.
-- Skills advice is ranked on the operator's task and does not repeat. A marketplace skill is offered only when the request names its domain, and never under yolo.
+- Skills advice is ranked on the operator's task and does not repeat. A skill that is already loaded is not offered again. A marketplace skill is offered only when the request names its domain, and never under yolo.
 - A redundant reread is annotated ("These lines were already shown in this turn") instead of blocked.
 - The turn tool budget scales with how many calls per round the route makes, a continued turn that crosses its budget rolls into a fresh turn, and `finish` stays admissible after the budget is spent.
 - An answered `ask_user` interview closes when the next reply asks nothing more, and a question sent as a bare string is accepted.
@@ -222,6 +222,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A headless run whose worker the main agent cancelled through `steer` no longer exits 1 `dispatched_worker_failed`.
 - `--verify` checks that finished are sealed when a shutdown cuts the run, and `--exit-code` applies when `-o` is set.
 - A FIFO steer channel keeps being read after a writer closes it.
+- A headless turn that calls `finish` without writing a reply is asked for the reply first, and the declaration is never printed as the answer.
 - `run --max-context-tokens=N` is accepted like `--max-context-tokens N`.
 - `fleet run` no longer reports its own redirected stdout or stderr file as an outside change.
 
@@ -267,6 +268,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A memory reminder counts as delivered only when its text reached an admitted request, and a lesson holds only when a later result satisfies its own evidence.
 - A successful shell result vouches for its exact command, not for look-alike wording, and a command run outside the workspace root vouches for nothing.
 - The observations of deleted sessions are swept daily.
+- A passed `verify` run vouches for its command as `memory_note` evidence, and lessons about a repository's checks reach every turn the finish gate covers.
 - `memory consolidate` leaves operator decisions and other repositories' records alone.
 
 **Telemetry and quota**
