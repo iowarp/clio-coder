@@ -10647,7 +10647,8 @@ export function createDispatchBundle(
 				// A worker stopped at its tool-call cap, or one that reported it did not
 				// finish, commits what it changed on its preserved branch as a partial
 				// result: never merged, never dropped.
-				const cappedPartial = !workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined);
+				const cappedPartial =
+					!workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined, finalOutcome);
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;

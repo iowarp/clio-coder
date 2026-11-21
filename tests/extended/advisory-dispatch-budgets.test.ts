@@ -21,6 +21,7 @@ import { openStoreBackend } from "../../src/domains/store/index.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { finishedRun, PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -629,6 +630,59 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 			ok(!/conflicting trusted outcome codes/u.test(detail), `handback then no report is one story: ${detail}`);
 			match(detail, /1 tool call \(bash\) still running/u);
 			match(detail, /before it wrote a report/u);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("a timed-out worktree coder names the host's changed paths and the unmerged branch that holds them", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec) => {
+				const tree = (spec as { taskWorktree?: { path: string } }).taskWorktree?.path;
+				if (tree !== undefined) partial(tree);
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						yield { type: "tool_execution_start", toolCallId: "w", toolName: "write", args: { path: "src/partial.ts" } };
+						yield { type: "tool_execution_end", toolCallId: "w", toolName: "write", isError: false };
+						yield { type: "clio_coder_tool_finish", payload: { tool: "write", outcome: "ok", durationMs: 1 } };
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: { outcomeCode: "worker_run_timeout", detail: "worker_run_timeout: the run reached 85%" },
+						};
+						yield {
+							type: "message_end",
+							message: { role: "assistant", stopReason: "stop", content: "Ported src/claimed.ts; 11 remain." },
+						};
+					})(),
+					abort() {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch({ ...coder(repo), worktree: true });
+			const receipt = await run.finalPromise;
+			equal(receipt.outcome, "timed_out");
+			const branch = `clio-coder/task/${receipt.runId}`;
+			equal(receipt.worktree?.branch, branch);
+			equal(receipt.worktree?.applied, false);
+			deepStrictEqual(receipt.worktree?.changedPaths, ["src/partial.ts"]);
+			equal(
+				execFileSync("git", ["show", `${branch}:src/partial.ts`], { cwd: repo, encoding: "utf8" }),
+				"export const ported = 1;\n",
+			);
+			const detail = receipt.outcomeDetail ?? "";
+			ok(detail.includes(`unmerged on ${branch}`), detail);
+			ok(detail.includes(`clio-coder fleet land ${branch} --yes`), detail);
+			const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY).join(" ");
+			ok(labels.includes('changed=1["src/partial.ts"]'), labels);
 		} finally {
 			await bundle.extension.stop?.();
 			rmSync(repo, { recursive: true, force: true });

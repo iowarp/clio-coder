@@ -8,10 +8,18 @@ import { mutationReportChecks, mutationReportFailures } from "../agents/result-c
  * result. A worker stopped at its tool-call cap often stops mid-change, and one
  * whose report says it did not finish changed only part of what it was asked;
  * their edits are neither merged nor left as loose files, so the host commits
- * them on the preserved branch for the dispatcher to review, continue or land.
+ * them on the preserved branch for the dispatcher to review, continue or land. A run that timed out (its wall clock,
+ * fleet M8) stopped mid-change the same way.
  */
-export function preservesPartialResult(outcomeCode: string | null, hasTaskWorktree: boolean): boolean {
-	return hasTaskWorktree && (outcomeCode === "worker_tool_call_cap_exhausted" || outcomeCode === "worker_partial_work");
+export function preservesPartialResult(
+	outcomeCode: string | null,
+	hasTaskWorktree: boolean,
+	outcome?: string | null,
+): boolean {
+	return (
+		hasTaskWorktree &&
+		(outcome === "timed_out" || outcomeCode === "worker_tool_call_cap_exhausted" || outcomeCode === "worker_partial_work")
+	);
 }
 
 /**
@@ -35,7 +43,7 @@ export function taskWorktreeCommitMessage(input: {
 
 /** The failure detail suffix naming where a preserved partial result is and how to land it. */
 export function partialResultDetail(branch: string): string {
-	return `its partial work is committed on the preserved branch ${branch} and was not merged; review or continue it there, and \`clio-coder fleet land ${branch}\` applies it`;
+	return `its partial work is committed, unmerged on ${branch}; review or continue it there, \`clio-coder fleet land ${branch}\` previews the merge and \`clio-coder fleet land ${branch} --yes\` lands it`;
 }
 
 const DECLARED_CHECK_DETAIL_MAX_CHARS = 120;
