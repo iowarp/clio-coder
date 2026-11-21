@@ -743,6 +743,12 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 		supportedReasoningEfforts: ["low", "medium", "high"],
 		defaultReasoningEffort: "high",
 	});
+	models.push({
+		...original[0],
+		id: "minimal-levels",
+		capabilities: { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } },
+		supportedReasoningEfforts: ["minimal", "medium"],
+	});
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const target = { id: "copilot-memory", runtime: "copilot-sdk", defaultModel: "three-levels" };
 	settings.targets = [target];
@@ -762,14 +768,21 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 			signal: new AbortController().signal,
 		});
 		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low", "the lowest listed effort, not the default");
-		// A caller that streams with thinking off and no clamp gets the lowest listed effort, never the server's default.
+		// Another caller that streams with no level keeps the effort out, and an effort sent is always a listed one.
 		const model = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "three-levels", null);
 		await engineStreamSimple(model, normalizeContext({ messages: [user("hello")] }), {
 			sessionId: "off-session",
 		}).result();
-		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low");
+		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, undefined);
+		const minimal = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "minimal-levels", null);
+		await engineStreamSimple(minimal, normalizeContext({ messages: [user("hello")] }), {
+			sessionId: "minimal-session",
+			reasoning: "minimal",
+		}).result();
+		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "minimal");
 	} finally {
 		disposeCopilotConversations("off-session");
+		disposeCopilotConversations("minimal-session");
 		await bundle.extension.stop?.();
 		models.splice(0, models.length, ...original);
 	}
