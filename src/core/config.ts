@@ -95,16 +95,17 @@ export interface SettingsIssue {
 	message: string;
 	kind?: SettingsIssueKind;
 	repair?: SettingsScalarRepair;
-	/** `2026-11-21-retired-settings` rewrites this key or value, so `clio-coder upgrade` repairs it. */
+	/** `2026-11-21-retired-settings` rewrites this key or value, so `clio-coder upgrade --post-install` repairs it. */
 	upgrade?: true;
 }
 
 /**
  * The upgrade advice, only when a pending migration rewrites one of these
  * issues. A key no release ever read is not one, and advising the upgrade for
- * it sent the operator to run a command that changes nothing (M-30).
+ * it sent the operator to run a command that changes nothing (M-30). Surfaces
+ * that list issues themselves (`config set`, `config inspect`) add it too (M-38).
  */
-function upgradeAdvice(issues: ReadonlyArray<SettingsIssue>): string | null {
+export function settingsUpgradeAdvice(issues: ReadonlyArray<SettingsIssue>): string | null {
 	return issuesKind(issues) === "schema" && issues.some((issue) => issue.upgrade === true)
 		? pendingMigrationAdvice()
 		: null;
@@ -154,7 +155,7 @@ export class SettingsValidationError extends Error {
 				? issues.map((issue) => `  ${issue.path}: ${issue.message}`)
 				: issues.map((issue) => `  ${issue.message}`);
 		const headline = kind === "schema" ? "settings.yaml failed validation:" : "settings.yaml cannot be loaded:";
-		const upgrade = upgradeAdvice(issues);
+		const upgrade = settingsUpgradeAdvice(issues);
 		super(
 			`${headline}\n${lines.join("\n")}\n\n` +
 				(upgrade === null ? "" : `${upgrade.charAt(0).toUpperCase()}${upgrade.slice(1)}.\n`) +
@@ -219,7 +220,7 @@ export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): stri
 			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
 			: issues.map((issue) => issue.message.replace(/^(?:invalid YAML|unreadable): /u, "")).join("; ");
 	// A pending migration's command comes first among the remedies: it is the repair that rewrites what the reader refuses.
-	const upgrade = upgradeAdvice(issues);
+	const upgrade = settingsUpgradeAdvice(issues);
 	const remedy = `${upgrade === null ? "" : `${upgrade}, or `}${settingsRemedyInline(kind, path)}`;
 	return foldToOneLine(
 		`${settingsFailureHeadline(kind)}: ${detail.replace(/\.$/u, "")}. ${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}. Run \`clio-coder doctor --fix\` for safe repairs.`,

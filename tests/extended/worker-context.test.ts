@@ -1257,7 +1257,8 @@ test("a host-written repair exchange journals no call attempt of its own (C-28)"
 				apiKey: "fixture",
 				thinkingLevel: "off",
 				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
-				allowedTools: ["read"],
+				// No read tool: a zero-tool scout report with one admitted is refused as unobserved (M-31), not this row's subject.
+				allowedTools: [],
 				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
 				product: "orientation",
 				noSkills: true,

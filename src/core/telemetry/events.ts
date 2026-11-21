@@ -402,6 +402,7 @@ export const EVENTS = {
 	}),
 	"prompt.prefix_captured": journal(S.PromptPrefixCapturedSchema, { tier: "research", cc: "structural" }),
 	"auth.refreshed": journal(S.AuthRefreshedSchema, { tier: "operational", cc: "content-free" }),
+	"cache.lane_fell_back": journal(S.CacheLaneFellBackSchema, { tier: "operational", cc: "content-free" }),
 	"middleware.fired": journal(S.MiddlewareFiredSchema, { tier: "operational", cc: "content-free" }),
 	"surface.settled": journal(S.SurfaceSettledSchema, { tier: "operational", cc: "content-free" }),
 	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free", version: 2 }),

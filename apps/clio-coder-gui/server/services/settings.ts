@@ -23,29 +23,34 @@ export class SettingsService {
 	) {}
 	/** Controls as they resolve for `cwd`, which the app server uses for its own settings at startup. */
 	async controlsAt(cwd: string) {
-		const report = await this.reads.call("settings.controls", { cwd });
+		return this.readControls({ cwd });
+	}
+	/** The workspace's layered controls, or the user layer alone when none is named. */
+	async controls(workspaceId?: string) {
+		return this.readControls(await this.scope(workspaceId));
+	}
+	private async readControls(scope: { cwd?: string }) {
+		const report = await this.reads.call("settings.controls", scope);
 		if (!Value.Check(SettingsControls, report))
 			throw new AppProblem("unavailable", "Settings controls returned an invalid projection.");
 		return report;
 	}
-	async controls(workspaceId: string) {
-		const workspace = await this.workspaces.get(workspaceId);
-		return this.controlsAt(workspace.path);
+	/** No workspace means no project layers: the read and the write see the user layer alone. */
+	private async scope(workspaceId?: string): Promise<{ cwd?: string }> {
+		return workspaceId === undefined ? {} : { cwd: (await this.workspaces.get(workspaceId)).path };
 	}
 	/** Writes are serial in the ops lane and land in the user layer only. */
-	async write(workspaceId: string, write: SettingWrite) {
+	async write(workspaceId: string | undefined, write: SettingWrite) {
 		if (!this.ops) throw new AppProblem("unsupported", "This server was started without a settings writer.");
-		const workspace = await this.workspaces.get(workspaceId);
-		const result = await this.ops.call("settings.write", { cwd: workspace.path, write });
+		const result = await this.ops.call("settings.write", { ...(await this.scope(workspaceId)), write });
 		if (!Value.Check(SettingWritten, result))
 			throw new AppProblem("unavailable", "Settings write returned an invalid projection.");
 		// The next turn after a 200 must already see the new limit, so the supervisor is updated first.
 		if (result.changed.some((row) => row.path === TURN_CAPACITY_SETTING)) await this.turnCapacityChanged?.();
 		return result;
 	}
-	async settings(workspaceId: string) {
-		const workspace = await this.workspaces.get(workspaceId);
-		const report = await this.reads.call("settings.read", { cwd: workspace.path });
+	async settings(workspaceId?: string) {
+		const report = await this.reads.call("settings.read", await this.scope(workspaceId));
 		if (!Value.Check(SettingsReport, report))
 			throw new AppProblem("unavailable", "Settings returned an invalid projection.");
 		return report;

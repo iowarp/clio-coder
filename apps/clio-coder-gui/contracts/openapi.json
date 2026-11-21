@@ -8578,7 +8578,7 @@
 											}
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 										},
 										"councils": {
 											"type": "object",
@@ -9141,7 +9141,7 @@
 														]
 													},
 													"evidence": {
-														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 													},
 													"parentRunId": {
 														"anyOf": [
@@ -9336,7 +9336,7 @@
 											]
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 										},
 										"parentRunId": {
 											"anyOf": [
@@ -9430,7 +9430,7 @@
 									"required": ["evidence", "record"],
 									"properties": {
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 										},
 										"record": {
 											"anyOf": [
@@ -9439,7 +9439,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_d8403b22"
+															"$ref": "#/components/schemas/Union_cfc02aad"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -10669,10 +10669,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/settings": {
+		"/api/settings": {
 			"get": {
-				"operationId": "workspaceSettings",
-				"summary": "Effective settings and each leaf's origin layer",
+				"operationId": "settingsReport",
+				"summary": "Effective settings and each leaf's origin layer; without a workspace, the user layer alone",
 				"security": [
 					{
 						"bearer": []
@@ -10680,9 +10680,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -10727,10 +10727,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/settings/controls": {
+		"/api/settings/controls": {
 			"get": {
 				"operationId": "settingsControls",
-				"summary": "The engine's setting controls with the app's write policy, timing and origin",
+				"summary": "The engine's setting controls with the app's write policy, timing and origin; without a workspace, the user layer alone",
 				"security": [
 					{
 						"bearer": []
@@ -10738,9 +10738,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -10959,9 +10959,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -19351,6 +19351,50 @@
 											},
 											"lastActivityAt": {
 												"type": "string"
+											},
+											"liveElsewhere": {
+												"type": "object",
+												"required": ["surface", "since", "host", "pid", "stale", "canTakeOver"],
+												"properties": {
+													"surface": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "terminal"
+															},
+															{
+																"type": "string",
+																"const": "headless"
+															},
+															{
+																"type": "string",
+																"const": "app"
+															},
+															{
+																"type": "string",
+																"const": "process"
+															}
+														]
+													},
+													"since": {
+														"type": "string"
+													},
+													"host": {
+														"type": "string",
+														"maxLength": 255
+													},
+													"pid": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"stale": {
+														"type": "boolean"
+													},
+													"canTakeOver": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
 											}
 										},
 										"additionalProperties": false
@@ -19537,6 +19581,197 @@
 							"application/json": {
 								"schema": {
 									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions/{sessionId}/transcript": {
+			"get": {
+				"operationId": "storedTranscript",
+				"summary": "A saved session's history as Markdown, read from its ledger without starting an engine",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "sessionId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["markdown", "turns", "truncated"],
+									"properties": {
+										"markdown": {
+											"type": "string",
+											"maxLength": 1048576
+										},
+										"turns": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions/{sessionId}/take-over": {
+			"post": {
+				"operationId": "takeOverSession",
+				"summary": "End the other process holding a saved session (clio-coder session terminate) so this app can resume it",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "sessionId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["released", "message"],
+									"properties": {
+										"released": {
+											"type": "boolean"
+										},
+										"message": {
+											"type": "string",
+											"maxLength": 2048
+										}
+									},
+									"additionalProperties": false
 								}
 							}
 						},
@@ -19870,6 +20105,71 @@
 												},
 												"additionalProperties": false
 											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/presence": {
+			"get": {
+				"operationId": "sessionPresence",
+				"summary": "Whether this server holds the session, so a page can ask before reading a snapshot it may not have",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["open"],
+									"properties": {
+										"open": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
@@ -20692,7 +20992,7 @@
 														"$ref": "#/components/schemas/RunRowV1"
 													},
 													"evidence": {
-														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 													}
 												},
 												"additionalProperties": false
@@ -20893,7 +21193,7 @@
 											"$ref": "#/components/schemas/RunRowV1"
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 										}
 									},
 									"additionalProperties": false
@@ -20967,7 +21267,7 @@
 									"required": ["evidence", "record"],
 									"properties": {
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_43e1c3d0"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_704019a4"
 										},
 										"record": {
 											"anyOf": [
@@ -20976,7 +21276,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_d8403b22"
+															"$ref": "#/components/schemas/Union_cfc02aad"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -24732,6 +25032,12 @@
 					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 				}
 			},
+			"Array_97981bce": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_admission_agent_attempt_0d2b6aaf"
+				}
+			},
 			"Array_97de5d58": {
 				"type": "array",
 				"items": {
@@ -24782,6 +25088,13 @@
 					"$ref": "#/components/schemas/Object_passed_sourceId_validatorDigest_d555b71d"
 				}
 			},
+			"Array_ad816648": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_code_id_layer_a2266520"
+				},
+				"maxItems": 32
+			},
 			"Array_b103590f": {
 				"type": "array",
 				"items": {
@@ -24828,13 +25141,6 @@
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_canStopTurn_decision_escalateAt_da5b47bd"
-				},
-				"maxItems": 32
-			},
-			"Array_ca77fca7": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_code_id_layer_2bccb87f"
 				},
 				"maxItems": 32
 			},
@@ -24925,12 +25231,6 @@
 					"$ref": "#/components/schemas/Object_agent_apply_dependencies_6396ef67"
 				},
 				"maxItems": 32
-			},
-			"Array_e865bf53": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_admission_agent_attempt_4aa89f10"
-				}
 			},
 			"Array_ea04312e": {
 				"type": "array",
@@ -25234,7 +25534,7 @@
 						"additionalProperties": false
 					},
 					"calls": {
-						"$ref": "#/components/schemas/Array_e865bf53"
+						"$ref": "#/components/schemas/Array_97981bce"
 					},
 					"matched": {
 						"type": "integer",
@@ -25251,8 +25551,53 @@
 				},
 				"additionalProperties": false
 			},
+			"Enum_08fd59cf": {
+				"enum": [
+					"vram_capacity_fit_failure",
+					"worker_tool_call_cap_exhausted",
+					"worker_context_exhausted",
+					"worker_turn_timeout",
+					"worker_run_timeout",
+					"worker_output_cap_exhausted",
+					"loop_guard_tools_disabled_exhausted",
+					"exploration_stalled",
+					"result_contract_exhausted",
+					"result_contract_invalid",
+					"worker_final_output_missing",
+					"host_verification_rejected",
+					"worker_no_work",
+					"obligation_unmet",
+					"worker_not_done",
+					"worker_partial_work",
+					"worker_mutation_blocked",
+					"merge_withheld",
+					"worker_removed_tests",
+					"assurance_compromised",
+					"information_flow_blocked",
+					"acp_auth_required",
+					"acp_model_unavailable",
+					"acp_thinking_unavailable",
+					"acp_transport_error"
+				]
+			},
 			"Enum_09fa48b8": {
 				"enum": ["create_new", "resume_other", "fork", "switch_branch", "close", "shutdown"]
+			},
+			"Enum_0ea72019": {
+				"enum": [
+					"termination",
+					"change-return",
+					"worker-outcome-code",
+					"finish-contract",
+					"writes-blocked",
+					"final-output",
+					"result-contract",
+					"obligation",
+					"host-checks",
+					"removed-tests",
+					"assurance",
+					"landing"
+				]
 			},
 			"Enum_2f17e4ad": {
 				"enum": ["verified", "failed", "absent", "unknown", "not_applicable"]
@@ -25371,6 +25716,9 @@
 			"Enum_5f1647f2": {
 				"enum": ["never_sent", "sent_unsettled", "settled_no_usage", "settled"]
 			},
+			"Enum_66c94551": {
+				"enum": ["grounded", "no-command-executed", "unmatched-command", "unattributable-status", "unobserved-lane"]
+			},
 			"Enum_684094fe": {
 				"enum": [
 					"working_set_evict",
@@ -25455,21 +25803,6 @@
 			"Enum_8e9d5d1a": {
 				"enum": ["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"]
 			},
-			"Enum_923a283a": {
-				"enum": [
-					"termination",
-					"change-return",
-					"worker-outcome-code",
-					"finish-contract",
-					"writes-blocked",
-					"final-output",
-					"result-contract",
-					"obligation",
-					"host-checks",
-					"removed-tests",
-					"landing"
-				]
-			},
 			"Enum_958565af": {
 				"enum": ["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"]
 			},
@@ -25515,9 +25848,6 @@
 			"Enum_a76013c0": {
 				"enum": ["pass", "fail", "unknown", "not_applicable", "not_reached"]
 			},
-			"Enum_ad1f6279": {
-				"enum": ["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]
-			},
 			"Enum_b4a9510b": {
 				"enum": ["recorded", "invalid", "absent", "unknown", "not_applicable"]
 			},
@@ -25557,34 +25887,6 @@
 					"build-failure",
 					"auth-failure",
 					"unknown"
-				]
-			},
-			"Enum_cd1d6753": {
-				"enum": [
-					"vram_capacity_fit_failure",
-					"worker_tool_call_cap_exhausted",
-					"worker_context_exhausted",
-					"worker_turn_timeout",
-					"worker_run_timeout",
-					"worker_output_cap_exhausted",
-					"loop_guard_tools_disabled_exhausted",
-					"exploration_stalled",
-					"result_contract_exhausted",
-					"result_contract_invalid",
-					"worker_final_output_missing",
-					"host_verification_rejected",
-					"worker_no_work",
-					"obligation_unmet",
-					"worker_not_done",
-					"worker_partial_work",
-					"worker_mutation_blocked",
-					"merge_withheld",
-					"worker_removed_tests",
-					"information_flow_blocked",
-					"acp_auth_required",
-					"acp_model_unavailable",
-					"acp_thinking_unavailable",
-					"acp_transport_error"
 				]
 			},
 			"Enum_f3897064": {
@@ -27477,7 +27779,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_agent_attempt_4aa89f10": {
+			"Object_admission_agent_attempt_0d2b6aaf": {
 				"type": "object",
 				"required": [
 					"callId",
@@ -27501,10 +27803,11 @@
 					"transport",
 					"cache",
 					"quota",
-					"responseId"
+					"responseId",
+					"billing"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_f384a28b"
+					"$ref": "#/components/schemas/Shape_077414d3"
 				},
 				"additionalProperties": false
 			},
@@ -27566,7 +27869,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_answerBudgetBytes_apiCalls_2de5efc0": {
+			"Object_agentId_answerBudgetBytes_apiCalls_1d4df237": {
 				"type": "object",
 				"required": [
 					"version",
@@ -27621,7 +27924,7 @@
 					"digest"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_beb2b276"
+					"$ref": "#/components/schemas/Shape_80c92fdf"
 				},
 				"additionalProperties": false
 			},
@@ -28328,11 +28631,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_assurance_obligation_rules_88afb827": {
+			"Object_assurance_obligation_rules_2f964f3c": {
 				"type": "object",
 				"required": ["version", "obligation", "rules", "assurance"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_c4db9ddf"
+					"$ref": "#/components/schemas/Shape_3741e796"
 				},
 				"additionalProperties": false
 			},
@@ -28902,28 +29205,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_basis_claimed_grounded_0e3a21b2": {
-				"type": "object",
-				"required": ["claimed", "grounded", "ungrounded", "basis"],
-				"properties": {
-					"claimed": {
-						"type": "integer",
-						"minimum": 0
-					},
-					"grounded": {
-						"type": "integer",
-						"minimum": 0
-					},
-					"ungrounded": {
-						"$ref": "#/components/schemas/Array_d853a408"
-					},
-					"basis": {
-						"$ref": "#/components/schemas/Enum_ad1f6279"
-					}
-				},
-				"additionalProperties": false
-			},
-			"Object_basis_claimed_grounded_2109080c": {
+			"Object_basis_claimed_grounded_20690804": {
 				"type": "object",
 				"required": ["claimed", "grounded", "ungrounded", "basis"],
 				"properties": {
@@ -28943,7 +29225,28 @@
 						}
 					},
 					"basis": {
-						"$ref": "#/components/schemas/Enum_ad1f6279"
+						"$ref": "#/components/schemas/Enum_66c94551"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_basis_claimed_grounded_b217276a": {
+				"type": "object",
+				"required": ["claimed", "grounded", "ungrounded", "basis"],
+				"properties": {
+					"claimed": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"grounded": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"ungrounded": {
+						"$ref": "#/components/schemas/Array_d853a408"
+					},
+					"basis": {
+						"$ref": "#/components/schemas/Enum_66c94551"
 					}
 				},
 				"additionalProperties": false
@@ -29868,12 +30171,12 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_code_id_layer_2bccb87f": {
+			"Object_code_id_layer_a2266520": {
 				"type": "object",
 				"required": ["id", "layer", "status"],
 				"properties": {
 					"id": {
-						"$ref": "#/components/schemas/Enum_923a283a"
+						"$ref": "#/components/schemas/Enum_0ea72019"
 					},
 					"layer": {
 						"enum": ["V1", "V2", "V3", "V4", "V6"]
@@ -29882,7 +30185,7 @@
 						"$ref": "#/components/schemas/Enum_a76013c0"
 					},
 					"code": {
-						"$ref": "#/components/schemas/Enum_cd1d6753"
+						"$ref": "#/components/schemas/Enum_08fd59cf"
 					}
 				},
 				"additionalProperties": false
@@ -30103,7 +30406,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_connectionReused_continuation_kind_13d8e1ff": {
+			"Object_connectionReused_continuation_kind_91a81497": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -30111,13 +30414,14 @@
 					"requestBytes",
 					"sessionPinnedToSse",
 					"connectionReused",
+					"session",
 					"websocketFailures",
 					"sseFallbacks",
 					"pinReason",
 					"recovery"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_bb2f2b8c"
+					"$ref": "#/components/schemas/Shape_a6048dde"
 				},
 				"additionalProperties": false
 			},
@@ -30883,7 +31187,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_evidence_foldVersion_generatedAt_43e1c3d0": {
+			"Object_evidence_foldVersion_generatedAt_704019a4": {
 				"type": "object",
 				"required": [
 					"v",
@@ -30898,11 +31202,11 @@
 					"evidence"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_151ea4a4"
+					"$ref": "#/components/schemas/Shape_491d6608"
 				},
 				"additionalProperties": false
 			},
-			"Object_exitCode_failureMessage_hostVerification_0170171f": {
+			"Object_exitCode_failureMessage_hostVerification_f6f6ed17": {
 				"type": "object",
 				"required": [
 					"outcome",
@@ -30917,7 +31221,7 @@
 					"validationGrounding"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_906b0149"
+					"$ref": "#/components/schemas/Shape_b8b712d5"
 				},
 				"additionalProperties": false
 			},
@@ -31743,6 +32047,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_modelCalls_nanoAiu_premiumRequests_3d8ce6aa": {
+				"type": "object",
+				"required": ["provider", "premiumRequests", "nanoAiu", "modelCalls"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_1448e543"
+				},
+				"additionalProperties": false
+			},
 			"Object_model_outputTokensPerSecond_target_ba0fc302": {
 				"type": "object",
 				"properties": {
@@ -32557,7 +32869,7 @@
 						"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 					},
 					"settled": {
-						"$ref": "#/components/schemas/Union_d8403b22"
+						"$ref": "#/components/schemas/Union_cfc02aad"
 					},
 					"seal": {
 						"$ref": "#/components/schemas/Union_4dc8870f"
@@ -33414,6 +33726,90 @@
 					"minimum": 0
 				}
 			},
+			"Shape_077414d3": {
+				"callId": {
+					"type": "string",
+					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attemptId": {
+					"type": "string",
+					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"agent": {
+					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
+				},
+				"owner": {
+					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"settledAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"target": {
+					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
+				},
+				"roundKind": {
+					"$ref": "#/components/schemas/Enum_413aacec"
+				},
+				"toolChoice": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"disposition": {
+					"$ref": "#/components/schemas/Union_f0839e51"
+				},
+				"stop": {
+					"$ref": "#/components/schemas/Union_4c094c81"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Union_178a3139"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"pricedBy": {
+					"enum": ["provider", "target-rates", "catalog", "free", "none"]
+				},
+				"stages": {
+					"$ref": "#/components/schemas/Union_00c11dd5"
+				},
+				"timing": {
+					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
+				},
+				"admission": {
+					"$ref": "#/components/schemas/Union_6872feba"
+				},
+				"transport": {
+					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_91a81497"
+				},
+				"cache": {
+					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
+				},
+				"quota": {
+					"$ref": "#/components/schemas/Union_96fc0259"
+				},
+				"responseId": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"billing": {
+					"$ref": "#/components/schemas/Union_b8a699c6"
+				}
+			},
 			"Shape_08142039": {
 				"ttft": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
@@ -33594,42 +33990,18 @@
 					"$ref": "#/components/schemas/Array_7d31aeb6"
 				}
 			},
-			"Shape_151ea4a4": {
-				"v": {
-					"type": "number",
-					"const": 1
+			"Shape_1448e543": {
+				"provider": {
+					"enum": ["github-copilot"]
 				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
+				"premiumRequests": {
+					"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
 				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				"nanoAiu": {
+					"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
 				},
-				"kind": {
-					"type": "string",
-					"const": "run-evidence"
-				},
-				"runId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"record": {
-					"enum": ["settled", "unsettled", "missing"]
-				},
-				"integrity": {
-					"$ref": "#/components/schemas/Object_detail_display_state_0afac497"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
-				},
-				"sealed": {
-					"$ref": "#/components/schemas/Union_592b0c73"
-				},
-				"evidence": {
-					"$ref": "#/components/schemas/Union_43aa76d8"
+				"modelCalls": {
+					"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
 				}
 			},
 			"Shape_1686abeb": {
@@ -33962,6 +34334,21 @@
 					"$ref": "#/components/schemas/Object_display_fact_1897f681"
 				}
 			},
+			"Shape_3741e796": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"obligation": {
+					"$ref": "#/components/schemas/Enum_728971a5"
+				},
+				"rules": {
+					"$ref": "#/components/schemas/Array_ad816648"
+				},
+				"assurance": {
+					"$ref": "#/components/schemas/Enum_bba1ce70"
+				}
+			},
 			"Shape_39fec1f7": {
 				"resource": {
 					"type": "string",
@@ -34142,6 +34529,44 @@
 				},
 				"hostVerification": {
 					"$ref": "#/components/schemas/Union_75ddb38c"
+				}
+			},
+			"Shape_491d6608": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "run-evidence"
+				},
+				"runId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"record": {
+					"enum": ["settled", "unsettled", "missing"]
+				},
+				"integrity": {
+					"$ref": "#/components/schemas/Object_detail_display_state_0afac497"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
+				},
+				"sealed": {
+					"$ref": "#/components/schemas/Union_ecf98cdb"
+				},
+				"evidence": {
+					"$ref": "#/components/schemas/Union_43aa76d8"
 				}
 			},
 			"Shape_4cbcf9e3": {
@@ -34946,6 +35371,228 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
+			"Shape_80c92fdf": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"agentId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"executionRole": {
+					"$ref": "#/components/schemas/Enum_f3897064"
+				},
+				"requestOrigin": {
+					"$ref": "#/components/schemas/Union_d7ccdb8b"
+				},
+				"identity": {
+					"$ref": "#/components/schemas/Union_5cd84371"
+				},
+				"route": {
+					"$ref": "#/components/schemas/Object_runtimeId_runtimeKind_targetId_8f906072"
+				},
+				"node": {
+					"$ref": "#/components/schemas/Union_b0281a53"
+				},
+				"routeDecision": {
+					"$ref": "#/components/schemas/Union_cfddcd30"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"phaseTiming": {
+					"$ref": "#/components/schemas/Object_queueWaitMs_totalEndToEndMs_02a09d83"
+				},
+				"routingIntent": {
+					"$ref": "#/components/schemas/Object_deadlineMs_failover_locality_da525918"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"endedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"outcome": {
+					"$ref": "#/components/schemas/Enum_7c26d95b"
+				},
+				"outcomeCode": {
+					"$ref": "#/components/schemas/Union_9508d021"
+				},
+				"exitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 1024
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 1024
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"terminalReason": {
+					"$ref": "#/components/schemas/Enum_8bfbcdd9"
+				},
+				"callIds": {
+					"$ref": "#/components/schemas/Union_90280c4e"
+				},
+				"processExitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"boundKind": {
+					"$ref": "#/components/schemas/Union_f6453495"
+				},
+				"stepPipeline": {
+					"$ref": "#/components/schemas/Object_done_stepTool_stoppedBy_0b2ff353"
+				},
+				"repairRounds": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"frameType": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_f52a393c"
+				},
+				"totalTokens": {
+					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				},
+				"apiCalls": {
+					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				},
+				"pricing": {
+					"$ref": "#/components/schemas/Object_freeRule_pricedBy_rateRef_25da2af5"
+				},
+				"toolCalls": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"tools": {
+					"$ref": "#/components/schemas/Array_9ef3a1fe"
+				},
+				"skills": {
+					"$ref": "#/components/schemas/Array_a62e240b"
+				},
+				"toolActivity": {
+					"$ref": "#/components/schemas/Union_c3096265"
+				},
+				"capabilityMismatch": {
+					"$ref": "#/components/schemas/Union_26e30db3"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Union_e315aa3b"
+				},
+				"context": {
+					"$ref": "#/components/schemas/Object_briefingBytes_project_worker_cbbba89f"
+				},
+				"upstream": {
+					"$ref": "#/components/schemas/Object_gatewayRoutes_responseModelIds_efe23277"
+				},
+				"blockedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"guardBlockedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"permissionRequestedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"escalations": {
+					"$ref": "#/components/schemas/Union_4322c019"
+				},
+				"flowRestrictions": {
+					"$ref": "#/components/schemas/Union_db2664c0"
+				},
+				"toolGovernance": {
+					"$ref": "#/components/schemas/Union_ac760949"
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Object_basis_detail_state_8ef9228e"
+				},
+				"quality": {
+					"$ref": "#/components/schemas/Union_409ae0f7"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Union_e79a7c04"
+				},
+				"unclassifiedAfterLastCheck": {
+					"$ref": "#/components/schemas/Object_commands_count_93a31ad5"
+				},
+				"routeWarnings": {
+					"$ref": "#/components/schemas/Array_5164076d"
+				},
+				"answerBudgetBytes": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 1000000
+				},
+				"verdict": {
+					"$ref": "#/components/schemas/Object_assurance_obligation_rules_2f964f3c"
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_7acf3e39"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_e1aa15ba"
+				},
+				"contextProvenance": {
+					"enum": ["recorded", "invalid", "not_applicable", "unknown"]
+				},
+				"hashes": {
+					"$ref": "#/components/schemas/Array_365b8f6b"
+				},
+				"result": {
+					"$ref": "#/components/schemas/Object_canonicalization_function_id_9126948f"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"digest": {
+					"type": "string",
+					"pattern": "^[0-9a-f]{64}$"
+				}
+			},
 			"Shape_80e91d79": {
 				"id": {
 					"type": "string",
@@ -35008,62 +35655,6 @@
 				},
 				"admissionWait": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				}
-			},
-			"Shape_906b0149": {
-				"outcome": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"outcomeCode": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"exitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"verification": {
-					"$ref": "#/components/schemas/Union_78e00bb6"
-				},
-				"typedValidations": {
-					"$ref": "#/components/schemas/Union_e5bede14"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_5fea9380"
-				},
-				"resultContract": {
-					"$ref": "#/components/schemas/Union_e30716bb"
-				},
-				"responseSchema": {
-					"$ref": "#/components/schemas/Union_64fd39b7"
-				},
-				"validationGrounding": {
-					"$ref": "#/components/schemas/Union_ff3dc232"
 				}
 			},
 			"Shape_92bc19ac": {
@@ -35249,6 +35840,38 @@
 				},
 				"replayMismatch": {
 					"$ref": "#/components/schemas/Object_breaks_firstDivergentSection_rePrefilled_6557f020"
+				}
+			},
+			"Shape_a6048dde": {
+				"kind": {
+					"$ref": "#/components/schemas/Enum_b62c7c0e"
+				},
+				"continuation": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"requestBytes": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"sessionPinnedToSse": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"connectionReused": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"session": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"websocketFailures": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"sseFallbacks": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"pinReason": {
+					"$ref": "#/components/schemas/Union_44f42e8b"
+				},
+				"recovery": {
+					"$ref": "#/components/schemas/Union_ad4812cb"
 				}
 			},
 			"Shape_a7a7e801": {
@@ -35558,6 +36181,62 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
+			"Shape_b8b712d5": {
+				"outcome": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"outcomeCode": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"exitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Union_78e00bb6"
+				},
+				"typedValidations": {
+					"$ref": "#/components/schemas/Union_e5bede14"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_5fea9380"
+				},
+				"resultContract": {
+					"$ref": "#/components/schemas/Union_e30716bb"
+				},
+				"responseSchema": {
+					"$ref": "#/components/schemas/Union_64fd39b7"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Union_9071f49a"
+				}
+			},
 			"Shape_b99de657": {
 				"id": {
 					"type": "string",
@@ -35585,35 +36264,6 @@
 				},
 				"finishedAt": {
 					"type": "string"
-				}
-			},
-			"Shape_bb2f2b8c": {
-				"kind": {
-					"$ref": "#/components/schemas/Enum_b62c7c0e"
-				},
-				"continuation": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"requestBytes": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"sessionPinnedToSse": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"connectionReused": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"websocketFailures": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"sseFallbacks": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"pinReason": {
-					"$ref": "#/components/schemas/Union_44f42e8b"
-				},
-				"recovery": {
-					"$ref": "#/components/schemas/Union_ad4812cb"
 				}
 			},
 			"Shape_bdc005cf": {
@@ -35778,228 +36428,6 @@
 				},
 				"complete": {
 					"type": "boolean"
-				}
-			},
-			"Shape_beb2b276": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"agentId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"executionRole": {
-					"$ref": "#/components/schemas/Enum_f3897064"
-				},
-				"requestOrigin": {
-					"$ref": "#/components/schemas/Union_d7ccdb8b"
-				},
-				"identity": {
-					"$ref": "#/components/schemas/Union_5cd84371"
-				},
-				"route": {
-					"$ref": "#/components/schemas/Object_runtimeId_runtimeKind_targetId_8f906072"
-				},
-				"node": {
-					"$ref": "#/components/schemas/Union_b0281a53"
-				},
-				"routeDecision": {
-					"$ref": "#/components/schemas/Union_cfddcd30"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"phaseTiming": {
-					"$ref": "#/components/schemas/Object_queueWaitMs_totalEndToEndMs_02a09d83"
-				},
-				"routingIntent": {
-					"$ref": "#/components/schemas/Object_deadlineMs_failover_locality_da525918"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"endedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"outcome": {
-					"$ref": "#/components/schemas/Enum_7c26d95b"
-				},
-				"outcomeCode": {
-					"$ref": "#/components/schemas/Union_dc8df585"
-				},
-				"exitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 1024
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 1024
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"terminalReason": {
-					"$ref": "#/components/schemas/Enum_8bfbcdd9"
-				},
-				"callIds": {
-					"$ref": "#/components/schemas/Union_90280c4e"
-				},
-				"processExitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"boundKind": {
-					"$ref": "#/components/schemas/Union_f6453495"
-				},
-				"stepPipeline": {
-					"$ref": "#/components/schemas/Object_done_stepTool_stoppedBy_0b2ff353"
-				},
-				"repairRounds": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"frameType": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_f52a393c"
-				},
-				"totalTokens": {
-					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				},
-				"apiCalls": {
-					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				},
-				"pricing": {
-					"$ref": "#/components/schemas/Object_freeRule_pricedBy_rateRef_25da2af5"
-				},
-				"toolCalls": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"tools": {
-					"$ref": "#/components/schemas/Array_9ef3a1fe"
-				},
-				"skills": {
-					"$ref": "#/components/schemas/Array_a62e240b"
-				},
-				"toolActivity": {
-					"$ref": "#/components/schemas/Union_c3096265"
-				},
-				"capabilityMismatch": {
-					"$ref": "#/components/schemas/Union_26e30db3"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Union_e315aa3b"
-				},
-				"context": {
-					"$ref": "#/components/schemas/Object_briefingBytes_project_worker_cbbba89f"
-				},
-				"upstream": {
-					"$ref": "#/components/schemas/Object_gatewayRoutes_responseModelIds_efe23277"
-				},
-				"blockedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"guardBlockedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"permissionRequestedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"escalations": {
-					"$ref": "#/components/schemas/Union_4322c019"
-				},
-				"flowRestrictions": {
-					"$ref": "#/components/schemas/Union_db2664c0"
-				},
-				"toolGovernance": {
-					"$ref": "#/components/schemas/Union_ac760949"
-				},
-				"verification": {
-					"$ref": "#/components/schemas/Object_basis_detail_state_8ef9228e"
-				},
-				"quality": {
-					"$ref": "#/components/schemas/Union_409ae0f7"
-				},
-				"validationGrounding": {
-					"$ref": "#/components/schemas/Union_c1723f5c"
-				},
-				"unclassifiedAfterLastCheck": {
-					"$ref": "#/components/schemas/Object_commands_count_93a31ad5"
-				},
-				"routeWarnings": {
-					"$ref": "#/components/schemas/Array_5164076d"
-				},
-				"answerBudgetBytes": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 1000000
-				},
-				"verdict": {
-					"$ref": "#/components/schemas/Object_assurance_obligation_rules_88afb827"
-				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_7acf3e39"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_e1aa15ba"
-				},
-				"contextProvenance": {
-					"enum": ["recorded", "invalid", "not_applicable", "unknown"]
-				},
-				"hashes": {
-					"$ref": "#/components/schemas/Array_365b8f6b"
-				},
-				"result": {
-					"$ref": "#/components/schemas/Object_canonicalization_function_id_9126948f"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"digest": {
-					"type": "string",
-					"pattern": "^[0-9a-f]{64}$"
 				}
 			},
 			"Shape_c1be710c": {
@@ -36219,21 +36647,6 @@
 				},
 				"task": {
 					"$ref": "#/components/schemas/Object_text_via_4e0bf981"
-				}
-			},
-			"Shape_c4db9ddf": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"obligation": {
-					"$ref": "#/components/schemas/Enum_728971a5"
-				},
-				"rules": {
-					"$ref": "#/components/schemas/Array_ca77fca7"
-				},
-				"assurance": {
-					"$ref": "#/components/schemas/Enum_bba1ce70"
 				}
 			},
 			"Shape_c6011c76": {
@@ -36826,87 +37239,6 @@
 				"objects": {
 					"type": "integer",
 					"minimum": 0
-				}
-			},
-			"Shape_f384a28b": {
-				"callId": {
-					"type": "string",
-					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attemptId": {
-					"type": "string",
-					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"agent": {
-					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
-				},
-				"owner": {
-					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"settledAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"target": {
-					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
-				},
-				"roundKind": {
-					"$ref": "#/components/schemas/Enum_413aacec"
-				},
-				"toolChoice": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"disposition": {
-					"$ref": "#/components/schemas/Union_f0839e51"
-				},
-				"stop": {
-					"$ref": "#/components/schemas/Union_4c094c81"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Union_178a3139"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"pricedBy": {
-					"enum": ["provider", "target-rates", "catalog", "free", "none"]
-				},
-				"stages": {
-					"$ref": "#/components/schemas/Union_00c11dd5"
-				},
-				"timing": {
-					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
-				},
-				"admission": {
-					"$ref": "#/components/schemas/Union_6872feba"
-				},
-				"transport": {
-					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_13d8e1ff"
-				},
-				"cache": {
-					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
-				},
-				"quota": {
-					"$ref": "#/components/schemas/Union_96fc0259"
-				},
-				"responseId": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
 				}
 			},
 			"Shape_f6d59a1a": {
@@ -38759,16 +39091,6 @@
 					}
 				]
 			},
-			"Union_592b0c73": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_0170171f"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_5a56f89d": {
 				"anyOf": [
 					{
@@ -39329,6 +39651,16 @@
 					}
 				]
 			},
+			"Union_9071f49a": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_basis_claimed_grounded_20690804"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_9151b0e7": {
 				"anyOf": [
 					{
@@ -39360,6 +39692,16 @@
 					{
 						"type": "string",
 						"const": "version-mismatch"
+					}
+				]
+			},
+			"Union_9508d021": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_08fd59cf"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -39879,6 +40221,16 @@
 					}
 				]
 			},
+			"Union_b8a699c6": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_modelCalls_nanoAiu_premiumRequests_3d8ce6aa"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_b9574732": {
 				"anyOf": [
 					{
@@ -39906,16 +40258,6 @@
 					{
 						"type": "string",
 						"const": "cancelled"
-					}
-				]
-			},
-			"Union_c1723f5c": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_basis_claimed_grounded_0e3a21b2"
-					},
-					{
-						"type": "null"
 					}
 				]
 			},
@@ -40075,6 +40417,16 @@
 					}
 				]
 			},
+			"Union_cfc02aad": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_1d4df237"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_cfddcd30": {
 				"anyOf": [
 					{
@@ -40120,16 +40472,6 @@
 					}
 				]
 			},
-			"Union_d8403b22": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_2de5efc0"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_d85bd6b4": {
 				"anyOf": [
 					{
@@ -40150,16 +40492,6 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_advisory_restrictions_version_6d90c570"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_dc8df585": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Enum_cd1d6753"
 					},
 					{
 						"type": "null"
@@ -40334,6 +40666,16 @@
 					}
 				]
 			},
+			"Union_e79a7c04": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_basis_claimed_grounded_b217276a"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_e7b69f9a": {
 				"anyOf": [
 					{
@@ -40395,6 +40737,16 @@
 					{
 						"type": "string",
 						"const": "failed"
+					}
+				]
+			},
+			"Union_ecf98cdb": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_f6f6ed17"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -40570,16 +40922,6 @@
 					}
 				]
 			},
-			"Union_ff3dc232": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_basis_claimed_grounded_2109080c"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_ffe49639": {
 				"anyOf": [
 					{
@@ -40700,7 +41042,7 @@
 						]
 					},
 					"lastCalls": {
-						"$ref": "#/components/schemas/Array_e865bf53"
+						"$ref": "#/components/schemas/Array_97981bce"
 					},
 					"workerStops": {
 						"type": "array",

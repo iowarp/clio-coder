@@ -164,6 +164,46 @@ describe("operator shell and wiki shutdown", { concurrency: false, skip: process
 			});
 		}
 	}
+	it("a session taken over by session terminate says who took it and why before it exits", {
+		timeout: 20_000,
+	}, async () => {
+		const home = makeScratchHome("clio-coder-shutdown-takeover-");
+		const id = "takeover-fixture";
+		const env = { ...process.env, ...home.env, CLIO_CODER_SHUTDOWN_HOOK_MS: "500" };
+		const child = spawn(process.execPath, ["--import", "tsx", fixture, "heartbeat", home.dir, id], {
+			env,
+			stdio: ["ignore", "ignore", "pipe"],
+		});
+		let stderr = "";
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		try {
+			assert.ok(await waitFor(() => existsSync(join(home.dir, "ready")) || child.exitCode !== null, 10_000), stderr);
+			assert.equal(child.exitCode, null, stderr);
+			const cli = join(process.cwd(), "src/cli/index.ts");
+			const argv = ["session", "terminate", id, "--reason", "taken over in the CLIO Coder desktop app", "--json"];
+			const script = `process.argv = [process.execPath, "clio-coder", ...${JSON.stringify(argv)}]; await import(${JSON.stringify(cli)});`;
+			const terminator = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+				env,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			let out = "";
+			terminator.stdout.on("data", (chunk: Buffer) => {
+				out += chunk.toString();
+			});
+			assert.ok(await waitFor(() => terminator.exitCode !== null, 15_000), out);
+			assert.equal(terminator.exitCode, 0, out);
+			assert.match(out, /"action":\s*"signaled"/u);
+			assert.ok(await waitFor(() => child.exitCode !== null, 5000), stderr);
+			assert.equal(child.exitCode, 143, stderr);
+			assert.match(stderr, /CLIO Coder: terminated by [^@\s]+@[^:\s]+: taken over in the CLIO Coder desktop app/u);
+			assert.doesNotMatch(stderr, /received SIGTERM/u);
+		} finally {
+			if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+			home.cleanup();
+		}
+	});
 	for (const mode of ["budget", "domains"]) {
 		it(`keeps per-hook limits within the ${mode} shutdown allowance`, { timeout: 10_000 }, async () => {
 			const home = makeScratchHome("clio-coder-shutdown-budget-");

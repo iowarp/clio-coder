@@ -1,4 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { GRADE_LAYERS, GRADE_RULE_IDS } from "../../src/core/telemetry/run-vocabulary.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -25,6 +27,7 @@ import type { ActionClass } from "../../src/domains/safety/action-classifier.js"
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
+import { settleStubBuilder } from "../harness/dispatch.js";
 import { BUILDER_GRADE, cleanGradeFacts, gradeWork } from "../harness/grade-facts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -393,4 +396,31 @@ it("grades through one rule table in layer order: the first failing rule names t
 	);
 	strictEqual(crashed.outcomeCode, "worker_context_exhausted");
 	strictEqual(crashed.rules.find((rule) => rule.id === "final-output")?.status, "not_reached");
+});
+
+it("a builder that read, recorded a limitation and changed nothing seals worker_not_done, not succeeded (M-39)", async () => {
+	// Wave-43 run 2krnb50hhugv: 15 reads, one limitation, no write; its finish assessment kept no limitation words.
+	const env = await isolateClioEnv("dispatch-limitation-only-");
+	try {
+		const root = join(env.dir, "project");
+		mkdirSync(root, { recursive: true });
+		const finished = (tool: string) => ({
+			type: "clio_coder_tool_finish",
+			payload: { tool, outcome: "ok", durationMs: 1 },
+		});
+		const { receipt } = await settleStubBuilder({
+			cwd: root,
+			report: { completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [] },
+			events: [finished("read"), finished("limitation")],
+		});
+		strictEqual(receipt.outcome, "failed");
+		strictEqual(receipt.outcomeCode, "worker_not_done");
+		match(receipt.outcomeDetail ?? "", /worker recorded a limitation and changed nothing/u);
+		deepStrictEqual(
+			receipt.verdict?.rules.find((rule) => rule.id === "obligation"),
+			{ id: "obligation", layer: "V3", status: "fail", code: "worker_not_done" },
+		);
+	} finally {
+		env.restore();
+	}
 });

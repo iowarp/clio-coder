@@ -629,7 +629,14 @@ const replayPath = (leaf) => {
 				sessionUpdate: node.kind === "user" ? "user_message_chunk" : "agent_message_chunk",
 				content: { type: "text", text: node.preview },
 			},
-			{ "clio-coder/replay": { turn } },
+			// A ledger dates every turn it replays.
+			{
+				"clio-coder/replay": {
+					turn,
+					startedAt: `2026-09-25T12:0${turn}:00.000Z`,
+					finishedAt: `2026-09-25T12:0${turn}:30.000Z`,
+				},
+			},
 		);
 	}
 	return turn;

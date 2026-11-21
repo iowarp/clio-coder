@@ -17,9 +17,14 @@ const KINDS = [
 		name: "dispatch capacity leases",
 		count: (audit: DispatchAdmissionStoreAudit) => audit.leases,
 	},
+	{
+		kind: "cache lane",
+		name: "dispatch cache lanes",
+		count: (audit: DispatchAdmissionStoreAudit) => audit.cacheLanes,
+	},
 ] as const;
 
-function labels(records: ReadonlyArray<InvalidAdmissionRecord>): string {
+function labels(records: ReadonlyArray<Pick<InvalidAdmissionRecord, "label">>): string {
 	const shown = records.slice(0, 3).map((record) => record.label);
 	return records.length > 3 ? `${shown.join(", ")} and ${records.length - 3} more` : shown.join(", ");
 }
@@ -31,7 +36,8 @@ function plural(count: number, one: string): string {
 /**
  * The admission store (`dispatch-admission.json`) holds both plan reservations and capacity leases. A record no
  * current reader accepts is dropped on read when it is settled; a live one refuses dispatch until `--fix` drops it,
- * and `--fix` resets a file that cannot be read at all. Leases and reservations are process-lifetime state.
+ * and `--fix` resets a file that cannot be read at all. Leases and reservations are process-lifetime state. Main
+ * sessions' prompt cache lanes (M-11) sit beside them, holding no capacity; their row names the live owners.
  */
 export function dispatchAdmissionFindings(options: { fix?: boolean; nowMs?: number } = {}): DoctorFinding[] {
 	const nowMs = options.nowMs ?? Date.now();
@@ -53,7 +59,12 @@ export function dispatchAdmissionFindings(options: { fix?: boolean; nowMs?: numb
 	const current = audit;
 	return KINDS.map(({ kind, name, count }): DoctorFinding => {
 		const invalid = current.invalid.filter((record) => record.kind === kind);
-		const valid = plural(count(current), "valid record");
+		const owners = current.cacheLaneOwners;
+		const held =
+			kind === "cache lane" && owners.length > 0
+				? ` (${plural(owners.length, "live owner")}: ${labels(owners.map((label) => ({ label })))})`
+				: "";
+		const valid = `${plural(count(current), "valid record")}${held}`;
 		if (invalid.length === 0) return { ok: true, name, detail: valid };
 		if (options.fix === true) {
 			return {
@@ -74,7 +85,7 @@ export function dispatchAdmissionFindings(options: { fix?: boolean; nowMs?: numb
 			ok: true,
 			level: "warn",
 			name,
-			detail: `${valid}; ${plural(invalid.length, "invalid settled record")} (${labels(invalid)}), dropped at the next start or by clio-coder doctor --fix`,
+			detail: `${valid}; ${plural(invalid.length, "invalid settled record")} (${labels(invalid)}), dropped at the next ${kind === "cache lane" ? "store write" : "start"} or by clio-coder doctor --fix`,
 		};
 	});
 }

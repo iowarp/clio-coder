@@ -128,6 +128,7 @@ class TerminationCoordinator {
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
 	private exitHandoff: (() => Promise<number>) | undefined;
 	private readonly forceExitHooks = new Set<() => void>();
+	private readonly signalExplainers = new Set<() => string | null>();
 
 	getPhase(): TerminationPhase {
 		return terminationPhase();
@@ -266,6 +267,31 @@ class TerminationCoordinator {
 	}
 
 	/**
+	 * A SIGTERM another process sent on purpose can say why: `session terminate` writes its request,
+	 * then signals, and the signal outruns the heartbeat that would have printed who asked. The first
+	 * explainer with an answer replaces the generic line.
+	 */
+	explainSignal(explain: () => string | null): () => void {
+		this.signalExplainers.add(explain);
+		return () => {
+			this.signalExplainers.delete(explain);
+		};
+	}
+
+	private signalNotice(signal: NodeJS.Signals): string {
+		if (signal === "SIGTERM")
+			for (const explain of this.signalExplainers) {
+				try {
+					const text = explain();
+					if (text) return text;
+				} catch {
+					/* An unreadable reason falls back to naming the signal. */
+				}
+			}
+		return `CLIO Coder: received ${signal}, shutting down...`;
+	}
+
+	/**
 	 * SIGHUP is here for the same reason as SIGTERM. Without a listener Node
 	 * takes its default action and the process dies with no shutdown at all,
 	 * which on a TUI session means the terminal is never given back. Exit codes
@@ -284,7 +310,7 @@ class TerminationCoordinator {
 				}
 				process.exit(SIGNAL_EXIT_CODES[signal] ?? 143);
 			}
-			this.notice(`CLIO Coder: received ${signal}, shutting down...`);
+			this.notice(this.signalNotice(signal));
 			void this.shutdown(SIGNAL_EXIT_CODES[signal] ?? 143);
 		};
 		this.signalHandler = handler;

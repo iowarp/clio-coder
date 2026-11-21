@@ -25,7 +25,7 @@ test("settings controls derive from the engine registry, write only the user lay
 	try {
 		const seeded = await seedSettings(h.home.path, h.home.env);
 		const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), Workspace);
-		const base = `/api/workspaces/${workspace.id}/settings/controls`;
+		const base = `/api/settings/controls?workspace=${workspace.id}`;
 		const patch = (body: unknown) =>
 			h.request(base, {
 				method: "PATCH",
@@ -68,6 +68,24 @@ test("settings controls derive from the engine registry, write only the user lay
 		assert.equal(byPath.get("fleet.concurrency")?.source, "project");
 		assert.equal(byPath.get("fleet.concurrency")?.access, "read-only");
 		assert.equal((await patch({ path: "fleet.concurrency", value: "3" })).status, 409);
+		// With no workspace named there is no project layer: the same control is the user's own, and writable.
+		const unscoped = (body?: unknown) =>
+			h.request("/api/settings/controls", {
+				...(body === undefined
+					? {}
+					: {
+							method: "PATCH",
+							headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+							body: JSON.stringify(body),
+						}),
+			});
+		const userOnly = (await json(await unscoped(), SettingsControls)).controls.find(
+			(control) => control.path === "fleet.concurrency",
+		);
+		assert.notEqual(userOnly?.source, "project");
+		assert.equal(userOnly?.access, "writable");
+		assert.equal((await unscoped({ path: "fleet.concurrency", value: "3" })).status, 200);
+		assert.match(await readFile(join(h.home.path, "config/settings.yaml"), "utf8"), /concurrency: 3/);
 
 		const thinking = byPath.get("chat.thinkingLevel");
 		assert.equal(thinking?.value, "high");
@@ -149,7 +167,7 @@ test("a lowered turn limit holds the next turn as soon as the write is acknowled
 	t.after(h.close);
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), Workspace);
 	assert.equal(h.supervisor.turnCapacity, 4);
-	const written = await h.request(`/api/workspaces/${workspace.id}/settings/controls`, {
+	const written = await h.request(`/api/settings/controls?workspace=${workspace.id}`, {
 		method: "PATCH",
 		headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
 		body: JSON.stringify({ path: "interface.guiTurnCapacity", value: "1" }),

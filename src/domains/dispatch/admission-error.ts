@@ -21,3 +21,16 @@ export class AdmissionTimedOutError extends Error {
 		this.name = "AdmissionTimedOutError";
 	}
 }
+
+/**
+ * Admission waited its bounded budget for the shared admission store lock while another process held it (M-35). The
+ * message names the holder and says to wait for it or stop it; the dispatch is refused, the process carries on.
+ */
+export class AdmissionLockBusyError extends Error {
+	readonly code = "admission_lock_busy" as const;
+
+	constructor(detail: string) {
+		super(`dispatch: admission denied: the shared admission store is busy; ${detail}`);
+		this.name = "AdmissionLockBusyError";
+	}
+}

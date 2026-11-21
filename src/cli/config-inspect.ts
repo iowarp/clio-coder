@@ -13,6 +13,7 @@
 
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import { settingsUpgradeAdvice } from "../core/config.js";
 import { cwdHash } from "../core/cwd-hash.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { resolvePackageRoot } from "../core/package-root.js";
@@ -96,6 +97,9 @@ function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 		const layered = readLayeredSettings(cwd);
 		for (const issue of layered.issues)
 			graph.issues.push(`settings ${issue.origin}: ${formatSettingsLayerIssue(layered, issue)}`);
+		// The same remedy doctor names when the pending migration rewrites the user file's issues (M-38).
+		const upgrade = settingsUpgradeAdvice(layered.issues.filter((issue) => issue.origin === "user"));
+		if (upgrade !== null) graph.issues.push(`settings user: ${upgrade}`);
 		// AUD-2 finding 4: include the defaults restored after a rejected setting.
 		const keys = Object.keys(layered.sources).sort();
 		for (const key of keys) {

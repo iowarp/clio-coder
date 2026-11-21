@@ -574,6 +574,11 @@
 						"status": "not_applicable"
 					},
 					{
+						"id": "assurance",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
 						"id": "landing",
 						"layer": "V6",
 						"status": "not_applicable"
@@ -2487,6 +2492,11 @@
 					},
 					{
 						"id": "removed-tests",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "assurance",
 						"layer": "V4",
 						"status": "not_applicable"
 					},

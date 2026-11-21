@@ -269,6 +269,8 @@ export const CallSettledSchema = Type.Object(
 				sessionPinnedToSse: factSchema(Type.Boolean()),
 				/** Present only when the call's own connection counters were attributable to it (#434). */
 				connectionReused: Type.Optional(factSchema(Type.Boolean())),
+				/** The Copilot session a copilot-sdk call went to, from Clio's own session pool (PV-2). */
+				session: Type.Optional(factSchema(vocabulary(["new", "spare", "continued", "resumed"]))),
 				/** WebSocket failures and SSE fallbacks inside this call, from the same attributable counters (#423). */
 				websocketFailures: Type.Optional(factSchema(count)),
 				sseFallbacks: Type.Optional(factSchema(count)),
@@ -1271,7 +1273,13 @@ export const RunSettledSchema = Type.Object(
 					claimed: count,
 					grounded: count,
 					ungrounded: Type.Array(text, { maxItems: 64 }),
-					basis: vocabulary(["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]),
+					basis: vocabulary([
+						"grounded",
+						"no-command-executed",
+						"unmatched-command",
+						"unattributable-status",
+						"unobserved-lane",
+					]),
 				},
 				closed,
 			),
@@ -2372,6 +2380,21 @@ export const AuthRefreshedSchema = Type.Object(
 		updatedAtBefore: Type.Optional(utc),
 		updatedAtAfter: Type.Optional(utc),
 		durationMs: duration,
+	},
+	closed,
+);
+/**
+ * A main session's prompt cache lane came from this process's own lanes because the cross-process lane store could
+ * not take the claim (M-11), so a concurrent Clio process may route to the same id.
+ */
+export const CacheLaneFellBackSchema = Type.Object(
+	{
+		/** lock-timeout: another holder kept the admission lock past the claim's bound. store-failed: any other error. */
+		reason: vocabulary(["lock-timeout", "store-failed"]),
+		/** The lock budget that ran out; null for a store failure. */
+		timeoutMs: Type.Union([count, Type.Null()]),
+		/** The in-process lane the conversation took instead. */
+		lane: count,
 	},
 	closed,
 );

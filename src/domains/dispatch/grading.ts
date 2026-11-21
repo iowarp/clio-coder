@@ -67,6 +67,11 @@ export interface GradeFacts {
 	host?: { rejection: { code: RunOutcomeCode; detail: string } | null };
 	/** V4: existing test cases the change removed; undefined until checked. */
 	removedTests?: ReadonlyArray<string>;
+	/**
+	 * The run's assurance (4.8) and, when compromised, the evidence that lowered it; undefined until it was derived.
+	 * `operatorAccepted`: the operator merged the branch from the merge card anyway (V6).
+	 */
+	assurance?: { value: RunAssurance; cause: string; operatorAccepted?: boolean };
 	/** V6: why landing the run's work failed or was withheld; undefined until it was attempted. */
 	landing?: { failure: { code: RunOutcomeCode | null; detail: string } | null };
 }
@@ -433,6 +438,20 @@ const RULES: ReadonlyArray<GradeRule> = [
 				code: "worker_removed_tests",
 				detail: `the change removes existing test cases (${removed.slice(0, 2).join("; ")}${removed.length > 2 ? `; and ${removed.length - 2} more` : ""}); fix the source or restore them`,
 			};
+		},
+	},
+	{
+		// A participant's own report can lower assurance and never raise it (4.8). A builder's change resting on a
+		// compromised result is not delivered; a checker's or reviewer's fail verdict is its deliverable, so it is exempt.
+		id: "assurance",
+		layer: "V4",
+		when: "succeeded",
+		appliesTo: (contract) => contract.role === "builder",
+		check: (facts) => {
+			const assurance = facts.assurance;
+			if (assurance === undefined) return NOT_APPLICABLE;
+			if (assurance.value !== "compromised" || assurance.operatorAccepted === true) return PASS;
+			return { status: "fail", code: "assurance_compromised", detail: `assurance compromised: ${assurance.cause}` };
 		},
 	},
 	{

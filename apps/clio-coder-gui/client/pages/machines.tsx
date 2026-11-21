@@ -513,7 +513,7 @@ export function MachinesPage({ client, local }: { client: Client; local: Client 
 				: current,
 		);
 		if (status === "succeeded" && request.body.action !== "check") {
-			for (const key of ["workspace-settings", "settings-controls", "config-graph"])
+			for (const key of ["settings-report", "settings-controls", "config-graph"])
 				void queries.invalidateQueries({ queryKey: [key] });
 		}
 	}, [operation.data, request, epochChanged, queries, store]);

@@ -75,11 +75,13 @@ export function resolveRunLimits(input: {
 
 /**
  * The one line that tells a worker its wall clock, in its dynamic prompt. It states the handback, never a cue to stop:
- * told it would "stop as timed out", luna and haiku coders quit 13 to 21 s into a 2 min run (fleet M8).
+ * told it would "stop as timed out", luna and haiku coders quit 13 to 21 s into a 2 min run (fleet M8). It names no
+ * moment tools go away either: told the host withdraws tools at 85%, a luna coder quit at 25 s claiming the tool window
+ * had closed (M-37). The handback round itself tells the worker its tools are withdrawn.
  */
 export function wallClockMessage(wallMs: number): string {
 	const minutes = (ms: number): string => `${Math.max(1, Math.round(ms / 60_000))} min`;
-	return `Wall clock: this run has ${minutes(wallMs)} from dispatch, and the host keeps that time for you. Keep working on the task at your normal pace; do not stop early, skip steps or cut the work short because of the clock. At ${Math.round(WALL_HANDBACK_SHARE * 100)}% the host withdraws your tools and asks for your report; that round is when you say what you finished and what is left.`;
+	return `Wall clock: this run has ${minutes(wallMs)} from dispatch, and the host keeps that time for you. Keep working on the task at your normal pace with your tools; do not stop early, skip steps or cut the work short because of the clock. When it is time to hand back, the host asks for your report in its own message; that is when you say what you finished and what is left.`;
 }
 
 export interface PlanCardLimitsInput {

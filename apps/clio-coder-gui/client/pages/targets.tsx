@@ -61,7 +61,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		const result = operation.data?.status === "succeeded" ? operation.data.result : null;
 		if (!result || !("targets" in result) || !request?.settled || tracking.epochChanged) return;
 		queries.setQueryData(["targets", request.workspaceId], result.targets);
-		for (const key of ["routing", "workspace-settings", "config-graph", "settings-controls"])
+		for (const key of ["routing", "settings-report", "config-graph", "settings-controls"])
 			void queries.invalidateQueries({ queryKey: [key] });
 	}, [operation.data, request, tracking.epochChanged, queries]);
 	return (

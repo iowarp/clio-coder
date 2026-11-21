@@ -63,7 +63,9 @@ export interface SettingsLayerIssue {
 	origin: SettingsOrigin;
 	path: string;
 	message: string;
-	kind?: SettingsIssue["kind"];
+	kind?: NonNullable<SettingsIssue["kind"]>;
+	/** A user-layer issue the pending `2026-11-21-retired-settings` migration rewrites (M-38). */
+	upgrade?: true;
 }
 
 export interface SettingsLayerInfo {
@@ -795,11 +797,22 @@ interface PreparedLayers {
 	local: RawLayer;
 }
 
+/** No project: the user layer stands alone, as for a surface with no workspace open. */
+const NO_PROJECT_LAYERS: PreparedLayers = {
+	projectFile: "",
+	localFile: "",
+	projectRaw: { origin: "project", path: "", blob: undefined },
+	localRaw: { origin: "project.local", path: "", blob: undefined },
+	project: { origin: "project", path: "", blob: undefined },
+	local: { origin: "project.local", path: "", blob: undefined },
+};
+
 function prepareProjectLayers(
-	cwd: string,
+	cwd: string | null,
 	issues: SettingsLayerIssue[],
 	userBlob: Record<string, unknown> | undefined,
 ): PreparedLayers {
+	if (cwd === null) return NO_PROJECT_LAYERS;
 	const operatorLevel = userAutonomy(userBlob);
 	const root = clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml");
 	const projectFile = join(root, ".clio-coder", "settings.yaml");
@@ -940,7 +953,14 @@ function validateLayerStack(
 	}
 	for (const issue of validation.issues) {
 		if (downgraded.has(issue.path)) continue;
-		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
+		const origin = settingsSourceFor(sources, issue.path);
+		// The migration rewrites settings.yaml only, so a project layer's retired key is not its to repair.
+		issues.push({
+			origin,
+			path: issue.path,
+			message: issue.message,
+			...(issue.upgrade && origin === "user" ? { upgrade: true as const } : {}),
+		});
 	}
 	// AUD-2 finding 4: keep rejected input in diagnostics before attributing its fallback.
 	for (const path of Object.keys(sources)) {
@@ -966,9 +986,10 @@ function validateLayerStack(
  * Read and layer settings for `cwd`, returning the validated effective settings
  * plus per-leaf source attribution. Never throws: validation issues and layer
  * problems are returned, and the effective settings always validate (invalid
- * merges fall back to the schema defaults for the offending keys).
+ * merges fall back to the schema defaults for the offending keys). A null `cwd`
+ * reads the user layer alone, with no project lookup and no project layers.
  */
-export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
+export function readLayeredSettings(cwd: string | null, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
 	const issues: SettingsLayerIssue[] = [];
 	const userFile = options.userPath ?? settingsPath();
 	const user = readRawLayer("user", userFile, issues);
@@ -983,6 +1004,7 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 					path: issue.path,
 					message: issue.message,
 					...(issue.kind ? { kind: issue.kind } : {}),
+					...(issue.upgrade ? { upgrade: issue.upgrade } : {}),
 				}));
 	return {
 		settings,
@@ -991,8 +1013,16 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 		layers: [
 			{ origin: "built-in", path: "(defaults)", present: true },
 			{ origin: "user", path: userFile, present: user.blob !== undefined },
-			{ origin: "project", path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
-			{ origin: "project.local", path: prepared.localFile, present: prepared.localRaw.blob !== undefined },
+			...(cwd === null
+				? []
+				: [
+						{ origin: "project" as const, path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
+						{
+							origin: "project.local" as const,
+							path: prepared.localFile,
+							present: prepared.localRaw.blob !== undefined,
+						},
+					]),
 		],
 		[STRICT_USER_ISSUES]: strictUserIssues,
 	} as InternalLayeredSettings;
@@ -1007,14 +1037,24 @@ export function readStrictLayeredSettings(cwd: string, options: ReadLayeredSetti
 	const layered = readLayeredSettings(cwd, options) as InternalLayeredSettings;
 	const reportedUserIssues = layered.issues
 		.filter((issue) => issue.origin === "user")
-		.map(({ path, message, kind }): SettingsIssue => ({ path, message, ...(kind ? { kind } : {}) }));
-	const userIssues = [...reportedUserIssues, ...layered[STRICT_USER_ISSUES]].filter(
-		(issue, index, all) =>
-			all.findIndex(
-				(candidate) =>
-					candidate.path === issue.path && candidate.message === issue.message && candidate.kind === issue.kind,
-			) === index,
-	);
+		.map(
+			({ path, message, kind, upgrade }): SettingsIssue => ({
+				path,
+				message,
+				...(kind ? { kind } : {}),
+				...(upgrade ? { upgrade } : {}),
+			}),
+		);
+	const same = (a: SettingsIssue, b: SettingsIssue) => a.path === b.path && a.message === b.message && a.kind === b.kind;
+	const all = [...reportedUserIssues, ...layered[STRICT_USER_ISSUES]];
+	// A duplicate keeps the upgrade flag either copy carries, so the thrown error still names the migration (M-38).
+	const userIssues = all
+		.filter((issue, index) => all.findIndex((candidate) => same(candidate, issue)) === index)
+		.map((issue) =>
+			issue.upgrade !== true && all.some((other) => other.upgrade === true && same(other, issue))
+				? { ...issue, upgrade: true as const }
+				: issue,
+		);
 	if (userIssues.length > 0) throw new SettingsValidationError(userIssues);
 	return layered;
 }
@@ -1024,9 +1064,9 @@ export function readStrictLayeredSettings(cwd: string, options: ReadLayeredSetti
  * user layer. The candidate user document is re-layered with the same project
  * files before it is written. This preserves references to project-only
  * targets while refusing a mutation that a higher-precedence project leaf
- * would silently override.
+ * would silently override. A null `cwd` re-layers with no project at all.
  */
-export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
+export function updateLayeredSettings(cwd: string | null, mutate: SettingsMutator): ClioSettings {
 	let committed: ClioSettings | null = null;
 	updateSavedSettingsDocument((saved) => {
 		const userValidation = validateSettings(saved);

@@ -454,6 +454,7 @@ import {
 	mergeCardCauseNote,
 } from "./merge-card.js";
 import {
+	compromisedReason,
 	mergeGateVerdict,
 	mergeWithheldDetail,
 	partialResultDetail,
@@ -493,7 +494,6 @@ import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
-	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
 	planQueueSlot,
@@ -504,6 +504,7 @@ import {
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
+	sweepDispatchReservationsAtStartup,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
 import {
@@ -557,7 +558,10 @@ import {
 	countToolCalls,
 	executedCalls,
 	hasPotentiallyMutatingAttempt,
+	type InFlightCall,
 	observationCalls,
+	recordCallFinish,
+	recordCallStart,
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
@@ -9150,6 +9154,10 @@ export function createDispatchBundle(
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
+		// The calls in flight by id, and the ones the host saw running when its abort started: the abort finishes them
+		// before the seal, so the stop detail reads this snapshot (M-37).
+		const inFlightCalls = new Map<string, InFlightCall>();
+		let callsAtAbort: InFlightCall[] | null = null;
 		let toolTelemetryIngestionErrors = 0;
 		const upstreamResponses: RunResultUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
@@ -9300,6 +9308,7 @@ export function createDispatchBundle(
 					usage?: unknown;
 					tool?: string;
 					toolCallId?: string;
+					action?: unknown;
 					sequence?: number;
 					outcomeCode?: unknown;
 					detail?: unknown;
@@ -9332,6 +9341,7 @@ export function createDispatchBundle(
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+				recordCallStart(inFlightCalls, event.payload);
 				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
 				else startsCarryIds = false;
 			}
@@ -9686,6 +9696,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
+				recordCallFinish(inFlightCalls, event.payload);
 				const tool = pendingCapabilities.get(event.payload.toolCallId ?? "") ?? event.payload.tool;
 				pendingCapabilities.delete(event.payload.toolCallId ?? "");
 				if (tool === ToolNames.Gateway && event.payload.toolCallId)
@@ -9977,7 +9988,10 @@ export function createDispatchBundle(
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
 			req,
-			abort,
+			abort: () => {
+				callsAtAbort ??= [...inFlightCalls.values()];
+				abort();
+			},
 			kill: abort,
 			...(steer ? { steer } : {}),
 			...(resolvePermission ? { resolvePermission } : {}),
@@ -10367,7 +10381,9 @@ export function createDispatchBundle(
 						? wallHandbackOutcomeDetail({
 								reported: hasDurableFinalOutput(outputCapture.snapshot()),
 								unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+								runningAtStop: callsAtAbort,
 								hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+								hostSignals: result.hostSignals ?? [],
 								exitCode: result.exitCode ?? null,
 								signal: result.signal ?? null,
 							})
@@ -10455,17 +10471,24 @@ export function createDispatchBundle(
 					// Only verify runs on the final tree ground a claim by check id or resolved command (bt-9, bt-27c).
 					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
+					toolLaneObserved: gradeContract.toolLaneObserved,
 					readOnly: lifecycle.readOnly,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
 				const activity = summarizeToolActivity(toolStats, classifyTool);
+				// A limitation the run recorded is a typed declaration whether or not the finish contract kept its words: an
+				// assessment of a run that changed nothing carries no evidence, and an empty list is not "none recorded".
+				const limitationSummaries =
+					finishContract?.assessment.evidence
+						.filter((item) => item.kind === "limitation")
+						.map((item) => item.summary.trim())
+						.filter((summary) => summary.length > 0) ?? [];
 				const recordedLimitations =
 					(toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0
-						? (finishContract?.assessment.evidence
-								.filter((item) => item.kind === "limitation")
-								.map((item) => item.summary.trim())
-								.filter((summary) => summary.length > 0) ?? ["a limitation was recorded"])
+						? limitationSummaries.length > 0
+							? limitationSummaries
+							: ["a limitation was recorded"]
 						: [];
 				gradeFacts.handback = {
 					finalOutput: hasDurableFinalOutput(capturedOutput),
@@ -10636,6 +10659,14 @@ export function createDispatchBundle(
 							? assuranceVerification
 							: verificationWithHostVerdict(assuranceVerification, hostVerification),
 				});
+				// What lowered it, in the merge gate's words: the checks this run executed that failed on its final tree.
+				const failedChecks = assuranceQuality.typedValidations
+					.filter((fact) => !fact.passed)
+					.map((fact) => fact.sourceId.replace(/^[\w-]+:/u, ""));
+				const assuranceFact = {
+					value: assurance,
+					cause: compromisedReason(appliedResultContract, finalText, failedChecks),
+				};
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
 				// check the merge used to rest on the exit status alone, and a Git
@@ -10652,6 +10683,7 @@ export function createDispatchBundle(
 					taskWorktreeHoldsWork(req.taskWorktree)
 						? {
 								assurance,
+								failedChecks,
 								contract: appliedResultContract,
 								output: finalText,
 								branch: req.taskWorktree.branch,
@@ -10664,6 +10696,14 @@ export function createDispatchBundle(
 				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);
 				const withheldVerdict = mergeGateInput === null ? null : mergeGateVerdict(mergeGateInput);
 				const mergeWithheld = withheldDetail !== null;
+				// One grade (4.8): a builder whose assurance is compromised is not delivered. A merge-mode branch with work is
+				// held by the merge gate, which reads the same assurance, and graded with its landing below.
+				if (mergeGateInput === null) {
+					gradeFacts.assurance = assuranceFact;
+					applyGrade(grade(gradeContract, gradeFacts));
+				}
+				// Its branch is kept like a host-rejected one, committed for the operator's one land command.
+				const assuranceHeld = req.taskWorktree !== undefined && outcomeCode === "assurance_compromised";
 				// A merge-mode run the worker finished but host verification rejected
 				// keeps its branch like a withheld merge, so its tree is committed there
 				// for the operator's one merge command instead of left as loose edits.
@@ -10688,8 +10728,13 @@ export function createDispatchBundle(
 				let claimReleased = false;
 				// Why landing the run's work failed or was held (V6); the grader seals it beside every other rule.
 				let landingFailure: { code: RunOutcomeCode | null; detail: string } | null = null;
+				// The operator merged a held branch from the card: a person accepted the result (V6).
+				let operatorMerged = false;
 				const landingAttempted = req.taskWorktree !== undefined;
-				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial)) {
+				if (
+					req.taskWorktree !== undefined &&
+					(finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial || assuranceHeld)
+				) {
 					const authorship =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
 							? resultContractAuthorship(appliedResultContract, capturedOutput?.state === "final" ? capturedOutput.text : null)
@@ -10705,7 +10750,7 @@ export function createDispatchBundle(
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
-						apply: mergeWithheld || hostRejectedMerge || cappedPartial ? "preserve" : (req.apply ?? "merge"),
+						apply: mergeWithheld || hostRejectedMerge || cappedPartial || assuranceHeld ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths,
 						commitMessage: taskCommitMessage,
 						authoredPaths,
@@ -10717,7 +10762,7 @@ export function createDispatchBundle(
 						landingFailure = {
 							code: null,
 							detail:
-								hostRejectedMerge || cappedPartial
+								hostRejectedMerge || cappedPartial || assuranceHeld
 									? [notedDetail(), worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
 									: (worktreeReceipt.detail ?? worktreeReceipt.reason),
 						};
@@ -10726,7 +10771,7 @@ export function createDispatchBundle(
 							detailNotes.push(partialResultDetail(req.taskWorktree.branch));
 							failureMessage = notedDetail() ?? failureMessage;
 						}
-					} else if (hostRejectedMerge) {
+					} else if (hostRejectedMerge || assuranceHeld) {
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
@@ -10839,6 +10884,7 @@ export function createDispatchBundle(
 								};
 								landingFailure = { code: null, detail: landed.detail ?? landed.reason };
 							} else {
+								operatorMerged = true;
 								worktreeReceipt = {
 									...landed,
 									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
@@ -10897,6 +10943,8 @@ export function createDispatchBundle(
 				// The landing is the last rule: its words already carry the notes made before it.
 				const preLandingDetail = notedDetail();
 				if (landingAttempted) {
+					if (mergeGateInput !== null)
+						gradeFacts.assurance = { ...assuranceFact, ...(operatorMerged ? { operatorAccepted: true } : {}) };
 					gradeFacts.landing = { failure: landingFailure };
 					applyGrade(grade(gradeContract, gradeFacts));
 				}
@@ -12388,8 +12436,9 @@ export function createDispatchBundle(
 				}),
 			);
 			// No in-memory executor survives a process restart, so every active
-			// side-store lease from an earlier bundle is orphaned and must expire.
-			cleanupDispatchReservations({ startup: true, nowMs: now() });
+			// side-store lease from an earlier bundle is orphaned and must expire. Boot never waits on the admission lock
+			// for it (M-35): a held lock leaves the sweep to the first plan admission.
+			sweepDispatchReservationsAtStartup(now());
 			const runLedger = openLedger({
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");

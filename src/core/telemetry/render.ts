@@ -227,7 +227,10 @@ export function renderDurationSum(sum: FactSum, unit = "call"): string {
 	return `≥${renderDurationMs(known)} (${plural(sum.unknownCount, unit)} unknown)`;
 }
 
-type Scalar = "count" | "usd" | "duration" | "percent";
+/** `units` keeps a fractional amount, such as a premium-request multiplier, that `count` would round away. */
+type Scalar = "count" | "usd" | "duration" | "percent" | "units";
+
+const fractional = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 function renderScalar(value: number, as: Scalar): string {
 	switch (as) {
@@ -237,6 +240,8 @@ function renderScalar(value: number, as: Scalar): string {
 			return renderDurationMs(value);
 		case "percent":
 			return `${value.toFixed(1)}%`;
+		case "units":
+			return fractional.format(value);
 		default:
 			return renderCount(value);
 	}

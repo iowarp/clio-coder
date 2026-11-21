@@ -521,7 +521,9 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 		// The worker keeps working and the host's 85% handback asks for the report; a quit cue made coders stop at 13 s.
 		const wallLine = wallClockMessage(120_000);
 		match(wallLine, /Keep working/u);
-		match(wallLine, /At 85% the host withdraws your tools and asks for your report/u);
+		// M-37: the line names no moment tools go away; told "at 85% the host withdraws your tools", a coder quit at 25 s.
+		ok(!/withdraw|85%|tool window/u.test(wallLine), wallLine);
+		match(wallLine, /the host asks for your report in its own message/u);
 		ok(!/stops as timed out/u.test(wallLine), wallLine);
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
@@ -597,10 +599,13 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 		timeout: 20_000,
 	}, async () => {
 		// The host's deadline abort is a stop; a worker that exits on its own after the handback is described by its exit.
+		// M-37: the real worker traps SIGTERM and exits 1 with no signal, and the abort finishes the running call before
+		// the seal, so the detail names the host's own signal and the call it saw running when the abort started.
 		for (const shape of ["host-timeout", "crash"] as const) {
 			const repo = checkout();
-			let stopped: (value: { exitCode: number | null; signal: NodeJS.Signals | null }) => void = () => {};
-			const exited = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+			type Exit = { exitCode: number | null; signal: NodeJS.Signals | null; hostSignals?: NodeJS.Signals[] };
+			let stopped: (value: Exit) => void = () => {};
+			const exited = new Promise<Exit>((resolve) => {
 				stopped = resolve;
 			});
 			let handedBack: () => void = () => {};
@@ -615,7 +620,10 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 						heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 						promise: shape === "crash" ? Promise.resolve({ exitCode: 1, signal: "SIGTERM" as const }) : exited,
 						events: (async function* () {
-							yield { type: "clio_coder_tool_start", payload: { tool: "bash", toolCallId: "call-sleep" } };
+							yield {
+								type: "clio_coder_tool_start",
+								payload: { tool: "bash", toolCallId: "call-sleep", action: { verb: "run", object: "sleep 200" } },
+							};
 							yield {
 								type: "clio_coder_run_outcome",
 								payload: {
@@ -626,6 +634,10 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 							if (shape === "host-timeout") {
 								handedBack();
 								await exited;
+								yield {
+									type: "clio_coder_tool_finish",
+									payload: { tool: "bash", toolCallId: "call-sleep", outcome: "error", durationMs: 1 },
+								};
 								return;
 							}
 							yield {
@@ -637,7 +649,7 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 							};
 						})(),
 						abort() {
-							stopped({ exitCode: null, signal: "SIGTERM" });
+							stopped({ exitCode: 1, signal: null, hostSignals: ["SIGTERM"] });
 						},
 					};
 				},
@@ -655,8 +667,10 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 				ok(!/handed back its report/u.test(detail), `the detail claims a report that never came: ${detail}`);
 				ok(!/conflicting trusted outcome codes/u.test(detail), `handback then no report is one story: ${detail}`);
 				if (shape === "host-timeout") {
-					match(detail, /reached the wall clock with 1 tool call \(bash\) still running before it wrote a report/u);
-					match(detail, /the host stopped it with SIGTERM, so it handed back no report/u);
+					match(
+						detail,
+						/reached the wall clock before it wrote a report; the host stopped it with SIGTERM while 1 tool call \(bash: sleep 200\) was still running, so it handed back no report/u,
+					);
 				} else {
 					match(detail, /it exited \(exit code 1, signal SIGTERM\) before it wrote a report, so it handed back no report/u);
 					ok(!/host stopped|reached the wall clock/u.test(detail), `the host never stopped this run: ${detail}`);
