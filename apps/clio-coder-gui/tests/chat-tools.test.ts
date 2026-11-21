@@ -15,6 +15,7 @@ import {
 	wholeFileWritePath,
 } from "../client/chat/diff-model.js";
 import { dispatchRunIds } from "../client/chat/dispatch-outcome-model.js";
+import { toolImagesView } from "../client/chat/tool-image-model.js";
 import {
 	applyPartialFrame,
 	basename,
@@ -988,4 +989,39 @@ test("only a whole-file write names a path whose current text the preview compar
 	assert.equal(wholeFileWritePath({ path: "fixture.txt", edits: [{ oldText: "a", newText: "b" }] }), null);
 	assert.equal(wholeFileWritePath({ path: "fixture.txt" }), null);
 	assert.equal(wholeFileWritePath(undefined), null);
+});
+
+test("a tool's returned images become typed data URLs with numbered alt text, and screenshot links read as paths", () => {
+	const png = "iVBORw0KGgo=";
+	const view = toolImagesView(
+		toolItem({
+			status: "completed",
+			images: [
+				{ mimeType: "image/png", data: png },
+				// Not drawable even if a future server let it through: SVG is not on the list, and the data is not base64.
+				{ mimeType: "image/svg+xml" as "image/png", data: png },
+				{ mimeType: "image/jpeg", data: '"><script>' },
+				{ mimeType: "image/webp", data: png },
+			],
+			imageLinks: [{ path: "/work/shots/shot.png", name: "shot.png" }],
+		}),
+		"browser",
+	);
+	assert.deepEqual(
+		view.images.map(({ src, alt }) => ({ src, alt })),
+		[
+			{ src: `data:image/png;base64,${png}`, alt: "Image 1 of 2 returned by browser" },
+			{ src: `data:image/webp;base64,${png}`, alt: "Image 2 of 2 returned by browser" },
+		],
+	);
+	assert.equal(new Set(view.images.map((image) => image.key)).size, 2);
+	assert.deepEqual(
+		view.links.map(({ path, label }) => ({ path, label })),
+		[{ path: "/work/shots/shot.png", label: "shot.png" }],
+	);
+	assert.equal(
+		toolImagesView(toolItem({ images: [{ mimeType: "image/gif", data: png }] }), "").images[0]?.alt,
+		"Image returned by tool",
+	);
+	assert.deepEqual(toolImagesView(toolItem(), "bash"), { images: [], links: [] });
 });

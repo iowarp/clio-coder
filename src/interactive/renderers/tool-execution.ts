@@ -70,6 +70,7 @@ import { shellCommandInk, toolOutputInk } from "./code-ink.js";
 import { renderDiffLines } from "./diff.js";
 import { LiveToolView } from "./live-tool-view.js";
 import { highlightJsonLine, tryRenderJson, tryRenderXml } from "./structured.js";
+import { renderToolResultImages } from "./tool-images.js";
 
 // The argument projection lives in the safety domain so the worker tool seam
 // scrubs by the same rules; re-exported here because this renderer is where
@@ -863,12 +864,20 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
 	const driftText = skillLoadFacts(finished)?.drifted === true ? `${toolMeta(" · ")}${yellow("drifted")}` : "";
+	// A request the browser session's host grant refused is a warning the folded row states with the grant that admits it.
+	const blockedDetails = executed && row.toolName === ToolNames.Browser ? (detailsOf(finished.result) ?? null) : null;
+	const blockedGrant = stringField(blockedDetails, "blockedGrant");
+	const blockedHosts = Array.isArray(blockedDetails?.blockedHosts) ? blockedDetails.blockedHosts.join(", ") : "";
+	const blockedText =
+		blockedGrant === null
+			? ""
+			: `${toolMeta(" · ")}${yellow(sanitizeCallTargetText(`blocked ${blockedHosts}; to admit: ${blockedGrant}`))}`;
 	// An offloaded result says where the rest is, not what its path is: the
 	// path is a 64-hex name that wrapped a row across three, and /view and the
 	// full body's footer state it.
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
-		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}`,
+		facts: `${statText}${parts.length > 0 ? toolMeta(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}${blockedText}`,
 		offload:
 			offloadPath === null
 				? ""
@@ -2092,6 +2101,7 @@ export function renderToolExecution(
 		...renderOutputMeta(finished, width, finished.isError, finished.outcome === "blocked" ? "decision" : "output"),
 	);
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+	out.push(...renderToolResultImages(finished.result, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
 	return out;
 }
@@ -2120,6 +2130,7 @@ export function renderToolResultOnly(
 	out.push(...approvalReceiptRows(finished, width, finished.isError));
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
+	out.push(...renderToolResultImages(finished.result, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
 	return out;
 }
@@ -2682,6 +2693,8 @@ export function renderToolPreview(
 			);
 		}
 	}
+	// A settled call's screenshots draw under its body where the terminal draws images (S5).
+	if (finished !== undefined && !failure) rows.push(...renderToolResultImages(finished.result, width, options));
 	return rows;
 }
 

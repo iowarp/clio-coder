@@ -20,8 +20,10 @@ import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { AUTONOMY_HELP } from "../../src/core/settings-awareness.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
+import { PLAYWRIGHT_CORE_VERSION } from "../../src/domains/lifecycle/browser-component.js";
+import { componentInstallDir } from "../../src/domains/lifecycle/components.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
+import type { ActionClass, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { denialLines } from "../../src/domains/safety/denial.js";
@@ -49,6 +51,13 @@ import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createAskUserTool } from "../../src/tools/ask-user.js";
 import { bashTool } from "../../src/tools/bash.js";
+import {
+	browserOutwardHosts,
+	browserToolSurface,
+	browserUngrantedEndpoint,
+	grantBrowserEndpoint,
+	grantBrowserHosts,
+} from "../../src/tools/browser/surface.js";
 import { editTool } from "../../src/tools/edit.js";
 import {
 	createRegistry,
@@ -162,6 +171,148 @@ test("a verify check that runs a command is contained at default like bash; list
 		{ check: undefined, sandboxed: false },
 	]);
 	deepStrictEqual(session.reviewed, []);
+});
+
+test("every browser op is contained at default like bash; a host beyond loopback asks before the page reaches it", async (t) => {
+	const home = await isolateClioEnv("clio-contained-browser-home-");
+	t.after(() => home.restore());
+	// A provisioned component, so only the host rule can ask.
+	const pkg = join(componentInstallDir("browser", PLAYWRIGHT_CORE_VERSION), "node_modules", "playwright-core");
+	mkdirSync(pkg, { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "playwright-core", main: "index.js" }));
+	writeFileSync(join(pkg, "index.js"), "");
+	mkdirSync(join(pkg, "..", "..", "browsers", "chromium_headless_shell-1"), { recursive: true });
+	const session = defaultSession(workspace("clio-contained-browser-"), { sandbox: true, snapshots: false });
+	const ran: Array<{ op: unknown; sandboxed: boolean }> = [];
+	session.registry.register({
+		...browserToolSurface,
+		run: async (args, options) => {
+			ran.push({ op: args.op, sandboxed: options?.shellSandbox !== undefined });
+			return { kind: "ok", output: "" };
+		},
+	});
+	for (const args of [
+		{ op: "open", url: "http://127.0.0.1:5173/" },
+		{ op: "run", script: "await page.click('#save')" },
+		{ op: "look" },
+		{ op: "serve", command: "npm run dev", ready: "http://127.0.0.1:5173/" },
+		// Hermetic reaches loopback only: no host to ask for, and the body refuses this one plainly.
+		{ op: "open", url: "https://example.com/", hermetic: true },
+	]) {
+		strictEqual((await session.registry.invoke({ tool: ToolNames.Browser, args })).kind, "ok", JSON.stringify(args));
+	}
+	const outward = await session.registry.invoke({
+		tool: ToolNames.Browser,
+		args: { op: "open", url: "https://example.com/" },
+	});
+	strictEqual(outward.kind, "blocked");
+	deepStrictEqual(ran, [
+		{ op: "open", sandboxed: true },
+		{ op: "run", sandboxed: true },
+		{ op: "look", sandboxed: true },
+		{ op: "serve", sandboxed: true },
+		{ op: "open", sandboxed: true },
+	]);
+});
+
+test("a browser host granted beyond loopback lasts for its session: another session, or a switch back, asks again", async (t) => {
+	const home = await isolateClioEnv("clio-contained-browser-grant-");
+	t.after(() => home.restore());
+	const pkg = join(componentInstallDir("browser", PLAYWRIGHT_CORE_VERSION), "node_modules", "playwright-core");
+	mkdirSync(pkg, { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "playwright-core", main: "index.js" }));
+	writeFileSync(join(pkg, "index.js"), "");
+	mkdirSync(join(pkg, "..", "..", "browsers", "chromium_headless_shell-1"), { recursive: true });
+	const { registry } = defaultSession(
+		workspace("clio-contained-browser-grant-"),
+		{ sandbox: true, snapshots: false },
+		{ operatorAttends: () => true },
+	);
+	// The body's own first step: grant the hosts admission just confirmed.
+	registry.register({
+		...browserToolSurface,
+		run: async (args, options) => {
+			grantBrowserHosts(options?.sessionId, browserOutwardHosts(args, options?.sessionId));
+			return { kind: "ok", output: "" };
+		},
+	});
+	const cards: Array<{ requestId: string; actionClass: ActionClass }> = [];
+	registry.onPermissionRequired((_call, decision, meta) =>
+		cards.push({ requestId: meta.requestId, actionClass: decision.classification.actionClass }),
+	);
+	const openIn = async (sessionId: string) => {
+		const before = cards.length;
+		const pending = registry.invoke(
+			{ tool: ToolNames.Browser, args: { op: "open", url: "https://docs.example.org/guide" } },
+			{ sessionId },
+		);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const card = cards.length > before ? cards.at(-1) : undefined;
+		if (card) await registry.resumeParkedCalls({ ...card, requestedBy: "contract-operator" });
+		return { sessionId, asked: card !== undefined, kind: (await pending).kind };
+	};
+	deepStrictEqual(
+		[await openIn("A"), await openIn("A"), await openIn("B"), await openIn("A")],
+		[
+			{ sessionId: "A", asked: true, kind: "ok" },
+			{ sessionId: "A", asked: false, kind: "ok" },
+			{ sessionId: "B", asked: true, kind: "ok" },
+			{ sessionId: "A", asked: true, kind: "ok" },
+		],
+	);
+});
+
+test("a browser attach asks once per CDP endpoint per session, whatever spelling names it", async (t) => {
+	const home = await isolateClioEnv("clio-contained-browser-attach-");
+	t.after(() => home.restore());
+	const pkg = join(componentInstallDir("browser", PLAYWRIGHT_CORE_VERSION), "node_modules", "playwright-core");
+	mkdirSync(pkg, { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "playwright-core", main: "index.js" }));
+	writeFileSync(join(pkg, "index.js"), "");
+	mkdirSync(join(pkg, "..", "..", "browsers", "chromium_headless_shell-1"), { recursive: true });
+	const { registry } = defaultSession(
+		workspace("clio-contained-browser-attach-"),
+		{ sandbox: true, snapshots: false },
+		{ operatorAttends: () => true },
+	);
+	registry.register({
+		...browserToolSurface,
+		run: async (args, options) => {
+			const grant = browserUngrantedEndpoint(args, options?.sessionId);
+			if (grant !== undefined) grantBrowserEndpoint(options?.sessionId, grant);
+			return { kind: "ok", output: "" };
+		},
+	});
+	const cards: Array<{ requestId: string; actionClass: ActionClass; ruleId: string | undefined }> = [];
+	registry.onPermissionRequired((_call, decision, meta) =>
+		cards.push({
+			requestId: meta.requestId,
+			actionClass: decision.classification.actionClass,
+			ruleId: decision.kind === "ask" ? decision.confirmationRuleId : undefined,
+		}),
+	);
+	const attachIn = async (sessionId: string, endpoint: string) => {
+		const before = cards.length;
+		const pending = registry.invoke({ tool: ToolNames.Browser, args: { op: "attach", endpoint } }, { sessionId });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const card = cards.length > before ? cards.at(-1) : undefined;
+		if (card) await registry.resumeParkedCalls({ ...card, requestedBy: "contract-operator" });
+		return { endpoint, asked: card?.ruleId ?? false, kind: (await pending).kind };
+	};
+	deepStrictEqual(
+		[
+			await attachIn("A", "9222"),
+			await attachIn("A", "http://127.0.0.1:9222/json/version"),
+			await attachIn("A", "127.0.0.1:9339"),
+			await attachIn("B", "9222"),
+		],
+		[
+			{ endpoint: "9222", asked: "browser-attach-endpoint", kind: "ok" },
+			{ endpoint: "http://127.0.0.1:9222/json/version", asked: false, kind: "ok" },
+			{ endpoint: "127.0.0.1:9339", asked: "browser-attach-endpoint", kind: "ok" },
+			{ endpoint: "9222", asked: "browser-attach-endpoint", kind: "ok" },
+		],
+	);
 });
 
 // ob-yolo Q7: a recognized command with unsandboxed: true ran unconfined at default with no review.

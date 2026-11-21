@@ -40,6 +40,7 @@ export const ACP_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"task-ledger",
 	"workspace",
 	"tool-output",
+	"screenshots",
 	"protected-artifact",
 	"compaction",
 	"prompt-manifest",
@@ -110,6 +111,8 @@ function expectedFormat(
 		case "prompt-manifest":
 		case "audit":
 			return "json";
+		case "screenshots":
+			return "image";
 		case "workspace":
 			return artifact.path ? workspaceFormat(artifact.path) : "text";
 		default:
@@ -213,6 +216,12 @@ export async function readAcpArtifact(
 		lines.push(line);
 		bytes += size;
 	}
+	// The picture rides the first page whole or not at all; a client that gets none reads the file at its path line.
+	const picture = !request.details && offset === 0 ? loaded.image : undefined;
+	const image =
+		picture !== undefined && picture.data.length + bytes <= MAX_PAGE_BYTES
+			? { mimeType: picture.mimeType, data: picture.data }
+			: undefined;
 	return {
 		id: request.id,
 		category: artifact.category,
@@ -223,6 +232,7 @@ export async function readAcpArtifact(
 		totalLines,
 		nextOffset: index < totalLines ? index : null,
 		...(clippedLines > 0 ? { clippedLines } : {}),
+		...(image !== undefined ? { image } : {}),
 		...(!request.details && loaded.details
 			? { details: { format: loaded.details.format, lineCount: loaded.details.lines.length } }
 			: {}),
