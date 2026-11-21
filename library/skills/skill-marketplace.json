@@ -62,6 +62,23 @@
 			"category": "coding"
 		},
 		{
+			"name": "web-debug",
+			"description": "Debugs a web front end in a headless browser: starts the dev server and a page check in one command, reads console errors, uncaught exceptions and failed requests as JSON, runs Playwright step files, and takes screenshots only for layout. Not for fetching documentation pages; use web_fetch.",
+			"triggers": [
+				"page throws on load",
+				"console error in the browser",
+				"failing request in the web app",
+				"layout broken at mobile width",
+				"check the page in a browser",
+				"playwright step file",
+				"screenshot the web app"
+			],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/web-debug",
+			"version": "0.1.0",
+			"audit": "pass",
+			"category": "coding"
+		},
+		{
 			"name": "context-handoff",
 			"description": "Writes a durable, redacted, reference-not-copy handoff document when a session winds down or context is about to be compacted or lost, so the next session or agent can continue. Not for orienting at the start of a session; use context-prime.",
 			"triggers": [

@@ -1060,6 +1060,33 @@ entries:
           engineer. User-invoked only. Not for weighing approaches or deciding
           the design; use architecture first."
   - kind: skill
+    name: web-debug
+    description: "Debugs a web front end in a headless browser: starts the dev
+      server and a page check in one command, reads console errors, uncaught
+      exceptions and failed requests as JSON, runs Playwright step files, and
+      takes screenshots only for layout. Not for fetching documentation pages;
+      use web_fetch."
+    category: coding
+    audit: pass
+    triggers:
+      - page throws on load
+      - console error in the browser
+      - failing request in the web app
+      - layout broken at mobile width
+      - check the page in a browser
+      - playwright step file
+      - screenshot the web app
+    version: 0.1.0
+    sourceUrl: skills/coding/web-debug
+    sha256: 2da164706bbf4a5d35c0c761feb059fd673d02e8e19869a77d42e0096cd6d1fe
+    provides:
+      - kind: skill
+        name: web-debug
+        description: "Debugs a web front end in a headless browser: starts the dev
+          server and a page check in one command, reads console errors, uncaught
+          exceptions and failed requests as JSON, runs Playwright step files,
+          and takes screenshots only for layout. Not for fetching "
+  - kind: skill
     name: workflow-capture
     description: "Packages a workflow that just happened into a reusable SKILL.md:
       reconstructs it from the session record, checks overlap with installed

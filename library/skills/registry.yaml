@@ -20,6 +20,10 @@ skills:
     path: coding/tdd
     version: 0.4.1
     sha256: 4721917747a3ffa1a4ff178e28a5f0b4e75a53438ce9563ca298290e9475467a
+  - name: web-debug
+    path: coding/web-debug
+    version: 0.1.0
+    sha256: 861b077aeb088404a52016700734a12bde3228560c1d716239c47f54a0bad595
   # ── context ──
   - name: context-handoff
     path: context/context-handoff
