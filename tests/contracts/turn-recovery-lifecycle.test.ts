@@ -318,6 +318,67 @@ test("an OAuth rejection refreshes the sent token once, then retries or ends wit
 		});
 });
 
+test("a retried request is recorded recovered when it answers, not when the rest of its turn ends (C-26)", async () => {
+	const failed = {
+		role: "assistant",
+		content: [],
+		stopReason: "error",
+		errorMessage: "Connection error.",
+	} as unknown as AgentMessage;
+	const answered = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call", name: "read", arguments: {} }],
+		stopReason: "toolUse",
+	} as unknown as AgentMessage;
+	const state = { messages: [failed] as AgentMessage[] };
+	const listeners = new Set<(event: { type: string; message?: AgentMessage }) => unknown>();
+	const phases: string[] = [];
+	let phasesAtAnswer: string[] = [];
+	const runtime = {
+		runtimeId: "litellm",
+		runtimeResolution: { target: { id: "gw" }, runtime: { id: "litellm" } },
+		agent: {
+			state,
+			subscribe(listener: (event: { type: string; message?: AgentMessage }) => unknown) {
+				listeners.add(listener);
+				return () => listeners.delete(listener);
+			},
+			async continue() {
+				state.messages.push(answered);
+				for (const listener of listeners) await listener({ type: "message_end", message: answered });
+				// The rest of the turn (its tool rounds) runs on inside the same continue, long after the answer.
+				phasesAtAnswer = [...phases];
+				state.messages.push({
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					stopReason: "stop",
+				} as AgentMessage);
+			},
+		},
+	} as unknown as AgentRuntime;
+	const recovery = createTurnRecovery({
+		state: createTurnState(),
+		persistence: { appendRetryStatus() {}, wasPersisted: () => true } as unknown as TurnRecoveryDeps["persistence"],
+		context: {} as TurnRecoveryDeps["context"],
+		retrySettings: () => ({ ...DEFAULT_RETRY_SETTINGS, baseDelayMs: 1, maxDelayMs: 1 }),
+		markPersistedUserEcho: async (_text, prompt) => prompt(),
+		emitRetryStatus: (status) => {
+			if (status.phase !== "waiting") phases.push(status.phase);
+		},
+		emitFailureMessage() {},
+		emitNotice() {},
+	});
+	const handled = await recovery.runTransientRetryChain(
+		runtime,
+		"request",
+		{ stopReason: "error", errorMessage: "Connection error.", message: failed },
+		[failed],
+	);
+	strictEqual(handled, true);
+	deepStrictEqual(phasesAtAnswer, ["scheduled", "retrying", "recovered"]);
+	deepStrictEqual(phases, ["scheduled", "retrying", "recovered"], "recovered is recorded once");
+});
+
 test("Stop fences deferred preparation and compaction before model calls or late publication", async (t) => {
 	for (const phase of ["prepare", "compaction"] as const)
 		for (const navigate of [false, true]) {

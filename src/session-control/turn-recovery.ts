@@ -769,6 +769,22 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			if (cancelled()) return true;
 			// A continue that throws before its run starts still classifies against an attempt of its own.
 			state.runEvidence.beginAttempt();
+			// The retried request answering is the recovery; the rest of the turn runs on inside this continue, and a
+			// later failure in it starts a ladder of its own rather than inheriting this one's spent rungs (C-26). An agent
+			// without an event stream is read once the continue ends, below.
+			let recovered = false;
+			const unsubscribe = movingNow
+				? undefined
+				: agentRuntime.agent.subscribe?.((event) => {
+						if (recovered || event.type !== "message_end" || event.message.role !== "assistant") return;
+						if (event.message.stopReason === "error" || event.message.stopReason === "aborted") return;
+						recovered = true;
+						recordRetryStatus({ phase: "recovered", attempt, maxAttempts, ...waitFacts(chainProviderWaits, false) });
+						chainAttempt = 0;
+						chainOwnRetries = 0;
+						chainProviderWaits = 0;
+						chainWaitedMs = 0;
+					});
 			try {
 				state.routeMoveSeat = true;
 				await agentRuntime.agent.continue();
@@ -803,6 +819,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				continue;
 			} finally {
 				state.routeMoveSeat = false;
+				unsubscribe?.();
 			}
 
 			if (cancelled()) return true;
@@ -815,7 +832,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			const settled = detectTerminalFailureFromState(agentRuntime.agent);
 			if (!settled) {
 				// A moved request answering is no recovery of anything: the row that moved it already said what happened.
-				if (!movingNow) {
+				if (!movingNow && !recovered) {
 					recordRetryStatus({
 						phase: "recovered",
 						attempt,
