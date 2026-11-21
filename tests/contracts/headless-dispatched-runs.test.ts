@@ -125,11 +125,11 @@ it("reports the no-work reason on the headless failure line", () => {
 		describeRuns([
 			{
 				...run("idle", "failed"),
-				outcomeCode: "worker_no_work",
-				outcomeDetail: "worker executed no tools, so it did none of its assignment",
+				outcomeCode: "obligation_unmet",
+				outcomeDetail: "obligation change-or-declared unmet: worker executed no tools, so it did none of its assignment",
 			},
 		]),
-		/idle \(coder, worker_no_work\): worker executed no tools/u,
+		/idle \(coder, obligation_unmet\): obligation change-or-declared unmet: worker executed no tools/u,
 	);
 });
 
@@ -149,14 +149,14 @@ it("reports the outcome code and bounded detail for any failed run", () => {
 it("carries a bounded structured reason for the JSON settlement", () => {
 	const projected = projectDispatchedRunOutcome({
 		...run("idle", "failed"),
-		outcomeCode: "worker_no_work",
+		outcomeCode: "obligation_unmet",
 		outcomeDetail: "worker executed no tools",
 	});
 	deepStrictEqual(projected, {
 		runId: "idle",
 		agentId: "coder",
 		outcome: "failed",
-		outcomeCode: "worker_no_work",
+		outcomeCode: "obligation_unmet",
 		outcomeDetail: "worker executed no tools",
 	});
 });

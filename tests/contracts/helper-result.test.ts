@@ -15,7 +15,7 @@ import { executedCalls, summarizeToolActivity } from "../../src/domains/dispatch
 import { approvedIdentityForSpec } from "../../src/domains/dispatch/worker-protocol.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
 import { parseWorkerSpec, workerSpecToolNames } from "../../src/worker/spec-contract.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { gradeWork } from "../harness/grade-facts.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -27,7 +27,11 @@ const evidence = {
 	observedReadRanges: new Map([["/repo/source.ts", [[1, 1] as const]]]),
 };
 const samples: Record<InternalHelperResultKind, Record<string, unknown>> = {
-	"mutation-report": { mutatedPaths: [], validations: [] },
+	"mutation-report": {
+		completion: { state: "done", limitations: [], unverified: [] },
+		mutatedPaths: [],
+		validations: [],
+	},
 	"scout-report": {
 		findings: [{ claim: "Exports answer", path: "source.ts", line: 1 }],
 		needsSplit: false,
@@ -89,7 +93,11 @@ test("typed mutation reports retain semantic grounding and their authorship and 
 	};
 	const unsupported = validateStructuredHelperResult({
 		...input,
-		data: { mutatedPaths: ["missing.ts"], validations: [] },
+		data: {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: ["missing.ts"],
+			validations: [],
+		},
 	});
 	strictEqual(unsupported.structured, null);
 	ok(unsupported.validation.reason?.includes("this run never wrote"));
@@ -128,12 +136,20 @@ test("a mutation report's baseline failure does not fail quality, and an unmarke
 	const contract = { kind: "mutation-report" as const };
 	const passed = { name: "python3 -m unittest", passed: true, evidence: "OK" };
 	const red = { name: "python3 -m unittest", passed: false, evidence: "FAILED (failures=1)" };
-	const baseline = { mutatedPaths: [], validations: [{ ...red, baseline: true }, passed] };
+	const baseline = {
+		completion: { state: "done", limitations: [], unverified: [] },
+		mutatedPaths: [],
+		validations: [{ ...red, baseline: true }, passed],
+	};
 	const result = validateStructuredHelperResult({ ...evidence, contract, data: baseline });
 	strictEqual(result.validation.quality, "pass");
 	deepStrictEqual(result.structured?.data, baseline);
 	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(baseline)), []);
-	const unmarked = { mutatedPaths: [], validations: [red, passed] };
+	const unmarked = {
+		completion: { state: "done", limitations: [], unverified: [] },
+		mutatedPaths: [],
+		validations: [red, passed],
+	};
 	strictEqual(validateStructuredHelperResult({ ...evidence, contract, data: unmarked }).validation.quality, "fail");
 	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(unmarked)), ["python3 -m unittest"]);
 });
@@ -263,6 +279,8 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 				promise: Promise.resolve({ exitCode: 0, signal: null }),
 				abort() {},
 				events: (async function* () {
+					// A provenance report meets the observed-evidence obligation only after it read something.
+					for (const event of observedReadEvents("receipt.json")) yield event;
 					yield {
 						type: "clio_coder_helper_result",
 						payload: {
@@ -365,6 +383,7 @@ test("headless human output lists a code check that ran and failed as failed, no
 	ok(human.includes(" failed_checks=1 verification=unverified not_verified=2 "), human);
 	// CLI-6: a mutation report lists only executed checks in validations, so a failed one is a failure, not a gap.
 	const report = {
+		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: ["a.js"],
 		validations: [
 			{ name: "npm test", passed: false, evidence: "exit 1" },
@@ -413,7 +432,12 @@ test("headless human output exposes a sealed coder limitation between narration 
 					payload: {
 						version: 1,
 						kind: "mutation-report",
-						data: { mutatedPaths: [], validations: [], declaredChecks: [limitation] },
+						data: {
+							completion: { state: "done", limitations: [], unverified: [] },
+							mutatedPaths: [],
+							validations: [],
+							declaredChecks: [limitation],
+						},
 					},
 				};
 			})(),

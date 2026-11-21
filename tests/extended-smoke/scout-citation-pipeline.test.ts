@@ -89,6 +89,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 				if (isMain(request)) return "Pipeline outcomes are recorded in the dispatch receipt.";
 				if (!isScout(request)) {
 					return JSON.stringify({
+						completion: { state: "done", limitations: [], unverified: [] },
 						mutatedPaths: [],
 						validations: [
 							{
@@ -116,7 +117,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 							? null
 							: { name: "dispatch", arguments: fixture.dispatch, id: "pipeline" };
 					}
-					// A dependent Documenter that executes no tool seals worker_no_work.
+					// A dependent Documenter that executes no tool leaves its obligation unmet.
 					if (!isScout(request)) {
 						return messages(request).some((message) => message.role === "tool")
 							? null

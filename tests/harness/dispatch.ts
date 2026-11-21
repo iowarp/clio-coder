@@ -135,3 +135,21 @@ export function holdEventLoop(): { release(): void } {
 		},
 	};
 }
+
+/**
+ * One read the worker ran and that succeeded, as a dispatch stub yields it: an explorer's report owes observed
+ * evidence (fleet design 4.8), so a stub that must succeed reads once before it reports.
+ */
+export function observedReadEvents(path = "fixture.txt", toolCallId = "observed-read"): Array<Record<string, unknown>> {
+	return [
+		{ type: "tool_execution_start", toolCallId, toolName: "read", args: { path } },
+		{
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: "read",
+			isError: false,
+			result: { content: [{ type: "text", text: path }] },
+		},
+		{ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId, outcome: "ok", durationMs: 1 } },
+	];
+}

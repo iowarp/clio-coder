@@ -114,7 +114,12 @@ describe("worker execute refusals", () => {
 		strictEqual(reported.requests, 4);
 		ok(JSON.stringify(reported.result.messages.at(-1)).includes("Changed a.py; tests pass."));
 		// A helper-result worker reports through its result tool, which that round names over the full list (x2-3, row 158).
-		const report = { mutatedPaths: [], validations: [], observations: ["./mark.sh was refused three times."] };
+		const report = {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: [],
+			validations: [],
+			observations: ["./mark.sh was refused three times."],
+		};
 		const helper = await runDenyWorker(
 			[[mark("one")], [mark("two")], [mark("three")], [{ name: "clio_submit_result", arguments: JSON.stringify(report) }]],
 			true,

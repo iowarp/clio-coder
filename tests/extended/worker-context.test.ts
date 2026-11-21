@@ -1058,7 +1058,13 @@ test("every role with a result hands back at its context share, whatever tools i
 		ok(fired.some((entry) => entry.runId === "run-handback-builder" && entry.evidence === "bound:context@worker"));
 		// A builder that owes a mutation report, on a route that offers the helper only at the handoff: the crossing
 		// round itself offers the helper, and the run submits through it.
-		const report = { mutatedPaths: [], validations: [], summary: "Checked the three files.", commitMessage: null };
+		const report = {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: [],
+			validations: [],
+			summary: "Checked the three files.",
+			commitMessage: null,
+		};
 		const structured = await runFauxWorker(
 			env.dir,
 			(done) =>

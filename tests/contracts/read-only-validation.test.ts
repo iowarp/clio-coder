@@ -25,6 +25,7 @@ import {
 	type VerifyCallOutcome,
 	verifyCallStart,
 } from "../../src/domains/dispatch/run-findings.js";
+import { receiptAssurance } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { type CallVerdict, classifyCall, settleCheckCall } from "../../src/domains/safety/check-classifier.js";
@@ -109,7 +110,8 @@ it("mutation reports accept omitted denied checks as an empty array without asse
 	const contract = { kind: "mutation-report" as const };
 	const result = validateResultContract({
 		contract,
-		output: '{"mutatedPaths":[],"validations":[],"summary":"Read the source."}',
+		output:
+			'{"completion":{"state":"done","limitations":[],"unverified":[]},"mutatedPaths":[],"validations":[],"summary":"Read the source."}',
 		cwd: process.cwd(),
 		networkAllowed: false,
 		filesystem: { readFile: () => null },
@@ -151,6 +153,7 @@ it("successful writes without executed checks conform without claiming validatio
 	recorder.start("write", "write", { path: "src/math.ts" });
 	recorder.finish("write", false);
 	const output = JSON.stringify({
+		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: ["src/math.ts"],
 		validations: [],
 		observations: ["Read and edited source; this is not a passed check."],
@@ -225,7 +228,8 @@ it("editing reports distinguish lack of measured checks from execution success",
 		});
 		const result = validateResultContract({
 			contract: { kind: "mutation-report" },
-			output: '{"mutatedPaths":["src/math.ts"],"validations":[]}',
+			output:
+				'{"completion":{"state":"done","limitations":[],"unverified":[]},"mutatedPaths":["src/math.ts"],"validations":[]}',
 			cwd,
 			networkAllowed: false,
 			filesystem: { readFile: () => null },
@@ -256,6 +260,7 @@ it("a verify that resolved to no check ran nothing, so a later pass under the de
 			return validateResultContract({
 				contract: { kind: "mutation-report" },
 				output: JSON.stringify({
+					completion: { state: "done", limitations: [], unverified: [] },
 					mutatedPaths: [],
 					validations: [{ name: "verify python-unittest", passed: true, evidence: "exit 0" }],
 				}),
@@ -449,7 +454,11 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 		[failed, passed],
 		[passed, failed],
 	]) {
-		const output = JSON.stringify({ mutatedPaths: [], validations });
+		const output = JSON.stringify({
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: [],
+			validations,
+		});
 		strictEqual(
 			validateResultContract({
 				contract: { kind: "mutation-report" },
@@ -491,6 +500,8 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 });
 
 it("an observed red judges only the tree it ran on, and respelled runs of one check settle each other (bt-27)", async () => {
+	// The last sealed result-contract fact, so the exit code below reads the assurance the receipt would carry.
+	let sealedFact: ReturnType<typeof validateResultContract> | null = null;
 	const seal = (steps: ReadonlyArray<readonly [string, string, boolean?]>, validations: unknown[]) => {
 		const recorder = createRunEffectsRecorder(process.cwd());
 		for (const [id, command, failed] of steps) {
@@ -500,9 +511,10 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 			recorder.finish(id, failed === true);
 		}
 		const effects = recorder.snapshot();
-		const quality = validateResultContract({
+		sealedFact = validateResultContract({
 			contract: { kind: "mutation-report" },
 			output: JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
 				mutatedPaths: steps.some(([, step]) => step === "edit") ? ["src/calc.c"] : [],
 				validations,
 			}),
@@ -510,7 +522,8 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 			networkAllowed: false,
 			filesystem: { readFile: () => "" },
 			observedRunEffects: effects,
-		}).quality;
+		});
+		const quality = sealedFact.quality;
 		const typedValidations = typedValidationFactsFromObservedEffects(effects);
 		return { quality, state: deriveRunVerification({ toolStats: [], typedValidations }).state };
 	};
@@ -627,8 +640,17 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 	strictEqual(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality, "unmeasured");
 	strictEqual(seal([["base", "pytest -q", true]], [{ ...red, name: "pytest" }, green]).quality, "fail");
 	// x1-5: a sealed fail exits 1, so `run --agent coder ... && git push` stops; a baseline red stays 0.
-	const exitCode = (quality: string) =>
-		mapExitCode({ exitCode: 0, quality: { resultContract: { quality } } } as unknown as RunResult);
+	// Called on a seal() result, so the seal it reads ran first.
+	const exitCode = (_sealed: string) =>
+		mapExitCode({
+			exitCode: 0,
+			verdict: {
+				assurance: receiptAssurance({
+					quality: { typedValidations: [], resultContract: sealedFact },
+					verification: { state: "unverified", basis: "no-validation-tool" },
+				}),
+			},
+		} as unknown as RunResult);
 	strictEqual(
 		await exitCode(
 			seal(
@@ -662,6 +684,7 @@ it("a green claim against a red latest verify on the final tree seals fail, as t
 		return validateResultContract({
 			contract: { kind: "mutation-report" },
 			output: JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
 				mutatedPaths: ["src/calc.c"],
 				validations: [{ name: "test", passed: true, evidence: "exit 0" }],
 			}),
@@ -981,6 +1004,7 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		const claim = validateResultContract({
 			contract: { kind: "mutation-report" },
 			output: JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
 				mutatedPaths: ["src/a.py"],
 				validations: [{ name: "pytest", passed: true, evidence: "exit 0" }],
 			}),
@@ -1527,7 +1551,11 @@ it("a run that executed node --check grounds its node --check claim, also behind
 		const effects = recorder.snapshot();
 		return groundClaimedValidations({
 			contractKind: "mutation-report",
-			output: JSON.stringify({ mutatedPaths: ["src/a.ts"], validations: [{ name: claim, passed: true }] }),
+			output: JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
+				mutatedPaths: ["src/a.ts"],
+				validations: [{ name: claim, passed: true }],
+			}),
 			executedCommands: effects.verificationCommands,
 			executedCheckingCalls: 1,
 		})?.grounded;

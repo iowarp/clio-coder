@@ -14,7 +14,7 @@ import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
 import { getDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -44,6 +44,8 @@ function controlledWorker() {
 		},
 		events: (async function* () {
 			const outcome = await done.promise;
+			// A provenance report owes observed evidence, so a run that succeeds reads once first.
+			if (outcome.exitCode === 0) for (const event of observedReadEvents()) yield event;
 			if (outcome.exitCode === 0)
 				yield {
 					type: "message_end",
@@ -544,6 +546,7 @@ describe("dispatch member controls", () => {
 		const f = await fixture(1, (worker, count) => {
 			worker.worker.events = (async function* () {
 				const outcome = await worker.worker.promise;
+				if (outcome.exitCode === 0) for (const event of observedReadEvents()) yield event;
 				yield {
 					type: "message_end",
 					message: {
@@ -648,6 +651,7 @@ describe("dispatch member controls", () => {
 			ok(result);
 			worker.worker.events = (async function* () {
 				const outcome = await worker.worker.promise;
+				if (outcome.exitCode === 0) for (const event of observedReadEvents()) yield event;
 				if (outcome.exitCode === 0)
 					yield {
 						type: "message_end",

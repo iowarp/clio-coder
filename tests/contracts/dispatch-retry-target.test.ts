@@ -16,7 +16,7 @@ import {
 import { defaultRoutingIntent } from "../../src/domains/dispatch/routing-intent.js";
 import { endpointIdentityHash } from "../../src/domains/dispatch/worker-protocol.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -79,6 +79,8 @@ async function retryFleet(
 		report?: object;
 		models?: ReadonlyArray<string>;
 		onSpawn?: (spec: WorkerSpec) => void;
+		/** The succeeding worker reads once, so its provenance report meets the observed-evidence obligation. */
+		observes?: boolean;
 		/** Active routing for researchers at the balanced posture, with every route ready. */
 		adaptive?: boolean;
 	} = {},
@@ -151,6 +153,7 @@ async function retryFleet(
 				events: (async function* () {
 					if (result.exitCode !== 0 && options.failureCode !== undefined)
 						yield { type: "clio_coder_run_outcome", payload: { outcomeCode: options.failureCode } };
+					if (result.exitCode === 0 && options.observes === true) for (const event of observedReadEvents()) yield event;
 					if (result.exitCode === 0)
 						yield {
 							type: "message_end",
@@ -356,7 +359,12 @@ describe("retry target selection", () => {
 		git("commit", "-qm", "base");
 		const trees: Array<{ path: string | undefined; present: boolean; model: string }> = [];
 		const fleet = await retryFleet(["default"], new Set(), new Set(), {
-			report: { mutatedPaths: [], validations: [], summary: "nothing to change" },
+			report: {
+				completion: { state: "done", limitations: [], unverified: [] },
+				mutatedPaths: [],
+				validations: [],
+				summary: "nothing to change",
+			},
 			models: ["gpt-4o-mini"],
 			onSpawn: (spec) => {
 				const path = spec.taskWorktree?.path;
@@ -408,6 +416,7 @@ describe("context overflow retry", () => {
 	it("retries once onto the first eligible route with a strictly larger window", async () => {
 		const fleet = await retryFleet(["default", "small", "same", "big"], new Set(["default"]), new Set(), {
 			failure: OVERFLOW,
+			observes: true,
 			windows: { default: 8192, small: 4096, same: 8192, big: 32768 },
 		});
 		try {
@@ -426,6 +435,7 @@ describe("context overflow retry", () => {
 	it("stays terminal with a detail when no route has a larger window", async () => {
 		const fleet = await retryFleet(["default", "small"], new Set(["default"]), new Set(), {
 			failure: OVERFLOW,
+			observes: true,
 			windows: { default: 8192, small: 8192 },
 		});
 		try {
@@ -445,6 +455,7 @@ describe("context overflow retry", () => {
 		const fleet = await retryFleet(["default", "small", "big"], new Set(["default", "small"]), new Set(), {
 			failure: "worker_context_exhausted: the run's context passed its usable window",
 			failureCode: "worker_context_exhausted",
+			observes: true,
 			windows: { default: 8192, small: 4096, big: 32768 },
 		});
 		try {
@@ -463,6 +474,7 @@ describe("context overflow retry", () => {
 	it("does not retry an overflow retry that overflows again", async () => {
 		const fleet = await retryFleet(["default", "mid", "big"], new Set(["default", "mid"]), new Set(), {
 			failure: OVERFLOW,
+			observes: true,
 			windows: { default: 8192, mid: 16384, big: 32768 },
 			maxRetries: 3,
 		});
@@ -482,6 +494,7 @@ describe("context overflow retry", () => {
 	it("does not retry under failover none", async () => {
 		const fleet = await retryFleet(["default", "big"], new Set(["default"]), new Set(), {
 			failure: OVERFLOW,
+			observes: true,
 			windows: { default: 8192, big: 32768 },
 		});
 		try {
