@@ -32,7 +32,7 @@ import {
 	repositoryRelativePath,
 } from "./lesson-evidence.js";
 import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord, eligibleMemoryRecords } from "./operations.js";
-import { claimPathRefusal, memoryRevision, recordClaim } from "./promotion.js";
+import { claimDeliveryPathRefusal, memoryRevision, recordClaim } from "./promotion.js";
 import { memoryStorePath, mutateMemoryRecords, readMemoryStoreSnapshot } from "./store.js";
 import type { MemoryClaimCommand, MemoryRecord } from "./types.js";
 
@@ -199,16 +199,21 @@ interface SourceFile {
  * certainly dead: the first word of the command it recommends no longer resolves (a program on `PATH`, a repository
  * program, a known runner), a file it quotes is gone, or the span it pins is known exactly (found as whole lines of
  * the file, or recovered from the lesson's own words) and the file no longer holds it. A lesson that binds a path
- * outside its repository checkout (another worktree, a scratch root) is refused as it would be at write (CLI-P25). A
+ * outside its repository checkout (another worktree, another checkout) is refused as at write (CLI-P25), with scratch
+ * placement left to the writer. A
  * span it cannot locate either way is undecided, and the lesson is delivered. Null when nothing is certainly dead,
  * otherwise why. It proves nothing about a subcommand, a flag or the claim; validity rests on verdicts.
  */
 function memoryDeliveryCheck(record: MemoryRecord, input: DeliveryCheckInput): string | null {
 	const claim = recordClaim(record);
-	// The write-time path rule, applied to lessons written before it: a lesson binding another worktree or a scratch
-	// path holds for one run only, yet reached every session of the repository.
-	const boundPath = claim === null ? null : claimPathRefusal(claim, record.repository?.key ?? input.root);
-	if (boundPath !== null) return boundPath;
+	// The write-time path rule, applied to repository lessons written before it: a lesson binding another worktree or a
+	// path outside the checkout holds for one run only, yet reached every session of the repository. Judged against the
+	// repository's canonical root (a legacy key may name a subdirectory), never against the reader's scratch roots.
+	if (record.scope === "repo" && claim !== null) {
+		const key = record.repository?.key ?? input.root;
+		const boundPath = claimDeliveryPathRefusal(claim, canonicalMemoryRepositoryIdentity(key)?.key ?? key);
+		if (boundPath !== null) return boundPath;
+	}
 	const recommended = claim?.kind === "command" ? claim.command : claim?.kind === "fix" ? claim.fixed : null;
 	if (recommended !== null) {
 		const word = recommended.argv[0] ?? "";

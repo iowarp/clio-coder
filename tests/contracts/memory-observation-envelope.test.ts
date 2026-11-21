@@ -1,10 +1,11 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { foldProjection } from "../../src/domains/context/fold/pressure.js";
 import type { ObservationSource, ObservationSourceUnit } from "../../src/domains/memory/contract.js";
 import { pruneOrphanedObservations } from "../../src/domains/memory/observation-store.js";
@@ -320,6 +321,12 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		fold.pressure = 0.3;
 		await runtime.runIdleStep();
 		strictEqual(calls, 0, "the margin is a share of the trigger, not of the window");
+		// A trigger of 0 (threshold 0 turns automatic compaction off) is no fold, so nothing is observed from token 0.
+		fold.trigger = 0;
+		fold.pressure = 0;
+		strictEqual(foldProjection(planner, {})?.path, "none");
+		await runtime.runIdleStep();
+		strictEqual(calls, 0, "a zero trigger prepares nothing");
 		fold.trigger = 0.8;
 		fold.pressure = 0.7;
 		await runtime.runIdleStep();
@@ -358,13 +365,24 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		turn(5);
 		await runtime.runIdleStep();
 		strictEqual(calls, 3, "the stop holds for the session");
+		// C-32: a final settlement with nothing decided journals no reminder-outcomes row.
+		const recorded: string[] = [];
+		const stop = telemetryHub().subscribe("memory.observation_recorded", (payload) => {
+			recorded.push(payload.event);
+		});
+		registration.reset();
+		stop();
+		deepStrictEqual(
+			recorded.filter((event) => event === "reminder-outcomes"),
+			[],
+		);
 	} finally {
 		runtime.dispose();
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test("the daily sweep removes the observations of deleted sessions only, and nothing when sessions cannot be listed (C-35)", () => {
+test("the daily sweep removes the observations of deleted sessions only, and nothing when sessions cannot be listed (C-35)", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "memory-observation-orphans-"));
 	try {
 		const observations = join(dir, "memory", "observations");
@@ -373,11 +391,22 @@ test("the daily sweep removes the observations of deleted sessions only, and not
 			mkdirSync(join(observations, id), { recursive: true });
 			writeFileSync(join(observations, id, "batch.json"), "{}");
 		}
-		strictEqual(pruneOrphanedObservations(dir), 1);
-		deepStrictEqual(readdirSync(observations), ["kept"], "a recorded session keeps its observations however old");
+		// A workspace that cannot be listed may hold any candidate's session: nothing goes.
+		const locked = join(dir, "sessions", "locked");
+		mkdirSync(join(locked, "hidden"), { recursive: true });
+		mkdirSync(join(observations, "hidden"), { recursive: true });
+		chmodSync(locked, 0o000);
+		try {
+			strictEqual(await pruneOrphanedObservations(dir), 0);
+		} finally {
+			chmodSync(locked, 0o700);
+		}
+		deepStrictEqual(readdirSync(observations).sort(), ["gone", "hidden", "kept"]);
+		strictEqual(await pruneOrphanedObservations(dir), 1);
+		deepStrictEqual(readdirSync(observations).sort(), ["hidden", "kept"], "a recorded session keeps its observations");
 		rmSync(join(dir, "sessions"), { recursive: true });
-		strictEqual(pruneOrphanedObservations(dir), 0);
-		deepStrictEqual(readdirSync(observations), ["kept"]);
+		strictEqual(await pruneOrphanedObservations(dir), 0);
+		deepStrictEqual(readdirSync(observations).sort(), ["hidden", "kept"]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
