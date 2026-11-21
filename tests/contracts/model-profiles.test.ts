@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -294,6 +294,34 @@ it("loads model-catalog.d overlays from the config, project and env dirs in that
 		else process.env.CLIO_CODER_CONFIG_DIR = saved.config;
 		if (saved.dirs === undefined) delete process.env[MODEL_CATALOG_DIRS_ENV];
 		else process.env[MODEL_CATALOG_DIRS_ENV] = saved.dirs;
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+it("a malformed model-catalog.d file is skipped and named, and the overlays beside it still merge", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-model-catalog-bad-"));
+	try {
+		const dir = join(root, "model-catalog.d");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "10-good.yaml"),
+			"- family: acme-coder\n  matchPatterns: [acme-coder]\n  capabilities: {}\n  quirks: { sampling: { instruct: { temperature: 0.42 } } }\n",
+		);
+		writeFileSync(join(dir, "20-bad.yaml"), "- family: broken\n  matchPatterns: acme\n");
+		const errors: string[] = [];
+		const kb = createProfileKnowledgeBase({
+			overlayRoots: [{ dir, label: "overlay" }],
+			userPath: join(root, "absent.yaml"),
+			onError: (message) => errors.push(message),
+		});
+		deepStrictEqual(kb.lookup("acme-coder-7b")?.entry.quirks, { sampling: { instruct: { temperature: 0.42 } } });
+		strictEqual(errors.length, 1, errors.join("\n"));
+		ok(errors[0]?.includes("20-bad.yaml") && errors[0].includes("matchPatterns"), errors[0]);
+		ok(!errors[0]?.includes("10-good.yaml"), errors[0]);
+		// A reload rereads the files; the bad one is skipped again instead of throwing.
+		kb.reload();
+		deepStrictEqual(kb.lookup("acme-coder-7b")?.entry.quirks, { sampling: { instruct: { temperature: 0.42 } } });
+	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
