@@ -1013,7 +1013,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			if (executable) options.pathToClaudeCodeExecutable = executable;
 			stopExpiryWatch = watchCredentialExpiry(credential?.expiresAt ?? input.credentialExpiresAt, () => {
 				authFailure =
-					"Clio's Claude subscription access token expired. Start a new assignment to refresh it; this run was stopped without replaying its work.";
+					"CLIO Coder's Claude subscription access token expired. Start a new assignment to refresh it; this run was stopped without replaying its work.";
 				abort();
 			});
 			abortController.signal.throwIfAborted();

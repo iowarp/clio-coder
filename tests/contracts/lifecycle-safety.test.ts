@@ -53,7 +53,7 @@ test("lifecycle roots must be distinct and non-nesting through symlink aliases",
 		cache: join(root, "cache"),
 	};
 	match(clioDirLayoutProblems(aliased).join("\n"), /config and data roots resolve to the same path/u);
-	throws(() => assertClioDirLayout(aliased), /Unsafe Clio directory layout/u);
+	throws(() => assertClioDirLayout(aliased), /Unsafe CLIO Coder directory layout/u);
 
 	const nested: ClioDirs = {
 		config: join(root, "config"),

@@ -981,7 +981,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		) {
 			return {
 				reasonCode: "path-policy:readOnlyPaths",
-				reasons: ["Clio settings and workspace trust records are operator-owned and cannot be mutated by tools"],
+				reasons: ["CLIO Coder settings and workspace trust records are operator-owned and cannot be mutated by tools"],
 				policySource: "builtin-classifier",
 			};
 		}
@@ -1201,7 +1201,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command: owned } }, callCwd, owned, trees)) {
 				return floorMatch({
 					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
-					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes Clio's own config, data, state or trust records, which only the operator changes`,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes CLIO Coder's own config, data, state or trust records, which only the operator changes`,
 				});
 			}
 		}
@@ -1239,7 +1239,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const dirs = new Set(stores.map((store) => path.dirname(store)).flatMap(forms));
 		const hit = (spelled: string): YoloFloorHit => ({
 			ruleId: YOLO_FLOOR_RULE_IDS.clioCredentials,
-			reason: `matched ${YOLO_FLOOR_RULE_IDS.clioCredentials}: reads Clio's own credential store (${spelled}), which no task needs`,
+			reason: `matched ${YOLO_FLOOR_RULE_IDS.clioCredentials}: reads CLIO Coder's own credential store (${spelled}), which no task needs`,
 		});
 		const memo = createPathWalkMemo();
 		const lands = (raw: string, wholeDirectory: boolean): boolean => {
@@ -1337,7 +1337,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return held(
 				floorMatch({
 					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
-					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into Clio's own config, data, state or trust records, which only the operator changes`,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into CLIO Coder's own config, data, state or trust records, which only the operator changes`,
 				}),
 			);
 		}
@@ -1440,7 +1440,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return held(
 				floorMatch({
 					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
-					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: runs a script the floor cannot read in a command naming Clio's own config, data, state or trust records, which only the operator changes; write the script to a file with the write tool and run that file`,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: runs a script the floor cannot read in a command naming CLIO Coder's own config, data, state or trust records, which only the operator changes; write the script to a file with the write tool and run that file`,
 				}),
 				[scriptUnplaceableReason(unplaced)],
 			);
@@ -4173,7 +4173,7 @@ function recordUnplaced(budget: ScriptBudget, name: string, note = ""): void {
 const LOGIN_PATH_PENDING_RULE_ID = "login-path-pending";
 
 const LOGIN_PATH_PENDING_REASON =
-	"the login environment bash commands run with is still being captured, so which file a bare `source name` loads is unknown; the call is judged instead of resolved on the PATH Clio was launched with";
+	"the login environment bash commands run with is still being captured, so which file a bare `source name` loads is unknown; the call is judged instead of resolved on the PATH CLIO Coder was launched with";
 
 /** What unconfined yolo, which has no judge, adds to that reason. */
 const LOGIN_PATH_PENDING_YOLO_HOLD =

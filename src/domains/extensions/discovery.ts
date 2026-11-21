@@ -211,7 +211,7 @@ export function parseExtensionManifest(
 		if (!evaluation.satisfied) {
 			diagnostics.push({
 				type: "error",
-				message: `extension ${manifest.id} requires Clio '${clioRange}', but running Clio version is '${evaluation.runningVersion}'`,
+				message: `extension ${manifest.id} requires CLIO Coder '${clioRange}', but running CLIO Coder version is '${evaluation.runningVersion}'`,
 				path: manifestPath,
 			});
 		}

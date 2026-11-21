@@ -398,9 +398,9 @@ describe("dispatch advisory admission and explicit authority", () => {
 			);
 		equal(
 			growth(150),
-			"planned for about 50 tool calls; Clio stops it at 150 (lowered to Clio's overall limit; about 150 if it has to redo its answer)",
+			"planned for about 50 tool calls; CLIO Coder stops it at 150 (lowered to CLIO Coder's overall limit; about 150 if it has to redo its answer)",
 		);
-		equal(growth(50), "Clio stops it at 50 tool calls (lowered to Clio's overall limit)");
+		equal(growth(50), "CLIO Coder stops it at 50 tool calls (lowered to CLIO Coder's overall limit)");
 		ok(
 			!resolveToolBudgetEnvelope({
 				...advisory,

@@ -440,7 +440,7 @@ async function ensureLmStudioResidencyUnlocked(
 				targetId: info.targetId,
 				runtimeId: "lmstudio",
 				model: modelKey,
-				message: `'${modelKey}' on target '${info.targetId}' differs from its load profile (${drift.join(", ")}) but another Clio request is using it; Clio reloads it on a later turn once it is idle.`,
+				message: `'${modelKey}' on target '${info.targetId}' differs from its load profile (${drift.join(", ")}) but another CLIO Coder request is using it; CLIO Coder reloads it on a later turn once it is idle.`,
 			});
 			return leased(keepLoaded());
 		}
@@ -497,7 +497,7 @@ async function ensureLmStudioResidencyUnlocked(
 			targetId: info.targetId,
 			runtimeId: "lmstudio",
 			model: entry.modelKey,
-			message: `unloading '${entry.modelKey}', which Clio loaded earlier on target '${info.targetId}', before loading '${modelKey}'`,
+			message: `unloading '${entry.modelKey}', which CLIO Coder loaded earlier on target '${info.targetId}', before loading '${modelKey}'`,
 			detail: { instance: entry.identifier, replacement: modelKey },
 		});
 	}
@@ -585,7 +585,7 @@ async function ensureLmStudioResidencyUnlocked(
 				targetId: info.targetId,
 				runtimeId: "lmstudio",
 				model: modelKey,
-				message: `LM Studio loaded '${modelKey}' on target '${info.targetId}' but not as its load profile asks (${unmet.join(", ")}). Clio keeps it${served} and will not reload it for this profile.`,
+				message: `LM Studio loaded '${modelKey}' on target '${info.targetId}' but not as its load profile asks (${unmet.join(", ")}). CLIO Coder keeps it${served} and will not reload it for this profile.`,
 				detail: { unmet: unmet.join("; ") },
 			});
 		}
@@ -685,7 +685,7 @@ async function ensureLmStudioResidencyUnlocked(
 		const pin = replacedDrift.join(", ");
 		if (outcome.error !== undefined) {
 			throw new Error(
-				`LM Studio could not load '${replaced.modelKey}' on target '${info.targetId}' to match its load profile (${pin}): ${reason}. Clio could not restore the previous instance (${outcome.error}).`,
+				`LM Studio could not load '${replaced.modelKey}' on target '${info.targetId}' to match its load profile (${pin}): ${reason}. CLIO Coder could not restore the previous instance (${outcome.error}).`,
 				{ cause: error },
 			);
 		}
@@ -699,7 +699,7 @@ async function ensureLmStudioResidencyUnlocked(
 			targetId: info.targetId,
 			runtimeId: "lmstudio",
 			model: modelKey,
-			message: `LM Studio could not load '${modelKey}' on target '${info.targetId}' to match its load profile (${pin}): ${reason}. Clio restored the previous instance${outcome.window !== undefined ? `, which serves ${outcome.window} tokens` : ""}, and will not retry this profile until the instance or the profile changes.`,
+			message: `LM Studio could not load '${modelKey}' on target '${info.targetId}' to match its load profile (${pin}): ${reason}. CLIO Coder restored the previous instance${outcome.window !== undefined ? `, which serves ${outcome.window} tokens` : ""}, and will not retry this profile until the instance or the profile changes.`,
 			detail: { unmet: pin },
 		});
 		return leased(outcome.instanceId ?? model.id);

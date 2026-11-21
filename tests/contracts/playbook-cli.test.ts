@@ -197,7 +197,7 @@ describe("playbook CLI variables", () => {
 			);
 			const result = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
 			strictEqual(result.code, 2, result.stdout + result.stderr);
-			match(result.stdout, /reserved for Clio internal orchestration/);
+			match(result.stdout, /reserved for CLIO Coder internal orchestration/);
 		}
 	});
 

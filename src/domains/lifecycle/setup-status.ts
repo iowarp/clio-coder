@@ -152,7 +152,7 @@ export function describeMissing(
 		case "credential": {
 			if (missing.projectUrl !== undefined)
 				return {
-					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so Clio sends it none of your keys. To use it, define ${missing.target} in your user settings with its own key variable (auth.apiKeyEnvVar).`,
+					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so CLIO Coder sends it none of your keys. To use it, define ${missing.target} in your user settings with its own key variable (auth.apiKeyEnvVar).`,
 				};
 			const command = `clio-coder auth login ${missing.provider}`;
 			const sentence = `${missing.provider} has no key or sign-in stored. Run: ${command}`;

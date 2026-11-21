@@ -162,11 +162,12 @@ export function rememberApprovedFlowPolicy(
 	const root = resolve(workspaceRoot);
 	const existing = recallApprovedFlowPolicy(root);
 	if (existing.kind === "approved" && existing.approved.policyHash === policyHash) return null;
-	if (stateRootRemoved()) return "Clio state was removed; the approved information-flow snapshot cannot be written";
+	if (stateRootRemoved())
+		return "CLIO Coder state was removed; the approved information-flow snapshot cannot be written";
 	try {
 		clioStateDir();
 		withStateFileLockSync(snapshotPath(root), () => {
-			if (stateRootRemoved()) throw new Error("Clio state was removed");
+			if (stateRootRemoved()) throw new Error("CLIO Coder state was removed");
 			const record: SnapshotRecord = { version: 1, workspaceRoot: root, policyPath, policyHash, informationFlow };
 			safeResourceWrite(snapshotPath(root), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
 		});

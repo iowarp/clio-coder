@@ -72,7 +72,7 @@ describe("main-session sandbox Clio roots", () => {
 			const plan = planMainSandboxSpawn(policy, { argv: ["/bin/true"] }, workspace, available);
 			equal(plan.kind, "refused", dir);
 			if (plan.kind === "refused") {
-				match(plan.message, new RegExp(`could not create Clio's directory .*${code}.*the command was not run`, "u"));
+				match(plan.message, new RegExp(`could not create CLIO Coder's directory .*${code}.*the command was not run`, "u"));
 			}
 		}
 	});

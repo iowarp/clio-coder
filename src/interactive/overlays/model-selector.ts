@@ -801,7 +801,9 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number, switch
 			: {
 					label: "context",
 					// The diagnostic's own sentence took three rows at 60 columns and pushed thinking off the card.
-					value: contextNote ? "unknown, so Clio compacts at its token budget; clio-coder configure can set it" : "unknown",
+					value: contextNote
+						? "unknown, so CLIO Coder compacts at its token budget; clio-coder configure can set it"
+						: "unknown",
 					tone: contextNote ? "warning" : "muted",
 				},
 		{
@@ -890,7 +892,7 @@ function modelListWords(source: ModelSource): string {
 		case "cache":
 			return "models from a cached list";
 		case "catalog":
-			return "models from Clio's catalog";
+			return "models from CLIO Coder's catalog";
 		case "default":
 			return "only the connection's default model";
 		default:

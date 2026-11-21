@@ -102,7 +102,7 @@ interface DetailRows {
 export function libraryOriginLabel(origin: LibraryOrigin): string {
 	switch (origin.kind) {
 		case "bundled":
-			return "Bundled with Clio";
+			return "Bundled with CLIO Coder";
 		case "remote":
 			return "Remote";
 		case "local":
@@ -163,7 +163,7 @@ function copyStateWords(state: string): string {
 		case "shadowed":
 			return "overridden";
 		case "incompatible":
-			return "needs another Clio version";
+			return "needs another CLIO Coder version";
 		case "untrusted":
 			return "not trusted";
 		default:
@@ -377,7 +377,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 	if (!owner)
 		reasons.push(
 			resource.source.class === "core"
-				? "Core components ship with Clio and have no package to install, update or remove."
+				? "Core components ship with CLIO Coder and have no package to install, update or remove."
 				: "This file was found directly in a resource root, not installed as a package, so package lifecycle does not apply.",
 		);
 	const selected = owner?.scope === view.scope;

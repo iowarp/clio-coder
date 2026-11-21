@@ -48,7 +48,7 @@ export function workerQuietWords(
 	const quietMs = Math.max(0, now - progress.quietSinceMs);
 	const endsInMs = DEFAULT_HEARTBEAT_SPEC.windowMs + DEFAULT_HEARTBEAT_SPEC.graceMs - quietMs;
 	const left = formatWaitClock(endsInMs);
-	const end = endsInMs >= 1000 ? `Clio stops it in ${left}` : "Clio is stopping it";
+	const end = endsInMs >= 1000 ? `CLIO Coder stops it in ${left}` : "CLIO Coder is stopping it";
 	// A narrow row keeps the countdown, which is what happens next, and lets the age of the silence go first.
 	const forms = [
 		`not responding for ${formatWaitClock(quietMs)} · ${end}`,
@@ -108,7 +108,7 @@ function workerSilenceForms(
 		limitMs === null ? null : limitMs % 60_000 === 0 ? `${limitMs / 60_000}m` : formatWaitClock(limitMs);
 	const limit = limitWords === null ? null : `reply limit ${limitWords}`;
 	const wide =
-		limitWords === null ? "x in /fleet stops it" : `Clio ends a reply after ${limitWords} · x in /fleet stops it`;
+		limitWords === null ? "x in /fleet stops it" : `CLIO Coder ends a reply after ${limitWords} · x in /fleet stops it`;
 	const short = limit === null ? "x in /fleet stops it" : `${limit} · x in /fleet stops it`;
 	// With no history the limit outranks `usual unknown`, so that clause trails where a row drops it first.
 	const middle =

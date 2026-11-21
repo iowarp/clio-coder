@@ -71,7 +71,7 @@ function fakeMux(options: { available?: boolean; reason?: string } = {}) {
 			server: null,
 			self: { workspaceId: null, tabId: null, paneId: "self" },
 			candidates: [],
-			reason: options.reason ?? "HERDR_ENV is not 1, so Clio is not running inside a pane host",
+			reason: options.reason ?? "HERDR_ENV is not 1, so CLIO Coder is not running inside a pane host",
 			refused: false,
 		}),
 		list: () => records,

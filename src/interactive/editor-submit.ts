@@ -441,7 +441,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.notify(
 					"error",
 					boardAgent !== null
-						? `${boardAgent} is not taking messages now, so this was not sent. Esc keeps your text as a draft for Clio.`
+						? `${boardAgent} is not taking messages now, so this was not sent. Esc keeps your text as a draft for CLIO Coder.`
 						: `steer to ${addressee} failed: ${msg}`,
 					`steer:${mention.target}`,
 				);
@@ -459,7 +459,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		if (boardAgent !== null) {
 			deps.notify(
 				"warning",
-				`${boardAgent} already ended, so this was not sent. Esc keeps your text as a draft for Clio.`,
+				`${boardAgent} already ended, so this was not sent. Esc keeps your text as a draft for CLIO Coder.`,
 				`steer:${mention.target}`,
 			);
 			return "rejected";

@@ -145,15 +145,15 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 				: 0,
 		text: (context) =>
 			context.autonomy === "default" || context.autonomy === "yolo"
-				? "Next time just ask: I can preview a Clio settings change for you to Apply. /model and /settings open the same controls."
-				: "/model switches the chat model, and /settings holds every other Clio option.",
+				? "Next time just ask: I can preview a CLIO Coder settings change for you to Apply. /model and /settings open the same controls."
+				: "/model switches the chat model, and /settings holds every other CLIO Coder option.",
 	},
 	{
 		id: "ask-clio",
 		feature: "ask-clio",
 		score: (turn) => (harnessQuestionTopics(turn.prompt).length > 0 && used(turn, "gateway:clio_docs") === 0 ? 2 : 0),
 		text: () =>
-			"Ask me anything about Clio itself: I answer from my bundled docs, source and live settings. /help <query> searches commands and keys.",
+			"Ask me anything about CLIO Coder itself: I answer from my bundled docs, source and live settings. /help <query> searches commands and keys.",
 	},
 	{
 		id: "side-question",
@@ -298,7 +298,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 		id: "welcome",
 		feature: "/help",
 		score: (turn, context) => (turn.priorMessages === 0 && postTurnLessonsSeen(context.profile) === 0 ? 0.5 : 0),
-		text: () => "/help lists every command and key, and you can ask me about Clio itself any time.",
+		text: () => "/help lists every command and key, and you can ask me about CLIO Coder itself any time.",
 	},
 ];
 
