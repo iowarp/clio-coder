@@ -166,6 +166,10 @@ export function dropRetiredSettings(raw: Record<string, unknown>): RetiredSettin
 
 const migration: Migration = {
 	id: ID,
+	projectSettings(raw: unknown): unknown {
+		if (!isRecord(raw) || (raw.version !== undefined && raw.version !== 2)) return raw;
+		return dropRetiredSettings(raw).document;
+	},
 	async up(): Promise<MigrationReport> {
 		return withSettingsLock(() => {
 			const report: MigrationReport = { changed: [], attention: [] };

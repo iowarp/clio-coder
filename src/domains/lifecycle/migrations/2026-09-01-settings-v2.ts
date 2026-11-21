@@ -343,6 +343,9 @@ function reportPath(stateDir: string): string {
 
 const migration: Migration = {
 	id: SETTINGS_V2_MIGRATION_ID,
+	projectSettings(raw: unknown): unknown {
+		return isPlainObject(raw) && raw.version === 2 ? raw : migrateSettingsV1Document(raw).document;
+	},
 	async up(stateDir: string): Promise<void> {
 		withSettingsLock(() => {
 			const path = settingsPath();

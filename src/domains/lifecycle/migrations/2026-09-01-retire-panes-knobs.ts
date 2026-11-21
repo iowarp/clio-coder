@@ -26,6 +26,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 const migration: Migration = {
 	id: "2026-09-01-retire-panes-knobs",
+	projectSettings(raw: unknown): unknown {
+		if (!isPlainObject(raw) || !isPlainObject(raw.panes)) return raw;
+		const next = structuredClone(raw);
+		const panes = next.panes as Record<string, unknown>;
+		for (const key of RETIRED_PANE_KEYS) delete panes[key];
+		if (Object.keys(panes).length === 0) delete next.panes;
+		return next;
+	},
 	async up(): Promise<void> {
 		withSettingsLock(() => {
 			const path = settingsPath();

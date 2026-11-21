@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { formatSettingsIssues, readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
+import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
 import { REGISTERED_MIGRATION_IDS } from "../../src/domains/lifecycle/migrations/registry-ids.js";
@@ -157,6 +158,32 @@ test("a settings failure names `clio-coder upgrade` while a registered migration
 		ok(/fleet\.speculativeDispatch: unknown key/u.test(text), text);
 		ok(!/clio-coder upgrade/u.test(text), text);
 	}
+});
+
+// The installer accepts a candidate only when its own `doctor --json` settings.yaml row is ok,
+// and `upgrade --post-install` runs the migrations only after that, so the row judges the file
+// as the pending migrations would leave it. The reader itself still refuses the file as written.
+test("the candidate check passes a home whose settings only the pending migration rewrites, and still refuses an unknown key", async (t) => {
+	const home = await isolateClioEnv("clio-retired-settings-candidate-");
+	t.after(() => home.restore());
+	const config = join(home.dir, "config");
+	mkdirSync(config, { recursive: true });
+	const file = join(config, "settings.yaml");
+	const recorded = REGISTERED_MIGRATION_IDS.filter((id) => id !== "2026-11-21-retired-settings");
+	writeFileSync(join(config, "migrations.json"), JSON.stringify({ applied: recorded }));
+	const row = () => runDoctor().find((finding) => finding.name === "settings.yaml");
+	const retired = "version: 2\nturnControl:\n  workflows: [orientation, direction, ledger-facts, detached-collection]\n";
+	writeFileSync(file, retired);
+	ok(validateSettingsFile().issues.length > 0, "the reader still refuses the file as written");
+	const passing = row();
+	strictEqual(passing?.ok, true, JSON.stringify(passing));
+	strictEqual(passing?.level, "warn");
+	ok(/2026-11-21-retired-settings.*clio-coder upgrade/u.test(passing?.detail ?? ""), passing?.detail);
+	strictEqual(readFileSync(file, "utf8"), retired, "the check writes nothing");
+	writeFileSync(file, `${retired}mystery: true\n`);
+	const refused = row();
+	strictEqual(refused?.ok, false, JSON.stringify(refused));
+	ok(/mystery: unknown key/u.test(refused?.detail ?? ""), refused?.detail);
 });
 
 test("the v1 migration drops the retired per-agent keys and records why", () => {
