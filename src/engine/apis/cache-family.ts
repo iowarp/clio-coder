@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Api, Context, Model, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
+import { registerSessionResourceCleanup } from "@earendil-works/pi-ai";
 import { resolvedRequestContext } from "../context.js";
 import type { CodexConfiguration } from "../types.js";
 import type { PinnedPromptPrefix } from "./anthropic-system-split.js";
@@ -63,6 +64,51 @@ export function sideCallCacheFamilyId(input: Omit<CacheFamilyInput, "tools" | "l
 /** The option a routed main request carries its own conversation id in, for the state that belongs to one session. */
 const CONVERSATION = "clioCoderConversation";
 
+/** The lane each live main conversation of this process holds, and the lanes each head has taken. */
+const mainLaneOf = new Map<string, { head: string; lane: number }>();
+const mainLanesOf = new Map<string, Set<number>>();
+/** Long-lived hosts open many sessions; a conversation never cleaned up must not hold a lane forever. */
+const MAX_MAIN_CONVERSATIONS = 256;
+
+function releaseMainLane(conversation: string): void {
+	const held = mainLaneOf.get(conversation);
+	if (held === undefined) return;
+	mainLaneOf.delete(conversation);
+	const lanes = mainLanesOf.get(held.head);
+	lanes?.delete(held.lane);
+	if (lanes?.size === 0) mainLanesOf.delete(held.head);
+}
+
+registerSessionResourceCleanup((sessionId) => {
+	if (sessionId !== undefined) return releaseMainLane(sessionId);
+	mainLaneOf.clear();
+	mainLanesOf.clear();
+});
+
+/**
+ * The lane a live main conversation takes among this process's live conversations of one head, as workers take one
+ * through `claimCacheLane` (FL-17): the lowest free lane, kept across its turns and released when its session
+ * resources are (a /new, /resume, a route change, a closed host session). Sessions one after another take lane 0 and
+ * share the head's cache; concurrent ones (several herdr lanes on one install, an ACP or GUI host holding several
+ * sessions) stop sharing one id, under which live conversations lose their own history more often.
+ */
+function claimMainLane(head: string, conversation: string): number {
+	const held = mainLaneOf.get(conversation);
+	if (held?.head === head) return held.lane;
+	releaseMainLane(conversation);
+	if (mainLaneOf.size >= MAX_MAIN_CONVERSATIONS) {
+		const oldest = mainLaneOf.keys().next().value;
+		if (oldest !== undefined) releaseMainLane(oldest);
+	}
+	const lanes = mainLanesOf.get(head) ?? new Set<number>();
+	mainLanesOf.set(head, lanes);
+	let lane = 0;
+	while (lanes.has(lane)) lane += 1;
+	lanes.add(lane);
+	mainLaneOf.set(conversation, { head, lane });
+	return lane;
+}
+
 /**
  * A main session's request with the cache routing id of its pinned head on a session-routed API (M-11). The main
  * thread keyed its routing by its own session id, so a new session never read the tools and install-wide pinned
@@ -72,14 +118,16 @@ const CONVERSATION = "clioCoderConversation";
  * that the per-conversation state (turn state, WebSocket continuation) keys on through `cacheConversationOf`.
  *
  * The id covers the items every such session sends first: the tool declarations and the pinned layer, which the
- * request's prefix hash names. A prompt that does not lead with that layer, or a request with cache retention off,
- * keeps the session's own id.
+ * request's prefix hash names, and ends in the conversation's lane (`claimMainLane`) as a worker's does. A prompt
+ * that does not lead with that layer, or a request with cache retention off, keeps the session's own id. A request
+ * already routed passes through unchanged.
  */
 export function withMainCacheRouting<T extends StreamOptions | SimpleStreamOptions>(
 	model: Model<Api>,
 	context: Context,
 	options: T | undefined,
 ): T | undefined {
+	if (options !== undefined && Object.hasOwn(options, CONVERSATION)) return options;
 	const conversation = options?.sessionId;
 	if (!SESSION_ROUTED_APIS.has(model.api) || !conversation || options.cacheRetention === "none") return options;
 	const extra = options as T & { clioCoderPinnedPrefix?: PinnedPromptPrefix; codexConfiguration?: CodexConfiguration };
@@ -101,7 +149,9 @@ export function withMainCacheRouting<T extends StreamOptions | SimpleStreamOptio
 		systemPrompt: `pinned:${pinned.chars}:${pinned.hash}`,
 		tools: tools ?? [],
 	});
-	return { ...options, sessionId: `clio-coder-m-${head}`, [CONVERSATION]: conversation };
+	// At most 60 characters, under the 64 Pi clamps a prompt cache key to.
+	const lane = claimMainLane(head, conversation) % 1_000_000;
+	return { ...options, sessionId: `clio-coder-m-${head}-${lane}`, [CONVERSATION]: conversation };
 }
 
 /**

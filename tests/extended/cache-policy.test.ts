@@ -24,9 +24,13 @@ import {
 	setEngineProviderCompactionPolicy,
 	setEngineSystemPrompt,
 } from "../../src/engine/agent.js";
-import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
+import { cleanupEngineSessionResources, completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import { engineMainStreamSimple, engineStreamSimple } from "../../src/engine/api-registry.js";
-import { sideCallCacheFamilyId, workerCacheFamilyId } from "../../src/engine/apis/cache-family.js";
+import {
+	sideCallCacheFamilyId,
+	withMainCacheRouting,
+	workerCacheFamilyId,
+} from "../../src/engine/apis/cache-family.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import {
 	closeResponsesWebSockets,
@@ -367,17 +371,36 @@ test("main sessions with one pinned head share a Codex cache routing key and kee
 		timestamp: 3,
 	};
 	const first = await send("session-repo-a", "Repo A handbook.\n", [task]);
-	const second = await send("session-repo-b", "Repo B handbook.\n", [task]);
-	ok(typeof first?.key === "string" && /^clio-coder-m-[a-f0-9]{40}$/u.test(first.key), String(first?.key));
-	strictEqual(second?.key, first?.key, "one pinned head routes both sessions to one cache");
+	ok(typeof first?.key === "string" && /^clio-coder-m-[a-f0-9]{40}-0$/u.test(first.key), String(first?.key));
+	// Two live sessions of one head take lanes of their own, as live workers do (FL-17).
+	const concurrent = await send("session-repo-b", "Repo B handbook.\n", [task]);
+	strictEqual(concurrent?.key, String(first.key).replace(/-0$/u, "-1"), "a concurrent live session takes the next lane");
 	// The backend routes by the header: it carries the same key as the body.
 	strictEqual(first?.header, first?.key);
-	strictEqual(second?.header, second?.key);
+	strictEqual(concurrent?.header, concurrent?.key);
 	// Continuation stays per session: the second session never carries the first one's turn token, its tool round does.
-	strictEqual(second?.turnState, null);
+	strictEqual(concurrent?.turnState, null);
 	strictEqual((await send("session-repo-a", "Repo A handbook.\n", [task, call, result]))?.turnState, "state-1");
+	// A session that ends releases its lane, and the next session of that head reads the cache it routed to.
+	cleanupEngineSessionResources("session-repo-a");
+	const next = await send("session-repo-d", "Repo D handbook.\n", [task]);
+	strictEqual(next?.key, first?.key, "a released lane is reused");
+	strictEqual((await send("session-repo-b", "Repo B handbook.\n", [task, call, result]))?.key, concurrent?.key);
+	// Routing an already routed request changes nothing: no second lane, no routing id taken as a conversation.
+	const bContext = { systemPrompt: `${pinned}Repo B handbook.\n`, tools: [read], messages: [task] } as never;
+	const pinnedPrefix = { chars: pinned.length, hash: createHash("sha256").update(pinned).digest("hex") };
+	const routed = withMainCacheRouting(model, bContext, {
+		sessionId: "session-repo-b",
+		clioCoderPinnedPrefix: pinnedPrefix,
+	} as never);
+	strictEqual((routed as { sessionId?: string } | undefined)?.sessionId, concurrent?.key);
+	strictEqual(withMainCacheRouting(model, bContext, routed), routed, "routing twice is routing once");
 	const other = await send("session-repo-c", "Repo A handbook.\n", [task], "Another install's identity.\n");
-	ok(typeof other?.key === "string" && other.key !== first?.key, "a different pinned head routes elsewhere");
+	ok(
+		typeof other?.key === "string" && other.key.endsWith("-0") && other.key !== first?.key,
+		"another head routes elsewhere",
+	);
+	for (const session of ["session-repo-b", "session-repo-c", "session-repo-d"]) cleanupEngineSessionResources(session);
 });
 
 test("the main thread's public Responses request marks the pinned prompt layer with its own breakpoint (PV-3)", async () => {
