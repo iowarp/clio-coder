@@ -2,11 +2,12 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
+import { formatSettingsIssues, readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
+import { REGISTERED_MIGRATION_IDS } from "../../src/domains/lifecycle/migrations/registry-ids.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // The reader used to ignore retired keys and read old spellings. `clio-coder upgrade`
@@ -123,6 +124,39 @@ test("with the read path gone, a retired key is an ordinary unknown key and an o
 			"interface.exitSummary: expected auto, brief, standard, report, or off",
 		],
 	);
+});
+
+test("a settings failure names `clio-coder upgrade` while a registered migration is pending, and only then", async (t) => {
+	const home = await isolateClioEnv("clio-retired-settings-advice-");
+	t.after(() => home.restore());
+	const config = join(home.dir, "config");
+	mkdirSync(config, { recursive: true });
+	writeFileSync(join(config, "settings.yaml"), "version: 2\nfleet:\n  speculativeDispatch: true\n");
+	const manifest = join(config, "migrations.json");
+	const advice = /clio-coder upgrade.*2026-11-21-retired-settings.*rewrites retired keys/u;
+	const surfaces = (): string[] => {
+		let thrown = "";
+		try {
+			readSettings();
+		} catch (error) {
+			thrown = String(error instanceof Error ? error.message : error).replace(/\n/gu, " ");
+		}
+		return [thrown, formatSettingsIssues(validateSettingsFile().issues)];
+	};
+	// A provisioned file with no manifest, then a manifest written before the migration existed.
+	for (const recorded of [null, REGISTERED_MIGRATION_IDS.filter((id) => id !== "2026-11-21-retired-settings")]) {
+		if (recorded !== null) writeFileSync(manifest, JSON.stringify({ applied: recorded }));
+		for (const text of surfaces()) {
+			ok(/fleet\.speculativeDispatch: unknown key/u.test(text), text);
+			ok(advice.test(text), text);
+		}
+	}
+	// Everything recorded: the upgrade has nothing to apply, so it is not advised.
+	writeFileSync(manifest, JSON.stringify({ applied: REGISTERED_MIGRATION_IDS }));
+	for (const text of surfaces()) {
+		ok(/fleet\.speculativeDispatch: unknown key/u.test(text), text);
+		ok(!/clio-coder upgrade/u.test(text), text);
+	}
 });
 
 test("the v1 migration drops the retired per-agent keys and records why", () => {

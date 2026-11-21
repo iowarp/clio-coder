@@ -1,5 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveClioDirs } from "../../../core/xdg.js";
+import { clioStateDir, resolveClioDirs } from "../../../core/xdg.js";
 
 /**
  * Ids of every registered migration, in registry order, and where the record of
@@ -47,4 +48,32 @@ export function migrationManifestPath(): string {
 /** Before 0.6.8 the manifest lived in the state root; `runPending` moves it once. */
 export function legacyMigrationManifestPath(stateDir: string): string {
 	return join(stateDir, MIGRATION_MANIFEST_FILE);
+}
+
+/**
+ * What to tell an operator whose settings.yaml fails validation while a
+ * registered migration is unrecorded: `clio-coder upgrade` applies it. A home
+ * upgraded by a package manager, or a settings file provisioned with no
+ * manifest, reaches the strict reader without that run. This only names the
+ * command; nothing is read in the migration's place. Null when nothing is
+ * pending or the manifest cannot be read (the upgrade refuses that one by name).
+ */
+export function pendingMigrationAdvice(): string | null {
+	let applied: unknown = [];
+	for (const path of [migrationManifestPath(), legacyMigrationManifestPath(clioStateDir())]) {
+		if (!existsSync(path)) continue;
+		try {
+			applied = (JSON.parse(readFileSync(path, "utf8")) as { applied?: unknown } | null)?.applied;
+		} catch {
+			return null;
+		}
+		break;
+	}
+	if (!Array.isArray(applied)) return null;
+	const recorded = new Set(applied);
+	const pending = REGISTERED_MIGRATION_IDS.filter((id) => !recorded.has(id));
+	if (pending.length === 0) return null;
+	if (pending.includes("2026-11-21-retired-settings"))
+		return "run `clio-coder upgrade`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings";
+	return `run \`clio-coder upgrade\` to apply ${pending.length} pending migration${pending.length === 1 ? "" : "s"}`;
 }

@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { pendingMigrationAdvice } from "../domains/lifecycle/migrations/registry-ids.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS, YOLO_CONFINEMENTS } from "../domains/safety/autonomy.js";
 import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
@@ -139,10 +140,12 @@ export class SettingsValidationError extends Error {
 				? issues.map((issue) => `  ${issue.path}: ${issue.message}`)
 				: issues.map((issue) => `  ${issue.message}`);
 		const headline = kind === "schema" ? "settings.yaml failed validation:" : "settings.yaml cannot be loaded:";
+		const upgrade = kind === "schema" ? pendingMigrationAdvice() : null;
 		super(
 			`${headline}\n${lines.join("\n")}\n\n` +
+				(upgrade === null ? "" : `${upgrade.charAt(0).toUpperCase()}${upgrade.slice(1)}.\n`) +
 				`${settingsRemedy(kind, path)}\n` +
-				"Run `clio-coder doctor --fix` to repair retired settings, YAML 1.1 on/off booleans, directories, and credential permissions without discarding your configuration.",
+				"Run `clio-coder doctor --fix` to repair retired enum values, YAML 1.1 on/off booleans, directories, and credential permissions without discarding your configuration.",
 		);
 		this.name = "SettingsValidationError";
 		this.issues = issues;
@@ -202,8 +205,10 @@ export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): stri
 		kind === "schema"
 			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
 			: issues.map((issue) => issue.message.replace(/^(?:invalid YAML|unreadable): /u, "")).join("; ");
+	// A pending migration's command leads: it is the repair that rewrites what the reader refuses.
+	const upgrade = kind === "schema" ? pendingMigrationAdvice() : null;
 	return foldToOneLine(
-		`${settingsFailureHeadline(kind)}: ${settingsRemedyInline(kind, path)}. Run \`clio-coder doctor --fix\` for safe repairs. ${detail}`,
+		`${settingsFailureHeadline(kind)}: ${upgrade === null ? "" : `${upgrade}, or `}${settingsRemedyInline(kind, path)}. Run \`clio-coder doctor --fix\` for safe repairs. ${detail}`,
 	);
 }
 
