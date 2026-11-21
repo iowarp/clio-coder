@@ -28,8 +28,9 @@ export function reportedModelFromMessage(message: unknown): Fact<string> {
 
 /**
  * Transport facts Clio counts itself: its Responses socket (`src/engine/apis/responses-websocket.ts`) records each
- * call's sends, reuse and SSE pin, attributed to that call alone. The connect span stays unknown. A delta frame's
- * bytes are not the payload's, so they stay unknown too (#434).
+ * call's sends, reuse and SSE pin, attributed to that call alone, and the copilot-sdk stream records which of its pooled
+ * Copilot sessions each call went to. The connect span stays unknown. A delta frame's bytes are not the payload's, so
+ * they stay unknown too (#434).
  */
 function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettled["transport"] {
 	const codex = record(raw.codexTransport);
@@ -50,24 +51,35 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 	// last request of the call is the one the provider answered.
 	const threads = record(raw.anthropicResponse).threadRequests;
 	const thread = Array.isArray(threads) && threads.length > 0 ? threads[threads.length - 1] : undefined;
+	// The copilot-sdk stream names the session its request went to and whether it sent only what that session had not
+	// seen (`src/engine/copilot/stream.ts`). The SDK runs its own runtime as Clio's child process; what that runtime
+	// does on the wire to GitHub (connection reuse, SSE or WebSocket) it does not report.
+	const copilotSession = (["new", "spare", "continued", "resumed"] as const).find(
+		(value) => value === raw.copilotSession,
+	);
+	const copilotRequest = raw.copilotContinuation === "delta" || raw.copilotContinuation === "full";
 	const continuation =
 		codex.request === "delta" || codex.request === "full"
 			? codex.request
-			: thread === undefined
-				? undefined
-				: thread === "continue"
-					? "delta"
-					: "full";
+			: copilotSession !== undefined && copilotRequest
+				? (raw.copilotContinuation as "delta" | "full")
+				: thread === undefined
+					? undefined
+					: thread === "continue"
+						? "delta"
+						: "full";
 	const bytes = sent && continuation !== "delta" ? amount(raw.clioCoderRequestBytes) : null;
 	const cacheKey = sent && typeof raw.clioCoderPromptCacheKey === "string" ? raw.clioCoderPromptCacheKey : undefined;
 	return {
-		kind: codex.mode === "websocket" || codex.mode === "sse" ? codex.mode : "unknown",
+		kind: codex.mode === "websocket" || codex.mode === "sse" ? codex.mode : copilotSession ? "subprocess" : "unknown",
 		continuation: continuation ? counted(continuation) : unobserved,
 		requestBytes:
 			bytes === null || !Number.isInteger(bytes)
 				? unobserved
 				: { kind: "estimated", value: bytes, method: "payload-json" },
-		sessionPinnedToSse: typeof codex.fallbackActive === "boolean" ? counted(codex.fallbackActive) : unobserved,
+		sessionPinnedToSse:
+			typeof codex.fallbackActive === "boolean" ? counted(codex.fallbackActive) : copilotSession ? unknown : unobserved,
+		...(copilotSession ? { session: counted(copilotSession), connectionReused: unknown } : {}),
 		...(codex.mode === "websocket" && codex.attribution === "exclusive" && counters.requests === 1
 			? { connectionReused: counted(counters.connectionsReused === 1 && counters.connectionsCreated === 0) }
 			: {}),

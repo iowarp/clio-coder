@@ -1376,9 +1376,29 @@ test("a side call leaves one spare session, and the next side call of its config
 		engineStreamSimple(model, normalizeContext({ systemPrompt: "Side judge.", messages: [user(text)] }), {}).result();
 	try {
 		const start = fake().sessions.length;
-		strictEqual((await side("judge one")).stopReason, "stop");
+		const transport = (message: AssistantMessage) => {
+			const { kind, continuation, session, connectionReused } = callSettlementFromMessage(message, "none").transport;
+			return { kind, continuation, session, connectionReused };
+		};
+		const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" });
+		const notReported = { kind: "unknown", reason: "provider-omitted" };
+		const one = await side("judge one");
+		strictEqual(one.stopReason, "stop");
+		deepStrictEqual(transport(one), {
+			kind: "subprocess",
+			continuation: counted("full"),
+			session: counted("new"),
+			connectionReused: notReported,
+		});
 		ok(await eventually(() => fake().sessions.length === start + 2), "the side call's own session and one spare");
-		strictEqual((await side("judge two")).stopReason, "stop");
+		const two = await side("judge two");
+		strictEqual(two.stopReason, "stop");
+		deepStrictEqual(transport(two), {
+			kind: "subprocess",
+			continuation: counted("full"),
+			session: counted("spare"),
+			connectionReused: notReported,
+		});
 		match(fake().sessions[start + 1]?.prompts[0] ?? "", /judge two/, "the second side call ran on the spare");
 		ok(await eventually(() => fake().sessions.length === start + 3), "taking the spare leaves a new one");
 		strictEqual(fake().sessions[start + 2]?.prompts.length, 0, "and the new spare is still empty");
@@ -1401,6 +1421,15 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	// A note that rode only on the request that delivered the result is not a rewrite.
 	const next = await step({ tools: [readTool], messages: [...held, user("next")] }, key);
 	strictEqual((next as { copilotContinuation?: string }).copilotContinuation, "delta");
+	const continued = callSettlementFromMessage(next, "none").transport;
+	deepStrictEqual(
+		[continued.kind, continued.continuation, continued.session],
+		[
+			"subprocess",
+			{ kind: "measured", value: "delta", source: "local-count" },
+			{ kind: "measured", value: "continued", source: "local-count" },
+		],
+	);
 	strictEqual(fake().sessions.length, start + 1);
 	deepStrictEqual(fake().sessions.at(-1)?.prompts.slice(1), ["next"], "the delta carries only the new turn");
 

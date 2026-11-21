@@ -261,6 +261,8 @@ export const CallSettledSchema = Type.Object(
 				sessionPinnedToSse: factSchema(Type.Boolean()),
 				/** Present only when the call's own connection counters were attributable to it (#434). */
 				connectionReused: Type.Optional(factSchema(Type.Boolean())),
+				/** The Copilot session a copilot-sdk call went to, from Clio's own session pool (PV-2). */
+				session: Type.Optional(factSchema(vocabulary(["new", "spare", "continued", "resumed"]))),
 				/** WebSocket failures and SSE fallbacks inside this call, from the same attributable counters (#423). */
 				websocketFailures: Type.Optional(factSchema(count)),
 				sseFallbacks: Type.Optional(factSchema(count)),
