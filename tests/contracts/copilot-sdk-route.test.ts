@@ -54,6 +54,7 @@ import {
 import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js";
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
+import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
@@ -252,6 +253,20 @@ class FakeSession {
 		}
 		if (prompt.includes("op:metrics-fail-once")) this.metricsFailOnce = true;
 		if (prompt.includes("op:slow-metrics")) this.metricsDelayOnce = 1500;
+		if (prompt.includes("op:call-in-lock")) {
+			// A worker whose one budgeted call locks it into synthesis, and a model that calls again in the locked round.
+			const name = [...this.tools.keys()][0];
+			for (const [index, [toolCallId, path]] of [["call_work", "CHAMPIONS.md"], ["call_locked", "README.md"]].entries()) {
+				this.usage({ model: "fake-model", apiCallId: "lock-" + index, inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+				this.emit("assistant.message", { messageId: "k" + index, apiCallId: "lock-" + index, content: "", toolRequests: [{ toolCallId, name, arguments: { path } }] });
+				const result = await this.tools.get(name).handler({ path }, { toolCallId, sessionId: this.sessionId, toolName: name, arguments: {}, signal: new AbortController().signal });
+				state.toolResults.push({ ...result, injectedBefore: [] });
+			}
+			this.usage({ model: "fake-model", apiCallId: "lock-2", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
+			this.emit("assistant.message", { messageId: "k2", apiCallId: "lock-2", content: "report: known evidence" });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("use tool")) {
 			const result = await this.spill(await this.callTool("call_1"));
 			if (!result) return;
@@ -2070,6 +2085,69 @@ test("steering triage at thinking off on a Copilot model that cannot turn thinki
 		loop.dispose();
 		await loop.whenSettled();
 		await providers.extension.stop?.();
+		models.splice(0, models.length, ...original);
+	}
+});
+
+// M-20: a locked synthesis round on Copilot keeps the session's effort and tool set, so the runtime keeps its cached
+// prefix; a tool call there is refused at admission by the worker's synthesis lockout. The work read ends in a newline, so
+// the locked round's tail note must not change that result's transcript identity, or the refused call reseeds a session.
+test("a locked Copilot worker round keeps the session's reasoning effort and tools, and refuses a call (M-20)", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "locked-levels",
+		capabilities: { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } },
+		supportedReasoningEfforts: ["low", "medium", "high"],
+	});
+	const sessionsBefore = fake().sessions.length;
+	try {
+		const worker = startWorkerRun(
+			{
+				agentId: "coder",
+				sessionId: "m20-worker",
+				systemPrompt: "Read then report.",
+				task: "op:call-in-lock: read CHAMPIONS.md, then report.",
+				target: { id: "copilot-worker", runtime: "copilot-sdk" },
+				runtime: copilotSdkRuntime,
+				wireModelId: "locked-levels",
+				thinkingLevel: "high",
+				modelCapabilities: {
+					contextWindow: 64000,
+					maxTokens: 4096,
+					tools: true,
+					reasoning: true,
+					reasoningLevels: ["low", "medium", "high"],
+				},
+				allowedTools: ["read"],
+				budget: { mode: "enforced", toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 150 },
+				noSkills: true,
+				cwd: process.cwd(),
+				onPermission: "deny",
+			},
+			() => {},
+		);
+		strictEqual((await worker.promise).exitCode, 0);
+		strictEqual(fake().sessions.length, sessionsBefore + 1, "the locked round continues the work session");
+		const session = fake().sessions.at(-1) as unknown as {
+			config: { reasoningEffort?: string; tools?: Array<{ name: string }> };
+			switches?: unknown[];
+			tools: Map<string, unknown>;
+		};
+		strictEqual(session.config.reasoningEffort, "high");
+		strictEqual(session.switches, undefined, "no setModel on the locked round");
+		deepStrictEqual(
+			[...session.tools.keys()],
+			(session.config.tools ?? []).map((tool) => tool.name),
+			"the tool set the session was created with",
+		);
+		const [work, locked] = fake().toolResults.slice(-2);
+		match(work?.textResultForLlm ?? "", /# Champions/);
+		strictEqual(locked?.resultType, "failure", "the locked round's call never runs");
+		match(locked?.textResultForLlm ?? "", /exploration tools are now disabled/);
+	} finally {
+		disposeCopilotConversations("m20-worker");
 		models.splice(0, models.length, ...original);
 	}
 });

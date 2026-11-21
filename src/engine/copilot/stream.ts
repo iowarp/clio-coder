@@ -138,7 +138,8 @@ const HOST_NOTES = /(?:^|\n+)\[middleware:[a-z-]+\][\s\S]*$/u;
  * produced before storing it, while the tool call ids it answered with are stable. A tool result's content is:
  * Copilot keeps every result it was handed, so a result the working set later stubs or cuts must not match its
  * synced form, or the next step continues over the full body Clio no longer counts (bt-47 drv-r4a). Host notes
- * trailing a result are left out, as a request-only note on the last result must not reseed the next step.
+ * trailing a result are left out, as a request-only note on the last result must not reseed the next step; so is
+ * the whitespace before them, which the note's separator joins with the body's own trailing newlines (M-20).
  */
 function fingerprint(message: CoreMessage): string | null {
 	switch (message.role) {
@@ -153,7 +154,7 @@ function fingerprint(message: CoreMessage): string | null {
 			return `a:${ids.join(",")}`;
 		}
 		case "toolResult": {
-			const text = textOf(message.content).replace(HOST_NOTES, "");
+			const text = textOf(message.content).replace(HOST_NOTES, "").trimEnd();
 			const images = imagesOf(message.content).map((image) => hash(image.data));
 			return `r:${message.toolCallId}:${message.isError ? "e" : "o"}:${hash(text)}:${images.join(",")}`;
 		}
