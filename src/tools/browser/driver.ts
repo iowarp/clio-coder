@@ -597,11 +597,12 @@ async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
 	for (const host of request.grantHosts ?? []) grantedHosts.add(host.toLowerCase());
 	let id = request.page;
 	let page: Any;
-	if (id !== undefined) page = pageFor(id).page;
+	// A page id nothing opened yet names the new page, so `open` with page "main" works on the first call.
+	if (id !== undefined && pages.has(id)) page = pageFor(id).page;
 	else {
 		if (pages.size >= MAX_PAGES)
 			throw new Error(`${MAX_PAGES} pages are open; close one (browser close with page) or reuse one with page`);
-		id = `p${nextPage++}`;
+		id = id !== undefined && /^[\w.-]{1,40}$/u.test(id) ? id : `p${nextPage++}`;
 		page = await context.newPage();
 		pages.set(id, page);
 		attach(id, page);
