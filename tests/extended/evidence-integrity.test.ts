@@ -211,7 +211,7 @@ describe("evidence integrity boundary", () => {
 		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /mutations:yes/u);
 	});
 
-	it("does not call a run whose validation failed a first-pass success (FL-3, bt-48-9)", () => {
+	it("judges first-pass success by the validation a run owed (FL-3, bt-48-9, C-37)", () => {
 		const draft = fixtureReceiptDraft(fixtureEnvelope("validation-failed-first-pass"));
 		draft.quality.resultContract = {
 			sourceId: `agent-result-contract:mutation-report:${"a".repeat(64)}`,
@@ -243,6 +243,58 @@ describe("evidence integrity boundary", () => {
 		strictEqual(settlement.facts.outcome, "succeeded");
 		strictEqual(assessed.data.trust.validationGrounding.state, "failed");
 		strictEqual(assessed.data.firstPassSuccess, false);
+		// C-37: a finish record that counted no paths outweighs no other change signal, such as an ACP delegation's
+		// successful script edit or a headless run's merged dispatch worktree its host observed.
+		const unvalidated = fixtureReceiptDraft(fixtureEnvelope("changed-without-counted-paths"));
+		const firstPass = (observedChange: boolean) => {
+			const settled = settleFinishedRun(unvalidated, {
+				terminal: { terminalReason: "completed" },
+				processExitCode: 0,
+				frameType: null,
+				usage: undefined,
+			});
+			const runCtx = { ...ctx, runId: unvalidated.runId, agent: { role: "worker" as const, id: unvalidated.runId } };
+			const clock = { t: unvalidated.endedAt, mono: 1 };
+			const noMutation = {
+				decision: "ok" as const,
+				reason: "no_mutation" as const,
+				rigor: "normal" as const,
+				mutatedPaths: 0,
+				evidenceKinds: [],
+			};
+			return assessRun(unvalidated.runId, {
+				records: [
+					makeTelemetryRecord(
+						"completion.evaluated",
+						{ ...noMutation, verification: { passedChecks: [], acceptance: [] } },
+						runCtx,
+						clock,
+					),
+					makeTelemetryRecord(
+						"run.settled",
+						{ ...settled.facts, result: telemetryObjectRef("run-result", settled.result) },
+						runCtx,
+						clock,
+					),
+				],
+				context: {
+					sessionId: null,
+					cwd: "/repo",
+					attempt: 0,
+					decisionRefs: [],
+					pipeline: null,
+					personaOverride: null,
+					observedChange,
+				},
+				gateDecisions: [],
+				decisions: null,
+			})?.data.firstPassSuccess;
+		};
+		unvalidated.toolActivity = { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: true };
+		strictEqual(firstPass(false), false);
+		unvalidated.toolActivity = { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false };
+		strictEqual(firstPass(true), false);
+		strictEqual(firstPass(false), true);
 	});
 
 	it("treats run ids as identities, never paths", async () => {

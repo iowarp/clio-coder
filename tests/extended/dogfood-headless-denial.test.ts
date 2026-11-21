@@ -13,8 +13,11 @@ import {
 	HEADLESS_PERMISSION_DENIED_MARKER,
 	HEADLESS_PERMISSION_DENIED_REASON,
 } from "../../src/core/headless-permission.js";
+import { WORKER_OUTPUT_MAX_BYTES } from "../../src/domains/dispatch/event-pump.js";
 
 import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
+import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
@@ -223,6 +226,7 @@ describe("headless no-op contract through the built binary", () => {
 		prompt?: string;
 		flags?: ReadonlyArray<string>;
 		settingsPatch?: (yaml: string) => string;
+		projectFiles?: Record<string, string>;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -238,6 +242,7 @@ describe("headless no-op contract through the built binary", () => {
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		writeFileSync(join(project, "sentinel.txt"), "blocked is harmless fixture text\n");
+		for (const [name, text] of Object.entries(input.projectFiles ?? {})) writeFileSync(join(project, name), text);
 		if (input.packageScripts)
 			writeFileSync(join(project, "package.json"), JSON.stringify({ scripts: input.packageScripts }));
 		const turn = await runCli(
@@ -260,7 +265,7 @@ describe("headless no-op contract through the built binary", () => {
 		ok(envelope);
 		strictEqual(envelope.exitCode, turn.code, "the receipt and the process must agree on the exit code");
 		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
-		return { turn, envelope, project, fixture };
+		return { turn, envelope, project, fixture, stateDir: scratch.stateDir };
 	}
 
 	test("--on-permission fail ends the run at the first refused ask with exit 3 before another request", async () => {
@@ -350,9 +355,9 @@ describe("headless no-op contract through the built binary", () => {
 
 	test("an answer turn whose command was blocked still succeeds and names the blocked call", async () => {
 		// A question asks for no change, so a refused command along the way is no unmet part of the task.
-		const { turn, envelope, project } = await headlessTurn({
+		const { turn, envelope, project, stateDir } = await headlessTurn({
 			autonomy: "default",
-			steps: [deniedInline],
+			steps: [{ id: "call-grep", name: "bash", arguments: { command: "grep -n fixture sentinel.txt" } }, deniedInline],
 			failOnNoop: true,
 			turnMode: "answer",
 			prompt: "What does sentinel.txt say?",
@@ -364,18 +369,77 @@ describe("headless no-op contract through the built binary", () => {
 		match(turn.stdout, /It says the fixture text\./);
 		doesNotMatch(turn.stderr, /no-op/);
 		match(turn.stderr, /answered with 1 blocked call: bash \(/);
+		// C-37: a shell command that only reads is no change to validate.
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
+	});
+
+	test("a --read-only review whose read was blocked still succeeds and names the blocked call", async () => {
+		// C-1: a read-only run asks for no change, so a read a rule refused along the way left nothing unmet.
+		const { turn, envelope, stateDir } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{ id: "call-read", name: "read", arguments: { path: ".env" } },
+				{ id: "call-grep", name: "bash", arguments: { command: "grep -n fixture sentinel.txt" } },
+				{ id: "call-verify", name: "verify", arguments: { check: "lint" } },
+			],
+			failOnNoop: false,
+			flags: ["--read-only"],
+			prompt: "Review sentinel.txt.",
+			reply: "The fixture text reads fine.",
+			// A check the run does not declare is refused under --read-only, so the run holds no validation.
+			packageScripts: { test: "node -e 0" },
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(envelope.outcome, "succeeded");
+		match(turn.stdout, /The fixture text reads fine\./);
+		doesNotMatch(turn.stderr, /no-op/);
+		match(turn.stderr, /answered with 2 blocked calls: read \(path-policy:zeroAccessPaths\), verify \(task:read_only\)/);
+		// C-37: a read-only shell command and a check change nothing, so the review owes no validation.
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
+	});
+
+	test("a run that wrote only through an opaque shell command owes validation (C-37)", async () => {
+		const { turn, envelope, project, stateDir } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{
+					id: "call-script-write",
+					name: "bash",
+					arguments: { command: `node -e 'require("fs").writeFileSync("c37.txt", "x")'` },
+				},
+			],
+			failOnNoop: false,
+			reply: "done",
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(readFileSync(join(project, "c37.txt"), "utf8"), "x");
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, false);
 	});
 
 	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
-		const { turn, envelope, project } = await headlessTurn({
+		const { turn, envelope, project, stateDir } = await headlessTurn({
 			autonomy: "default",
 			steps: [writeProof],
 			failOnNoop: true,
-			reply: "done",
+			// The secret starts 13 bytes before the result object's bound would cut it.
+			reply: `done ${"x".repeat(WORKER_OUTPUT_MAX_BYTES - 38)} sk_live_${"A1b2C3d4E5".repeat(2)}A1b2 end`,
 		});
 		strictEqual(turn.code, 0, turn.stderr);
 		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
 		strictEqual(envelope.outcome, "succeeded");
+		// C-11: the seal cites the finish contract decision the run's session recorded at its end.
+		const evidence = await inspectRunEvidence(stateDir, envelope.id);
+		strictEqual(evidence.trust.completionEvidence.state, "incomplete", JSON.stringify(evidence.trust));
+		// A run that wrote a file without validation is no first-pass success (C-37).
+		strictEqual(evidence.firstPassSuccess, false);
+		// C-12: the main run's result object holds its answer, as a worker's does.
+		const result = readVerifiedRun(stateDir, envelope.id)?.result;
+		const output = result?.state === "resolved" ? result.value.output : undefined;
+		match(output?.text ?? "", /^done/);
+		// C-12: the answer is redacted before its bound, so no part of a secret the bound cuts is stored.
+		strictEqual(output?.truncated, true);
+		doesNotMatch(output?.text ?? "", /sk_live_/);
+		ok(Buffer.byteLength(output?.text ?? "", "utf8") <= WORKER_OUTPUT_MAX_BYTES);
 	});
 
 	test("one blocked call and one successful write is not a no-op under --fail-on-noop", async () => {
@@ -441,16 +505,24 @@ describe("headless no-op contract through the built binary", () => {
 	});
 
 	test("a prose answer with no tool call is not a no-op under --fail-on-noop", async () => {
-		const { turn, envelope } = await headlessTurn({
+		const { turn, envelope, stateDir } = await headlessTurn({
 			autonomy: "default",
 			steps: [],
 			failOnNoop: true,
-			reply: "The answer is 42.",
+			flags: ["--output-schema", "answer.schema.json"],
+			projectFiles: { "answer.schema.json": JSON.stringify({ type: "object", required: ["answer"] }) },
+			reply: '```json\n{"answer": 42}\n```',
 		});
 		strictEqual(turn.code, 0, turn.stderr);
 		strictEqual(envelope.status, "completed");
 
 		strictEqual(envelope.outcome, "succeeded");
+		// C-37: an answer that changed nothing needs no validation to be a first-pass success.
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
+		// C-12: the result object stores the answer stdout printed, the validated JSON alone.
+		strictEqual(turn.stdout, '{"answer": 42}\n');
+		const result = readVerifiedRun(stateDir, envelope.id)?.result;
+		strictEqual(result?.state === "resolved" ? result.value.output?.text : undefined, '{"answer": 42}');
 	});
 
 	test("tools that all failed without a block are a no-op under --fail-on-noop", async () => {
