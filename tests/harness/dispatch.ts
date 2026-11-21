@@ -187,6 +187,8 @@ export function observedCheckEvents(
 export async function settleStubBuilder(input: {
 	cwd: string;
 	report: object;
+	/** The builder recipe; coder by default. */
+	agentId?: string;
 	resolvedVerification?: Parameters<DispatchContract["dispatch"]>[0]["resolvedVerification"];
 	beforeExit?: () => void;
 	events?: ReadonlyArray<Record<string, unknown>>;
@@ -220,7 +222,7 @@ export async function settleStubBuilder(input: {
 	await bundle.extension.start();
 	try {
 		const handle = await bundle.contract.dispatch({
-			agentId: "coder",
+			agentId: input.agentId ?? "coder",
 			task: "Edit input.txt.",
 			executionRole: "builder",
 			requestOrigin: "internal",

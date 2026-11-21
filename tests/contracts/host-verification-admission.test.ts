@@ -514,3 +514,21 @@ it("a builder's two verdicts disagreeing seal one grade: outcome, exit code, rul
 	match(host.projected.outcomeDetail ?? "", /host verification check 'unit' rejected/u);
 	match(host.card, /host verification check 'unit' rejected/u);
 });
+
+it("a documenter whose only validation is inspection prose stays delivered: the prose claim neither grounds nor compromises (M9)", async () => {
+	const { receipt, run } = await settleStubBuilder({
+		cwd: project([]),
+		agentId: "documenter",
+		report: {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: ["input.txt"],
+			validations: [{ name: "Inspect supplied Scout findings", passed: true, evidence: "findiff/grids.py:31" }],
+		},
+	});
+	strictEqual(receipt.validationGrounding ?? null, null);
+	ok(receipt.verdict?.assurance !== "compromised", receipt.verdict?.assurance);
+	strictEqual(receipt.verdict?.rules.find((entry) => entry.id === "assurance")?.status, "pass");
+	strictEqual(receipt.outcome, "succeeded", receipt.outcomeDetail ?? undefined);
+	strictEqual(receipt.exitCode, 0);
+	strictEqual(projectDispatchedRunOutcome(run).outcome, "succeeded");
+});
