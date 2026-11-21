@@ -821,6 +821,18 @@ test("ACP dispatch seals peer errors as failed and forwards a requested model", 
 		strictEqual(succeeded.outcome, "succeeded");
 		strictEqual(succeeded.exitCode, 0);
 		strictEqual(succeeded.delegation?.selectedModelId, "gpt-6-luna[medium]");
+		// A typed admission refusal settles with its own outcome code; the peer's untyped error above keeps none (C-16).
+		strictEqual(failed.outcomeCode, null);
+		const unoffered = await (await bundle.contract.dispatch({ ...request, model: "gpt-9-unknown" })).finalPromise;
+		strictEqual(unoffered.outcomeCode, "acp_model_unavailable");
+		ok(
+			unoffered.outcomeDetail?.includes("does not offer requested model 'gpt-9-unknown'"),
+			unoffered.outcomeDetail ?? "",
+		);
+		const thought = settings.integrations.externalAgents.entries[0];
+		if (thought !== undefined) thought.args = [thought.args[0] ?? "", "thought-option"];
+		const level = await (await bundle.contract.dispatch({ ...request, thinkingLevel: "xhigh" })).finalPromise;
+		strictEqual(level.outcomeCode, "acp_thinking_unavailable", level.failureMessage);
 	} finally {
 		await bundle.extension.stop?.();
 		restoreDispatchState();

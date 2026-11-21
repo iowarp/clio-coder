@@ -26,7 +26,7 @@ import { isAntigravityAcp, prepareAntigravityLaunch } from "./antigravity-launch
 import type { AntigravityQuestion, AntigravityShims } from "./antigravity-shims.js";
 import { createAntigravityShims } from "./antigravity-shims.js";
 import { withInstalledCodex } from "./codex-launch.js";
-import { AcpAuthRequiredError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
+import { AcpAuthRequiredError, AcpError, AcpProcessError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
 import { legacyModelRequest, offeredChoices, peerSelectOption } from "./peer-config-options.js";
 import { AcpToolMediator } from "./tool-mediator.js";
@@ -37,6 +37,7 @@ import {
 	type StdioTransportOptions,
 } from "./transport.js";
 import type {
+	AcpDelegationFailureCode,
 	AcpDelegationResult,
 	AcpInitializeResponse,
 	AcpPromptResponse,
@@ -155,6 +156,15 @@ class AsyncEventQueue<T> implements AsyncIterableIterator<T> {
 			waiter?.({ done: true, value: undefined });
 		}
 	}
+}
+
+/** The typed cause of a delegation that threw, or undefined when the error carries none (C-16). */
+function delegationFailureCode(err: unknown, authFailed: boolean): AcpDelegationFailureCode | undefined {
+	if (authFailed || err instanceof AcpAuthRequiredError) return "acp_auth_required";
+	if (err instanceof AcpError && (err.code === "acp_model_unavailable" || err.code === "acp_thinking_unavailable"))
+		return err.code;
+	if (err instanceof AcpProcessError) return "acp_transport_error";
+	return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -647,7 +657,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 								? matching[0]
 								: undefined;
 				if (selected === undefined || modelOption === null) {
-					throw new Error(
+					throw new AcpError(
+						"acp_model_unavailable",
 						matching.length > 1 && thinkingLevel === undefined
 							? `ACP peer offers multiple efforts for requested model '${requestedModel}'; specify thinkingLevel${offeredChoices(matching)}`
 							: `ACP peer does not offer requested model '${requested}'${offeredChoices(ids)}`,
@@ -677,7 +688,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			if (thinkingLevel !== undefined && !effortInModelId) {
 				const level = thoughtOption?.values.find((value) => value.toLowerCase() === thinkingLevel.toLowerCase());
 				if (thoughtOption === null || level === undefined) {
-					throw new Error(
+					throw new AcpError(
+						"acp_thinking_unavailable",
 						`ACP peer does not offer requested thinking level '${thinkingLevel}'${offeredChoices(thoughtOption?.values)}`,
 					);
 				}
@@ -779,6 +791,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(reportedFailure !== null || (stopReason !== "end_turn" && stopReason !== "cancelled")
 					? { failureMessage: reportedFailure ?? `ACP stopReason=${stopReason}` }
 					: {}),
+				...(authFailure !== null && reportedFailure === authFailure ? { failureCode: "acp_auth_required" as const } : {}),
 				...(usageLimit !== undefined ? { usageLimit } : {}),
 				delegation: {
 					acpSessionId: sessionId,
@@ -800,6 +813,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				? baseMessage
 				: `${baseMessage}; ACP ${termination.scope} exit was not observed within the force-termination bound`;
 			for (const event of errorEvents(message)) emit(event);
+			const failureCode = aborted ? undefined : delegationFailureCode(err, authFailure !== null);
 			const toolSnapshot = mediator.snapshot();
 			return {
 				messages: [],
@@ -808,6 +822,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(err instanceof AcpTimeoutError ? { timedOut: true } : {}),
 				...(err instanceof AcpAuthRequiredError ? { authRequired: { loginCommand: err.loginCommand } } : {}),
 				failureMessage: message,
+				...(failureCode !== undefined ? { failureCode } : {}),
 				delegation: {
 					acpSessionId: sessionId,
 					...(selectedModelId !== null ? { selectedModelId } : {}),

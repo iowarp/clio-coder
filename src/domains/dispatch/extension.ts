@@ -1509,6 +1509,8 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 }
 
 const MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS = 2048;
+/** Bound on the adapter's failure words an ACP run's outcome detail carries (C-16). */
+const MAX_ACP_FAILURE_DETAIL_BYTES = 1024;
 const MAX_WORKER_OUTCOME_DETAIL_BYTES = 1024;
 const MAX_WORKER_DIAGNOSTIC_FAILURE_CHARS = 4096;
 
@@ -7850,6 +7852,16 @@ export function createDispatchBundle(
 				const { outcome, detail } = resolveRunOutcome(evidence);
 				let finalOutcome = outcome;
 				let finalDetail = detail;
+				// A failure the adapter typed (sign-in, an unoffered model or thinking level, a broken channel) settles
+				// under its own code, with the adapter's words beside the generic exit detail (C-16).
+				if (outcome === "failed" && result.failureCode !== undefined) {
+					outcomeCode = result.failureCode;
+					if (result.failureMessage !== undefined)
+						finalDetail = boundedExternalDiagnostic(
+							detail !== null ? `${detail}; ${result.failureMessage}` : result.failureMessage,
+							MAX_ACP_FAILURE_DETAIL_BYTES,
+						);
+				}
 				// Same high-rigor completion gate as native dispatch: an external
 				// agent is a guest inside Clio's policy model, not an exemption.
 				const finishContract = assessDispatchFinishContract({
