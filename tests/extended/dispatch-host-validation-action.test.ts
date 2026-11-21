@@ -1,4 +1,7 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 
@@ -53,6 +56,57 @@ function ungroundedRun(declaredCheck?: string, contractKind?: string) {
 }
 
 describe("dispatch host validation action", () => {
+	it("names declared expected outputs the run left unwritten, so the caller moves them instead of searching", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-coder-expected-outputs-"));
+		try {
+			writeFileSync(join(cwd, "app.js"), "");
+			const envelope = fixtureEnvelope("run-plan");
+			const draft = fixtureReceiptDraft(envelope);
+			draft.output = {
+				state: "final",
+				text: "wrote plan artifact (9B) to .clio-coder/artifacts/PLAN.md",
+				bytes: 57,
+				truncated: false,
+			};
+			draft.reproducibility = {
+				cwd,
+				safetyPolicy: {
+					version: 1,
+					rulePackHash: null,
+					rulePackVersion: null,
+					projectPolicyPath: null,
+					projectPolicyHash: null,
+					projectPolicyValid: null,
+				},
+			};
+			draft.intent = {
+				version: 2,
+				readRoots: [],
+				writeRoots: [],
+				relevantPaths: [],
+				pathProvenance: [],
+				expectedOutputs: ["PLAN.md", "app.js"],
+				verification: [],
+			};
+			const receipt = finishRunResult(draft, envelope, {
+				terminal: { terminalReason: "completed" },
+				processExitCode: envelope.exitCode,
+				frameType: null,
+				usage: undefined,
+			}).result;
+			const run = {
+				receipt,
+				integrity: { state: "verified" as const, by: "producer" as const },
+				summary: { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId },
+			};
+			const output = formatDispatchOutput("parallel", [run], 16_384);
+			match(output, /^expected_outputs run-plan: not written \["PLAN\.md"\]; its answer names what it wrote/m);
+			doesNotMatch(output, /not written \[[^\]]*app\.js/);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("leads an ungrounded worker return with the next host check sequence", () => {
 		const run = ungroundedRun();
 		const output = formatDispatchOutput("parallel", [run], 16_384);
