@@ -21,6 +21,7 @@ import {
 import { fitHintEntries, fitRow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import {
 	MUTATION_PREVIEW_KEY,
+	PERMISSION_SESSION_SCOPE_KEY,
 	PERMISSION_STOP_KEY,
 	PERMISSION_TERMS_KEY,
 	type PermissionInspectionHint,
@@ -404,6 +405,16 @@ function permissionChoices(
 	}
 	return [
 		{ key: "Enter", verb: "allow", consequence: `${runs}${draftNote}` },
+		// A sandbox escape's session option names the scope it grants in full (M-7).
+		...(view.escapeScope !== undefined
+			? [
+					{
+						key: permissionKeyLabel(PERMISSION_SESSION_SCOPE_KEY),
+						verb: "approve for this session",
+						consequence: `${view.escapeScope.label.replace(/^Approve for this session:\s*/u, "")}; later unsandboxed scripts inside it run without asking${draftNote}`,
+					},
+				]
+			: []),
 		{ key: "Esc", verb: "deny", consequence: "skips it" },
 		{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
 	];

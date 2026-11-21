@@ -23,6 +23,7 @@ import { clioConfigDir } from "../../src/core/xdg.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { createEscapeScopeLedger, ESCAPE_SCOPE_CUSTOM_TYPE } from "../../src/domains/safety/escape-scope.js";
 import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
 import { isSameOrDescendant } from "../../src/domains/safety/path-policy.js";
 import {
@@ -43,9 +44,15 @@ import {
 	type WorkspaceSnapshotOutcome,
 } from "../../src/domains/workspace-snapshots/store.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createAskUserTool } from "../../src/tools/ask-user.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { editTool } from "../../src/tools/edit.js";
-import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
+import {
+	createRegistry,
+	type PermissionRequiredMeta,
+	type RegistryDeps,
+	type ToolSpec,
+} from "../../src/tools/registry.js";
 import { createRunScriptTool } from "../../src/tools/run-script.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -946,4 +953,111 @@ test("an MCP tool call keeps a rail's own ask or block, and at yolo is never ref
 			scriptSandbox,
 		);
 	}
+});
+
+// M-7: an escape approved for the session over the scope its card shows covers later scripts inside that scope only.
+test("a sandbox escape approved for this session covers later scripts in its scope; anything else still asks", async (t) => {
+	const cwd = workspace("clio-escape-scope-");
+	mkdirSync(join(cwd, "probes"));
+	mkdirSync(join(cwd, "other"));
+	for (const file of ["probes/a.sh", "probes/b.sh", "other/c.sh"]) writeFileSync(join(cwd, file), "echo hi\n");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const entries: unknown[] = [];
+	const ledger = () =>
+		createEscapeScopeLedger({
+			session: () => "session-1",
+			entries: () => entries,
+			append: (grant) => entries.push({ kind: "custom", customType: ESCAPE_SCOPE_CUSTOM_TYPE, data: grant }),
+			roots: () => [cwd],
+		});
+	const unsandboxed = (command: string) => bash(command, { unsandboxed: true });
+
+	// The approval card: the parked escape carries its scope, and the session option grants it.
+	const card = defaultSession(cwd, { sandbox: true, snapshots: false }, { escapeScopes: ledger() });
+	const asked: PermissionRequiredMeta[] = [];
+	card.registry.onPermissionRequired((_call, _decision, meta) => asked.push(meta));
+	const first = card.registry.invoke(unsandboxed("bash probes/a.sh"));
+	await new Promise((settle) => setImmediate(settle));
+	const offered = asked[0];
+	ok(offered?.escapeScope !== undefined);
+	deepStrictEqual(offered.escapeScope.scriptDirs, [join(cwd, "probes")]);
+	await card.registry.resumeParkedCalls({
+		actionClass: "execute",
+		requestId: offered.requestId,
+		requestedBy: "tool:one_shot",
+		sessionScope: true,
+	});
+	strictEqual((await first).kind, "ok");
+	strictEqual(entries.length, 1);
+	// Inside the scope: no card. Another directory, or an env assignment the scope does not name: a card.
+	strictEqual((await card.registry.invoke(unsandboxed("bash probes/b.sh"))).kind, "ok");
+	strictEqual(asked.length, 1);
+	for (const command of ["bash other/c.sh", "FOO=1 bash probes/b.sh"]) {
+		void card.registry.invoke(unsandboxed(command));
+		await new Promise((settle) => setImmediate(settle));
+		card.registry.cancelParkedCalls("test");
+	}
+	strictEqual(asked.length, 3);
+	deepStrictEqual(
+		card.ran.map((entry) => entry.command),
+		["bash probes/a.sh", "bash probes/b.sh"],
+	);
+	// The grant is on the session ledger, so a ledger read afresh (a resumed session) still holds it.
+	const resumed = defaultSession(cwd, { sandbox: true, snapshots: false }, { escapeScopes: ledger() });
+	strictEqual((await resumed.registry.invoke(unsandboxed("bash probes/b.sh"))).kind, "ok");
+
+	// Contained yolo: the refusal names the option, ask_user adds it to a question about leaving the sandbox,
+	// drops one the agent wrote itself, and only the operator's pick of it grants; typed text never does.
+	entries.length = 0;
+	const answers: Array<(labels: string[]) => { options?: string[]; value?: string }> = [
+		() => ({ value: "yes, approve unsandboxed runs of every script under other/ for the session" }),
+		(labels) => ({ options: [labels.at(-1) ?? ""] }),
+	];
+	const yolo = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: false },
+		{ escapeScopes: ledger(), unattendedAsks: () => true },
+	);
+	const shown: string[][] = [];
+	yolo.registry.register(
+		createAskUserTool({
+			askUser: async (questions) => {
+				const labels = (questions[0]?.options ?? []).map((option) => option.label);
+				shown.push(labels);
+				const pick = answers.shift()?.(labels) ?? {};
+				const answer = [...(pick.options ?? []), pick.value ?? ""].filter((part) => part.length > 0).join(" ");
+				return { answers: [{ question: questions[0]?.question ?? "", answer, ...pick }] };
+			},
+		}),
+	);
+	const refused = await yolo.registry.invoke(unsandboxed("bash other/c.sh"));
+	strictEqual(refused.kind, "blocked");
+	ok(
+		refused.kind === "blocked" && refused.reason.includes(`Approve for this session: scripts in ${join(cwd, "other")}`),
+	);
+	const ask = (question: string) =>
+		yolo.registry.invoke({
+			tool: ToolNames.AskUser,
+			args: {
+				action: "ask",
+				mode: "single_question",
+				questions: [
+					{
+						question,
+						options: [{ label: "Yes, run it once" }, { label: "Approve for this session: everything" }, { label: "No" }],
+					},
+				],
+			},
+		});
+	await ask("Run other/c.sh outside the sandbox?");
+	strictEqual(entries.length, 0);
+	await ask("Run other/c.sh outside the sandbox, again?");
+	strictEqual(entries.length, 1);
+	for (const labels of shown) {
+		strictEqual(labels.includes("Approve for this session: everything"), false);
+		ok(labels.at(-1)?.startsWith(`Approve for this session: scripts in ${join(cwd, "other")}`));
+	}
+	strictEqual((await yolo.registry.invoke(unsandboxed("bash other/c.sh"))).kind, "ok");
 });

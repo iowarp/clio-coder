@@ -219,6 +219,9 @@ export interface OverlayLifecycleController {
 	toggleDispatchBoardOverlay(): void;
 	openQueueNavigatorState(): void;
 	confirmPermission(): void;
+	/** The live card offers its sandbox escape's session option (M-7), and choosing it. */
+	canConfirmPermissionForSession(): boolean;
+	confirmPermissionForSession(): void;
 	/** The live card opened less than `PERMISSION_SETTLE_MS` ago, so Enter does not allow it yet. */
 	isPermissionSettling(): boolean;
 	cancelPermission(): void;
@@ -772,6 +775,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		isPermissionSettling,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
+			footer.refresh();
+			tui.requestRender();
+		},
+		canConfirmPermissionForSession: () => overlayPermission?.canConfirmForSession() ?? false,
+		confirmPermissionForSession: () => {
+			overlayPermission?.confirmForSession();
 			footer.refresh();
 			tui.requestRender();
 		},

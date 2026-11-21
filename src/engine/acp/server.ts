@@ -97,6 +97,7 @@ import {
 	decisionActionClass,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
+import { escapeScopeOptionLabel } from "../../domains/safety/escape-scope.js";
 import {
 	messageStopCompleted,
 	redactFinalUrlCredentials,
@@ -3270,12 +3271,13 @@ interface AcpPermissionBridge {
 
 /**
  * The closed set of option ids a `session/request_permission` from this server
- * offers, announced at initialize. Exactly one grants; the other two deny and
- * differ only in what happens to the rest of the turn. A client that returns
- * anything outside this list is denied, so minting `allow-always` cannot buy a
- * grant this server never offered.
+ * offers, announced at initialize. `allow-once` grants; the two rejects deny and
+ * differ only in what happens to the rest of the turn. `allow-session-scope`
+ * rides only a sandbox escape whose card names a session scope (M-7), and grants
+ * the call and that scope. A client that returns anything this ask did not offer
+ * is denied, so minting `allow-always` cannot buy a grant this server never offered.
  */
-const ACP_PERMISSION_OPTION_IDS = ["allow-once", "reject-once", "reject-and-stop"] as const;
+const ACP_PERMISSION_OPTION_IDS = ["allow-once", "reject-once", "reject-and-stop", "allow-session-scope"] as const;
 
 /** Bound for one line of decision copy. The longest of them is well under this. */
 const ACP_MAX_DECISION_COPY_BYTES = 512;
@@ -3446,6 +3448,7 @@ function installPermissionBridge(input: {
 			action: "grant" | "deny" | "stop" | "expire" = "deny",
 			beforeRelease?: () => void,
 			reason?: string,
+			sessionScope?: true,
 		) =>
 			resolvePermission(
 				{ ...(input.bus ? { bus: input.bus } : {}), ...(input.toolRegistry ? { registry: input.toolRegistry } : {}) },
@@ -3459,6 +3462,7 @@ function installPermissionBridge(input: {
 						actionClass: decision.classification.actionClass,
 					},
 					...(action === "grant" ? { grantRequestedBy: "acp-client" } : {}),
+					...(action === "grant" && sessionScope === true ? { sessionScope } : {}),
 					...(beforeRelease ? { beforeRelease } : {}),
 					...(reason !== undefined ? { reason } : {}),
 				},
@@ -3609,6 +3613,16 @@ function installPermissionBridge(input: {
 										name: stopAction?.label ?? "Deny and stop",
 										kind: "reject_once",
 									},
+									// A sandbox escape's session option (M-7): its label is the scope it grants.
+									...(meta.escapeScope !== undefined
+										? [
+												{
+													optionId: "allow-session-scope",
+													name: escapeScopeOptionLabel(meta.escapeScope),
+													kind: "allow_always",
+												},
+											]
+										: []),
 								],
 								_meta: {
 									...decisionMeta(
@@ -3654,7 +3668,8 @@ function installPermissionBridge(input: {
 						(answer.outcome !== "cancelled" &&
 							(answer.outcome !== "selected" ||
 								typeof answer.optionId !== "string" ||
-								!ACP_PERMISSION_OPTION_IDS.some((id) => id === answer.optionId)))
+								!ACP_PERMISSION_OPTION_IDS.some((id) => id === answer.optionId) ||
+								(answer.optionId === "allow-session-scope" && meta.escapeScope === undefined)))
 					) {
 						throw new Error("malformed ACP permission response: expected cancellation or an offered optionId");
 					}
@@ -3686,6 +3701,10 @@ function installPermissionBridge(input: {
 					}
 					if (answer.outcome === "selected" && answer.optionId === "allow-once") {
 						await resolve({ status: "granted", decidedBy: "acp-client" }, "grant");
+						return;
+					}
+					if (answer.outcome === "selected" && answer.optionId === "allow-session-scope") {
+						await resolve({ status: "granted", decidedBy: "acp-client" }, "grant", undefined, undefined, true);
 						return;
 					}
 					void resolve({ status: "denied", decidedBy: "acp-client", reason: "ACP client denied this tool call" });
