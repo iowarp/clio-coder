@@ -1,4 +1,5 @@
 import { ceilChars } from "../session/context-accounting.js";
+import { operatorDecided } from "./guardian-gate.js";
 import { keptLessonLabel, projectKeptLesson } from "./lesson-projection.js";
 import { eligibleMemoryRecords, memoryRecordEligible } from "./operations.js";
 import {
@@ -189,12 +190,17 @@ export function withOperatorSessionNotes(section: string, notes: ReadonlyArray<O
 	].join("\n");
 }
 
-/** Whether a record a compiled prompt carries may still stand there: the fresh-selection eligibility, or why not. */
-export type MemoryRecordStanding = "eligible" | "withdrawn" | "deleted";
+/**
+ * Whether a record a compiled prompt carries may still stand there: the fresh-selection eligibility, or why not.
+ * `automatic` is an eligible record no operator stands behind; `eligible` is one an operator decided (or a
+ * session-pinned note). Only the second rides a running session's tail as `# Memory update`.
+ */
+export type MemoryRecordStanding = "eligible" | "automatic" | "withdrawn" | "deleted";
 
 export function memoryRecordStanding(record: MemoryRecord | undefined): MemoryRecordStanding {
 	if (record === undefined) return "deleted";
-	return memoryRecordEligible(record) ? "eligible" : "withdrawn";
+	if (!memoryRecordEligible(record)) return "withdrawn";
+	return operatorDecided(record) ? "eligible" : "automatic";
 }
 
 const withdrawalLine = (id: string): string => `- [${id}] withdrawn. Do not use this memory record.`;
@@ -218,12 +224,28 @@ function lastDeliveredMemory(frozen: string, framed: readonly string[]): Map<str
 }
 
 /**
+ * Whether this session's prompt already carries a record, so no tool-time reminder repeats it (DESIGN 4.4): the
+ * frozen section, a `# Memory update` already sent, a framed reminder naming it, or the update this turn adds.
+ */
+export function memoryCarried(compiled: string, framed: readonly string[], delta: string): (id: string) => boolean {
+	const ids = new Set(
+		[compiled, delta, ...framed.filter((text) => text.includes("# Memory update"))].flatMap((section) =>
+			memorySectionBlocks(section).map((block) => block.id),
+		),
+	);
+	return (id) => ids.has(id) || framed.some((text) => text.includes(`[${id}]`));
+}
+
+/**
  * The records whose live text differs from what the model last received for
  * that id, and the lapsed records it last received as text. A memory approval
  * or revision between turns then reaches the model as tail text instead of
  * recompiling the system prompt and re-billing the conversation (#423); an
  * unchanged session yields the empty string. Records that only dropped out of
- * the live selection say nothing: ranking is not withdrawal.
+ * the live selection say nothing: ranking is not withdrawal. A record no
+ * operator stands behind (`automatic`), such as a lesson another running
+ * session got approved, waits for this session's successor: only an operator
+ * decision rides the tail mid-session (DESIGN 4.4). Withdrawals always ride.
  */
 export function memorySectionDelta(
 	frozen: string,
@@ -237,7 +259,9 @@ export function memorySectionDelta(
 	};
 	const delivered = lastDeliveredMemory(frozen, framed);
 	const withdrawn = [...delivered].filter(([id, text]) => text !== null && lapsed(id)).map(([id]) => withdrawalLine(id));
-	const fresh = memorySectionBlocks(live).filter((block) => !lapsed(block.id) && delivered.get(block.id) !== block.text);
+	const fresh = memorySectionBlocks(live).filter(
+		(block) => !lapsed(block.id) && standings.get(block.id) !== "automatic" && delivered.get(block.id) !== block.text,
+	);
 	if (fresh.length === 0 && withdrawn.length === 0) return "";
 	return [
 		MEMORY_UPDATE_HEADING,

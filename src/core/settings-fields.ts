@@ -74,6 +74,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"defaultNode",
 	"defaults",
 	"delegation",
+	"delivery",
 	"deltas",
 	"demo",
 	"deny",

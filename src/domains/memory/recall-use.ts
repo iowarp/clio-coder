@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
@@ -142,6 +142,26 @@ export function demotedMemoryIds(ledger: RecallUseLedger): Set<string> {
 			.filter(([, entry]) => entry.consecutiveUnused >= MEMORY_DEMOTE_AFTER_UNUSED)
 			.map(([id]) => id),
 	);
+}
+
+let demotedRead: { path: string; stamp: string; ids: ReadonlySet<string> } | null = null;
+
+/**
+ * The demoted ids on disk, the one source the `# Memory` section and every reminder read. Tool boundaries ask for it
+ * on every call, so the ledger is parsed again only when its file changes.
+ */
+export function readDemotedMemoryIds(stateDir: string): ReadonlySet<string> {
+	const path = recallUseLedgerPath(stateDir);
+	let stamp = "missing";
+	try {
+		const info = statSync(path);
+		stamp = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`;
+	} catch {
+		/* A missing ledger demotes nothing; the stamp still keys the empty read. */
+	}
+	if (demotedRead?.path !== path || demotedRead.stamp !== stamp)
+		demotedRead = { path, stamp, ids: demotedMemoryIds(readRecallUseLedger(stateDir)) };
+	return demotedRead.ids;
 }
 
 function isEntry(value: unknown): value is RecallUseEntry {

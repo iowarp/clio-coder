@@ -124,9 +124,9 @@ import {
 } from "../domains/safety/information-flow.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import {
-	callChangesTree,
 	createRunEffectsRecorder,
 	recordToolExecutionEffects,
+	sessionChangesTree,
 } from "../domains/safety/run-effects.js";
 import type {
 	WorkerGitAllowance,
@@ -1004,7 +1004,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const readStreakRegistration =
 		deliveryTools.length > 0 && workerCanWrite
 			? createReadStreakRegistration({
-					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+					// The worker's configured scratch roots count as scratch, as its run-effects recorder reads them.
+					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(() => workerSettings) },
 					workspaceRoot: () => input.cwd ?? process.cwd(),
 					surface: {
 						canWrite: true,
