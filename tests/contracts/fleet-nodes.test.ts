@@ -17,6 +17,7 @@ import {
 import { sameFleetBuild } from "../../src/domains/dispatch/fleet-preflight.js";
 import { verifyFleetProject } from "../../src/domains/dispatch/fleet-project-verification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
+import { WORKER_SPEC_VERSIONS } from "../../src/worker/spec-contract.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("fleet node management", () => {
@@ -116,7 +117,7 @@ describe("fleet node management", () => {
 		const ssh = join(scratch, "ssh");
 		writeFileSync(
 			ssh,
-			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok'\n`,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=${WORKER_SPEC_VERSIONS.join(" ")}' 'state=ok'\n`,
 		);
 		chmodSync(ssh, 0o755);
 		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false });
@@ -134,7 +135,7 @@ describe("fleet node management", () => {
 		const ssh = join(scratch, "ssh");
 		writeFileSync(
 			ssh,
-			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok' 'machine=0123456789abcdef0123456789abcdef'\n`,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=${WORKER_SPEC_VERSIONS.join(" ")}' 'state=ok' 'machine=0123456789abcdef0123456789abcdef'\n`,
 		);
 		chmodSync(ssh, 0o755);
 		const options = { sshBinary: ssh, targets: [], verifyProject: false } as const;
@@ -158,7 +159,7 @@ describe("fleet node management", () => {
 		const ssh = join(scratch, "ssh");
 		writeFileSync(
 			ssh,
-			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok' 'machine=0123456789abcdef0123456789abcdef'\n`,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=${WORKER_SPEC_VERSIONS.join(" ")}' 'state=ok' 'machine=0123456789abcdef0123456789abcdef'\n`,
 		);
 		chmodSync(ssh, 0o755);
 		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false, record: true });
@@ -197,7 +198,7 @@ describe("fleet node management", () => {
 		const ssh = join(scratch, "ssh");
 		writeFileSync(
 			ssh,
-			`#!/bin/sh\ncase "$*" in *clio-coder-targets*) cat > ${shellQuote(observed)}; exit 0;; esac\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok'\n`,
+			`#!/bin/sh\ncase "$*" in *clio-coder-targets*) cat > ${shellQuote(observed)}; exit 0;; esac\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=${WORKER_SPEC_VERSIONS.join(" ")}' 'state=ok'\n`,
 		);
 		chmodSync(ssh, 0o755);
 		process.env.CLIO_FLEET_NAMED_TEST_KEY = "named-variable-key";
