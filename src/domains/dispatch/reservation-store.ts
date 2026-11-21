@@ -23,16 +23,10 @@ import {
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
 import { COUNCIL_MIN_MEMBERS } from "./gate-role-prompts.js";
+import { leaseInstant, leaseLapsed } from "./lease-clock.js";
 
 const MAX_RESERVATION_RECORDS = 500;
 export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
-/**
- * A reservation owned on another host cannot be probed from here, so it is
- * reclaimed only once it is this far past its expiry. The owner refreshes the
- * expiry as it consumes members and on every heartbeat of a running member's
- * lease, so only a lost node's plan gets this old.
- */
-const FOREIGN_RESERVATION_GRACE_MS = 15 * 60_000;
 
 /**
  * `council` is carried rather than flattened into `parallel` because it is the
@@ -323,7 +317,7 @@ export function createDispatchReservation(input: {
 				planned.reason.startsWith("dispatch:") ? planned.reason : `dispatch: reservation denied: ${planned.reason}`,
 			);
 		}
-		const createdAt = new Date(nowMs).toISOString();
+		const createdAt = leaseInstant(nowMs);
 		const birthToken = processBirthToken();
 		const record: DispatchReservationRecord = {
 			ownerId: `plan-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
@@ -333,7 +327,7 @@ export function createDispatchReservation(input: {
 			topology: input.topology,
 			status: "active",
 			createdAt,
-			expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_RESERVATION_TTL_MS)).toISOString(),
+			expiresAt: leaseInstant(nowMs + (input.ttlMs ?? DEFAULT_RESERVATION_TTL_MS)),
 			settledAt: null,
 			members: tasks.map((task) => ({ ...task, status: "held", consumedAt: null, releasedAt: null })),
 		};
@@ -376,7 +370,7 @@ function reservationTransferLease(input: ReservationTransferInput): AcquireCapac
 			const member = record.members.find((entry) => entry.memberId === input.memberId);
 			if (member?.status !== "held") throw new Error(`dispatch: reservation member '${input.memberId}' is not held`);
 			member.status = "consumed";
-			member.consumedAt = new Date(nowMs).toISOString();
+			member.consumedAt = leaseInstant(nowMs);
 			refreshExpiry(record, nowMs);
 			state.reservations = records.map(copyRecord);
 		},
@@ -386,7 +380,7 @@ function reservationTransferLease(input: ReservationTransferInput): AcquireCapac
 /** Hosts that cannot probe a plan's owner judge it by its expiry; a live plan keeps it current. */
 function refreshExpiry(record: DispatchReservationRecord, nowMs: number): void {
 	const refreshed = nowMs + DEFAULT_RESERVATION_TTL_MS;
-	if (refreshed > Date.parse(record.expiresAt)) record.expiresAt = new Date(refreshed).toISOString();
+	if (refreshed > Date.parse(record.expiresAt)) record.expiresAt = leaseInstant(refreshed);
 }
 
 /**
@@ -523,10 +517,10 @@ export function releaseDispatchReservationMemberAsync(
 		if (record.status !== "active" || !member || member.status === "released")
 			return { result: copyRecord(record), changed: false };
 		member.status = "released";
-		member.releasedAt = new Date(nowMs).toISOString();
+		member.releasedAt = leaseInstant(nowMs);
 		if (record.members.every((entry) => entry.status === "released")) {
 			record.status = "released";
-			record.settledAt = new Date(nowMs).toISOString();
+			record.settledAt = leaseInstant(nowMs);
 		}
 		replaceReservations(state, records);
 		return { result: copyRecord(record), changed: true };
@@ -540,7 +534,7 @@ export function releaseDispatchReservation(ownerId: string, nowMs = Date.now()):
 		const record = records.find((entry) => entry.ownerId === ownerId);
 		if (!record) return null;
 		if (record.status !== "active") return copyRecord(record);
-		const settledAt = new Date(nowMs).toISOString();
+		const settledAt = leaseInstant(nowMs);
 		for (const member of record.members) {
 			if (member.status === "released") continue;
 			member.status = "released";
@@ -559,7 +553,7 @@ export function rollbackDispatchReservation(ownerId: string, nowMs = Date.now())
 		const record = records.find((entry) => entry.ownerId === ownerId);
 		if (!record) return null;
 		if (record.status !== "active") return copyRecord(record);
-		const settledAt = new Date(nowMs).toISOString();
+		const settledAt = leaseInstant(nowMs);
 		for (const member of record.members) {
 			if (member.status === "released") continue;
 			member.status = "released";
@@ -607,18 +601,20 @@ function expireRecords(
 	nowMs: number,
 	startup: boolean,
 ): DispatchReservationRecord[] {
-	const settledAt = new Date(nowMs).toISOString();
+	const settledAt = leaseInstant(nowMs);
 	for (const record of records) {
 		if (record.status !== "active") continue;
 		const alive = reservationOwnerAlive(record);
 		// On a shared state dir a local pid probe would inspect the wrong process, so neither it nor the
-		// startup sweep may judge another host's plan; only an expiry well past its estimate does.
+		// startup sweep may judge another host's plan; only its expiry past the skew tolerance does. The owner
+		// pushes the expiry out as it consumes members and on every heartbeat of a running member's lease, so only
+		// a lost node's plan lapses.
 		if (alive === null) {
-			if (Date.parse(record.expiresAt) + FOREIGN_RESERVATION_GRACE_MS > nowMs) continue;
+			if (!leaseLapsed(record.expiresAt, nowMs, true)) continue;
 		} else if (
 			// A healthy collective may outlive its planning estimate. Reclaim only orphaned owners.
 			(alive && !(startup && record.ownerPid === process.pid)) ||
-			(!startup && Date.parse(record.expiresAt) > nowMs)
+			(!startup && !leaseLapsed(record.expiresAt, nowMs, false))
 		)
 			continue;
 		expireRecord(record, settledAt);
@@ -636,7 +632,7 @@ export function expireDispatchReservationsOwnedBy(owner: { host: string; pid: nu
 	return withStateFileLockSync(capacityStateLockPath(), () => {
 		if (owner.birth === null) return 0;
 		const records = readStore();
-		const settledAt = new Date().toISOString();
+		const settledAt = leaseInstant(Date.now());
 		let expired = 0;
 		for (const record of records) {
 			if (

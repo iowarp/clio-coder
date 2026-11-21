@@ -12,7 +12,7 @@ durable instants, but it does not impose one clock primitive on every module.
 | --- | --- | --- |
 | Process-local elapsed span | Use a monotonic source such as `performance.now()` or `process.hrtime.bigint()` when the start and finish occur in one process. | [heartbeat.ts](../../src/domains/dispatch/heartbeat.ts), [code-step.ts](../../src/domains/dispatch/code-step.ts), [startup-timer.ts](../../src/core/startup-timer.ts) |
 | Durable or cross-process instant | Store epoch milliseconds or canonical UTC from `new Date(...).toISOString()`. | Session entries, telemetry records, dispatch rows |
-| Persisted expiry, lock age, or restart-visible deadline | Some owners intentionally compare `Date.now()` values because the fact must survive a process boundary or is derived from filesystem metadata. | [state-file-lock.ts](../../src/core/state-file-lock.ts) for lock age, [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts) for lease and drain `expiresAt`, dispatch admission and recovery |
+| Persisted expiry, lock age, or restart-visible deadline | Some owners intentionally compare `Date.now()` values because the fact must survive a process boundary or is derived from filesystem metadata. | [state-file-lock.ts](../../src/core/state-file-lock.ts) for lock age, [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts) for lease and drain `expiresAt` under the rule in [lease-clock.ts](../../src/domains/dispatch/lease-clock.ts), dispatch admission and recovery |
 | Duration between two stored instants | Subtract through `rawDurationMs` and clamp at the render or summing boundary. | [timers.ts](../../src/core/timers.ts), [phase-timing.ts](../../src/domains/dispatch/phase-timing.ts) |
 | Timer delay | Clamp to Node's real limit before calling `setTimeout`. | [timers.ts](../../src/core/timers.ts) |
 | Concurrent ordering | Prefer an explicit sequence or store order when the protocol supplies one; do not invent ordering from close timestamps. | [agent-ledger-store.ts](../../src/domains/dispatch/agent-ledger-store.ts), [execution-scheduler.ts](../../src/domains/dispatch/execution-scheduler.ts) |
@@ -28,11 +28,17 @@ mtime age, or a record another process must read after restart.
 filesystem fact, and it measures its own acquisition deadline with
 `performance.now()`, because that wait is a span inside the calling process.
 
-The writer set ages an owner on another host with neither host's
-clock. [writer-set.ts](../../src/domains/dispatch/writer-set.ts)
-writes a probe file beside the record and subtracts the record's modification
-time from the probe's, so both instants come from the filesystem that stores
-the lease and two hosts with skewed clocks agree on its age.
+Dispatch leases follow one rule, set out in
+[lease-clock.ts](../../src/domains/dispatch/lease-clock.ts): capacity leases, main
+cache lanes, the capacity drain, reservations and the writer set persist ISO
+`acquiredAt`, `heartbeatAt` and `expiresAt` from the writer's wall clock, never a
+duration. Capacity leases and the writer set renew every `LEASE_HEARTBEAT_MS`
+(10 s) for `LEASE_TTL_MS` (30 s). A reader judges a record on its own wall clock:
+one its own host wrote lapses at `expiresAt`, one another host wrote only
+`LEASE_CLOCK_SKEW_MS` (60 s) later, so a reader whose clock runs ahead never takes
+a live holder's record. Waits and holds inside one process, such as a writer
+queued behind the writer set or a follower held behind its prefix leader, run on
+`performance.now()`.
 
 ### Durations between stored instants
 

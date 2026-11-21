@@ -15,6 +15,7 @@ import {
 	releaseCapacityLease,
 	writeCapacityStateUnsafe,
 } from "../../src/domains/dispatch/capacity-lease.js";
+import { LEASE_CLOCK_SKEW_MS } from "../../src/domains/dispatch/lease-clock.js";
 import {
 	cleanupDispatchReservations,
 	createDispatchReservation,
@@ -455,6 +456,25 @@ it("a running member's lease heartbeat keeps its plan current for hosts that can
 	} finally {
 		await controller.stop();
 	}
+});
+
+it("another host's lease and plan hold until their expiry plus the clock skew tolerance, then are reclaimed (M12)", () => {
+	const reservation = reserve();
+	const lease = acquireCapacityLease({
+		assignmentId: "far",
+		nodeId: "gpu07",
+		limits: { global: 4, nodes: { gpu07: 4 }, endpoints: {} },
+	});
+	const state = readCapacityStateUnsafe();
+	for (const entry of state.leases) entry.host = "other-host";
+	state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+	writeCapacityStateUnsafe(state);
+	const leaseLapse = Date.parse(lease.expiresAt) + LEASE_CLOCK_SKEW_MS;
+	strictEqual(capacityLeaseUsage({ nowMs: leaseLapse - 1 }).nodes.gpu07, 1);
+	strictEqual(capacityLeaseUsage({ nowMs: leaseLapse }).nodes.gpu07, undefined);
+	const planLapse = Date.parse(reservation.expiresAt) + LEASE_CLOCK_SKEW_MS;
+	strictEqual(cleanupDispatchReservations({ nowMs: planLapse - 1 }), 0);
+	strictEqual(cleanupDispatchReservations({ nowMs: planLapse }), 1);
 });
 
 it("another host's leases and reservations do not consume this host's global cap", () => {

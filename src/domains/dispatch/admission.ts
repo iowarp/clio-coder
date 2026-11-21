@@ -20,6 +20,7 @@ import {
 	renameCapacityLeaseAssignment,
 	renewCapacityLeasesUnsafe,
 } from "./capacity-lease.js";
+import { LEASE_HEARTBEAT_MS } from "./lease-clock.js";
 import { refreshReservationsForLeasesUnsafe, transferDispatchReservationToLeaseUnsafe } from "./reservation-store.js";
 
 /**
@@ -591,7 +592,7 @@ export function createCapacityAdmissionController(options: {
 				heartbeatRun = null;
 			});
 	};
-	const heartbeatTimer = setInterval(heartbeat, options.heartbeatMs ?? 10_000);
+	const heartbeatTimer = setInterval(heartbeat, options.heartbeatMs ?? LEASE_HEARTBEAT_MS);
 	heartbeatTimer.unref();
 	const controller: CapacityAdmissionController = {
 		async admit(input) {
