@@ -2128,6 +2128,57 @@ test("a declared validation wrapper is judged by what it runs, at least as stric
 	} finally {
 		process.chdir(cwd);
 	}
+	// Row 261 last pass (r261e): never looser than b1c4855bf, whose decisions are pinned per scope (sandbox and snapshots,
+	// no sandbox, no snapshots): the kind's rank, and on a tie its rule, its snapshot (R) and its sandbox (S). An allow
+	// keeps exactly base's sandbox, since a sandbox on an allow lets admission skip the autonomy ask.
+	const scopes = [contained, { ...contained, sandbox: false }, { ...contained, snapshots: false }];
+	const rank: Record<string, number> = { allow: 0, ask: 1, block: 2 };
+	const reset = "damage-control:git-reset-hard";
+	const outsideRm = "damage-control:delete-outside-workspace";
+	const substitution = "bash-command-substitution";
+	const pinned: ReadonlyArray<readonly [string, ...string[]]> = [
+		['echo foo"TMPDIR" && rm -rf "$TMPDIR/x"', `ask+R+S ${outsideRm}`, `ask+R ${outsideRm}`, `ask+S ${outsideRm}`],
+		["./scripts/slot.sh git reset --hard", "allow+R+S bash-unrecognized", "allow+R bash-unrecognized", `ask+S ${reset}`],
+		[
+			'./scripts/slot.sh ssh host "$(id)"',
+			"allow+S bash-unrecognized",
+			`ask ${substitution}`,
+			"allow+S bash-unrecognized",
+		],
+		[
+			'./scripts/slot.sh -s git reset --hard && ./scripts/slot.sh -s foo ssh host "$(id)"',
+			"allow+R+S bash-shell-operators",
+			`ask+R ${substitution}`,
+			`ask+S ${reset}`,
+		],
+		[
+			"cat > a.txt <<'EOF'\nrm /tmp/foo\nEOF\ngit reset --hard",
+			"allow+R+S bash-shell-operators",
+			"allow+R bash-shell-operators",
+			`ask+S ${reset}`,
+		],
+		[
+			"git reset --hard && env -S 'rm /tmp/foo'",
+			"allow+R+S bash-shell-operators",
+			"allow+R bash-shell-operators",
+			`ask+S ${reset}`,
+		],
+		["git reset --hard && echo /tmp/foo | xargs rm", `ask+R+S ${outsideRm}`, `ask+R ${outsideRm}`, `ask+S ${reset}`],
+	];
+	for (const [command, ...base] of pinned) {
+		for (const [index, scope] of scopes.entries()) {
+			const decision = engine.evaluate(bash(command), "default", scope);
+			const [head = "", reasonCode] = (base[index] as string).split(" ");
+			const [kind = "", ...flags] = head.split("+");
+			const label = `${command} @${index}: ${decision.kind}/${decision.reasonCode}`;
+			strictEqual((rank[decision.kind] ?? -1) >= (rank[kind] ?? 3), true, label);
+			if (decision.kind !== kind) continue;
+			strictEqual(decision.reasonCode, reasonCode, label);
+			if (flags.includes("R")) strictEqual(decision.recoverable, true, label);
+			if (kind === "allow" || flags.includes("S"))
+				strictEqual(decision.shellSandbox !== undefined, flags.includes("S"), label);
+		}
+	}
 	// An undeclared script stays opaque, and a check behind the declared wrapper is not judged more strictly.
 	deepStrictEqual(verdicts(undeclared), before);
 	deepStrictEqual(verdicts("scripts/slot.sh ls"), verdicts("scripts/x.sh ls"));

@@ -2154,52 +2154,73 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// FX-46: a declared validation wrapper runs the rest of its line, so what it runs is judged as if written bare,
 		// and the strictest reading stands; readings at the same verdict merge. An undeclared script stays opaque.
 		const { callCwd } = commandUnderJudgment(normalizeCallPaths(rawCall));
-		const rank = (kind: SafetyPolicyDecision["kind"]) => (kind === "block" ? 2 : kind === "ask" ? 1 : 0);
 		let result = decision;
 		for (const inner of declaredWrapperReadings(command, callCwd)) {
 			const through = evaluateScopedReading({ ...rawCall, args: { ...rawCall.args, command: inner } }, posture, scope);
-			if (rank(through.kind) < rank(result.kind)) continue;
-			result =
-				rank(through.kind) === rank(result.kind)
-					? mergedWrapperReading(result, through, inner)
-					: {
-							...through,
-							...(decision.command !== undefined ? { command: decision.command } : {}),
-							reasons: [
-								`a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`,
-								...through.reasons,
-							],
-						};
+			result = mergedWrapperReading(result, through, inner);
 			if (result.kind === "block") break;
 		}
 		return result;
 	};
 
 	/**
-	 * Two readings at the same verdict merge rather than one replacing the other: a snapshot requirement either holds
-	 * stays, the more specific rule (a damage-control or path match over a catch-all) names the call, and both readings'
-	 * reasons are kept.
+	 * The call as judged so far (`current`, the command as written first) merged with a wrapper-stripped reading, never
+	 * looser than either (row 261): the stricter verdict names the call (its rule, reason code and match). On a tie the
+	 * reading already standing keeps its classification, and a stripped reading names the call only by a rule the standing
+	 * one lacks, never by a code admission treats more kindly (`snapshot-recoverable`). Reasons are the union; a snapshot requirement and an unrecognized command from
+	 * either reading stay, as does a test runner's consent. The sandbox is the standing reading's on a tie, since one
+	 * added to an allow would let admission run it unasked, and on an escalation the stricter reading's, or the standing
+	 * one's when it names none, the read-only box first.
 	 */
 	const mergedWrapperReading = (
-		decision: SafetyPolicyDecision,
+		current: SafetyPolicyDecision,
 		through: SafetyPolicyDecision,
 		inner: string,
 	): SafetyPolicyDecision => {
-		// The reading that names a rule (damage control, a path rule) names the call over one that names none.
+		const rank = (kind: SafetyPolicyDecision["kind"]) => (kind === "block" ? 2 : kind === "ask" ? 1 : 0);
+		const escalates = rank(through.kind) > rank(current.kind);
+		const own = escalates ? through : current;
+		const other = escalates ? current : through;
+		const note = `a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`;
+		const reasons = [...new Set([...(escalates ? [note] : []), ...own.reasons, ...other.reasons])];
+		const boxes = escalates ? [through.shellSandbox, current.shellSandbox] : [current.shellSandbox];
+		const present = boxes.filter((box) => box !== undefined);
+		const shellSandbox = present.find((box) => box.readOnly === true) ?? present[0];
+		const rest: SafetyPolicyDecision = { ...own };
+		delete rest.shellSandbox;
+		delete rest.execRecognition;
+		// On a tie the standing reading keeps its classification; the stripped one names the call only when it names a
+		// rule the standing one does not (a damage-control or path match), or the standing code is one admission runs
+		// unasked, and never with such a code itself.
+		const kindly = (reading: SafetyPolicyDecision) =>
+			reading.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE || reading.reasonCode === SCRATCH_DISPOSABLE_REASON_CODE;
 		const specific = (reading: SafetyPolicyDecision) =>
 			reading.match !== undefined || reading.reasonCode.includes("damage-control:");
-		const own = specific(through) && !specific(decision) ? through : decision;
-		const other = own === decision ? through : decision;
-		const note = `a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`;
-		const reasons = [...new Set([...(own === through ? [note] : []), ...own.reasons, ...other.reasons])];
-		// A sandbox either reading runs in stays, the read-only one when both name one (r261c-14).
-		const sandboxes = [decision.shellSandbox, through.shellSandbox].filter((box) => box !== undefined);
-		const shellSandbox = sandboxes.find((box) => box.readOnly === true) ?? sandboxes[0];
+		const renames =
+			!escalates &&
+			through.kind === current.kind &&
+			!kindly(through) &&
+			(kindly(current) || (specific(through) && !specific(current)));
+		if (renames) {
+			delete rest.ruleId;
+			delete rest.match;
+			rest.reasonCode = through.reasonCode;
+			if (through.ruleId !== undefined) rest.ruleId = through.ruleId;
+			if (through.match !== undefined) rest.match = through.match;
+		}
+		const execRecognition =
+			current.execRecognition === "unrecognized" || through.execRecognition === "unrecognized"
+				? ("unrecognized" as const)
+				: own.execRecognition;
 		return {
-			...own,
+			...rest,
 			...(shellSandbox !== undefined ? { shellSandbox } : {}),
-			...(decision.command !== undefined ? { command: decision.command } : {}),
-			...(decision.recoverable === true || through.recoverable === true ? { recoverable: true as const } : {}),
+			...(execRecognition !== undefined ? { execRecognition } : {}),
+			...(current.command !== undefined ? { command: current.command } : {}),
+			...(current.recoverable === true || through.recoverable === true ? { recoverable: true as const } : {}),
+			...(current.runsWorkspaceCode === true || through.runsWorkspaceCode === true
+				? { runsWorkspaceCode: true as const }
+				: {}),
 			reasons,
 		};
 	};
