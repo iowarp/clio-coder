@@ -540,6 +540,8 @@ export interface ToolCallStat {
 	totalDurationMs: number;
 	/** Successful calls the safety layer classed as write or destructive, for tools whose class depends on arguments. */
 	okWrites?: number;
+	/** Calls that returned a notice without running: the spent per-turn observation pool stopped them (C-17). */
+	withheld?: number;
 }
 
 /**
@@ -556,6 +558,8 @@ export interface ToolActivitySummary {
 	mutatingSucceeded: boolean;
 	/** The worker wrote at least one blob into a granted store tag. */
 	storeWritten?: boolean;
+	/** Calls in `calls` the spent observation pool answered with a notice instead of running (C-17); absent when none. */
+	withheld?: number;
 }
 
 /** One live-grant request on a worker receipt: who could decide, who did, and whether the call ran. */

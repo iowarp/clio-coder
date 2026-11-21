@@ -48,6 +48,8 @@ export interface RunEventJournalFacts {
 	/** Present-tense descriptor verb (`reading`); the object is the line's detail. */
 	verb?: string;
 	outcome?: "ok" | "error" | "blocked";
+	/** An `ok` finish whose call returned a notice without running: the spent observation pool stopped it (C-17). */
+	notExecuted?: "observation_budget";
 	durationMs?: number;
 	/** Why a call was blocked or failed, or why an approval resolved the way it did. */
 	reason?: string;
@@ -139,8 +141,9 @@ function isSafeRunId(runId: string): boolean {
 function createRunEventJournal(): RunEventJournalSink {
 	const forward = (runId: string, body: RunEventJournalBody, at?: string): void => {
 		if (!isSafeRunId(runId) || !runEventJournalEnabled() || stateRootRemoved()) return;
-		runTelemetryJournal(runId)?.feed(body, RUN_EVENT_JOURNAL_CAP_BYTES);
-		appendRunFeed(runId, body, at);
+		// The feed file numbers the row first, so the journal projection files it under the same seq (C-29).
+		const position = appendRunFeed(runId, body, at);
+		runTelemetryJournal(runId)?.feed(body, RUN_EVENT_JOURNAL_CAP_BYTES, position);
 	};
 	return {
 		open(runId, agentId): void {

@@ -175,6 +175,8 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 				return () => {};
 			};
 			handle.agent.prompt = async () => {
+				// The engine opens every prompt with agent_start before any tool runs.
+				await listener?.({ type: "agent_start" } as AgentEvent, new AbortController().signal);
 				const dispatch = state.tools?.find((entry) => entry.name === "dispatch");
 				ok(dispatch, "the real chat loop must install the admitted dispatch tool");
 				const result = await dispatch.execute("fixture-call", {
@@ -199,6 +201,7 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 	try {
 		const ids: string[] = [];
 		const workerIds: string[] = [];
+		let runningPids: Array<number | null> = [];
 		for (const interrupted of [false, true]) {
 			let drain: (() => void | Promise<void>) | undefined;
 			const shutdown: HeadlessShutdownHooks = {
@@ -212,10 +215,17 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 				? async () => {
 						await drain?.();
 					}
-				: undefined;
+				: async () => {
+						const rows = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])];
+						runningPids = rows
+							.filter((run) => run.agentId === "main-agent" && run.status === "running")
+							.map((run) => run.pid);
+					};
 			const code = await runHeadlessMainAgent(loop, { prompt: `Inspect ${interrupted}`, shutdown });
 			await drain?.();
 			strictEqual(code, interrupted ? 143 : 0);
+			// C-13: while its settled child pointed at it, the parent had a running row with this process's pid.
+			if (!interrupted) deepStrictEqual(runningPids, [process.pid]);
 			const journal = readRunJournal(join(env.dir, "state"));
 			ok(journal);
 			const mains = [...journal.envelopes.values()].filter((run) => run.agentId === "main-agent");

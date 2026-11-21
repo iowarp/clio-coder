@@ -2,6 +2,7 @@ import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { MemoryDeliveryMode, MemoryLessonsMode } from "../../core/defaults.js";
+import { unboundTelemetrySession } from "../../core/telemetry/producer.js";
 import type { FoldPlannerView } from "../context/fold/pressure.js";
 import { foldProjection } from "../context/fold/pressure.js";
 import type { CommandSegment } from "./command-evidence.js";
@@ -311,7 +312,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		mode: () => this.#infrastructure?.settings().surfaces.delivery ?? "decision",
 		notice: (line) => this.#infrastructure?.notice?.(line),
 		diagnostic: (line) => this.#infrastructure?.diagnostic?.(line),
-		event: (name, facts) => this.#event(name, facts),
+		// The session-start check decides before a fresh session binds; its decisions wait for that session (FX-45).
+		event: (name, facts) => this.#event(name, facts, true),
 	});
 	/** Note writes started so far, so a caller waiting on lesson writes waits on these too. */
 	#noteWrites: Promise<void> = Promise.resolve();
@@ -1588,13 +1590,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			durationMs: this.#durationMs,
 		};
 	}
-	#event(event: MemoryObservationEvent, facts: Record<string, unknown>): void {
+	#event(event: MemoryObservationEvent, facts: Record<string, unknown>, preBind = false): void {
 		const { sessionId, ...structural } = facts;
-		observationEvent(
-			event,
-			structural,
-			typeof sessionId === "string" ? sessionId : this.#registration?.captureMemoryAuthority()?.scope.sessionId,
-		);
+		const owner =
+			typeof sessionId === "string" ? sessionId : this.#registration?.captureMemoryAuthority()?.scope.sessionId;
+		observationEvent(event, structural, owner ?? (preBind ? unboundTelemetrySession() : undefined));
 	}
 }
 

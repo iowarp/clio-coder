@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { readBuildStamp } from "../../core/build-info.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
@@ -58,10 +59,14 @@ export function createProcessJournal(
 		kind: "process.started" | "process.exited" | "journal.gap",
 		data: PendingTelemetry["data"],
 	): PendingTelemetry => ({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() }) as PendingTelemetry;
+	// The process starts when its journal is created, not when the writer finishes opening: an async open lands after
+	// boot facts the pending queue already holds, so the record is stamped now and enqueued first (C-30).
+	const started = stamp("process.started", {});
 	const open = (): Promise<CallJournal | null> =>
 		(writer ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8")
 			.then((text) => {
 				const pkg = JSON.parse(text) as { version?: string; dependencies?: Record<string, string> };
+				const build = readBuildStamp();
 				return openCallJournal({
 					directory: telemetryProcessDirectory(stateDir, context.processId),
 					context,
@@ -71,12 +76,14 @@ export function createProcessJournal(
 					writer: {
 						clioCoderVersion: pkg.version ?? "unknown",
 						piVersion: pkg.dependencies?.["@earendil-works/pi-ai"] ?? "unknown",
+						// Which build wrote the process, when the bundle recorded one (C-31).
+						...(build ? { build } : {}),
 					},
 				});
 			})
 			.then((journal) => {
 				ready = journal;
-				journal.enqueue(stamp("process.started", {}));
+				journal.enqueue(started);
 				for (const record of pending.splice(0)) journal.enqueue(record);
 				// What the queue refused before the writer opened is a gap the journal itself must show (#434).
 				if (dropped > 0)

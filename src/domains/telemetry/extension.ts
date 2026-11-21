@@ -43,7 +43,7 @@ import { createProcessJournal } from "./process-journal.js";
 import { createTelemetryProjection } from "./projection.js";
 import { sweepTelemetryDaily } from "./retention.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
-import { createSessionJournals } from "./session-journals.js";
+import { createSessionJournals, holdUnboundTelemetry } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
 
 /**
@@ -125,6 +125,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 		origin: TelemetrySessionOrigin,
 		kind: K,
 		data: EventPayload<K>,
+		/** The pre-bind hold this fresh session alone receives, released inside its lease (CLI-P47). */
+		hold?: ReturnType<typeof holdUnboundTelemetry>,
 	): void => {
 		const write = journals
 			.acquire(origin, mainAgent(origin.id))
@@ -135,6 +137,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 						if (kind === "session.closed") lease.requestSeal?.();
 						else lease.cancelSeal?.();
 					}
+					// A session whose writer did not open cannot take them; they go where they went before the hold.
+					hold?.release(lease.journaled ? lease.context : null);
 				} finally {
 					await lease.release();
 				}
@@ -142,12 +146,26 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			.catch(() => {
 				// The writer reports its own failure; meta.json keeps endedAt for readers either way.
 			})
-			.finally(() => pendingRecords.delete(write));
+			.finally(() => {
+				// Released at most once: a lease that failed outright still ends the hold (CLI-P47).
+				hold?.release(null);
+				pendingRecords.delete(write);
+			});
 		pendingRecords.add(write);
 	};
 	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
 	// so stop() journals its close while the writers still accept records (#434).
 	let liveSession: TelemetrySessionOrigin | null = null;
+	/**
+	 * Facts emitted before the first session binds, held for it (CLI-P47, FX-45). The first bind detaches it at once:
+	 * a session opened fresh receives it, a resumed or loaded session never does.
+	 */
+	let preBind: ReturnType<typeof holdUnboundTelemetry> | undefined;
+	const detachPreBind = (): ReturnType<typeof holdUnboundTelemetry> | undefined => {
+		const hold = preBind;
+		preBind = undefined;
+		return hold;
+	};
 	// Once stopping, no record reopens a writer that closeAll is shutting (#434).
 	let stopping = false;
 	/**
@@ -167,6 +185,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 						lease.storeObject("config", payload.settings),
 					]);
 					telemetryHub().emit("config.changed", { ...settingsChangeData(payload), before, after }, lease.context);
+					// A session-only edit is not what a reopen compares against; the next open snapshots again (C-18).
+					noteJournaledSettings(origin.id, undefined);
 				} finally {
 					await lease.release();
 				}
@@ -183,19 +203,30 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 	>();
 	// Health is the process's: one window per process into its own journal, never one per session (#434).
 	const healthWindows = createHealthWindows({
-		active: () => journals.openSessions().length > 0,
+		// The live session's writer stays open while idle, so sampling follows session activity, not open writers (C-18).
+		active: () => journals.busy(),
 		writers: () => openCallJournalHealth().map(({ health }) => health),
 		record: (data) => telemetryHub().emit("health.sampled", data),
 		recordSamples: (data) => telemetryHub().emit("health.samples_captured", data),
 		samplesWanted: () => telemetryCaptures("health.samples_captured"),
 	});
+	/**
+	 * The settings fingerprint each session's journal last recorded in this process. A writer reopening under the same
+	 * settings records no second snapshot; its journal already holds them (C-18).
+	 */
+	const journaledSettings = new Map<string, string>();
+	const noteJournaledSettings = (sessionId: string, fingerprint: string | undefined): void => {
+		journaledSettings.delete(sessionId);
+		if (fingerprint === undefined) return;
+		journaledSettings.set(sessionId, fingerprint);
+		if (journaledSettings.size > 256) journaledSettings.delete(journaledSettings.keys().next().value as string);
+	};
 	const journals = createSessionJournals(
 		clioStateDir(),
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
 		sessionCapture,
 		// Each writer opens with the settings it records under, so its records never read against unknown settings.
 		async (origin, _sessionDirectory, journal) => {
-			healthWindows.start();
 			let settings: Readonly<ClioSettings> | undefined;
 			try {
 				settings = config()?.get();
@@ -203,13 +234,18 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 				// A writer that opens before the config domain starts has no settings to record yet.
 			}
 			if (!settings) return;
+			const fingerprint = computeSettingsFingerprint(settings);
+			if (journaledSettings.get(origin.id) === fingerprint) return;
 			// Objects go through the writer, so none lands behind the session's seal (#434).
 			const stored = journal.storeObject("config", settings).then((ref) => {
-				telemetryHub().emit(
-					"config.snapshotted",
-					{ settings: ref, settingsFingerprint: settingsFingerprintCommitment(computeSettingsFingerprint(settings)) },
-					sessionContext(origin.id),
-				);
+				if (
+					telemetryHub().emit(
+						"config.snapshotted",
+						{ settings: ref, settingsFingerprint: settingsFingerprintCommitment(fingerprint) },
+						sessionContext(origin.id),
+					)
+				)
+					noteJournaledSettings(origin.id, fingerprint);
 			});
 			openingSnapshots.set(origin.id, { origin, journal, stored });
 			try {
@@ -218,6 +254,7 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 				openingSnapshots.delete(origin.id);
 			}
 		},
+		() => healthWindows.start(),
 	);
 	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir, process: () => processJournal });
 	// Every host that boots this domain (TUI, ACP, headless run, fleet) owns one process journal, opened lazily (#434).
@@ -251,7 +288,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			// A snapshot that failed to store still leaves the change worth recording; its own failure was reported.
 			const write: Promise<void> = (stored ? stored.then(store, store) : store())
 				.then(([before, after]) => {
-					telemetryHub().emit("config.changed", { ...data, before, after }, sessionContext(origin.id));
+					if (telemetryHub().emit("config.changed", { ...data, before, after }, sessionContext(origin.id)))
+						noteJournaledSettings(origin.id, data.settingsFingerprint.hash);
 				})
 				.catch(settingsUnavailable)
 				.finally(() => pendingRecords.delete(write));
@@ -339,6 +377,11 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			} catch {
 				// Another bundle in this process already owns the process journal; one per process (#434).
 			}
+			try {
+				preBind ??= holdUnboundTelemetry();
+			} catch {
+				// Another bundle in this process already holds them; one hold per process (CLI-P47).
+			}
 			const settings = config();
 			if (settings) {
 				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const)
@@ -370,18 +413,25 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 				context.bus.subscribe("config.session_changed", recordSessionSettingsChange),
 				context.bus.subscribe("session.created", ({ sessionId, cwdHash }) => {
 					liveSession = { id: sessionId, cwdHash };
-					recordLifecycle(liveSession, "session.opened", {});
+					journals.keepOpen(sessionId);
+					recordLifecycle(liveSession, "session.opened", {}, detachPreBind());
 					// The session that becomes current binds here for every creator. A TUI creates it lazily on the first
 					// submit, long after boot bound nothing, and /new, fork and ACP session/new create the same way.
 					resetSession(sessionId);
 				}),
 				context.bus.subscribe("session.reattached", ({ sessionId, cwdHash, via }) => {
+					// A resumed or loaded session did not exist unbound in this process; nothing held is its (CLI-P47).
+					detachPreBind()?.release(null);
 					liveSession = cwdHash === undefined ? null : { id: sessionId, cwdHash };
+					journals.keepOpen(liveSession?.id ?? null);
 					if (liveSession) recordLifecycle(liveSession, "session.resumed", { via });
 				}),
 				// A park is the session's close; its reason says what replaced or ended it (#434).
 				context.bus.subscribe("session.parked", ({ sessionId, cwdHash, reason }) => {
-					if (liveSession?.id === sessionId) liveSession = null;
+					if (liveSession?.id === sessionId) {
+						liveSession = null;
+						journals.keepOpen(null);
+					}
 					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.closed", { reason });
 				}),
 			);
@@ -397,6 +447,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "shutdown" });
 			liveSession = null;
 			await Promise.all(pendingRecords);
+			// No session bound: what was held goes where it went before the hold, while the process journal is open.
+			detachPreBind()?.release(null);
 			await journals.closeAll();
 			// A process that recorded nothing process-scoped never opened a journal, and closing it writes nothing.
 			await processJournal?.close(processExitStatus());

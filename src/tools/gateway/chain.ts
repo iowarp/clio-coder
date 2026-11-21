@@ -5,6 +5,7 @@ import {
 } from "../../core/reminder-framing.js";
 import { skillActivationFromToolDetails } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { settleObservationCharge } from "../observation.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { boundedToolResultExcerpt, toolResultContextText } from "../result-disposition.js";
 import { CHAIN_OUTPUT_TRUNCATED_MARKER } from "../surface.js";
@@ -366,13 +367,16 @@ export async function runGatewayChain(
 		const result = results.get(step.id);
 		if (result === undefined) return [];
 		const output = projectedOutput(step, result);
+		const truncated = output !== toolResultContextText(result);
+		// The chain's aggregate cap cut this step after its own call settled; the pool pays for what is shown (C-17).
+		if (truncated) settleObservationCharge(result, byteLength(output));
 		return [
 			{
 				id: step.id,
 				capability: step.capability,
 				kind: result.kind,
 				output,
-				truncated: output !== toolResultContextText(result),
+				truncated,
 			},
 		];
 	});

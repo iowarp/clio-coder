@@ -32,6 +32,16 @@ export interface RunAssessmentContext {
 	decisionRefs: ReadonlyArray<string>;
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
+	/**
+	 * The finish contract decision the run's session recorded for it, for a run whose own journal holds none: a
+	 * headless main run's turn records it in its session, which settles before the run scope opens (C-11).
+	 */
+	completion?: Pick<TelemetryRecord<"completion.evaluated">, "id" | "t" | "data">;
+	/**
+	 * A change the run's host observed that its settled facts do not carry: a headless main run's successful mutating
+	 * call or merged dispatch worktree (C-37).
+	 */
+	observedChange?: boolean;
 }
 
 export interface AssessRunInput {
@@ -68,11 +78,14 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 	const digest = runSettledDigest(settled);
 	// The producer holds the record it is about to seal; a reader replaces this integrity with the seal's verdict.
 	let trust = adaptRunTrustStatus({ ...settled, runId, digest }, { state: "verified", by: "producer" });
-	const completion = input.records
-		.filter((record) => record.k === "completion.evaluated" && record.ctx.runId === runId && record.t <= settledAt)
-		.sort((left, right) => left.t.localeCompare(right.t))
-		.at(-1);
-	if (completion?.k === "completion.evaluated")
+	const completion =
+		input.records
+			.flatMap((record) =>
+				record.k === "completion.evaluated" && record.ctx.runId === runId && record.t <= settledAt ? [record] : [],
+			)
+			.sort((left, right) => left.t.localeCompare(right.t))
+			.at(-1) ?? input.context?.completion;
+	if (completion !== undefined)
 		trust = composeTrustStatus(trust, { completionEvidence: adaptCompletionEvidence(completion) });
 	const verdicts: EvidenceAssessed["verdicts"] = [];
 	for (const gate of [...input.gateDecisions].sort(compareGates)) {
@@ -125,7 +138,7 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 				attempt === 0 &&
 				settled.stepPipeline?.done !== false &&
 				trustVerdict(trust) !== "compromised" &&
-				!findings.some((entry) => entry.tag === "no-validation"),
+				!(findings.some((entry) => entry.tag === "no-validation") && validationOwed(settled, completion, context)),
 			failureCause,
 			// Plain data for the journal: the canonical status hands out readonly artifact lists.
 			trust: JSON.parse(JSON.stringify(trust)) as EvidenceAssessed["trust"],
@@ -141,6 +154,30 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 			cwd: context?.cwd ?? null,
 		},
 	};
+}
+
+/**
+ * Whether a run without validation evidence fails first-pass success for it (C-37): one that declared checks, or one
+ * that any signal shows changed state: its finish contract's mutated paths, a successful mutating call, a command the
+ * check classifier could not read, an applied worktree or one its host observed. A finish record that counted no paths
+ * outweighs none of them, since it cannot see a script's or a merged worktree's writes. Without any signal, a
+ * read-only recipe's run or a run with a finish record changed nothing to validate; a run with no evidence still owes it.
+ */
+function validationOwed(
+	settled: RunSettled,
+	completion: Pick<TelemetryRecord<"completion.evaluated">, "data"> | undefined,
+	context: RunAssessmentContext | null,
+): boolean {
+	if (settled.hostVerification !== null || (settled.quality?.resultContract ?? null) !== null) return true;
+	const changed =
+		(completion?.data.mutatedPaths ?? 0) > 0 ||
+		settled.toolActivity?.mutatingSucceeded === true ||
+		settled.unclassifiedAfterLastCheck !== undefined ||
+		settled.worktree?.applied === true ||
+		context?.observedChange === true;
+	if (changed) return true;
+	if (completion !== undefined || settled.verification.basis === "read-only-agent") return false;
+	return (settled.toolActivity ?? null) === null;
 }
 
 function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[] {

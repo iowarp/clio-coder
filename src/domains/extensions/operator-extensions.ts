@@ -35,6 +35,8 @@ export interface OperatorExtensionsOptions extends OperatorRuntimeOptions {
 	/** False for an extension the operator muted; see `OperatorRuntimeV2Options.admits`. */
 	admits?: (extensionId: string) => boolean;
 	surface?: ExtensionSurfaceModel;
+	/** See `OperatorRuntimeV2Options.pruneOrphanedSessionState`. */
+	pruneOrphanedSessionState?: boolean;
 }
 
 type ReloadReason = "startup" | "reload" | "session-change";
@@ -78,6 +80,7 @@ export class OperatorExtensions {
 			onReload: _onReload,
 			frozenTools,
 			commitHooks,
+			pruneOrphanedSessionState,
 			...shared
 		} = options;
 		this.v1 = new OperatorExtensionRuntime({
@@ -93,6 +96,7 @@ export class OperatorExtensions {
 			...(admits ? { admits } : {}),
 			...(embed ? { embed } : {}),
 			...(sandboxUnixSockets ? { sandboxUnixSockets } : {}),
+			...(pruneOrphanedSessionState !== undefined ? { pruneOrphanedSessionState } : {}),
 			reserved: () =>
 				this.v1
 					.entries()

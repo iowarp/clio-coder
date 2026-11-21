@@ -469,6 +469,9 @@ export const RUN_FEED_EVENTS = [
 	"clio_coder_permission_resolved",
 	"clio_coder_run_outcome",
 	"clio_coder_steer_received",
+	"clio_coder_helper_result",
+	"clio_coder_helper_result_rejected",
+	"clio_coder_write_record_downgraded",
 	"unknown",
 ] as const;
 export const RUN_FEED_OUTCOMES = [
@@ -733,6 +736,9 @@ export const HookRanSchema = Type.Object(
 		]),
 		effectKinds: Type.Optional(Type.Array(ExistingId, { maxItems: 32 })),
 		durationMs: Type.Optional(duration),
+		/** One record for this many effect-free runs in a turn; `durationMs` is their total. */
+		runs: Type.Optional(count),
+		maxDurationMs: Type.Optional(duration),
 		timeoutMs: Type.Optional(duration),
 		exitCode: Type.Optional(Type.Integer()),
 		outputChars: Type.Optional(count),
@@ -1078,12 +1084,21 @@ export const RunSettledSchema = Type.Object(
 		toolCalls: count,
 		/**
 		 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
-		 * counts the permission asks that were refused without an answer, apart from `blocked`, so a row sums; absent when
+		 * counts the permission asks that were refused without an answer, apart from `blocked`, and `withheld` the calls
+		 * the spent observation pool answered with a notice instead of running (C-17), so a row sums; each is absent when
 		 * there were none.
 		 */
 		tools: Type.Array(
 			Type.Object(
-				{ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count, asked: Type.Optional(count) },
+				{
+					tool: ExistingId,
+					calls: count,
+					ok: count,
+					errors: count,
+					blocked: count,
+					asked: Type.Optional(count),
+					withheld: Type.Optional(count),
+				},
 				closed,
 			),
 			{ maxItems: 256 },
@@ -1106,6 +1121,8 @@ export const RunSettledSchema = Type.Object(
 					storeWritten: Type.Optional(Type.Boolean()),
 					/** Calls that started and never finished, so a sealed reader shows them too (FL-6); absent when none. */
 					unfinished: Type.Optional(count),
+					/** Calls the spent observation pool answered without running them (C-17); absent when none. */
+					withheld: Type.Optional(count),
 				},
 				closed,
 			),
@@ -1902,6 +1919,8 @@ export const ToolSettledSchema = Type.Object(
 		terminate: Type.Optional(Type.Literal(true)),
 		/** Which refusal blocked it: a policy, an unapproved park, or a withheld duplicate of a succeeded call. */
 		blocked: Type.Optional(vocabulary(["refused", "denied-park", "redundant-repeat"])),
+		/** An `ok` call that returned a notice without running: the spent observation pool stopped it (C-17). */
+		notExecuted: Type.Optional(vocabulary(["observation_budget"])),
 		/**
 		 * The kind of file a write or edit targeted, from its extension alone; the path and name never enter the record.
 		 * `telemetry insights` reads it to tell prose from code and data work.
