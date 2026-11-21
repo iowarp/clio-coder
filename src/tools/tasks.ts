@@ -10,7 +10,7 @@ import {
 } from "../domains/session/task-board.js";
 import type { UserTask, UserTasksStore } from "../domains/user-tasks/store.js";
 import { StringEnum } from "../engine/ai.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 
 /**
  * The tasks tool: the session task board. The agent declares what it is
@@ -206,6 +206,36 @@ function mutationFromArgs(action: TasksAction, args: Record<string, unknown>): T
 	}
 }
 
+/** `ids` is one action per id, in order, stopping at the first failure (C-24). */
+async function runForEachId(
+	args: Record<string, unknown>,
+	options: ToolInvokeOptions | undefined,
+	runOne: ToolSpec["run"],
+): Promise<ToolResult> {
+	const { ids, ...rest } = args;
+	const action = typeof rest.action === "string" ? rest.action : "";
+	if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => typeof id !== "string")) {
+		return { kind: "error", message: 'tasks: ids must be a list of task ids, e.g. ids=["t1","t2"]' };
+	}
+	if (rest.id !== undefined) return { kind: "error", message: "tasks: send id or ids, not both" };
+	if (action !== "done" && action !== "block" && action !== "drop") {
+		return {
+			kind: "error",
+			message: `tasks: ids applies to done, block and drop; ${action || "this action"} takes one id`,
+		};
+	}
+	let last: ToolResult = { kind: "error", message: "tasks: ids named no task" };
+	for (const [index, id] of (ids as string[]).entries()) {
+		last = await runOne({ ...rest, id }, options);
+		if (last.kind !== "error") continue;
+		const applied = ids.slice(0, index).join(", ");
+		const skipped = ids.slice(index + 1).join(", ");
+		const parts = [...(applied ? [`${applied} already applied`] : []), ...(skipped ? [`${skipped} not attempted`] : [])];
+		return parts.length > 0 ? { ...last, message: `${last.message} (${parts.join("; ")})` } : last;
+	}
+	return last;
+}
+
 export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 	const reconcileUserTasks = (): ReadonlyArray<UserTask> => {
 		if (!deps.userTasks) return [];
@@ -220,7 +250,7 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 		return deps.userTasks.reconcile(links, sessionId);
 	};
 
-	return {
+	const spec: ToolSpec = {
 		name: ToolNames.Tasks,
 		description:
 			"Session task board: chain known start -> work and done -> start -> next work with gateway op=chain and after dependencies; " +
@@ -268,9 +298,20 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			// Weak-model shapes: a numeric or bare-number id becomes "tN", and a
 			// JSON-string tasks array is parsed back into a real array.
 			const idPrefix = prepared.action === "pick" ? "u" : "t";
-			if (typeof prepared.id === "number" && Number.isFinite(prepared.id)) prepared.id = `${idPrefix}${prepared.id}`;
-			if (typeof prepared.id === "string" && /^\d+$/.test(prepared.id.trim())) {
-				prepared.id = `${idPrefix}${prepared.id.trim()}`;
+			const taskId = (id: unknown): unknown => {
+				if (typeof id === "number" && Number.isFinite(id)) return `${idPrefix}${id}`;
+				if (typeof id === "string" && /^\d+$/.test(id.trim())) return `${idPrefix}${id.trim()}`;
+				return id;
+			};
+			if (prepared.id !== undefined) prepared.id = taskId(prepared.id);
+			if (Array.isArray(prepared.ids)) prepared.ids = prepared.ids.map(taskId);
+			// `create` with `items` is a plan with tasks under other names (C-24).
+			if (prepared.action === "create") {
+				prepared.action = "plan";
+				if (prepared.tasks === undefined && prepared.items !== undefined) {
+					prepared.tasks = prepared.items;
+					delete prepared.items;
+				}
 			}
 			if (typeof prepared.tasks === "string" && prepared.tasks.trim().startsWith("[")) {
 				try {
@@ -399,5 +440,9 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			].join("\n");
 			return { kind: "ok", output, details: boardDetails(typedAction, result.board) };
 		},
+	};
+	return {
+		...spec,
+		run: (args, options) => (args.ids === undefined ? spec.run(args, options) : runForEachId(args, options, spec.run)),
 	};
 }

@@ -1913,10 +1913,20 @@ export const ToolSettledSchema = Type.Object(
 		skill: Type.Optional(ExistingId),
 		/** The capabilities a gateway call or chain invoked, so the tool mix sees `data` or `web_fetch` behind it. */
 		capabilities: Type.Optional(Type.Array(ExistingId, { minItems: 1, maxItems: 32 })),
+		/** A capability a gateway call or chain step ran under the model's call; see {@link countsAsToolCall} (C-9). */
+		inner: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
 export type ToolSettled = Static<typeof ToolSettledSchema>;
+/**
+ * Whether a tool.settled or tool.decided row is a call the model made. A gateway call's capability and each chain
+ * step decide and settle as their own `inner` rows, so every decision has its settlement; counters count only the
+ * model's call (C-9).
+ */
+export function countsAsToolCall(data: { inner?: true }): boolean {
+	return data.inner !== true;
+}
 /**
  * One final safety disposition at a tool decision point, carrying its classification and policy facts. Commands,
  * arguments and policy prose stay out of the journal (#434).
@@ -1935,6 +1945,8 @@ export const ToolDecidedSchema = Type.Object(
 		policyHash: Type.Optional(ExistingId),
 		/** The confirmation rule (for example slurm-allocation) that raised an ask, apart from the policy's own rule. */
 		confirmationRuleId: Type.Optional(ExistingId),
+		/** A capability a gateway call or chain step ran under the model's call; see {@link countsAsToolCall} (C-9). */
+		inner: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
@@ -2359,7 +2371,10 @@ const FiringIdSchema = Type.String({ pattern: "^fir_[0-9a-f]{8}_[1-9][0-9]{0,15}
 /** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
 export const MiddlewareFiredSchema = Type.Object(
 	{
-		/** Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`). */
+		/**
+		 * Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`) or the rule
+		 * settles every firing (`nudge.read-streak`, `nudge.scout-survey`, `worker.thrash`; exploration design 3.4).
+		 */
 		firingId: Type.Optional(FiringIdSchema),
 		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
 		phase: vocabulary(["sync", "async", "awaited"]),

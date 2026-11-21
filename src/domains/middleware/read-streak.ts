@@ -29,6 +29,12 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCa
  * counts it; an operator's own turn and a session change reset it. Both
  * classifiers are passed in, so this domain imports no engine module.
  *
+ * Channels (X6). The first note rides the read that crossed the line, as a
+ * tool-result note. The second and last notes, the answer note and the
+ * standalone serial note are `inject_reminder` effects: the main session
+ * delivers one at the tool-batch boundary as a host-framed user message,
+ * the channel the weakest models answer.
+ *
  * A writer worker (X3) has no turn_start report, so it passes its surface,
  * and it has its own host channel: the second step goes there once, in place
  * of the second and last notes.
@@ -41,7 +47,8 @@ const SECOND_NOTE = 40;
 const LAST_NOTE = 60;
 const SERIAL_ROUNDS = 4;
 const STREAK_EVIDENCE = "count:read-class-calls@no-progress-streak";
-const SERIAL_EVIDENCE = "count:single-read-rounds@no-progress-streak";
+/** The evidence class of the serial-round note, which settles on round width rather than on progress (3.4). */
+export const READ_STREAK_SERIAL_EVIDENCE = "count:single-read-rounds@no-progress-streak";
 const BATCH_SENTENCE = "Send the reads and searches you already know you need together in one round.";
 /** Compaction stages that may remove tool results from the request; a recall restores them instead. */
 const NON_FOLD_STAGES: ReadonlySet<string> = new Set(["working_set_recall"]);
@@ -68,8 +75,38 @@ export interface ReadStreakClassifiers {
 		args: unknown,
 		declared: (tool: string) => { readOnly?: boolean; idempotent?: boolean } | undefined,
 	): boolean;
-	/** The finish gate's reading of whether a bash call changed the workspace (`callChangesTree`). */
+	/**
+	 * Whether a call changed the workspace (`callChangesTree` in run-effects): the finish gate's reading, with a named
+	 * write outside the workspace or in a scratch root changing nothing.
+	 */
 	changesTree(toolName: string, args: Record<string, unknown> | undefined, cwd: string): boolean;
+}
+
+/**
+ * What the rule saw, reported to the outcome ledger so it settles the rule's notes and measures the turn from the
+ * rule's own reading of each call instead of a second classifier (exploration design 3.4, X4). A `call` is one model
+ * call the rule judged, with the streak after it and the rounds it added to a serial run; a `fold` is a compaction
+ * that may have removed earlier results; a `handover` is a user message handed to the run mid-turn (a queued steer),
+ * which starts a new streak as an operator turn does.
+ */
+export type ReadStreakStep =
+	| {
+			kind: "call";
+			sessionId?: string;
+			toolName: string;
+			toolCallId?: string;
+			effect: CallEffect;
+			reads: number;
+			/** Rounds this call added to a serial run: all of them when the run reaches its length, then one each. */
+			serialRounds: number;
+			/** The note this call carries, if any. */
+			note: "ladder" | "serial" | null;
+	  }
+	| { kind: "fold"; sessionId?: string }
+	| { kind: "handover"; sessionId?: string };
+
+export interface ReadStreakObserver {
+	observeReadStreak(step: ReadStreakStep): void;
 }
 
 interface TurnSurface {
@@ -80,6 +117,8 @@ interface TurnSurface {
 
 interface StreakState {
 	sessionId: string | undefined;
+	/** The user turn the streak runs under, from turn_start; a tool hook naming another one ran after a handover. */
+	userTurnId: string | undefined;
 	reads: number;
 	serial: number;
 	serialNoted: boolean;
@@ -168,9 +207,15 @@ function outerChain(input: MiddlewareHookInput): boolean {
 	);
 }
 
+/** A note for the model alone, delivered at the tool-batch boundary as a host message where the session has one. */
+function hostNote(message: string): MiddlewareEffect {
+	return { kind: "inject_reminder", message, severity: "info", audience: "model" };
+}
+
 type CallEffect = "read" | "progress" | "other";
 
 export function createReadStreakRegistration(deps: {
+	observer?: ReadStreakObserver;
 	classifiers: ReadStreakClassifiers;
 	workspaceRoot?: () => string;
 	/** What a run that reports no turn_start can do; absent reads as a writer that can plan and ask. */
@@ -182,6 +227,7 @@ export function createReadStreakRegistration(deps: {
 }): MiddlewareHookRegistration & { resetStreak(): void } {
 	const state: StreakState = {
 		sessionId: undefined,
+		userTurnId: undefined,
 		reads: 0,
 		serial: 0,
 		serialNoted: false,
@@ -210,8 +256,12 @@ export function createReadStreakRegistration(deps: {
 			return call.toolName === ToolNames.Tasks && call.args?.action === "list" ? "other" : "progress";
 		}
 		if (call.toolName === ToolNames.Dispatch) return call.args?.list === true ? "other" : "progress";
+		const root = deps.workspaceRoot?.() ?? process.cwd();
+		// A write outside the workspace or in a scratch root is not the edit the note asks for.
 		if (call.toolName === ToolNames.Edit || call.toolName === ToolNames.Write)
-			return input.toolResultDetails?.unchanged === true ? "other" : "progress";
+			return input.toolResultDetails?.unchanged !== true && deps.classifiers.changesTree(call.toolName, call.args, root)
+				? "progress"
+				: "other";
 		// Only a declared read-only extension tool is a read here; an idempotent one may still write.
 		const readOnly = input.metadata?.toolReadOnly;
 		const declared = typeof readOnly === "boolean" ? { readOnly } : {};
@@ -219,12 +269,13 @@ export function createReadStreakRegistration(deps: {
 		// Typed git reads as a read only for its inspection ops, so any other op that succeeded (add, commit) is progress.
 		if (call.toolName === ToolNames.Git) return "progress";
 		if (call.toolName === ToolNames.Bash) {
-			const root = deps.workspaceRoot?.() ?? process.cwd();
 			if (deps.classifiers.changesTree(call.toolName, call.args, root)) return "progress";
 		}
 		return "other";
 	};
 
+	/** The note the call being judged now carries. */
+	let noted: "ladder" | "serial" | null = null;
 	const afterRead = (
 		input: MiddlewareHookInput,
 		context?: MiddlewareHookEvaluationContext,
@@ -257,12 +308,16 @@ export function createReadStreakRegistration(deps: {
 				state.serialNoted = true;
 			}
 			context?.evidence?.(STREAK_EVIDENCE);
-			return [{ kind: "annotate_tool_result", message, severity: "info" }];
+			noted = "ladder";
+			return [
+				state.reads === FIRST_NOTE ? { kind: "annotate_tool_result", message, severity: "info" } : hostNote(message),
+			];
 		}
 		if (surface.canWrite && state.serial === SERIAL_ROUNDS && !state.serialNoted) {
 			state.serialNoted = true;
-			context?.evidence?.(SERIAL_EVIDENCE);
-			return [{ kind: "annotate_tool_result", message: serialNote(state.serial), severity: "info" }];
+			context?.evidence?.(READ_STREAK_SERIAL_EVIDENCE);
+			noted = "serial";
+			return [hostNote(serialNote(state.serial))];
 		}
 		return NONE;
 	};
@@ -274,18 +329,41 @@ export function createReadStreakRegistration(deps: {
 		description: "ask for a decision after a long run of read-only calls with no edit, plan or question",
 		hooks: ["turn_start", "before_tool", "after_tool", "on_compaction"],
 		evidence: STREAK_EVIDENCE,
+		settles: true,
 		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
 			followSession(input.sessionId);
 			if (input.hook === "turn_start") {
 				state.chain = null;
 				if (operatorTurnStart(input)) reset();
 				state.surface = turnSurface(input);
+				const userTurnId = input.metadata?.userTurnId;
+				state.userTurnId = typeof userTurnId === "string" ? userTurnId : undefined;
 				return NONE;
 			}
 			if (input.hook === "on_compaction") {
 				const stage = input.metadata?.stage;
-				if (typeof stage !== "string" || !NON_FOLD_STAGES.has(stage)) state.folded = true;
+				if (typeof stage !== "string" || !NON_FOLD_STAGES.has(stage)) {
+					state.folded = true;
+					deps.observer?.observeReadStreak({
+						kind: "fold",
+						...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+					});
+				}
 				return NONE;
+			}
+			// A user message handed to the run mid-turn files its own user turn with no turn_start: a new streak starts.
+			if (
+				state.userTurnId !== undefined &&
+				input.turnId !== undefined &&
+				input.turnId !== state.userTurnId &&
+				input.metadata?.origin !== "harness"
+			) {
+				state.userTurnId = input.turnId;
+				reset();
+				deps.observer?.observeReadStreak({
+					kind: "handover",
+					...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				});
 			}
 			if (input.hook === "before_tool") {
 				if (outerChain(input)) {
@@ -304,15 +382,32 @@ export function createReadStreakRegistration(deps: {
 			if (input.metadata?.nested === true || input.metadata?.origin === "harness") return NONE;
 			if (input.metadata?.resultKind !== "ok") return NONE;
 			const effect = classify(input);
-			if (effect === "progress") {
-				reset();
-				return NONE;
-			}
-			if (effect === "other") {
-				state.serial = 0;
-				return NONE;
-			}
-			return afterRead(input, context);
+			let effects = NONE;
+			noted = null;
+			const serialBefore = state.serial;
+			if (effect === "progress") reset();
+			else if (effect === "other") state.serial = 0;
+			else effects = afterRead(input, context);
+			// A single-read round adds to the serial run: all of its rounds when it reaches its length, then one each.
+			const serialRounds =
+				state.serial !== serialBefore + 1
+					? 0
+					: state.serial === SERIAL_ROUNDS
+						? SERIAL_ROUNDS
+						: state.serial > SERIAL_ROUNDS
+							? 1
+							: 0;
+			deps.observer?.observeReadStreak({
+				kind: "call",
+				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				toolName: effectiveToolCall(input.toolName, input.toolArgs).toolName,
+				...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+				effect,
+				reads: state.reads,
+				serialRounds,
+				note: noted,
+			});
+			return effects;
 		},
 	};
 }

@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import type { HostInsertSource } from "../domains/session/entries.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { TurnQueuesState } from "./turn-state.js";
@@ -153,6 +154,13 @@ export interface TurnQueuesDeps {
 	now?: () => number;
 }
 
+/** A host message waiting for the next tool-batch boundary (X6), with the rule that emitted it. */
+export interface QueuedHostMessage {
+	text: string;
+	source: HostInsertSource;
+	rule?: string;
+}
+
 export interface TurnQueues {
 	/** `front` puts the entry at the head of the queue: a send-now the operator chose to wait with. Null when nothing is running. */
 	steer(text: string, display?: QueuedChatMessage["display"], options?: QueueEnqueueOptions): QueuedChatMessage | null;
@@ -162,6 +170,16 @@ export interface TurnQueues {
 		options?: QueueEnqueueOptions,
 	): QueuedChatMessage | null;
 	queuedMessages(): QueuedMessagesSnapshot;
+	/**
+	 * A host-framed message for the running turn (X6): it waits for the next tool-batch boundary that carries the run
+	 * on, where the turn runtime takes it ({@link takeHostMessages}) and appends it as a host insert, and is dropped
+	 * when the run ends first. It never reaches the engine's steering queue, is never shown in the queue panel, never
+	 * counts as a pending steer (so it never interrupts a running tool) and never starts a user turn. False when
+	 * nothing is running or the same text already waits.
+	 */
+	queueHostMessage(text: string, source: HostInsertSource, rule?: string): boolean;
+	/** The host messages waiting for this boundary, in queue order; taking them empties the lane. */
+	takeHostMessages(): QueuedHostMessage[];
 	/** Copies of the entries still in Clio's hands, in delivery order. */
 	entries(): QueuedChatMessage[];
 	/** True while a next-slot message is queued or handed over but not yet injected. */
@@ -256,6 +274,11 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	let reportedHeld = new WeakSet<QueuedChatMessage>();
 	let announcedHeld = 0;
 	let flushNext = false;
+	// Host messages waiting for the next tool-batch boundary.
+	const hostQueue: QueuedHostMessage[] = [];
+	const dropHost = (): void => {
+		hostQueue.length = 0;
+	};
 
 	const emitQueueUpdate = (): void => {
 		deps.emitQueueUpdateEvent(queue.map((entry) => ({ ...entry })));
@@ -372,6 +395,13 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	return {
 		steer: (text, display, options) => enqueue(text, "steer", display, options),
 		queueFollowUp: (text, display, options) => enqueue(text, "follow-up", display, options),
+		queueHostMessage(text, source, rule) {
+			if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
+			if (hostQueue.some((entry) => entry.text === text)) return false;
+			hostQueue.push({ text, source, ...(rule !== undefined ? { rule } : {}) });
+			return true;
+		},
+		takeHostMessages: () => hostQueue.splice(0, hostQueue.length),
 		queuedMessages(): QueuedMessagesSnapshot {
 			return {
 				steer: queue.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
@@ -426,6 +456,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		clearQueuedMirror(): QueuedChatMessage[] {
 			const drained = [...inFlight.splice(0, inFlight.length), ...queue.splice(0, queue.length)];
+			dropHost();
 			heldFor = null;
 			announcedHeld = 0;
 			flushNext = false;
@@ -442,6 +473,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			return [...inFlight, ...queue].filter((entry) => !fromMachine(entry)).map((entry) => ({ ...entry }));
 		},
 		handOverAtFinishTurn(final) {
+			// A host message rides only a boundary the run continues past; at its final turn it would carry a finished run on.
+			if (final) dropHost();
 			const agent = state.runtime?.agent;
 			if (!agent || heldFor !== null) return;
 			const steered = handOver(agent, "steer", "finish-turn");
@@ -453,6 +486,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			handOver(agent, "steer", "prepare-next-turn");
 		},
 		handOverBeforePrompt(agent, options) {
+			// A host message belongs to the run that queued it; a new prompt starts past it.
+			dropHost();
 			if (heldFor !== "operator" || options?.keepOperatorHold !== true) {
 				if (heldFor !== null) reportReleased();
 				heldFor = null;
@@ -467,6 +502,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			flushNext = true;
 		},
 		onRunCancelled({ hold, preserve = false, settle = false }) {
+			dropHost();
 			const changed = inFlight.length > 0 || queue.length > 0;
 			reportReturned(inFlight, "run-cancelled");
 			queue.unshift(...inFlight.splice(0, inFlight.length));
@@ -618,6 +654,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				);
 			queue.length = 0;
 			inFlight.length = 0;
+			dropHost();
 			persistedUserEchoes.length = 0;
 			heldFor = null;
 			if (options?.keepOperator === true && operator.length > 0) {

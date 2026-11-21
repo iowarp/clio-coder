@@ -52,6 +52,8 @@ export interface HostInsertOptions {
 	/** Rows that may not anchor the record: a stopped reply the record replaces. */
 	exclude?: ReadonlyArray<string>;
 	restoration?: HostInsertRestoration;
+	/** The rule that emitted a `reminder` record, kept on the record for audit (X6). */
+	rule?: string;
 }
 
 export interface HostInserts {
@@ -131,6 +133,7 @@ export function createHostInserts(deps: HostInsertsDeps): HostInserts {
 			place: typeof anchor === "string" ? { after: anchor } : anchor,
 			...(options.replaces && options.replaces.length > 0 ? { replaces: [...options.replaces] } : {}),
 			...(options.restoration ? { restoration: options.restoration } : {}),
+			...(options.rule !== undefined ? { rule: options.rule } : {}),
 		};
 		append(data);
 		known.add(data.id);

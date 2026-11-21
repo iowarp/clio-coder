@@ -8,6 +8,7 @@
 
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
+import { countsAsToolCall } from "../../core/telemetry/schemas.js";
 import type { AccountabilityEventName, AccountabilityRecord, JournalSource } from "./read-model.js";
 
 // ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ export function foldDecisions(records: Iterable<AccountabilityRecord>): Decision
 				approvals[record.data.status] += 1;
 				break;
 			case "tool.decided":
-				tools[record.data.decision] += 1;
+				if (countsAsToolCall(record.data)) tools[record.data.decision] += 1;
 				break;
 			case "safety.judged":
 				safety[record.data.verdict] += 1;

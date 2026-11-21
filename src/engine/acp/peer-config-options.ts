@@ -4,6 +4,8 @@
  * effort as one legacy `<model>-<level>` id, which only an agy delegation splits here.
  */
 
+import { AcpError } from "./errors.js";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -103,7 +105,8 @@ export function legacyModelRequest(
 	if (level !== null && ids.includes(base)) {
 		const offered = thoughtOption?.values.find((value) => value.toLowerCase() === level.toLowerCase()) ?? level;
 		if (request.thinkingLevel !== undefined && request.thinkingLevel.toLowerCase() !== offered.toLowerCase()) {
-			throw new Error(
+			throw new AcpError(
+				"acp_model_unavailable",
 				`ACP peer does not offer requested model '${model}' with thinking level '${request.thinkingLevel}': the id names thinking level '${level}'`,
 			);
 		}
@@ -121,7 +124,8 @@ export function legacyModelRequest(
 	const current = modelOption?.currentValue ?? null;
 	if (current !== null && variants.includes(current)) return { model: current };
 	if (variants.length === 1) return { model: variants[0] ?? model };
-	throw new Error(
+	throw new AcpError(
+		"acp_model_unavailable",
 		`ACP peer offers multiple efforts for requested model '${model}'; specify thinkingLevel${offeredChoices(variants)}`,
 	);
 }

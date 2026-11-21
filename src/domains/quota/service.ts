@@ -18,6 +18,7 @@ import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS } from "./cache.js";
 import { anthropicStreamSnapshot, codexStreamSnapshots, withAnthropicStreamSnapshot } from "./observed.js";
 import { localQuotaSnapshot } from "./presentation.js";
 import { buildQuotaProviders } from "./registry.js";
+import { quotaSharedStatePath } from "./shared-state.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
 export interface QuotaServiceOptions {
@@ -40,7 +41,14 @@ export interface QuotaService {
 
 export function createQuotaService(options: QuotaServiceOptions = {}): QuotaService {
 	const providers = options.providers ?? buildQuotaProviders();
-	const cache = options.cache ?? createQuotaCache({ ttlMs: options.ttlMs ?? DEFAULT_QUOTA_CACHE_TTL_MS });
+	// The machine's own accounts share readings and holds with every other process. Injected providers are not those
+	// accounts, so their readings stay in this process.
+	const cache =
+		options.cache ??
+		createQuotaCache({
+			ttlMs: options.ttlMs ?? DEFAULT_QUOTA_CACHE_TTL_MS,
+			...(options.providers === undefined ? { sharedStatePath: quotaSharedStatePath() } : {}),
+		});
 	const includeLocal =
 		options.includeLocal ??
 		readSettings().targets.some((target) => getRuntimeRegistry().get(target.runtime)?.tier === "local-native");

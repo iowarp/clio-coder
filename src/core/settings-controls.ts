@@ -761,6 +761,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Sandbox unix sockets",
 		"Block stops sandboxed commands from opening Unix sockets, because a socket they can reach (tmux, an X11 display, a daemon's control socket) can run commands outside the sandbox. Database sockets, Docker and other local IPC then fail inside it, and a command that needs one runs unsandboxed after review. Owned hides only the sockets you own (tmux, an X11 socket file, your agents) and leaves other users' reachable, such as the MUNGE and SSSD sockets cluster commands need; abstract sockets stay reachable. Allow leaves every socket reachable. User settings only.",
 	],
+	"safety.validationWrappers": [
+		"Validation wrappers",
+		"Wrapper scripts that run a check with the words after them, such as a test-slot or CI launcher: a path matches that script, a bare name its basename. A command starting with one counts as the check it runs, so a finish after it is not assessed as unvalidated; the run still counts as a change, since the wrapper may write. A file writer, a shell, an interpreter, echo, cat, xargs and similar words are refused.",
+	],
 	"fleet.keepPeerInstructionFiles": [
 		"Peers that keep their own instruction files",
 		"Runtime ids (codex-cli, pi-cli, opencode-cli) of delegated harnesses that read their own repository instruction files unchanged, with the rules Clio compiled for the run beside them. Others read the compiled rules in place of their files; claude-code always reads its own beside them.",

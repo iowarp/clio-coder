@@ -25,7 +25,7 @@ import {
 	recordAgentLedgerDispute,
 	recordClaims,
 } from "../../src/domains/claims/index.js";
-import { claimsFullReadCount } from "../../src/domains/claims/store.js";
+import { CLAIMS_INDEX_CHECKPOINT_LAG, claimsFullReadCount } from "../../src/domains/claims/store.js";
 import { exportClaims, importClaims } from "../../src/domains/claims/transfer.js";
 import {
 	appendAgentLedgerEntry,
@@ -538,6 +538,35 @@ describe("claims lifecycle (#406)", () => {
 				[["contradicts", rerun.id]],
 			);
 			assert.equal(claimsFullReadCount(), reads + 1);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("item 4: empty check starts checkpoint the index only every few records; a claim checkpoints at once", async () => {
+		const env = await isolateClioEnv("clio-claims-life-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const indexed = () => (JSON.parse(readFileSync(claimsIndexPath(project), "utf8")) as { logBytes: number }).logBytes;
+			const logSize = () => statSync(claimsLogPath(project)).size;
+			const start = (toolCallId: string) =>
+				appendCheckStarts(project, { channel: "verify", sessionId: "s", toolCallId }, ["stats"], "2026-11-06T00:00:00Z");
+			await appendClaims([claimAt(project, true, "c".repeat(40), "2026-11-06T00:00:00.000Z")]);
+			const checkpoint = indexed();
+			const reads = claimsFullReadCount();
+			await start("t0");
+			assert.equal(indexed(), checkpoint, "an empty binding leaves the index lagging");
+			const size = logSize();
+			assert.deepEqual([...(await start("t0")).entries()], [["stats", []]]);
+			assert.equal(logSize(), size, "the lagging tail still holds the run's first start");
+			for (let call = 1; call < CLAIMS_INDEX_CHECKPOINT_LAG; call++) await start(`t${call}`);
+			assert.equal(indexed(), logSize(), "the index checkpoints once the lag reaches its bound");
+			await start("late");
+			await appendClaims([claimAt(project, false, "c".repeat(40), "2026-11-06T00:01:00.000Z")]);
+			assert.equal(indexed(), logSize(), "a claim checkpoints at once");
+			assert.equal(claimsFullReadCount(), reads, "a lagging index is caught up, never rebuilt");
 		} finally {
 			env.restore();
 		}

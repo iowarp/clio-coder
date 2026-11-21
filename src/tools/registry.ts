@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -37,6 +38,7 @@ import type {
 	MiddlewareHookInput,
 	MiddlewareHookResult,
 	MiddlewareMetadataValue,
+	MiddlewareReminderSeverity,
 	ToolCallLanding,
 } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
@@ -687,6 +689,12 @@ export interface ToolInvokeOptions {
 	 */
 	nested?: boolean;
 	/**
+	 * Set by the gateway on the capability a call or chain step runs under the
+	 * model's call. Its tool.decided and tool.settled rows carry `inner` so each
+	 * decision has its own settlement and counters count the model's call (C-9).
+	 */
+	gatewayInner?: true;
+	/**
 	 * The capability surface this run was admitted to, when the run is
 	 * narrower than the registry (a worker). The gateway refuses to call any
 	 * capability outside it, so a recipe's declared tools bound the gateway
@@ -801,6 +809,8 @@ export interface AskUserToolPolicy {
 	planOnly?: boolean;
 	/** A plan card was answered with anything but keeping the plan: work or a revision follows and may still need the operator. */
 	asksAfterClose?: boolean;
+	/** The interview the same operator prompt closed before this continuation turn began (C-25). */
+	closedEarlier?: AskUserToolPolicy;
 	id: string;
 	status: AskUserInterviewStatus;
 	startedAt: string;
@@ -994,6 +1004,21 @@ export interface ToolRegistry {
 	 * call, so neither needs a state here. Returns an unsubscribe handle.
 	 */
 	onAdmissionReview?(listener: (event: AdmissionReviewEvent) => void): () => void;
+	/**
+	 * Subscribe to the reminders synchronous after_tool middleware emitted for a call, for the session that delivers
+	 * them at the tool-batch boundary. Returns an unsubscribe handle.
+	 */
+	onToolBoundaryReminders?(
+		listener: (reminders: ReadonlyArray<ToolBoundaryReminder>, input: MiddlewareHookInput) => void,
+	): () => void;
+}
+
+/** An `inject_reminder` emitted at after_tool, with the rule that emitted it. */
+export interface ToolBoundaryReminder {
+	message: string;
+	ruleId: string;
+	severity?: MiddlewareReminderSeverity;
+	audience?: "model";
 }
 
 /** One step of the safety judge's hold on a started call, keyed by the engine's tool call id. */
@@ -1215,6 +1240,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
 	>();
 	const admissionReviewListeners = new Set<(event: AdmissionReviewEvent) => void>();
+	const boundaryReminderListeners = new Set<
+		(reminders: ReadonlyArray<ToolBoundaryReminder>, input: MiddlewareHookInput) => void
+	>();
 	let approvalRequestCounter = 0;
 	const approvalRequestToken = randomBytes(4).toString("hex");
 
@@ -1639,7 +1667,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (!deps.middleware) return [];
 		const input = hookInput(hook, spec, call, decision, options, result, resultDigest);
 		const startedAt = performance.now();
-		const effects = noteGuardRule(deps.middleware.runHook(input));
+		const ran = deps.middleware.runHook(input);
+		const effects = noteGuardRule(ran);
 		options?.onHookTime?.(performance.now() - startedAt);
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
@@ -1647,7 +1676,38 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// A provider-routing sink is advisory to this call. It may narrow the
 			// next request, but it must never throw through tool admission.
 		}
+		if (hook === "after_tool" && boundaryReminderListeners.size > 0) passBoundaryReminders(ran, input);
 		return effects;
+	};
+
+	/**
+	 * An `inject_reminder` a synchronous after_tool registration emits is no annotation, so this call's result does
+	 * not carry it. It passes through to the session that owns the run, which delivers it at the tool-batch boundary
+	 * (exploration design 3.3, X6). Each reminder names the rule that emitted it.
+	 */
+	const passBoundaryReminders = (ran: MiddlewareHookResult, input: MiddlewareHookInput): void => {
+		const reminders: ToolBoundaryReminder[] = [];
+		let offset = 0;
+		for (const rule of ran.fired ?? []) {
+			for (const effect of ran.effects.slice(offset, offset + rule.effects.length)) {
+				if (effect.kind !== "inject_reminder") continue;
+				reminders.push({
+					message: effect.message,
+					ruleId: rule.ruleId,
+					...(effect.severity !== undefined ? { severity: effect.severity } : {}),
+					...(effect.audience !== undefined ? { audience: effect.audience } : {}),
+				});
+			}
+			offset += rule.effects.length;
+		}
+		if (reminders.length === 0) return;
+		for (const listener of boundaryReminderListeners) {
+			try {
+				listener(reminders, input);
+			} catch {
+				// Delivery is the session's; its failure never changes this call.
+			}
+		}
 	};
 
 	/**
@@ -2223,6 +2283,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			tool: call.tool,
 			classification: decision.classification,
 			decision: auditDecision,
+			...(gatewayInnerScope.getStore() === true ? { inner: true as const } : {}),
 			...(overrides?.requestId !== undefined ? { requestId: overrides.requestId } : {}),
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 			...(overrides?.reasonCode !== undefined ? { reasonCode: overrides.reasonCode } : {}),
@@ -2309,7 +2370,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 
 	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string, options?: ParkCancelOptions): void => {
-		withToolTelemetryContext(entry.options ?? {}, () => {
+		withRegistryScope(entry.options, () => {
 			cleanupParkedEntry(entry);
 			disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 			// A denied/cancelled park is still a model attempt: observe it so
@@ -2666,7 +2727,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listVisible: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "direct"),
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
-			return withToolTelemetryContext(options ?? {}, async () => {
+			return withRegistryScope(options, async () => {
 				if (deps.principal === "worker") return invokeAdmitted(call, options);
 				// A refusal is final for the identical call within the turn: the same
 				// policy, the same operator and the same server would answer it the
@@ -2732,7 +2793,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			});
 		},
 		async requestReadRootApproval(root, options, task) {
-			return withToolTelemetryContext(options ?? {}, async () => {
+			return withRegistryScope(options, async () => {
 				// Contained yolo never waits for a person, so the Scout run reports the approval it needed instead.
 				if (
 					(deps.principal ?? "main") !== "main" ||
@@ -2844,7 +2905,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (entry) pending.push({ entry });
 			}
 			for (const { entry, reparkIndex } of pending) {
-				await withToolTelemetryContext(entry.options ?? {}, async () => {
+				await withRegistryScope(entry.options, async () => {
 					if (entry.readRootApproval === true) {
 						if (grant === undefined || grant.actionClass !== "read" || (grant.issuer ?? "operator") !== "operator") {
 							reparkEntry(entry, reparkIndex);
@@ -3009,6 +3070,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			admissionReviewListeners.add(listener);
 			return () => {
 				admissionReviewListeners.delete(listener);
+			};
+		},
+		onToolBoundaryReminders(listener) {
+			boundaryReminderListeners.add(listener);
+			return () => {
+				boundaryReminderListeners.delete(listener);
 			};
 		},
 	};
@@ -3198,6 +3265,14 @@ function operatorAnswers(verdict: RegistryVerdict): Array<{ question: string; an
 }
 
 /** Delegated execution evidence stays in process, never in model-visible result fields. */
+/** Whether the invocation in progress is a capability the gateway runs under the model's call (C-9). */
+const gatewayInnerScope = new AsyncLocalStorage<boolean>();
+
+/** The telemetry scope of one invocation, with whether its decisions are a gateway call's inner rows. */
+function withRegistryScope<T>(options: ToolInvokeOptions | undefined, work: () => T): T {
+	return gatewayInnerScope.run(options?.gatewayInner === true, () => withToolTelemetryContext(options ?? {}, work));
+}
+
 const nestedExecutions = new WeakMap<ToolResult, { decision: SafetyDecision; execution: ExecutionProvenance }>();
 
 const nestedChainResults = new WeakMap<ToolResult, ExecutionProvenance>();

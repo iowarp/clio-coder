@@ -146,7 +146,7 @@ describe("decide tool", () => {
 	it("enforces the argument caps and names the field", async () => {
 		const f = fixture();
 		const cases: Array<[Record<string, unknown>, RegExp]> = [
-			[{ ...GOOD_ARGS, key: "CacheKey" }, /key must be kebab-case/u],
+			[{ ...GOOD_ARGS, key: "cache key" }, /key must be kebab-case/u],
 			[
 				{ ...GOOD_ARGS, key: "a".repeat(DECIDE_CAPS.keyBytes + 1) },
 				new RegExp(`key exceeds the ${DECIDE_CAPS.keyBytes}-byte cap`, "u"),
@@ -176,6 +176,11 @@ describe("decide tool", () => {
 			if (result.kind === "error") match(result.message, expected);
 		}
 		strictEqual(f.entries.length, 0);
+		// A snake_case or capitalized key names the same decision; it is recorded kebab-case and the result says so (C-24).
+		const snake = await f.tool.run({ ...GOOD_ARGS, key: "Cache_Key_Shape" });
+		ok(snake.kind === "ok", JSON.stringify(snake));
+		match(snake.output, /^decision recorded: cache-key-shape = .*key read as "cache-key-shape" from "Cache_Key_Shape"/u);
+		strictEqual(f.entries.at(-1)?.decisions[0]?.key, "cache-key-shape");
 	});
 
 	it("refuses without a decision board, as in a worker registry", async () => {

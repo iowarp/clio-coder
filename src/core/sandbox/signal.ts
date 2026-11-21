@@ -10,7 +10,9 @@ import { readFileSync } from "node:fs";
  * `--die-with-parent` then SIGKILLs the whole namespace, and the payload never
  * sees the SIGTERM it was meant to handle. The payload's groups are led by the
  * launcher's direct children, whose host PIDs Linux lists in
- * `/proc/<pid>/task/<pid>/children`.
+ * `/proc/<pid>/task/<pid>/children`. A launch with masks runs bwrap as the
+ * child of a launcher shell first (bwrap.ts), so a child that leads no group
+ * is looked through, two levels down at most.
  *
  * Returns true when at least one payload group was signalled, so the caller
  * can let the launcher exit on its own once the payload does. Returns false
@@ -19,9 +21,13 @@ import { readFileSync } from "node:fs";
  */
 export function signalSandboxPayload(launcherPid: number, signal: NodeJS.Signals): boolean {
 	if (process.platform !== "linux") return false;
+	return signalChildGroups(launcherPid, signal, 2);
+}
+
+function signalChildGroups(parentPid: number, signal: NodeJS.Signals, depth: number): boolean {
 	let children: number[];
 	try {
-		children = readFileSync(`/proc/${launcherPid}/task/${launcherPid}/children`, "utf8")
+		children = readFileSync(`/proc/${parentPid}/task/${parentPid}/children`, "utf8")
 			.trim()
 			.split(/\s+/u)
 			.map(Number)
@@ -33,13 +39,15 @@ export function signalSandboxPayload(launcherPid: number, signal: NodeJS.Signals
 	}
 	let signalled = false;
 	for (const child of children) {
-		if (child === launcherPid) continue;
+		if (child === parentPid) continue;
 		try {
 			process.kill(-child, signal);
 			signalled = true;
 		} catch {
-			// ESRCH: the child exited or leads no group; EPERM: not ours. Either way
-			// the launcher-group signal remains the fallback.
+			// ESRCH: the child exited or leads no group, such as bwrap under the
+			// launcher shell, whose own child leads the payload's; EPERM: not ours.
+			// Either way the launcher-group signal remains the fallback.
+			if (depth > 1 && signalChildGroups(child, signal, depth - 1)) signalled = true;
 		}
 	}
 	return signalled;

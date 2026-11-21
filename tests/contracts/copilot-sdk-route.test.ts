@@ -54,6 +54,7 @@ import {
 import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js";
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -1941,5 +1942,75 @@ test("a default copilot-sdk target admits workers beside the foreground turn, an
 	} finally {
 		for (const release of foreground) release();
 		await controller.stop();
+	}
+});
+
+test("steering triage at thinking off on a Copilot model that cannot turn thinking off sends its lowest effort (C-2)", {
+	timeout: 20_000,
+}, async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "three-levels",
+		capabilities: { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } },
+		supportedReasoningEfforts: ["low", "medium", "high"],
+	});
+	const target = { id: "copilot-triage", runtime: "copilot-sdk", defaultModel: "three-levels" };
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	settings.targets = [target];
+	settings.chat.target = target.id;
+	settings.chat.model = "three-levels";
+	settings.chat.steering.triage = {
+		...settings.chat.steering.triage,
+		enabled: true,
+		target: target.id,
+		model: "three-levels",
+		thinkingLevel: "off",
+	};
+	const providers = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+	await providers.extension.start();
+	ok((await copilotSdkRuntime.probe(target as TargetDescriptor, {} as ProbeContext)).ok);
+	let release!: () => void;
+	const turnHeld = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const sessionsBefore = fake().sessions.length;
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: providers.contract,
+		knownTargets: () => new Set([target.id]),
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+			agent: {
+				state: options?.initialState as { messages: unknown[] },
+				subscribe: () => () => {},
+				abort() {},
+				steer() {},
+				followUp() {},
+				clearAllQueues() {},
+				async prompt() {
+					await turnHeld;
+				},
+			},
+		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	try {
+		const turn = loop.submit("fix the cache");
+		ok(await eventually(() => loop.isStreaming(), 10_000), "the turn started");
+		strictEqual(loop.steer("also add docs"), true);
+		strictEqual(loop.steer("and a test"), true);
+		ok(await eventually(() => fake().sessions.length > sessionsBefore, 15_000), "the triage side call reached Copilot");
+		// Off resolves through the listing like any level: this model has no off, so the round runs at low, never at
+		// the server's default effort.
+		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low");
+		release();
+		await turn;
+	} finally {
+		release();
+		loop.dispose();
+		await loop.whenSettled();
+		await providers.extension.stop?.();
+		models.splice(0, models.length, ...original);
 	}
 });

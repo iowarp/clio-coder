@@ -457,7 +457,8 @@ function mapPathBearingToolCall(
 	};
 }
 
-function mapToolCall(toolCall: AcpToolCallUpdate | undefined, cwd: string): MappedToolCall {
+/** The Clio tool and normalized arguments an ACP tool call amounts to; `known` false names no Clio tool. */
+export function mapAcpToolCall(toolCall: AcpToolCallUpdate | undefined, cwd: string): MappedToolCall {
 	const kind = typeof toolCall?.kind === "string" ? toolCall.kind.toLowerCase() : "";
 	const rawInput = isRecord(toolCall?.rawInput) ? toolCall.rawInput : {};
 	const rawTool = stringField(rawInput, "tool", "toolName", "tool_name", "name");
@@ -574,7 +575,7 @@ export class AcpToolMediator {
 		const parsed = isRecord(params) ? (params as AcpRequestPermissionParams) : {};
 		const options = Array.isArray(parsed.options) ? parsed.options : [];
 		const toolCall = isRecord(parsed.toolCall) ? (parsed.toolCall as AcpToolCallUpdate) : undefined;
-		const mapped = mapToolCall(toolCall, this.input.cwd);
+		const mapped = mapAcpToolCall(toolCall, this.input.cwd);
 		let decision: "approved" | "denied" | "cancelled" = "denied";
 		let reason: string | undefined;
 		let safetyDecision: SafetyDecision | undefined;

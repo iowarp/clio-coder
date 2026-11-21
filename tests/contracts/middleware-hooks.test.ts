@@ -115,6 +115,7 @@ describe("middleware hook boundary", () => {
 			harness: { runIds: ["harness-1"], reads: 1 },
 			previousClarificationStreak: 2,
 			completion: { decision: "ok", mutatedPaths: 0, evidenceKinds: ["verification"] },
+			exploration: { maxReadStreak: 0, serialRounds: 0, notes: 0 },
 		});
 		hook({ hook: "turn_start", turnId: "user-2" });
 		hook({ hook: "before_tool", turnId: "user-2", toolName: "dispatch", toolArgs: args });

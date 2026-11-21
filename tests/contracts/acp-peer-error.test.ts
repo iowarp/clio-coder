@@ -7,6 +7,8 @@ import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
+import { workerFailureHeadline } from "../../src/domains/dispatch/failure-headline.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
 import { prepareAntigravityLaunch } from "../../src/engine/acp/antigravity-launch.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
@@ -821,6 +823,40 @@ test("ACP dispatch seals peer errors as failed and forwards a requested model", 
 		strictEqual(succeeded.outcome, "succeeded");
 		strictEqual(succeeded.exitCode, 0);
 		strictEqual(succeeded.delegation?.selectedModelId, "gpt-6-luna[medium]");
+		// A typed admission refusal settles with its own outcome code; the peer's untyped error above keeps none (C-16).
+		strictEqual(failed.outcomeCode, null);
+		const unoffered = await (await bundle.contract.dispatch({ ...request, model: "gpt-9-unknown" })).finalPromise;
+		strictEqual(unoffered.outcomeCode, "acp_model_unavailable");
+		ok(
+			unoffered.outcomeDetail?.includes("does not offer requested model 'gpt-9-unknown'"),
+			unoffered.outcomeDetail ?? "",
+		);
+		const thought = settings.integrations.externalAgents.entries[0];
+		if (thought !== undefined) thought.args = [thought.args[0] ?? "", "thought-option"];
+		const level = await (await bundle.contract.dispatch({ ...request, thinkingLevel: "xhigh" })).finalPromise;
+		strictEqual(level.outcomeCode, "acp_thinking_unavailable", level.failureMessage);
+		// A peer that keeps another level after Clio selected one is the same refusal.
+		if (thought !== undefined) thought.args = [thought.args[0] ?? "", "thought-refuse"];
+		const kept = await (await bundle.contract.dispatch({ ...request, model: "gpt-6-luna", thinkingLevel: "high" }))
+			.finalPromise;
+		strictEqual(kept.outcomeCode, "acp_thinking_unavailable", kept.failureMessage);
+		// The headline is the adapter's words, without the generic stop reason.
+		strictEqual(
+			workerFailureHeadline(unoffered.outcomeDetail)?.startsWith("ACP delegation failed: ACP peer does not offer"),
+			true,
+			unoffered.outcomeDetail ?? "",
+		);
+		// A sign-in refusal moves to another target, as a 401/403 does, never a same-target retry.
+		const evidence = {
+			exitCode: 1,
+			abortedByOperator: false,
+			stallKilled: false,
+			timedOut: false,
+			permissionFailure: false,
+			policyDenied: null,
+			stopReason: "error",
+		};
+		strictEqual(classifyFailure(evidence, null, "failed", "acp_auth_required"), "target-auth");
 	} finally {
 		await bundle.extension.stop?.();
 		restoreDispatchState();
