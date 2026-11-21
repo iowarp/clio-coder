@@ -453,7 +453,7 @@ import {
 	mergeCardCauseNote,
 } from "./merge-card.js";
 import {
-	compromisedReason,
+	compromisedCause,
 	mergeGateVerdict,
 	mergeWithheldDetail,
 	partialResultDetail,
@@ -10620,10 +10620,8 @@ export function createDispatchBundle(
 				const failedChecks = assuranceQuality.typedValidations
 					.filter((fact) => !fact.passed)
 					.map((fact) => fact.sourceId.replace(/^[\w-]+:/u, ""));
-				const assuranceFact = {
-					value: assurance,
-					cause: compromisedReason(appliedResultContract, finalText, failedChecks),
-				};
+				const compromise = compromisedCause(appliedResultContract, finalText, failedChecks);
+				const assuranceFact = { value: assurance, cause: compromise.reason, ownFailure: compromise.ownFailure };
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
 				// check the merge used to rest on the exit status alone, and a Git
