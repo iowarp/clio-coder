@@ -794,18 +794,18 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 			last: besideFinish,
 			expected: `${review}\n\n${closing}`,
 		},
-		// No reply at all: narration is never the answer; the silent finish's own result is.
+		// No reply at all: narration is never the answer, and neither is the silent finish's own result (CLI-P49).
 		{
 			name: "narration only, silent finish",
 			before: round(narration),
 			last: silentFinish,
-			expected: "completion declared",
+			expected: "",
 		},
 		{
 			name: "a read with no text, silent finish",
 			before: round(assistant("toolUse", [{ type: "toolCall", id: "r1", name: "read", arguments: {} }])),
 			last: silentFinish,
-			expected: "completion declared",
+			expected: "",
 		},
 		// An artifact's terminating result is the whole answer, in every output.
 		{
@@ -820,10 +820,13 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 		},
 	];
 	for (const { name, before, last, expected, extra = { declared } } of scenarios) {
+		rmSync(join(env.dir, "out.txt"), { force: true });
 		const text = await writtenCallRun(undefined, last, { path: "out.txt", cwd: env.dir }, { before, ...extra });
 		strictEqual(text.code, 0, `${name}: ${text.stderr}`);
-		strictEqual(text.stdout, `${expected}\n`, name);
-		strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`, name);
+		strictEqual(text.stdout, expected.length > 0 ? `${expected}\n` : "", name);
+		ok(!text.stdout.includes("completion declared"), name);
+		if (expected.length > 0) strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`, name);
+		else ok(!existsSync(join(env.dir, "out.txt")) || readFileSync(join(env.dir, "out.txt"), "utf8").trim() === "", name);
 		const v2 = await writtenCallRun("json", last, undefined, { before, ...extra });
 		const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
 		strictEqual(envelope.result?.text, expected, `${name}: ${v2.stdout}`);

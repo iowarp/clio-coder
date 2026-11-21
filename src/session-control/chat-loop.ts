@@ -2716,6 +2716,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		noAnswer?: TurnNoAnswerCause,
 	): Promise<void> => {
 		const calls = turnRuntime.takeSettledCalls(userTurnId);
+		const bareFinishRefusals = turnRuntime.takeBareFinishRefusals(userTurnId);
 		const origin = deps.session?.current();
 		const acquire = deps.telemetry?.acquireTelemetrySession;
 		if (!origin || !acquire) return;
@@ -2724,7 +2725,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				telemetryHub().emit(
 					"turn.settled",
-					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause, noAnswer),
+					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause, noAnswer, bareFinishRefusals),
 					lease.context,
 				);
 			} finally {
@@ -3619,6 +3620,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
+					state.turnReplied = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
 					if (options.machineTurn === undefined) headlessObservation?.reset(options.hostRun?.runId);
 				}

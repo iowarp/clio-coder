@@ -7,6 +7,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { agentSkillToolPolicy, withModelSkillActivation } from "../../src/core/skill-activation.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
+import { createSkillsReminderRegistration } from "../../src/domains/middleware/skills-reminder.js";
 import {
 	clearPluginSnapshots,
 	disablePlugin,
@@ -206,9 +207,30 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	match(automatic.systemPrompt, /# Self-development skills/);
 	match(automatic.systemPrompt, /without waiting for a separate skill request/);
 	match(automatic.systemPrompt, /Never load both up front or for a step the task does not reach/);
+	// CLI-P56: the fixed prefix says a skill loaded this session by any route is never loaded again, and the per-turn
+	// list leaves out a skill the session already loaded.
+	match(
+		automatic.systemPrompt,
+		/unless it is already loaded this session \(by you, by the operator's \/skill, or by the host\)/,
+	);
+	const ranked = (loaded: string[]) =>
+		createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 2,
+			modelMayActivateSkills: () => true,
+			rankSkills: () => CLIO_SELF_DEVELOPMENT_SKILLS.map((id) => ({ id, description: `${id} workflow`, score: 1 })),
+			loadedSkillNames: () => loaded,
+		})
+			.evaluate({ hook: "turn_start", text: "Fix the parser in src", metadata: { conversationMessages: 0 } })
+			.map((effect) => ("message" in effect ? effect.message : ""))
+			.join("\n");
+	match(ranked([]), /- clio-coder-dev:/);
+	const afterLoad = ranked(["clio-coder-dev"]);
+	strictEqual(afterLoad.includes("- clio-coder-dev:"), false, afterLoad);
+	match(afterLoad, /- clio-coder-test:/);
 	strictEqual(automatic.systemPrompt.includes("## Establish the actual assignment"), false);
 	const headless = await prompt({ ...inputs, headless: true });
 	match(headless.systemPrompt, /load clio-coder-dev before the first edit/);
+	match(headless.systemPrompt, /skip one already loaded this session/);
 	strictEqual(headless.systemPrompt.includes("does not load these skills"), false);
 	const worker = await bundle.contract.compileWorkerPrompt({
 		cwd,

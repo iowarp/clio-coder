@@ -176,7 +176,9 @@ function parseSteps(value: unknown): Step[] {
 		if (entry.capability.trim() === ToolNames.SelfCompact)
 			throw new Error("self_compact must be called alone with gateway op=call");
 		if (entry.capability.trim() === ToolNames.Finish)
-			throw new Error("finish ends the turn; call it alone, not in a chain");
+			throw new Error(
+				"finish ends the turn, so it is never a chain step: write your reply to the user as text, then call finish directly as the only tool call in that response",
+			);
 		return {
 			id: id as string | undefined,
 			capability: entry.capability.trim(),

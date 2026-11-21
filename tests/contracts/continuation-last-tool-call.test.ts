@@ -3,6 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { ExtensionHookEvent } from "../../src/domains/extensions/public-api-v2.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
@@ -10,12 +12,14 @@ import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { buildExtensionPromptGate } from "../../src/entry/extension-runtime-hooks.js";
 import type { CreateChatLoopDeps, PromptSubmitInput } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { ContinuationState } from "../../src/session-control/turn-state.js";
-import type { SealedCompletion } from "../../src/tools/finish.js";
+import { FINISH_WITHOUT_REPLY_REFUSAL, type SealedCompletion } from "../../src/tools/finish.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -30,8 +34,15 @@ const SECRET = "sk-ant-api03-continuationfixture0123456789abcdefghijklmnop";
  * and after an operator message is handed into it, and the last one runs and declares. With `rounds`, two yolo
  * continuations of that prompt each run a tool and end undeclared; the first crosses the budget again.
  */
-async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "handover" | "bare" | "rounds") {
+async function stoppedTurn(
+	dir: string,
+	mode: "undeclared" | "declared" | "handover" | "bare" | "rounds" | "narrated" | "continued",
+) {
 	const declared = mode === "declared" || mode === "handover";
+	const headless = mode === "rounds" || mode === "narrated" || mode === "continued";
+	const journals = createSessionJournals(clioStateDir(), () => {
+		throw new Error("fixture journal unavailable");
+	});
 	let queued = false;
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -73,7 +84,8 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 	const loop = createChatLoop({
 		middlewareToolChoice: toolChoice,
 		// FX-41's shared finish round needs a chain nobody watches; an operator's chain in a session is attended (CLI-P46).
-		...(mode === "rounds" ? { headless: true } : {}),
+		...(headless ? { headless: true } : {}),
+		telemetry: { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract,
 		getSettings: () => settings,
 		getAutonomy: () => "yolo",
 		providers: context.getContract("providers") as ProvidersContract,
@@ -117,10 +129,16 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 				async continue() {
 					throw new Error("the fixture never retries");
 				},
-				async prompt() {
+				async prompt(input?: unknown) {
 					prompts++;
 					await listener({ type: "agent_start" });
 					await listener({ type: "turn_start" });
+					if (prompts === 2 && mode === "continued") {
+						// Pi settles the submitted continuation prompt as a user message before the first round.
+						const text = typeof input === "string" ? input : "";
+						await push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() } as AgentMessage);
+						await gate({ type: "toolCall", id: "call-c", name: "finish", arguments: { state: "done" } });
+					}
 					if (prompts === 1) {
 						// The stopped turn's last call: a failed bash run whose args carry a secret and a long string.
 						await push({
@@ -152,6 +170,26 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 							interrupted: false,
 							at: Date.now(),
 						});
+						if (mode === "narrated") {
+							// Narration beside a work call is never the headless answer, so it is no reply (CLI-P49).
+							await push({
+								role: "assistant",
+								content: [
+									{ type: "text", text: "Let me read package.json." },
+									{ type: "toolCall", id: "call-r", name: "read", arguments: { path: "package.json" } },
+								],
+								stopReason: "toolUse",
+								timestamp: Date.now(),
+							} as unknown as AgentMessage);
+							await gate({ type: "toolCall", id: "call-n", name: "finish", arguments: { state: "done" } });
+						}
+						if (mode === "continued")
+							await push({
+								role: "assistant",
+								content: [{ type: "text", text: "The CI run is still red." }],
+								stopReason: "stop",
+								timestamp: Date.now(),
+							} as unknown as AgentMessage);
 					}
 					if (prompts === 1 && declared) {
 						// A middleware required verify; the provider fell back to auto and the model called finish alone.
@@ -311,6 +349,10 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
 	});
 	let sealed: SealedCompletion | null = null;
+	const turns: Array<{ bareFinishRefusals?: number }> = [];
+	const unsubscribe = telemetryHub().subscribe("turn.settled", (payload: unknown) => {
+		turns.push(payload as { bareFinishRefusals?: number });
+	});
 	try {
 		await loop.submit("poll CI until green");
 		await loop.whenSettled();
@@ -318,8 +360,10 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();
+		unsubscribe();
+		await journals.flush();
 	}
-	return { submitted, decisions, entries, gates, sealed };
+	return { submitted, decisions, entries, gates, sealed, turns };
 }
 
 test("a continuation's prompt_submit names the last tool call; an operator prompt does not", async (t) => {
@@ -428,13 +472,16 @@ test("a turn declared through finish is never continued: no required-tool round,
 test("an attended finish with no reply text is refused once per user turn, a roll of the operator's prompt included (FX-40, CLI-P46)", async (t) => {
 	const scratch = await isolateClioEnv("clio-coder-continuation-bare-");
 	t.after(() => scratch.restore());
-	const { submitted, gates, sealed, entries } = await stoppedTurn(scratch.dir, "bare");
+	const { submitted, gates, sealed, entries, turns } = await stoppedTurn(scratch.dir, "bare");
 	strictEqual(submitted[1]?.origin.origin, "continuation");
-	deepStrictEqual(gates, [
-		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
-		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
-		"ran",
-	]);
+	deepStrictEqual(gates, [FINISH_WITHOUT_REPLY_REFUSAL, FINISH_WITHOUT_REPLY_REFUSAL, "ran"]);
+	// CLI-P50: both refusals journal on the turn.settled of the run that refused them, the one after the handed-in
+	// operator message (a steer) included, keyed like the run's calls.
+	deepStrictEqual(
+		turns.map((turn) => turn.bareFinishRefusals ?? 0),
+		[0, 2],
+		JSON.stringify(turns),
+	);
 	// The bare finish that ran still declares, and the seal records that its response carried no reply.
 	const noReply = { what: "the response that declared completion carried no reply text for the operator", why: "other" };
 	strictEqual(sealed?.claimed, "done");
@@ -450,6 +497,17 @@ test("an attended finish with no reply text is refused once per user turn, a rol
 		| undefined;
 	deepStrictEqual(filed?.payload.result.details.completion.limitations, [noReply]);
 	strictEqual(filed?.payload.result.content[0]?.text, "completion declared: done (1 limitation)\n");
+});
+
+test("a headless turn has replied only when its answer has a reply, read through the turn runtime (CLI-P49)", async (t) => {
+	const scratch = await isolateClioEnv("clio-coder-continuation-headless-reply-");
+	t.after(() => scratch.restore());
+	// Narration beside a read is no reply, so the bare finish after it is refused.
+	deepStrictEqual((await stoppedTurn(scratch.dir, "narrated")).gates, [FINISH_WITHOUT_REPLY_REFUSAL]);
+	// A continuation's prompt starts the turn the answer is read from, so the reply before it no longer counts.
+	const continued = await stoppedTurn(scratch.dir, "continued");
+	strictEqual(continued.submitted[1]?.origin.origin, "continuation");
+	deepStrictEqual(continued.gates, [FINISH_WITHOUT_REPLY_REFUSAL]);
 });
 
 test("yolo continuations of one operator prompt share its finish round and nudges (FX-41)", async (t) => {

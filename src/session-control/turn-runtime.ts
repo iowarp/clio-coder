@@ -45,6 +45,7 @@ import { prefixBlocksOf } from "./prefix-blocks.js";
  */
 
 import { performance } from "node:perf_hooks";
+import { replySegment } from "../cli/modes/answer-segments.js";
 import type { BackendCompletionTimings, CacheRequestStructure } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
@@ -434,6 +435,8 @@ export interface TurnRuntime {
 	toolTelemetry: ToolTelemetry;
 	/** The journaled main calls whose lease was taken for this user turn, in settle order (#434). */
 	takeSettledCalls(userTurnId: string): CallSettled[];
+	/** How many bare attended finishes this user turn refused (FX-40), cleared as it is read (CLI-P50). */
+	takeBareFinishRefusals(userTurnId: string): number;
 }
 
 function isCollectedBatchResult(toolName: string, result: unknown): boolean {
@@ -514,6 +517,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 */
 	const announcedResolutionWarnings = new Set<string>();
 	const turnCalls = new Map<string, CallSettled[]>();
+	// Bare attended finishes refused per user turn (FX-40), journaled on that turn's turn.settled (CLI-P50).
+	const bareFinishRefusals = new Map<string, number>();
 	// A turn id a delivered steer moved a run to, mapped to the turn the run settles under (bt-26 N2h).
 	const steeredTurns = new Map<string, string>();
 	// The last request sent on each cache key, kept across runtime rebuilds and dropped whenever turn-context restarts
@@ -1385,17 +1390,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					origin: state.currentTurnOrigin?.origin,
 					promptOrigin: state.promptOrigin,
 					refusedThisTurn: state.finishReplyRefused,
+					repliedThisTurn: state.turnReplied,
 				});
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
 				if (verdict !== "refuse") return undefined;
 				state.finishReplyRefused = true;
+				const active = state.activeUserTurnId;
+				// Keyed like turnCalls (bt-26 N2h): a refusal after a steer settles under the user turn the run started under.
+				const refusedTurn = active && (steeredTurns.get(active) ?? runTurnId ?? active);
+				if (refusedTurn) bareFinishRefusals.set(refusedTurn, (bareFinishRefusals.get(refusedTurn) ?? 0) + 1);
 				return { block: true, reason: FINISH_WITHOUT_REPLY_REFUSAL };
 			},
 			// FX-40: an admitted bare finish files its missing reply in the result itself, which the transcript shows, the
 			// session ledger keeps and the turn's declaration is read from.
 			afterToolCall: async ({ toolCall, result, isError }) => {
 				const bare = bareFinishCalls.delete(toolCall.id);
-				return bare && !isError ? withoutReplyResult(result) : undefined;
+				return bare && !isError ? withoutReplyResult(result, deps.headless === true) : undefined;
 			},
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
@@ -2107,7 +2117,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					if (attached.includes(tool)) return true;
 					return attached.includes("gateway") && (deps.gatewayCapabilityNames?.().includes(tool) ?? false);
 				});
+				// CLI-P49: the turn has replied exactly when the headless answer has a segment, read by the same typed
+				// predicate after the written-calls stamp: no narration beside a work call, failed message or dead markup.
+				if (replySegment(event.message) !== null) state.turnReplied = true;
 			}
+			// Every user message starts the turn whose replies are the answer, as the headless reader counts it (CLI-P43), so
+			// a continuation's prompt clears the reply the bare-finish check reads too.
+			if (event.type === "message_end" && event.message.role === "user") state.turnReplied = false;
 			// The run's start and end name the operator turn its calls journal under, so the transcript receipt reads
 			// that turn's spend from the read model (#434 §11.3).
 			if ((enrichedEvent.type === "agent_start" || enrichedEvent.type === "agent_end") && state.activeUserTurnId)
@@ -2558,6 +2574,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// carries its turn id in the journal, so releasing them here only bounds this map (#434).
 			for (const turnId of turnCalls.keys()) if (turnId !== state.activeUserTurnId) turnCalls.delete(turnId);
 			return calls;
+		},
+		takeBareFinishRefusals(userTurnId) {
+			const count = bareFinishRefusals.get(userTurnId) ?? 0;
+			// Only the running turn can still refuse; any other entry belongs to a turn that already settled.
+			for (const turnId of bareFinishRefusals.keys())
+				if (turnId === userTurnId || turnId !== state.activeUserTurnId) bareFinishRefusals.delete(turnId);
+			return count;
 		},
 	};
 }
