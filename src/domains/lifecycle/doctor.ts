@@ -9,7 +9,7 @@ import {
 	type Stats,
 	statSync,
 } from "node:fs";
-import { join, relative as relativePath } from "node:path";
+import { dirname, join, relative as relativePath } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
@@ -17,6 +17,7 @@ import { formatSettingsIssues, readSettings, validateSettings, validateSettingsF
 import { copilotKeychainOnlyDetail } from "../../core/copilot-keychain.js";
 import { detectNewerHome, initializeClioHome } from "../../core/init.js";
 import {
+	aclPrincipalName,
 	applyOwnerOnlyAcl,
 	currentWindowsAccount,
 	extraAclPrincipals,
@@ -96,7 +97,7 @@ function tightenToOwnerOnly(path: string): number | null {
 }
 
 /**
- * The win32 "credentials" row from the file's `icacls` listing: an allow ACE
+ * The win32 "credentials" row from the file's DACL (SDDL, by SID): an allow ACE
  * for anyone beyond the account, SYSTEM and Administrators lets another local
  * account read or replace the key, which `--fix` removes. `removed` names the
  * principals a `--fix` in this run took off the ACL.
@@ -115,7 +116,15 @@ export function windowsCredentialsFinding(
 			detail: foldDetail(`${path}; could not read its ACL: ${acl.error}`),
 		};
 	}
-	const extras = extraAclPrincipals(acl.output, path, account);
+	if (account.sid === null) {
+		return {
+			ok: true,
+			level: "warn",
+			name: "credentials",
+			detail: `${path}; could not resolve the current Windows account's SID to check its ACL`,
+		};
+	}
+	const extras = extraAclPrincipals(acl.dacl, account).map(aclPrincipalName);
 	if (extras.length === 0) {
 		const detail = removed.length === 0 ? path : `${path}; removed ${removed.join(", ")} from its ACL`;
 		return { ok: true, name: "credentials", detail };
@@ -548,10 +557,14 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				chmodSync(credentialsPath, 0o600);
 				// Who held an ACE before the repair, so the row can say what it removed.
 				const before = process.platform === "win32" ? readWindowsAcl(credentialsPath) : null;
+				// The directory first, so a later write's temp file starts owner-only too.
+				const credentialsDir = dirname(credentialsPath);
+				const dirFailure = applyOwnerOnlyAcl(credentialsDir, {}, { directory: true });
+				if (dirFailure !== null) throw new Error(`could not make ${credentialsDir} owner-only: ${dirFailure}`);
 				const aclFailure = applyOwnerOnlyAcl(credentialsPath);
 				if (aclFailure !== null) throw new Error(`could not make ${credentialsPath} owner-only: ${aclFailure}`);
-				if (before !== null && "output" in before)
-					credentialsAclRemoved = extraAclPrincipals(before.output, credentialsPath, currentWindowsAccount());
+				if (before !== null && "dacl" in before)
+					credentialsAclRemoved = extraAclPrincipals(before.dacl, currentWindowsAccount()).map(aclPrincipalName);
 			}
 		} catch (error) {
 			repairFailure = error instanceof Error ? error.message : String(error);
