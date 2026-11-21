@@ -23,7 +23,7 @@ skills:
   - name: web-debug
     path: coding/web-debug
     version: 0.1.0
-    sha256: 861b077aeb088404a52016700734a12bde3228560c1d716239c47f54a0bad595
+    sha256: ee71d3f4430ba88da9bc249b2b9778e592f3c9efc4107ccca1dda72bce8a1f73
   # ── context ──
   - name: context-handoff
     path: context/context-handoff

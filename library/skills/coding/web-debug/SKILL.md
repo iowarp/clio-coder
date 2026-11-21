@@ -50,9 +50,13 @@ exits non-zero when the page failed to load or a step threw.
    ```
 
    Run it from the package that has Playwright (or pass `--project <dir>`) so
-   the project's own Playwright drives the browser. Several servers go in one
-   `--serve` string joined with `&`; `--ready` names the one the page needs
-   first, and `--wait-for` waits for text the page shows once its data loaded.
+   the project's own Playwright drives the browser; `--serve` runs in the
+   current directory. Several servers go in one `--serve` string joined with
+   `&`. The driver waits for the page URL and for every `--ready` URL
+   (repeatable; name each backend the page calls), then for the page to
+   render text. `--wait-for <text>` waits for text the page shows once its
+   data loaded. `blank: true` means nothing rendered: read `console` and
+   `exceptions` for a render error before raising `--timeout`.
 2. Read the JSON before anything else: `exceptions` (message, url, line),
    `console` (errors and warnings, deduplicated with counts), `failedRequests`
    (method, url without its query string, status or network error), `error`.

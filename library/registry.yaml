@@ -1078,7 +1078,7 @@ entries:
       - screenshot the web app
     version: 0.1.0
     sourceUrl: skills/coding/web-debug
-    sha256: 2da164706bbf4a5d35c0c761feb059fd673d02e8e19869a77d42e0096cd6d1fe
+    sha256: cef309968fe5932eff4186ee3caf97cb75da6d8e636d94cbb5ebeb9e1f9d5a70
     provides:
       - kind: skill
         name: web-debug

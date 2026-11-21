@@ -19,7 +19,7 @@ const MAX_ENTRIES = 50;
 const MAX_TEXT = 300;
 
 function parseArgs(argv) {
-	const o = { viewports: [], storage: [], wait: 1000, timeout: 30000, readyTimeout: 90000 };
+	const o = { viewports: [], storage: [], ready: [], wait: 1000, timeout: 30000, readyTimeout: 90000 };
 	const value = (i, flag) => {
 		if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
 		return argv[i + 1];
@@ -35,7 +35,7 @@ function parseArgs(argv) {
 				o.viewports.push({ width: Number(m[1]), height: Number(m[2]) });
 			}
 		else if (a === "--serve") o.serve = value(i++, a);
-		else if (a === "--ready") o.ready = value(i++, a);
+		else if (a === "--ready") o.ready.push(value(i++, a));
 		else if (a === "--ready-timeout") o.readyTimeout = Number(value(i++, a));
 		else if (a === "--local-storage") {
 			const kv = value(i++, a);
@@ -58,7 +58,6 @@ function parseArgs(argv) {
 		else throw new Error(`unexpected argument ${a}`);
 	}
 	if (o.viewports.length === 0) o.viewports.push({ width: 1280, height: 800 });
-	if (o.serve && !o.ready) o.ready = o.url;
 	return o;
 }
 
@@ -252,6 +251,7 @@ async function playwrightEngine(pw, report) {
 				shot: (file, fullPage) => page.screenshot({ path: file, fullPage }),
 				text: (selector) => page.locator(selector).first().innerText({ timeout: 5000 }),
 				waitForText: (text, timeout) => page.getByText(text).first().waitFor({ state: "visible", timeout }),
+				contentLength: () => page.evaluate(() => document.body?.innerText.trim().length ?? 0),
 				title: () => page.title(),
 				url: () => page.url(),
 				close: () => context.close(),
@@ -428,6 +428,7 @@ async function startCdp(wsUrl, child, profile, executable, report) {
 				goto,
 				shot,
 				text: (selector) => evaluate((sel) => document.querySelector(sel)?.innerText ?? "", selector),
+				contentLength: () => evaluate(() => document.body?.innerText.trim().length ?? 0),
 				waitForText: async (text, timeout) => {
 					const end = Date.now() + timeout;
 					while (Date.now() < end) {
@@ -478,22 +479,29 @@ for (const sig of ["SIGINT", "SIGTERM"])
 		process.exit(130);
 	});
 
-async function startServer(command, ready, timeoutMs) {
+/** Start the server and wait until every ready URL answers below 500. */
+async function startServer(command, readyUrls, timeoutMs) {
 	let log = "";
 	server = spawn(command, { shell: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
 	server.stdout.on("data", (d) => (log = (log + d).slice(-4000)));
 	server.stderr.on("data", (d) => (log = (log + d).slice(-4000)));
 	const end = Date.now() + timeoutMs;
+	const waiting = new Set(readyUrls);
 	while (Date.now() < end) {
 		if (server.exitCode !== null)
-			throw new Error(`--serve exited with ${server.exitCode} before ${ready} answered: ${clip(log.slice(-600))}`);
-		try {
-			const r = await fetch(ready, { signal: AbortSignal.timeout(2000) });
-			if (r.status < 500) return () => log;
-		} catch {}
+			throw new Error(
+				`--serve exited with ${server.exitCode} before ${[...waiting].join(", ")} answered: ${clip(log.slice(-600))}`,
+			);
+		for (const ready of [...waiting]) {
+			try {
+				const r = await fetch(ready, { signal: AbortSignal.timeout(2000) });
+				if (r.status < 500) waiting.delete(ready);
+			} catch {}
+		}
+		if (waiting.size === 0) return;
 		await new Promise((r) => setTimeout(r, 300));
 	}
-	throw new Error(`${ready} did not answer within ${timeoutMs}ms: ${clip(log.slice(-600))}`);
+	throw new Error(`${[...waiting].join(", ")} did not answer within ${timeoutMs}ms: ${clip(log.slice(-600))}`);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -525,8 +533,8 @@ async function main() {
 	let engine;
 	try {
 		if (o.serve) {
-			await startServer(o.serve, o.ready, o.readyTimeout);
-			out.served = { command: o.serve, ready: redact(o.ready) };
+			await startServer(o.serve, [...new Set([...o.ready, o.url])], o.readyTimeout);
+			out.served = { command: o.serve, ready: [...new Set([...o.ready, o.url])].map(redact) };
 		}
 		const pw = loadPlaywright(o.project ?? process.cwd());
 		try {
@@ -569,6 +577,12 @@ async function main() {
 					out.error = `wait-for failed at ${tag}: ${clip(String(err.message).split("\n")[0])}`;
 					exit = 1;
 				}
+			else {
+				// A single-page app answers "load" before it renders; wait for any body text.
+				const end = Date.now() + o.timeout;
+				while (Date.now() < end && (await Promise.resolve(p.contentLength()).catch(() => 0)) === 0)
+					await new Promise((r) => setTimeout(r, 250));
+			}
 			if (o.wait > 0) await new Promise((r) => setTimeout(r, o.wait));
 			if (steps)
 				try {
@@ -589,6 +603,10 @@ async function main() {
 				} catch (err) {
 					out.text[tag] = `(no text for ${o.text}: ${clip(err.message)})`;
 				}
+			}
+			if ((await Promise.resolve(p.contentLength()).catch(() => 0)) === 0) {
+				out.blank = true;
+				out.hint = `the page rendered no text at ${tag} within ${o.timeout}ms: a render error (see console and exceptions), a server that is not up, or a slow first load (raise --timeout or pass --wait-for)`;
 			}
 			out.title = await Promise.resolve(p.title()).catch(() => undefined);
 			out.finalUrl = redact(await Promise.resolve(p.url()).catch(() => o.url));
