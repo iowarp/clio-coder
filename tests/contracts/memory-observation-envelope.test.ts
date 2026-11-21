@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -382,7 +382,7 @@ test("the observer prepares only near a portable fold, stops after two declined 
 	}
 });
 
-test("the daily sweep removes the observations of deleted sessions only, and nothing when sessions cannot be listed (C-35)", () => {
+test("the daily sweep removes the observations of deleted sessions only, and nothing when sessions cannot be listed (C-35)", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "memory-observation-orphans-"));
 	try {
 		const observations = join(dir, "memory", "observations");
@@ -391,11 +391,22 @@ test("the daily sweep removes the observations of deleted sessions only, and not
 			mkdirSync(join(observations, id), { recursive: true });
 			writeFileSync(join(observations, id, "batch.json"), "{}");
 		}
-		strictEqual(pruneOrphanedObservations(dir), 1);
-		deepStrictEqual(readdirSync(observations), ["kept"], "a recorded session keeps its observations however old");
+		// A workspace that cannot be listed may hold any candidate's session: nothing goes.
+		const locked = join(dir, "sessions", "locked");
+		mkdirSync(join(locked, "hidden"), { recursive: true });
+		mkdirSync(join(observations, "hidden"), { recursive: true });
+		chmodSync(locked, 0o000);
+		try {
+			strictEqual(await pruneOrphanedObservations(dir), 0);
+		} finally {
+			chmodSync(locked, 0o700);
+		}
+		deepStrictEqual(readdirSync(observations).sort(), ["gone", "hidden", "kept"]);
+		strictEqual(await pruneOrphanedObservations(dir), 1);
+		deepStrictEqual(readdirSync(observations).sort(), ["hidden", "kept"], "a recorded session keeps its observations");
 		rmSync(join(dir, "sessions"), { recursive: true });
-		strictEqual(pruneOrphanedObservations(dir), 0);
-		deepStrictEqual(readdirSync(observations), ["kept"]);
+		strictEqual(await pruneOrphanedObservations(dir), 0);
+		deepStrictEqual(readdirSync(observations).sort(), ["hidden", "kept"]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

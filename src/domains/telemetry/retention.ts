@@ -595,9 +595,9 @@ export async function sweepTelemetryDaily(
 	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
 	const result = await applyTelemetryPrune(plan, { stopped: () => performance.now() > deadline || hostStopped() });
 	await pruneWorkerObservationsWithRuns(stateDir, nowMs, options.budgetMs ?? SWEEP_BUDGET_MS, hostStopped);
-	// A deleted session's memory observations are orphans no session can read (C-35, orphans only).
-	const observationsDeadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
-	pruneOrphanedObservations(stateDir, () => performance.now() > observationsDeadline || hostStopped());
+	// A deleted session's memory observations are orphans no session can read (C-35, orphans only). They share the
+	// removal budget: what is left after the journals goes on a later day.
+	await pruneOrphanedObservations(stateDir, () => performance.now() > deadline || hostStopped()).catch(() => 0);
 	return result;
 }
 
