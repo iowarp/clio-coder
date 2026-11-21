@@ -95,7 +95,7 @@ export interface SettingsIssue {
 	message: string;
 	kind?: SettingsIssueKind;
 	repair?: SettingsScalarRepair;
-	/** `2026-11-21-retired-settings` rewrites this key or value, so `clio-coder upgrade` repairs it. */
+	/** `2026-11-21-retired-settings` rewrites this key or value, so `clio-coder upgrade --post-install` repairs it. */
 	upgrade?: true;
 }
 
