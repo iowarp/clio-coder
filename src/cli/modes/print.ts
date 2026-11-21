@@ -73,6 +73,7 @@ import {
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { formatStatedWait } from "../../domains/session/retry.js";
 import { telemetryRunDirectory, telemetrySessionDirectory } from "../../domains/telemetry/paths.js";
+import { callRepeatsAsRead } from "../../engine/loop-guard.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
@@ -316,6 +317,8 @@ interface HeadlessMainAgentRunStats {
 	toolRounds: ToolRoundRecord[];
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
+	/** In-flight calls the loop guard reads as reads (`callRepeatsAsRead`), such as a read-only shell command (C-37). */
+	readingCalls: Set<string>;
 	pendingVerifyCalls: Map<string, VerifyCallStart>;
 	verifyCalls: VerifyCallOutcome[];
 	/** The run's workspace mutations, so a check is judged against the tree it ran on (bt-27c). */
@@ -346,6 +349,8 @@ interface HeadlessMainAgentRunStats {
 	mergedTaskWorktrees: number;
 	/** A call of a state-changing class succeeded, the main run's side of a worker's tool activity (C-37). */
 	mutatingSucceeded: boolean;
+	/** The run's `--read-only` scope: it can change nothing, so it owes no validation for a change (C-37). */
+	readOnly: boolean;
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
 	/**
@@ -570,12 +575,14 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
+		if (callRepeatsAsRead(event.toolName, event.args, () => undefined)) stats.readingCalls.add(event.toolCallId);
 		if (call.toolName === ToolNames.Verify) stats.pendingVerifyCalls.set(event.toolCallId, verifyCallStart(call.args));
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
 	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
 	stats.pendingCapabilities.delete(event.toolCallId);
+	const reads = stats.readingCalls.delete(event.toolCallId);
 	// A call the output limit cut off never ran: its run's one notice states it, and it is no tool error (bt-39 a).
 	if ((event as { notRun?: unknown }).notRun !== undefined) {
 		stats.pendingVerifyCalls.delete(event.toolCallId);
@@ -587,6 +594,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	for (const child of children) {
 		const toolCallId = `${event.toolCallId}:${child.id}`;
 		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCallStart(child.args));
+		if (callRepeatsAsRead(child.capability, child.args, () => undefined)) stats.readingCalls.add(toolCallId);
 		recordToolEnd(stats, {
 			type: "tool_execution_end",
 			toolCallId,
@@ -710,7 +718,9 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (outcome === "blocked" || decision === "blocked") {
 		if (!withheldDuplicateRead && !readOnlyCeiling) stats.unresolvedBlocks.add(action);
 	} else if (outcome === "ok" || (outcome === undefined && !event.isError)) {
-		if (!terminating && MAIN_MUTATING_CLASSES.has(action)) stats.mutatingSucceeded = true;
+		// A read-only command reads, and a check is the validation itself, not a change to validate.
+		if (!terminating && !reads && tool !== ToolNames.Verify && MAIN_MUTATING_CLASSES.has(action))
+			stats.mutatingSucceeded = true;
 		const capability =
 			tool === ToolNames.Gateway
 				? (event.result as { details?: { capability?: unknown } } | undefined)?.details?.capability
@@ -1174,8 +1184,9 @@ async function recordHeadlessMainAgentRun(input: {
 				},
 			);
 			const completion = sessionId === null ? undefined : await sessionCompletion(sessionId, input.startedAt);
-			// What the host saw change that the settled facts cannot carry owes validation as they do (C-37).
-			const observedChange = changedWorkspace(input.stats) || input.stats.mutatingSucceeded;
+			// What the host saw change that the settled facts cannot carry owes validation as they do (C-37); a --read-only
+			// run can change nothing.
+			const observedChange = !input.stats.readOnly && (changedWorkspace(input.stats) || input.stats.mutatingSucceeded);
 			const assessment = finished.settlement.assessment;
 			const settlement =
 				assessment !== undefined
@@ -1300,6 +1311,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		toolRounds: [],
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
+		readingCalls: new Set(),
 		pendingVerifyCalls: new Map(),
 		verifyCalls: [],
 		runEffects: createRunEffectsRecorder(process.cwd(), {
@@ -1318,6 +1330,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		reportPaths: new Set(),
 		mergedTaskWorktrees: 0,
 		mutatingSucceeded: false,
+		readOnly: options.constraints?.readOnly === true,
 		unresolvedBlocks: new Set<string>(),
 		failedDispatch: null,
 		// A read-only run can change nothing, so like an answer turn it asked for no change (C-1).

@@ -355,9 +355,9 @@ describe("headless no-op contract through the built binary", () => {
 
 	test("an answer turn whose command was blocked still succeeds and names the blocked call", async () => {
 		// A question asks for no change, so a refused command along the way is no unmet part of the task.
-		const { turn, envelope, project } = await headlessTurn({
+		const { turn, envelope, project, stateDir } = await headlessTurn({
 			autonomy: "default",
-			steps: [deniedInline],
+			steps: [{ id: "call-grep", name: "bash", arguments: { command: "grep -n fixture sentinel.txt" } }, deniedInline],
 			failOnNoop: true,
 			turnMode: "answer",
 			prompt: "What does sentinel.txt say?",
@@ -369,23 +369,51 @@ describe("headless no-op contract through the built binary", () => {
 		match(turn.stdout, /It says the fixture text\./);
 		doesNotMatch(turn.stderr, /no-op/);
 		match(turn.stderr, /answered with 1 blocked call: bash \(/);
+		// C-37: a shell command that only reads is no change to validate.
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
 	});
 
 	test("a --read-only review whose read was blocked still succeeds and names the blocked call", async () => {
 		// C-1: a read-only run asks for no change, so a read a rule refused along the way left nothing unmet.
-		const { turn, envelope } = await headlessTurn({
+		const { turn, envelope, stateDir } = await headlessTurn({
 			autonomy: "default",
-			steps: [{ id: "call-read", name: "read", arguments: { path: ".env" } }],
+			steps: [
+				{ id: "call-read", name: "read", arguments: { path: ".env" } },
+				{ id: "call-grep", name: "bash", arguments: { command: "grep -n fixture sentinel.txt" } },
+				{ id: "call-verify", name: "verify", arguments: { check: "lint" } },
+			],
 			failOnNoop: false,
 			flags: ["--read-only"],
 			prompt: "Review sentinel.txt.",
 			reply: "The fixture text reads fine.",
+			// A check the run does not declare is refused under --read-only, so the run holds no validation.
+			packageScripts: { test: "node -e 0" },
 		});
 		strictEqual(turn.code, 0, turn.stderr);
 		strictEqual(envelope.outcome, "succeeded");
 		match(turn.stdout, /The fixture text reads fine\./);
 		doesNotMatch(turn.stderr, /no-op/);
-		match(turn.stderr, /answered with 1 blocked call: read/);
+		match(turn.stderr, /answered with 2 blocked calls: read \(path-policy:zeroAccessPaths\), verify \(task:read_only\)/);
+		// C-37: a read-only shell command and a check change nothing, so the review owes no validation.
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
+	});
+
+	test("a run that wrote only through an opaque shell command owes validation (C-37)", async () => {
+		const { turn, envelope, project, stateDir } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{
+					id: "call-script-write",
+					name: "bash",
+					arguments: { command: `node -e 'require("fs").writeFileSync("c37.txt", "x")'` },
+				},
+			],
+			failOnNoop: false,
+			reply: "done",
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(readFileSync(join(project, "c37.txt"), "utf8"), "x");
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, false);
 	});
 
 	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
