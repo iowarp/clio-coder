@@ -30,11 +30,11 @@ import { withAnthropicDiagnostics } from "./apis/anthropic-diagnostics.js";
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
-import { observeCodexTransport } from "./apis/codex-transport.js";
 import { withCodexTurnState } from "./apis/codex-turn-state.js";
 import { observeResponsesCacheDiagnostics } from "./apis/openai-cache-diagnostics.js";
 import { withProviderCheckpoint } from "./apis/openai-compaction.js";
 import { observeResponsesModelId } from "./apis/responses-model-id.js";
+import { observeResponsesTransport } from "./apis/responses-transport.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { withClioIdentity } from "./client-identity.js";
 import { normalizeContext } from "./context.js";
@@ -185,7 +185,7 @@ export function engineStream(
 					),
 					(effective) =>
 						observeAnthropicResponse(model, effective, (anthropic) =>
-							observeCodexTransport(model, anthropic, (transport) =>
+							observeResponsesTransport(model, anthropic, (transport) =>
 								observeResponsesModelId(model, transport, (observed) =>
 									observePayloadBytes(model, observed, (sized) => dispatchEngineStream(model, context, sized)),
 								),
@@ -260,7 +260,7 @@ function scopedEngineStreamSimple(
 					),
 					(effective) =>
 						observeAnthropicResponse(model, effective, (anthropic) =>
-							observeCodexTransport(model, anthropic, (transport) =>
+							observeResponsesTransport(model, anthropic, (transport) =>
 								observeResponsesModelId(model, transport, (observed) =>
 									observePayloadBytes(
 										model,

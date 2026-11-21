@@ -142,7 +142,6 @@ export interface CodexTransportCounters {
 	sseFallbacks: number;
 }
 
-/** #423 / #427 AC4: sanitized per-call transport attribution and safe-boundary recovery. */
 /**
  * The public Responses API's verdict on one request's prompt cache against the previous response of the same
  * conversation (`prompt_cache_options.comparison_response_id`), as the provider stated it. `unavailable` and
@@ -156,6 +155,11 @@ export interface ResponsesCacheDiagnostic {
 	comparisonReusableTokens?: number;
 }
 
+/**
+ * #423 / #427 AC4: sanitized per-call transport attribution and safe-boundary recovery, for Codex and public
+ * Responses calls alike (`src/engine/apis/responses-transport.ts`). Each call counts its own sends, so a call with a
+ * session is `exclusive`; `overlap` and `counter_reset` appear only in records from before Clio owned the socket.
+ */
 export interface CodexTransportObservation {
 	mode: "websocket" | "sse" | "unknown";
 	request: "full" | "delta" | "unknown";
