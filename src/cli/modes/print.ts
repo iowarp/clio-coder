@@ -11,6 +11,7 @@ import {
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
 import type { CallFilter } from "../../core/telemetry/dto.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { renderCompactCount, renderUsdSum } from "../../core/telemetry/render.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
@@ -18,6 +19,7 @@ import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import { runCapStopCode, type TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
+import { WORKER_OUTPUT_MAX_BYTES } from "../../domains/dispatch/event-pump.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import { type RunCallUsage, runUsageFromCalls } from "../../domains/dispatch/run-call-usage.js";
 import {
@@ -35,19 +37,21 @@ import {
 } from "../../domains/dispatch/run-findings.js";
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
 import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
-import { newRunId, openLedger } from "../../domains/dispatch/state.js";
+import { type CreateRunInput, newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
 	RunEnvelope,
 	RunKind,
 	RunOutcome,
 	RunResultCostCap,
 	RunResultDraft,
+	RunResultOutput,
 	RunResultSafetySummary,
 	RunStatus,
 	SafetyBlockedAttempt,
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
+import { createRedactionTally, redactSecretsText } from "../../domains/evidence/redact.js";
 import { describeMissing, missingFromFailedCall } from "../../domains/lifecycle/setup-status.js";
 import {
 	AUTONOMOUS_CAP_EXIT_CODE,
@@ -60,7 +64,7 @@ import {
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
-import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
+import { redactFinalUrlCredentials, redactSecretString, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import {
 	createRunEffectsRecorder,
 	type RunEffectsRecorder,
@@ -68,11 +72,12 @@ import {
 } from "../../domains/safety/run-effects.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { formatStatedWait } from "../../domains/session/retry.js";
-import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../domains/telemetry/paths.js";
+import { callRepeatsAsRead } from "../../engine/loop-guard.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
-import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
+import type { ChatLoop, ChatLoopEvent, ChatLoopRunSnapshot } from "../../session-control/chat-loop.js";
 import {
 	CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
 	classifyTurnEnding,
@@ -92,6 +97,7 @@ import { type CompletionDeclaration, completionOfToolResult, sealCompletion } fr
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
+import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
 import { sealedFactsNotVerified } from "../run-output.js";
@@ -311,6 +317,8 @@ interface HeadlessMainAgentRunStats {
 	toolRounds: ToolRoundRecord[];
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
+	/** In-flight calls the loop guard reads as reads (`callRepeatsAsRead`), such as a read-only shell command (C-37). */
+	readingCalls: Set<string>;
 	pendingVerifyCalls: Map<string, VerifyCallStart>;
 	verifyCalls: VerifyCallOutcome[];
 	/** The run's workspace mutations, so a check is judged against the tree it ran on (bt-27c). */
@@ -339,6 +347,10 @@ interface HeadlessMainAgentRunStats {
 	reportPaths: Set<string>;
 	/** Dispatched runs whose task worktree merged into this workspace. */
 	mergedTaskWorktrees: number;
+	/** A call of a state-changing class succeeded, the main run's side of a worker's tool activity (C-37). */
+	mutatingSucceeded: boolean;
+	/** The run's `--read-only` scope: it can change nothing, so it owes no validation for a change (C-37). */
+	readOnly: boolean;
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
 	/**
@@ -347,8 +359,9 @@ interface HeadlessMainAgentRunStats {
 	 */
 	failedDispatch: { reason: string; started: boolean } | null;
 	/**
-	 * Whether the task asked for a change. Only an explicit `--turn-mode answer`
-	 * or `proposal` says it did not; the no-op verdict applies only when it did.
+	 * Whether the task asked for a change. An explicit `--turn-mode answer` or
+	 * `proposal`, or the `--read-only` ceiling, says it did not; the no-op verdict
+	 * applies only when it did.
 	 */
 	changeAsked: boolean;
 }
@@ -562,12 +575,14 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
+		if (callRepeatsAsRead(event.toolName, event.args, () => undefined)) stats.readingCalls.add(event.toolCallId);
 		if (call.toolName === ToolNames.Verify) stats.pendingVerifyCalls.set(event.toolCallId, verifyCallStart(call.args));
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
 	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
 	stats.pendingCapabilities.delete(event.toolCallId);
+	const reads = stats.readingCalls.delete(event.toolCallId);
 	// A call the output limit cut off never ran: its run's one notice states it, and it is no tool error (bt-39 a).
 	if ((event as { notRun?: unknown }).notRun !== undefined) {
 		stats.pendingVerifyCalls.delete(event.toolCallId);
@@ -579,6 +594,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	for (const child of children) {
 		const toolCallId = `${event.toolCallId}:${child.id}`;
 		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCallStart(child.args));
+		if (callRepeatsAsRead(child.capability, child.args, () => undefined)) stats.readingCalls.add(toolCallId);
 		recordToolEnd(stats, {
 			type: "tool_execution_end",
 			toolCallId,
@@ -702,6 +718,9 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (outcome === "blocked" || decision === "blocked") {
 		if (!withheldDuplicateRead && !readOnlyCeiling) stats.unresolvedBlocks.add(action);
 	} else if (outcome === "ok" || (outcome === undefined && !event.isError)) {
+		// A read-only command reads, and a check is the validation itself, not a change to validate.
+		if (!terminating && !reads && tool !== ToolNames.Verify && MAIN_MUTATING_CLASSES.has(action))
+			stats.mutatingSucceeded = true;
 		const capability =
 			tool === ToolNames.Gateway
 				? (event.result as { details?: { capability?: unknown } } | undefined)?.details?.capability
@@ -787,6 +806,15 @@ function writtenPaths(stats: HeadlessMainAgentRunStats): number {
 function changedWorkspace(stats: HeadlessMainAgentRunStats): boolean {
 	return writtenPaths(stats) > 0 || stats.mergedTaskWorktrees > 0;
 }
+
+/** A worker's mutating classes less dispatch, which the main run counts by its merged worktrees instead (C-37). */
+const MAIN_MUTATING_CLASSES: ReadonlySet<string> = new Set([
+	"write",
+	"execute",
+	"system_modify",
+	"git_destructive",
+	"destructive",
+]);
 
 /** A blocked call or a failed dispatch remains, and nothing changed the workspace. */
 function unmetWithoutChange(stats: HeadlessMainAgentRunStats): boolean {
@@ -906,6 +934,88 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	return count;
 }
 /**
+ * The printed answer as a result object holds it, within the bound a worker's output seals under. It is redacted as the
+ * object store redacts before the bound: a bound first would cut a secret into a piece no redactor recognizes (#446).
+ */
+function boundedAnswer(answer: HeadlessStoredAnswer): RunResultOutput {
+	const text = redactSecretsText(redactSecretString(answer.text), createRedactionTally());
+	const bytes = Buffer.byteLength(text, "utf8");
+	// The marker follows the kept bytes, so they leave it room within the bound.
+	const marker = "\n[output truncated]";
+	const bounded =
+		bytes <= WORKER_OUTPUT_MAX_BYTES
+			? text
+			: truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES - Buffer.byteLength(marker, "utf8"), marker);
+	return { state: answer.state, text: bounded, bytes, truncated: bounded !== text };
+}
+
+/** What stdout printed as the run's answer; partial when the output token limit stopped it. */
+interface HeadlessStoredAnswer {
+	text: string;
+	state: RunResultOutput["state"];
+}
+
+/**
+ * The finish contract decision the run's own turns recorded last: the main loop journals it in the session, not the run
+ * scope, so the run's assessment reads it from there (C-11). A worker's decision carries its own run id and is left
+ * out; a journal that cannot be read leaves the completion axis unrecorded.
+ */
+async function sessionCompletion(
+	sessionId: string,
+	from: string,
+): Promise<Pick<TelemetryRecord<"completion.evaluated">, "id" | "t" | "data"> | undefined> {
+	try {
+		const { readCallJournal } = await import("../../domains/telemetry/call-journal.js");
+		const read = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId), ["completion.evaluated"]);
+		return read.records
+			.flatMap(({ record }) =>
+				record.k === "completion.evaluated" && record.ctx.runId === undefined && record.t >= from ? [record] : [],
+			)
+			.sort((left, right) => left.t.localeCompare(right.t))
+			.at(-1);
+	} catch {
+		return undefined;
+	}
+}
+
+/** The ledger row a headless main-agent run opens with, from the route its loop resolved. */
+function mainAgentRow(
+	runId: string,
+	task: string,
+	snapshot: ChatLoopRunSnapshot,
+	sessionId: string | null,
+): CreateRunInput {
+	return {
+		id: runId,
+		agentId: "main-agent",
+		executionRole: "builder",
+		requestOrigin: "user",
+		task,
+		targetId: snapshot.targetId,
+		wireModelId: snapshot.wireModelId,
+		runtimeId: snapshot.runtimeId,
+		runtimeKind: snapshot.runtimeKind,
+		sessionId,
+		cwd: snapshot.cwd,
+	};
+}
+
+/**
+ * Publish the run's ledger row as running once its loop has resolved a route, before any child it dispatches settles,
+ * with this process's pid so recovery can tell a live parent from an abandoned one (C-13). A run whose route is never
+ * resolved gets its row at settlement, as before.
+ */
+async function openRunningMainAgentRow(runId: string, chat: ChatLoop, task: string, startedAt: string): Promise<void> {
+	const snapshot = chat.lastRunSnapshot?.();
+	if (!snapshot || !isMainAgentRunKind(snapshot.runtimeKind)) return;
+	const ledger = openLedger();
+	if (ledger.get(runId) !== null) return;
+	ledger.create(mainAgentRow(runId, task, snapshot, snapshot.sessionId ?? chat.getSessionId()));
+	ledger.update(runId, { status: "running", startedAt, pid: process.pid, heartbeatAt: new Date().toISOString() });
+	await ledger.persist();
+}
+
+/**
  * Settle the main-agent run the way dispatch settles a worker (#434): one result built with its run.settled, the
  * record made durable and the run scope sealed, and only then the ledger row published terminal, so `fleet verify`
  * and `fleet view` read a finished run the same way whoever ran it. A settlement that does not land publishes the row
@@ -928,6 +1038,8 @@ async function recordHeadlessMainAgentRun(input: {
 	stoppedChecks?: ReadonlyArray<{ id: string; command: string }>;
 	/** Passing dispatch run records still standing at the end, as the observed line names them (bt-verify7a). */
 	dispatchRuns?: ReadonlyArray<string>;
+	/** The answer stdout printed for this run; absent when it printed none. */
+	answer?: HeadlessStoredAnswer;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -940,19 +1052,8 @@ async function recordHeadlessMainAgentRun(input: {
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
 	const sessionId = snapshot.sessionId ?? input.chat.getSessionId();
 	const ledger = openLedger();
-	const envelope = ledger.create({
-		id: input.runId,
-		agentId: "main-agent",
-		executionRole: "builder",
-		requestOrigin: "user",
-		task: input.task,
-		targetId: snapshot.targetId,
-		wireModelId: snapshot.wireModelId,
-		runtimeId: snapshot.runtimeId,
-		runtimeKind: snapshot.runtimeKind,
-		sessionId,
-		cwd: snapshot.cwd,
-	});
+	// The row the run opened as running when its route was known is the one it settles (C-13).
+	const envelope = ledger.get(input.runId) ?? ledger.create(mainAgentRow(input.runId, input.task, snapshot, sessionId));
 	const lineage = {
 		parentRunId: null,
 		rootRunId: envelope.id,
@@ -1055,6 +1156,8 @@ async function recordHeadlessMainAgentRun(input: {
 		terminalReason: mainAgentTerminalReason(outcome).terminalReason,
 		sessionId,
 		...(input.calls ? { callIds: input.calls.callIds } : {}),
+		// The answer seals in the result object as a worker's does, under the same bound (C-12).
+		...(input.answer !== undefined && input.answer.text.length > 0 ? { output: boundedAnswer(input.answer) } : {}),
 	};
 	try {
 		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal. The
@@ -1080,7 +1183,19 @@ async function recordHeadlessMainAgentRun(input: {
 					...(stepPipeline !== null ? { stepPipeline } : {}),
 				},
 			);
-			await journal.settle(finished.settlement);
+			const completion = sessionId === null ? undefined : await sessionCompletion(sessionId, input.startedAt);
+			// What the host saw change that the settled facts cannot carry owes validation as they do (C-37); a --read-only
+			// run can change nothing.
+			const observedChange = !input.stats.readOnly && (changedWorkspace(input.stats) || input.stats.mutatingSucceeded);
+			const assessment = finished.settlement.assessment;
+			const settlement =
+				assessment !== undefined
+					? {
+							...finished.settlement,
+							assessment: { ...assessment, ...(completion !== undefined ? { completion } : {}), observedChange },
+						}
+					: finished.settlement;
+			await journal.settle(settlement);
 		} finally {
 			await journal.close();
 		}
@@ -1196,6 +1311,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		toolRounds: [],
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
+		readingCalls: new Set(),
 		pendingVerifyCalls: new Map(),
 		verifyCalls: [],
 		runEffects: createRunEffectsRecorder(process.cwd(), {
@@ -1213,9 +1329,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		permissionRequestedByTool: new Map<string, number>(),
 		reportPaths: new Set(),
 		mergedTaskWorktrees: 0,
+		mutatingSucceeded: false,
+		readOnly: options.constraints?.readOnly === true,
 		unresolvedBlocks: new Set<string>(),
 		failedDispatch: null,
-		changeAsked: options.constraints?.mode !== "answer" && options.constraints?.mode !== "proposal",
+		// A read-only run can change nothing, so like an answer turn it asked for no change (C-1).
+		changeAsked:
+			options.constraints?.readOnly !== true &&
+			options.constraints?.mode !== "answer" &&
+			options.constraints?.mode !== "proposal",
 	};
 	// The ledger row is this run's accounting, so it has to exist on the costly
 	// failure paths too. Two callers can reach it: the turn's own completion
@@ -1226,14 +1348,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
 	let entriesBefore = 0;
+	// The running ledger row, opened at the first loop event after the route resolved (C-13).
+	let runningRow: Promise<void> | null = null;
 	const recordRun = (
 		terminal: HeadlessTerminalOutcome,
 		acceptance: ReadonlyArray<RunJsonVerifyResult> | null = null,
 		stoppedChecks: ReadonlyArray<{ id: string; command: string }> = [],
+		answer: HeadlessStoredAnswer | null = null,
 	): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
 		sealed = (async () => {
+			// Settlement updates the running row, so it waits for that row to be on disk.
+			await runningRow;
 			// A read model that cannot answer leaves the message fold for the row; the run still settles (#434).
 			const calls = (await options.runUsage?.(startedAt).catch(() => null)) ?? null;
 			if (calls !== null && runResultV2Active()) await noteRunUsageV2(options, startedAt, calls);
@@ -1258,6 +1385,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				acceptance,
 				stoppedChecks,
 				dispatchRuns,
+				...(answer !== null ? { answer } : {}),
 			});
 		})().catch((error: unknown) => {
 			process.stderr.write(
@@ -1446,6 +1574,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let permissionStop: string | null = null;
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
+		if (runningRow === null && chat.lastRunSnapshot?.()) {
+			runningRow = openRunningMainAgentRow(runId, chat, options.prompt, startedAt).catch((error: unknown) => {
+				process.stderr.write(
+					`clio-coder run: running ledger row write failed: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			});
+		}
 		if (mode === "json") {
 			const messages = event.type === "agent_end" ? event.messages : [];
 			const frames = jsonProjector
@@ -1660,7 +1795,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		failureMessage: null,
 	};
 	let stderrMessage: string | null = null;
-	let stdoutMessage: string | null = null;
+	// The answer a text run prints, computed once: stdout prints it and the result object stores it (C-12).
+	let answerMessage: string | null = null;
+	let answerState: RunResultOutput["state"] = "final";
 	if (termination.isShuttingDown()) {
 		// The turn did not fail; a signal ended it. Both this path and the drain
 		// hook read interruption from the coordinator, so whichever seals first
@@ -1715,7 +1852,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		// Text mode printed the chat loop's notice for a thinking-only stop as it arrived.
 		stderrMessage = mode === "text" && result.thinkingOnlyLength ? null : failureMessage;
-		if (mode === "text" && printedAnswer(result).length > 0) stdoutMessage = settledAnswer(printedAnswer(result));
+		if (printedAnswer(result).length > 0) {
+			answerMessage = settledAnswer(printedAnswer(result));
+			answerState = "partial";
+		}
 	} else if (result.noAnswer !== null) {
 		// Earlier chatter or a line of markup is not the answer the caller asked for, whatever it reads like.
 		const failureMessage = `clio-coder run: the turn ended without an answer. ${result.noAnswer}`;
@@ -1780,23 +1920,21 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "verify_failed" };
 			stderrMessage = failureMessage;
 		}
-		if (mode === "text") {
-			// A terminating tool ends the turn in place of an assistant message, so its
-			// result is the answer and any assistant text before it is mid-workflow
-			// chatter the model never offered as a reply. Printing that chatter instead
-			// hands the operator a dangling "let me try..." for a turn that succeeded.
-			const answer = printedAnswer(result);
-			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
-		}
+		// A terminating tool ends the turn in place of an assistant message, so its
+		// result is the answer and any assistant text before it is mid-workflow
+		// chatter the model never offered as a reply. Printing that chatter instead
+		// hands the operator a dangling "let me try..." for a turn that succeeded.
+		const answer = printedAnswer(result);
+		answerMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		// SPEC 6.8: an answer that still does not match outranks verify, noop and limitation (6.5 order); nothing
 		// reaches stdout or `-o`. A match prints the validated JSON alone.
 		if (structuredVerdict !== null && !structuredVerdict.ok) {
 			const failureMessage = schemaMismatchMessage(structuredVerdict.errors);
 			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "schema_mismatch" };
 			stderrMessage = failureMessage;
-			stdoutMessage = null;
-		} else if (structuredVerdict?.ok === true && mode === "text" && terminal.exitCode === 0) {
-			stdoutMessage = structuredVerdict.json;
+			answerMessage = null;
+		} else if (structuredVerdict?.ok === true && terminal.exitCode === 0) {
+			answerMessage = structuredVerdict.json;
 		}
 		if (terminal.exitCode === 0 && !runStats.changeAsked) {
 			const notice = blockedCallsNotice(runStats);
@@ -1835,7 +1973,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			outcomeDetail: "permission_required",
 		};
 		stderrMessage = permissionStop;
-		stdoutMessage = null;
+		answerMessage = null;
 	}
 	const unscripted = scripted !== undefined && !termination.isShuttingDown() ? scripted.unscripted() : null;
 	if (scripted !== undefined && unscripted !== null) {
@@ -1848,7 +1986,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			outcomeDetail: "unscripted",
 		};
 		stderrMessage = failureMessage;
-		stdoutMessage = null;
+		answerMessage = null;
 	}
 	const exitCode = terminal.exitCode;
 	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
@@ -1880,22 +2018,26 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	}
 	writeVerifyFrame(verify);
 
+	if (answerMessage !== null) {
+		// CLI-P42: a run the observation pool stopped says so after its answer, as `run --agent` prints its limits.
+		const notVerified = options.outputSchema === undefined ? sealedFactsNotVerified(sealedCompletion.facts) : "";
+		if (notVerified.length > 0) answerMessage = `${answerMessage}\n${notVerified.replace(/\n$/u, "")}`;
+	}
+	const storedAnswer = answerMessage !== null ? { text: answerMessage, state: answerState } : null;
+
 	await frameChain;
 	// A shutdown seals what the drain would, whichever of this path and the drain arrives first.
-	if (termination.isShuttingDown()) await recordRun(terminal, verify ?? [], stoppedVerifyChecks(verify ?? []));
-	else await recordRun(terminal, verify);
+	if (termination.isShuttingDown())
+		await recordRun(terminal, verify ?? [], stoppedVerifyChecks(verify ?? []), storedAnswer);
+	else await recordRun(terminal, verify, [], storedAnswer);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);
 	}
-	if (stdoutMessage !== null) {
-		// CLI-P42: a run the observation pool stopped says so after its answer, as `run --agent` prints its limits.
-		const notVerified =
-			mode === "text" && options.outputSchema === undefined ? sealedFactsNotVerified(sealedCompletion.facts) : "";
-		if (notVerified.length > 0) stdoutMessage = `${stdoutMessage}\n${notVerified.replace(/\n$/u, "")}`;
+	if (answerMessage !== null && mode === "text") {
 		// CLI-P22: text mode's `-o` holds exactly these bytes; a v1 or v2 JSON run reads its answer from its frames.
-		if (mode === "text") noteTextAnswer(stdoutMessage);
-		writeRawStdout(`${stdoutMessage}\n`);
+		noteTextAnswer(answerMessage);
+		writeRawStdout(`${answerMessage}\n`);
 	}
 	// What the harness saw, beside the model's account; stdout stays the answer and the exit code is unchanged.
 	const observedLine =
