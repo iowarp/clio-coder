@@ -13,6 +13,7 @@ import { parseInterviewNext } from "../../src/domains/extensions/runtime-output-
 import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import type { ExtensionHost } from "../../src/entry/extension-host.js";
 import { startExtensionHost } from "../../src/entry/extension-host.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { runParkedInterview } from "../../src/tools/extension-interview.js";
@@ -145,6 +146,13 @@ test("an interview that completes a step's last step puts pipelineDone in the st
 
 test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, an interview fails closed at once", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"gate_probe",
@@ -156,11 +164,10 @@ test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, 
 		},
 		script,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
 	const notices: string[] = [];
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
@@ -169,11 +176,6 @@ test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, 
 		sessionId: () => "headless-session",
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
-	});
-	t.after(async () => {
-		await host.dispose();
-		process.chdir(previous);
-		env.restore();
 	});
 	equal((await host.ready).status, "committed", notices.join("\n"));
 	const executor = bridge.current();
@@ -194,6 +196,13 @@ test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, 
 
 test("a turn that starts right after a session change still runs the gate on the next generation", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"gate_probe",
@@ -203,13 +212,12 @@ test("a turn that starts right after a session change still runs the gate on the
 };
 `,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
 	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	let streaming = false;
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "acp",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
@@ -218,11 +226,6 @@ test("a turn that starts right after a session change still runs the gate on the
 		sessionId: () => "acp-session",
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
-	});
-	t.after(async () => {
-		await host.dispose();
-		process.chdir(previous);
-		env.restore();
 	});
 	equal((await host.ready).status, "committed", notices.join("\n"));
 	// ACP's session/new parks the current session, and the prompt that follows starts its turn at once.
@@ -236,6 +239,13 @@ test("a turn that starts right after a session change still runs the gate on the
 
 test("a headless run's last turn_end reaches its runtime before the host disposes it", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"turn_probe",
@@ -247,11 +257,10 @@ test("a headless run's last turn_end reaches its runtime before the host dispose
 };
 `,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const handlers: Array<(event: ChatLoopEvent) => void> = [];
 	const notices: string[] = [];
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: createExtensionRuntimeHookBridge(),
@@ -268,10 +277,6 @@ test("a headless run's last turn_end reaches its runtime before the host dispose
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
 	});
-	t.after(() => {
-		process.chdir(previous);
-		env.restore();
-	});
 	equal((await host.ready).status, "committed", notices.join("\n"));
 	for (const handler of handlers) handler({ type: "agent_end", messages: [] } as unknown as ChatLoopEvent);
 	await host.dispose();
@@ -280,6 +285,13 @@ test("a headless run's last turn_end reaches its runtime before the host dispose
 
 test("a headless run that ends while its startup reload stages reports no reload failure", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"slow_probe",
@@ -290,10 +302,9 @@ test("a headless run that ends while its startup reload stages reports no reload
 };
 `,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const notices: string[] = [];
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: createExtensionRuntimeHookBridge(),
@@ -303,10 +314,6 @@ test("a headless run that ends while its startup reload stages reports no reload
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
 	});
-	t.after(() => {
-		process.chdir(previous);
-		env.restore();
-	});
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	await host.dispose();
 	equal((await host.ready).message, "operator runtime is disposed");
@@ -315,6 +322,11 @@ test("a headless run that ends while its startup reload stages reports no reload
 
 test("an ACP client that closes stdin leaves no runtime child and the process exits", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	let stop = (): void => {};
+	t.after(() => {
+		stop();
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"close_probe",
@@ -340,12 +352,11 @@ test("an ACP client that closes stdin leaves no runtime child and the process ex
 			return false;
 		}
 	};
-	t.after(() => {
+	stop = () => {
 		acp.kill("SIGKILL");
 		// The runtime leads its own process group; a leaked one goes with the test.
 		if (runtime !== undefined && alive(runtime)) process.kill(-runtime, "SIGKILL");
-		env.restore();
-	});
+	};
 	let stderr = "";
 	acp.stderr.setEncoding("utf8");
 	acp.stderr.on("data", (chunk: string) => {
@@ -389,6 +400,11 @@ test("an ACP client that closes stdin leaves no runtime child and the process ex
 
 test("an ACP serve loop that throws still disposes the extension host and the process exits", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	let stop = (): void => {};
+	t.after(() => {
+		stop();
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"throw_probe",
@@ -433,7 +449,7 @@ test("an ACP serve loop that throws still disposes the extension host and the pr
 			.map((line) => line.trim().split(/\s+/))
 			.filter((cols) => cols.slice(1).join(" ").includes(env.dir))
 			.map((cols) => Number(cols[0]));
-	t.after(() => {
+	stop = () => {
 		acp.kill("SIGKILL");
 		for (const pid of runtimes())
 			try {
@@ -441,8 +457,7 @@ test("an ACP serve loop that throws still disposes the extension host and the pr
 			} catch {
 				// Already gone between the listing and the kill.
 			}
-		env.restore();
-	});
+	};
 	let stderr = "";
 	acp.stderr.setEncoding("utf8");
 	acp.stderr.on("data", (chunk: string) => {
@@ -465,6 +480,13 @@ test("an ACP serve loop that throws still disposes the extension host and the pr
 
 test("a headless run's first turn_start reaches its runtime though the turn starts before startup commits", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"start_probe",
@@ -479,11 +501,10 @@ export default (api) => {
 };
 `,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
 	const notices: string[] = [];
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
@@ -492,11 +513,6 @@ export default (api) => {
 		sessionId: () => "headless-session",
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
-	});
-	t.after(async () => {
-		await host.dispose();
-		process.chdir(previous);
-		env.restore();
 	});
 	const executor = bridge.current();
 	ok(executor, "the host binds the hook bridge");
@@ -508,6 +524,13 @@ export default (api) => {
 
 test("a turn held during startup is dropped once ACP's session/new makes another session current", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"start_probe",
@@ -522,13 +545,12 @@ export default (api) => {
 };
 `,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
 	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	let sessionId = "old-session";
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "acp",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
@@ -537,11 +559,6 @@ export default (api) => {
 		sessionId: () => sessionId,
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
-	});
-	t.after(async () => {
-		await host.dispose();
-		process.chdir(previous);
-		env.restore();
 	});
 	const executor = bridge.current();
 	ok(executor, "the host binds the hook bridge");
@@ -555,6 +572,13 @@ export default (api) => {
 
 test("a hook that arrives after a second session change, while the first change's reload runs, waits for the next generation", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
+	const previous = process.cwd();
+	let host: ExtensionHost | undefined;
+	t.after(async () => {
+		await host?.dispose();
+		process.chdir(previous);
+		env.restore();
+	});
 	const cwd = installRuntime(
 		env.dir,
 		"gate_probe",
@@ -564,12 +588,11 @@ test("a hook that arrives after a second session change, while the first change'
 };
 `,
 	);
-	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
 	const bus = createTelemetryHub();
 	const notices: string[] = [];
-	const host = startExtensionHost({
+	host = startExtensionHost({
 		mode: "acp",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
@@ -578,11 +601,6 @@ test("a hook that arrives after a second session change, while the first change'
 		sessionId: () => "acp-session",
 		targetId: () => "target",
 		notify: (line) => notices.push(line),
-	});
-	t.after(async () => {
-		await host.dispose();
-		process.chdir(previous);
-		env.restore();
 	});
 	equal((await host.ready).status, "committed", notices.join("\n"));
 	bus.emit("session.parked", { sessionId: "acp-session", reason: "create_new", at: Date.now() });
