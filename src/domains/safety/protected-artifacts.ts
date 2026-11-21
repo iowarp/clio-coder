@@ -156,6 +156,16 @@ export function protectArtifact(state: ProtectedArtifactState, artifact: Protect
 	return stateFromMap(artifacts);
 }
 
+/**
+ * C-7: a quoted here-document `cat` or `tee` copies into a file, or a known stdin sink reads, is content, not shell
+ * text, so a `>` in a TypeScript body is no redirect. The command line, its redirect included, stays judged, and so
+ * does a body the path walk still reads because a step of the call may run the copied file (FX-25's floor reading).
+ */
+function heredocDataCommandText(command: string): string {
+	const text = withoutDataHeredocBodies(command);
+	return text !== command && extractCommandPathWalks(command).length === 1 ? text : command;
+}
+
 function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): boolean {
 	const candidate = normalizePathKey(artifactPath);
 	if (candidate === null) return false;
@@ -172,7 +182,7 @@ function classifyDestructiveCommand(
 	const artifacts = normalizedArtifacts(protectedArtifacts);
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
-	const segments = splitSegments(scanShellLike(command)).flatMap((tokens) => [
+	const segments = splitSegments(scanShellLike(heredocDataCommandText(command))).flatMap((tokens) => [
 		tokens,
 		...substitutionSegments(tokens, 0),
 	]);
