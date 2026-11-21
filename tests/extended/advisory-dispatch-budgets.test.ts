@@ -14,7 +14,7 @@ import {
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
-import { resolveRunWall, runWallCapMs } from "../../src/domains/dispatch/run-limits.js";
+import { resolveRunWall, runWallCapMs, wallClockMessage } from "../../src/domains/dispatch/run-limits.js";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
@@ -518,6 +518,11 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 		});
 		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "internal"), DEFAULT_SETTINGS.fleet.limits.internalRunTimeoutMs);
 		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "user"), 1_800_000);
+		// The worker keeps working and the host's 85% handback asks for the report; a quit cue made coders stop at 13 s.
+		const wallLine = wallClockMessage(120_000);
+		match(wallLine, /Keep working/u);
+		match(wallLine, /At 85% the host withdraws your tools and asks for your report/u);
+		ok(!/stops as timed out/u.test(wallLine), wallLine);
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: (spec) => {
