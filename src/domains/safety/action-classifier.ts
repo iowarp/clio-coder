@@ -691,6 +691,8 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 	const realUnderTemp = (target: string, suffix: ReadonlyArray<string>): boolean =>
 		canonicalizeRawPath(target, "/") === path.join(canonicalTemp, ...suffix);
 	const edits: Array<{ start: number; end: number; text: string }> = [];
+	/** The cd rewrites, which the walk reads as bases: a program run anywhere in the call voids them. */
+	const cdEdits: typeof edits = [];
 	let leadingCd: string | null = null;
 	let linkRisk = false;
 	let hasDelete = false;
@@ -803,7 +805,7 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 					cdBase = provable ? landing : null;
 					if (provable && landing !== null) {
 						const word = step.words[step.words.length - 1] as ShellWord;
-						edits.push({ start: word.start, end: word.end, text: quoted(landing) });
+						cdEdits.push({ start: word.start, end: word.end, text: quoted(landing) });
 						if (itemIndex === 0 && index === 0 && singleChain) leadingCd = landing;
 					}
 					continue;
@@ -824,13 +826,17 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 					continue;
 				}
 				linkRisk = true;
+				// Row 287 (neon): the program may plant a link below the cd landing, so no later operand is placed from it.
+				cdBase = null;
 			}
 		}
 		// After the and-or a pin made past its head may never have been made, and the shell may be wherever a cd left it.
 		for (const name of chainNames) pins.delete(name);
 	}
-	// A program may plant a link where the walk would follow the cd as a base, so only a call that runs none keeps it.
+	// A program may plant a link where the walk would follow the cd as a base, so only a call that runs none keeps it,
+	// and the cd stays as written: a rewritten landing would be a base the walk places under a scratch root.
 	if (linkRisk) leadingCd = null;
+	else edits.push(...cdEdits);
 	if (!hasDelete || (edits.length === 0 && leadingCd === null)) return unchanged;
 	let projected = command;
 	for (const edit of [...edits].sort((left, right) => right.start - left.start))

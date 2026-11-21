@@ -541,6 +541,14 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		const reasons = engine.evaluate(bash(command), "default", contained).reasons.join("; ");
 		strictEqual(/deletes [^;]*src with no workspace snapshot/u.test(reasons), !placed, `${command}: ${reasons}`);
 	}
+	// Row 287 (neon finding 1): a program after the temp cd may link anything below it, so neither the cd rewrite nor its
+	// base survives and the delete keeps the reading it has at b1c4855bf.
+	mkdirSync(join(temp, "dir"), { recursive: true });
+	for (const target of ["sub/.git", "sub/target"]) {
+		const command = `D="$TMPDIR/dir"\ncd "$D" && python3 -c 'import os; os.symlink("${cwd}", "sub")' && rm -rf ${target}`;
+		const decision = engine.evaluate(bash(command), "default", contained);
+		strictEqual(`${decision.kind}/${decision.reasonCode}`, "ask/damage-control:delete-outside-workspace", command);
+	}
 	// Row 261 final (r261c): the floor gaps the second review found, each red at the bounce-1 head.
 	symlinkSync(".git", join(cwd, "gitlink261"));
 	t.after(() => rmSync(join(cwd, "gitlink261"), { force: true }));
