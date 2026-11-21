@@ -71,6 +71,16 @@ describe("worker attestation: gateway follows the runtime's tool loop", () => {
 	});
 
 	it("still signs gateway onto a native runtime's surface", () => {
-		strictEqual(signed({ kind: "http", id: "litellm" }), toolSignatureOf([...admitted, ToolNames.Gateway]));
+		// A native run's envelope carries gateway for its gatewayed capabilities, and the worker signs what it was sealed.
+		const surface = [...admitted, ToolNames.Gateway];
+		strictEqual(
+			attestedToolSignature({
+				allowedTools: surface,
+				toolsSupported: true,
+				agentId: "architect",
+				runtime: { kind: "http", id: "litellm" },
+			}),
+			toolSignatureOf(surface),
+		);
 	});
 });

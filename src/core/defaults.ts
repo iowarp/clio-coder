@@ -240,8 +240,9 @@ export interface WorkingSetSettings {
  * then so the slot's prefix cache already holds it when the real turn arrives.
  *
  * The boolean is the master switch. The feature is off on every tier but
- *     `local-native` whatever this says, and off for workers and headless runs,
- *     because it buys latency for an operator watching a local server.
+ *     `local-native` and the `openai-codex` runtime (a `generate: false` warm)
+ *     whatever this says, and off for workers and headless runs, because it buys
+ *     latency for an operator watching the session.
  */
 export interface PanesSettings {
 	/** Which terminal run states raise a pane-host toast. */
@@ -737,6 +738,12 @@ export interface SafetySettings {
 	 */
 	sandboxPassEnv: string[];
 	/**
+	 * Target ids whose runtime's own login file the main session's contained commands may read, read-only, so a
+	 * live check of a candidate build can sign in (copilot-sdk: `$COPILOT_HOME/config.json`). Workers keep every
+	 * mask. Read only from the operator's own settings file.
+	 */
+	liveCheckTargets: string[];
+	/**
 	 * Unix-domain sockets inside the OS sandbox. block refuses new ones, since a
 	 * socket a contained command can see (a terminal multiplexer, X11, a
 	 * daemon's control socket) runs commands outside the sandbox; allow leaves
@@ -983,6 +990,7 @@ export const DEFAULT_SETTINGS = {
 		sandboxNetwork: false,
 		scratchRoots: [] as string[],
 		sandboxPassEnv: [] as string[],
+		liveCheckTargets: [] as string[],
 		sandboxUnixSockets: "block" as UnixSocketMode,
 		sandboxCacheMaxGiB: 4,
 		snapshots: "auto" as WorkspaceSnapshotMode,
@@ -1237,6 +1245,10 @@ safety:
   # passwords, URLs with a password). Names listed here are kept. Honored only
   # in this file.
   sandboxPassEnv: []
+  # Target ids whose own login file (copilot-sdk: the official copilot login)
+  # your sandboxed commands may read, so a live check can sign in. Workers keep
+  # it hidden. Honored only in this file.
+  liveCheckTargets: []
   # Unix sockets inside the sandbox: block | owned | allow. A socket a sandboxed
   # command can reach (tmux, X11, a daemon) can run commands outside it. owned
   # hides only your own, so system daemons (MUNGE, SSSD) stay reachable.

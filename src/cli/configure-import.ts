@@ -92,7 +92,7 @@ export function parseSetupFile(text: string): SetupFileParse {
 	const ids = targets.map((target) => target.id);
 	for (const [index, target] of targets.entries()) {
 		if (!getRuntimeRegistry().get(target.runtime))
-			errors.push(`targets[${index}].runtime: '${target.runtime}' is not a runtime this Clio knows`);
+			errors.push(`targets[${index}].runtime: '${target.runtime}' is not a runtime this CLIO Coder build knows`);
 		if (ids.indexOf(target.id) !== index) errors.push(`targets[${index}].id: '${target.id}' appears twice`);
 	}
 	const chat = roleDefault(errors, "chat", raw.chat, ids);
@@ -212,7 +212,7 @@ async function readSetupSource(source: string): Promise<string> {
 function keySource(target: TargetDescriptor): string {
 	if (target.auth?.apiKeyEnvVar) return `key from $${target.auth.apiKeyEnvVar}`;
 	if (target.auth?.oauthProfile) return `sign-in profile ${target.auth.oauthProfile}`;
-	return "no key named; Clio uses a stored login if there is one";
+	return "no key named; CLIO Coder uses a stored login if there is one";
 }
 
 function describePlan(file: SetupFile, plan: ImportPlan): string[] {

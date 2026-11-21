@@ -318,6 +318,18 @@ const CLIO_ISSUE_COMMAND = /\bgh\s+(?:issue\s+create\b|api\s+\S*\/issues\b)/u;
 export const CLIO_REPORT_NUDGE =
 	"CLIO Coder has /report, which checks for duplicates, shows the operator the exact text and attaches versions.";
 
+const NO_TERMINAL_FAILURE =
+	/\/dev\/tty: No such device or address|open terminal failed|\bnot a (?:tty|terminal)\b|input device is not a TTY|a terminal is required|Inappropriate ioctl for device/iu;
+
+/**
+ * A command runs in a session of its own with no controlling terminal, so the TUI's terminal is never its terminal
+ * (M-12). One that needed a terminal fails, and the failure says why and where an interactive program can run.
+ */
+function noTerminalHint(output: string): string | null {
+	if (process.platform === "win32" || !NO_TERMINAL_FAILURE.test(output)) return null;
+	return "bash: the command looks like it needed a terminal. Tool commands run without one, so they cannot reach the TUI's terminal; run an interactive program in a pane (panes tool), or give it a pseudo-terminal of its own.";
+}
+
 /**
  * A `gh` issue filed against Clio Coder's own repository bypasses /report (R-12). The call is not blocked, since the
  * operator's credential is theirs; the result gains one note naming the route that dedups, shows the text and adds
@@ -569,7 +581,8 @@ export const bashTool: ToolSpec = {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
 				const sandboxHint =
 					options?.shellSandbox === undefined ? null : mainSandboxWriteHint(rawOutput, options.shellSandbox);
-				const status = `bash: command failed (exit ${code ?? "?"})${sandboxHint === null ? "" : `\n${sandboxHint}`}`;
+				const hints = [sandboxHint, noTerminalHint(rawOutput)].filter((hint): hint is string => hint !== null);
+				const status = `bash: command failed (exit ${code ?? "?"})${hints.map((hint) => `\n${hint}`).join("")}`;
 				const message = `${output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`}${clioIssueNudge(args.command)}`;
 				return {
 					kind: "error",

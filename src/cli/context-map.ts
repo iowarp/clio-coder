@@ -233,7 +233,7 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 	process.stdout.write(
 		json
 			? `${JSON.stringify(payload, null, 2)}\n`
-			: `clio-coder context map wrote ${target}\n  ${payload.files} files, ${payload.areas} areas, ${payload.relationships} import relationships\n  Open the HTML in a browser, or use /skill map-codebase for Clio's guided explanation.\n`,
+			: `clio-coder context map wrote ${target}\n  ${payload.files} files, ${payload.areas} areas, ${payload.relationships} import relationships\n  Open the HTML in a browser, or use /skill map-codebase for CLIO Coder's guided explanation.\n`,
 	);
 	return 0;
 }

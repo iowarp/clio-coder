@@ -29,7 +29,7 @@ function chooseYolo(commitResult: boolean | undefined): string[] {
 		notice: (_level, text) => void notices.push(text),
 		onClose() {},
 		section: "safety",
-		rowId: "autonomy",
+		rowId: "safety.autonomy",
 	});
 	const frame = dockTop(tui)?.frame as unknown as Component;
 	frame.handleInput?.("\r"); // open the autonomy choices

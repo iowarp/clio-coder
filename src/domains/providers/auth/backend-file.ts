@@ -15,16 +15,19 @@ import type { AuthStorageBackend, LockResult } from "./storage.js";
 // fsync the hand-rolled variants lacked. The explicit chmod pins the file to
 // exactly 0o600: safeResourceWrite creates its temp with mode 0o600, which umask
 // can still narrow, so we re-assert the secret's mode after the rename.
-// On Windows the mode protects nothing: the renamed file carries the ACL it
-// inherited from the config directory, so it is made owner-only after each
-// write. A failure keeps the written credentials, warns once, and doctor
-// reports the ACL.
+// On Windows the mode protects nothing: a new file carries the ACL it inherits
+// from the config directory. So the directory is made owner-only before each
+// write, with inheritable grants, and the temp file starts owner-only; the
+// renamed file is made owner-only after it. A failure keeps the written
+// credentials, warns once, and doctor reports the ACL.
 let aclWarningShown = false;
 
 function atomicWriteSecret(absPath: string, contents: string, aclHost: AclHost): void {
+	const dirFailure = applyOwnerOnlyAcl(dirname(absPath), aclHost, { directory: true });
 	safeResourceWrite(absPath, contents, { encoding: "utf8", mode: 0o600 });
 	chmodSync(absPath, 0o600);
-	const aclFailure = applyOwnerOnlyAcl(absPath, aclHost);
+	const aclFailure =
+		applyOwnerOnlyAcl(absPath, aclHost) ?? (dirFailure === null ? null : `its directory: ${dirFailure}`);
 	if (aclFailure !== null && !aclWarningShown) {
 		aclWarningShown = true;
 		process.stderr.write(

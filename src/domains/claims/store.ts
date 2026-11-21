@@ -1173,8 +1173,8 @@ export interface ClaimsCompaction {
  * Rewrite a project's log without what no reader needs (#406), under the log's lock: check-starts that bound no
  * hypothesis, repeated lines, and lines that are not a valid record of this project (moved to a quarantine file, not
  * deleted). With `pruneSupersededBefore`, superseded claims captured before that time are pruned too, unless a
- * regression, a hypothesis test or a memory record (`cited`) still names them; edges naming a pruned claim go with
- * it. Lines of a version or type this build does not know are kept as they are, so an older build never drops a newer
+ * regression, a hypothesis test or a memory record (`cited`) still names them; an edge pointing at a pruned claim goes
+ * with it, and one coming from it stays. Lines of a version or type this build does not know are kept as they are, so an older build never drops a newer
  * build's records. The new generation is written beside the log and renamed over it, so a reader without the lock sees
  * one generation or the other; the previous generation stays as `<digest>.prev.jsonl` until the next compaction.
  */
@@ -1291,12 +1291,12 @@ function rewriteLogLocked(
 			result.prunedClaims += 1;
 			continue;
 		}
-		if (value.type === "edge" && (pruned.has(String(value.from)) || pruned.has(String(value.to)))) {
+		// An edge leaves with the claim it points at, never with the one it comes from: a kept claim keeps the edge saying
+		// what superseded it, even when that later claim is pruned or evicted, so neither makes an old verdict read current.
+		if (value.type === "edge" && pruned.has(String(value.to))) {
 			result.prunedEdges += 1;
 			continue;
 		}
-		// An edge leaves with the claim it points at: a kept claim keeps the edge saying what superseded it, even when that
-		// later claim is evicted, so eviction never makes an old verdict read as current.
 		if (evicted.has(id) || (value.type === "edge" && evicted.has(String(value.to)))) {
 			if (!written.has(id)) evictedLines.push(line);
 			written.add(id);

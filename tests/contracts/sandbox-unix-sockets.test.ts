@@ -368,8 +368,7 @@ test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies l
 			readOnly: false,
 			cwd: workspace,
 			writeBoundaries: [],
-			allowedTools: [],
-			networkSetting: false,
+			network: false,
 			unixSockets,
 		});
 	assert.equal(spec("allow")?.unixSockets, "allow");

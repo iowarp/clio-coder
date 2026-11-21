@@ -5,9 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runBashCommand } from "../../src/core/bash-exec.js";
+import { validateSettings } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { buildBwrapInvocation } from "../../src/core/sandbox/bwrap.js";
-import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
+import {
+	holdsNamedCredential,
+	mainSandboxEnvPolicy,
+	sandboxEnvPolicy,
+	scrubSandboxEnv,
+} from "../../src/core/sandbox/env-scrub.js";
 import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
 import { withMountAliases } from "../../src/core/sandbox/mount-aliases.js";
 import { discoverSecretMasks } from "../../src/core/sandbox/secret-files.js";
@@ -460,6 +466,47 @@ test("under bwrap a contained command cannot read .env or credential variables, 
 	const unsandboxed = await runBashCommand(command, { cwd });
 	match(unsandboxed.stdout, /fake-file-value/u);
 	match(unsandboxed.stdout, /fake-dsn-pass/u);
+});
+
+test("a live-check target's login file reads through the main sandbox, and nothing else nor a worker policy does (M-5)", async (t) => {
+	const targets = [
+		{ id: "seat", runtime: "copilot-sdk", auth: {} },
+		{ id: "local", runtime: "openai-compat", auth: {} },
+	];
+	const validated = validateSettings({ targets: [], safety: { liveCheckTargets: ["seat"] } });
+	ok(
+		validated.issues.some((issue) => issue.path === "safety.liveCheckTargets"),
+		JSON.stringify(validated.issues),
+	);
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const isolated = await isolateClioEnv("clio-live-check-login-");
+	t.after(() => isolated.restore());
+	process.env.HOME = isolated.dir;
+	delete process.env.COPILOT_HOME;
+	mkdirSync(join(isolated.dir, ".copilot"), { recursive: true });
+	mkdirSync(join(isolated.dir, ".codex"), { recursive: true });
+	writeFileSync(join(isolated.dir, ".copilot", "config.json"), '{"fake":"seat-login-value"}\n');
+	writeFileSync(join(isolated.dir, ".codex", "auth.json"), '{"fake":"codex-login-value"}\n');
+	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-live-check-ws-")));
+	const settings = { safety: { sandboxPassEnv: [], liveCheckTargets: ["seat", "local"] }, targets };
+	const read = (env: ReturnType<typeof sandboxEnvPolicy>): string => {
+		const plan = planMainSandboxSpawn(
+			mainSandboxPolicy({ workspace: cwd, scratchRoots: [], env }),
+			{ argv: ["/bin/sh", "-c", "cat .copilot/config.json; cat .codex/auth.json"] },
+			isolated.dir,
+		);
+		strictEqual(plan.kind, "sandboxed");
+		return plan.kind === "sandboxed" ? spawnSync(plan.file, plan.args, { encoding: "utf8" }).stdout : "";
+	};
+	const main = read(mainSandboxEnvPolicy(settings, {}, isolated.dir));
+	match(main, /seat-login-value/u);
+	ok(!main.includes("codex-login-value"), main);
+	// Workers and host verification build their policy from sandboxEnvPolicy, which reveals nothing.
+	ok(!read(sandboxEnvPolicy(settings)).includes("seat-login-value"));
 });
 
 test("typed read and grep refuse Clio's settings and MCP files while they hold a secret, as the sandbox hides them", async (t) => {

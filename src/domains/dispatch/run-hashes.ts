@@ -102,6 +102,8 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 		declaration: commitment("protected-artifacts", "json-insertion-order"),
 	},
 	{ path: /^safety\.permit\.digest$/u, declaration: commitment("worker-permit", "json-sorted-prefixed-v1") },
+	{ path: /^safety\.envelope\.digest$/u, declaration: commitment("worker-envelope", "json-sorted-prefixed-v1") },
+	{ path: /^safety\.envelope\.permitDigest$/u, declaration: commitment("worker-permit", "json-sorted-prefixed-v1") },
 	{ path: /^safety\.permit\..*\.digest$/u, declaration: commitment("mcp-server", "json-insertion-order") },
 	{
 		path: /^hostVerification\.checks\[\]\.tree\.fingerprint$/u,

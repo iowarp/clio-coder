@@ -221,7 +221,7 @@ export async function runClioCommand(
 			// The one next action, and that nothing else can run until it is done (HI02).
 			process.stdout.write(
 				wrapToTerminal(
-					`${describeVerdict(verdict)} Clio needs a model before it can do anything else, so setup starts now.`,
+					`${describeVerdict(verdict)} CLIO Coder needs a model before it can do anything else, so setup starts now.`,
 				),
 			);
 			const { runConfigureCommand } = await import("./configure.js");

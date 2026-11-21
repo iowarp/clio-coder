@@ -138,13 +138,16 @@ describe("rate limit ladder at yolo (#445)", () => {
 		strictEqual(attended.continues, 0);
 	});
 
-	it("does not wait on a transient failure that is not a rate limit", async (c) => {
-		const { delays, state } = await run(c, {
-			yolo: true,
-			errorMessage: "503 service unavailable",
-			failingContinues: 1000,
+	// An overloaded 503 names no rate limit: it once waited out the whole hour at maxDelayMs, 425 calls at 200 ms (M-9).
+	for (const errorMessage of [
+		"503 service unavailable",
+		'503: {"message":"fixture overloaded","type":"server_error"}',
+	]) {
+		it(`does not wait on a transient failure that is not a rate limit: ${errorMessage}`, async (c) => {
+			const { continues, delays, state } = await run(c, { yolo: true, errorMessage, failingContinues: 1000 });
+			deepStrictEqual(delays, [2000, 4000, 8000]);
+			strictEqual(continues, 3);
+			strictEqual(state.continuation.stop?.cause, "retries_exhausted");
 		});
-		deepStrictEqual(delays, [2000, 4000, 8000]);
-		strictEqual(state.continuation.stop?.cause, "retries_exhausted");
-	});
+	}
 });

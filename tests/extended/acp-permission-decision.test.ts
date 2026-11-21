@@ -121,7 +121,7 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		deepStrictEqual(turn.init.agentCapabilities._meta["clio-coder/decision"], {
 			version: 1,
 			meta: "clio-coder/decision",
-			options: ["allow-once", "reject-once", "reject-and-stop"],
+			options: ["allow-once", "reject-once", "reject-and-stop", "allow-session-scope"],
 		});
 	});
 

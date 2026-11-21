@@ -152,23 +152,18 @@ test("fleet --help answers from a module that does not load the fleet command", 
 	ok(seen.size <= 16, `fleet help chunks: ${seen.size} > 16`);
 });
 
-test("fleet status answers an empty ledger from a module that does not load the fleet command", () => {
+test("fleet status answers from a module that does not load the fleet command, ledger rows included", () => {
 	const metadata = readMetafile();
 	const owners = Object.entries(metadata.outputs).filter(([, output]) => "src/cli/fleet-status.ts" in output.inputs);
 	strictEqual(owners.length, 1, "build with pnpm build before checking the fleet status artifact");
 	const owner = owners[0];
 	ok(owner);
-	const seen = new Set<string>();
-	const visit = (name: string): void => {
+	const visit = (name: string, seen: Set<string>, forbidden: RegExp): void => {
 		if (seen.has(name)) return;
 		const output = metadata.outputs[name];
 		ok(output, `missing static output: ${name}`);
 		seen.add(name);
-		for (const source of Object.keys(output.inputs))
-			ok(
-				!/^src\/(?:cli\/fleet\.ts|entry\/|domains\/(?:dispatch|providers|session)\/)/u.test(source),
-				`fleet status loads ${source}`,
-			);
+		for (const source of Object.keys(output.inputs)) ok(!forbidden.test(source), `fleet status loads ${source}`);
 		for (const dependency of output.imports) {
 			if (dependency.kind === "dynamic-import") continue;
 			if (dependency.external)
@@ -176,12 +171,22 @@ test("fleet status answers an empty ledger from a module that does not load the 
 					!/^@earendil-works\/pi-(ai|agent-core)(?:\/|$)/u.test(dependency.path),
 					`fleet status loads the model/agent SDK: ${dependency.path}`,
 				);
-			else visit(dependency.path);
+			else visit(dependency.path, seen, forbidden);
 		}
 	};
-	visit(owner[0]);
+	const seen = new Set<string>();
+	visit(owner[0], seen, /^src\/(?:cli\/fleet\.ts|entry\/|domains\/(?:dispatch|providers|session)\/)/u);
 	// 0.8.5 measured 5 static chunks (25 loaded with the settings and admission reads, against 266 / 10,003,472 B before).
 	ok(seen.size <= 8, `fleet status chunks: ${seen.size} > 8`);
+	// Ledger rows add the ledger, the project scope and the light run-journal reader, never a domain module, the
+	// session loader or the fleet command. 0.8.5 measured 48 chunks in this closure and 49 / 1,862,408 B loaded over five
+	// ledger rows (CLI-P11), against 142 / 9,363,218 B loaded when per-run telemetry came through fleet.ts.
+	const rows = new Set(seen);
+	const rowsForbidden =
+		/^src\/(?:cli\/fleet\.ts|entry\/|session-control\/|interactive\/|domains\/[^/]+\/(?:extension|index)\.ts|domains\/session\/telemetry-source\.ts)$/u;
+	for (const dependency of metadata.outputs[owner[0]]?.imports ?? [])
+		if (dependency.kind === "dynamic-import") visit(dependency.path, rows, rowsForbidden);
+	ok(rows.size <= 56, `fleet status chunks over ledger rows: ${rows.size} > 56`);
 });
 
 test("headless run refuses before boot from a closure without the composition root or the model SDK", () => {

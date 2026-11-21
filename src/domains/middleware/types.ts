@@ -39,14 +39,16 @@ export type MiddlewareAnnotationSeverity = (typeof MIDDLEWARE_ANNOTATION_SEVERIT
  * outcome since the last change is red, a detached child run not yet collected, an open task-board item. A builtin
  * turn_end producer tags the reminder or continuation it already emits for one; the host lowers a declared `done` over
  * any of them to `partly_done`. Hooks files cannot declare it. `observation_budget` is the host's own: a headless run
- * whose last observation calls the pool refused, so what they would have read went unseen (CLI-P42).
+ * whose last observation calls the pool refused, so what they would have read went unseen (CLI-P42). `missing_output`
+ * is the host's too: a file the operator named as an output does not exist when the turn is sealed (M-4).
  */
 export type CompletionFact =
 	| "unvalidated_mutation"
 	| "failed_check"
 	| "uncollected_run"
 	| "open_task"
-	| "observation_budget";
+	| "observation_budget"
+	| "missing_output";
 
 export type MiddlewareEffect =
 	/**

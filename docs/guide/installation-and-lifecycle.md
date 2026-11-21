@@ -511,7 +511,7 @@ catalog only as a marketplace, through `clio-coder library install skill:<name>`
 
 ## 2. File & Permissions Matrix
 
-The core files are created automatically during the first run. `settings.yaml`, `credentials.yaml`, `home.json` and `migrations.json` are written owner-only (`0o600`). `doctor` reports a `settings.yaml` that is wider than owner-only as a warning and a `credentials.yaml` that is not `0o600` as an error, and `doctor --fix` tightens both. Session directories, transcripts, spilled tool output and `runs.json` are owner-only too (`0o700` directories, `0o600` files), and boot closes the state subdirectories an earlier version created group- and world-readable, without recursing. A home shared through a group loses that access on upgrade; share a session with `clio-coder telemetry share` instead. `doctor` warns when the state or data root is open to other users, and `doctor --fix` tightens a root that passes the ownership test `reset` uses. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask. On Windows the mode checks do not run and the directory's ACL protects these files, except `credentials.yaml`, which is made owner-only (the current account and SYSTEM) after each write; `doctor` warns when its ACL grants anyone else and `doctor --fix` reapplies it.
+The core files are created automatically during the first run. `settings.yaml`, `credentials.yaml`, `home.json` and `migrations.json` are written owner-only (`0o600`). `doctor` reports a `settings.yaml` that is wider than owner-only as a warning and a `credentials.yaml` that is not `0o600` as an error, and `doctor --fix` tightens both. Session directories, transcripts, spilled tool output and `runs.json` are owner-only too (`0o700` directories, `0o600` files), and boot closes the state subdirectories an earlier version created group- and world-readable, without recursing. A home shared through a group loses that access on upgrade; share a session with `clio-coder telemetry share` instead. `doctor` warns when the state or data root is open to other users, and `doctor --fix` tightens a root that passes the ownership test `reset` uses. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask. On Windows the mode checks do not run and the directory's ACL protects these files, except that before each `credentials.yaml` write the config directory is made owner-only (the current account and SYSTEM, inherited by new files) and the file itself is made owner-only after it; `doctor` warns when the file's ACL grants anyone else, reading it by SID so a localized Windows names no false principal, and `doctor --fix` reapplies both.
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
@@ -951,19 +951,17 @@ for a recorded prerelease channel) for installer installs.
 
 #### Current migration contract
 
-The source tree registers ten migrations in execution order
+The source tree registers eight migrations in execution order
 (`src/domains/lifecycle/migrations/index.ts`):
 
-1. `2026-09-01-settings-v2`
-2. `2026-11-21-retired-settings`
-3. `2026-09-01-retire-panes-knobs`
-4. `2026-10-06-playbooks-and-packages`
-5. `2026-10-07-acp-adapters`
-6. `2026-10-07-claude-subscription`
-7. `2026-10-20-fleet-permissions-judge`
-8. `2026-10-31-remove-old-telemetry`
-9. `2026-11-02-approvals-to-config`
-10. `2026-11-07-remove-copilot-consent`
+1. `2026-11-21-retired-settings`
+2. `2026-10-06-playbooks-and-packages`
+3. `2026-10-07-acp-adapters`
+4. `2026-10-07-claude-subscription`
+5. `2026-10-20-fleet-permissions-judge`
+6. `2026-10-31-remove-old-telemetry`
+7. `2026-11-02-approvals-to-config`
+8. `2026-11-07-remove-copilot-consent`
 
 The retired-settings migration removes the keys retired without a replacement
 from the user `settings.yaml`, rewrites the older `interface.exitSummary` and
@@ -1262,8 +1260,8 @@ Lifecycle facts that belong here:
 - Leaving first-run setup before any target is saved exits 130 with
   ``configuration cancelled; no target saved. Run `clio-coder configure` when you are ready.``
   A bare `clio-coder` launch reads that status as "nothing was configured".
-- Settings files written by an older release are migrated by
-  `clio-coder upgrade --post-install`, which keeps the original as `settings.yaml.v1.bak`.
+- A version-1 settings file is not read or converted; move it aside and the next run
+  writes a version-2 file with the defaults.
 
 ---
 

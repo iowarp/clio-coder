@@ -622,7 +622,15 @@ function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
 						return policyCap(readMaxBytes());
 					},
 				}
-			: metadata.resultSizePolicy;
+			: spec.name === ToolNames.Verify
+				? {
+						...metadata.resultSizePolicy,
+						// The frontend check's screenshot gets read's image budget; its report text keeps the summary bound.
+						get imageMaxBytes() {
+							return readMaxBytes();
+						},
+					}
+				: metadata.resultSizePolicy;
 	return withMetadata(spec, {
 		...metadata,
 		...(resultSizePolicy ? { resultSizePolicy } : {}),

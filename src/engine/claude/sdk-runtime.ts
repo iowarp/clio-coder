@@ -773,6 +773,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		...(input.taskGit?.taskWorktree !== undefined ? { taskWorktreeRoot: input.taskGit.taskWorktree.path } : {}),
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
+		// The run's own worktree binds its commands to the roots at merge-back (fleet M7), as the native worker reads it.
+		...(input.writeRoots !== undefined && input.writeRootsCommandsBounded === true ? { writeRootsOsConfined: true } : {}),
 		...(input.protectedArtifactState !== undefined
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
 			: {}),

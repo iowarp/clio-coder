@@ -60,30 +60,70 @@ test("image result shaping preserves valid images and bounds combined payload", 
 
 test("browser screenshot survives scratch cleanup only on vision routes", async () => {
 	const { chmodSync, existsSync, readFileSync } = await import("node:fs");
-	const { runFrontendCheck } = await import("../../src/tools/verify/frontend.js");
+	const { verifyTool } = await import("../../src/tools/verify/index.js");
+	const { builtin } = await import("../../src/tools/builtin-tool-catalog.js");
+	const { crc32, deflateSync } = await import("node:zlib");
 	const dir = mkdtempSync(join(tmpdir(), "clio-coder-image-browser-"));
 	const previousCwd = process.cwd(),
 		previousPath = process.env.PATH;
 	try {
 		writeFileSync(join(dir, "page.html"), "<!doctype html><html><body>Rendered</body></html>");
+		// A 96x96 noise PNG, about 37 KB of base64: past verify's 16 KiB text bound, inside read's image budget.
+		const side = 96;
+		const rows = Buffer.alloc(side * (side * 3 + 1));
+		let seed = 0x9e3779b9;
+		for (let i = 0; i < rows.length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >>> 17;
+			seed ^= seed << 5;
+			rows[i] = i % (side * 3 + 1) === 0 ? 0 : seed & 0xff;
+		}
+		const chunk = (type: string, body: Buffer) => {
+			const head = Buffer.alloc(4);
+			head.writeUInt32BE(body.length);
+			const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
+			const crc = Buffer.alloc(4);
+			crc.writeUInt32BE(crc32(typed));
+			return Buffer.concat([head, typed, crc]);
+		};
+		const ihdr = Buffer.alloc(13);
+		ihdr.writeUInt32BE(side, 0);
+		ihdr.writeUInt32BE(side, 4);
+		ihdr.set([8, 2, 0, 0, 0], 8);
+		const shotFile = join(dir, "noise.png");
+		writeFileSync(
+			shotFile,
+			Buffer.concat([
+				Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+				chunk("IHDR", ihdr),
+				chunk("IDAT", deflateSync(rows)),
+				chunk("IEND", Buffer.alloc(0)),
+			]),
+		);
 		const browser = join(dir, "chromium");
 		writeFileSync(
 			browser,
-			`#!${process.execPath}\nconst fs=require('node:fs'); const path=process.argv.find(x=>x.startsWith('--screenshot=')).slice(13);fs.writeFileSync('screenshot-path.txt',path);fs.writeFileSync(path,Buffer.from('${PNG}','base64'));`,
+			`#!${process.execPath}\nconst fs=require('node:fs'); const path=process.argv.find(x=>x.startsWith('--screenshot=')).slice(13);fs.writeFileSync('screenshot-path.txt',path);fs.copyFileSync(${JSON.stringify(shotFile)},path);`,
 		);
 		chmodSync(browser, 0o755);
 		process.chdir(dir);
 		process.env.PATH = dir;
+		const registered = builtin(verifyTool, { path: "src/tools/verify/index.ts", scope: "core" });
 		for (const supportsImages of [true, false]) {
-			const result = await runFrontendCheck(
-				{ path: "page.html", browser: "required" },
-				{ supportsImages, toolResultMaxBytes: 8192 },
+			// Through verify and its result shaping: the screenshot must reach a vision route's model context.
+			const context = { supportsImages, toolResultMaxBytes: 65_536 };
+			const result = shapeToolResult(
+				registered,
+				await verifyTool.run({ check: "frontend", path: "page.html", browser: "required" }, context),
+				context,
 			);
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
 				strictEqual(result.images?.length ?? 0, supportsImages ? 1 : 0);
 				match(result.output, /loaded and rendered with chromium/);
-				ok(Buffer.byteLength(result.output) + (result.images ?? []).reduce((n, image) => n + image.data.length, 0) <= 8192);
+				ok(
+					Buffer.byteLength(result.output) + (result.images ?? []).reduce((n, image) => n + image.data.length, 0) <= 65_536,
+				);
 			}
 			strictEqual(existsSync(readFileSync(join(dir, "screenshot-path.txt"), "utf8")), false);
 		}

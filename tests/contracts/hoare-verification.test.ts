@@ -366,7 +366,7 @@ describe("Hoare contract honesty", () => {
 				const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 					spawnWorker: (spec): SpawnedWorker => {
 						spawns++;
-						strictEqual(spec.readOnly, true);
+						strictEqual(spec.envelope.write.mode, "none");
 						strictEqual(spec.sandbox?.mode, "required");
 						strictEqual(spec.sandbox?.network, false);
 						deepStrictEqual(spec.sandbox?.writableRoots, []);

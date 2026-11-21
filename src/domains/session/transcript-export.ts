@@ -83,7 +83,7 @@ function resultText(result: unknown): string {
  * gateway, and a chain's settled steps follow its aggregate result as their own
  * call and result. The ledger keeps the wire record; only the reading changes.
  */
-function transcriptBlocks(input: TranscriptExportInput): { blocks: TranscriptBlock[]; turns: number } {
+export function transcriptBlocks(input: TranscriptExportInput): { blocks: TranscriptBlock[]; turns: number } {
 	const blocks: TranscriptBlock[] = [];
 	let turns = 0;
 	// A refused capability's result carries no capability name of its own, so

@@ -1,4 +1,7 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
@@ -9,6 +12,8 @@ import { declaredScopeReplacementDiagnostic, resolveDispatchPathScope } from "..
 import { localNodeIdentity } from "../../src/domains/dispatch/transport.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
+import { workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -95,7 +100,7 @@ it("announces withheld checks for narrow roots without an OS sandbox", async () 
 	const tools: Array<ReadonlyArray<string>> = [];
 	const bundle = makeDispatchBundle(context, {
 		spawnWorker: (spec) => {
-			tools.push(spec.allowedTools);
+			tools.push(workerSpecToolNames(spec));
 			throw new Error("fixture: scope admitted");
 		},
 	});
@@ -166,15 +171,104 @@ it("names withheld checks in the dispatch result and the worker's own prompt (CL
 		});
 		strictEqual(detached.kind, "ok", JSON.stringify(detached).slice(0, 600));
 		const detachedText = detached.kind === "ok" ? detached.output : "";
-		strictEqual(detachedText.match(/agent=coder \[withheld: bash, verify\]/gu)?.length, 2, detachedText);
-		match(detachedText, /write roots without an OS sandbox.*cannot run checks/u);
+		strictEqual(detachedText.match(/agent=coder \[withheld: bash, verify\b/gu)?.length, 2, detachedText);
+		match(detachedText, /write roots with neither an OS sandbox nor a task worktree.*cannot run checks/u);
 		const sync = await tool.run({ agent: "coder", ...task("c.js") });
-		match(JSON.stringify(sync), /ran without bash, verify.*write roots without an OS sandbox/u);
+		match(
+			JSON.stringify(sync),
+			/ran without bash, verify \(write-roots-unconfined\).*neither an OS sandbox nor a task worktree/u,
+		);
 		strictEqual(specs.length, 3);
 		for (const spec of specs) {
-			const notice = spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-checks-withheld");
-			match(notice?.body ?? "", /bash, verify.*withheld.*checks you could not run/su);
+			const notice = spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-withheld");
+			match(notice?.body ?? "", /- bash: .*- verify: .*Without bash, verify.*checks you could not run/su);
 		}
+	} finally {
+		process.chdir(home);
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+it("places unconfined rooted coders in their own worktrees with bash and verify, merging back only their roots (M7)", async () => {
+	const env = await isolateClioEnv("worktree-placement-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.sandbox = "off";
+	const context = dispatchStubContext({ settings });
+	const repo = join(env.dir, "repo");
+	mkdirSync(repo);
+	const git = (...args: string[]) =>
+		execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-C", repo, ...args], { encoding: "utf8" });
+	git("init", "-q", "-b", "main");
+	for (const file of ["a.js", "b.js", "stray.js"]) writeFileSync(join(repo, file), "base\n");
+	git("add", ".");
+	git("commit", "-q", "-m", "base");
+	const specs: WorkerSpec[] = [];
+	const bundle = makeDispatchBundle(context, {
+		spawnWorker: (spec) => {
+			specs.push(spec);
+			// The stub edits its worktree as a worker would: its own root, and one tracked file outside it.
+			const own = spec.task.includes("a.js") ? "a.js" : "b.js";
+			const tree = spec.taskWorktree?.path ?? "";
+			ok(tree.length > 0, "the run must have its own worktree");
+			const edits = own === "a.js" ? [own, "stray.js"] : [own];
+			for (const file of edits) writeFileSync(join(tree, file), "edited\n");
+			return {
+				pid: null,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+				abort() {},
+				events: (async function* () {
+					for (const [index, file] of edits.entries()) {
+						const args = { path: join(tree, file), oldText: "base", newText: "edited" };
+						yield { type: "tool_execution_start", toolCallId: `e${index}`, toolName: "edit", args };
+						yield {
+							type: "tool_execution_end",
+							toolCallId: `e${index}`,
+							toolName: "edit",
+							isError: false,
+							result: { content: [{ type: "text", text: `edited ${file}` }] },
+						};
+						yield {
+							type: "clio_coder_tool_finish",
+							payload: { tool: "edit", toolCallId: `e${index}`, outcome: "ok", durationMs: 1 },
+						};
+					}
+					yield {
+						type: "message_end",
+						message: {
+							role: "assistant",
+							stopReason: "stop",
+							content: JSON.stringify({ mutatedPaths: edits, validations: [], summary: `edited ${own}` }),
+						},
+					};
+				})(),
+			};
+		},
+	});
+	const home = process.cwd();
+	process.chdir(repo);
+	try {
+		await bundle.extension.start();
+		const tool = createDispatchTool({
+			dispatch: bundle.contract,
+			getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+			getAutonomy: () => "yolo",
+		});
+		const task = (path: string) => ({ task: `Edit ${path}.`, intent: { write_roots: [path] } });
+		const result = await tool.run({ agent: "coder", tasks: [task("a.js"), task("b.js")] });
+		strictEqual(specs.length, 2);
+		for (const spec of specs) {
+			strictEqual(spec.envelope.write.mode, "worktree");
+			strictEqual(spec.envelope.write.commandsBounded, true);
+			ok(workerSpecToolNames(spec).includes(ToolNames.Bash));
+			ok(workerSpecToolNames(spec).includes(ToolNames.Verify));
+			ok(!spec.envelope.withheld.some((entry) => entry.reason === "write-roots-unconfined"));
+		}
+		strictEqual(readFileSync(join(repo, "a.js"), "utf8"), "edited\n", JSON.stringify(result).slice(0, 600));
+		strictEqual(readFileSync(join(repo, "b.js"), "utf8"), "edited\n");
+		strictEqual(readFileSync(join(repo, "stray.js"), "utf8"), "base\n", "only the declared roots merge back");
+		match(JSON.stringify(result), /changes outside the write roots stay uncommitted in worktree [^"]*: stray\.js/u);
 	} finally {
 		process.chdir(home);
 		await bundle.extension.stop?.();
@@ -220,7 +314,7 @@ it("a local writer with write roots keeps bash and verify when fleet nodes are c
 	const tools: Array<ReadonlyArray<string>> = [];
 	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 		spawnWorker: (spec) => {
-			tools.push(spec.allowedTools);
+			tools.push(workerSpecToolNames(spec));
 			throw new Error("fixture: placed");
 		},
 		resolveNode: () => ({ node: localNodeIdentity() }),
@@ -252,9 +346,9 @@ it("names the deny permit a judge-mode dispatch runs with when no safety judge i
 	settings.fleet.permissions.mode = "judge";
 	settings.safety.judge.enabled = true;
 	const notices: Array<{ code: string; message: string }> = [];
-	const permissions: Array<WorkerSpec["onPermission"]> = [];
+	const permissions: Array<WorkerSpec["envelope"]["approval"]["asks"]> = [];
 	const spawnWorker = (spec: WorkerSpec): never => {
-		permissions.push(spec.onPermission);
+		permissions.push(spec.envelope.approval.asks);
 		throw new Error("fixture: admitted");
 	};
 	const dispatchOnce = async (options: Parameters<typeof makeDispatchBundle>[1]) => {
@@ -291,6 +385,34 @@ it("names the deny permit a judge-mode dispatch runs with when no safety judge i
 		strictEqual(permissions[0] ?? "deny", "deny");
 		await dispatchOnce({ workerAskJudge: { seat: () => undefined, autonomy: () => "default" } });
 		strictEqual(notices.length, 1, "a seated judge answers the asks, so nothing is announced");
+		// M7 acceptance: the plan card names the withheld judge route before anything runs.
+		const context = dispatchStubContext({ settings });
+		const bundle = makeDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				dispatch: bundle.contract,
+				getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+				getAutonomy: () => "default",
+			});
+			const prepared = tool.prepareAdmissionArguments?.({
+				agent: "coder",
+				mode: "sequential",
+				tasks: [{ task: "Rename the helper." }, { task: "Update its callers." }],
+			});
+			ok(prepared);
+			strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+			const card = tool.describeDispatchPlan?.(prepared).text ?? "";
+			tool.disposeAdmissionArguments?.(prepared);
+			const lines = card.split("\n").filter((line) => line.startsWith("    withheld: asks:judge: "));
+			strictEqual(lines.length, 2, card);
+			match(
+				lines[0] ?? "",
+				/^ {4}withheld: asks:judge: no safety judge can answer this run's asks, so they are denied \(this process seats no safety judge/u,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	} finally {
 		env.restore();
 	}

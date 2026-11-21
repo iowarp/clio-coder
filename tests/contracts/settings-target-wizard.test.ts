@@ -102,7 +102,7 @@ class ScriptedWizard extends TargetWizardSurface {
 		else if (heading.includes("Where does your model")) value = "local-server";
 		else if (heading.includes("Which provider")) value = this.runtime;
 		else if (heading.includes("Which model") || heading.includes("Choose the model")) value = this.model;
-		else if (heading.includes("Review what Clio could verify")) {
+		else if (heading.includes("Review what CLIO Coder could verify")) {
 			for (const width of [40, 60, 80]) {
 				const screen = this.render(width).map(stripTerminalSequences).join("\n");
 				for (const control of ["Save target", "Back", "Cancel setup", "No generation", "GPU/VRAM"])
@@ -307,7 +307,7 @@ test("Add in the dock sends one test request and saves on its answer, without th
 		strictEqual(await add.start({ mode: "add" }), 0, add.reports.join("\n"));
 		strictEqual(server.requests.length, 1, add.reports.join("\n"));
 		match(add.reports.join("\n"), /Testing wizard-one \/ model-a \.\.\. answered in/u);
-		ok(!add.seen.some((heading) => heading.includes("Review what Clio could verify")));
+		ok(!add.seen.some((heading) => heading.includes("Review what CLIO Coder could verify")));
 		ok(readSettings().targets.some((target) => target.id === "wizard-one"));
 	} finally {
 		await closeServer(server.server);
@@ -378,7 +378,7 @@ test("Connect by URL saves a connection from a URL and a model inside the hosted
 		strictEqual(settings.chat.model, "model-b");
 		const screen = wizard.render(200).map(stripTerminalSequences).join("\n");
 		match(screen, new RegExp(`Connected: ${target.id} / model-b`));
-		ok(!screen.includes("Start Clio"), screen);
+		ok(!screen.includes("Start CLIO Coder"), screen);
 	} finally {
 		server.close();
 		env.restore();
