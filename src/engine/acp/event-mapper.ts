@@ -128,6 +128,11 @@ export class AcpEventMapper {
 		return [];
 	}
 
+	/** Tool calls the peer started and has not yet settled; one still running after the prompt is background work. */
+	openToolCalls(): number {
+		return this.toolStarts.size;
+	}
+
 	finalEvents(response: AcpPromptResponse | null, reportedFailure: string | null = null): AgentEvent[] {
 		const missingStopReason = typeof response?.stopReason !== "string" || response.stopReason.length === 0;
 		const stopReason = missingStopReason ? "error" : (response?.stopReason ?? "error");

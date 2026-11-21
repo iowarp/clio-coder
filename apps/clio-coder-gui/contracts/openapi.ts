@@ -97,7 +97,7 @@ export function openapi() {
 	return hoistSharedSchemas({
 		openapi: "3.1.0",
 		jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
-		info: { title: "Clio Coder", version: APP_VERSION },
+		info: { title: "CLIO Coder", version: APP_VERSION },
 		paths,
 		components: {
 			securitySchemes: {

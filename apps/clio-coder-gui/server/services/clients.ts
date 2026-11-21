@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ClientCredential, ClientIdentity } from "../../contracts/auth.js";
 
 /**
@@ -15,7 +15,9 @@ export const TICKET_TTL_MS = 30_000;
 export const LAUNCH_TICKET_TTL_MS = 60_000;
 const MAX_LAUNCH_TICKETS = 64;
 export const LAUNCH_CHALLENGE_TTL_MS = 60_000;
-const MAX_LAUNCH_CHALLENGES = 256;
+/** A challenge is 32 bytes, 43 base64url characters: a nonce, its expiry in whole seconds and their truncated MAC. */
+const CHALLENGE_NONCE_BYTES = 12;
+const CHALLENGE_MAC_BYTES = 16;
 /** A client with no open event stream still counts as present this long after its last request. */
 export const PRESENCE_MS = 30_000;
 const MAX_CLIENTS = 256;
@@ -38,7 +40,10 @@ export class ClientRegistry {
 	private readonly byCredential = new Map<string, string>();
 	private readonly tickets = new Map<string, { clientId: string; expiresAt: number }>();
 	private readonly launchTickets = new Map<string, number>();
-	private readonly launchChallenges = new Map<string, number>();
+	/** Signs this process's launch challenges, so issuing one stores nothing an unauthenticated caller can fill. */
+	private readonly challengeKey = randomBytes(32);
+	/** Challenges a valid proof has spent, until they expire. Only a holder of the launch token adds one. */
+	private readonly spentChallenges = new Map<string, number>();
 	constructor(private readonly now: () => number = Date.now) {}
 
 	/** Issue a credential to a client that presented the launch token. */
@@ -136,22 +141,45 @@ export class ClientRegistry {
 		return expiresAt !== undefined && expiresAt > this.now();
 	}
 
-	/** A single-use challenge for a launcher's proof of the launch token; anyone may ask, and it opens nothing alone. */
+	/**
+	 * A challenge for a launcher's proof of the launch token; anyone may ask, and it opens nothing alone. It is
+	 * signed rather than stored, so no number of requests can push out the one a launcher is about to answer.
+	 */
 	launchChallenge() {
-		const now = this.now();
-		for (const [hash, expiresAt] of this.launchChallenges) if (expiresAt <= now) this.launchChallenges.delete(hash);
-		while (this.launchChallenges.size >= MAX_LAUNCH_CHALLENGES)
-			this.launchChallenges.delete(this.launchChallenges.keys().next().value as string);
-		const challenge = secret();
-		this.launchChallenges.set(digest(challenge), now + LAUNCH_CHALLENGE_TTL_MS);
+		const nonce = randomBytes(CHALLENGE_NONCE_BYTES);
+		const expiry = Buffer.alloc(4);
+		expiry.writeUInt32BE(Math.ceil((this.now() + LAUNCH_CHALLENGE_TTL_MS) / 1000));
+		const body = Buffer.concat([nonce, expiry]);
+		const challenge = Buffer.concat([body, this.challengeMac(body)]).toString("base64url");
 		return { challenge, expiresIn: LAUNCH_CHALLENGE_TTL_MS / 1000 };
 	}
 
-	redeemChallenge(challenge: string) {
+	/**
+	 * True when `challenge` is one this process issued, unexpired and unspent, and `prove` accepts the proof over
+	 * it; the challenge is then spent. A wrong proof spends nothing: a caller can ask for any number of
+	 * challenges, so a spent one would not limit guesses, and a guess at the proof's MAC cannot succeed.
+	 */
+	redeemChallenge(challenge: string, prove: () => boolean) {
+		const now = this.now();
+		for (const [hash, expiresAt] of this.spentChallenges) if (expiresAt <= now) this.spentChallenges.delete(hash);
+		const raw = Buffer.from(challenge, "base64url");
+		if (raw.length !== CHALLENGE_NONCE_BYTES + 4 + CHALLENGE_MAC_BYTES || raw.toString("base64url") !== challenge)
+			return false;
+		const body = raw.subarray(0, CHALLENGE_NONCE_BYTES + 4);
+		if (!timingSafeEqual(raw.subarray(body.length), this.challengeMac(body))) return false;
+		const expiresAt = body.readUInt32BE(CHALLENGE_NONCE_BYTES) * 1000;
 		const hash = digest(challenge);
-		const expiresAt = this.launchChallenges.get(hash);
-		this.launchChallenges.delete(hash);
-		return expiresAt !== undefined && expiresAt > this.now();
+		if (expiresAt <= now || this.spentChallenges.has(hash) || !prove()) return false;
+		this.spentChallenges.set(hash, expiresAt);
+		return true;
+	}
+
+	private challengeMac(body: Buffer) {
+		return createHmac("sha256", this.challengeKey)
+			.update("clio-coder-gui/challenge/v1|")
+			.update(body)
+			.digest()
+			.subarray(0, CHALLENGE_MAC_BYTES);
 	}
 
 	/** Count an open event stream as presence; the returned function ends it. `end` closes it from this side. */

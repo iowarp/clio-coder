@@ -14,10 +14,13 @@ import { steerToolSurface } from "./steer-surface.js";
  * broker, never trusted from the arguments, and approval is admitted there as
  * the main agent's own call.
  *
- * Both act only on runs this session dispatched. The run ledger and the
- * assignment store are machine-wide, and a cancel aimed at another process's
- * assignment reached nothing (abort only touches this process's workers) while
- * the tool reported "cancellation signalled".
+ * Guide and cancel act only on runs this session dispatched. The run ledger and
+ * the assignment store are machine-wide, and a cancel aimed at another
+ * process's assignment reached nothing (abort only touches this process's
+ * workers) while the tool reported "cancellation signalled". Approve and deny
+ * answer the ask, not the run: the session that holds the ask may answer it,
+ * which after /fork is the fork that adopted it (bt-11), and the grant broker
+ * decides that.
  */
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "interrupted", "stale", "dead"]);
@@ -160,11 +163,11 @@ export function createSteerTool(deps: SteerToolDeps): ToolSpec {
 					message: `steer: action must be guide or cancel; got '${action}' (approve and deny answer a worker permission request with request_id)`,
 				};
 			}
-			const foreign = foreignRunError(deps, runId, options);
-			if (foreign !== null) return foreign;
 			if (action === "approve" || action === "deny") {
 				return decideGrant(deps, runId, action, typeof args.request_id === "string" ? args.request_id.trim() : "", options);
 			}
+			const foreign = foreignRunError(deps, runId, options);
+			if (foreign !== null) return foreign;
 			if (action === "guide") {
 				return guide(deps, runId, typeof args.message === "string" ? args.message.trim() : "");
 			}

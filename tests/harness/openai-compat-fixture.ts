@@ -304,13 +304,16 @@ export function seedOpenAICompatToolOrchestrator(configDir: string, url: string,
 export function seedOpenAICompatFleetDefault(configDir: string): void {
 	const p = join(configDir, "settings.yaml");
 	const yaml = readFileSync(p, "utf8");
-	const patched = yaml
+	const routed = yaml
 		.replace(/^ {4}target: null$/m, "    target: mock-chat")
-		.replace(/^ {4}model: null$/m, "    model: mock-model")
-		.replace(
-			"      vision: true",
-			["      chat: true", "      tools: true", "      toolCallFormat: openai", "      vision: true"].join("\n"),
-		);
+		.replace(/^ {4}model: null$/m, "    model: mock-model");
+	// The tool orchestrator seed already declares the tool capabilities; a second copy is invalid YAML.
+	const patched = routed.includes("      tools: true")
+		? routed
+		: routed.replace(
+				"      vision: true",
+				["      chat: true", "      tools: true", "      toolCallFormat: openai", "      vision: true"].join("\n"),
+			);
 	writeFileSync(p, patched, "utf8");
 }
 

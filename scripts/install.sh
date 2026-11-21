@@ -92,7 +92,8 @@ Options:
   --no-post-install     Skip `clio-coder upgrade --post-install` after installing.
   --gui                 Also set up the desktop app (Linux: starts at login and
                         appears in the app menu; under WSL also in the Windows
-                        Start Menu). Env: CLIO_CODER_INSTALL_GUI=1
+                        Start Menu; macOS: starts at login). Env:
+                        CLIO_CODER_INSTALL_GUI=1
   --no-gui              Skip the desktop app. Default: ask on a terminal, skip
                         otherwise. Env: CLIO_CODER_INSTALL_GUI=0
   --no-workspace        Deprecated and ignored: CLIO Coder's pane host (herdr,
@@ -608,13 +609,14 @@ print_next_steps() {
 }
 
 # The desktop app is the GUI's background service: one `gui background install` adds the login
-# service, the app-menu entry and, under WSL, the Windows Start Menu shortcut. It needs Linux
-# with a systemd user session, so other platforms keep the `clio-coder gui` hint only.
+# service (a systemd user unit on Linux, a launchd agent on macOS), the app-menu entry on Linux and,
+# under WSL, the Windows Start Menu shortcut. Other platforms keep the `clio-coder gui` hint only.
 offer_gui() {
 	[ "$install_gui" != 0 ] || return 0
-	if [ "$(uname -s 2>/dev/null)" != Linux ]; then
+	gui_os="$(uname -s 2>/dev/null)"
+	if [ "$gui_os" != Linux ] && [ "$gui_os" != Darwin ]; then
 		# Asked for by name, it gets an answer; the default stays quiet where there is nothing to offer.
-		if [ "$install_gui" = 1 ]; then warn "the desktop app runs as a login service on Linux only; start it here with: clio-coder gui"; fi
+		if [ "$install_gui" = 1 ]; then warn "the desktop app runs as a login service on Linux and macOS only; start it here with: clio-coder gui"; fi
 		return 0
 	fi
 	if [ "$install_gui" = ask ]; then
@@ -625,7 +627,11 @@ offer_gui() {
 		return 0
 	fi
 	if [ "$install_gui" = ask ]; then
-		printf '[install] Add the CLIO Coder desktop app? It starts at login and appears in your app menu. [Y/n] '
+		if [ "$gui_os" = Darwin ]; then
+			printf '[install] Add the CLIO Coder desktop app? It starts at login; open it with clio-coder gui. [Y/n] '
+		else
+			printf '[install] Add the CLIO Coder desktop app? It starts at login and appears in your app menu. [Y/n] '
+		fi
 		answer=""
 		read -r answer </dev/tty || answer=n
 		case "$answer" in "" | [Yy]*) ;; *) return 0 ;; esac
@@ -634,6 +640,8 @@ offer_gui() {
 	if "$node_bin" "$entry" gui background install --handover --json </dev/null >"$work/gui.out"; then
 		if "$node_bin" -e 'try { process.exit(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).windows?.status === "installed" ? 0 : 1); } catch { process.exit(1); }' "$work/gui.out"; then
 			ok "desktop app installed; open CLIO Coder from the Windows Start Menu or your app menu, or run: clio-coder gui"
+		elif [ "$gui_os" = Darwin ]; then
+			ok "desktop app installed; it starts at login; open it with: clio-coder gui"
 		else
 			ok "desktop app installed; it starts at login and is in your app menu as CLIO Coder, or run: clio-coder gui"
 		fi

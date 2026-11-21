@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
-import { orderedSectionControls } from "../../src/cli/configure-controls.js";
+import { orderedAreaControls } from "../../src/cli/configure-controls.js";
 import { CONFIGURE_CATEGORY_CHOICES } from "../../src/cli/configure-layout.js";
 import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import { runDoctorModelChecks } from "../../src/domains/lifecycle/doctor.js";
@@ -59,8 +59,8 @@ test("configure presents complete task-based connection categories without a cat
 });
 
 test("each settings area exposes its complete catalog in grouped order", () => {
-	for (const section of ["chat", "fleet", "context", "safety", "interface", "integrations"] as const) {
-		const controls = orderedSectionControls(section);
+	for (const section of ["models", "chat", "workers", "context", "safety", "workspace", "advanced"] as const) {
+		const controls = orderedAreaControls(section);
 		assert.ok(controls.length > 0, section);
 		const completed = new Set<string>();
 		let active = "";

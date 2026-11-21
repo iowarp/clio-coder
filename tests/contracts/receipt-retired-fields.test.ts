@@ -81,6 +81,7 @@ describe("run settlement (#434)", () => {
 				command: "peer",
 				args: [],
 				acpSessionId: null,
+				opened: "new",
 				acpProtocolVersion: 1,
 				acpAgentName: null,
 				acpAgentVersion: null,
