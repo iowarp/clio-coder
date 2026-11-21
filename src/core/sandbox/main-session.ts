@@ -111,6 +111,45 @@ export function mainSessionShellSandboxed(
 	return state === "contained-sandbox" || state === "sandboxed";
 }
 
+/**
+ * What a yolo notice may say about contained yolo's shell sandbox and safety
+ * judge, read from the facts a yolo run records: the same mode and probe as
+ * `yoloShellState` and a dispatch envelope's sandbox backend, and the judge
+ * switch the judge itself reads. No notice claims a sandbox or a judge that is off (M-19).
+ */
+export function yoloContainmentNotes(
+	mode: SandboxMode,
+	availability: SandboxAvailability,
+	judgeEnabled: boolean,
+): { backend: SandboxAvailability["backend"]; why: string | null; sandbox: string; judge: string } {
+	const contained = mainShellContained(mode, availability);
+	const why = contained
+		? null
+		: mode === "off"
+			? "safety.sandbox is off"
+			: (availability.reason ?? "no sandbox backend");
+	return {
+		backend: contained ? availability.backend : null,
+		why,
+		sandbox: contained
+			? `commands run in the ${availability.backend} OS sandbox`
+			: `commands run without an OS sandbox (${why}), as default runs them`,
+		judge: judgeEnabled
+			? "the safety judge reviews what would need approval"
+			: "the safety judge is off (safety.judge.enabled), so what would need approval is refused",
+	};
+}
+
+/** Shown once to an operator whose yolo became contained on upgrade (ob-yolo D1), with this host's real containment. */
+export function yoloContainedMigrationNotice(
+	mode: SandboxMode,
+	availability: SandboxAvailability,
+	judgeEnabled: boolean,
+): string {
+	const notes = yoloContainmentNotes(mode, availability, judgeEnabled);
+	return `Yolo now runs contained: ${notes.sandbox}; ${notes.judge}; nothing waits for you, and a call that would need you is refused back to Clio instead of asking. To keep the old unconfined yolo, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.`;
+}
+
 export interface MainSandboxPolicyInput {
 	/** The session workspace root. */
 	workspace: string;

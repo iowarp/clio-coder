@@ -2837,10 +2837,6 @@ export function updateSavedSettingsDocument(
 	}, options);
 }
 
-/** Shown once to an operator whose yolo became contained on upgrade (ob-yolo D1). */
-export const YOLO_CONTAINED_MIGRATION_NOTICE =
-	"Yolo now runs contained: the OS sandbox and the safety judge stay on, and nothing waits for you; a call that would need you is refused back to Clio instead of asking. To keep the old unconfined yolo, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.";
-
 /**
  * Record `safety.yoloConfinement: contained` in the operator's user settings
  * when the file has no confinement yet, so the migration notice shows once.

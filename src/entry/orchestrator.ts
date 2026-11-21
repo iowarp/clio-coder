@@ -11,12 +11,7 @@ import { noteMainRunV2, startRunOutput, writeRunDiagnostic } from "../cli/run-fa
 import { setToolEnvAutonomy, startLoginEnvCapture } from "../core/bash-exec.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
-import {
-	type ClioSettings,
-	readSettings,
-	recordYoloConfinementOnce,
-	YOLO_CONTAINED_MIGRATION_NOTICE,
-} from "../core/config.js";
+import { type ClioSettings, readSettings, recordYoloConfinementOnce } from "../core/config.js";
 import {
 	DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 	interfaceGuidanceEnabled,
@@ -45,7 +40,11 @@ import {
 import { sandboxAvailability } from "../core/sandbox/availability.js";
 import { mainSandboxEnvPolicy } from "../core/sandbox/env-scrub.js";
 import { createGitHooksFingerprinter } from "../core/sandbox/git-hooks-fingerprint.js";
-import { mainShellContained, yoloScriptSandboxState } from "../core/sandbox/main-session.js";
+import {
+	mainShellContained,
+	yoloContainedMigrationNotice,
+	yoloScriptSandboxState,
+} from "../core/sandbox/main-session.js";
 import {
 	resolveMemoryRoute,
 	routingChangeNotices,
@@ -2087,8 +2086,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		savedSafety.yoloConfinement !== "unconfined" &&
 		recordYoloConfinementOnce()
 	) {
-		if (interactive) initialNotices.push(YOLO_CONTAINED_MIGRATION_NOTICE);
-		else process.stderr.write(`clio-coder: ${YOLO_CONTAINED_MIGRATION_NOTICE}\n`);
+		const notice = yoloContainedMigrationNotice(savedSafety.sandbox, sandboxAvailability(), savedSafety.judge.enabled);
+		if (interactive) initialNotices.push(notice);
+		else process.stderr.write(`clio-coder: ${notice}\n`);
 	}
 	const startupOverrides: SessionOverrides = new Map(
 		bootAutonomy === undefined ? [] : [["safety.autonomy", bootAutonomy]],
