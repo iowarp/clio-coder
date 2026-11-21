@@ -9,7 +9,6 @@ import {
 	readFileSync,
 	statSync,
 	symlinkSync,
-	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -478,7 +477,7 @@ describe("settings and migration boundary", () => {
 		strictEqual(readFileSync(join(locks, "notes.txt"), "utf8"), "kept\n");
 	});
 
-	it("moves a writer set record from a heartbeat duration to its expiry, and names one it cannot read", async () => {
+	it("deletes a version 1 writer set record, keeps a version 2 one, and names one it cannot read", async () => {
 		const id = "2026-11-21-writer-set-lease-clock";
 		const dir = join(stateDir, "checkout-writer-leases");
 		const others = listMigrations()
@@ -486,20 +485,19 @@ describe("settings and migration boundary", () => {
 			.filter((other) => other !== id);
 		mkdirSync(dir, { recursive: true });
 		const at = "2026-11-21T12:00:00.000Z";
-		const v1 = { version: 1, checkout: "/repo", host: "h", pid: 7, processBirthToken: "t", acquiredAt: at };
-		writeFileSync(join(dir, "a.json"), JSON.stringify({ ...v1, heartbeatAt: at, heartbeatExpiresMs: 120_000 }));
-		utimesSync(join(dir, "a.json"), Date.parse(at) / 1000, Date.parse(at) / 1000);
+		const base = { checkout: "/repo", host: "h", pid: 7, processBirthToken: "t", acquiredAt: at, heartbeatAt: at };
+		writeFileSync(join(dir, "a.json"), JSON.stringify({ ...base, version: 1, heartbeatExpiresMs: 120_000 }));
+		const v2 = JSON.stringify({ ...base, version: 2, expiresAt: "2026-11-21T12:02:00.000Z" });
+		writeFileSync(join(dir, "c.json"), v2);
 		writeFileSync(join(dir, "b.json"), "{}\n");
 		writeFileSync(join(scratch.dir, "config", "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
 		const run = await runPending(stateDir);
 		deepStrictEqual(run.applied, [id]);
-		deepStrictEqual(JSON.parse(readFileSync(join(dir, "a.json"), "utf8")), {
-			...v1,
-			heartbeatAt: at,
-			version: 2,
-			expiresAt: "2026-11-21T12:02:00.000Z",
-		});
+		strictEqual(existsSync(join(dir, "a.json")), false);
+		strictEqual(readFileSync(join(dir, "c.json"), "utf8"), v2);
+		strictEqual(run.reports?.[id]?.changed.length, 1);
 		strictEqual(run.reports?.[id]?.attention.length, 1);
+		ok(run.reports?.[id]?.attention[0]?.includes(join(dir, "b.json")));
 		strictEqual(readFileSync(join(dir, "b.json"), "utf8"), "{}\n");
 	});
 
