@@ -156,16 +156,18 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 /**
  * The exploration advisories the main session registers together: the follow-up Scout advisory, the in-turn scout
  * nudge and, when the composition supplies its classifiers, the no-progress read streak, reporting what it sees to
- * `readStreakObserver` when one is given (the outcome ledger, X4).
+ * `readStreakObserver` when one is given (the outcome ledger, X4) and handing a gated streak's stall to
+ * `readStreakStall` (X7).
  */
 export function createExplorationNudgeRegistrations(
 	deps: {
 		workspaceRoot?: () => string;
 		readStreak?: ReadStreakClassifiers;
 		readStreakObserver?: ReadStreakObserver;
+		readStreakStall?: (detail: string) => void;
 	} = {},
 ): ReadonlyArray<MiddlewareHookRegistration> {
-	const { readStreak, readStreakObserver, ...shared } = deps;
+	const { readStreak, readStreakObserver, readStreakStall, ...shared } = deps;
 	return [
 		createReadOnlyExplorationNudgeRegistration(shared).registration,
 		createScoutNudgeRegistration(shared),
@@ -175,6 +177,7 @@ export function createExplorationNudgeRegistrations(
 						...shared,
 						classifiers: readStreak,
 						...(readStreakObserver !== undefined ? { observer: readStreakObserver } : {}),
+						...(readStreakStall !== undefined ? { stall: readStreakStall } : {}),
 					}),
 				]
 			: []),

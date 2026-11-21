@@ -48,7 +48,8 @@ Flags:
   --resume, -r <session>    append this turn to an existing session, by id, unique id prefix or name;
                             exit 2 when another process holds it open
   --continue                append this turn to the most recent session for this cwd; after a yolo
-                            autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
+                            autonomous-cap (exit 4), judge-streak (exit 3) or exploration_stalled (exit 1) stop it
+                            resumes with a fresh window
   --fork                    with --resume or --continue: branch a new session from that one's last committed
                             turn and run there; the parent is read, never written, and may be open elsewhere
   --name <text>             name this run's session (the new, resumed or forked one)

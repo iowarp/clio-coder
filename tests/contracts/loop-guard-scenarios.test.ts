@@ -1,16 +1,25 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
+import { resolveRunExit } from "../../src/cli/modes/run-json-schema-v2.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../../src/core/guardrails.js";
-import type { ToolName } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { type TurnConstraints, turnScopeGuidance } from "../../src/core/turn-constraints.js";
 import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import { createReadStreakRegistration } from "../../src/domains/middleware/read-streak.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import {
+	autonomyHaltNotice,
+	autonomyHaltReason,
+	createAutonomyWindow,
+} from "../../src/domains/safety/autonomy-window.js";
+import { callChangesTree } from "../../src/domains/safety/index.js";
+import {
 	type CreateLoopGuardRegistrationOptions,
+	callRepeatsAsRead,
 	createLoopGuardRegistration,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
@@ -795,3 +804,91 @@ test("loop guard read coverage: a grep between rereads keeps the count, a fold f
 		}
 	}
 });
+
+test("read-streak decision gate: an unattended streak past every note refuses reads, then halts the run (X7)", () => {
+	const stalls: string[] = [];
+	const rule = createReadStreakRegistration({
+		classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+		workspaceRoot: () => process.cwd(),
+		stall: (detail) => stalls.push(detail),
+	});
+	const writer = [ToolNames.Gateway, ToolNames.Read, ToolNames.Edit, ToolNames.Tasks].join(",");
+	const start = (turnOrigin: string, extra: NonNullable<MiddlewareHookInput["metadata"]> = {}) =>
+		rule.evaluate({
+			hook: "turn_start",
+			sessionId: "s1",
+			metadata: { turnOrigin, activeCapabilityNames: writer, ...extra },
+		});
+	const hook = (
+		at: "before_tool" | "after_tool",
+		toolName: string,
+		toolArgs: Record<string, unknown>,
+		batch: string,
+		continues = true,
+	) =>
+		rule.evaluate({
+			hook: at,
+			sessionId: "s1",
+			toolName,
+			toolArgs,
+			correlationId: batch,
+			metadata: { turnBudgetContinues: continues, batchSize: 2, ...(at === "after_tool" ? { resultKind: "ok" } : {}) },
+		});
+	const reads = (count: number, from = 0) => {
+		for (let index = 0; index < count; index += 1) {
+			const args = { path: `src/f-${from + index}.ts` };
+			deepStrictEqual(hook("before_tool", ToolNames.Read, args, `b${from + index}`), []);
+			hook("after_tool", ToolNames.Read, args, `b${from + index}`);
+		}
+	};
+	const gated = (batch: string, continues = true) =>
+		hook("before_tool", ToolNames.Read, { path: `src/${batch}.ts` }, batch, continues);
+	start("operator");
+	// 79 reads with the three notes delivered: nothing is refused yet; the 80th read runs and arms the gate.
+	reads(80);
+	// An attended turn (no continuation without the operator) is never gated.
+	deepStrictEqual(gated("attended", false), []);
+	const first = gated("g1");
+	strictEqual(first[0]?.kind, "block_tool");
+	ok(first[0]?.kind === "block_tool" && first[0].reason.startsWith("[CLIO Coder] 80 read-only calls in a row"));
+	// A sibling in the same round is the same refused round; a check is no reset and keeps the gate armed.
+	strictEqual(gated("g1")[0]?.kind, "block_tool");
+	hook("after_tool", ToolNames.Bash, { command: "pnpm test" }, "c1");
+	strictEqual(stalls.length, 0);
+	// The second refused round hands the stall over, once.
+	strictEqual(gated("g2")[0]?.kind, "block_tool");
+	strictEqual(gated("g3")[0]?.kind, "block_tool");
+	strictEqual(stalls.length, 1);
+	ok(stalls[0]?.startsWith("80 read-only calls in a row"));
+	// A turn admitted past the halt starts a fresh streak, even as a continuation.
+	start("continuation");
+	deepStrictEqual(gated("fresh"), []);
+	// A recorded plan disarms the gate until a new streak spends its notes again.
+	reads(80, 100);
+	strictEqual(gated("g4")[0]?.kind, "block_tool");
+	hook("after_tool", ToolNames.Tasks, { action: "plan" }, "p1");
+	deepStrictEqual(gated("g5"), []);
+	// A turn that cannot write is gated with its answer wording once its one note is spent.
+	start("operator", { turnMode: "answer", activeCapabilityNames: ToolNames.Read });
+	reads(80, 200);
+	const answer = gated("a1");
+	ok(answer[0]?.kind === "block_tool" && answer[0].reason.includes("Answer from what you have now"));
+	// The main session's stop is the autonomy window's exploration halt; a headless run exits on its own cause.
+	const halts: string[] = [];
+	const window = createAutonomyWindow({
+		caps: () => ({ toolCalls: 0, minutes: 0, tokens: 0 }),
+		onHalt: (halt) => halts.push(autonomyHaltReason(halt)),
+	});
+	window.haltFor("exploration", stalls[0] ?? "");
+	deepStrictEqual(halts, ["exploration_stalled"]);
+	ok(autonomyHaltNotice(window.halted() ?? never(), "headless").startsWith("exploration_stalled: 80 read-only calls"));
+	deepStrictEqual(resolveRunExit([{ code: "exploration_stalled" }, { code: "noop" }]).exitCode, 1);
+	strictEqual(
+		resolveRunExit([{ code: "exploration_stalled" }, { code: "noop" }]).causes[0]?.code,
+		"exploration_stalled",
+	);
+});
+
+function never(): never {
+	throw new Error("expected a halt");
+}

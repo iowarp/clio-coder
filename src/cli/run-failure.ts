@@ -534,6 +534,8 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 	const detail = seen.runEnd?.outcomeDetail ?? seen.receipt?.outcomeDetail ?? undefined;
 	const signal = signalForExitCode(code);
 	if (signal !== null) return [{ code: "interrupted", signal, ...message }];
+	// The read-streak decision gate ended the run (X7); its exit code is the cause's own, whatever it is set to.
+	if (detail === "exploration_stalled") return [{ code: "exploration_stalled", ...message }];
 	// An exit no row names keeps its code; run_failed carries what was said about it.
 	const unnamed: RunExitFact[] = [
 		{ code: "forced_exit", exitCode: code },
