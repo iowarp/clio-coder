@@ -40,6 +40,9 @@ export default (api) => {
 function installRuntime(dir: string, id: string, runtime: Record<string, unknown>, source: string): string {
 	const root = path.join(dir, "source");
 	const cwd = path.join(dir, "workspace");
+	// The runtime's bwrap launch masks home credential files by path, and a host agent renaming one over mid-launch
+	// fails it; a scratch home has none. The test's restore() puts HOME back.
+	process.env.HOME = dir;
 	mkdirSync(root);
 	mkdirSync(cwd);
 	writeFileSync(

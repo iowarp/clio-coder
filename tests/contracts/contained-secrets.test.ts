@@ -245,6 +245,8 @@ test("under bwrap a secret whose parent a verify script renamed is masked at its
 	}
 	const isolated = await isolateClioEnv("clio-secret-rename-");
 	t.after(() => isolated.restore());
+	// bwrap masks home credential files by path, and a host agent renaming one over mid-launch fails the launch.
+	process.env.HOME = isolated.dir;
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-rename-ws-")));
 	execFileSync("git", ["init", "-q"], { cwd: root });
 	writeFileSync(join(root, ".gitignore"), ".env.local\n");
@@ -277,6 +279,7 @@ test("under bwrap a contained command cannot read .env or credential variables, 
 	}
 	const isolated = await isolateClioEnv("clio-contained-secrets-");
 	t.after(() => isolated.restore());
+	process.env.HOME = isolated.dir;
 	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-contained-secrets-ws-")));
 	writeFileSync(join(cwd, ".env"), "FAKE_ENV_FILE=fake-file-value\n");
 	// Admission refuses a literal `cat .env`; a script reads it where no command text names it.
