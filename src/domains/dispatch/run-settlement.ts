@@ -284,6 +284,31 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 	};
 }
 
+/** The sealed envelope as run.settled records it (M-18): the receipt's own summary, copied. */
+function settledEnvelope(
+	envelope: NonNullable<NonNullable<RunResultDraft["safety"]>["envelope"]>,
+): NonNullable<RunSettled["envelope"]> {
+	return {
+		version: envelope.version,
+		digest: envelope.digest,
+		permitDigest: envelope.permitDigest,
+		role: envelope.role,
+		skills: { bound: [...envelope.skills.bound], discovery: envelope.skills.discovery },
+		read: { roots: [...envelope.read.roots], outside: [...envelope.read.outside] },
+		write: {
+			mode: envelope.write.mode,
+			roots: [...envelope.write.roots],
+			commandsBounded: envelope.write.commandsBounded,
+		},
+		exec: { ...envelope.exec },
+		network: { shell: envelope.network.shell, tools: [...envelope.network.tools], mcp: [...envelope.network.mcp] },
+		approval: { ...envelope.approval },
+		sandbox: { ...envelope.sandbox },
+		withheld: envelope.withheld.map((entry) => ({ ...entry })),
+		staticHead: envelope.staticHead,
+	};
+}
+
 /** Blocked attempts as the sealed record keeps them: by tool, class and rule, never the reason prose. */
 function settledBlockedAttempts(attempts: ReadonlyArray<SafetyBlockedAttempt>): RunSettled["blockedAttempts"] {
 	return attempts.slice(0, 64).map((attempt) => ({
@@ -441,6 +466,7 @@ export function settleFinishedRun(
 						},
 					}
 				: {}),
+			...(receipt.safety?.envelope !== undefined ? { envelope: settledEnvelope(receipt.safety.envelope) } : {}),
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,
@@ -469,6 +495,7 @@ export function settleFinishedRun(
 						...(receipt.worktree.base !== undefined ? { base: receipt.worktree.base } : {}),
 						diffHash: receipt.worktree.diffHash,
 						...(receipt.worktree.changedPaths !== undefined ? { changedPaths: [...receipt.worktree.changedPaths] } : {}),
+						...(receipt.worktree.deletedPaths !== undefined ? { deletedPaths: [...receipt.worktree.deletedPaths] } : {}),
 						...(receipt.worktree.commit !== undefined ? { commit: receipt.worktree.commit } : {}),
 						...(receipt.worktree.reason !== undefined ? { reason: receipt.worktree.reason } : {}),
 						...(receipt.worktree.detail !== undefined ? { detail: receipt.worktree.detail } : {}),

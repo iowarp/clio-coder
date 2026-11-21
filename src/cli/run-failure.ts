@@ -29,6 +29,7 @@ import {
 	type RunSteerFrameV2,
 	type RunUsageV2,
 	resolveRunExit,
+	type SettledRunEnvelope,
 	signalForExitCode,
 	verifyChecksV2,
 	verifyNotImplicated,
@@ -282,26 +283,37 @@ let supersededRuns: RunDispatchedRunV2[] = [];
 /** Every run the main agent dispatched, for the envelope's `dispatch.runs` (row 164); `--agent` lists its receipt instead. */
 let dispatchedRuns: RunDispatchedRunV2[] = [];
 
-function dispatchedRunV2(run: RunJsonDispatchedRunOutcome): RunDispatchedRunV2 {
+function dispatchedRunV2(
+	run: RunJsonDispatchedRunOutcome,
+	envelopes: ReadonlyMap<string, SettledRunEnvelope> = new Map(),
+): RunDispatchedRunV2 {
+	const envelope = envelopes.get(run.runId);
 	return {
 		runId: run.runId,
 		agentId: run.agentId,
 		...(run.outcome !== null ? { outcome: run.outcome } : {}),
 		...(run.outcomeCode !== null ? { outcomeCode: run.outcomeCode } : {}),
 		...(run.outcomeDetail !== null ? { outcomeDetail: run.outcomeDetail } : {}),
+		...(envelope !== undefined ? { safety: { envelope } } : {}),
 	};
 }
 
 /** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
 export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
 	if (v2Started === null) return;
-	supersededRuns = runs.map(dispatchedRunV2);
+	supersededRuns = runs.map((run) => dispatchedRunV2(run));
 }
 
-/** Hand the v2 writer every run the main agent dispatched, as they settled; a no-op for v1 runs. */
-export function noteDispatchRunsV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+/**
+ * Hand the v2 writer every run the main agent dispatched, as they settled, each with the sealed envelope its journal
+ * recorded (M-18); a no-op for v1 runs.
+ */
+export function noteDispatchRunsV2(
+	runs: ReadonlyArray<RunJsonDispatchedRunOutcome>,
+	envelopes: ReadonlyMap<string, SettledRunEnvelope> = new Map(),
+): void {
 	if (v2Started === null) return;
-	dispatchedRuns = runs.map(dispatchedRunV2);
+	dispatchedRuns = runs.map((run) => dispatchedRunV2(run, envelopes));
 }
 /** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
 let runPlan: Readonly<Record<string, unknown>> | undefined;
