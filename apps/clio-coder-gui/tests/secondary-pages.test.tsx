@@ -48,12 +48,12 @@ function render(cache: QueryClient, path: string, node: ReactNode) {
 }
 const controls: SettingsControls = {
 	userFile: "/scratch/config/settings.yaml",
-	sections: [{ id: "chat", label: "Chat", description: "Conversation preferences" }],
+	sections: [{ id: "models", label: "Models", description: "Where models come from" }],
 	controls: [
 		{
 			path: "chat.thinkingLevel",
-			section: "chat",
-			group: "Responses",
+			section: "models",
+			group: "Reasoning & length",
 			label: "Thinking level",
 			description: "Reasoning budget",
 			valueHelp: {},

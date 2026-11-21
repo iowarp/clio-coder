@@ -16,8 +16,10 @@ import {
 	countsOnThisNode,
 	describeEndpointCapacityHolders,
 	endpointCapacityRemedy,
+	readCapacityStateRepairUnsafe,
 	readCapacityStateUnsafe,
 	updateCapacityStateAsync,
+	validReservationRecord,
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
 import { COUNCIL_MIN_MEMBERS } from "./gate-role-prompts.js";
@@ -130,49 +132,9 @@ function copyRecord(record: DispatchReservationRecord): DispatchReservationRecor
 	return { ...record, members: record.members.map((member) => ({ ...member })) };
 }
 
-function validRecord(value: unknown): value is DispatchReservationRecord {
-	if (typeof value !== "object" || value === null) return false;
-	const record = value as Partial<DispatchReservationRecord>;
-	return (
-		typeof record.ownerId === "string" &&
-		typeof record.ownerPid === "number" &&
-		Number.isInteger(record.ownerPid) &&
-		record.ownerPid > 0 &&
-		typeof record.host === "string" &&
-		(record.processBirthToken === undefined || typeof record.processBirthToken === "string") &&
-		(record.topology === "parallel" ||
-			record.topology === "detached" ||
-			record.topology === "sequential" ||
-			record.topology === "pipeline" ||
-			record.topology === "review" ||
-			record.topology === "compete" ||
-			record.topology === "council") &&
-		(record.status === "active" ||
-			record.status === "released" ||
-			record.status === "rolled_back" ||
-			record.status === "expired") &&
-		typeof record.createdAt === "string" &&
-		typeof record.expiresAt === "string" &&
-		(record.settledAt === null || typeof record.settledAt === "string") &&
-		Array.isArray(record.members) &&
-		record.members.every(
-			(member) =>
-				typeof member.memberId === "string" &&
-				Number.isInteger(member.wave) &&
-				typeof member.nodeId === "string" &&
-				(member.endpointKey === undefined || typeof member.endpointKey === "string") &&
-				typeof member.costUpperBoundUsd === "number" &&
-				Number.isFinite(member.costUpperBoundUsd) &&
-				member.costUpperBoundUsd >= 0 &&
-				(member.status === "held" || member.status === "consumed" || member.status === "released") &&
-				(member.consumedAt === null || typeof member.consumedAt === "string") &&
-				(member.releasedAt === null || typeof member.releasedAt === "string"),
-		)
-	);
-}
-
 function parseReservations(values: ReadonlyArray<unknown>): DispatchReservationRecord[] {
-	if (!values.every(validRecord)) throw new Error("dispatch admission store has invalid reservation records");
+	// The read already dropped every invalid record or refused the store; this guards in-memory state only.
+	if (!values.every(validReservationRecord)) throw new Error("dispatch admission store has invalid reservation records");
 	return values.map((record) => copyRecord(record));
 }
 
@@ -690,11 +652,16 @@ export function expireDispatchReservationsOwnedBy(owner: { host: string; pid: nu
 
 export function cleanupDispatchReservations(options?: { startup?: boolean; nowMs?: number }): number {
 	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const records = readStore();
+		// Boot passes through here under the lock, so it is where invalid settled records leave the file.
+		const { state, dropped } = readCapacityStateRepairUnsafe();
+		const records = parseReservations(state.reservations);
 		const before = records.filter((record) => record.status === "active").length;
 		expireRecords(records, options?.nowMs ?? Date.now(), options?.startup === true);
 		const after = records.filter((record) => record.status === "active").length;
-		if (before !== after) writeStore(records);
+		if (before !== after || dropped > 0) {
+			replaceReservations(state, records);
+			writeCapacityStateUnsafe(state);
+		}
 		return before - after;
 	});
 }

@@ -276,6 +276,7 @@ async function goldenRun(kind: "native" | "acp", fail: boolean): Promise<unknown
 				stopReason: "end_turn",
 				delegation: {
 					acpSessionId: "golden-session",
+					opened: "new",
 					initialize: null,
 					toolCallsRequested: 0,
 					toolCallsApproved: 0,

@@ -369,7 +369,11 @@ const SegmentChunk = memo(function SegmentChunk({
 							</div>
 						);
 					case "notice":
-						return null;
+						return (
+							<p key={segment.item.id} className="chat-notice" role="note">
+								{segment.item.text}
+							</p>
+						);
 					case "reasoning":
 						return <ReasoningDisclosure key={segment.item.id} item={segment.item} />;
 					default:

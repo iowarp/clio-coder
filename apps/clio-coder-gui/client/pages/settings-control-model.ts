@@ -139,15 +139,12 @@ export function sentence(text: string): string {
  */
 export type SettingsScopeId = "models" | "safety" | "context" | "advanced";
 
-const MODEL_GROUPS: ReadonlySet<string> = new Set([
-	"chat/Model & responses",
-	"chat/Model picker",
-	"fleet/Default model",
-]);
+/** The Models page: every control of the shared Models area, plus the default model delegated work uses. */
+const MODEL_GROUPS: ReadonlySet<string> = new Set(["workers/Default worker"]);
 const keyOf = (control: Pick<SettingControl, "section" | "group">) => `${control.section}/${control.group}`;
 
 const CALM: Readonly<Record<Exclude<SettingsScopeId, "advanced">, (control: SettingControl) => boolean>> = {
-	models: (control) => MODEL_GROUPS.has(keyOf(control)),
+	models: (control) => control.section === "models" || MODEL_GROUPS.has(keyOf(control)),
 	safety: (control) => control.section === "safety",
 	context: (control) => control.section === "context",
 };

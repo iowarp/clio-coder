@@ -9,9 +9,10 @@ import {
 	withStateFileLockSection,
 	withStateFileLockSync,
 } from "../../core/state-file-lock.js";
-import { clioStateDir } from "../../core/xdg.js";
+import { clioStateDir, clioStatePath } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { endpointLabel, foregroundStreamUsage, maxConcurrentRequestsRemedy } from "../providers/endpoint-capacity.js";
+import type { DispatchReservationRecord } from "./reservation-store.js";
 
 export { processBirthToken } from "../../core/process-identity.js";
 
@@ -121,6 +122,10 @@ function leaseOnEndpoint(lease: CapacityLease, endpointKey: string): boolean {
 function capacityStatePath(): string {
 	return join(clioStateDir(), "dispatch-admission.json");
 }
+/** Whether the store exists, without creating the state root the way `clioStateDir` does; doctor must not. */
+function capacityStateExists(): boolean {
+	return existsSync(join(clioStatePath(), "dispatch-admission.json"));
+}
 /** The admission state file itself keys the one cross-process transaction lock. */
 export function capacityStateLockPath(): string {
 	return capacityStatePath();
@@ -161,25 +166,184 @@ function validDrain(value: unknown): value is CapacityDrain {
 		validTimestamp(drain.expiresAt)
 	);
 }
-export function readCapacityStateUnsafe(): CapacityStateFile {
-	if (!existsSync(capacityStatePath())) return { version: 2, draining: null, leases: [], reservations: [] };
+/** The one reservation shape every current writer records; `reservation-store.ts` interprets it. */
+export function validReservationRecord(value: unknown): value is DispatchReservationRecord {
+	if (typeof value !== "object" || value === null) return false;
+	const record = value as Partial<DispatchReservationRecord>;
+	return (
+		typeof record.ownerId === "string" &&
+		typeof record.ownerPid === "number" &&
+		Number.isInteger(record.ownerPid) &&
+		record.ownerPid > 0 &&
+		typeof record.host === "string" &&
+		(record.processBirthToken === undefined || typeof record.processBirthToken === "string") &&
+		(record.topology === "parallel" ||
+			record.topology === "detached" ||
+			record.topology === "sequential" ||
+			record.topology === "pipeline" ||
+			record.topology === "review" ||
+			record.topology === "compete" ||
+			record.topology === "council") &&
+		(record.status === "active" ||
+			record.status === "released" ||
+			record.status === "rolled_back" ||
+			record.status === "expired") &&
+		typeof record.createdAt === "string" &&
+		typeof record.expiresAt === "string" &&
+		(record.settledAt === null || typeof record.settledAt === "string") &&
+		Array.isArray(record.members) &&
+		record.members.every(
+			(member) =>
+				typeof member.memberId === "string" &&
+				Number.isInteger(member.wave) &&
+				typeof member.nodeId === "string" &&
+				(member.endpointKey === undefined || typeof member.endpointKey === "string") &&
+				typeof member.costUpperBoundUsd === "number" &&
+				Number.isFinite(member.costUpperBoundUsd) &&
+				member.costUpperBoundUsd >= 0 &&
+				(member.status === "held" || member.status === "consumed" || member.status === "released") &&
+				(member.consumedAt === null || typeof member.consumedAt === "string") &&
+				(member.releasedAt === null || typeof member.releasedAt === "string"),
+		)
+	);
+}
+
+/**
+ * A stored record no current reader accepts. A settled one holds no capacity and is dropped where it is read.
+ * A live one (an active reservation, or a lease whose expiry has not run out) may still bind a running process's
+ * slots, so admission refuses until `clio-coder doctor --fix` drops it.
+ */
+export interface InvalidAdmissionRecord {
+	kind: "reservation" | "capacity lease";
+	label: string;
+	live: boolean;
+}
+
+function recordLabel(value: unknown, key: "ownerId" | "leaseId", index: number): string {
+	const id = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+	return typeof id === "string" && /^[\w.:-]{1,80}$/u.test(id) ? `'${id}'` : `#${index}`;
+}
+
+function liveInvalidLease(value: unknown, nowMs: number): boolean {
+	const expiresAt =
+		typeof value === "object" && value !== null ? (value as { expiresAt?: unknown }).expiresAt : undefined;
+	const expiry = typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+	// Renewal rewrites the expiry of a lease it can find, so a lease this stale has no live owner on any host.
+	return Number.isFinite(expiry) && expiry + FOREIGN_LEASE_GRACE_MS > nowMs;
+}
+
+type CapacityStateScan = { state: CapacityStateFile; invalid: InvalidAdmissionRecord[] } | { problem: string };
+
+function scanCapacityState(nowMs: number): CapacityStateScan {
 	let parsed: CapacityStateFile;
 	try {
 		parsed = JSON.parse(readFileSync(capacityStatePath(), "utf8")) as CapacityStateFile;
 	} catch (error) {
-		throw new Error(`dispatch capacity store is unreadable: ${error instanceof Error ? error.message : String(error)}`);
+		return {
+			problem: `dispatch capacity store is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+		};
 	}
 	if (
 		parsed?.version !== 2 ||
 		!(parsed.draining === null || validDrain(parsed.draining)) ||
 		!Array.isArray(parsed.leases) ||
-		!parsed.leases.every(valid) ||
 		!Array.isArray(parsed.reservations)
 	)
-		throw new Error(
-			`dispatch capacity store has an invalid schema (expected version 2): ${capacityStatePath()}. Remove the file to reset local admission state; leases and reservations are process-lifetime state, not history.`,
-		);
-	return { ...parsed, leases: parsed.leases.map(clone), reservations: structuredClone(parsed.reservations) };
+		return { problem: `dispatch capacity store has an invalid schema (expected version 2): ${capacityStatePath()}` };
+	const invalid: InvalidAdmissionRecord[] = [];
+	const leases = parsed.leases.filter((lease, index) => {
+		if (valid(lease)) return true;
+		invalid.push({
+			kind: "capacity lease",
+			label: recordLabel(lease, "leaseId", index),
+			live: liveInvalidLease(lease, nowMs),
+		});
+		return false;
+	});
+	const reservations = parsed.reservations.filter((record, index) => {
+		if (validReservationRecord(record)) return true;
+		const status = typeof record === "object" && record !== null ? (record as { status?: unknown }).status : undefined;
+		invalid.push({ kind: "reservation", label: recordLabel(record, "ownerId", index), live: status === "active" });
+		return false;
+	});
+	return {
+		state: { ...parsed, leases: leases.map(clone), reservations: structuredClone(reservations) },
+		invalid,
+	};
+}
+
+function liveInvalidRefusal(live: ReadonlyArray<InvalidAdmissionRecord>): string {
+	const name = (record: InvalidAdmissionRecord): string =>
+		`${record.kind === "reservation" ? "active reservation" : "capacity lease"} ${record.label}`;
+	const named = live.slice(0, 3).map(name).join(", ");
+	const more = live.length > 3 ? ` and ${live.length - 3} more` : "";
+	const what = live.length === 1 ? `an invalid ${named}` : `invalid live records (${named}${more})`;
+	return `dispatch admission store has ${what} in ${capacityStatePath()}; if its owner is gone, run clio-coder doctor --fix to drop it`;
+}
+
+/**
+ * Read the admission state, dropping every invalid settled record (see `InvalidAdmissionRecord`). `dropped`
+ * counts them, so a caller holding the lock can rewrite the store.
+ */
+export function readCapacityStateRepairUnsafe(nowMs = Date.now()): { state: CapacityStateFile; dropped: number } {
+	if (!existsSync(capacityStatePath()))
+		return { state: { version: 2, draining: null, leases: [], reservations: [] }, dropped: 0 };
+	const scan = scanCapacityState(nowMs);
+	if ("problem" in scan) throw new Error(`${scan.problem}; clio-coder doctor --fix resets it`);
+	const live = scan.invalid.filter((record) => record.live);
+	if (live.length > 0) throw new Error(liveInvalidRefusal(live));
+	return { state: scan.state, dropped: scan.invalid.length };
+}
+
+export function readCapacityStateUnsafe(): CapacityStateFile {
+	return readCapacityStateRepairUnsafe().state;
+}
+
+export interface DispatchAdmissionStoreAudit {
+	path: string;
+	/** Why the whole file cannot be read; `repairDispatchAdmissionStore` resets it. */
+	problem: string | null;
+	reservations: number;
+	leases: number;
+	invalid: ReadonlyArray<InvalidAdmissionRecord>;
+}
+
+/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
+export function auditDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmissionStoreAudit | null {
+	if (!capacityStateExists()) return null;
+	const scan = scanCapacityState(nowMs);
+	if ("problem" in scan)
+		return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+	return {
+		path: capacityStatePath(),
+		problem: null,
+		reservations: scan.state.reservations.length,
+		leases: scan.state.leases.length,
+		invalid: scan.invalid,
+	};
+}
+
+/**
+ * `doctor --fix`: drop every invalid record, live ones included, and reset a file that cannot be read at all.
+ * Leases and reservations are process-lifetime state, not history, so nothing worth keeping goes with them.
+ */
+export function repairDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmissionStoreAudit | null {
+	if (!capacityStateExists()) return null;
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		const scan = scanCapacityState(nowMs);
+		if ("problem" in scan) {
+			writeCapacityStateUnsafe({ version: 2, draining: null, leases: [], reservations: [] });
+			return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+		}
+		if (scan.invalid.length > 0) writeCapacityStateUnsafe(scan.state);
+		return {
+			path: capacityStatePath(),
+			problem: null,
+			reservations: scan.state.reservations.length,
+			leases: scan.state.leases.length,
+			invalid: scan.invalid,
+		};
+	});
 }
 export function writeCapacityStateUnsafe(file: CapacityStateFile): void {
 	assertCapacityLeaseBound(file);
@@ -279,11 +443,10 @@ export function activeCapacityDrainUnsafe(file: CapacityStateFile, nowMs: number
 const RESERVATION_STATUSES = new Set(["active", "released", "rolled_back", "expired"]);
 const MEMBER_STATUSES = new Set(["held", "consumed", "released"]);
 /**
- * Held reservation slots are capacity too, so admission must count them. This is
- * a deliberately minimal re-read of the shape `reservation-store.ts` owns (that
- * module cannot be imported here without a cycle). Anything it would reject is
- * rejected here as well: silently skipping an unreadable record would under-count
- * capacity and admit past the cap.
+ * Held reservation slots are capacity too, so admission must count them. The read
+ * already dropped every record `validReservationRecord` rejects; this re-checks the
+ * fields it counts, and still fails closed, because silently skipping a record would
+ * under-count capacity and admit past the cap.
  */
 function heldReservationUsage(
 	values: ReadonlyArray<unknown>,

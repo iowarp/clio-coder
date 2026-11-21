@@ -170,6 +170,11 @@ export interface GrantBroker {
 	revokeRun(runId: string, reason: string, options?: { final?: boolean }): void;
 	/** Revoke a session's pending requests: session end, turn cancel, ownership change. */
 	revokeSession(sessionId: string | null, reason: string): void;
+	/**
+	 * A fork takes over a pending request its parked ancestor held (bt-11). Silent: a pending-to-pending change
+	 * re-forwards the ask, and the session switch republishes every window. Null when the request is not pending.
+	 */
+	adopt(requestId: string, sessionId: string): GrantRecord | null;
 	dispose(): void;
 }
 
@@ -492,6 +497,12 @@ export function createGrantBroker(deps: GrantBrokerDeps): GrantBroker {
 				transition(record, "canceled", { execution: "not_executed", reason, decidedAt: now() });
 				deps.deliver(record, "deny", reason);
 			}
+		},
+		adopt(requestId, sessionId) {
+			const record = records.get(requestId);
+			if (record === undefined || record.state !== "pending") return null;
+			record.ownerSessionId = sessionId;
+			return snapshot(record);
 		},
 		dispose() {
 			for (const timer of timers.values()) clearTimeout(timer);

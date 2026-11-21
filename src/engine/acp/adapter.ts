@@ -40,16 +40,26 @@ import type {
 	AcpDelegationFailureCode,
 	AcpDelegationResult,
 	AcpInitializeResponse,
+	AcpPostSettle,
 	AcpPromptResponse,
 	AcpRequestPermissionResponse,
 	AcpToolCallUpdate,
 	AcpUsageMeta,
 } from "./types.js";
 import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY, AcpUsageMetaSchema } from "./types.js";
+import {
+	ACP_UPSTREAM_V1,
+	AcpV1LoadSessionResponseSchema,
+	AcpV1ResumeSessionResponseSchema,
+} from "./upstream-schema.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
 
 export const DEFAULT_CANCEL_GRACE_MS = 1_000;
+/** Safety cap on how long a session stays open after its prompt while the peer still reports work in progress. */
+const POST_SETTLE_CAP_MS = 120_000;
+/** How often a post-settle window looks again for a closed transport between the peer's updates. */
+const POST_SETTLE_POLL_MS = 100;
 
 export interface AcpDelegationRunInput {
 	telemetry?: { context: WorkerTelemetryContext; target: RunUsage["target"] };
@@ -91,6 +101,13 @@ export interface AcpDelegationRunInput {
 	 * operator may answer. Absent, or null, answers the question cancelled. The signal aborts when the run ends.
 	 */
 	askPeerQuestion?: (question: AcpPeerQuestion, signal: AbortSignal) => Promise<string | null>;
+	/**
+	 * Reopen this earlier peer session instead of opening a new one: `session/resume` when the peer advertises it, else
+	 * `session/load` with its replayed history kept out of the run's events, else the run fails naming the peer.
+	 */
+	reopen?: { sessionId: string };
+	/** Testable stand-in for the safety cap on a post-settle window; the run uses POST_SETTLE_CAP_MS. */
+	postSettleCapMs?: number;
 }
 
 /** A fixed-choice question an ACP peer (agy `interaction_*`) asked, with the choices it takes back by `optionId`. */
@@ -188,6 +205,17 @@ function supportsSessionClose(init: AcpInitializeResponse | null): boolean {
 	// whose sessions predate the stable capability.
 	const meta = isRecord(caps._meta) ? caps._meta[ACP_SESSION_META_KEY] : undefined;
 	return isRecord(meta) && meta.close === true;
+}
+
+/**
+ * How a peer reopens an earlier session: `session/resume` restores it without replaying history, so it wins over
+ * `session/load`, which streams the whole history back first. Null when the peer advertises neither.
+ */
+function reopenMethod(init: AcpInitializeResponse | null): "session/resume" | "session/load" | null {
+	const caps = init?.agentCapabilities;
+	if (!isRecord(caps)) return null;
+	if (isRecord(caps.sessionCapabilities) && isRecord(caps.sessionCapabilities.resume)) return "session/resume";
+	return caps.loadSession === true ? "session/load" : null;
 }
 
 function flattenPrompt(input: AcpDelegationRunInput, systemPromptSent = false): string {
@@ -368,6 +396,14 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	})();
 	antigravity?.recordChild(transport.pid);
 	let sessionId: string | null = null;
+	let opened: "new" | "resume" | "load" = "new";
+	let replaying = false;
+	let replayedUpdates = 0;
+	// What the peer has said since the prompt, which a post-settle window reads to tell live background work from done.
+	let sessionUpdates = 0;
+	let peerState = { busy: false, idle: false };
+	// A post-settle window waits on this; every peer update wakes it to read the work the peer now reports.
+	let wakeOnUpdate = (): void => {};
 	let initialized: AcpInitializeResponse | null = null;
 	let aborted = false;
 	let finished = false;
@@ -477,7 +513,24 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 
 	const unregisters = [
 		transport.onNotification("session/update", (params) => {
+			// A session/load replays the session's history before it answers; that history is not this run's work.
+			if (replaying) {
+				replayedUpdates += 1;
+				return;
+			}
+			sessionUpdates += 1;
+			const update = isRecord(params) && isRecord(params.update) ? params.update : null;
+			// ACP v2 reports foreground state, with a complete snapshot of background work when it reports any; v1 peers
+			// never send it. Idle with no background listed is the peer saying its work is done.
+			if (update?.sessionUpdate === "state_update") {
+				const backgroundWork = Array.isArray(update.background) && update.background.length > 0;
+				peerState = {
+					busy: update.state !== "idle" || backgroundWork,
+					idle: update.state === "idle" && !backgroundWork,
+				};
+			}
 			for (const event of mapper.mapUpdate(params)) emit(event);
+			wakeOnUpdate();
 		}),
 		transport.onRequest("session/request_permission", (params) => {
 			const question = agy?.question(params) ?? null;
@@ -587,6 +640,76 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		const requireActive = () => {
 			if (aborted) throw new Error("the delegation was cancelled before its prompt");
 		};
+		/** Work in progress: a tool call still pending or in progress, or a v2 peer reporting running or background work. */
+		const backgroundLive = (): boolean => mapper.openToolCalls() > 0 || peerState.busy;
+		/**
+		 * Holds the session open after the prompt answered exactly while the peer reports work in progress, and closes it
+		 * once the peer reports idle (a v2 idle state with nothing in the background, or no call left open), at the
+		 * safety cap, or when the run is aborted or the transport closes.
+		 */
+		const holdForBackground = async (): Promise<AcpPostSettle> => {
+			const capMs = input.postSettleCapMs ?? POST_SETTLE_CAP_MS;
+			const startedAt = monotonicNow();
+			const updatesBefore = sessionUpdates;
+			peerState = { ...peerState, idle: false };
+			const close = (ended: AcpPostSettle["ended"]): AcpPostSettle => ({
+				waitedMs: Math.round(monotonicNow() - startedAt),
+				updates: sessionUpdates - updatesBefore,
+				ended,
+			});
+			try {
+				for (;;) {
+					if (aborted || transport.closed) return close("aborted");
+					if (peerState.idle || !backgroundLive()) return close("idle");
+					const left = capMs - (monotonicNow() - startedAt);
+					if (left <= 0) return close("cap");
+					let timer: ReturnType<typeof setTimeout> | undefined;
+					await Promise.race([
+						new Promise<void>((resolve) => {
+							wakeOnUpdate = resolve;
+							timer = setTimeout(resolve, Math.min(POST_SETTLE_POLL_MS, left));
+						}),
+						abortWake,
+					]);
+					clearTimeout(timer);
+				}
+			} finally {
+				wakeOnUpdate = () => {};
+			}
+		};
+		/** The earlier session reopened the way the peer allows, its answer held to the pinned upstream v1 schema. */
+		const reopenSession = async (earlier: string): Promise<unknown> => {
+			const method = reopenMethod(initialized);
+			if (method === null)
+				throw new AcpError(
+					"acp_session_unavailable",
+					`ACP peer cannot reopen session '${earlier}': it advertises neither session/resume nor session/load`,
+				);
+			opened = method === "session/resume" ? "resume" : "load";
+			// Named before the answer, so an abort while the peer reopens it cancels that session.
+			sessionId = earlier;
+			replaying = method === "session/load";
+			let answer: unknown;
+			try {
+				answer = await transport.request<unknown>(
+					method,
+					{ sessionId: earlier, cwd: input.cwd, mcpServers: [] },
+					connectTimeoutMs,
+				);
+			} catch (error) {
+				throw agy?.authFailure(error) ?? error;
+			} finally {
+				replaying = false;
+			}
+			const schema = method === "session/resume" ? AcpV1ResumeSessionResponseSchema : AcpV1LoadSessionResponseSchema;
+			const invalid = Value.Errors(schema, answer)[0];
+			if (invalid !== undefined)
+				throw new AcpError(
+					"acp_session_unavailable",
+					`ACP peer answered ${method} outside ACP v1 (${ACP_UPSTREAM_V1.tag}): ${invalid.instancePath || "/"} ${invalid.message}`,
+				);
+			return answer;
+		};
 		try {
 			emit({ type: "agent_start" } as AgentEvent);
 			requireActive();
@@ -615,12 +738,13 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				params: { cwd: input.cwd, mcpServers: [] },
 				systemPromptSent: false,
 			};
-			const session = await transport
-				.request<unknown>("session/new", sessionNew.params, connectTimeoutMs)
-				.catch((error: unknown) => {
-					throw agy?.authFailure(error) ?? error;
-				});
-			sessionId = sessionIdFrom(session);
+			const session =
+				input.reopen === undefined
+					? await transport.request<unknown>("session/new", sessionNew.params, connectTimeoutMs).catch((error: unknown) => {
+							throw agy?.authFailure(error) ?? error;
+						})
+					: await reopenSession(input.reopen.sessionId);
+			sessionId = input.reopen?.sessionId ?? sessionIdFrom(session);
 			requireActive();
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
 			const modeReset = agy?.defaultMode(sessionId, session) ?? null;
@@ -719,7 +843,13 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				"session/prompt",
 				{
 					sessionId,
-					prompt: [{ type: "text", text: flattenPrompt(input, sessionNew.systemPromptSent) }],
+					prompt: [
+						{
+							type: "text",
+							// A reopened session already holds the system prompt its first turn carried.
+							text: flattenPrompt(input, opened !== "new" || sessionNew.systemPromptSent),
+						},
+					],
 				},
 				promptTimeoutMs,
 			);
@@ -751,6 +881,10 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					emit({ type: "clio_coder_peer_steer_failed", payload: { reason: acpErrorMessage(outcome.error) } });
 			}
 			if (agy !== null && steerPrompts.length > 0) promptResponse = agy.settleTurn(settledTurn);
+			// Background work can outlive the prompt (Phase 3.3): while the peer still reports work in progress, its updates
+			// belong to this run, so the session stays open until the peer reports idle, under the safety cap.
+			const postSettle =
+				!aborted && promptResponse?.stopReason === "end_turn" && backgroundLive() ? await holdForBackground() : undefined;
 			// agy ends some failed turns as if they succeeded and records why only in its own store.
 			const sideband = aborted ? {} : (agy?.sideband(sessionId) ?? {});
 			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
@@ -798,6 +932,9 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(usageLimit !== undefined ? { usageLimit } : {}),
 				delegation: {
 					acpSessionId: sessionId,
+					opened,
+					...(replayedUpdates > 0 ? { replayedUpdates } : {}),
+					...(postSettle !== undefined ? { postSettle } : {}),
 					...(sideband.nonResumable !== undefined ? { nonResumable: sideband.nonResumable } : {}),
 					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
@@ -828,6 +965,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(failureCode !== undefined ? { failureCode } : {}),
 				delegation: {
 					acpSessionId: sessionId,
+					opened,
+					...(replayedUpdates > 0 ? { replayedUpdates } : {}),
 					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
 					toolCallsRequested: toolSnapshot.toolCallsRequested,

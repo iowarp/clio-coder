@@ -1,10 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { resolveClioDirs, resolvePackageRoot } from "../clio/http-shims.js";
+import { launchdPlist, serviceHost, serviceIdentity, taskSpec } from "./service-model.js";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 const BackgroundConfig = Type.Object(
@@ -25,15 +26,13 @@ const BackgroundConfig = Type.Object(
 );
 export type BackgroundConfig = Static<typeof BackgroundConfig>;
 
-export function backgroundPaths(directory: string) {
+/** `unit` names the service for this host's manager (systemd, launchd or Task Scheduler); `unitFile` defines it. */
+export function backgroundPaths(directory: string, platform: string = process.platform) {
 	if (!isAbsolute(directory)) throw new Error("The background directory must be absolute.");
-	const id = createHash("sha256").update(directory).digest("hex").slice(0, 12);
-	const unit = `clio-coder-gui-${id}.service`;
 	return {
 		directory,
 		config: join(directory, "server.json"),
-		unit,
-		unitFile: join(directory, unit),
+		...serviceIdentity(directory, platform),
 		manifest: join(directory, "owner.json"),
 	};
 }
@@ -104,14 +103,19 @@ export function systemdArgument(value: string) {
 		throw new Error("Service paths cannot contain control characters.");
 	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%").replace(/\$/g, "$$$$")}"`;
 }
-export function backgroundUnit(config: BackgroundConfig, directory: string) {
+/** The definition of the background service in its manager's own format. */
+export function backgroundUnit(config: BackgroundConfig, directory: string, platform: string = process.platform) {
+	const files = backgroundPaths(directory, platform);
 	const argv = [
 		config.launch.node,
 		...(config.launch.loader ? ["--import", config.launch.loader] : []),
 		config.launch.entry,
 		"--persistent",
-		backgroundPaths(directory).config,
+		files.config,
 	];
+	const host = serviceHost(platform);
+	if (host === "launchd") return launchdPlist(files.unit, argv);
+	if (host === "task-scheduler") return taskSpec(files.unit, argv);
 	return [
 		"[Unit]",
 		"Description=CLIO Coder graphical application",

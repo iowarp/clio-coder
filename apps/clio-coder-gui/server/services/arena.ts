@@ -24,7 +24,8 @@ const STARTED = /^clio-coder arena: match ([0-9]{8}-[0-9]{6}-[0-9a-f]{4}) starte
 type ToolResult = { id: string; message: string };
 
 function checked<T extends TSchema>(schema: T, value: unknown, what: string): Static<T> {
-	if (!Value.Check(schema, value)) throw new AppProblem("operation_failed", `Clio returned an invalid arena ${what}.`);
+	if (!Value.Check(schema, value))
+		throw new AppProblem("operation_failed", `CLIO Coder returned an invalid arena ${what}.`);
 	return value as Static<T>;
 }
 
@@ -67,8 +68,8 @@ export class ArenaService {
 				throw new AppProblem(
 					"conflict",
 					request.replace
-						? "Clio refused the vote: the match is missing, still running, or has fewer contenders than that label."
-						: "Clio refused the vote: the match already has one (replace it explicitly), is still running, or has fewer contenders than that label.",
+						? "CLIO Coder refused the vote: the match is missing, still running, or has fewer contenders than that label."
+						: "CLIO Coder refused the vote: the match already has one (replace it explicitly), is still running, or has fewer contenders than that label.",
 				);
 			throw error;
 		}
@@ -113,7 +114,7 @@ export class ArenaService {
 	): Promise<ToolResult> {
 		if (signal.aborted) throw new AppProblem("operation_failed", "Arena match was cancelled before it started.");
 		const { child, birthToken } = await runClioCommand({ kind: "arena.run", request }, cwd, this.env);
-		progress(`Clio is running ${request.contenders.length} contenders on one prompt.`);
+		progress(`CLIO Coder is running ${request.contenders.length} contenders on one prompt.`);
 		return new Promise((resolve, reject) => {
 			let failure: Error | undefined;
 			let matchId: string | undefined;

@@ -33,6 +33,7 @@ import {
 	writerSetConflict,
 } from "../domains/dispatch/writer-set.js";
 import {
+	councilVoterPersona,
 	dispatchRequestsFromArgs,
 	maxOutputBytesArg,
 	prepareDispatchArguments,
@@ -1003,6 +1004,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										task: renderCouncilVoteMemberTask(base.task),
 										resultContractOverride: councilBallotContract(base.task),
+										...councilVoterPersona(member.agent ?? base.agentId),
 									}
 								: {}),
 							target: member.target,

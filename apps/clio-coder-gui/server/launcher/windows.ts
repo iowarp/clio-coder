@@ -13,8 +13,8 @@ import { windowsAppScript, windowsIdentitySource } from "./windows-app.js";
  * and only files whose recorded hash still matches are ever removed.
  */
 const owner = "clio-coder-gui-windows";
-const menuName = "Clio Coder.lnk";
-const startupName = "Clio Coder (background).lnk";
+const menuName = "CLIO Coder.lnk";
+const startupName = "CLIO Coder (background).lnk";
 const manifestName = "windows.json";
 const iconName = "clio-coder.ico";
 

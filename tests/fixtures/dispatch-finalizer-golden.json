@@ -2370,7 +2370,8 @@
 				"toolCallsApproved": 0,
 				"toolCallsDenied": 0,
 				"toolGovernance": "clio-coder-policy",
-				"toolCallLog": []
+				"toolCallLog": [],
+				"opened": "new"
 			},
 			"sessionId": null,
 			"terminalReason": "completed",
@@ -2749,6 +2750,9 @@
 			"node": {
 				"id": "local",
 				"kind": "local"
+			},
+			"acpSession": {
+				"sessionId": "golden-session"
 			},
 			"outcome": "succeeded",
 			"outcomeCode": null,
