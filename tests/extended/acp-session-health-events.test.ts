@@ -186,7 +186,7 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 
 it("forwards bounded failure codes and reasons for withheld and idle workers", async () => {
 	const { bus, peer, served } = await openSession(["run.failed"]);
-	for (const outcomeCode of ["worker_no_work", "merge_withheld"] as const) {
+	for (const outcomeCode of ["obligation_unmet", "merge_withheld"] as const) {
 		bus.emit("run.failed", {
 			runId: outcomeCode,
 			agentId: "coder",
@@ -204,7 +204,7 @@ it("forwards bounded failure codes and reasons for withheld and idle workers", a
 	const events = eventsOf(peer);
 	deepStrictEqual(
 		events.map((event) => (event.payload as Record<string, unknown>).outcomeCode),
-		["worker_no_work", "merge_withheld"],
+		["obligation_unmet", "merge_withheld"],
 	);
 	for (const event of events) {
 		const detail = (event.payload as { outcomeDetail: string }).outcomeDetail;

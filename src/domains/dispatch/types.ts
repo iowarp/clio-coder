@@ -1,6 +1,7 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
+import type { RunVerdict } from "./grading.js";
 /**
  * Shared run + receipt types for the dispatch domain.
  *
@@ -396,9 +397,10 @@ export interface RunValidationGrounding {
 	 * detector does not enumerate, which is reported and nothing more.
 	 * `unattributable-status` means a claimed check ran, but its call's exit
 	 * status was a later command's, so it is reported and nothing more (bt-9).
+	 * `unobserved-lane` means the run's tool lane was not observed (a CLI subprocess): its claims read unknown.
 	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status";
+	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status" | "unobserved-lane";
 }
 
 /**
@@ -1076,6 +1078,12 @@ export interface RunResult {
 	budget?: RunToolBudgetEnvelope;
 	/** Bytes of the answer the parent sees at sync, collect and record, fixed at dispatch (M3). Absent on older runs. */
 	answerBudgetBytes?: number;
+	/**
+	 * The grader's verdict (fleet M9): the obligation the run owed, every rule's result in layer order, and its
+	 * assurance, the one value the merge gate, the exit code and a parent's finish contract read. Absent on receipts
+	 * sealed before M9.
+	 */
+	verdict?: RunVerdict;
 	/** Proof of briefing content without copying its prose into the receipt. */
 	briefing?: RunBriefingProvenance;
 	workerContext?: WorkerContextProvenance;

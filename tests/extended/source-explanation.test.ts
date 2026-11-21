@@ -25,6 +25,7 @@ const coderExplanation = fixture.findings
 	.join("\n\n");
 const coderReport = (summary: string, passed = true) =>
 	JSON.stringify({
+		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [],
 		validations: [{ name: "source read", passed, evidence: "Read only the four requested files; no tests ran." }],
 		summary,

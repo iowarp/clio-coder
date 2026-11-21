@@ -29,11 +29,21 @@ export const RUN_OUTCOME_CODES = [
 	"result_contract_invalid",
 	"worker_final_output_missing",
 	"host_verification_rejected",
+	/**
+	 * Retired by the grader (fleet M9): obligation_unmet replaced it. No path writes it; it stays only so run journals
+	 * sealed before M9 still parse.
+	 */
 	"worker_no_work",
+	/** The run left the obligation its role owes unmet (fleet design 4.8); the detail names the obligation. */
+	"obligation_unmet",
+	/** A builder declared its assignment unfinished, or asked for wider write roots, and changed nothing. */
+	"worker_not_done",
 	"worker_partial_work",
 	"worker_mutation_blocked",
 	"merge_withheld",
 	"worker_removed_tests",
+	/** A builder's assurance (fleet design 4.8) is compromised: the detail names the evidence that lowered it. */
+	"assurance_compromised",
 	"information_flow_blocked",
 	"acp_auth_required",
 	"acp_model_unavailable",
@@ -41,6 +51,45 @@ export const RUN_OUTCOME_CODES = [
 	"acp_transport_error",
 ] as const;
 export type RunOutcomeCode = (typeof RUN_OUTCOME_CODES)[number];
+
+/** What evidence a run's result must rest on, resolved once from its role (fleet design 4.8). */
+export const RUN_OBLIGATIONS = [
+	"observed-evidence",
+	"answer",
+	"change-or-declared",
+	"executed-checks",
+	"cited-evidence",
+] as const;
+export type RunObligation = (typeof RUN_OBLIGATIONS)[number];
+
+/** The grader's layers: V0 is enforced at admission and V5 by the gates, so it holds V1 to V4 and the landing (V6). */
+export const GRADE_LAYERS = ["V1", "V2", "V3", "V4", "V6"] as const;
+export type GradeLayer = (typeof GRADE_LAYERS)[number];
+
+/** The grader's rules, in the order they are evaluated: the order is the precedence (fleet M9). */
+export const GRADE_RULE_IDS = [
+	"termination",
+	"change-return",
+	"worker-outcome-code",
+	"finish-contract",
+	"writes-blocked",
+	"final-output",
+	"result-contract",
+	"obligation",
+	"host-checks",
+	"removed-tests",
+	"assurance",
+	"landing",
+] as const;
+export type GradeRuleId = (typeof GRADE_RULE_IDS)[number];
+
+/** `not_reached`: an earlier rule already failed the run. `unknown`: the facts the rule needs were not observed. */
+export const GRADE_RULE_STATUSES = ["pass", "fail", "unknown", "not_applicable", "not_reached"] as const;
+export type GradeRuleStatus = (typeof GRADE_RULE_STATUSES)[number];
+
+/** How far a run's result is backed (fleet design 4.8): the trust verdict of its own settled facts. */
+export const RUN_ASSURANCES = ["reviewed", "grounded", "unverified", "compromised", "unknown"] as const;
+export type RunAssurance = (typeof RUN_ASSURANCES)[number];
 
 /** How each labelled hash a finished run carries was computed (`run-hashes.ts`, #434). */
 export const RUN_HASH_CANONICALIZATIONS = [

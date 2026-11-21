@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import assert, { match } from "node:assert/strict";
 import path from "node:path";
 import { it } from "node:test";
 import {
@@ -18,15 +18,26 @@ const contract = { kind: "artifact-report", path: ".clio-coder/staging/core/page
 const target = path.resolve(cwd, contract.path);
 const markup = `<tool_call><function=write><parameter=path>${target}</parameter></function></tool_call>`;
 
-it("checks the exact required artifact, independently of terminal prose or literal tool markup", () => {
-	for (const [label, content, reason] of [
+const report = JSON.stringify({ summary: "page", completion: { state: "done", limitations: [], unverified: [] } });
+
+it("checks the exact required artifact behind a typed report, and refuses prose or literal tool markup", () => {
+	for (const [label, content, artifactReason] of [
 		["missing", null, "missing or unreadable"],
 		["unreadable", null, "missing or unreadable"],
 		["empty", "", "empty"],
 		["whitespace", " \n\t", "empty"],
 		["nonempty seed", "# Existing page\n", undefined],
 	] as const) {
-		for (const output of [markup, "The requested page is complete.", null]) {
+		for (const output of [report, markup, "The requested page is complete.", null]) {
+			// A builder's artifact report declares its completion as typed JSON (fleet design 4.3); prose is no report.
+			const typed = output === report;
+			const reason = typed
+				? artifactReason
+					? `Required artifact is ${artifactReason}: ${JSON.stringify(contract.path)}`
+					: undefined
+				: output === null
+					? "missing final result"
+					: "result must be valid JSON";
 			const reads: string[] = [];
 			const filesystem = {
 				readFile(filePath: string) {
@@ -39,11 +50,11 @@ it("checks the exact required artifact, independently of terminal prose or liter
 			const validation = validateResultContract(input);
 			assert.equal(validation.conformance, reason ? "fail" : "pass", label);
 			assert.equal(validation.quality, "unmeasured");
-			if (reason) assert.equal(validation.reason, `Required artifact is ${reason}: ${JSON.stringify(contract.path)}`);
+			if (reason) assert.equal(validation.reason, reason);
 			const receipt = validateRecipeResult({ ...input, reachedTerminalResult: true });
 			assert.equal(receipt?.fact.conformance, validation.conformance);
 			assert.equal(receipt?.fact.quality, "unmeasured");
-			assert.deepEqual(reads, [target, target]);
+			assert.deepEqual(reads, typed ? [target, target] : []);
 		}
 	}
 });
@@ -56,11 +67,8 @@ it("preserves generic artifact reports and their identity without reading disk",
 		resultContractSourceId(generic),
 		"agent-result-contract:artifact-report:8684aff02aa44364d921fc90e2188b0f1be25fea50f7e099792279cceba9d774",
 	);
-	assert.equal(
-		resultContractShape(generic),
-		"any final text; the artifact you wrote at the location the task named is the result",
-	);
-	for (const output of [markup, "", null]) {
+	match(resultContractShape(generic), /^\{"summary":.*"completion":\{"state":"done\|partly_done\|not_done"/u);
+	for (const output of [report]) {
 		const validation = validateResultContract({
 			contract: generic,
 			output,

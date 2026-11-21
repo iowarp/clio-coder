@@ -187,6 +187,7 @@ for (const agent of ["scout", "coder"] as const) {
 										? { winner: 1, checks: [{ name: "grounded", passed: true, evidence: "tracked.txt:1" }] }
 										: writer
 											? {
+													completion: { state: "done", limitations: [], unverified: [] },
 													mutatedPaths: authoredPaths,
 													validations: [{ name: "git diff --check", passed: true, evidence: "git diff --check exited 0" }],
 												}
@@ -426,7 +427,11 @@ for (const pick of [1, 2]) {
 								content: JSON.stringify(
 									judge
 										? { winner: pick, checks: [{ name: "hostChecks", passed: true, evidence: "candidate hostChecks" }] }
-										: { mutatedPaths: ["value.txt"], validations: [] },
+										: {
+												completion: { state: "done", limitations: [], unverified: [] },
+												mutatedPaths: ["value.txt"],
+												validations: [],
+											},
 								),
 							},
 						};

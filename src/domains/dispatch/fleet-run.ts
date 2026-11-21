@@ -66,7 +66,7 @@ import {
 	executionPlanWaves,
 	spliceExecutionPlan,
 } from "./execution-plan.js";
-import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
+import { gateAuthorContractKind, gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
 import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
 import { changedCheckFiles, deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
@@ -361,11 +361,7 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 			usd: "unknownCount" in usd ? usd : sumFacts([usd]),
 			...freeClaim(settled.pricing.pricedBy === "free", settled.pricing.freeRule),
 		},
-		inspection: reviewerInspectionOf({
-			runtimeKind: settled.route.runtimeKind,
-			toolActivity: settled.toolActivity,
-			validationGrounding: settled.validationGrounding,
-		}),
+		inspection: reviewerInspectionOf({ outcomeCode: settled.outcomeCode, verdict: settled.verdict ?? null }),
 	};
 }
 
@@ -860,7 +856,8 @@ async function runFleetHoldingWorkspace(
 								...(decisionRefs.length > 0 ? { decisionRefs } : {}),
 								readOnly: true,
 								lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
-								resultContractOverride: { kind: "artifact-report" },
+								// A proposal is a researcher's prose, not a builder report.
+								resultContractOverride: { kind: "text-report" },
 								...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
 								...(step.target !== undefined ? { target: step.target } : {}),
 								...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
@@ -968,7 +965,7 @@ async function runFleetHoldingWorkspace(
 					...(step.plan !== undefined
 						? { resultContractOverride: { kind: "delegation-plan" as const } }
 						: step.gate !== undefined
-							? { resultContractOverride: { kind: "artifact-report" as const } }
+							? { resultContractOverride: { kind: gateAuthorContractKind(step.executionRole) } }
 							: {}),
 				};
 				if (step.plan?.proposals === true) {

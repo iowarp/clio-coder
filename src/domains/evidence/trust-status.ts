@@ -525,6 +525,10 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 		return attributed("failed", source, hostAuthority, artifacts);
 	}
 	if (host?.status === "verified") {
+		// A participant's own report can lower assurance and never raise it (DESIGN 4.8): a check the worker saw fail
+		// on the final tree is not made to pass by the declared checks the host ran.
+		if (settledQualityFails(facts.quality))
+			return attributed("failed", source, { kind: "validator", id: "result-quality" }, artifacts);
 		// Only checks executed for this run validate it. A pass reused from another run's memo is not authenticated
 		// evidence, and a record that predates the counts cannot say which it was. A lint or format check skipped
 		// because the task changed nothing under it is moot, so it neither validates nor blocks; a run whose every
@@ -561,6 +565,9 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 	if (settledQualityFails(facts.quality))
 		return attributed("failed", source, { kind: "validator", id: "result-quality" }, artifacts);
 	const grounding = facts.validationGrounding;
+	// An unobserved tool lane's claims are unknown, never ungrounded (DESIGN 4.8 V1); a failing one already lowered it.
+	if (grounding?.basis === "unobserved-lane" && grounding.ungrounded.length > 0)
+		return attributed("unknown", source, { kind: "validator", id: "unobserved-tool-lane" }, artifacts);
 	if (
 		grounding?.basis === "no-command-executed" &&
 		(grounding.ungrounded.length > 0 || grounding.claimed > grounding.grounded)

@@ -12,6 +12,7 @@ import {
 	resolveProjectVerifierExecutionCwd,
 } from "../../tools/verify/catalog.js";
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
+import { trustVerdict } from "../evidence/trust-projection.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { ObservedCheck } from "../session/task-board.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
@@ -1629,12 +1630,11 @@ function passedDispatchRun(run: Record<string, unknown>): boolean {
 	// Historical results predate canonical trust status. For current results,
 	// a clean process exit cannot overrule failed, absent, or ungrounded validation.
 	if (!("trustStatus" in run)) return true;
+	// The child's assurance is the one value read (fleet design 4.8): only a grounded or reviewed result is evidence.
 	const trust = validateTrustStatus(run.trustStatus);
-	return (
-		trust.ok &&
-		trust.status.artifactIntegrity.state === "verified" &&
-		trust.status.validationGrounding.state === "validated"
-	);
+	if (!trust.ok) return false;
+	const assurance = trustVerdict(trust.status);
+	return assurance === "grounded" || assurance === "reviewed";
 }
 
 /** Prefer the receipt's own agent id, then the dispatch call's, then unknown. */

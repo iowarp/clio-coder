@@ -17,12 +17,16 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
-import type { RunResultReproducibility } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResult, RunResultReproducibility } from "../../src/domains/dispatch/types.js";
+import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engine.js";
+import { dispatchStubContext } from "./dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
 
 /**
@@ -134,4 +138,106 @@ export function holdEventLoop(): { release(): void } {
 			clearInterval(timer);
 		},
 	};
+}
+
+/**
+ * One read the worker ran and that succeeded, as a dispatch stub yields it: an explorer's report owes observed
+ * evidence (fleet design 4.8), so a stub that must succeed reads once before it reports.
+ */
+export function observedReadEvents(path = "fixture.txt", toolCallId = "observed-read"): Array<Record<string, unknown>> {
+	return [
+		{ type: "tool_execution_start", toolCallId, toolName: "read", args: { path } },
+		{
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: "read",
+			isError: false,
+			result: { content: [{ type: "text", text: path }] },
+		},
+		{ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId, outcome: "ok", durationMs: 1 } },
+	];
+}
+
+/**
+ * One check the worker ran through bash and that passed, as a dispatch stub yields it: a checker's or reviewer's
+ * claimed check must be one the run executed (fleet design 4.8), so a stub that claims `command` runs it first.
+ */
+export function observedCheckEvents(
+	command = "npm test",
+	toolCallId = "observed-check",
+): Array<Record<string, unknown>> {
+	return [
+		{ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command } },
+		{
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: "bash",
+			isError: false,
+			result: { content: [{ type: "text", text: "ok" }] },
+		},
+		{ type: "clio_coder_tool_finish", payload: { tool: "bash", toolCallId, outcome: "ok", durationMs: 1 } },
+	];
+}
+
+/**
+ * Settle one builder dispatch whose stub worker read once and returns `report` as its mutation report, through the
+ * real settle path: host checks, grade and seal. `beforeExit` changes the tree while the worker is still running;
+ * `events` replaces the one read with the tool finishes the worker yields before its report.
+ */
+export async function settleStubBuilder(input: {
+	cwd: string;
+	report: object;
+	/** The builder recipe; coder by default. */
+	agentId?: string;
+	resolvedVerification?: Parameters<DispatchContract["dispatch"]>[0]["resolvedVerification"];
+	beforeExit?: () => void;
+	events?: ReadonlyArray<Record<string, unknown>>;
+}): Promise<{ receipt: RunResult; run: RunEnvelope }> {
+	const calls = input.events ?? [
+		{ type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } },
+	];
+	let finish!: (result: SpawnedWorkerResult) => void;
+	const done = new Promise<SpawnedWorkerResult>((resolve) => {
+		finish = resolve;
+	});
+	const worker: SpawnedWorker = {
+		pid: null,
+		promise: done,
+		heartbeatAt: { current: Date.now(), monotonic: 0 },
+		events: (async function* () {
+			await done;
+			yield* calls;
+			yield {
+				type: "message_end",
+				message: { role: "assistant", stopReason: "stop", content: JSON.stringify(input.report) },
+			};
+		})(),
+		abort() {
+			finish({ exitCode: null, signal: "SIGTERM" });
+		},
+	};
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker: () => worker });
+	await bundle.extension.start();
+	try {
+		const handle = await bundle.contract.dispatch({
+			agentId: input.agentId ?? "coder",
+			task: "Edit input.txt.",
+			executionRole: "builder",
+			requestOrigin: "internal",
+			resultContractOverride: { kind: "mutation-report" },
+			cwd: input.cwd,
+			...(input.resolvedVerification !== undefined ? { resolvedVerification: input.resolvedVerification } : {}),
+		});
+		input.beforeExit?.();
+		finish({ exitCode: 0, signal: null });
+		const receipt = await handle.finalPromise;
+		const run = bundle.contract.getRun(receipt.runId);
+		if (run === null) throw new Error(`run ${receipt.runId} left the ledger`);
+		return { receipt, run };
+	} finally {
+		finish({ exitCode: 0, signal: null });
+		await bundle.extension.stop?.();
+	}
 }

@@ -19,7 +19,12 @@ const data = { findings: [{ claim: "No grounded evidence is available." }], need
 const submit = (args: unknown = data) => ({ name: "clio_submit_result", arguments: JSON.stringify(args) });
 const longData = { ...data, findings: [{ claim: "Substantive finding. ".repeat(600) }] };
 const write = { name: "write", arguments: JSON.stringify({ path: "forbidden.txt", content: "must not execute" }) };
-const mutationData = { mutatedPaths: ["changed.txt"], validations: [], observations: ["Updated the assigned file."] };
+const mutationData = {
+	completion: { state: "done", limitations: [], unverified: [] },
+	mutatedPaths: ["changed.txt"],
+	validations: [],
+	observations: ["Updated the assigned file."],
+};
 const mutationWrite = { name: "write", arguments: JSON.stringify({ path: "changed.txt", content: "changed" }) };
 const scenarios: Array<{
 	name: string;
@@ -57,9 +62,23 @@ const scenarios: Array<{
 		name: "coder without tool support accepts ordinary JSON",
 		mutation: true,
 		toolsSupported: false,
-		rounds: [JSON.stringify({ mutatedPaths: [], validations: [], summary: null, commitMessage: null })],
+		rounds: [
+			JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
+				mutatedPaths: [],
+				validations: [],
+				summary: null,
+				commitMessage: null,
+			}),
+		],
 		code: 0,
-		expectedData: { mutatedPaths: [], validations: [], summary: null, commitMessage: null },
+		expectedData: {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: [],
+			validations: [],
+			summary: null,
+			commitMessage: null,
+		},
 	},
 	{
 		name: "coder ordinary JSON seals without a submission round",
@@ -75,8 +94,20 @@ const scenarios: Array<{
 		synthesisDuringWrite: true,
 		rounds: [
 			[mutationWrite],
-			[submit({ mutatedPaths: [], validations: "invalid" })],
-			[submit({ mutatedPaths: [], validations: "invalid" })],
+			[
+				submit({
+					completion: { state: "done", limitations: [], unverified: [] },
+					mutatedPaths: [],
+					validations: "invalid",
+				}),
+			],
+			[
+				submit({
+					completion: { state: "done", limitations: [], unverified: [] },
+					mutatedPaths: [],
+					validations: "invalid",
+				}),
+			],
 			[submit(mutationData)],
 		],
 		code: 0,
@@ -84,7 +115,7 @@ const scenarios: Array<{
 		terminalRound: 1,
 	},
 	{
-		name: "repeated malformed no-work replies retain worker_no_work",
+		name: "repeated malformed no-work replies fail the change-or-declared obligation",
 		mutation: true,
 		noWorkRecovery: true,
 		rounds: ["Done.", "Done."],
@@ -183,7 +214,12 @@ for (const scenario of scenarios) {
 			if (scenario.noWorkRecovery)
 				deepStrictEqual(
 					events.filter((event) => event.type === "clio_coder_run_outcome").map((event) => event.payload),
-					[{ outcomeCode: "worker_no_work", detail: "worker executed no tools, so it did none of its assignment" }],
+					[
+						{
+							outcomeCode: "obligation_unmet",
+							detail: "obligation change-or-declared unmet: worker executed no tools, so it did none of its assignment",
+						},
+					],
 				);
 			ok(
 				typeof sessionIds[0] === "string" && sessionIds[0].length > 0 && sessionIds.every((id) => id === sessionIds[0]),

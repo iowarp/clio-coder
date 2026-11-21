@@ -20,8 +20,8 @@
  *   - countToolCalls returns the sum of count across every entry.
  */
 
+import { ToolNames } from "../../core/tool-names.js";
 import type { ActionClass } from "../safety/action-classifier.js";
-import type { Obligation } from "./obligation.js";
 import type { ToolActivitySummary, ToolCallStat } from "./types.js";
 
 export interface ToolFinishPayload {
@@ -248,130 +248,18 @@ export function blockedStateChangingCalls(
 	return blocked;
 }
 
-/** A report that opens by saying the worker could not do something. */
-const INABILITY_OPENING =
-	/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu;
-/** A report that opens by saying the assignment needed no change, the finish an unrefused edit worker may give. */
-const NO_CHANGE_NEEDED_OPENING =
-	/^(?:no\s+(?:code\s+|source\s+)?(?:changes?|edits?|fix(?:es)?|modifications?)\s+(?:(?:is|are|was|were)\s+)?(?:needed|required|necessary)|nothing\s+(?:needed\s+to\s+(?:change|be\s+changed)|needs\s+(?:to\s+)?(?:change|changing|fixing)|to\s+(?:change|fix))|already\s+(?:implemented|done|fixed|correct|present|in\s+place|handled|satisfied))\b/iu;
-/** A report that opens by saying the work is only partly done. */
-const PARTIAL_OPENING =
-	/^(?:(?:only\s+)?partial(?:ly)?\b|incomplete\b|(?:i\s+)?(?:did not|didn't|have not|haven't)\s+(?:finish|complete)|not\s+(?:all|everything|finished|complete)\b)/iu;
-
 /**
- * With files changed, an inability counts as partial work only when what the worker could not do is the work itself.
- * "Unable to run the tests here; implemented X" is a finish it could not verify, not an unfinished assignment.
+ * Observations, the one counter every evidence obligation reads (DESIGN 4.8): succeeded read-class calls and
+ * succeeded checks. The handback tool is not one.
  */
-const UNFINISHED_INABILITY = new RegExp(
-	`${INABILITY_OPENING.source}\\s+(?:to\\s+)?(?:finish|complete|implement|fix|address|apply|do\\s+(?:all|everything|the\\s+rest|it))\\b`,
-	"iu",
-);
-
-/**
- * The worker's report (a mutation report's summary, else its final prose) and its opening.
- * Only a report that opens with its inability counts: "the parser cannot overflow" is not one.
- * A leading conventional-commit subject line ("fix(scope): ...") is the report's title, not its opening.
- */
-function workerReportOpening(finalText: string | undefined): { report: string; opening: string } {
-	let report = finalText?.trim() ?? "";
-	try {
-		const parsed: unknown = JSON.parse(report);
-		if (parsed && typeof parsed === "object" && "summary" in parsed && typeof parsed.summary === "string") {
-			report = parsed.summary;
-		}
-	} catch {
-		// Plain final prose is also a valid worker report.
+export function observationCalls(
+	stats: ReadonlyMap<string, ToolCallStat>,
+	classify: (tool: string) => ActionClass,
+): number {
+	let observed = 0;
+	for (const stat of stats.values()) {
+		if (stat.tool === "clio_submit_result") continue;
+		if (stat.tool === ToolNames.Verify || classify(stat.tool) === "read") observed += stat.ok;
 	}
-	const opening = report.trimStart().replace(/^[a-z]+(?:\([^)\n]*\))?!?:[^\n]*\n\s*/u, "");
-	return { report, opening };
-}
-
-/**
- * An edit worker that changed files but opened its report by saying it could not
- * finish did part of its assignment. Its clean exit sealed "succeeded" and merged
- * the half-done tree under a subject such as "Could not finish everything".
- */
-export function workerPartialWorkDetail(input: {
-	activity: Pick<ToolActivitySummary, "mutatingSucceeded">;
-	mutatedPathCount: number | null;
-	finalText?: string;
-}): string | null {
-	const changed =
-		(input.mutatedPathCount ?? 0) > 0 || (input.mutatedPathCount === null && input.activity.mutatingSucceeded);
-	if (!changed) return null;
-	const { opening } = workerReportOpening(input.finalText);
-	if (!UNFINISHED_INABILITY.test(opening) && !PARTIAL_OPENING.test(opening)) return null;
-	const reason = opening.split(/\r?\n/u)[0]?.trim() ?? "";
-	return `worker reported it did not finish the assignment, so its changes are a partial result${reason ? `: ${reason}` : ""}`;
-}
-
-/** A clean process exit cannot overrule an edit worker's explicit report of inability. */
-export function workerNoWorkDetail(input: {
-	activity: ToolActivitySummary;
-	/**
-	 * False for a CLI subprocess: its tools run inside the external agent, so a zero
-	 * count says Clio saw nothing, not that the worker did nothing. Defaults to true.
-	 */
-	toolLaneObserved?: boolean;
-	limitationRecorded: boolean;
-	mutatedPathCount: number | null;
-	/** Permission asks the operator or main agent denied during the run. */
-	escalationsDenied?: number;
-	/** Who denied them, last one named. Absent reads as the operator. */
-	escalationDeniedBy?: "operator" | "main agent" | "safety judge";
-	/** Permission asks nobody answered inside their window, which the fallback then denied. */
-	escalationsTimedOut?: number;
-	/** Execute- or write-class calls policy refused without an escalation. */
-	blockedStateChanging?: number;
-	finalText?: string;
-	limitationDetail?: string;
-}): string | null {
-	const { report, opening } = workerReportOpening(input.finalText);
-	const reportedInability = INABILITY_OPENING.test(opening);
-	const unchanged = input.mutatedPathCount === 0;
-	// The operator must see that the run did nothing because they denied the call
-	// (flywheel p7/A5); the worker's own text may not open with an inability.
-	const denied = input.escalationsDenied ?? 0;
-	if (denied > 0 && !input.activity.mutatingSucceeded && (input.mutatedPathCount ?? 0) === 0) {
-		return `the ${input.escalationDeniedBy ?? "operator"} denied ${denied === 1 ? "the worker's permission request" : `${denied} of the worker's permission requests`}, so it changed nothing and the assignment was not done`;
-	}
-	// The same refusal with nobody at the keys sealed `✓ execution ok` over an unchanged tree.
-	const timedOut = input.escalationsTimedOut ?? 0;
-	if (timedOut > 0 && !input.activity.mutatingSucceeded && (input.mutatedPathCount ?? 0) === 0) {
-		return `nobody answered ${timedOut === 1 ? "the worker's permission request" : `${timedOut} of the worker's permission requests`} in time, so it changed nothing and the assignment was not done`;
-	}
-	// A store put is the deliverable of a store-only worker, though it touches no workspace path.
-	if (unchanged && !input.activity.storeWritten && (input.limitationRecorded || reportedInability)) {
-		const reason = input.limitationDetail?.trim() || report;
-		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
-	}
-	if (input.toolLaneObserved !== false && executedCalls(input.activity) === 0) {
-		return "worker executed no tools, so it did none of its assignment";
-	}
-	// A worker that found nothing to change says so; one incidental refusal on the way does not undo that finish.
-	const refused = input.blockedStateChanging ?? 0;
-	if (unchanged && refused > 0 && !input.activity.mutatingSucceeded && !NO_CHANGE_NEEDED_OPENING.test(opening)) {
-		return `the worker's ${refused === 1 ? "state-changing call was" : `${refused} state-changing calls were`} refused by policy and nothing changed, so the assignment was not done`;
-	}
-	return null;
-}
-
-/**
- * A run that owes `observed-evidence` and settled without executing one tool read nothing, so its report rests on
- * no evidence. Its clean exit sealed `succeeded`, quality=unmeasured and failed=0 (FX-19). The result-report call is
- * not a tool here: summarizeToolActivity already leaves it out. Null for any other obligation, and for a CLI
- * subprocess whose tool lane Clio cannot see.
- */
-export function readScopedNoToolsReason(input: {
-	activity: Pick<ToolActivitySummary, "calls" | "withheld">;
-	obligation: Obligation;
-	toolLaneObserved: boolean;
-}): string | null {
-	if (input.obligation !== "observed-evidence" || !input.toolLaneObserved || executedCalls(input.activity) > 0)
-		return null;
-	return "obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited";
-}
-
-export function blockedWriteDetail(attempted: number): string {
-	return `${attempted === 1 ? "the one write it attempted was" : `all ${attempted} writes it attempted were`} blocked by policy, so no workspace change landed`;
+	return observed;
 }

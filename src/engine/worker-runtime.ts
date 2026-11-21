@@ -2531,7 +2531,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A file-scoped coder sometimes ends its first reply with no tool call and a
 			// report that it has no edit tool or cannot find the file (p8/S1, p9/C3),
 			// then does the same work when asked again. The orchestrator fails every
-			// zero-call edit run as worker_no_work, so one repair round costs nothing
+			// zero-call edit run as obligation_unmet, so one repair round costs nothing
 			// the run had left. A second empty reply passes through to that outcome.
 			const zeroToolViolation =
 				toolExecutionsStarted === 0 &&
@@ -2543,7 +2543,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write)
 					? `no tool was called, so none of the assignment was done. The admitted tools are ${activeWorkerTools.join(", ")}, and they include ${activeWorkerTools.filter((tool) => tool === ToolNames.Edit || tool === ToolNames.Write).join(" and ")}. Inspect the workspace and do the assignment with them. If a tool refuses a call, report that refusal as the limitation.`
 					: null;
-			// A second no-work reply belongs to worker_no_work, even when its
+			// A second no-work reply belongs to obligation_unmet, even when its
 			// report is malformed. The p8/S1 recovery must not spend shape repairs.
 			const violation =
 				zeroToolRepairQueued && toolExecutionsStarted === 0
@@ -2564,11 +2564,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}).conformance === "fail";
 			if (helperSchema !== null && zeroToolRepairQueued && toolExecutionsStarted === 0) {
 				// An unsealed helper would otherwise hide the parent's no-work classification behind a generic failed exit.
-				// Without a helper the worker exits clean and the parent seals worker_no_work from the empty tool activity.
-				phase.sealOver("worker executed no tools, so it did none of its assignment");
+				// Without a helper the worker exits clean and the parent's grader seals obligation_unmet from the empty tool activity.
+				phase.sealOver("obligation change-or-declared unmet: worker executed no tools, so it did none of its assignment");
 				emit({
 					type: "clio_coder_run_outcome",
-					payload: { outcomeCode: "worker_no_work", detail: phase.sealedBy ?? "" },
+					payload: { outcomeCode: "obligation_unmet", detail: phase.sealedBy ?? "" },
 				});
 			} else if (violation === null && helperSchema !== null) {
 				const parsed = parseJsonObjectPayload(assistantMessageText(event.message) ?? "");

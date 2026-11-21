@@ -1,4 +1,5 @@
 import { taskCommitSubject } from "../../core/commit-message.js";
+import type { RunAssurance } from "../../core/telemetry/run-vocabulary.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { mutationReportChecks, mutationReportFailures } from "../agents/result-contract.js";
@@ -49,20 +50,52 @@ export function partialResultDetail(branch: string): string {
 const DECLARED_CHECK_DETAIL_MAX_CHARS = 120;
 
 export interface MergeGateInput {
-	/** Quality sealed on the receipt's result contract fact, if any. */
-	quality: string | undefined;
-	/** Host verification status, undefined when no check was configured. */
-	hostStatus: string | undefined;
+	/** The run's assurance (DESIGN 4.8): the one verdict value the gate reads. */
+	assurance: RunAssurance;
 	contract: ResultContract | null;
-	/** The worker's captured final answer. */
+	/** The worker's captured final answer, read only for its typed fields. */
 	output: string | null;
 	branch: string;
-	task?: string;
-	executedCheckingCalls?: number;
-	/** Shell commands the worker ran to a clean exit, verbatim; absent when the caller did not record them. */
-	executedShellCommands?: ReadonlyArray<string>;
 	/** Test cases or test files the task branch removed against its base, from `removedTestCases`. */
 	removedTests?: ReadonlyArray<string>;
+	/** Checks this run executed that failed on its final tree, from its typed validations. */
+	failedChecks?: ReadonlyArray<string>;
+}
+
+/**
+ * Why a compromised result is not trusted, in the words every surface shows: the merge gate's withheld reason and
+ * the grader's `assurance` rule both read it, so the card, the receipt and the envelope name one cause.
+ */
+export function compromisedReason(
+	contract: ResultContract | null,
+	output: string | null,
+	failedChecks: ReadonlyArray<string> = [],
+): string {
+	return compromisedVerdict(contract, output, failedChecks).reason;
+}
+
+function compromisedVerdict(
+	contract: ResultContract | null,
+	output: string | null,
+	failedChecks: ReadonlyArray<string>,
+): MergeGateVerdict {
+	const listed = (names: ReadonlyArray<string>): string => {
+		const named = names.slice(0, 3).map(boundedCheck).join("; ");
+		return `${named}${names.length > 3 ? `; and ${names.length - 3} more` : ""}`;
+	};
+	const failed = mutationReportFailures(contract, output);
+	const already = "if that failure was already there";
+	if (failed.length > 0)
+		return { reason: `the worker's own report lists a failing validation (${listed(failed)})`, appliesWhen: already };
+	if (failedChecks.length > 0)
+		return {
+			reason: `a check this run executed failed on its final tree (${listed(failedChecks)})`,
+			appliesWhen: already,
+		};
+	return {
+		reason: "its result is not trusted: a validation it claims was never observed or failed",
+		appliesWhen: "once a check backs the change",
+	};
 }
 
 /** A line that declares one test case, across the common frameworks. */
@@ -156,55 +189,6 @@ export interface MergeGateVerdict {
 }
 
 const TASK_CLAUSE_SPLIT = /[.;\n,]|\b(?:and|but|then)\b/iu;
-const VALIDATION_OPT_OUT =
-	/\b(?:do\s+not|don['’]t|never|skip|without|no\s+need\s+to|need\s+not)\s+(?:(?:run|execute|perform|do|running|executing)\s+)?(?:(?:the|any)\s+)?(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b|\bno\s+(?:tests?|checks?|validation)\s+(?:required|needed|necessary)\b|\b(?:tests?|checks?|validation)\b[^.\n]{0,40}\bnot\s+(?:required|needed|necessary)\b/iu;
-const VALIDATION_SUBJECT = /\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu;
-const VALIDATION_REQUEST =
-	/\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu;
-
-/**
- * "Verify the change by running: python3 -B -c 'import calc'" or "Run `make check` to verify": the task names the
- * exact command its validation is. Only these two spellings count, so "run the app" names nothing.
- */
-const NAMED_CHECK_BY_RUNNING = /\b(?:verify|validate|check|test)\b[^\n]{0,80}?\bby\s+running\b([^\n]*)/iu;
-const BACKTICKED = /`([^`\n]+)`/u;
-const COLON_COMMAND = /^\s*:\s*(\S[^\n]*)/u;
-const NAMED_CHECK_RUN_TO_VERIFY = /\brun\s+`([^`\n]+)`\s+to\s+(?:verify|validate|check|test)\b/iu;
-
-function normalizeCommand(command: string): string {
-	return command.trim().replace(/\s+/gu, " ");
-}
-
-/**
- * One spelling for a package script, for comparison only: `pnpm test`, `npm run test` and `yarn test` all read as
- * `npm-script test`, a form no real command contains.
- */
-function scriptForm(command: string): string {
-	return command.replace(/(^|&& |; )(?:npm|pnpm|yarn|bun) (?:run )?(?=\S)/gu, "$1npm-script ");
-}
-
-/** The command the task names as its check, or null when it names none. */
-function taskNamedCheck(task: string): string | null {
-	// Only an unmistakable command counts: backticked after "by running", or the colon form. "By running the tests"
-	// names nothing and falls back to taskRequestsValidation.
-	const rest = NAMED_CHECK_BY_RUNNING.exec(task)?.[1];
-	const byRunning = rest === undefined ? undefined : (BACKTICKED.exec(rest)?.[1] ?? COLON_COMMAND.exec(rest)?.[1]);
-	const raw = byRunning ?? NAMED_CHECK_RUN_TO_VERIFY.exec(task)?.[1];
-	if (raw === undefined) return null;
-	const command = normalizeCommand(
-		raw
-			.split(/\.\s/u)[0]
-			?.replace(/^`|`$/gu, "")
-			.replace(/[.;,]+$/u, "") ?? "",
-	);
-	return command.length > 0 ? command : null;
-}
-
-function taskRequestsValidation(task: string): boolean {
-	return task
-		.split(TASK_CLAUSE_SPLIT)
-		.some((clause) => !VALIDATION_OPT_OUT.test(clause) && VALIDATION_REQUEST.test(clause));
-}
 
 const TEST_REMOVAL_REQUEST =
 	/\b(?:delete|remove|drop|retire|prune)\b(?:(?!\b(?:so|until|making|make|that|which|because)\b)[^.\n]){0,60}\b(?:tests?|specs?|test\s+(?:cases?|files?|suites?))\b/iu;
@@ -222,31 +206,15 @@ export function taskRequestsTestRemoval(task: string): boolean {
 }
 
 /**
- * True when a clause of the task tells the worker not to validate. A check the
- * worker then reports as not run honored that instruction, so it is not a
- * reason to hold the merge (flywheel p7/A2).
- */
-function taskOptsOutOfValidation(task: string): boolean {
-	return task
-		.split(TASK_CLAUSE_SPLIT)
-		.some((clause) => VALIDATION_OPT_OUT.test(clause) && VALIDATION_SUBJECT.test(clause));
-}
-
-/**
- * Decide whether a succeeded merge-mode task worktree is kept off the
- * operator's branch. Returns the verdict when it is withheld, null when it may
- * merge. Three cases withhold: a report listing a failing validation, a report
- * that asked for a check it did not run (`declaredChecks`) without any passing
- * validation, and a diff that removes existing test cases. The first two yield
- * to passing host verification (the second merged a left-pad change onto a red
- * main, flywheel 31jukrioe38d). The third does not, because a passing suite
- * says nothing about a test that is gone.
+ * Decide whether a succeeded merge-mode task worktree is kept off the operator's branch. Returns the verdict when it
+ * is withheld, null when it may merge. It reads the run's assurance, never the task's or the report's prose: a
+ * compromised result is held (a failing check the worker's own report lists lowers assurance even when the host's
+ * declared checks passed), a grounded or reviewed one merges, and an unverified one merges unless its typed report
+ * names a check the host did not run. A diff that removes existing test cases is held whatever the assurance, because
+ * a passing suite says nothing about a test that is gone.
  */
 export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null {
-	// Ahead of the host-verified exit: a suite that passes proves nothing about
-	// a test the worker deleted, so only the operator can accept the removal.
-	// A task that asked for the removal got what it asked for (flywheel F-D1).
-	const removedTests = input.task !== undefined && taskRequestsTestRemoval(input.task) ? [] : (input.removedTests ?? []);
+	const removedTests = input.removedTests ?? [];
 	if (removedTests.length > 0) {
 		const shown = removedTests.slice(0, 2).map(boundedCheck).join("; ");
 		const more = removedTests.length > 2 ? `; and ${removedTests.length - 2} more` : "";
@@ -255,41 +223,11 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 			appliesWhen: "if removing those tests was intended",
 		};
 	}
-	if (input.hostStatus === "verified") return null;
-	if (input.quality === "fail") {
-		const failed = mutationReportFailures(input.contract, input.output);
-		const named = failed.slice(0, 3).map(boundedCheck).join("; ");
-		const more = failed.length > 3 ? `; and ${failed.length - 3} more` : "";
-		return {
-			reason: `the worker's own report lists a failing validation${named ? ` (${named}${more})` : ""}`,
-			appliesWhen: "if that failure was already there",
-		};
-	}
-	if (input.executedCheckingCalls === 0 && input.task !== undefined && taskRequestsValidation(input.task)) {
-		return {
-			reason: "the task requested validation but the worker executed no check",
-			appliesWhen: "once the requested validation passes",
-		};
-	}
-	// Unrelated clean calls (`python3 --version`, `echo hello`) satisfy the count above, so a task that names its
-	// check also needs that command among the ones that ran (rcsmoke zbook N1).
-	const named = input.task !== undefined ? taskNamedCheck(input.task) : null;
-	if (
-		named !== null &&
-		input.executedShellCommands !== undefined &&
-		!input.executedShellCommands.some((command) => scriptForm(normalizeCommand(command)).includes(scriptForm(named)))
-	) {
-		return {
-			reason: `the task named its check (${boundedCheck(named)}) but the worker never ran it`,
-			appliesWhen: "once that check passes",
-		};
-	}
-	if (input.contract === null) return null;
-	const reported = mutationReportChecks(input.contract, input.output);
-	const first = reported.declaredChecks[0];
-	if (first === undefined || reported.validationPassed) return null;
-	if (input.task !== undefined && taskOptsOutOfValidation(input.task) && !taskRequestsValidation(input.task))
-		return null;
+	if (input.assurance === "compromised")
+		return compromisedVerdict(input.contract, input.output, input.failedChecks ?? []);
+	if (input.assurance === "grounded" || input.assurance === "reviewed" || input.contract === null) return null;
+	const first = mutationReportChecks(input.contract, input.output).declaredChecks[0];
+	if (first === undefined) return null;
 	return {
 		reason: `the worker asked for a check the host did not run (${boundedCheck(first)})`,
 		appliesWhen: "once that check passes",

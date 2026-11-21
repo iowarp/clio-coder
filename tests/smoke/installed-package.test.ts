@@ -206,8 +206,12 @@ async function assertInstalledReasoningReplay(bin: string, cwd: string, home: st
 		const retained = request.messages.some(
 			(message: { reasoning_content?: string }) => message.reasoning_content === thought,
 		);
-		const delta =
-			requests.length === 1 ? { reasoning_content: thought } : { content: retained ? "The coefficient is 0.002." : "" };
+		// The artifact report is typed JSON with its completion (fleet design 4.3).
+		const report = JSON.stringify({
+			summary: "The coefficient is 0.002.",
+			completion: { state: "done", limitations: [], unverified: [] },
+		});
+		const delta = requests.length === 1 ? { reasoning_content: thought } : { content: retained ? report : "" };
 		res.setHeader("content-type", "text/event-stream");
 		res.end(
 			`data: ${JSON.stringify({ model: modelId, choices: [{ index: 0, delta, finish_reason: requests.length === 1 ? "length" : "stop" }] })}\n\ndata: [DONE]\n\n`,

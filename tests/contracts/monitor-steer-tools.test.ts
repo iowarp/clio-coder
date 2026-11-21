@@ -8,7 +8,7 @@ import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispa
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createRegistry, type ToolResult } from "../../src/tools/registry.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -39,6 +39,8 @@ function controlledWorker() {
 		},
 		events: (async function* () {
 			const outcome = await done;
+			// A provenance report carries the observed-evidence obligation (fleet design 4.8): the stub reads before it answers.
+			if (outcome.exitCode === 0) for (const event of observedReadEvents()) yield event;
 			if (outcome.exitCode === 0)
 				yield {
 					type: "message_end",

@@ -519,6 +519,73 @@
 				"promptCaching": true
 			},
 			"sessionId": null,
+			"verdict": {
+				"version": 1,
+				"obligation": "observed-evidence",
+				"rules": [
+					{
+						"id": "termination",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "change-return",
+						"layer": "V1",
+						"status": "not_applicable"
+					},
+					{
+						"id": "worker-outcome-code",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "finish-contract",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "writes-blocked",
+						"layer": "V1",
+						"status": "not_applicable"
+					},
+					{
+						"id": "final-output",
+						"layer": "V2",
+						"status": "pass"
+					},
+					{
+						"id": "result-contract",
+						"layer": "V2",
+						"status": "pass"
+					},
+					{
+						"id": "obligation",
+						"layer": "V3",
+						"status": "pass"
+					},
+					{
+						"id": "host-checks",
+						"layer": "V4",
+						"status": "pass"
+					},
+					{
+						"id": "removed-tests",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "assurance",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "landing",
+						"layer": "V6",
+						"status": "not_applicable"
+					}
+				],
+				"assurance": "unverified"
+			},
 			"terminalReason": "completed",
 			"routeDecision": {
 				"policyVersion": "route-policy/4",
@@ -2374,6 +2441,73 @@
 				"opened": "new"
 			},
 			"sessionId": null,
+			"verdict": {
+				"version": 1,
+				"obligation": "change-or-declared",
+				"rules": [
+					{
+						"id": "termination",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "change-return",
+						"layer": "V1",
+						"status": "not_applicable"
+					},
+					{
+						"id": "worker-outcome-code",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "finish-contract",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "writes-blocked",
+						"layer": "V1",
+						"status": "pass"
+					},
+					{
+						"id": "final-output",
+						"layer": "V2",
+						"status": "pass"
+					},
+					{
+						"id": "result-contract",
+						"layer": "V2",
+						"status": "not_applicable"
+					},
+					{
+						"id": "obligation",
+						"layer": "V3",
+						"status": "unknown"
+					},
+					{
+						"id": "host-checks",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "removed-tests",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "assurance",
+						"layer": "V4",
+						"status": "not_applicable"
+					},
+					{
+						"id": "landing",
+						"layer": "V6",
+						"status": "not_applicable"
+					}
+				],
+				"assurance": "unverified"
+			},
 			"terminalReason": "completed",
 			"routeDecision": {
 				"policyVersion": "route-policy/4",

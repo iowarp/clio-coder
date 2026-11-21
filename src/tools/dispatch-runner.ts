@@ -1474,11 +1474,7 @@ function readVerifiedGateRun(deps: DispatchToolDeps, runId: string): GateRunFact
 		outcome: settled.outcome,
 		exitCode: settled.exitCode,
 		...(settled.node ? { node: { id: settled.node.id } } : {}),
-		inspection: reviewerInspectionOf({
-			runtimeKind: settled.route.runtimeKind,
-			toolActivity: settled.toolActivity,
-			validationGrounding: settled.validationGrounding,
-		}),
+		inspection: reviewerInspectionOf({ outcomeCode: settled.outcomeCode, verdict: settled.verdict ?? null }),
 	};
 }
 
@@ -1573,7 +1569,7 @@ async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void>
 					decider,
 					correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
 					output: record.finalOutput,
-					reviewer: deciderReceipt.inspection ?? { toolCalls: null, ungrounded: [] },
+					reviewer: deciderReceipt.inspection ?? { obligationUnmet: false },
 				}).draft;
 			}
 			resolved.push(resolvePendingGateDecision(handle, draft));

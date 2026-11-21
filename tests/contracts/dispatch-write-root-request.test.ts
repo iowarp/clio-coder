@@ -46,6 +46,7 @@ function writeRootFleet() {
 							role: "assistant",
 							stopReason: "stop",
 							content: JSON.stringify({
+								completion: { state: "done", limitations: [], unverified: [] },
 								mutatedPaths: [],
 								validations: [],
 								summary: asking ? "stopped: tests/a.test.ts is outside my write roots" : "nothing left to change",
@@ -179,7 +180,7 @@ describe("a worker's request for wider write roots", () => {
 		try {
 			const first = await fleet.bundle.contract.dispatch(coderRequest(false));
 			const receipt = await first.finalPromise;
-			strictEqual(receipt.outcomeCode, "worker_no_work");
+			strictEqual(receipt.outcomeCode, "worker_not_done");
 			match(receipt.outcomeDetail ?? "", /re-dispatch with intent\.write_roots including tests\/a\.test\.ts/u);
 			strictEqual(fleet.bundle.contract.grants?.list({ pendingOnly: true }).length, 0);
 		} finally {
