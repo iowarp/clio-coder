@@ -155,7 +155,8 @@ export function dialectToolCall(
  * The effects a dialect hook's JSON answer on stdout (exit 0) decides, in the
  * agents' precedence: `continue: false`, then the PreToolUse
  * `permissionDecision`, then `decision: "block"`, then `additionalContext`.
- * `allow` grants nothing past Clio's own admission. A rewrite through
+ * `allow` grants nothing past Clio's own admission, and `ask` parks the call
+ * for the operator like any approval ask. A rewrite through
  * `updatedInput` is refused rather than run unchanged, since a hook that
  * rewrites a call did not agree to the original. Null when stdout is not a JSON
  * object, so the hook's plain-output handling applies.
@@ -194,7 +195,7 @@ export function dialectOutputEffects(
 			const decision = specific.permissionDecision;
 			if (decision === "deny") return [block(said(specific.permissionDecisionReason) ?? reason)];
 			if (decision === "ask")
-				return [block(`${said(specific.permissionDecisionReason) ?? reason} (the hook asked for approval)`)];
+				return [{ kind: "request_approval", reason: said(specific.permissionDecisionReason) ?? `hook ${hookId} asks` }];
 			if (blocks) return [block(reason)];
 			if (specific.updatedInput !== undefined)
 				return [block(`hook ${hookId} rewrote the call through updatedInput, which CLIO Coder does not apply`)];

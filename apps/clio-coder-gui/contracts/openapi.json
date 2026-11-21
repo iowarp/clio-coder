@@ -37465,7 +37465,8 @@
 													"require_tool",
 													"lock_tools",
 													"notify_operator",
-													"rewrite_tool_input"
+													"rewrite_tool_input",
+													"request_approval"
 												]
 											}
 										},

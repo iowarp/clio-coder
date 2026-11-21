@@ -1094,10 +1094,19 @@ interface ParkedCall {
 	abortCleanup?: () => void;
 	/** The hook drift a `git-hooks-changed` park showed the operator. */
 	hookDrift?: GitHookDriftReport;
+	/** Set when a before_tool hook's `request_approval` parked the call: what its hook stage decided. */
+	settledHookEffects?: ReadonlyArray<MiddlewareEffect>;
 }
 
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
+	/**
+	 * The before_tool effects of a call a hook parked for approval, keyed by the
+	 * options object the registry made for its park or its approved run, so the
+	 * call runs on what its hooks decided without running them again. Private:
+	 * no caller-built options object can be in it.
+	 */
+	const hookSettled = new WeakMap<ToolInvokeOptions, ReadonlyArray<MiddlewareEffect>>();
 	// The operator's own yolo exists only on the main session's registry (#419).
 	const operatorYoloScope = (level: AutonomyLevel): OperatorYoloScope | undefined =>
 		level === "yolo" && (deps.principal ?? "main") === "main" && deps.scratchRoots !== undefined
@@ -1401,6 +1410,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		/** When the body started, so an awaited after_tool hook learns how long it ran. */
 		let bodyStartedAt: number | undefined;
 		let execution: ExecutionProvenance = {};
+		// Set when a hook's approval request handed the call to the ask route, which then owns its arguments.
+		let handedOff = false;
 		const bodyMs = (): number => (bodyStartedAt === undefined ? 0 : Math.round(performance.now() - bodyStartedAt));
 		// Resolved once per admitted call, so the before_tool hook, the body and
 		// the after_tool hook all mean the same landing (undefined: not yet resolved).
@@ -1453,16 +1464,18 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// absorbed below, so the session keeps the record of what it carried.
 			const flowViolation = trueYolo() ? null : (sourceAdmissionRefusal(spec, call) ?? outboundFlowViolation(spec, call));
 			if (flowViolation !== null) return flowBlocked(flowViolation);
+			// A call a hook parked for approval already passed its hook stage; it runs on that stage's effects.
+			const settled = options !== undefined ? hookSettled.get(options) : undefined;
 			// The hook layer is the only control stage past safety admission. Guards
 			// (loop, protected artifacts, dispatch dedup) are before_tool
 			// registrations; the first block_tool effect decides the verdict. Keep
 			// this gate inside the admission cleanup boundary: dispatch may already
 			// own a provisional reservation by the time a guard blocks execution.
-			let beforeEffects = runToolHook("before_tool", spec, call, decision, options);
-			let block = firstBlockToolEffect(beforeEffects);
+			let beforeEffects = settled ?? runToolHook("before_tool", spec, call, decision, options);
+			let block = settled !== undefined ? null : firstBlockToolEffect(beforeEffects);
 			// Extension runtime hooks are awaited only when one matches this tool,
 			// so a call nothing gates takes no extra turn of the event loop.
-			if (!block && deps.middleware?.hasAwaitedHook?.("before_tool", spec.name)) {
+			if (settled === undefined && !block && deps.middleware?.hasAwaitedHook?.("before_tool", spec.name)) {
 				landing = hookLanding(spec, call);
 				const awaited = await runAwaitedToolHook("before_tool", spec, call, decision, options, landing, beforeEffects);
 				beforeEffects = [...beforeEffects, ...awaited];
@@ -1499,6 +1512,31 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (block) {
 				const verdict = guardBlocked(call, decision, block.reason, guardRuleIds.get(block));
 				return block.redundantRepeat === true ? { ...verdict, redundantRepeat: true } : verdict;
+			}
+			// A hook asked the operator. A call that carries an approval already has
+			// one; any other takes the route every ask takes (judge, refusals, card)
+			// and, once released, runs on these effects.
+			const approvalAsk =
+				settled === undefined && options?.approval === undefined
+					? beforeEffects.find((effect) => effect.kind === "request_approval")
+					: undefined;
+			if (approvalAsk?.kind === "request_approval") {
+				if (rewrittenArgs !== undefined)
+					return guardBlocked(
+						call,
+						decision,
+						`${spec.name} did not run: a hook asked for approval of a call an extension rewrote, and a rewritten call is not parked for approval (${approvalAsk.reason})`,
+					);
+				handedOff = true;
+				const parkOptions: ToolInvokeOptions = { ...(options ?? {}) };
+				hookSettled.set(parkOptions, beforeEffects);
+				return await routeAsk(
+					call,
+					call,
+					hookApprovalOutcome(call, decision, approvalAsk.reason),
+					parkOptions,
+					beforeEffects,
+				);
 			}
 			// Recoverability point: admission allowed the call and no hook blocked it,
 			// so a snapshot here precedes exactly the bodies that will run.
@@ -1641,9 +1679,51 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				};
 			}
 		} finally {
-			disposeAdmissionArgs(spec, admittedArgs);
-			if (rewrittenArgs !== undefined && rewrittenArgs !== admittedArgs) disposeAdmissionArgs(spec, rewrittenArgs);
+			// A call handed to the ask route keeps its prepared arguments: its refusal or its approved run releases them.
+			if (!handedOff) {
+				disposeAdmissionArgs(spec, admittedArgs);
+				if (rewrittenArgs !== undefined && rewrittenArgs !== admittedArgs) disposeAdmissionArgs(spec, rewrittenArgs);
+			}
 		}
+	};
+
+	/** The ask a before_tool hook's `request_approval` parks: the call's own classification, the hook's reason. */
+	const hookApprovalOutcome = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		reason: string,
+	): Extract<AdmitOutcome, { kind: "park" }> => {
+		const rejection = {
+			short: `${call.tool} needs approval: a hook asked (${reason})`,
+			detail: `A before_tool hook asked for the operator's approval before this ${call.tool} call runs: ${reason}`,
+			hints: ["Approve to run the call once.", "Deny to refuse it back to the model."],
+		};
+		// The ask names its own rail, not the rule that admitted the call.
+		const ask: SafetyDecision = {
+			kind: "ask",
+			classification: decision.classification,
+			rejection,
+			...(decision.policy !== undefined
+				? {
+						policy: {
+							...decision.policy,
+							kind: "ask" as const,
+							ruleId: HOOK_APPROVAL_RULE_ID,
+							reasonCode: HOOK_APPROVAL_RULE_ID,
+							reasons: [rejection.short],
+							rejection,
+						},
+					}
+				: {}),
+		};
+		return {
+			kind: "park",
+			decision: ask,
+			axis: approvalAxisId(ask, deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL),
+			// A worker's ordinary ask carries main authority, as admission gives it.
+			approvalAuthority: deps.principal === "worker" ? "main" : "operator",
+			source: "hook",
+		};
 	};
 
 	/** The hook input with what the session carries and the effective tool's declared metadata. */
@@ -2389,7 +2469,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// A denied/cancelled park is still a model attempt: observe it so
 			// identical retries trip the loop detector. When the detector fires, its
 			// reason replaces the generic denial so the model gets recovery guidance.
-			const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
+			// A hook-raised park was observed by the hook stage that raised it.
+			const loopReason =
+				entry.settledHookEffects !== undefined ? null : observeRejectedAttempt(entry.call, entry.decision, entry.options);
 			entry.resolve(
 				guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
 					parkDenial(
@@ -2554,6 +2636,26 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (outcome.kind === "execute") {
 			return runSpec(outcome.spec, admissionCall, outcome.decision, options);
 		}
+		return routeAsk(admissionCall, factCall, outcome, options);
+	};
+
+	/**
+	 * Route one ask: the safety judge, the contained-yolo and no-listener
+	 * refusals, then a park on the operator card. Admission asks and a before_tool
+	 * hook's `request_approval` take the same route; `hookEffects` is that hook
+	 * stage's result, which already observed the attempt and which the call
+	 * reuses when it runs.
+	 */
+	const routeAsk = async (
+		admissionCall: ClassifierCall,
+		factCall: ClassifierCall,
+		outcome: Extract<AdmitOutcome, { kind: "park" }>,
+		options: ToolInvokeOptions | undefined,
+		hookEffects?: ReadonlyArray<MiddlewareEffect>,
+	): Promise<RegistryVerdict> => {
+		// The hook stage already showed the loop guard this attempt; running it again would count it twice.
+		const rejected = (): string | null =>
+			hookEffects !== undefined ? null : observeRejectedAttempt(admissionCall, outcome.decision, options);
 		// The safety judge reviews the ask before anyone is asked. An allow runs
 		// the call, a block refuses it back to the model, and anything else parks
 		// exactly as before, with the judge's reason on the card when it had one.
@@ -2584,7 +2686,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const reasonCode = `${SAFETY_JUDGE_REASON_PREFIX}${judged.rule}`;
 			const blocked = blockDecision(
 				outcome.decision,
-				{ short: `${call.tool} blocked by the safety judge (rule ${judged.rule})`, detail: judged.refusal, hints: [] },
+				{
+					short: `${admissionCall.tool} blocked by the safety judge (rule ${judged.rule})`,
+					detail: judged.refusal,
+					hints: [],
+				},
 				{ kind: "block", reasonCode },
 			);
 			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode });
@@ -2595,7 +2701,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				judged.allowedBy,
 				reasonCode,
 			);
-			return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
+			return (hookEffects !== undefined ? null : observeBlockedAttempt(admissionCall, verdict, options)) ?? verdict;
 		}
 		const judgeGate = judged.kind === "park" ? { gateReason: judged.gateReason, gateBuild: judged.build } : {};
 		if (unattended) {
@@ -2607,7 +2713,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			else if (judged.kind === "park")
 				observeUnattendedRefusal(admissionCall, outcome.decision, "no-verdict", judged.cause);
 			else observeUnattendedRefusal(admissionCall, outcome.decision, "operator-only");
-			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			const loopReason = rejected();
 			return (
 				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
 				parkDenial(
@@ -2628,7 +2734,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
 				reasonCode: NO_PARK_LISTENER_REASON_CODE,
 			});
-			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			const loopReason = rejected();
 			return (
 				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
 				parkDenial(
@@ -2640,7 +2746,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const abortReason = PARK_ABORT_REASON;
 		if (options?.signal?.aborted) {
 			disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
-			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			const loopReason = rejected();
 			return { kind: "blocked", reason: loopReason ?? abortReason, decision: outcome.decision };
 		}
 		return new Promise<RegistryVerdict>((resolve) => {
@@ -2688,6 +2794,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				resolve: settle,
 				closePark,
 				...(outcome.hookDrift !== undefined ? { hookDrift: outcome.hookDrift } : {}),
+				...(hookEffects !== undefined ? { settledHookEffects: hookEffects } : {}),
 			};
 			if (options !== undefined) parkedCall.options = options;
 			if (options?.signal) {
@@ -2959,6 +3066,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						});
 						return;
 					}
+					// A hook asked the operator, so only an operator's grant releases the call; a re-admission sweep leaves it waiting.
+					if (entry.settledHookEffects !== undefined && grant === undefined) {
+						reparkEntry(entry, reparkIndex);
+						return;
+					}
 					// A one-shot grant covers only the parked call it selected. Calls
 					// that parked while the overlay was already open remain queued and
 					// need their own confirmation, so a concurrent privileged call
@@ -3019,6 +3131,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 										...(grant.issuer !== undefined ? { issuer: grant.issuer } : {}),
 									},
 								};
+					// The approved call runs on what its hook stage decided, without running the hooks again.
+					if (entry.settledHookEffects !== undefined && approvedOptions !== undefined)
+						hookSettled.set(approvedOptions, entry.settledHookEffects);
 					// Seal the park before the body runs. Everything after this line is
 					// the tool working, and the caller charges that to the tool.
 					entry.closePark();
@@ -3237,6 +3352,9 @@ function safetyJudgeAllowedDecision(ask: SafetyDecision): SafetyDecision {
 }
 
 const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";
+/** The rail a before_tool hook's `request_approval` parks on. */
+const HOOK_APPROVAL_RULE_ID = "middleware-hook-ask";
+
 const NO_PARK_LISTENER_REASON =
 	"refused: this call needs operator confirmation and no permission listener is registered to ask for it";
 /** Audit code of a call contained yolo refused because it would have waited for the operator. */

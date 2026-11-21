@@ -1476,6 +1476,16 @@ describe("user hook applicability", () => {
 		]);
 		stdout = JSON.stringify({ decision: "block", reason: "legacy block" });
 		deepStrictEqual(claude.evaluate(bash), [{ kind: "block_tool", reason: "legacy block", severity: "hard-block" }]);
+		stdout = JSON.stringify({
+			hookSpecificOutput: { permissionDecision: "ask", permissionDecisionReason: "confirm the secret read" },
+		});
+		deepStrictEqual(claude.evaluate(bash), [{ kind: "request_approval", reason: "confirm the secret read" }]);
+		ok(
+			issuesFor({ on: "turn_start", kind: "effect", effect: { kind: "request_approval", reason: "x" } }).some((i) =>
+				i.includes("before_tool"),
+			),
+			"an approval request applies only before a tool runs",
+		);
 		stdout = JSON.stringify({ hookSpecificOutput: { permissionDecision: "allow" } });
 		deepStrictEqual(claude.evaluate(bash), [], "allow grants nothing past Clio's own admission");
 		stdout = JSON.stringify({ hookSpecificOutput: { additionalContext: "touches generated files" } });

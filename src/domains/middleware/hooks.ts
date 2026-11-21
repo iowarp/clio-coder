@@ -53,7 +53,7 @@ import { validateMiddlewareEffect } from "./validate.js";
  * apply through turn-middleware.ts; on_compaction is observe-only.
  */
 const USER_HOOK_APPLIED_EFFECTS: Readonly<Record<MiddlewareHook, ReadonlyArray<MiddlewareEffectKind>>> = {
-	before_tool: ["block_tool", "annotate_tool_result", "require_tool", "lock_tools", "protect_path"],
+	before_tool: ["block_tool", "annotate_tool_result", "require_tool", "lock_tools", "protect_path", "request_approval"],
 	after_tool: ["annotate_tool_result", "require_tool", "lock_tools", "protect_path"],
 	turn_start: ["inject_reminder", "notify_operator", "require_tool", "lock_tools"],
 	turn_end: ["inject_reminder", "request_continuation", "notify_operator"],
