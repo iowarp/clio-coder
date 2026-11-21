@@ -121,6 +121,9 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"cat 3>notes.md 1>&3 <<'EOF'\ncredentials.yaml\nEOF",
 		// Neon round: a locale-quoted command name bash may translate to any program.
 		"$\"cat\" <<'EOF'\nrm -rf protected.txt; cat .env\nEOF",
+		// A step that opens the names a copied body holds.
+		"cat <<'EOF' > f && head -c 4 f | wc --files0-from=-\n.env\nEOF",
+		"cat <<'EOF' > f && head -c 4 f > f2 && wc --files0-from=f2\n.env\nEOF",
 		"wc -c < nope.key",
 		"if head nope.key; then :; fi",
 		"od -c *.key",

@@ -32,14 +32,16 @@ import {
  * commands. The command line itself, redirect targets included, stays judged.
  */
 
-/** Steps that run no file and execute nothing they read. */
+/**
+ * Steps that run no file, execute nothing they read and open no file their input or a file names: `wc` is not one,
+ * since GNU `wc --files0-from` opens the names a copied body holds.
+ */
 const INERT_STEPS: ReadonlySet<string> = new Set([
 	"cat",
 	"tee",
 	"echo",
 	"printf",
 	"ls",
-	"wc",
 	"head",
 	"tail",
 	"grep",
