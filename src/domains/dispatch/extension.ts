@@ -414,7 +414,7 @@ import {
 	judgeWithheldCause,
 } from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
-import { answerBudgetMessage, sealedAnswerBudgetBytes } from "./handback.js";
+import { answerBudgetMessage, sealedAnswerBudgetBytes, wallHandbackOutcomeDetail } from "./handback.js";
 import {
 	classifyHeartbeat,
 	DEFAULT_HEARTBEAT_SPEC,
@@ -1526,6 +1526,9 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 	const code = OUTCOME_CODE_SPECIFICITY.find((candidate) => codes.has(candidate)) ?? null;
 	if (codes.size <= 1) return { code, conflict: null };
 	if ([...codes].every((candidate) => LOOP_DEGENERATION_CODES.has(candidate))) return { code, conflict: null };
+	// A run the wall clock moved to handback that then ends without an answer is one story, told at settle (fleet M8).
+	if (code === "worker_run_timeout" && codes.size === 2 && codes.has("worker_final_output_missing"))
+		return { code, conflict: null };
 	return {
 		code,
 		conflict: `conflicting trusted outcome codes: ${[...codes].sort().join(", ")}`,
@@ -10301,6 +10304,15 @@ export function createDispatchBundle(
 				// meet a grounding rule from a prompt that asks for the impossible.
 				const workerCodeDetail =
 					resolvedOutcomeCode.code === null ? undefined : trustedOutcomeDetails.get(resolvedOutcomeCode.code);
+				// DESIGN 4.5 (fleet M8): the host, not the worker's line written at the handback, says whether a report came back.
+				const wallHandback =
+					resolvedOutcomeCode.code === "worker_run_timeout"
+						? wallHandbackOutcomeDetail({
+								reported: hasDurableFinalOutput(outputCapture.snapshot()),
+								unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+								signal: result.signal ?? null,
+							})
+						: undefined;
 				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
 				const classifyTool = (tool: string): ActionClass => safety.classify({ tool }).actionClass;
 				const mutatedPathCount = finishContract?.assessment.mutatedPaths.length ?? null;
@@ -10318,6 +10330,7 @@ export function createDispatchBundle(
 						code: resolvedOutcomeCode.code,
 						...(workerCodeDetail !== undefined ? { detail: workerCodeDetail } : {}),
 					},
+					...(wallHandback !== undefined ? { wallHandback } : {}),
 					finishGateEngaged: finishContract?.rigor === "high" && finishContract.assessment.kind === "engage",
 					blockedWrites: blockedWriteAttempts(toolStats, classifyTool, mutatedPathCount),
 				};
@@ -10600,7 +10613,8 @@ export function createDispatchBundle(
 				// A worker stopped at its tool-call cap, or one that reported it did not
 				// finish, commits what it changed on its preserved branch as a partial
 				// result: never merged, never dropped.
-				const cappedPartial = !workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined);
+				const cappedPartial =
+					!workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined, finalOutcome);
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;

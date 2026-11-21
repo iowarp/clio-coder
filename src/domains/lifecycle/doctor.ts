@@ -51,6 +51,7 @@ import { shadowedPlaybooks } from "../agents/playbook.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
 import { inspectMemoryStoreRepair, type MemoryStoreRepair, repairMemoryStore } from "../memory/index.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
+import { ModelCatalogOverlays, resolveModelCatalogOverlayRoots } from "../providers/catalog-overlays.js";
 import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
@@ -1750,7 +1751,52 @@ async function systemOneEngineFindings(
  * same issues one per line for feeding back to whoever wrote the file.
  */
 export function runDoctorHarnessChecks(workspaceRoot: string = process.cwd()): DoctorFinding[] {
-	return [...harnessFindings(workspaceRoot), ...playbookShadowFindings(workspaceRoot)];
+	return [
+		...harnessFindings(workspaceRoot),
+		...playbookShadowFindings(workspaceRoot),
+		...modelCatalogOverlayFindings(workspaceRoot),
+	];
+}
+
+/**
+ * The operator's `model-catalog.d` overlays: which entries loaded and from where, and a warning for each file the
+ * loader skipped. Silent when no overlay directory exists.
+ */
+function modelCatalogOverlayFindings(workspaceRoot: string): DoctorFinding[] {
+	let overlays: ModelCatalogOverlays;
+	let roots: ReturnType<typeof resolveModelCatalogOverlayRoots>;
+	try {
+		roots = resolveModelCatalogOverlayRoots({ cwd: workspaceRoot });
+		if (roots.length === 0) return [];
+		overlays = new ModelCatalogOverlays(roots);
+	} catch (err) {
+		return [
+			{
+				ok: false,
+				name: "model catalog overlays",
+				detail: `could not be read, so no overlay applies: ${err instanceof Error ? err.message : String(err)}; fix the directory, then rerun \`clio-coder doctor\``,
+			},
+		];
+	}
+	const entries = overlays.entries();
+	const families = [...new Set(entries.map((entry) => entry.family))];
+	const shown = families.length > 8 ? [...families.slice(0, 8), `${families.length - 8} more`] : families;
+	const loaded: DoctorFinding = {
+		ok: true,
+		name: "model catalog overlays",
+		detail: `${entries.length} ${entries.length === 1 ? "entry" : "entries"}${shown.length > 0 ? ` (${shown.join(", ")})` : ""} from ${roots.map((root) => root.dir).join(", ")}`,
+	};
+	return [
+		loaded,
+		...overlays.problems().map(
+			(problem): DoctorFinding => ({
+				ok: true,
+				level: "warn",
+				name: "model catalog file",
+				detail: `${problem}; this file is skipped, the other overlay files still apply; fix or remove it, then rerun \`clio-coder doctor\``,
+			}),
+		),
+	];
 }
 
 /** A user or project playbook that replaces a builtin's or the operator's of the same name, so it is not silent. */

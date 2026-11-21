@@ -442,6 +442,23 @@ describe("main compiled-prompt cache identity", () => {
 		// never to the transcript.
 		deepStrictEqual(cacheNotices, [["prompt_recompiled"]]);
 		deepStrictEqual(transcriptNotices, []);
+
+		// M-21: a compile superseded before it was recorded (a resume prices its budget before the turn restores its
+		// thinking level) is not the prompt the next one follows: back to the recorded bytes is no recompile.
+		epoch = "4:1";
+		promptBody = "# unsent interim prompt";
+		await context.ensureSessionPrompt(agentRuntime);
+		epoch = "5:1";
+		promptBody = "# changed prompt";
+		await context.ensureSessionPrompt(agentRuntime);
+		context.logPromptCompileIfPending();
+		const settled = promptEntries.at(-1) as { data?: { previousHash?: string | null; hash?: string } } | undefined;
+		strictEqual(settled?.data?.previousHash, sha256("# changed prompt"), "provenance chains from the recorded prompt");
+		context.consumeExpectedColdReasons("llama.cpp");
+		const returnedPayload = context.promptCachePayloadForAssistant({ input: 1 } as never) as {
+			expectedColdReasons?: string[];
+		};
+		strictEqual(returnedPayload.expectedColdReasons, undefined, "the recorded bytes sent again are not cold");
 		context.dispose();
 	});
 });

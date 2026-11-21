@@ -56,6 +56,9 @@ import { fileURLToPath } from "node:url";
 import { type BashCommandProgress, combineLiveBashOutput } from "../../core/bash-exec.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
+import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { yoloContainmentNotes } from "../../core/sandbox/main-session.js";
+import type { SandboxMode } from "../../core/sandbox/types.js";
 import { emitApproval } from "../../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
@@ -499,6 +502,8 @@ export interface AcpRoutingSnapshot {
 export interface AcpSafeSettingsSnapshot extends AcpRoutingSnapshot {
 	thinkingLevel: AcpThinkingLevel;
 	autonomy: AutonomyLevel;
+	/** What the yolo mode description reads to state the real sandbox and judge; never sent to the client. */
+	containment?: { sandbox: SandboxMode; judgeEnabled: boolean };
 }
 
 /** Who a settings change from an ACP client is attributed to: the Clio GUI names itself, any other client is acp (#434). */
@@ -2784,6 +2789,16 @@ const ACP_EMPTY_TRUNCATED_TARGET_LIST_BYTES = utf8Bytes(
 // Session summaries share the same JSON-RPC line ceiling. Keep a
 // stable newest-first prefix of whole rows and reserve 16 KiB for the envelope.
 const ACP_MAX_SESSION_LIST_RESULT_BYTES = 240 * 1024;
+
+/** The yolo mode's description, with the sandbox backend and judge state this host's yolo runs under (M-19). */
+function yoloModeDescription(containment: AcpSafeSettingsSnapshot["containment"]): string {
+	const notes = yoloContainmentNotes(
+		containment?.sandbox ?? "auto",
+		sandboxAvailability(),
+		containment?.judgeEnabled ?? true,
+	);
+	return `Runs without approval stops: ${notes.sandbox}; ${notes.judge}; a call that would need your approval is refused instead of asked (unless the operator's settings chose unconfined yolo). Questions still reach you.`;
+}
 
 function safeSettingsProjection(snapshot: AcpSafeSettingsSnapshot): AcpSafeSettings {
 	const thinkingLevel = ACP_THINKING_LEVEL_SET.has(snapshot.thinkingLevel) ? snapshot.thinkingLevel : "off";
@@ -5394,8 +5409,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			{
 				id: "yolo",
 				name: "yolo",
-				description:
-					"Runs without approval stops: the same sandbox and safety judge, and a call that would need your approval is refused instead of asked (unless the operator's settings chose unconfined yolo). Questions still reach you.",
+				description: yoloModeDescription(options.settings?.read().containment),
 			},
 		],
 	});

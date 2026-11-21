@@ -14,13 +14,14 @@ import {
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
-import { resolveRunWall, runWallCapMs } from "../../src/domains/dispatch/run-limits.js";
+import { resolveRunWall, runWallCapMs, wallClockMessage } from "../../src/domains/dispatch/run-limits.js";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { finishedRun, PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -517,6 +518,11 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 		});
 		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "internal"), DEFAULT_SETTINGS.fleet.limits.internalRunTimeoutMs);
 		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "user"), 1_800_000);
+		// The worker keeps working and the host's 85% handback asks for the report; a quit cue made coders stop at 13 s.
+		const wallLine = wallClockMessage(120_000);
+		match(wallLine, /Keep working/u);
+		match(wallLine, /At 85% the host withdraws your tools and asks for your report/u);
+		ok(!/stops as timed out/u.test(wallLine), wallLine);
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: (spec) => {
@@ -581,6 +587,107 @@ describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
 			deepStrictEqual(receipt.checkoutChanges?.changedPaths, ["src/partial.ts"]);
 			ok(JSON.stringify(receipt).includes("11 modules remain"), "the receipt keeps the handback report");
 			match(receipt.outcomeDetail ?? "", /wall clock/u);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("a run stopped at the wall with a tool call in flight after handback says it wrote no report", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: () => {
+				partial(repo);
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: Promise.resolve({ exitCode: 1, signal: "SIGTERM" }),
+					events: (async function* () {
+						yield { type: "clio_coder_tool_start", payload: { tool: "bash", toolCallId: "call-sleep" } };
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: {
+								outcomeCode: "worker_run_timeout",
+								detail: "worker_run_timeout: the run reached 85% of its 120 s wall clock and handed back its report",
+							},
+						};
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: {
+								outcomeCode: "worker_final_output_missing",
+								detail: "worker loop ended without a final assistant output (stopReason=aborted)",
+							},
+						};
+					})(),
+					abort() {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch(coder(repo));
+			const receipt = await run.finalPromise;
+			equal(receipt.outcome, "timed_out");
+			const detail = receipt.outcomeDetail ?? "";
+			ok(!/handed back its report/u.test(detail), `the detail claims a report that never came: ${detail}`);
+			ok(!/conflicting trusted outcome codes/u.test(detail), `handback then no report is one story: ${detail}`);
+			match(detail, /1 tool call \(bash\) still running/u);
+			match(detail, /before it wrote a report/u);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("a timed-out worktree coder names the host's changed paths and the unmerged branch that holds them", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec) => {
+				const tree = (spec as { taskWorktree?: { path: string } }).taskWorktree?.path;
+				if (tree !== undefined) partial(tree);
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						yield { type: "tool_execution_start", toolCallId: "w", toolName: "write", args: { path: "src/partial.ts" } };
+						yield { type: "tool_execution_end", toolCallId: "w", toolName: "write", isError: false };
+						yield { type: "clio_coder_tool_finish", payload: { tool: "write", outcome: "ok", durationMs: 1 } };
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: { outcomeCode: "worker_run_timeout", detail: "worker_run_timeout: the run reached 85%" },
+						};
+						yield {
+							type: "message_end",
+							message: { role: "assistant", stopReason: "stop", content: "Ported src/claimed.ts; 11 remain." },
+						};
+					})(),
+					abort() {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch({ ...coder(repo), worktree: true });
+			const receipt = await run.finalPromise;
+			equal(receipt.outcome, "timed_out");
+			const branch = `clio-coder/task/${receipt.runId}`;
+			equal(receipt.worktree?.branch, branch);
+			equal(receipt.worktree?.applied, false);
+			deepStrictEqual(receipt.worktree?.changedPaths, ["src/partial.ts"]);
+			equal(
+				execFileSync("git", ["show", `${branch}:src/partial.ts`], { cwd: repo, encoding: "utf8" }),
+				"export const ported = 1;\n",
+			);
+			const detail = receipt.outcomeDetail ?? "";
+			ok(detail.includes(`unmerged on ${branch}`), detail);
+			ok(detail.includes(`clio-coder fleet land ${branch} --yes`), detail);
+			const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY).join(" ");
+			ok(labels.includes('changed=1["src/partial.ts"]'), labels);
 		} finally {
 			await bundle.extension.stop?.();
 			rmSync(repo, { recursive: true, force: true });
