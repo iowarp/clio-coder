@@ -2939,9 +2939,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * The level the triage round asks for. Off is sent as off, exactly as before the setting existed; any other level
-	 * resolves through the route the way the chat route's level does, so a model without that level gets its nearest
-	 * supported one. A route that no longer resolves keeps the round at off.
+	 * The level the triage round asks for, resolved through the route the way the chat route's level does, so a model
+	 * without that level, off included, gets its nearest supported one. A route that no longer resolves keeps the
+	 * round at off.
 	 */
 	const triageThinkingLevel = (
 		level: ThinkingLevel,
@@ -2949,7 +2949,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		wireModelId: string,
 		model: EngineModel,
 	): ThinkingLevel => {
-		if (level === "off") return "off";
 		const resolved = resolveRuntimeTarget(deps.providers, {
 			targetId,
 			wireModelId,
@@ -4432,15 +4431,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								stopReason: record.stopReason,
 								retries: turnRetryAttempts + providerRetryAttempts,
 								// The post-tool guard stops between calls, so no call carries its cause; the ledger reply does (CLI-3).
+								// A loop-guard or turn-budget-roll stop is the guard's, read off the owner it aborted (C-10).
 								cause: canceled
 									? "operator_cancel"
 									: autonomyStopped
 										? "autonomy_stop"
 										: jobClockStopped
 											? "job_clock"
-											: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
-												? "oversized_tool_result"
-												: undefined,
+											: owner !== null && owner === guardStoppedOwner
+												? "loop_guard"
+												: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
+													? "oversized_tool_result"
+													: undefined,
 								noAnswer: ending?.kind === "no_answer" ? ending.cause : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
@@ -4653,6 +4655,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptByTriage = options?.source === "triage";
 				state.activeInterruptByAutonomy = options?.source === "autonomy";
 				state.activeInterruptByJobClock = options?.source === "job_clock";
+				state.activeInterruptByLoopGuard = options?.source === "loop_guard";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))

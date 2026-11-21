@@ -318,6 +318,125 @@ test("an OAuth rejection refreshes the sent token once, then retries or ends wit
 		});
 });
 
+test("a retried request is recorded recovered when it answers, not when the rest of its turn ends (C-26)", async () => {
+	const failed = {
+		role: "assistant",
+		content: [],
+		stopReason: "error",
+		errorMessage: "Connection error.",
+	} as unknown as AgentMessage;
+	const answered = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call", name: "read", arguments: {} }],
+		stopReason: "toolUse",
+	} as unknown as AgentMessage;
+	const done = { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" } as AgentMessage;
+	type Listener = (event: { type: string; message?: AgentMessage }) => unknown;
+	type Round = (turn: {
+		emit(message: AgentMessage): Promise<void>;
+		abort(): void;
+		phases(): string[];
+	}) => Promise<void>;
+	/** One retry chain whose continue() plays one round per call; the rest of a turn runs on inside its continue. */
+	const chain = async (...rounds: Round[]) => {
+		const state = { messages: [failed] as AgentMessage[] };
+		const listeners = new Set<Listener>();
+		const statuses: Array<[string, number]> = [];
+		const controller = new AbortController();
+		const turn = {
+			async emit(message: AgentMessage) {
+				state.messages.push(message);
+				for (const listener of listeners) await listener({ type: "message_end", message });
+			},
+			abort: () => controller.abort(),
+			phases: () => statuses.map(([phase]) => phase),
+		};
+		const runtime = {
+			runtimeId: "litellm",
+			runtimeResolution: { target: { id: "gw" }, runtime: { id: "litellm" } },
+			agent: {
+				state,
+				subscribe(listener: Listener) {
+					listeners.add(listener);
+					return () => listeners.delete(listener);
+				},
+				async continue() {
+					const round = rounds.shift();
+					ok(round, "no more rounds scripted");
+					await round(turn);
+				},
+			},
+		} as unknown as AgentRuntime;
+		const recovery = createTurnRecovery({
+			state: createTurnState(),
+			persistence: { appendRetryStatus() {}, wasPersisted: () => true } as unknown as TurnRecoveryDeps["persistence"],
+			context: {} as TurnRecoveryDeps["context"],
+			retrySettings: () => ({ ...DEFAULT_RETRY_SETTINGS, baseDelayMs: 1, maxDelayMs: 1 }),
+			turnSignal: () => controller.signal,
+			markPersistedUserEcho: async (_text, prompt) => prompt(),
+			emitRetryStatus: (status) => {
+				if (status.phase !== "waiting") statuses.push([status.phase, status.attempt]);
+			},
+			emitFailureMessage() {},
+			emitNotice() {},
+		});
+		const handled = await recovery.runTransientRetryChain(
+			runtime,
+			"request",
+			{ stopReason: "error", errorMessage: "Connection error.", message: failed },
+			[failed],
+		);
+		return { handled, statuses, phases: turn.phases(), listeners: listeners.size };
+	};
+	let atAnswer: string[] = [];
+	const answeredThenDone = await chain(async (turn) => {
+		await turn.emit(answered);
+		atAnswer = turn.phases();
+		await turn.emit(done);
+	});
+	strictEqual(answeredThenDone.handled, true);
+	deepStrictEqual(atAnswer, ["scheduled", "retrying", "recovered"]);
+	deepStrictEqual(
+		answeredThenDone.phases,
+		["scheduled", "retrying", "recovered"],
+		"a second answer records nothing more",
+	);
+	strictEqual(answeredThenDone.listeners, 0);
+	// A later drop inside the same continue starts its own ladder at its first rung.
+	const freshLadder = await chain(
+		async (turn) => {
+			await turn.emit(answered);
+			throw new Error("Connection error.");
+		},
+		async (turn) => turn.emit(done),
+	);
+	deepStrictEqual(freshLadder.statuses, [
+		["scheduled", 1],
+		["retrying", 1],
+		["recovered", 1],
+		["scheduled", 1],
+		["retrying", 1],
+		["recovered", 1],
+	]);
+	strictEqual(freshLadder.listeners, 0);
+	// A later failure that may not retry entered no ladder, so nothing is exhausted.
+	const laterRefusal = await chain(async (turn) => {
+		await turn.emit(answered);
+		throw Object.assign(new Error("Bad request."), { status: 400 });
+	});
+	strictEqual(laterRefusal.handled, true);
+	deepStrictEqual(laterRefusal.phases, ["scheduled", "retrying", "recovered"]);
+	strictEqual(laterRefusal.listeners, 0);
+	// An answer that lands after Esc, /new or /resume belongs to no live turn.
+	const lateAnswer = await chain(async (turn) => {
+		turn.abort();
+		await turn.emit(answered);
+	});
+	strictEqual(lateAnswer.handled, true);
+	deepStrictEqual(lateAnswer.phases, ["scheduled", "retrying"]);
+	strictEqual(lateAnswer.listeners, 0);
+});
+
 test("Stop fences deferred preparation and compaction before model calls or late publication", async (t) => {
 	for (const phase of ["prepare", "compaction"] as const)
 		for (const navigate of [false, true]) {
