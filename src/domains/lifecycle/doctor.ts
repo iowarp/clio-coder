@@ -1000,7 +1000,8 @@ export function formatDoctorReport(findings: DoctorFinding[]): string {
 /** Keep CLI, JSON and in-session warnings actionable even when an optional check only supplies a diagnosis. */
 export function withDoctorCommand(finding: DoctorFinding): DoctorFinding {
 	if (finding.ok && finding.level !== "warn" && finding.level !== "error") return finding;
-	if (/`(?:clio-coder(?:`| [^`<>]+`)|pnpm [^`]+`|chmod [^`]+`)/.test(finding.detail)) return finding;
+	if (/`(?:clio-coder(?:`| [^`<>]+`)|pnpm [^`]+`|chmod [^`]+`|export [A-Za-z_]\w*=[^`]+`)/.test(finding.detail))
+		return finding;
 	const name = finding.name;
 	const command = /^(?:settings|credentials|repair|state metadata|.* dir$|installation files)/.test(name)
 		? "clio-coder doctor --fix"
@@ -1015,7 +1016,8 @@ export function withDoctorCommand(finding: DoctorFinding): DoctorFinding {
 						: /^(?:install method|engine runtime|node version)/.test(name)
 							? "clio-coder upgrade"
 							: "clio-coder config inspect --json";
-	return { ...finding, detail: `${finding.detail}; next: \`${command}\`` };
+	// A detail that ends its sentence loses the period, so the join never reads `.; next:`.
+	return { ...finding, detail: `${finding.detail.replace(/\.$/u, "")}; next: \`${command}\`` };
 }
 
 /**

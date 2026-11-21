@@ -26,7 +26,7 @@
 
 - Text folding applies to `interop` (except `interop skills`), `toolchain`, `slurm`, and `naming` whenever a family has `>= 2` quiet (`ok`/`info`) rows, even if sibling rows in that family are `warn` or `error` (the `warn`/`error` rows print expanded beside the folded summary row) ([doctor.ts](../../src/cli/doctor.ts)):
   - Summary format `<ok-word>: a, b; <info-word>: c`: `interop` (`on PATH` / `noted`; `` `clio-coder configure --interop` reviews them ``), `toolchain` (`found` / `not on PATH`), `slurm` (`ready` / `not set up`), `naming` (`clean` / `noted`).
-- `warn` and `error` findings that do not already contain a backticked `clio-coder`, `pnpm`, or `chmod` command get `` ; next: `<command>` `` appended automatically (`withDoctorCommand`).
+- `warn` and `error` findings that do not already contain a backticked `clio-coder`, `pnpm`, `chmod`, or `export NAME=` command get `` ; next: `<command>` `` appended automatically (`withDoctorCommand`), after the detail's closing period is dropped.
 
 ## First run: which rows to read first
 
