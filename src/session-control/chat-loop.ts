@@ -4340,10 +4340,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								`decision-ledger:${askUserPolicy.id}`,
 							);
 						}
-						if (askUserPolicy.status === "complete" && askUserPolicy.rounds.length > 0) promptInterview = askUserPolicy;
 					}
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
+					// Only a submit that still owns this generation hands its interview on, so a turn superseded while the
+					// decisions persisted never answers another session's continuation (C-25).
+					if (askUserPolicy?.status === "complete" && askUserPolicy.rounds.length > 0) promptInterview = askUserPolicy;
 					// A turn that ended without its turn_end hook (a throw or an abort before any reply) ended here, while this
 					// submit still owns the stream and its lease: a resubmit below can take ownership and return before its turn_start.
 					if (promptStarted && submitOwner === owner) outcomeCollector.endTurn();
@@ -4880,6 +4882,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			submitOwner?.abort();
 			submitGeneration += 1;
+			// An interview another session or branch closed never answers this one's continuations (C-25).
+			promptInterview = undefined;
 			turnRuntime.cancelRunWatchdog();
 			sessionResetSettlement = activeSubmit;
 			state.streaming = false;

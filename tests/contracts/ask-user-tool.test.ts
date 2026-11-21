@@ -770,14 +770,18 @@ describe("ask_user tool", () => {
 		try {
 			await loop.submit("Design the cache key.");
 			await loop.submit("[CLIO Coder] The previous turn stopped: it rolled over.", { yoloContinuation: true });
+			// A session switch (/new, /resume, /fork, tree navigation) drops the interview another session closed.
+			loop.resetForSession(null);
+			await loop.submit("[CLIO Coder] Autonomy resumed.", { yoloContinuation: true });
 			await loop.submit("Now write the summary.");
 		} finally {
 			loop.dispose();
 		}
-		strictEqual(completes.length, 2, JSON.stringify(completes));
+		strictEqual(completes.length, 3, JSON.stringify(completes));
 		match(completes[0] ?? "", /already_complete/u);
 		match(completes[0] ?? "", /Node id/u);
 		match(completes[1] ?? "", /none was asked/u);
+		match(completes[2] ?? "", /none was asked/u);
 		ok(finalized, "onAskUserFinalized ran");
 		strictEqual(finalized.status, "complete");
 		strictEqual(finalized.summary, undefined, "closed implicitly, not by turn_finished fallback");
