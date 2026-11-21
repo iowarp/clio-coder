@@ -37,6 +37,8 @@ export interface ExtensionHostOptions {
 	embed?: OperatorExtensionsOptions["embed"];
 	sandboxUnixSockets?: OperatorExtensionsOptions["sandboxUnixSockets"];
 	readOnly?: OperatorExtensionsOptions["readOnly"];
+	/** False in the worker hook host, which serves no session and so never prunes another's state. */
+	pruneOrphanedSessionState?: false;
 	/** One line naming the extension and the reason. */
 	notify: (message: string) => void;
 	/** ACP's interview channel when the client answers interviews, or a headless run's `--answers` file. */
@@ -72,6 +74,7 @@ export function startExtensionHost(options: ExtensionHostOptions): ExtensionHost
 		...(options.embed ? { embed: options.embed } : {}),
 		...(options.sandboxUnixSockets ? { sandboxUnixSockets: options.sandboxUnixSockets } : {}),
 		...(options.readOnly ? { readOnly: options.readOnly } : {}),
+		...(options.pruneOrphanedSessionState === false ? { pruneOrphanedSessionState: false } : {}),
 		onChange: () => schedule(),
 		onDiagnostic: (message) => options.notify(message),
 		onReload: (result) => {

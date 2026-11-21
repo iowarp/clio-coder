@@ -54,6 +54,8 @@ export interface ExtensionRuntimeHookExecutor {
 export interface ExtensionRuntimeHookBridge extends PinnedContextStore {
 	bind(executor: ExtensionRuntimeHookExecutor | null): void;
 	current(): ExtensionRuntimeHookExecutor | null;
+	/** The main session the hooks run in now; null in a worker's bridge or before a session exists. */
+	sessionId(): string | null;
 }
 
 /**
@@ -70,5 +72,6 @@ export function createExtensionRuntimeHookBridge(pinned?: PinnedContextPersisten
 			executor = next;
 		},
 		current: () => executor,
+		sessionId: () => pinned?.sessionId() ?? null,
 	};
 }

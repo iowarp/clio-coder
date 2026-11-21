@@ -11,10 +11,11 @@ import type {
 	ExtensionReloadPrepareResult,
 	ExtensionsContract,
 } from "../../src/domains/extensions/index.js";
+import { createExtensionRuntimeHookBridge, type ExtensionEffect } from "../../src/domains/extensions/index.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { extensionSnapshotFor } from "../../src/domains/extensions/snapshot-access.js";
 import { bindExtensionSnapshotStore } from "../../src/domains/extensions/snapshot-store.js";
-import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { installExtension, listInstalledExtensions, removeExtension } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { HookReceipt } from "../../src/domains/middleware/hooks.js";
 import type {
@@ -30,8 +31,10 @@ import {
 	type ExtensionGenerationCommitted,
 	type ExtensionReloadCoordinatorDeps,
 } from "../../src/entry/extension-reload.js";
+import { createQuietHookRuns } from "../../src/entry/extension-runtime-hooks.js";
 import { middlewareOwner } from "../harness/middleware-owner.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 const domainContext: DomainContext = { bus: {} as DomainContext["bus"], getContract: () => undefined };
@@ -163,6 +166,95 @@ describe("extension reload coordinator publication", () => {
 	afterEach(() => {
 		bindExtensionSnapshotStore(null);
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
+	it("records effect-free runtime hook runs as one receipt per turn and each effect on its own (C-33)", async (t) => {
+		const env = await isolateClioEnv("clio-coder-quiet-hook-receipts-");
+		t.after(() => env.restore());
+		const project = scratch();
+		const source = scratch();
+		writeFileSync(
+			path.join(source, "clio-coder-extension.json"),
+			JSON.stringify({
+				id: "quiet_gate",
+				name: "Quiet gate",
+				version: "1.0.0",
+				description: "Watches reads",
+				runtime: {
+					api: 2,
+					entrypoint: "extension.mjs",
+					hooks: [{ on: "before_tool", tools: ["read"], timeoutMs: 1000, onTimeout: "pass", onError: "pass" }],
+				},
+			}),
+		);
+		writeFileSync(path.join(source, "extension.mjs"), "export default () => {};\n");
+		ok(installExtension(source, { cwd: project, scope: "user" }).extension?.loadable);
+		const harness = liveHarness(project);
+		t.after(() => harness.stop());
+		let session = "s-1";
+		const bridge = createExtensionRuntimeHookBridge({ sessionId: () => session });
+		let effects: ExtensionEffect[] = [];
+		bridge.bind({ hook: async () => ({ kind: "ok", effects }), notify: () => {} });
+		const heard = new Map<string, () => void>();
+		const bus = {
+			subscribe: (name: string, listener: () => void) => {
+				heard.set(name, listener);
+				return () => {};
+			},
+		} as unknown as NonNullable<ExtensionReloadCoordinatorDeps["bus"]>;
+		const coordinator = harness.coordinator({ runtimeHooks: bridge, bus });
+		strictEqual(coordinator.applyBoot().status, "committed");
+		const read = { hook: "before_tool", toolName: "read", toolArgs: {}, turnId: "turn-1", sessionId: "s-1" } as const;
+		for (let n = 0; n < 3; n += 1) await harness.middleware.runAwaitedHook?.(read);
+		effects = [{ kind: "notify_operator", message: "seen", key: "seen" }];
+		await harness.middleware.runAwaitedHook?.(read);
+		const runtime = () =>
+			harness.receipts
+				.filter((receipt) => receipt.kind === "runtime")
+				.map((receipt) => [receipt.turnId, receipt.effectKinds ?? [], receipt.runs ?? 1]);
+		deepStrictEqual(runtime(), [["turn-1", ["notify_operator"], 1]], "an effect keeps its own receipt at once");
+		await harness.middleware.runAsyncHook?.({ hook: "turn_end", turnId: "turn-1", sessionId: "s-1" });
+		deepStrictEqual(runtime(), [
+			["turn-1", ["notify_operator"], 1],
+			["turn-1", [], 3],
+		]);
+		const quiet = harness.receipts.at(-1);
+		deepStrictEqual([quiet?.outcome, quiet?.toolName, quiet?.sessionId], ["runtime-ok", "read", "s-1"]);
+		ok((quiet?.maxDurationMs ?? -1) >= 0 && (quiet?.durationMs ?? -1) >= (quiet?.maxDurationMs ?? 0));
+		// A turn cut short has no turn_end: its held runs go when it is aborted, under the session they ran in, even
+		// when the run named none and the session has changed since.
+		effects = [];
+		const unnamed = { hook: "before_tool", toolName: "read", toolArgs: {}, turnId: "turn-2" } as const;
+		await harness.middleware.runAwaitedHook?.(unnamed);
+		session = "s-2";
+		heard.get("turn.aborted")?.();
+		deepStrictEqual(
+			[harness.receipts.at(-1)?.turnId, harness.receipts.at(-1)?.sessionId],
+			["turn-2", "s-1"],
+			"an aborted turn's runs are written at once, under their own session",
+		);
+		// A parked session writes what it held before the next one is current.
+		await harness.middleware.runAwaitedHook?.({ ...read, turnId: "turn-3", sessionId: "s-2" });
+		heard.get("session.parked")?.();
+		strictEqual(harness.receipts.at(-1)?.turnId, "turn-3");
+		// A reload to a generation with no runtime hook, whose turn_end would write nothing, writes them first.
+		await harness.middleware.runAwaitedHook?.({ ...read, turnId: "turn-4" });
+		ok(removeExtension("quiet_gate", { cwd: project, scope: "user" }).removed);
+		strictEqual(coordinator.reload().status, "committed");
+		strictEqual(harness.receipts.at(-1)?.turnId, "turn-4");
+		// Shutdown writes the held runs, and every later one at once, before any drain hook unbinds the ledger.
+		ok(heard.has("shutdown.requested"));
+		const closing: HookReceipt[] = [];
+		const holder = createQuietHookRuns((receipt) => closing.push(receipt));
+		const ran = harness.receipts.find((receipt) => receipt.kind === "runtime" && receipt.runs === undefined);
+		ok(ran);
+		holder.add(ran);
+		holder.close();
+		holder.add(ran);
+		deepStrictEqual(
+			closing.map((receipt) => receipt.runs),
+			[1, undefined],
+		);
 	});
 
 	it("keeps boot at generation zero until the composition root publishes the paired first generation", () => {

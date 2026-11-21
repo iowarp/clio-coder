@@ -31,7 +31,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { recordPackageActivity } from "../core/package-activity.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
-import { telemetryHub } from "../core/telemetry/hub.js";
+import { type TelemetryHub, telemetryHub } from "../core/telemetry/hub.js";
 import type { ToolName } from "../core/tool-names.js";
 import type {
 	ExtensionReloadCommitted,
@@ -49,6 +49,7 @@ import {
 	type CapturedHookSourceSet,
 	type HookReceipt,
 	type HookReceiptSink,
+	type MiddlewareHookRegistration,
 	type MiddlewareRegistrar,
 	type MiddlewareRegistrationConflict,
 	type UserHookCommandRunner,
@@ -71,6 +72,7 @@ import {
 	buildExtensionPromptGate,
 	buildExtensionRuntimeHooks,
 	buildWorkerExtensionHooks,
+	createQuietHookRuns,
 	type ExtensionPromptGate,
 	evaluateWorkerHookRequest,
 	pinnableExtensionIds,
@@ -122,6 +124,13 @@ export interface ExtensionReloadCoordinatorDeps {
 	runtimeHooks?: ExtensionRuntimeHookBridge;
 	/** The session gateway's MCP ownership, read by runtime hooks that name one server's tools. */
 	mcpOwner?: McpToolOwnerLookup;
+	/**
+	 * Where a main session's boundaries are heard. The effect-free hook runs held for a turn's receipt are written when a
+	 * turn is aborted or the session parks, and the holder closes when shutdown is requested, before any drain hook
+	 * unbinds the session ledger (C-33). Defaults to the process hub; a host with no turns hears neither and flushes as
+	 * it stops.
+	 */
+	bus?: Pick<TelemetryHub, "subscribe">;
 }
 
 export interface ExtensionReloadCoordinator {
@@ -154,6 +163,8 @@ export interface ExtensionReloadCoordinator {
 		/** One line through the runtime host's notice channel. */
 		notify(message: string): void;
 	};
+	/** Write the receipts held for effect-free runtime hook runs; a host with no turns calls it as it stops. */
+	flushHookReceipts(): void;
 }
 
 /** One hook execution as `hook.ran`; the session, run and turn ride the record's context, never its payload (#434). */
@@ -180,6 +191,8 @@ function recordHookRan(receipt: HookReceipt, sessionId: string | undefined): voi
 				outcome: receipt.outcome,
 				...(receipt.effectKinds !== undefined ? { effectKinds: receipt.effectKinds.slice(0, 32) } : {}),
 				...(receipt.durationMs !== undefined ? { durationMs: Math.max(0, receipt.durationMs) } : {}),
+				...(receipt.runs !== undefined ? { runs: receipt.runs } : {}),
+				...(receipt.maxDurationMs !== undefined ? { maxDurationMs: Math.max(0, receipt.maxDurationMs) } : {}),
 				...(receipt.timeoutMs !== undefined ? { timeoutMs: receipt.timeoutMs } : {}),
 				...(receipt.exitCode !== undefined ? { exitCode: receipt.exitCode } : {}),
 				...(receipt.outputChars !== undefined ? { outputChars: receipt.outputChars } : {}),
@@ -280,6 +293,24 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 	let holdTrust = false;
 	let promptGate: ExtensionPromptGate | null = null;
 	let publishedPackages: ReadonlyArray<InstalledExtension> = [];
+	// Effect-free runtime hook runs wait here for their turn's aggregate receipt, across generations (C-33).
+	const quietRuns = createQuietHookRuns(deps.recordReceipt, () => deps.runtimeHooks?.sessionId() ?? null);
+	// A turn that ends without turn_end, or a session that parks, writes what it held under its own session.
+	const bus = deps.bus ?? telemetryHub();
+	bus.subscribe("turn.aborted", () => quietRuns.flush());
+	bus.subscribe("session.parked", () => quietRuns.flush());
+	bus.subscribe("shutdown.requested", () => quietRuns.close());
+	/** Published after every runtime hook, so the turn's own turn_end runs are in the aggregate it writes. */
+	const quietRunsAtTurnEnd: MiddlewareHookRegistration = {
+		id: "extension:hook-receipts:turn_end",
+		description: "writes the turn's effect-free extension hook runs as one receipt per hook",
+		hooks: ["turn_end"],
+		evaluate: () => [],
+		evaluateAsync: async () => {
+			quietRuns.flush();
+			return [];
+		},
+	};
 	let toolRegistry: Pick<ToolRegistry, "register" | "unregister" | "get"> | null = null;
 	let registeredTools: ToolName[] = [];
 	let workerDeclarations: ReadonlyArray<WorkerExtensionHook> = [];
@@ -424,6 +455,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			const runtimeHookOptions = {
 				generation: candidate.generation,
 				recordReceipt: deps.recordReceipt,
+				quietRuns,
 				...(deps.now !== undefined ? { now: deps.now } : {}),
 				...(deps.mcpOwner !== undefined ? { mcpOwner: deps.mcpOwner } : {}),
 			};
@@ -439,6 +471,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			const preparedReplacement = deps.middleware.prepareRegistrationReplacement("user-hooks", candidate.generation, [
 				...built.registrations,
 				...runtimeRegistrations,
+				...(runtimeRegistrations.length > 0 || (nextPromptGate?.size ?? 0) > 0 ? [quietRunsAtTurnEnd] : []),
 			]);
 			if (preparedReplacement.status === "rejected") {
 				candidate.discard();
@@ -464,6 +497,8 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 					diagnostics: failure(`generation ${candidate.generation} was superseded before it could be published`),
 				});
 			}
+			// The outgoing generation's held runs are written now; the next one may have no turn_end to write them.
+			quietRuns.flush();
 			candidate.publish();
 			replacement.publish();
 			promptGate = nextPromptGate;
@@ -561,5 +596,6 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 				),
 			notify: (message) => deps.runtimeHooks?.current()?.notify(message),
 		},
+		flushHookReceipts: () => quietRuns.flush(),
 	};
 }

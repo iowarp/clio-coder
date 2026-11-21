@@ -17,6 +17,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { relativePathEscapes } from "../../core/path-containment.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { recordedSessionIds } from "../../engine/session.js";
 import { GITLINK_MODE, type GitCall, parseRawDiff, runGit, SnapshotUnavailableError, splitNul } from "./git.js";
 import {
 	pinIdentity,
@@ -218,6 +219,9 @@ async function plumbingConfig(repo: Repository, deadline: number): Promise<strin
 	return config;
 }
 
+/** Where sessions whose ids cannot name a ref keep their snapshot state. */
+const INVALID_SESSION_DIR = "invalid";
+
 function snapshotsRoot(stateDir: string): string {
 	return path.join(stateDir, "snapshots");
 }
@@ -400,7 +404,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 	const maxUntrackedBytes = options.maxUntrackedBytes ?? SNAPSHOT_MAX_UNTRACKED_BYTES;
 	const keep = Math.max(1, options.keep ?? SNAPSHOT_KEEP);
 	const idProblem = sessionIdProblem(sessionId);
-	const dir = path.join(snapshotsRoot(stateDir), idProblem === null ? sessionId : "invalid");
+	const dir = path.join(snapshotsRoot(stateDir), idProblem === null ? sessionId : INVALID_SESSION_DIR);
 	const indexFile = path.join(dir, "index");
 	const privateObjects = path.join(dir, "objects");
 
@@ -1031,7 +1035,7 @@ export interface PruneWorkspaceSnapshotsOptions {
 }
 
 /**
- * Drop snapshot refs and state of sessions idle longer than 14 days. Refs are
+ * Drop snapshot refs and state of sessions idle longer than 14 days or no longer recorded. Refs are
  * removed from the repository each session recorded; refs in the current
  * repository whose session state is already gone go by their commit date.
  * Unreferenced objects are left for `git gc`. Best effort throughout.
@@ -1053,10 +1057,14 @@ export async function pruneWorkspaceSnapshots(
 	} catch {
 		// No snapshot state yet.
 	}
+	// A session that no longer exists has no rewind left to serve, so its state goes whatever its age (C-35). The
+	// shared directory of sessions whose ids name no ref is never an orphan: a live session may write it.
+	const recorded = recordedSessionIds(options.stateDir);
 	for (const name of entries) {
 		if (name === options.keepSessionId) continue;
 		const dir = path.join(root, name);
 		const log = readLog(dir);
+		const orphaned = recorded !== null && name !== INVALID_SESSION_DIR && !recorded.has(name);
 		let touched = log === null ? Number.NaN : Date.parse(log.updatedAt);
 		if (Number.isNaN(touched)) {
 			try {
@@ -1065,7 +1073,7 @@ export async function pruneWorkspaceSnapshots(
 				continue;
 			}
 		}
-		if (touched >= cutoff) continue;
+		if (touched >= cutoff && !orphaned) continue;
 		await withSessionLock(dir, async () => {
 			if (log !== null && sessionIdProblem(name) === null && existsSync(log.commonDir)) {
 				try {
