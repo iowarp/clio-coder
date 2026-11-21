@@ -10,7 +10,7 @@ Use `/tree` to inspect terminal conversation branches and `/fork [name]` to fork
 
 ## Find sessions from the shell
 
-`clio-coder session list` shows open sessions on this state directory, from any host that shares it, with host, pid, and last heartbeat. `clio-coder session terminate <id>` asks the owning process to exit.
+`clio-coder session list` shows open sessions on this state directory, from any host that shares it, with host, pid, and last heartbeat. `clio-coder session terminate <id>` asks the owning process to exit. `clio-coder session history` lists saved sessions, `clio-coder --resume <id or prefix>` reopens one, and `clio-coder --continue` reopens the most recent session for the project.
 
 ## Keep long work focused
 

@@ -11,7 +11,10 @@ Navigate the terminal, choose models, and control a session.
 | `clio-coder configure` | Connect a model with Guided setup |
 | `clio-coder doctor` | Check installation and connections |
 | `clio-coder upgrade` | Update CLIO Coder |
-| `clio-coder --help` | See installed commands |
+| `clio-coder --help` | See installed commands; `--help --all` lists every command path |
+| `clio-coder --resume` | Pick an earlier session to reopen; `--continue` opens the latest |
+| `clio-coder session history` | List saved sessions from the shell |
+| `clio-coder config get <path>` | Read one setting; `config set` and `config unset` change it |
 
 For a single task without the interactive interface:
 
@@ -19,7 +22,7 @@ For a single task without the interactive interface:
 clio-coder run "Explain this project's test setup. Do not change files." --cwd /path/to/project
 ```
 
-Add `--json` when you need machine-readable events. A request to avoid edits is task guidance. When execution must be constrained, add `--read-only` or limit tools with `--allow-tools <names>`.
+Add `--output-format json` for one machine-readable result, or `--output-format stream-json` for events as they happen. A request to avoid edits is task guidance. When execution must be constrained, add `--read-only` or limit tools with `--allow-tools <names>`.
 
 ## Everyday terminal commands
 
@@ -68,4 +71,4 @@ Ctrl+C closes an active overlay or cancels a running turn. When idle with no que
 
 For a course correction, type it in the composer and press **Alt+S** (or **Ctrl+G s**). Work already completed remains in the session record. In the queue, `t` switches a message between the next pause and the end of the turn.
 
-A clean exit prints a summary of the session and the `/resume <id>` line that reopens it. Interactive sessions are resumed from inside the app, not with a command-line flag.
+A clean exit prints a summary of the session and the `clio-coder --resume <id>` line that reopens it. Inside the app, `/resume` does the same.

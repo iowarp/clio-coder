@@ -12,7 +12,7 @@ clio-coder agents validate
 clio-coder run --agent coder "<task>"
 ```
 
-`clio-coder agents` lists the agents you can run, including `architect`, `coder`, `debugger`, `documenter`, `git-master`, `tester`, and `verifier`. `/run` dispatches one from a session. Add `--read-only` to keep one dispatch from changing anything; work it delegates is read-only too.
+`clio-coder agents` lists the agents you can run, including `architect`, `coder`, `debugger`, `documenter`, `git-master`, `reviewer`, `tester`, and `verifier`. `/run` dispatches one from a session. Add `--read-only` to keep one dispatch from changing anything; work it delegates is read-only too.
 
 Helper agents such as Scout are dispatched by the main agent, and `clio-coder agents --all` lists them. You cannot start them directly.
 
@@ -25,10 +25,13 @@ Helper agents such as Scout are dispatched by the main agent, and `clio-coder ag
 | `debugger` | Diagnose failing code, tests, or runs | No |
 | `documenter` | Write docs and examples from source | Yes |
 | `git-master` | Commits, worktrees, merges, pull requests | Yes |
+| `reviewer` | Judge one diff or change against its acceptance criteria | No |
 | `tester` | Add deterministic regression tests | Yes |
 | `verifier` | Run test, lint, build, and review gates | No |
 | `wiki-writer` | Plan a wiki or write one page | Yes |
 | `wiki-repair` | Fix one wiki draft's diagnostics | Yes |
+
+When the main agent dispatches without naming an agent, the job picks one: inspecting goes to `scout`, reviewing a diff to `reviewer`, running checks to `verifier`, diagnosing a failure to `debugger`, adding tests to `tester`, implementing to `coder`, and documentation to `documenter`.
 
 ## Add your own
 
