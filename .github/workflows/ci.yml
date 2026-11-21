@@ -25,7 +25,7 @@ on:
         default: true
         type: boolean
       browser:
-        description: Also run the GUI browser smoke in Chrome (it runs on every version-branch push and pull request; not a required check)
+        description: Also run the GUI browser smoke, perf checks and API smoke (they run on every version-branch push and pull request; not a required check)
         default: false
         type: boolean
       nonce:

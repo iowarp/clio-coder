@@ -1,6 +1,7 @@
 // Measure streamed Markdown, code, tools and diagrams in a private production client.
 // Reports observed frame intervals, input and paint latency, long tasks, DOM and heap
-// growth; checks that streaming preserves the draft and scroll position.
+// growth; checks that streaming preserves the draft and scroll position. With --check it
+// exits 1 when a behavior that must hold does not (see `regressions`); timings stay figures.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { cpus, loadavg, totalmem } from "node:os";
@@ -28,6 +29,8 @@ const { values } = parseArgs({
 		"page-back": { type: "boolean", default: false },
 		// Record a Chrome performance trace per streamed turn (and of the resume), for DevTools or Perfetto.
 		trace: { type: "boolean", default: false },
+		// Fail the run on a behavioral regression, for CI. Never on a timing: those vary by machine.
+		check: { type: "boolean", default: false },
 	},
 });
 if (!values.client) throw new Error("--client <private build> is required.");
@@ -506,7 +509,47 @@ try {
 	await h.close();
 }
 report.errors = errors;
+report.regressions = regressions(report);
 const file = join(values.out, `${values.label}.json`);
 await writeFile(file, `${JSON.stringify(report, null, "\t")}\n`);
 console.log(JSON.stringify(report, null, 2));
 console.log(`Wrote ${file}`);
+if (values.check && (report.regressions as string[]).length > 0) {
+	console.error(`[perf] ${(report.regressions as string[]).length} regression(s):`);
+	for (const line of report.regressions as string[]) console.error(`  - ${line}`);
+	process.exitCode = 1;
+}
+
+/**
+ * What must hold whatever the machine: no page error, a streamed turn keeps the typed draft and the place the
+ * reader scrolled to, a quiet turn stays pinned to the live edge, the answer arrives whole, and a resumed
+ * conversation shows its newest turn. Frame, input and paint figures are reported, never judged here.
+ */
+function regressions(measured: Record<string, unknown>): string[] {
+	const found = (measured.errors as string[]).map((error) => `page error: ${error}`);
+	const history = measured.history as { renderedTurns: number } | undefined;
+	if (HISTORY > 0) {
+		if (!history || history.renderedTurns < 1) found.push("the resumed conversation rendered no turn");
+		return found;
+	}
+	const turns = (measured.turns ?? []) as Array<{
+		turn: number;
+		quiet: boolean;
+		pinnedAfterSettle?: boolean;
+		draftKept?: boolean;
+		scroll?: { stayedPut: boolean } | null;
+	}>;
+	if (turns.length !== TURNS) found.push(`measured ${turns.length} of ${TURNS} turns`);
+	for (const turn of turns) {
+		if (turn.quiet && turn.pinnedAfterSettle !== true)
+			found.push(`turn ${turn.turn} left the live edge after it settled`);
+		if (!turn.quiet && turn.draftKept !== true) found.push(`turn ${turn.turn} lost the draft typed while it streamed`);
+		if (!turn.quiet && turn.scroll?.stayedPut !== true)
+			found.push(`turn ${turn.turn} moved the reader's scroll position`);
+	}
+	const text = measured.lastTurnText as { truncated: boolean; truncatedInGui: boolean } | undefined;
+	if (!text) found.push("the last answer was not read back");
+	else if (text.truncatedInGui && !text.truncated)
+		found.push("the page shows the last answer cut though the server holds it whole");
+	return found;
+}
