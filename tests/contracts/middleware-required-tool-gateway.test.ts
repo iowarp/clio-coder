@@ -75,7 +75,7 @@ test("finish consumers: the stalled-turn nudge yields to the pinned round unatte
 	];
 	let gateOn = false;
 	let otherOn = false;
-	const collector = createTurnOutcomeCollector();
+	const collector = createTurnOutcomeCollector({ workspaceRoot: () => root });
 	const gate: MiddlewareHookRegistration = {
 		id: FINISH_CONTRACT_REGISTRATION_ID,
 		description: "finish gate fixture",
@@ -236,6 +236,33 @@ test("finish consumers: the stalled-turn nudge yields to the pinned round unatte
 		await gated();
 		call("bash", "c-wrapped", { command: "scripts/test-slot.sh node --test foo.test.ts" }, undefined, exit0);
 		strictEqual(settled.get(lastOf(FINISH_CONTRACT_REGISTRATION_ID))?.outcome, "acted");
+		collector.endTurn();
+		// A clean exit speaks for a piped check, and a log outside the tree is no change; a check in a chain counts; a bash
+		// check needs its zero-exit receipt; the session's workspace, not the process directory, is where it must run.
+		const admission = { outcome: "ok", decision: "allowed", actionClass: "execute" };
+		const chainOf = (...steps: Array<[string, Record<string, unknown>, Record<string, unknown>?, object?]>) => ({
+			op: "chain",
+			chainResults: steps.map(([capability, args, details, stepAdmission], index) => ({
+				id: `s${index}`,
+				capability,
+				args,
+				result: { details: { kind: "ok", ...details, chainAdmission: stepAdmission ?? admission } },
+			})),
+		});
+		const gateActs = async (toolName: string, toolArgs: Record<string, unknown>, receipt: Record<string, unknown>) => {
+			await gated();
+			call(toolName, `c-gate-${fired.length}`, toolArgs, undefined, receipt);
+			const outcome = settled.get(lastOf(FINISH_CONTRACT_REGISTRATION_ID))?.outcome;
+			collector.endTurn();
+			return outcome === "acted";
+		};
+		for (const command of ["npm test | head -n 50", "npm test > /tmp/test.log 2>&1", "npm test 2>&1 | tee /tmp/test.log"])
+			ok(await gateActs("bash", { command }, exit0), command);
+		ok(await gateActs("gateway", { op: "chain", steps: [] }, chainOf(["verify", { check: "test" }])));
+		ok(!(await gateActs("bash", { command: "npm test" }, {})));
+		process.chdir(cwd);
+		ok(await gateActs("bash", { command: "npm test", cwd: root }, exit0));
+		process.chdir(root);
 		gateOn = false;
 		// A limitation still states progress for every other surface (MD12).
 		otherOn = true;
@@ -274,19 +301,29 @@ test("finish consumers: the stalled-turn nudge yields to the pinned round unatte
 		strictEqual(side([["bash", { command: "npm test && node rewrite.mjs" }, exit0, "ok", "execute"]]).arms, 0);
 		strictEqual(side([["bash", { command: "scripts/test-slot.sh node --test a.test.ts" }, exit0, "ok"]]).arms, 1);
 		strictEqual(side([["verify", { check: "test" }, {}, undefined]]).arms, 0);
-		const admission = { outcome: "ok", decision: "allowed", actionClass: "execute" };
-		const chain = {
-			op: "chain",
-			chainResults: [
-				{
-					id: "v",
-					capability: "verify",
-					args: { check: "test" },
-					result: { details: { kind: "ok", chainAdmission: admission } },
-				},
-			],
-		};
-		strictEqual(side([["gateway", { op: "chain", steps: [] }, chain, "ok"]]).arms, 1);
+		strictEqual(side([["bash", { command: "npm test | head -n 50" }, exit0, "ok", "execute"]]).arms, 1);
+		strictEqual(side([["bash", { command: "npm test > /tmp/test.log 2>&1" }, exit0, "ok", "execute"]]).arms, 1);
+		// A chain's steps keep their order; a refused or blocked write ran nothing, so the check before it stands.
+		const write = { outcome: "ok", decision: "allowed", actionClass: "write" };
+		const editStep: [string, Record<string, unknown>, Record<string, unknown>, object] = [
+			"edit",
+			{ path: "a.ts", edits: [] },
+			{},
+			write,
+		];
+		const verifyStep: [string, Record<string, unknown>] = ["verify", { check: "test" }];
+		const chained = (...steps: Parameters<typeof chainOf>) =>
+			side([["gateway", { op: "chain", steps: [] }, chainOf(...steps), "ok"]]).arms;
+		strictEqual(chained(verifyStep), 1);
+		strictEqual(chained(editStep, verifyStep), 1);
+		strictEqual(chained(verifyStep, editStep), 0);
+		const refused = { refusal: { kind: "policy" } };
+		const blocked = { outcome: "blocked", decision: "blocked", actionClass: "execute" };
+		strictEqual(chained(verifyStep, ["bash", { command: "echo x > a.txt" }, refused, blocked]), 1);
+		strictEqual(side([verify, ["edit", { path: "a.ts", edits: [] }, refused, "error", "write"]]).arms, 1);
+		strictEqual(side([verify, ["bash", { command: "echo x > a.txt" }, refused, "error", "execute"]]).arms, 1);
+		const failedWrite = { outcome: "failure", exitCode: 1 };
+		strictEqual(side([verify, ["bash", { command: "echo x > a.txt" }, failedWrite, "error", "execute"]]).arms, 0);
 		const token = `ghp_${"a1B2".repeat(10)}`;
 		const status = side([], `rotate ${token} in deploy\nadd docs`).status;
 		ok(status.startsWith("declared partly_done; remaining: rotate ") && status.endsWith("; add docs"), status);

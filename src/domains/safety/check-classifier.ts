@@ -267,32 +267,6 @@ export function callVerdict(
 }
 
 /**
- * Whether a call that settled ok ran a check that speaks for it, as a completion consumer credits one (memory design
- * MD14): a check the vocabulary names, one behind a declared validation wrapper, or a declared project check, whose
- * exit status is the check's own (no `|| true`, `; echo`, or a later pipe stage that can fail a green check), run in
- * this workspace, and with no change of the tree after it in the same command. `declaredChecks` is read only for a
- * bash call the vocabulary does not already name a check.
- */
-export function checkSpeaksForCall(
-	toolName: string,
-	args: Record<string, unknown> | undefined,
-	cwd: string,
-	declaredChecks: () => ReadonlyArray<DeclaredVerifierCommand> = () => [],
-): boolean {
-	const named = callVerdict(toolName, args) === "check";
-	if (!named && toolName !== ToolNames.Bash) return false;
-	const declared = named ? [] : declaredChecks();
-	if (!named && declared.length === 0) return false;
-	const reading = classifyCall(toolName, args, { cwd, declaredChecks: declared });
-	if (reading.verdict !== "check" || reading.shape === "mixed") return false;
-	const shell = reading.shell;
-	return (
-		shell === null ||
-		(shell.statusAttributable && shell.failureAttributable && !shell.outsideCwd && !shell.outsideLockedEnv)
-	);
-}
-
-/**
  * A bash command's {@link ShellCheckReading}, each facet read from the command on first use: only a check, or a call a
  * vocabulary names, ever asks, so a large write never pays for them (x6-7).
  */

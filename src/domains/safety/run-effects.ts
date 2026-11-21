@@ -11,6 +11,7 @@ import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/reso
 import {
 	type CallClassification,
 	type CheckOutputReader,
+	callVerdict,
 	classifyCall,
 	settleCheckCall,
 	validationCommandOf,
@@ -383,15 +384,49 @@ export function callChangesTree(
 	cwd: string,
 	options: { env?: NodeJS.ProcessEnv; scratchRoots?: ReadonlyArray<string>; gitHelpers?: boolean } = {},
 ): boolean {
-	const reader = checkOutputReader(cwd, options.env, options.scratchRoots);
-	const outputTarget: CheckOutputReader = Object.assign(
-		(base: string, logs?: ReadonlySet<string>) => reader(base, logs),
-		{
-			changed: reader.changed,
-			outside: reader.outsideOrScratch,
-		},
-	);
+	const outputTarget = workspaceOutputTarget(cwd, options);
 	return classifyCall(toolName, args, { cwd, outputTarget, gitHelpers: options.gitHelpers === true }).changesTree;
+}
+
+/** Where a check's log may land for a call in `cwd`: outside the tree or under a scratch root, as the recorder reads it. */
+function workspaceOutputTarget(
+	cwd: string,
+	options: { env?: NodeJS.ProcessEnv; scratchRoots?: ReadonlyArray<string> } = {},
+): CheckOutputReader {
+	const reader = checkOutputReader(cwd, options.env, options.scratchRoots);
+	return Object.assign((base: string, logs?: ReadonlySet<string>) => reader(base, logs), {
+		changed: reader.changed,
+		outside: reader.outsideOrScratch,
+	});
+}
+
+/**
+ * Whether a call that settled ok passed a check that speaks for it, as a completion consumer credits one (memory
+ * design MD14). The check is one the vocabulary names, one behind a declared validation wrapper, or a declared project
+ * check; a bash call also needs its shell receipt (success, exit 0). Its exit must be the check's own (no `|| true` or
+ * `; echo`); a clean exit speaks for a piped check, as {@link settleCheckCall} reads it. It ran in this workspace, and
+ * nothing in the same command changes the tree after it; a log written outside the tree or to a scratch root is no
+ * change. Declared checks are read only for a bash call the vocabulary does not already name.
+ */
+export function checkPassedForCall(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	details: Readonly<Record<string, unknown>> | undefined,
+	cwd: string,
+): boolean {
+	if (
+		toolName === ToolNames.Bash &&
+		!((details?.kind === undefined || details.kind === "ok") && details?.outcome === "success" && details.exitCode === 0)
+	)
+		return false;
+	const named = callVerdict(toolName, args) === "check";
+	if (!named && toolName !== ToolNames.Bash) return false;
+	const declaredChecks = named ? [] : declaredVerifierCommands(cwd, undefined);
+	if (!named && declaredChecks.length === 0) return false;
+	const reading = classifyCall(toolName, args, { cwd, outputTarget: workspaceOutputTarget(cwd), declaredChecks });
+	if (reading.verdict !== "check" || reading.shape === "mixed") return false;
+	const shell = reading.shell;
+	return shell === null || (shell.statusAttributable && !shell.outsideCwd && !shell.outsideLockedEnv);
 }
 
 /**

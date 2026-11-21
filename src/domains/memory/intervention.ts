@@ -13,6 +13,7 @@ import {
 	RESOLVED_DISPATCH_PLAN_ARGUMENT,
 } from "../../tools/dispatch-plan.js";
 import {
+	isRefusalToolResultError,
 	legacyToolResultDigest,
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
@@ -22,10 +23,8 @@ import { headForRedaction } from "../evidence/redact.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
-import { checkSpeaksForCall } from "../safety/check-classifier.js";
-import { declaredVerifierCommands } from "../safety/finish-contract.js";
 import { hashToolCall } from "../safety/loop-detector.js";
-import { callChangesTree } from "../safety/run-effects.js";
+import { callChangesTree, checkPassedForCall } from "../safety/run-effects.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
@@ -613,6 +612,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 */
 	let checkStepThisTurn = 0;
 	let lastTreeChangeStep = 0;
+	/** Orders every check and change those two record, a gateway chain's steps included. */
+	let evidenceSequence = 0;
 	/** Operator turns in this scope, and the one the last side lesson pass ran in: at most one pass per turn. */
 	let turnSequence = 0;
 	let lessonPassTurn = -1;
@@ -1283,41 +1284,48 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	/**
-	 * A call that settled ok and ran a check that speaks for it (the safety domain's reader) is this turn's latest check;
-	 * any other call that changed the tree, a shell mutation included, is the latest change. A chain's steps count each
-	 * as its own call, in order.
+	 * A call that settled ok and passed a check that speaks for it (the safety domain's reader) is this turn's latest
+	 * check; any other call that ran and changed the tree, a shell mutation included, is the latest change. A refused or
+	 * blocked call ran nothing and changes nothing. A chain's steps count each as its own call, in order: every leaf call
+	 * takes the next number of one sequence, so an edit then a check in one chain leaves the check standing.
 	 */
 	function noteCheckOrChange(
 		toolName: string,
 		rawArgs: Record<string, unknown> | undefined,
 		details: MiddlewareHookInput["toolResultDetails"],
-		settledOk: boolean,
-		actionClass: string | undefined,
+		settled: { ok: boolean; ran: boolean; actionClass: string | undefined },
 	): void {
 		const children = gatewayChainReceipts(toolName, { details });
 		if (children.length > 0) {
 			for (const child of children) {
 				const childDetails = isPlainRecord(child.result.details) ? child.result.details : {};
-				const settled =
-					child.admission.outcome === "ok" && child.admission.decision === "allowed" && childDetails.kind === "ok";
-				noteCheckOrChange(child.capability, child.args, childDetails, settled, undefined);
+				const admitted = child.admission.decision === "allowed" && child.admission.outcome !== "blocked";
+				const ok = admitted && child.admission.outcome === "ok" && childDetails.kind === "ok";
+				const ran = ok || (admitted && !isRefusalToolResultError({ kind: "error", details: childDetails }));
+				noteCheckOrChange(child.capability, child.args, childDetails, {
+					ok,
+					ran,
+					actionClass: child.admission.actionClass,
+				});
 			}
 			return;
 		}
 		const call = effectiveToolCall(toolName, rawArgs, details);
 		const args = call.args === undefined ? undefined : { ...call.args };
 		const root = workspaceRoot();
-		const bashPassed = call.toolName !== ToolNames.Bash || successfulShellReceipt(settledOk, details);
-		if (
-			settledOk &&
-			bashPassed &&
-			checkSpeaksForCall(call.toolName, args, root, () => declaredVerifierCommands(root, undefined))
-		) {
-			checkStepThisTurn = toolStep;
+		if (settled.ok && checkPassedForCall(call.toolName, args, details, root)) {
+			evidenceSequence += 1;
+			checkStepThisTurn = evidenceSequence;
 			return;
 		}
-		if ((settledOk && WORKSPACE_CHANGING_CLASSES.has(String(actionClass))) || callChangesTree(call.toolName, args, root))
-			lastTreeChangeStep = toolStep;
+		if (!settled.ran) return;
+		if (
+			(settled.ok && WORKSPACE_CHANGING_CLASSES.has(String(settled.actionClass))) ||
+			callChangesTree(call.toolName, args, root)
+		) {
+			evidenceSequence += 1;
+			lastTreeChangeStep = evidenceSequence;
+		}
 	}
 
 	/** A lone shell invocation failed from the workspace root: it waits for a success that fixes it. */
@@ -1476,6 +1484,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		armsInScope = 0;
 		checkStepThisTurn = 0;
 		lastTreeChangeStep = 0;
+		evidenceSequence = 0;
 		turnSequence = 0;
 		lessonPassTurn = -1;
 		trajectory.length = 0;
@@ -2101,13 +2110,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
 		if (command !== null && successfulShellReceipt(input.metadata?.resultKind === "ok", input.toolResultDetails))
 			rememberSucceededCommand(command, input.toolArgs?.cwd);
-		noteCheckOrChange(
-			input.toolName ?? "",
-			input.toolArgs,
-			input.toolResultDetails,
-			input.metadata?.resultKind === "ok",
-			String(input.metadata?.actionClass),
-		);
+		{
+			const kind = input.metadata?.resultKind;
+			noteCheckOrChange(input.toolName ?? "", input.toolArgs, input.toolResultDetails, {
+				ok: kind === "ok",
+				ran: kind === "ok" || (kind === "error" && !isRefusalToolResultError({ kind, details: input.toolResultDetails })),
+				actionClass: typeof input.metadata?.actionClass === "string" ? input.metadata.actionClass : undefined,
+			});
+		}
 		const root = workspaceRoot();
 		const readPath =
 			prepared.toolName === ToolNames.Read && outcome === "ok" && typeof input.toolArgs?.path === "string"

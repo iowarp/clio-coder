@@ -13,14 +13,13 @@ import {
 	type ReadStreakStep,
 	SCOUT_NUDGE_REGISTRATION_ID,
 } from "../domains/middleware/index.js";
-import { checkSpeaksForCall } from "../domains/safety/check-classifier.js";
-import { declaredVerifierCommands } from "../domains/safety/finish-contract.js";
 import { FINISH_CONTRACT_REGISTRATION_ID } from "../domains/safety/finish-contract-registration.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
+import { checkPassedForCall } from "../domains/safety/run-effects.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { dispatchKeysFromArgs } from "../domains/turn-control/index.js";
 import { completionOfToolResult } from "../tools/finish.js";
-import { effectiveToolCall } from "../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 
 export interface CollectedTurn {
 	readonly control: TurnOutcomeRecord["control"];
@@ -153,6 +152,7 @@ function callFact(
 	toolName: string,
 	args: Readonly<Record<string, unknown>> | undefined,
 	details: MiddlewareHookInput["toolResultDetails"],
+	root: string,
 ): CallFact | null {
 	if (toolName === ToolNames.Finish) {
 		const state = completionOfToolResult(toolName, { details })?.state;
@@ -161,17 +161,26 @@ function callFact(
 	}
 	// MD12's progress rule, unchanged for every surface: a `verify` receipt or any non-read call, a limitation included.
 	const progress = toolName === ToolNames.Verify || !isReadOnlyCall(toolName, args);
-	// The finish gate's own fact: a limitation, or a check whose exit speaks for it (a declared one or one behind a
-	// declared wrapper included); a shell exit other than zero passed nothing.
-	const exited = typeof details?.exitCode === "number" ? details.exitCode : 0;
+	// The finish gate's own fact: a limitation, or a check the safety domain's reader says passed and speaks for itself
+	// (a declared one or one behind a declared wrapper included; a bash check needs its zero-exit receipt).
 	const check =
 		toolName === ToolNames.Limitation ||
-		(exited === 0 &&
-			checkSpeaksForCall(toolName, args === undefined ? undefined : { ...args }, process.cwd(), () =>
-				declaredVerifierCommands(process.cwd(), undefined),
-			));
+		checkPassedForCall(toolName, args === undefined ? undefined : { ...args }, details, root);
 	if (!progress && !check) return null;
 	return { kind: "receipt", progress, check, unfinished: false };
+}
+
+/** A step of a gateway chain that settled ok and passed a check: the finish gate's fact, as the same check alone is. */
+function chainPassedCheck(toolName: string, details: MiddlewareHookInput["toolResultDetails"], root: string): boolean {
+	return gatewayChainReceipts(toolName, { details }).some((child) => {
+		const childDetails = child.result.details as Record<string, unknown> | undefined;
+		return (
+			child.admission.outcome === "ok" &&
+			child.admission.decision === "allowed" &&
+			childDetails?.kind === "ok" &&
+			checkPassedForCall(child.capability, child.args, childDetails, root)
+		);
+	});
 }
 
 /** Whether a firing of this surface names the fact a call states: the finish gate names only checks (4.6). */
@@ -220,7 +229,18 @@ function isDispatchListing(args: Readonly<Record<string, unknown>> | undefined):
 	return args?.list === true;
 }
 
-export function createTurnOutcomeCollector(): TurnOutcomeCollector {
+/**
+ * `workspaceRoot` is the session's workspace, where a check must have run to count for the finish gate; absent, the
+ * process directory.
+ */
+export function createTurnOutcomeCollector(options: { workspaceRoot?: () => string } = {}): TurnOutcomeCollector {
+	const workspaceRoot = (): string => {
+		try {
+			return options.workspaceRoot?.() ?? process.cwd();
+		} catch {
+			return process.cwd();
+		}
+	};
 	let previousClarificationStreak = 0;
 	let active = emptyTurn(0);
 	let userTurnId: string | null = null;
@@ -595,7 +615,10 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 					active = { ...active, readOnlyCallsBeforeFirstDispatch: active.readOnlyCallsBeforeFirstDispatch + 1 };
 				}
 			} else if (input.hook === "after_tool" && input.metadata?.resultKind === "ok" && input.toolName !== undefined) {
-				const call = callFact(toolName, args, input.toolResultDetails);
+				const root = workspaceRoot();
+				let call = callFact(toolName, args, input.toolResultDetails, root);
+				if (call?.check !== true && chainPassedCheck(input.toolName, input.toolResultDetails, root))
+					call = { kind: "receipt", progress: call?.progress ?? false, check: true, unfinished: false };
 				if (call !== null)
 					credit(
 						call,
