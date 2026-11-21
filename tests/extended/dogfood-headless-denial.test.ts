@@ -398,6 +398,8 @@ describe("headless no-op contract through the built binary", () => {
 		// C-11: the seal cites the finish contract decision the run's session recorded at its end.
 		const evidence = await inspectRunEvidence(stateDir, envelope.id);
 		strictEqual(evidence.trust.completionEvidence.state, "incomplete", JSON.stringify(evidence.trust));
+		// A run that wrote a file without validation is no first-pass success (C-37).
+		strictEqual(evidence.firstPassSuccess, false);
 		// C-12: the main run's result object holds its answer, as a worker's does.
 		const result = readVerifiedRun(stateDir, envelope.id)?.result;
 		match(result?.state === "resolved" ? (result.value.output?.text ?? "") : "", /^done/);
@@ -466,7 +468,7 @@ describe("headless no-op contract through the built binary", () => {
 	});
 
 	test("a prose answer with no tool call is not a no-op under --fail-on-noop", async () => {
-		const { turn, envelope } = await headlessTurn({
+		const { turn, envelope, stateDir } = await headlessTurn({
 			autonomy: "default",
 			steps: [],
 			failOnNoop: true,
@@ -476,6 +478,8 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(envelope.status, "completed");
 
 		strictEqual(envelope.outcome, "succeeded");
+		// C-37: an answer that changed nothing needs no validation to be a first-pass success.
+		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
 	});
 
 	test("tools that all failed without a block are a no-op under --fail-on-noop", async () => {

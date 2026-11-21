@@ -133,7 +133,7 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 				attempt === 0 &&
 				settled.stepPipeline?.done !== false &&
 				trustVerdict(trust) !== "compromised" &&
-				!findings.some((entry) => entry.tag === "no-validation"),
+				!(findings.some((entry) => entry.tag === "no-validation") && validationOwed(settled, completion)),
 			failureCause,
 			// Plain data for the journal: the canonical status hands out readonly artifact lists.
 			trust: JSON.parse(JSON.stringify(trust)) as EvidenceAssessed["trust"],
@@ -149,6 +149,21 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 			cwd: context?.cwd ?? null,
 		},
 	};
+}
+
+/**
+ * Whether a run without validation evidence fails first-pass success for it (C-37): one that declared checks, or
+ * changed state, by its finish contract's count of mutated paths or, without that record, by its tool activity. A
+ * read-only recipe's run or an answer changed nothing to validate; a run with no evidence either way still owes it.
+ */
+function validationOwed(
+	settled: RunSettled,
+	completion: Pick<TelemetryRecord<"completion.evaluated">, "data"> | undefined,
+): boolean {
+	if (settled.hostVerification !== null || (settled.quality?.resultContract ?? null) !== null) return true;
+	if (completion !== undefined) return completion.data.mutatedPaths > 0;
+	if (settled.verification.basis === "read-only-agent") return false;
+	return settled.toolActivity?.mutatingSucceeded ?? true;
 }
 
 function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[] {
