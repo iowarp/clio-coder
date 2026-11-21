@@ -434,7 +434,7 @@ function deleteTargetReason(
 	base: string | undefined,
 	pattern: string | null,
 	scratchRoots: ReadonlyArray<string>,
-	throughLink: (abs: string) => boolean = () => false,
+	throughLink: (abs: string, follows?: boolean) => boolean = () => false,
 ): string | null {
 	const abs = canonicalizeRawPath(target, candidateBase(base));
 	const workspace = canonicalizePath(path.resolve(process.cwd()));
@@ -452,7 +452,17 @@ function deleteTargetReason(
 		scope === "children" ? isUnderPrefix(abs, root) : isStrictlyUnder(abs, root),
 	);
 	// A link the command plants first is followed by the delete, and nothing here can see where it points (row 261).
-	if (inScratch && throughLink(abs))
+	// A `..` after a link climbs from where the link points, not from the link's own directory, so each prefix
+	// the path walks before a `..` is checked too.
+	const climbsThroughLink = (): boolean => {
+		let walked = path.isAbsolute(target) ? "/" : candidateBase(base);
+		for (const segment of target.split("/")) {
+			if (segment === ".." && throughLink(walked, true)) return true;
+			walked = path.join(walked, segment);
+		}
+		return false;
+	};
+	if (inScratch && (throughLink(abs) || climbsThroughLink()))
 		return `${DELETE_PATH_REASON_PREFIX}unresolved: ${target} below a link this command creates`;
 	return inScratch ? null : `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
 }
@@ -732,7 +742,8 @@ function deleteEventReasons(
 	// root; a bare link name removes only the link.
 	const follows =
 		scope === "children" || event.scope === "children" || event.findRoot !== undefined || /\/\.?$/u.test(expanded);
-	const through = throughLink === undefined ? undefined : (abs: string) => throughLink(abs, follows);
+	const through =
+		throughLink === undefined ? undefined : (abs: string, always?: boolean) => throughLink(abs, always ?? follows);
 	const from = path.isAbsolute(target) ? [undefined] : (bases ?? []);
 	const reasons = new Set<string>();
 	for (const base of from) {

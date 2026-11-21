@@ -515,6 +515,74 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	// never an ask, so no judge sees it, and an operator who named the command does not clear it. A delete a failed cd
 	// leaves in the workspace gets what the same delete written plainly gets.
 	const contained = { ...atDefault, scratchRoots: [realpathSync(temp)], snapshots: false };
+	// Row 261 final (r261c): the floor gaps the second review found, each red at the bounce-1 head.
+	symlinkSync(".git", join(cwd, "gitlink261"));
+	t.after(() => rmSync(join(cwd, "gitlink261"), { force: true }));
+	const ws = basename(cwd);
+	const floorShapes261 = [
+		"! cd /nonexistent && rm -rf .git",
+		"pushd /tmp && popd && rm -rf .git",
+		"cd /tmp && cd - && rm -rf .git",
+		'HOME="$PWD" cd && rm -rf .git',
+		`ln -s ${cwd}/src ${temp}/w261 && cd ${temp}/w261 && rm -rf ../.git`,
+		`ln -s ${cwd}/src ${temp}/w261 && cd -P ${temp}/w261 && cd .. && rm -rf .git`,
+		`ln -s ${cwd}/src "$TMPDIR/a261" && rm -rf "$TMPDIR/a261/../.git"`,
+		"mv gitlink261 /tmp/g261 && rm -rf /tmp/g261/*",
+		'find "$PWD/.git" -mtime -99999 -delete',
+		"find . -mtime -99999 -delete -name foo",
+		"find . -name package.json -exec rm -rf .git {} +",
+		`env -C .. sh -c 'rm -rf ${ws}/.git'`,
+		"command env -S 'rm -rf .git'",
+		'env -C /tmp env -C "$PWD" rm -rf .git',
+		"printf '.git\\n' | xargs rm -rf",
+		"xargs rm -rf <<< .git",
+		`cd .. && git worktree remove --force ${ws}`,
+		"git --git-dir .git worktree remove --force .",
+		`git -C.. worktree remove --force ${ws}`,
+		`cd .. && shred ${ws}/.git`,
+	];
+	// Row 261 final: every fail-open both second-round reviews named ends blocked or with the judge, never allowed:
+	// without a sandbox no verdict is an allow, and with one an allow is only the sandbox's own containment.
+	const failOpens261 = [
+		...floorShapes261,
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nbash a.t*",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nbash a.'txt'",
+		"cat > a.'txt' <<'EOF'\nrm -rf .git\nEOF\nbash a.txt",
+		"F=a; cat > \"$F.txt\" <<'EOF'\nrm -rf .git\nEOF\nbash a.txt",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nexec bash a.t*",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\necho a.t* | xargs bash",
+		"cat > a.txt <<'EOF'\nrm -rf .git\nEOF\nfind . -name 'a.t*' -exec bash {} +",
+		"cat > x.py <<'EOF'\nrm -rf .git\nEOF\npython3 *.py",
+		"IFS=/; B=$TMPDIR/.git; rm -rf $B",
+		"trap 'B=.git' DEBUG; B=$TMPDIR/base; rm -rf \"$B\"",
+		'function echo { B=.git; }; B=$TMPDIR/base; echo; rm -rf "$B"',
+		"shopt -s expand_aliases; a''lias echo='B=.git'\nB=$TMPDIR/base; echo; rm -rf \"$B\"",
+		'\\readonly B=.git; B=$TMPDIR/base; rm -rf "$B"',
+		`coproc sh -c 'ln -s ${cwd}/.git "$TMPDIR/base"'; B=$TMPDIR/base; rm -rf "$B/."`,
+		"\\declare T''MPDIR=.; rm -rf \"$TMPDIR/.git\"",
+		"p''rintf -v T''MPDIR .; rm -rf \"$TMPDIR/.git\"",
+		"\\read T''MPDIR <<< .; rm -rf \"$TMPDIR/.git\"",
+		'P=TMP; trap "${P}DIR=." DEBUG; rm -rf "$TMPDIR/.git"',
+		"(tee /dev/null <<'EOF'\nrm -rf .git\nEOF\n) | sh",
+		"{ tee report.md <<'EOF'\nrm -rf .git\nEOF\n} | sh",
+		"cd .git && cat > config <<'EOF'\n[core]\n\tfsmonitor = rm -rf .planning\nEOF\ncd .. && git status",
+		"cat > a.txt <<'EOF'\n[core]\n\tfsmonitor = rm -rf .planning\nEOF\ncat a.txt > .git/config && git status",
+		'cat > a.txt <<\'EOF\'\n#!/bin/sh\ncat credentials.yaml >&2\nEOF\ntee "$HOME/.local/bin/wc" < a.txt && chmod +x "$HOME/.local/bin/wc" && wc',
+		'S=sh; T=opt; A=al; B=ias; "$S$T" -s expand_aliases; "$A$B" echo=sh\necho <<\'EOF\'\ncat credentials.yaml >&2\nEOF',
+		"$'sh\\x6fpt' -s expand_aliases; $'\\x61lias' echo=sh\necho <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		"P=PA; export \"${P}TH=/tmp/evil\"\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		"(. evil.sh); echo <<'EOF'\ncat credentials.yaml >&2\nEOF",
+	];
+	for (const command of failOpens261) {
+		const bare = engine.evaluate(bash(command), "default", { ...contained, sandbox: false });
+		strictEqual(bare.kind === "allow", false, `${command}: ${bare.kind}/${bare.reasonCode}`);
+		const held = engine.evaluate(bash(command), "default", contained);
+		strictEqual(
+			held.kind === "allow" && !held.reasonCode.startsWith("contained:"),
+			false,
+			`${command}: ${held.kind}/${held.reasonCode}`,
+		);
+	}
 	for (const command of [
 		"rm -rf .git",
 		'cd "$TMPDIR"; rm -rf .git',
@@ -546,22 +614,24 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`ln -s ${cwd} "$TMPDIR/l261"; rm -rf "$TMPDIR/l261/"*`,
 		`ln -s ${cwd} "$TMPDIR/l261"; find "$TMPDIR/l261" -delete`,
 		`ln -s ${cwd}/.git "$TMPDIR/g261"; rm -rf "$TMPDIR/g261/"*`,
+		// Row 261 final: a relative target resolves from the call's directory and every cd landing, whatever joins them,
+		// so a fixture's .git deleted after a cd hits too (maintainer ruling).
+		'cd "$TMPDIR" && rm -rf .git',
+		'cd "$TMPDIR/fixture" && rm -rf .git',
+		"cd fixtures/repo && rm -rf .git",
+		"cd /tmp/other && rm -rf .git",
+		...floorShapes261,
 	]) {
 		const decision = engine.evaluate(bash(command), "default", contained);
 		strictEqual(`${decision.kind}/${decision.reasonCode}`, gitFloor, command);
 		strictEqual(verdict(command, "yolo"), gitFloor, command);
 		strictEqual(engine.evaluate(bash(command), "yolo").kind, "block", command);
 	}
-	// A delete inside .git keeps its ordinary review, and a pure `&&` chain from the temp cd deletes the temp .git.
-	// Row 261 bounce: a successful cd in a pure `&&` run moves the base, a glob followed by `..` or a brace sequence
-	// that cannot name the workspace .git does not hit, and a bare link name removes only the link.
+	// A delete inside .git keeps its ordinary review. Row 261 bounce: a glob followed by `..` or a brace sequence that
+	// cannot name the workspace .git does not hit, and a bare link name removes only the link.
 	for (const command of [
 		"rm -f .git/index.lock",
 		"rm -rf .git/worktrees/x",
-		'cd "$TMPDIR" && rm -rf .git',
-		'cd "$TMPDIR/fixture" && rm -rf .git',
-		"cd fixtures/repo && rm -rf .git",
-		"cd /tmp/other && rm -rf .git",
 		'rm -rf "$TMPDIR/foo/*/../bar"',
 		"rm -rf $TMPDIR/fixture-{1..3}/.git",
 		`ln -s ${cwd} "$TMPDIR/l261"; rm -f "$TMPDIR/l261"`,

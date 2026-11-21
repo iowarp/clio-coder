@@ -1086,6 +1086,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const memo = createPathWalkMemo();
 		return skillMutationReason(trees.roots, mutationCandidates(targets, callCwd, command, memo), memo) !== null;
 	};
+	/**
+	 * The workspace `.git` floor over a command as written, then over its scratch projection (`$TMPDIR` spelled out),
+	 * which only adds placeable paths: a hit in either reading holds (row 261).
+	 */
+	const workspaceGitHit = (command: string, callCwd: string): YoloFloorHit | null => {
+		const written = yoloFloorWorkspaceGitHit(command, callCwd, cwd);
+		if (written !== null) return written;
+		const projected = resolveScratchDeleteOperands(command).command;
+		return projected === command ? null : yoloFloorWorkspaceGitHit(projected, callCwd, cwd);
+	};
 	const floorMatch = (hit: YoloFloorHit, actionClass = "system_modify") => ({
 		match: { ruleId: hit.ruleId, reason: hit.reason, actionClass, block: true } satisfies DamageControlMatch,
 		source: "builtin-classifier" as const,
@@ -1106,7 +1116,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
 		if (gitOnly) {
 			for (const candidate of commands) {
-				const git = yoloFloorWorkspaceGitHit(resolveScratchDeleteOperands(candidate).command, callCwd, cwd);
+				const git = workspaceGitHit(candidate, callCwd);
 				if (git !== null) return floorMatch(git);
 			}
 			return null;
@@ -1119,8 +1129,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (executable !== null) return floorMatch(executable);
 			const deleted = yoloFloorDeleteHit(candidate, callCwd, cwd);
 			if (deleted !== null) return floorMatch(deleted);
-			// A pure `&&` chain from a cd to the temp root places its relative deletes there alone (XR-43).
-			const git = yoloFloorWorkspaceGitHit(resolveScratchDeleteOperands(candidate).command, callCwd, cwd);
+			// Relative deletes resolve from the call's directory and every cd landing, whatever separates them (row 261).
+			const git = workspaceGitHit(candidate, callCwd);
 			if (git !== null) return floorMatch(git);
 		}
 		if (invokesTrustMutation(command, rawText)) {
