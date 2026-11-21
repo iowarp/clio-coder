@@ -4723,13 +4723,15 @@ function scanShellText(command: string, bodies: ReadonlyArray<HeredocBody> = [])
 		ansiCQuoted = false;
 		substitutions = [];
 	};
-	const appendBacktick = (open: number): number | null => {
+	const appendBacktick = (open: number, inDouble = false): number | null => {
 		const close = matchingBacktick(command, open);
 		if (close === null) return null;
 		wordStart ??= open;
 		current += command.slice(open, close + 1);
-		// ORCH-006: escaped ticks inside a backtick script become nested delimiters.
-		substitutions.push(command.slice(open + 1, close).replace(/\\`/gu, "`"));
+		// ORCH-006: escaped ticks inside a backtick script become nested delimiters; inside double quotes bash also
+		// drops the backslash before `"`, `$` and `\`, so `\"` is a quote in the script.
+		const script = command.slice(open + 1, close);
+		substitutions.push(inDouble ? script.replace(/\\([`"$\\])/gu, "$1") : script.replace(/\\`/gu, "`"));
 		return close;
 	};
 
@@ -4763,7 +4765,7 @@ function scanShellText(command: string, bodies: ReadonlyArray<HeredocBody> = [])
 				}
 			}
 			if (quote === '"' && char === "`") {
-				const close = appendBacktick(index);
+				const close = appendBacktick(index, true);
 				if (close !== null) {
 					index = close;
 					continue;
