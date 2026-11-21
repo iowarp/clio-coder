@@ -113,7 +113,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run"]);
 			strictEqual(code, 0);
-			match(stdout, /Would apply 10 pending migrations:/u);
+			match(stdout, /Would apply 11 pending migrations:/u);
 			for (const id of MIGRATION_IDS) ok(stdout.includes(id), id);
 			match(stdout, /Would refresh state metadata/u);
 			match(stdout, /Dry run: no changes made/u);

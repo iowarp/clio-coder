@@ -8940,7 +8940,13 @@ export function createDispatchBundle(
 			throw error;
 		}
 		if (!heldFollower) timing.workerSpawnedAt = new Date(now()).toISOString();
-		const abort = () => worker.abort();
+		// The wall clock and a call's timeout_ms can both stop a run; its worker is stopped once (fleet M8).
+		let workerAborted = false;
+		const abort = (): void => {
+			if (workerAborted) return;
+			workerAborted = true;
+			worker.abort();
+		};
 		const sendToWorker = worker.send?.bind(worker);
 		answerHook = sendToWorker;
 		const steeringProvenance: RunSteeringProvenance[] = [];
@@ -11200,7 +11206,7 @@ export function createDispatchBundle(
 		if (req.runIdHint === undefined && req.worktree !== true) req = { ...req, runIdHint: newRunId() };
 		// DESIGN 4.5: every run has a wall clock from this call, so time queued for a slot counts; a retry keeps its root's.
 		const wallRecipe = agents.get(req.agentId);
-		const recipeWallMs = wallRecipe === null ? undefined : normalizeAgentSpec(wallRecipe).budget.timeoutMs;
+		const recipeWallMs = wallRecipe === null ? undefined : normalizeAgentSpec(wallRecipe).budget?.timeoutMs;
 		const wallClock = resolveRunWall({
 			capMs: runWallCapMs((getEffectiveSettings() ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
 			...(recipeWallMs !== undefined ? { recipeMs: recipeWallMs } : {}),
@@ -11625,7 +11631,7 @@ export function createDispatchBundle(
 				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
 				wallMs: resolveRunWall({
 					capMs: runWallCapMs((settings ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
-					...(agentSpec.budget.timeoutMs !== undefined ? { recipeMs: agentSpec.budget.timeoutMs } : {}),
+					...(agentSpec.budget?.timeoutMs !== undefined ? { recipeMs: agentSpec.budget.timeoutMs } : {}),
 					startedAt: 0,
 				}).wallMs,
 			}),
