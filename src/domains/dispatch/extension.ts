@@ -10428,6 +10428,7 @@ export function createDispatchBundle(
 					// Only verify runs on the final tree ground a claim by check id or resolved command (bt-9, bt-27c).
 					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
+					toolLaneObserved: gradeContract.toolLaneObserved,
 					readOnly: lifecycle.readOnly,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),

@@ -397,9 +397,10 @@ export interface RunValidationGrounding {
 	 * detector does not enumerate, which is reported and nothing more.
 	 * `unattributable-status` means a claimed check ran, but its call's exit
 	 * status was a later command's, so it is reported and nothing more (bt-9).
+	 * `unobserved-lane` means the run's tool lane was not observed (a CLI subprocess): its claims read unknown.
 	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status";
+	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status" | "unobserved-lane";
 }
 
 /**

@@ -67,9 +67,11 @@ export interface ValidationGrounding {
 	 * `unattributable-status` means an unmatched claim names a command the run
 	 * ran, but the call's exit status was a later command's (`make test; echo
 	 * EXIT=$?`), so nothing observed says it passed; reported, never a downgrade.
+	 * `unobserved-lane` means the run's tool lane was not observed (a CLI subprocess), so nothing can match or rule out
+	 * an execution (DESIGN 4.8 V1: unobserved, never zero); the claims read unknown, never ungrounded.
 	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status";
+	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status" | "unobserved-lane";
 }
 
 export interface ValidationGroundingInput {
@@ -84,6 +86,8 @@ export interface ValidationGroundingInput {
 	unattributableCommands?: ReadonlySet<string>;
 	/** Successful shell and typed-verification calls this run made, matched or not. */
 	executedCheckingCalls: number;
+	/** False when Clio did not see the run's tool calls (a CLI subprocess): zero executions then says nothing. */
+	toolLaneObserved?: boolean;
 	/** The gates a verifier's task declared; `verify <id>` ran the gate's command text. */
 	taskGates?: ReadonlyArray<{ id: string; text: string }>;
 	/** Passing `verify` runs on the run's final tree (`CheckFreshness.verifyRuns`): check id and resolved command. */
@@ -267,11 +271,13 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 		basis:
 			ungrounded.length === 0
 				? "grounded"
-				: input.executedCheckingCalls === 0
-					? "no-command-executed"
-					: unattributable
-						? "unattributable-status"
-						: "unmatched-command",
+				: input.toolLaneObserved === false
+					? "unobserved-lane"
+					: input.executedCheckingCalls === 0
+						? "no-command-executed"
+						: unattributable
+							? "unattributable-status"
+							: "unmatched-command",
 	};
 }
 
@@ -283,6 +289,8 @@ export function invalidatesQuality(grounding: ValidationGrounding): boolean {
 /** One line naming what the run claimed and never ran, for the sealed outcome. */
 export function describeUngroundedValidations(grounding: ValidationGrounding): string {
 	const named = grounding.ungrounded.map((name) => JSON.stringify(name)).join(", ");
+	if (grounding.basis === "unobserved-lane")
+		return `unobserved validation: this run claimed ${named} passed in a tool lane CLIO Coder does not observe, so no execution backs or refutes it (${grounding.grounded}/${grounding.claimed} claims grounded)`;
 	if (grounding.basis === "unattributable-status")
 		return `unattributable validation: this run claimed ${named} passed; it ran the check, but the command's exit status was not the check's (${grounding.grounded}/${grounding.claimed} claims grounded)`;
 	return grounding.basis === "no-command-executed"

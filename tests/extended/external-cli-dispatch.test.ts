@@ -28,7 +28,7 @@ if (scenario.hang) setInterval(() => {}, 1000);
 else {
   const answer = JSON.stringify({
     completion: { state: "done", limitations: [], unverified: [] },
-    mutatedPaths: [], validations: [], summary: "PONG"
+    mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG"
   });
   for (const event of [
     { type: "thread.started", thread_id: "fixture-thread" },
@@ -176,7 +176,7 @@ import { join } from "node:path";
 let stdin = "";
 for await (const chunk of process.stdin) stdin += chunk;
 writeFileSync(join(process.cwd(), "seen.json"), JSON.stringify({ argv: process.argv.slice(2), stdin }));
-const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [], summary: "PONG" });
+const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG" });
 for (const event of [
   { type: "thread.started", thread_id: "peer-thread" },
   { type: "turn.started" },
@@ -311,7 +311,7 @@ for await (const chunk of process.stdin) stdin += chunk;
 writeFileSync(${JSON.stringify(seenPath)}, JSON.stringify({ agents: readFileSync("AGENTS.md", "utf8"), stdin }));
 writeFileSync("src/cart.ts", "export const cents = (value: number): number => Math.round(value);\\n");
 appendFileSync("AGENTS.md", "- An edit the task did not ask for.\\n");
-const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["src/cart.ts"], validations: [], summary: "edited" });
+const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["src/cart.ts"], validations: [{ name: "fixture", passed: true, evidence: "edited" }], summary: "edited" });
 for (const event of [
   { type: "text", sessionID: "session-1", part: { type: "text", text: answer } },
   { type: "step_finish", sessionID: "session-1", part: { type: "step-finish", cost: 0, tokens: { input: 3, output: 1 } } },
@@ -455,7 +455,7 @@ test("managed Pi CLI dispatch seals peer-estimated cost and session identity", {
 for await (const chunk of process.stdin) {}
 const answer = JSON.stringify({
   completion: { state: "done", limitations: [], unverified: [] },
-  mutatedPaths: [], validations: [], summary: "PONG"
+  mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG"
 });
 
 for (const event of [
@@ -515,6 +515,82 @@ for (const event of [
 	}
 });
 
+test("a CLI-subprocess builder's claims read unknown, never compromised; its own failing check still lowers it (M9)", {
+	timeout: 20_000,
+}, async () => {
+	// DESIGN 4.8 V1: Clio does not see a CLI subprocess's tool lane, so a claim it cannot match is unobserved, not ungrounded.
+	const executable = join(root, "bin", "pi");
+	const reportPath = join(root, "pi-report.json");
+	writeFileSync(
+		executable,
+		`#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+for await (const chunk of process.stdin) {}
+const answer = readFileSync(${JSON.stringify(reportPath)}, "utf8");
+for (const event of [
+  { type: "session", id: "pi-session" },
+  { type: "message_end", message: { role: "assistant", model: "fixture", content: [{ type: "text", text: answer }],
+    stopReason: "stop", usage: { input: 8, output: 4, totalTokens: 12 } } },
+  { type: "agent_settled" }
+]) process.stdout.write(JSON.stringify(event) + "\\n");
+`,
+	);
+	chmodSync(executable, 0o755);
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "pi-test", runtime: "pi-cli", defaultModel: "pi-cli-default", trustedUnmediated: true }];
+	settings.fleet.default.target = "pi-test";
+	settings.fleet.default.model = "pi-cli-default";
+	settings.fleet.retry.maxRetries = 0;
+	settings.safety.autonomy = "default";
+	const bundle = makeDispatchBundle(
+		dispatchStubContext({
+			settings,
+			runtime: piCliRuntime,
+			agentTools: ["read", "write"],
+			useRuntimeDefaultAgentBudget: true,
+		}),
+	);
+	await bundle.extension.start();
+	const settle = async (passed: boolean) => {
+		writeFileSync(
+			reportPath,
+			JSON.stringify({
+				completion: { state: "done", limitations: [], unverified: [] },
+				mutatedPaths: [],
+				validations: [{ name: "npm test", passed, evidence: passed ? "exit 0" : "exit 1" }],
+				summary: "checked",
+			}),
+		);
+		const run = await bundle.contract.dispatch({
+			agentId: "coder",
+			target: "pi-test",
+			task: "Check the cart",
+			executionRole: "builder",
+			requestOrigin: "user",
+			cwd: root,
+		});
+		return run.finalPromise;
+	};
+	try {
+		const claimed = await settle(true);
+		equal(claimed.validationGrounding?.basis, "unobserved-lane");
+		equal(claimed.verdict?.assurance, "unverified");
+		equal(claimed.outcome, "succeeded", claimed.failureMessage);
+		equal(claimed.verdict?.rules.find((rule) => rule.id === "assurance")?.status, "pass");
+		const failing = await settle(false);
+		equal(failing.verdict?.assurance, "compromised");
+		equal(failing.outcome, "failed");
+		equal(failing.outcomeCode, "assurance_compromised");
+		match(
+			failing.outcomeDetail ?? "",
+			/assurance compromised: the worker's own report lists a failing validation \(npm test\)/u,
+		);
+	} finally {
+		rmSync(reportPath, { force: true });
+		await bundle.extension.stop?.();
+	}
+});
+
 test("a Pi too old to skip its AGENTS.md reads it beside the compiled rules, and the receipt says why", {
 	timeout: 30_000,
 }, async () => {
@@ -531,7 +607,7 @@ if (process.argv[2] === "--version") {
 } else {
   for await (const chunk of process.stdin) {}
   writeFileSync(join(process.cwd(), "seen.json"), JSON.stringify(process.argv.slice(2)));
-  const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [], summary: "PONG" });
+  const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG" });
   for (const event of [
     { type: "session", id: "pi-session" },
     { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }], stopReason: "stop", usage: { input: 2, output: 1 } } },
@@ -617,7 +693,7 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 	const answer = JSON.stringify({
 		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [changed],
-		validations: [],
+		validations: [{ name: "fixture", passed: true, evidence: "file written" }],
 		summary: "edited",
 	});
 	for (const event of [
@@ -769,7 +845,7 @@ for await (const chunk of process.stdin) {}
 const sandboxAt = process.argv.indexOf("--sandbox");
 if (process.argv[sandboxAt + 1] !== "workspace-write") process.exit(7);
 writeFileSync(join(process.cwd(), "proof.txt"), "HELLO");
-const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["proof.txt"], validations: [], summary: "Created proof.txt" });
+const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["proof.txt"], validations: [{ name: "content", passed: true, evidence: "HELLO" }], summary: "Created proof.txt" });
 for (const event of [
   { type: "thread.started", thread_id: "write-thread" },
   { type: "turn.started" },
