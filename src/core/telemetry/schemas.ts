@@ -940,6 +940,11 @@ export const TurnSettledSchema = Type.Object(
 			},
 			closed,
 		),
+		/**
+		 * Attended finish calls this user turn refused because their response carried no reply text (FX-40, CLI-P50), so
+		 * the rate per model is readable from the journal. Absent when none was refused and in journals before CLI-P50.
+		 */
+		bareFinishRefusals: Type.Optional(Type.Integer({ minimum: 1 })),
 	},
 	closed,
 );

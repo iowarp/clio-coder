@@ -383,6 +383,7 @@ export function turnSettlementFromCalls(
 	retries: number,
 	fallbackCause?: FailureCause,
 	noAnswer?: TurnNoAnswerCause,
+	bareFinishRefusals = 0,
 ): EventPayload<"turn.settled"> {
 	const reason = (
 		typeof stopReason === "string" && STOP_REASONS.has(stopReason) ? stopReason : "error"
@@ -421,5 +422,6 @@ export function turnSettlementFromCalls(
 			// Only a turn that stopped normally can answer nothing; a stop with its own cause is read by that cause.
 			...(noAnswer !== undefined && reason === "stop" && cause === null ? { noAnswer } : {}),
 		},
+		...(bareFinishRefusals > 0 ? { bareFinishRefusals: Math.trunc(bareFinishRefusals) } : {}),
 	};
 }

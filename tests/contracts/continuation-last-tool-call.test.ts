@@ -15,7 +15,7 @@ import { buildExtensionPromptGate } from "../../src/entry/extension-runtime-hook
 import type { CreateChatLoopDeps, PromptSubmitInput } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { ContinuationState } from "../../src/session-control/turn-state.js";
-import type { SealedCompletion } from "../../src/tools/finish.js";
+import { FINISH_WITHOUT_REPLY_REFUSAL, type SealedCompletion } from "../../src/tools/finish.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -430,11 +430,7 @@ test("an attended finish with no reply text is refused once per user turn, a rol
 	t.after(() => scratch.restore());
 	const { submitted, gates, sealed, entries } = await stoppedTurn(scratch.dir, "bare");
 	strictEqual(submitted[1]?.origin.origin, "continuation");
-	deepStrictEqual(gates, [
-		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
-		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
-		"ran",
-	]);
+	deepStrictEqual(gates, [FINISH_WITHOUT_REPLY_REFUSAL, FINISH_WITHOUT_REPLY_REFUSAL, "ran"]);
 	// The bare finish that ran still declares, and the seal records that its response carried no reply.
 	const noReply = { what: "the response that declared completion carried no reply text for the operator", why: "other" };
 	strictEqual(sealed?.claimed, "done");

@@ -165,7 +165,7 @@ export function bareFinishVerdict(
 }
 
 export const FINISH_WITHOUT_REPLY_REFUSAL =
-	"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.";
+	"finish did not run: this response has no reply text. Write your reply to the user as text first; then, in that same response, call finish as the only tool call.";
 
 /** The declaration of a bare finish admitted after its turn's one refusal, with the missing reply on record (FX-40). */
 export function withoutReplyLimitation(completion: CompletionDeclaration): CompletionDeclaration {

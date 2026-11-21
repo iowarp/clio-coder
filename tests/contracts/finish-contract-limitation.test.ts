@@ -23,6 +23,7 @@ import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import {
 	bareFinishVerdict,
 	completionOfToolResult,
+	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
 	finishTool,
@@ -32,6 +33,7 @@ import {
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
+import { turnSettlementFromCalls } from "../../src/domains/telemetry/call-facts.js";
 
 const SOURCE = { source: "builtin" } as never;
 
@@ -1044,6 +1046,11 @@ describe("the finish declaration (fleet design 4.3)", () => {
 			remaining: ["docs"],
 		});
 		strictEqual((await finishTool.run({ state: "finished" })).kind, "error");
+		// CLI-P50: the refusal repeats the reply rule, and each refusal is counted on its turn's turn.settled so the rate
+		// per model is readable (absent when none was refused).
+		ok(FINISH_WITHOUT_REPLY_REFUSAL.includes("Write your reply to the user as text first; then, in that same response"));
+		strictEqual(turnSettlementFromCalls("stop", [], 0, undefined, undefined, 2).bareFinishRefusals, 2);
+		ok(!("bareFinishRefusals" in turnSettlementFromCalls("stop", [], 0)));
 		const call = { name: ToolNames.Finish, arguments: { state: "done" } };
 		strictEqual(finishSiblingRefusal(call, { content: [{ type: "text" }, { type: "toolCall" }] }), undefined);
 		ok(finishSiblingRefusal(call, { content: [{ type: "toolCall" }, { type: "toolCall" }] })?.block);

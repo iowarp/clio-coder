@@ -2716,6 +2716,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		noAnswer?: TurnNoAnswerCause,
 	): Promise<void> => {
 		const calls = turnRuntime.takeSettledCalls(userTurnId);
+		const bareFinishRefusals = turnRuntime.takeBareFinishRefusals(userTurnId);
 		const origin = deps.session?.current();
 		const acquire = deps.telemetry?.acquireTelemetrySession;
 		if (!origin || !acquire) return;
@@ -2724,7 +2725,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				telemetryHub().emit(
 					"turn.settled",
-					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause, noAnswer),
+					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause, noAnswer, bareFinishRefusals),
 					lease.context,
 				);
 			} finally {

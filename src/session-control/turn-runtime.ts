@@ -433,6 +433,8 @@ export interface TurnRuntime {
 	toolTelemetry: ToolTelemetry;
 	/** The journaled main calls whose lease was taken for this user turn, in settle order (#434). */
 	takeSettledCalls(userTurnId: string): CallSettled[];
+	/** How many bare attended finishes this user turn refused (FX-40), cleared as it is read (CLI-P50). */
+	takeBareFinishRefusals(userTurnId: string): number;
 }
 
 function isCollectedBatchResult(toolName: string, result: unknown): boolean {
@@ -513,6 +515,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 */
 	const announcedResolutionWarnings = new Set<string>();
 	const turnCalls = new Map<string, CallSettled[]>();
+	// Bare attended finishes refused per user turn (FX-40), journaled on that turn's turn.settled (CLI-P50).
+	const bareFinishRefusals = new Map<string, number>();
 	// A turn id a delivered steer moved a run to, mapped to the turn the run settles under (bt-26 N2h).
 	const steeredTurns = new Map<string, string>();
 	// The last request sent on each cache key, kept across runtime rebuilds and dropped whenever turn-context restarts
@@ -1387,6 +1391,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
 				if (verdict !== "refuse") return undefined;
 				state.finishReplyRefused = true;
+				const refusedTurn = state.activeUserTurnId;
+				if (refusedTurn) bareFinishRefusals.set(refusedTurn, (bareFinishRefusals.get(refusedTurn) ?? 0) + 1);
 				return { block: true, reason: FINISH_WITHOUT_REPLY_REFUSAL };
 			},
 			// FX-40: an admitted bare finish files its missing reply in the result itself, which the transcript shows, the
@@ -2556,6 +2562,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// carries its turn id in the journal, so releasing them here only bounds this map (#434).
 			for (const turnId of turnCalls.keys()) if (turnId !== state.activeUserTurnId) turnCalls.delete(turnId);
 			return calls;
+		},
+		takeBareFinishRefusals(userTurnId) {
+			const count = bareFinishRefusals.get(userTurnId) ?? 0;
+			// Only the running turn can still refuse; any other entry belongs to a turn that already settled.
+			for (const turnId of bareFinishRefusals.keys())
+				if (turnId === userTurnId || turnId !== state.activeUserTurnId) bareFinishRefusals.delete(turnId);
+			return count;
 		},
 	};
 }
