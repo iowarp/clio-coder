@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { telemetryContext, withToolTelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import { unboundTelemetrySession } from "../../core/telemetry/producer.js";
 import {
 	type MiddlewareFiredRule,
 	type MiddlewareHookResult,
@@ -10,7 +11,7 @@ import {
 
 const SEVERITY_ORDER: ReadonlyArray<MiddlewareReminderSeverity> = ["info", "advisory", "warn", "hard-block"];
 /** The evidence class shape middleware.fired admits; a class built from an operator's id that misses it is dropped. */
-const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$/;
+export const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$/;
 /** The process's one firing sequence: every owner draws from it, so no owner is ever forgotten and handed an id again. */
 let firingSequence = 0;
 /**
@@ -30,13 +31,17 @@ export function nextFiringId(): string {
 	return `fir_${PROCESS_TOKEN}_${firingSequence}`;
 }
 
+/** A firing settles when one of its effects does or its rule declares that every firing of it settles. */
+function settles(rule: MiddlewareFiredRule): boolean {
+	return rule.settles === true || rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind));
+}
+
 /** The result with a firing id on every rule whose effects settle; a hook with no session or run has no ledger. */
 function withFiringIds(result: MiddlewareHookResult): MiddlewareHookResult {
 	const owner = result.input.sessionId ?? result.input.runId;
-	if (owner === undefined || !result.fired?.some((rule) => rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind))))
-		return result;
+	if (owner === undefined || !result.fired?.some(settles)) return result;
 	const fired: MiddlewareFiredRule[] = result.fired.map((rule) =>
-		rule.effects.some((kind) => SETTLING_EFFECT_KINDS.has(kind)) ? { ...rule, firingId: nextFiringId() } : rule,
+		settles(rule) ? { ...rule, firingId: nextFiringId() } : rule,
 	);
 	return { ...result, fired };
 }
@@ -55,9 +60,11 @@ export function recordFiredRules(
 	const result = withFiringIds(given);
 	try {
 		const { input } = result;
+		// A fresh session's first turn fires before the session exists; its firings wait for it (CLI-P47).
+		const sessionId = input.sessionId ?? (input.runId === undefined ? unboundTelemetrySession() : undefined);
 		const ctx = withToolTelemetryContext(
 			{
-				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				...(sessionId !== undefined ? { sessionId } : {}),
 				...(input.runId !== undefined ? { runId: input.runId } : {}),
 				...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 				...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),

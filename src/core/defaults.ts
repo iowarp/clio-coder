@@ -623,6 +623,15 @@ export interface MemorySurfaceSettings {
 	 */
 	delivery: MemoryDeliveryMode;
 	/**
+	 * Who writes cross-session notes. `agent`, the default, attaches `memory_note` to sessions that start with it, so
+	 * the main agent writes notes whose command or read the host binds as evidence; `rules` pairs a failed command
+	 * with the next success of the same program and subcommand that changed only its options and files that pair as
+	 * a note; `side` adds the side-model lesson pass and completion retention, armed only by such a pair and run at
+	 * most once per turn; `off` writes nothing. Rules capture runs under every mode but `off`. `agent` is a policy
+	 * choice, not a measured win: if the author comparison shows it no better than `rules`, `rules` becomes the default.
+	 */
+	lessons: MemoryLessonsMode;
+	/**
 	 * In-session correction after repeated failures. `rules` (the default) keeps the repeated-failure annotation and
 	 * turn-end reminder and makes no model call; `model` adds the model step on `tool_error_streak` and `loop_signal`.
 	 * Rules by default as a policy choice: 111 lane model calls produced no reminder.
@@ -634,9 +643,17 @@ export interface MemorySurfaceSettings {
 	 * as a policy choice: 818 lane model calls, a product read by restoration 11 times.
 	 */
 	bank: "rules" | "model";
+	/**
+	 * Mining earlier sessions of the repository for new lessons while the session is idle. Off by default as a policy
+	 * choice: archive filings were 36 grounded against 184 ungrounded, from sessions reviewing each other.
+	 * `clio-coder memory consolidate` is the explicit, model-free pass over the store either way.
+	 */
+	history: "off" | "on";
 }
 
 export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
+
+export type MemoryLessonsMode = "off" | "rules" | "agent" | "side";
 
 export interface MemorySettings {
 	enabled: boolean;
@@ -923,7 +940,14 @@ export const DEFAULT_SETTINGS = {
 		memory: {
 			enabled: true,
 			sideShare: 0.15,
-			surfaces: { observe: "off", delivery: "decision", correct: "rules", bank: "rules" },
+			surfaces: {
+				observe: "off",
+				delivery: "decision",
+				lessons: "agent",
+				correct: "rules",
+				bank: "rules",
+				history: "off",
+			},
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1158,8 +1182,10 @@ context:
     surfaces:
       observe: off
       delivery: decision
+      lessons: agent
       correct: rules
       bank: rules
+      history: off
     target: null
     model: null
     thinkingLevel: off

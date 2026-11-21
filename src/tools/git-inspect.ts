@@ -82,33 +82,106 @@ export type GitFieldCheck =
 
 /**
  * Models often send `file` where an op takes `path` (or `paths` for add)
- * (FW-9). It is folded into that field before validation; naming both with
- * different values is refused, since either reading would drop one.
+ * (FW-9), and `range` or `ref` where it takes `rev`, `max_count` where log takes
+ * `limit` (C-23). Each is folded into that field before validation; naming both
+ * with different values is refused, since either reading would drop one.
  */
-const FILE_ALIAS = "file";
+const FIELD_ALIASES: ReadonlyArray<readonly [alias: string, fields: ReadonlyArray<string>]> = [
+	["file", ["path", "paths"]],
+	["range", ["rev"]],
+	["ref", ["rev"]],
+	["max_count", ["limit"]],
+];
 
-function foldFileAlias(
-	op: GitOp,
-	args: Record<string, unknown>,
-): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
-	if (!Object.hasOwn(args, FILE_ALIAS)) return { ok: true, args };
-	const field = OP_FIELDS[op].includes("path") ? "path" : OP_FIELDS[op].includes("paths") ? "paths" : null;
-	if (field === null) return { ok: true, args };
-	const { [FILE_ALIAS]: file, ...rest } = args;
-	const value = field === "paths" && typeof file === "string" ? [file] : file;
+type Folded = { ok: true; args: Record<string, unknown> } | { ok: false; error: string };
+
+function foldAlias(op: GitOp, args: Record<string, unknown>, alias: string, fields: ReadonlyArray<string>): Folded {
+	if (!Object.hasOwn(args, alias)) return { ok: true, args };
+	const field = fields.find((candidate) => OP_FIELDS[op].includes(candidate));
+	if (field === undefined) return { ok: true, args };
+	const { [alias]: given, ...rest } = args;
+	const value = field === "paths" && typeof given === "string" ? [given] : given;
 	if (Object.hasOwn(rest, field) && JSON.stringify(rest[field]) !== JSON.stringify(value)) {
 		return {
 			ok: false,
-			error: `git: op ${op} got both ${field} and ${FILE_ALIAS} with different values; nothing ran. Send only ${field}. Example: ${example(op)}`,
+			error: `git: op ${op} got both ${field} and ${alias} with different values; nothing ran. Send only ${field}. Example: ${example(op)}`,
 		};
 	}
 	return { ok: true, args: { ...rest, [field]: value } };
 }
 
+function stringArray(value: unknown): string[] | null {
+	return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
+}
+
+/**
+ * The typed fields a command-line `args` array spells for log, diff or show
+ * (C-23): -N, -n N and --max-count=N as limit, --stat, --name-only, --cached,
+ * one revision or range as rev, and one path after --. log's --oneline is what
+ * it always prints. Any other token is refused by name, so nothing the array
+ * asks for is silently dropped (DF-9).
+ */
+function foldArgv(op: GitOp, args: Record<string, unknown>): Folded {
+	const argv = stringArray(args.args);
+	if (argv === null || (op !== "log" && op !== "diff" && op !== "show")) return { ok: true, args };
+	const { args: _argv, ...rest } = args;
+	const tokens = argv[0] === op ? argv.slice(1) : argv;
+	const fields: Record<string, unknown> = {};
+	const refuse = (token: string): Folded => ({
+		ok: false,
+		error: `git: op ${op} has no field for ${JSON.stringify(token)} in args; nothing ran. ${op} takes ${OP_FIELDS[op].join(", ")}, plus cwd, timeout_ms, max_output_bytes.${op === "show" ? "" : " For one commit's header and patch use op show with rev."} Example: ${example(op)}`,
+	});
+	for (let index = 0; index < tokens.length; index++) {
+		const token = tokens[index] ?? "";
+		const count = /^-(\d+)$|^-n(\d+)$|^--max-count=(\d+)$/u.exec(token);
+		const next = tokens[index + 1] ?? "";
+		if (token === "--") {
+			const paths = tokens.slice(index + 1);
+			if (paths.length !== 1) return refuse(paths.join(" "));
+			fields.path = paths[0];
+			break;
+		}
+		if (op === "log" && count !== null) fields.limit = Number(count[1] ?? count[2] ?? count[3]);
+		else if (op === "log" && (token === "-n" || token === "--max-count") && /^\d+$/u.test(next)) {
+			fields.limit = Number(next);
+			index++;
+		} else if (op === "log" && token === "--oneline") continue;
+		else if (token === "--stat") fields.stat = true;
+		else if (op !== "log" && token === "--name-only") fields.name_only = true;
+		else if (op === "diff" && (token === "--cached" || token === "--staged")) fields.cached = true;
+		else if (!token.startsWith("-") && token.length > 0 && fields.rev === undefined) fields.rev = token;
+		else return refuse(token);
+	}
+	for (const [field, value] of Object.entries(fields)) {
+		if (Object.hasOwn(rest, field) && JSON.stringify(rest[field]) !== JSON.stringify(value)) {
+			return {
+				ok: false,
+				error: `git: op ${op} got ${field} both as a field and in args with different values; nothing ran. Send only the field. Example: ${example(op)}`,
+			};
+		}
+	}
+	return { ok: true, args: { ...rest, ...fields } };
+}
+
+function foldSpellings(op: GitOp, input: Record<string, unknown>): Folded {
+	let folded: Folded = foldArgv(op, input);
+	for (const [alias, fields] of FIELD_ALIASES) {
+		if (!folded.ok) return folded;
+		folded = foldAlias(op, folded.args, alias, fields);
+	}
+	return folded;
+}
+
+/** An inspection op an argv array names first, when no op field does (`args:["log","-5"]`). */
+function argvOp(input: Record<string, unknown>): string[] {
+	const first = stringArray(input.args)?.[0];
+	return first === "status" || first === "diff" || first === "log" || first === "show" ? [first] : [];
+}
+
 /** The op the call names, and every field checked against what that op takes. */
 export function checkGitFields(input: Record<string, unknown>): GitFieldCheck {
 	const named = OP_ALIASES.flatMap((key) => (typeof input[key] === "string" ? [input[key] as string] : []));
-	const op = named[0] ?? "";
+	const op = named[0] ?? argvOp(input)[0] ?? "";
 	const unexpected = Object.keys(input).find(
 		(key) => !COMMON_FIELDS.has(key) && !Object.values(OP_FIELDS).some((fields) => fields.includes(key)),
 	);
@@ -123,7 +196,7 @@ export function checkGitFields(input: Record<string, unknown>): GitFieldCheck {
 	if (new Set(named).size > 1) {
 		return { ok: false, op, error: `git: op, mode and action name different ops (${named.join(", ")}); nothing ran` };
 	}
-	const folded = foldFileAlias(gitOp, input);
+	const folded = foldSpellings(gitOp, input);
 	if (!folded.ok) return { ok: false, op, error: folded.error };
 	const args = folded.args;
 	const accepted = OP_FIELDS[gitOp];

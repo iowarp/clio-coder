@@ -300,7 +300,7 @@
 				},
 				{
 					"tool": "memory_recall",
-					"objective": "Recall task memory and approved durable memory that matches a query, without writing memory.",
+					"objective": "Recall task memory, durable lessons and unverified notes that match a query, without writing memory.",
 					"plane": "observe",
 					"argumentShape": "Required args: query."
 				},

@@ -20,6 +20,7 @@ const workerKinds = new Set([
 	"tool.settled",
 	"tool.decided",
 	"middleware.fired",
+	"surface.settled",
 	"auth.refreshed",
 	"context.fold",
 ]);

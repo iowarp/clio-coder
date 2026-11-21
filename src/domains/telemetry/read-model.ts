@@ -63,7 +63,7 @@ import type {
 	ObjectRef,
 	SurfaceOutcome,
 } from "../../core/telemetry/schemas.js";
-import { EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
+import { countsAsToolCall, EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
@@ -81,7 +81,7 @@ import {
 	foldRunJournal,
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
-import type { telemetryPromptStructure } from "./objects.js";
+import { readStoredRunResult, type telemetryPromptStructure } from "./objects.js";
 import { runSettledDigest } from "./run-digest.js";
 import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 import { verifyTelemetryScope } from "./seal.js";
@@ -250,7 +250,7 @@ interface ToolSummary {
 const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Tasks, ToolNames.Decide]);
 
 function noteTool(tools: Map<string, ToolSummary>, record: TelemetryRecord): string | null {
-	if (record.k !== "tool.settled" || record.ctx.callId === undefined) return null;
+	if (record.k !== "tool.settled" || record.ctx.callId === undefined || !countsAsToolCall(record.data)) return null;
 	const prior = tools.get(record.ctx.callId);
 	tools.set(record.ctx.callId, {
 		calls: (prior?.calls ?? 0) + 1,
@@ -3153,6 +3153,7 @@ export function timeline(
 				break;
 			case "tool.settled": {
 				const data = record.data;
+				if (!countsAsToolCall(data)) break;
 				const duration = localClock(data.durationMs);
 				const parked = data.parkedMs === undefined ? null : localClock(data.parkedMs);
 				const bytes = data.resultBytes === undefined ? null : localCount(data.resultBytes);
@@ -3538,7 +3539,8 @@ function scopeObject<T>(
 	if (file === undefined || createHash("sha256").update(file.bytes).digest("hex") !== ref.id.slice("obj_".length))
 		return { state: "missing" };
 	try {
-		const value: unknown = JSON.parse(file.bytes.toString("utf8"));
+		const parsed: unknown = JSON.parse(file.bytes.toString("utf8"));
+		const value = ref.subject === "run-result" ? readStoredRunResult(parsed) : parsed;
 		return check(value) ? { state: "resolved", value } : { state: "missing" };
 	} catch {
 		// Bytes that hash to the id but do not parse were never a stored object.
@@ -3575,7 +3577,7 @@ function runClock(
 function runActivity(run: Run, output: Quantity["fact"], options: ReadOptions): RunTelemetryV1["activity"] {
 	const toolIds = new Set<string>();
 	for (const record of run.source.records) {
-		if (record.k === "tool.settled") toolIds.add(record.ctx.toolCallId ?? record.id);
+		if (record.k === "tool.settled" && countsAsToolCall(record.data)) toolIds.add(record.ctx.toolCallId ?? record.id);
 		if (
 			record.k === "run.feed_appended" &&
 			record.data.body.kind === "event" &&
@@ -4170,7 +4172,7 @@ export interface SideSurfacesFold {
 
 /**
  * One surface's firings and their settlements: a middleware rule by its registration id, or a host surface such as
- * `triage`. A rule that only reminds or notifies is count-only: it fires and never settles.
+ * `triage`. A rule none of whose firings settle is count-only: it fires and never settles.
  */
 export interface SurfaceLedgerRow {
 	surface: string;
@@ -4183,7 +4185,10 @@ export interface SurfaceLedgerRow {
 	outcomes: Partial<Record<SurfaceOutcome, number>>;
 	/** Settling firings with no settlement in these records: still open, or a session that never closed. */
 	unsettled: number;
-	/** Settling firings a worker drew under its run: no outcome ledger runs in a worker, so they never settle. */
+	/**
+	 * Settling firings a worker drew under its run and left unsettled: no outcome ledger runs in a worker, so only a
+	 * firing the run settles itself (`worker.thrash`, exploration design 3.4) ever settles there.
+	 */
 	unledgered: number;
 	/** Settlements beyond the first for one firing; any is a ledger defect, since each firing settles once. */
 	duplicates: number;
@@ -4208,10 +4213,7 @@ function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRo
 			target.fired += 1;
 			if (record.data.firingId === undefined) continue;
 			target.settling += 1;
-			const owner = telemetryOwner(record.ctx);
-			// A worker's firing is labelled, never counted as a session firing left open.
-			if (owner.startsWith("run:")) target.unledgered += 1;
-			else firings.set(`${owner}/${record.data.firingId}`, record.data.ruleId);
+			firings.set(`${telemetryOwner(record.ctx)}/${record.data.firingId}`, record.data.ruleId);
 		}
 	}
 	for (const record of records) {
@@ -4231,7 +4233,12 @@ function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRo
 		if (record.data.admittedIn !== null) target.admitted += 1;
 		target.outcomes[record.data.outcome] = (target.outcomes[record.data.outcome] ?? 0) + 1;
 	}
-	for (const [key, surface] of firings) if (!settled.has(key)) row(surface).unsettled += 1;
+	// A worker's open firing is labelled, never counted as a session firing left open.
+	for (const [key, surface] of firings) {
+		if (settled.has(key)) continue;
+		if (key.startsWith("run:")) row(surface).unledgered += 1;
+		else row(surface).unsettled += 1;
+	}
 	return [...rows.values()].sort((a, b) => a.surface.localeCompare(b.surface));
 }
 
@@ -4277,6 +4284,20 @@ function sideCallTotals(attempts: readonly FoldedAttempt[]): {
 	}
 	return { totals, unknownUsage };
 }
+
+/**
+ * The record kinds {@link foldSideSurfaces} reads: the call fold's own, the memory steps and the surface ledger. A reader
+ * may read a journal filtered to these (`readCallJournal`'s `wanted`) and fold the same result.
+ */
+export const SIDE_SURFACE_RECORD_KINDS = [
+	"call.started",
+	"call.settled",
+	"call.linked",
+	"journal.gap",
+	"memory.step_decided",
+	"middleware.fired",
+	"surface.settled",
+] as const;
 
 /**
  * Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1).
@@ -4392,7 +4413,9 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 	const journals = [...source.sessions.flatMap(sessionJournals), ...source.runs.values()];
 	const inWindow = (at: string) => Date.parse(at) >= from && Date.parse(at) <= to + 5_000;
 	const records = accountabilityRecords(journals).filter((record) => inWindow(record.t));
-	const decisions = records.filter((record) => record.k === "tool.decided");
+	const decisions = records
+		.filter((record) => record.k === "tool.decided")
+		.filter((record) => countsAsToolCall(record.data));
 	// A stalled step pipeline settles its run `completed`, so the run count alone reads it as done (bt-20).
 	const pipelines = source.sessions
 		.flatMap((session) => session.journal.records)
@@ -4484,7 +4507,7 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 	const ordered = [...records.values()].sort((a, b) => a.t.localeCompare(b.t) || a.id.localeCompare(b.id));
 	const tools = new Map<string, { ok: number; errors: number; blocked: number; durations: number[] }>();
 	for (const record of ordered) {
-		if (record.k !== "tool.settled") continue;
+		if (record.k !== "tool.settled" || !countsAsToolCall(record.data)) continue;
 		const row = tools.get(record.data.tool) ?? { ok: 0, errors: 0, blocked: 0, durations: [] };
 		if (record.data.outcome === "ok") row.ok++;
 		else if (record.data.outcome === "error") row.errors++;
@@ -4493,6 +4516,10 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 		tools.set(record.data.tool, row);
 	}
 	const compactions = ordered.filter((record) => record.k === "compaction.settled");
+	// Totals count the model's calls only, like the per-tool and per-session rows (C-9).
+	const settledCalls = ordered
+		.filter((record) => record.k === "tool.settled")
+		.filter((record) => countsAsToolCall(record.data));
 	const outcomes = { committed: 0, discarded: 0, failed: 0, unresolved: 0 };
 	for (const record of compactions) outcomes[record.data.outcome]++;
 	const sessions = source.sessions
@@ -4509,7 +4536,9 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 			for (const journal of sessionJournals(session))
 				for (const record of journal.records) ownRecords.set(record.id, record);
 			const observed = [...ownRecords.values()];
-			const settledTools = observed.filter((record) => record.k === "tool.settled");
+			const settledTools = observed
+				.filter((record) => record.k === "tool.settled")
+				.filter((record) => countsAsToolCall(record.data));
 			return {
 				sessionId: session.sessionId,
 				startedAt: telemetry.lifetime.firstRecordAt,
@@ -4539,13 +4568,9 @@ function operatorPerformance(source: RepoSource, windowed = true) {
 			),
 		},
 		totals: {
-			toolCalls: shownCount(ordered.filter((record) => record.k === "tool.settled").length),
-			toolErrors: shownCount(
-				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "error").length,
-			),
-			toolBlocked: shownCount(
-				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "blocked").length,
-			),
+			toolCalls: shownCount(settledCalls.length),
+			toolErrors: shownCount(settledCalls.filter((record) => record.data.outcome === "error").length),
+			toolBlocked: shownCount(settledCalls.filter((record) => record.data.outcome === "blocked").length),
 			compactions: shownCount(compactions.length),
 		},
 		tools: [...tools]

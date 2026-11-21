@@ -5,6 +5,7 @@ import {
 } from "../../core/reminder-framing.js";
 import { skillActivationFromToolDetails } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { settleObservationCharge } from "../observation.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { boundedToolResultExcerpt, toolResultContextText } from "../result-disposition.js";
 import { CHAIN_OUTPUT_TRUNCATED_MARKER } from "../surface.js";
@@ -114,6 +115,24 @@ function references(value: unknown, depth = 0): string[] {
 const STEP_KEYS = ["id", "capability", "args", "after"];
 const STEP_ID = /^[a-z][a-z0-9_-]{0,31}$/u;
 
+/** An all-digit step id (`"1"`) is read as `s1`, the id an unnamed first step gets (C-8). */
+function stepId(value: unknown): unknown {
+	return typeof value === "string" && /^\d{1,31}$/u.test(value) ? `s${value}` : value;
+}
+
+/** The step's args with every all-digit `$from` read as {@link stepId} reads the id it names. */
+function withStepIdRefs(value: unknown, depth = 0): unknown {
+	if (depth > 32) return value;
+	if (Array.isArray(value)) return value.map((entry) => withStepIdRefs(entry, depth + 1));
+	if (!record(value)) return value;
+	return Object.fromEntries(
+		Object.entries(value).map(([key, entry]) => [
+			key,
+			key === "$from" ? stepId(entry) : withStepIdRefs(entry, depth + 1),
+		]),
+	);
+}
+
 function shapeOf(value: unknown): string {
 	return value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
 }
@@ -145,11 +164,12 @@ function parseSteps(value: unknown): Step[] {
 		const unknown = Object.keys(entry).find((key) => !STEP_KEYS.includes(key));
 		if (unknown !== undefined)
 			throw new Error(`${at} has unknown key "${unknown}"; a step takes id, capability, args, after`);
-		if (entry.id !== undefined && (typeof entry.id !== "string" || !STEP_ID.test(entry.id)))
+		const id = stepId(entry.id);
+		if (id !== undefined && (typeof id !== "string" || !STEP_ID.test(id)))
 			throw new Error(`${at}.id must match ${STEP_ID.source}`);
 		if (typeof entry.capability !== "string" || !entry.capability.trim())
 			throw new Error(`${at}.capability must be a non-empty string`);
-		const args = stepArgs(entry.args, at);
+		const args = withStepIdRefs(stepArgs(entry.args, at)) as Record<string, unknown>;
 		if (entry.after !== undefined && (!Array.isArray(entry.after) || entry.after.some((id) => typeof id !== "string")))
 			throw new Error(`${at}.after must be an array of step ids`);
 		if (entry.capability.trim() === ToolNames.Gateway) throw new Error("nested gateways are not chain steps");
@@ -158,10 +178,10 @@ function parseSteps(value: unknown): Step[] {
 		if (entry.capability.trim() === ToolNames.Finish)
 			throw new Error("finish ends the turn; call it alone, not in a chain");
 		return {
-			id: entry.id as string | undefined,
+			id: id as string | undefined,
 			capability: entry.capability.trim(),
 			args,
-			after: [...new Set([...((entry.after as string[]) ?? []), ...references(args)])],
+			after: [...new Set([...((entry.after as string[]) ?? []).map((ref) => stepId(ref) as string), ...references(args)])],
 		};
 	});
 	// A step without an id gets one by position only while nothing can depend on it.
@@ -347,13 +367,16 @@ export async function runGatewayChain(
 		const result = results.get(step.id);
 		if (result === undefined) return [];
 		const output = projectedOutput(step, result);
+		const truncated = output !== toolResultContextText(result);
+		// The chain's aggregate cap cut this step after its own call settled; the pool pays for what is shown (C-17).
+		if (truncated) settleObservationCharge(result, byteLength(output));
 		return [
 			{
 				id: step.id,
 				capability: step.capability,
 				kind: result.kind,
 				output,
-				truncated: output !== toolResultContextText(result),
+				truncated,
 			},
 		];
 	});

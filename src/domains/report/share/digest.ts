@@ -76,7 +76,7 @@ export function telemetryShareDigest(
 					if (typeof model === "string")
 						bump(digest.models, model.startsWith("anon_") || carriesPath(model) ? "anon" : model);
 				} else if (k === "run.settled") bump(digest.runTerminal, field(data, "terminalReason"));
-				else if (k === "tool.settled") {
+				else if (k === "tool.settled" && field(data, "inner") !== true) {
 					const tool = field(data, "tool");
 					const name = typeof tool === "string" && BUILTIN_TOOLS.has(tool) ? tool : "other";
 					const outcome = field(data, "outcome");

@@ -469,6 +469,9 @@ export const RUN_FEED_EVENTS = [
 	"clio_coder_permission_resolved",
 	"clio_coder_run_outcome",
 	"clio_coder_steer_received",
+	"clio_coder_helper_result",
+	"clio_coder_helper_result_rejected",
+	"clio_coder_write_record_downgraded",
 	"unknown",
 ] as const;
 export const RUN_FEED_OUTCOMES = [
@@ -733,6 +736,9 @@ export const HookRanSchema = Type.Object(
 		]),
 		effectKinds: Type.Optional(Type.Array(ExistingId, { maxItems: 32 })),
 		durationMs: Type.Optional(duration),
+		/** One record for this many effect-free runs in a turn; `durationMs` is their total. */
+		runs: Type.Optional(count),
+		maxDurationMs: Type.Optional(duration),
 		timeoutMs: Type.Optional(duration),
 		exitCode: Type.Optional(Type.Integer()),
 		outputChars: Type.Optional(count),
@@ -1078,12 +1084,21 @@ export const RunSettledSchema = Type.Object(
 		toolCalls: count,
 		/**
 		 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
-		 * counts the permission asks that were refused without an answer, apart from `blocked`, so a row sums; absent when
+		 * counts the permission asks that were refused without an answer, apart from `blocked`, and `withheld` the calls
+		 * the spent observation pool answered with a notice instead of running (C-17), so a row sums; each is absent when
 		 * there were none.
 		 */
 		tools: Type.Array(
 			Type.Object(
-				{ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count, asked: Type.Optional(count) },
+				{
+					tool: ExistingId,
+					calls: count,
+					ok: count,
+					errors: count,
+					blocked: count,
+					asked: Type.Optional(count),
+					withheld: Type.Optional(count),
+				},
 				closed,
 			),
 			{ maxItems: 256 },
@@ -1106,6 +1121,8 @@ export const RunSettledSchema = Type.Object(
 					storeWritten: Type.Optional(Type.Boolean()),
 					/** Calls that started and never finished, so a sealed reader shows them too (FL-6); absent when none. */
 					unfinished: Type.Optional(count),
+					/** Calls the spent observation pool answered without running them (C-17); absent when none. */
+					withheld: Type.Optional(count),
 				},
 				closed,
 			),
@@ -1902,6 +1919,8 @@ export const ToolSettledSchema = Type.Object(
 		terminate: Type.Optional(Type.Literal(true)),
 		/** Which refusal blocked it: a policy, an unapproved park, or a withheld duplicate of a succeeded call. */
 		blocked: Type.Optional(vocabulary(["refused", "denied-park", "redundant-repeat"])),
+		/** An `ok` call that returned a notice without running: the spent observation pool stopped it (C-17). */
+		notExecuted: Type.Optional(vocabulary(["observation_budget"])),
 		/**
 		 * The kind of file a write or edit targeted, from its extension alone; the path and name never enter the record.
 		 * `telemetry insights` reads it to tell prose from code and data work.
@@ -1913,10 +1932,20 @@ export const ToolSettledSchema = Type.Object(
 		skill: Type.Optional(ExistingId),
 		/** The capabilities a gateway call or chain invoked, so the tool mix sees `data` or `web_fetch` behind it. */
 		capabilities: Type.Optional(Type.Array(ExistingId, { minItems: 1, maxItems: 32 })),
+		/** A capability a gateway call or chain step ran under the model's call; see {@link countsAsToolCall} (C-9). */
+		inner: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
 export type ToolSettled = Static<typeof ToolSettledSchema>;
+/**
+ * Whether a tool.settled or tool.decided row is a call the model made. A gateway call's capability and each chain
+ * step decide and settle as their own `inner` rows, so every decision has its settlement; counters count only the
+ * model's call (C-9).
+ */
+export function countsAsToolCall(data: { inner?: true }): boolean {
+	return data.inner !== true;
+}
 /**
  * One final safety disposition at a tool decision point, carrying its classification and policy facts. Commands,
  * arguments and policy prose stay out of the journal (#434).
@@ -1935,6 +1964,8 @@ export const ToolDecidedSchema = Type.Object(
 		policyHash: Type.Optional(ExistingId),
 		/** The confirmation rule (for example slurm-allocation) that raised an ask, apart from the policy's own rule. */
 		confirmationRuleId: Type.Optional(ExistingId),
+		/** A capability a gateway call or chain step ran under the model's call; see {@link countsAsToolCall} (C-9). */
+		inner: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
@@ -2359,7 +2390,10 @@ const FiringIdSchema = Type.String({ pattern: "^fir_[0-9a-f]{8}_[1-9][0-9]{0,15}
 /** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
 export const MiddlewareFiredSchema = Type.Object(
 	{
-		/** Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`). */
+		/**
+		 * Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`) or the rule
+		 * settles every firing (`nudge.read-streak`, `nudge.scout-survey`, `worker.thrash`; exploration design 3.4).
+		 */
 		firingId: Type.Optional(FiringIdSchema),
 		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
 		phase: vocabulary(["sync", "async", "awaited"]),

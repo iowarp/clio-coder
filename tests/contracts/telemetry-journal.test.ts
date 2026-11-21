@@ -1,5 +1,6 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
 	appendFile,
@@ -18,12 +19,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Value } from "typebox/value";
+import { buildStampText, readBuildStamp } from "../../src/core/build-info.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureAdmits, effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../src/core/telemetry/capture.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { CostReportV1, ExplanationV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { makeTelemetryRecord, SegmentHeaderSchema } from "../../src/core/telemetry/envelope.js";
 import type { Fact } from "../../src/core/telemetry/fact.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
@@ -37,10 +40,12 @@ import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js"
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
+import { canonicalJson } from "../../src/domains/prompts/hash.js";
 
 const emptySum = sumFacts([]);
 
 import { defaultRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
+import { runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { observationTracing, traceObservation } from "../../src/domains/memory/observation-events.js";
 import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
@@ -55,6 +60,7 @@ import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domain
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import {
+	callJournalHeader,
 	openCallJournal,
 	openCallJournalHealth,
 	readCallJournal,
@@ -72,6 +78,7 @@ import { foldCallJournal, foldFacts } from "../../src/domains/telemetry/folds.js
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import {
 	readTelemetryObject,
+	readTelemetryObjectSync,
 	storeTelemetryObject,
 	telemetryCommitment,
 	telemetryPromptStructure,
@@ -448,6 +455,60 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		const before = await readFile(join(directory, run.runId, "journal.jsonl"));
 		display.open(run.runId, "late");
 		deepStrictEqual(await readFile(join(directory, run.runId, "journal.jsonl")), before);
+	} finally {
+		await journal.close();
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("run feed telemetry names every worker frame it keeps and carries feed.jsonl's seq (C-29)", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-"));
+	const runId = `feedseq${Date.now().toString(36)}`;
+	const run = { sessionId: null, runId, agent: { role: "worker" as const, id: runId } };
+	const journal = await openRunTelemetry(run, join(directory, runId));
+	try {
+		const display = defaultRunEventJournal();
+		const at = new Date().toISOString();
+		display.open(runId, "scout");
+		// feed.jsonl keeps a delta row the journal projection drops, so their counters part here.
+		display.append(runId, { at, type: "thinking_delta" });
+		for (const type of [
+			"clio_coder_helper_result",
+			"clio_coder_helper_result_rejected",
+			"clio_coder_write_record_downgraded",
+		])
+			display.append(runId, { at, type });
+		// feed.jsonl reaches its cap first, since the journal keeps no detail: both stores truncate at the same row.
+		const bulky = "lorem ipsum ".repeat(22_000);
+		for (let n = 0; n < 10; n += 1)
+			display.append(runId, {
+				at,
+				type: "clio_coder_tool_finish",
+				tool: "read",
+				callId: `bulky-${n}`,
+				outcome: "ok",
+				detail: bulky,
+			});
+		display.terminal(runId, "succeeded");
+		await journal.close();
+		const journaled = (await readCallJournal(join(directory, runId))).records.flatMap(({ record }) =>
+			record.k === "run.feed_appended"
+				? [[record.data.seq, record.data.body.kind === "event" ? record.data.body.type : record.data.body.kind]]
+				: [],
+		);
+		const rows = (await readFile(runFeedPath(runId), "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { seq: number; kind: string; type?: string })
+			.filter((row) => row.type !== "thinking_delta");
+		deepStrictEqual(
+			journaled,
+			rows.map((row) => [row.seq, row.type ?? row.kind]),
+		);
+		ok(
+			rows.some((row) => row.kind === "journal_truncated"),
+			"the feed cap was reached",
+		);
 	} finally {
 		await journal.close();
 		await rm(directory, { recursive: true, force: true });
@@ -862,6 +923,59 @@ test("memory and observation traces journal content only under research capture 
 	} finally {
 		unregister();
 		await journals.closeAll();
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("session meta and segment headers carry the build that wrote them (C-31)", () => {
+	const stamp = readBuildStamp(
+		{ commit: "9d2e646", dirty: true },
+		"0b6f7c1e-9a51-4f0e-8d3c-2f1a7e5b9c40",
+		"2026-11-21T00:51:02.000Z",
+	);
+	deepStrictEqual(stamp, {
+		commit: "9d2e646",
+		dirty: true,
+		id: "0b6f7c1e-9a51-4f0e-8d3c-2f1a7e5b9c40",
+		builtAt: "2026-11-21T00:51:02.000Z",
+	});
+	strictEqual(readBuildStamp(null, null, null), undefined, "a source run records no build");
+	strictEqual(
+		buildStampText(stamp as NonNullable<typeof stamp>),
+		"9d2e646-dirty built 2026-11-21T00:51:02.000Z (build 0b6f7c1e-9a51-4f0e-8d3c-2f1a7e5b9c40)",
+	);
+	const header = callJournalHeader({
+		clioCoderVersion: "0.8.5-dev",
+		piVersion: "0.0.0",
+		...(stamp ? { build: stamp } : {}),
+	});
+	ok(Value.Check(SegmentHeaderSchema, header), "a segment header names its build in the writer block");
+	ok(Value.Check(SegmentHeaderSchema, callJournalHeader({ clioCoderVersion: "0.8.5-dev", piVersion: "0.0.0" })));
+});
+
+test("process.started is stamped when the process journal is created and leads its first batch (C-30)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const processJournal = createProcessJournal(stateDir, () => {});
+	try {
+		// A boot fact emitted while the writer is still opening must not precede the process's own start.
+		telemetryHub().emit("process.booted", {
+			surface: "run",
+			node: process.version,
+			platform: process.platform,
+			totalMs: 1,
+			phases: [],
+		});
+		await processJournal.close(0);
+		const [processId] = await readdir(telemetryProcessesDirectory(stateDir));
+		const records = (await readCallJournal(telemetryProcessDirectory(stateDir, processId as string))).records.map(
+			({ record }) => record,
+		);
+		const [started] = records;
+		const booted = records.find((record) => record.k === "process.booted");
+		strictEqual(started?.k, "process.started");
+		ok(booted && started.mono < booted.mono, "process.started carries the journal's creation time");
+	} finally {
+		await processJournal.close(0);
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });
@@ -1690,6 +1804,59 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 	} finally {
 		await parent.close();
 		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a run result written as version 2 reads back with its text derived, and the writer still keeps version 1 (C-28)", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-result-"));
+	try {
+		const data = { findings: [{ claim: "The marker is on line 2." }], needsSplit: false, proposedSubtasks: [] };
+		const text = canonicalJson(data);
+		const result = {
+			version: 1 as const,
+			output: {
+				state: "final" as const,
+				text,
+				bytes: Buffer.byteLength(text),
+				truncated: false,
+				structured: { version: 1 as const, kind: "scout-report", data },
+			},
+			failureMessage: null,
+			outcomeDetail: null,
+			worktree: null,
+			checkoutChanges: null,
+			hostVerification: null,
+		};
+		// Installed binaries without the version 2 reader share the state root, so the writer keeps both forms for now.
+		const ref = await storeTelemetryObject(directory, "run-result", result);
+		const stored = JSON.parse(await readFile(join(directory, "objects", `${ref.id}.json`), "utf8"));
+		strictEqual(stored.version, 1);
+		strictEqual(stored.output.text, text);
+		deepStrictEqual(await readTelemetryObject(directory, ref), { kind: "resolved", value: result });
+		const raw = async (value: unknown) => {
+			const bytes = canonicalJson(value);
+			const id = `obj_${createHash("sha256").update(bytes, "utf8").digest("hex")}`;
+			await writeFile(join(directory, "objects", `${id}.json`), bytes);
+			return {
+				label: "resolvable" as const,
+				function: "sha256" as const,
+				canonicalization: "json-sorted-v1" as const,
+				subject: "run-result" as const,
+				id,
+			};
+		};
+		// A version 2 record keeps the answer once, as data; every read derives the text and returns version 1.
+		const { text: _text, ...once } = result.output;
+		const compact = await raw({ ...result, version: 2, output: once });
+		deepStrictEqual(await readTelemetryObject(directory, compact), { kind: "resolved", value: result });
+		deepStrictEqual(readTelemetryObjectSync(directory, compact), { kind: "resolved", value: result });
+		// A malformed version 2 record cannot throw in the reader; the shape check refuses it.
+		const broken = { ...result, version: 2, output: { ...once, structured: null } };
+		deepStrictEqual(await readTelemetryObject(directory, await raw(broken)), { kind: "resolved", value: broken });
+		const brokenRef = await raw(broken);
+		throws(() => readTelemetryObjectSync(directory, brokenRef), /invalid telemetry object shape/);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
 	}
 });
 

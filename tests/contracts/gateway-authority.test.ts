@@ -132,7 +132,8 @@ function capabilityRows(source: Harness, tool: string): Array<Record<string, unk
 	return neutral(
 		source.rows
 			.filter((row) => row.tool === tool)
-			.map(({ requestId: _requestId, ...rest }) => ({ ...rest }) as Record<string, unknown>),
+			// The gateway's capability row is the same decision marked as the call's inner row (C-9).
+			.map(({ requestId: _requestId, inner: _inner, ...rest }) => ({ ...rest }) as Record<string, unknown>),
 		source.cwd,
 	);
 }

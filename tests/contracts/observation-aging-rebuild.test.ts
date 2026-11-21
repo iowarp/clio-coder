@@ -5,16 +5,25 @@ import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import type { MiddlewareContract, MiddlewareHookRegistration } from "../../src/domains/middleware/index.js";
+import { createReadStreakRegistration, READ_STREAK_REGISTRATION_ID } from "../../src/domains/middleware/read-streak.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { callChangesTree } from "../../src/domains/safety/index.js";
+import {
+	HOST_INSERT_CUSTOM_TYPE,
+	type HostInsertRecord,
+	type SessionEntry,
+} from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
+import { callRepeatsAsRead } from "../../src/engine/loop-guard.js";
 import type { AgentMessage, Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
@@ -54,8 +63,11 @@ const targetA = {
 const targetB = { ...targetA, id: "aging-b" };
 const model = litellm.synthesizeModel(targetA, "aging-model", null) as Model<"openai-completions">;
 
-/** One read per scripted path, then an answer for every later request; every request the provider would receive is kept. */
-function transport(paths: ReadonlyArray<string> = ["record.md", "record.md"]) {
+/**
+ * One read per scripted path (a parallel batch of reads per path list), then an answer for every later request; every
+ * request the provider would receive is kept.
+ */
+function transport(paths: ReadonlyArray<string | ReadonlyArray<string>> = ["record.md", "record.md"]) {
 	const requests: AgentMessage[][] = [];
 	/** The message array each request put on the wire, as the provider received it. */
 	const bodies: unknown[][] = [];
@@ -68,6 +80,11 @@ function transport(paths: ReadonlyArray<string> = ["record.md", "record.md"]) {
 				`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 			);
 		const tool = call <= paths.length;
+		const step = paths[call - 1];
+		const batch =
+			typeof step === "string"
+				? [{ id: `read-${call}`, path: step }]
+				: (step ?? []).map((path, index) => ({ id: `read-${call}-${index}`, path }));
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				controller.enqueue(
@@ -75,14 +92,12 @@ function transport(paths: ReadonlyArray<string> = ["record.md", "record.md"]) {
 						tool
 							? {
 									role: "assistant",
-									tool_calls: [
-										{
-											index: 0,
-											id: `read-${call}`,
-											type: "function",
-											function: { name: "read", arguments: JSON.stringify({ path: paths[call - 1] }) },
-										},
-									],
+									tool_calls: batch.map(({ id, path }, index) => ({
+										index,
+										id,
+										type: "function",
+										function: { name: "read", arguments: JSON.stringify({ path }) },
+									})),
 								}
 							: { role: "assistant", content: "done" },
 					),
@@ -104,7 +119,11 @@ const toolResults = (messages: AgentMessage[] | undefined): string[] =>
  * A chat loop over its own session bundle, as one process holds it; every loop shares `wire`. A `window` declares that
  * context window on the target and wires production compaction with a scripted summarizer.
  */
-function harness(wire: ReturnType<typeof transport>, window?: number) {
+function harness(
+	wire: ReturnType<typeof transport>,
+	window?: number,
+	extra?: { middleware: MiddlewareContract; body: (path: string) => string },
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = targetA.id;
@@ -125,14 +144,30 @@ function harness(wire: ReturnType<typeof transport>, window?: number) {
 	const session = createSessionBundle(context).contract;
 	const safety = context.getContract("safety");
 	ok(safety);
-	const registry = createRegistry({ safety, autonomy: () => "yolo" });
+	const registry = createRegistry({
+		safety,
+		autonomy: () => "yolo",
+		...(extra ? { middleware: extra.middleware } : {}),
+	});
 	registry.register({
 		name: ToolNames.Read,
 		description: "Returns the same body for a path every time",
 		parameters: Type.Object({ path: Type.String() }),
 		baseActionClass: "read",
-		run: async (args) => ({ kind: "ok", output: args.path === "small.md" ? SMALL : RECORD }),
+		run: async (args) => ({
+			kind: "ok",
+			output: extra ? extra.body(String(args.path)) : args.path === "small.md" ? SMALL : RECORD,
+		}),
 	});
+	// A turn that can edit is a writer to the read streak.
+	if (extra)
+		registry.register({
+			name: ToolNames.Edit,
+			description: "Never called",
+			parameters: Type.Object({ path: Type.String() }),
+			baseActionClass: "write",
+			run: async () => ({ kind: "ok", output: "" }),
+		});
 	const events: ChatLoopEvent[] = [];
 	const counter = { agents: 0, summaries: 0 };
 	const providers = context.getContract("providers") as ProvidersContract;
@@ -144,6 +179,7 @@ function harness(wire: ReturnType<typeof transport>, window?: number) {
 		readSessionEntries: () => (session.current() ? session.readEntries() : []),
 		toolRegistry: registry,
 		bus: context.bus,
+		...(extra ? { middleware: extra.middleware } : {}),
 		...(window
 			? {
 					autoCompact: createProductionAutoCompact(
@@ -325,3 +361,102 @@ for (const [compactions, paths] of [
 		);
 	});
 }
+
+it("the read streak's second step rides one boundary as a host insert, a cancel in preparation drops the next, and a rebuild sends the same bytes (X6)", {
+	timeout: 30_000,
+}, async () => {
+	// One batch of 40 reads crosses the second step; a batch of 20 more crosses the last, and that boundary is cancelled.
+	const batch = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}.md`);
+	const wire = transport([batch("a", 40), batch("b", 20)]);
+	const streak = createReadStreakRegistration({
+		classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+		workspaceRoot: () => process.cwd(),
+	});
+	const emitted: string[] = [];
+	const spied: MiddlewareHookRegistration = {
+		...streak,
+		evaluate(input, context) {
+			const effects = streak.evaluate(input, context);
+			for (const effect of effects) if (effect.kind === "inject_reminder") emitted.push(effect.message);
+			return effects;
+		},
+	};
+	let cancel = (): void => {};
+	let stopped = 0;
+	// The operator stops the run while the boundary after the second batch is being prepared.
+	const stopper: MiddlewareHookRegistration = {
+		id: "fixture.stop-in-preparation",
+		description: "cancels the run in the second boundary's preparation",
+		hooks: ["after_tool"],
+		evaluate: () => [],
+		evaluateAsync: async (input) => {
+			if (input.metadata?.stage === "tool_batch_end" && wire.requests.length === 2) {
+				stopped += 1;
+				cancel();
+			}
+			return [];
+		},
+	};
+	const extra = () => ({
+		middleware: createMiddlewareBundle({ registrations: [spied, stopper] }).contract,
+		body: (file: string) => `notes for ${file}`,
+	});
+	const second = "40 read-only calls in a row";
+	const last = "60 read-only calls in a row";
+	const carrying = (body: unknown[] | undefined, words: string) =>
+		(body ?? []).filter((message) => JSON.stringify(message).includes(words));
+	const first = harness(wire, undefined, extra());
+	cancel = () => first.loop.cancel();
+	let id: string | undefined;
+	try {
+		await first.loop.submit("Survey the notes.");
+		await first.loop.whenSettled();
+		id = first.session.current()?.id;
+		strictEqual(stopped, 1, "the operator stopped the second boundary's preparation");
+		ok(emitted.some((message) => message.includes(second)) && emitted.some((message) => message.includes(last)));
+		// The second step rides the request after its batch once, last, as a host-framed user message.
+		const live = wire.bodies[1] ?? [];
+		strictEqual(carrying(live, second).length, 1);
+		const tail = live.at(-1) as { role?: string; content?: unknown } | undefined;
+		strictEqual(tail?.role, "user");
+		ok(JSON.stringify(tail.content).includes(second) && JSON.stringify(tail.content).includes("<system-reminder>"));
+		strictEqual((live.at(-2) as { role?: string } | undefined)?.role, "tool");
+		// The cancelled boundary sent nothing and recorded nothing.
+		for (const body of wire.bodies) strictEqual(carrying(body, last).length, 0);
+		const entries = first.session.readEntries() as SessionEntry[];
+		const inserts = entries.flatMap((entry) =>
+			entry.kind === "custom" && entry.customType === HOST_INSERT_CUSTOM_TYPE ? [entry.data as HostInsertRecord] : [],
+		);
+		deepStrictEqual(
+			inserts.map((record) => [record.source, record.rule, JSON.stringify(record.elements).includes(second)]),
+			[["reminder", READ_STREAK_REGISTRATION_ID, true]],
+		);
+		// No reminder is filed as the operator's turn.
+		const users = entries.filter((entry) => entry.kind === "message" && entry.role === "user");
+		ok(
+			users.every((entry) => !JSON.stringify(entry).includes("<system-reminder>")),
+			JSON.stringify(users),
+		);
+	} finally {
+		await first.close();
+	}
+	ok(id);
+	const live = wire.bodies[1] ?? [];
+
+	const rebuilt = harness(wire, undefined, extra());
+	try {
+		rebuilt.session.resume(id);
+		replayCurrentSession(
+			{ session: rebuilt.session, chat: rebuilt.loop, readEntries: () => rebuilt.session.readEntries() },
+			id,
+		);
+		await rebuilt.loop.submit("Now answer.");
+		await rebuilt.loop.whenSettled();
+	} finally {
+		await rebuilt.close();
+	}
+	const resumed = wire.bodies.at(-1) ?? [];
+	deepStrictEqual(resumed.slice(0, live.length), live, "the rebuilt request repeats the live one through the insert");
+	strictEqual(carrying(resumed, second).length, 1);
+	strictEqual(carrying(resumed, last).length, 0);
+});

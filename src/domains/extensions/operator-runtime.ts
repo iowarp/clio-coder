@@ -64,7 +64,7 @@ export interface OperatorRuntimeOptions {
 	list?: (cwd: string) => InstalledExtension[];
 	onChange?: () => void;
 	onReload?: (result: OperatorReloadResult, reason: "startup" | "reload" | "session-change") => void;
-	/** Synchronous paired snapshot/hook commit. Runtimes have a separate readiness clock. */
+	/** Synchronous paired snapshot/hook commit, skipped on startup, which pairs with the boot generation. Runtimes have a separate readiness clock. */
 	commitHooks?: () => { status: string; generation: number; reason?: string };
 	/** Explicit headless invocation starts only its selected owner. */
 	onlyId?: string;
@@ -319,7 +319,9 @@ export class OperatorExtensionRuntime {
 				this.queued = true;
 				throw new Error("session became busy while staging; reload queued until idle");
 			}
-			const hooks = this.options.commitHooks?.();
+			// Boot already published the hook generation this startup pairs with (applyBoot), and committing it again
+			// only republished the same snapshot and reloaded unchanged plugin resources a second time (C-34).
+			const hooks = reason === "startup" ? undefined : this.options.commitHooks?.();
 			if (hooks && hooks.status !== "committed")
 				throw new Error(`hook generation rejected: ${hooks.reason ?? hooks.status}`);
 			this.generation = next;

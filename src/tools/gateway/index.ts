@@ -3,6 +3,8 @@ import { normalizeGatewayArguments } from "../../core/gateway-envelope.js";
 import { discoveryScore } from "../../core/harness-discovery.js";
 import type { CatalogRanker, PrecomputedRanking } from "../../core/precomputed-rank.js";
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
+import { withToolTelemetryContext } from "../../core/telemetry/context.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { toolSurfaceSources } from "../../core/turn-constraints.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
@@ -27,6 +29,7 @@ import {
 	type ToolResult,
 	type ToolSpec,
 } from "../registry.js";
+import { toolResultContextText } from "../result-disposition.js";
 import { type GatewayCapabilityKind, gatewayCapabilityKind, surfaceSpecPlacement } from "../surface.js";
 import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 import { runGatewayChain } from "./chain.js";
@@ -820,6 +823,61 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		return payload;
 	};
 
+	/**
+	 * The capability a call or chain step runs, decided and settled as an inner row under the step's own id, so each
+	 * of its tool.decided rows has a tool.settled (C-9). The model's gateway call settles itself in agent-tools.
+	 */
+	const invokeInner = async (
+		name: string,
+		args: Record<string, unknown>,
+		options: ToolInvokeOptions,
+	): ReturnType<ToolRegistry["invoke"]> => {
+		const started = performance.now();
+		let parkedMs = 0;
+		const inner: ToolInvokeOptions = {
+			...options,
+			gatewayInner: true,
+			onParked: (ms) => {
+				parkedMs += ms;
+				options.onParked?.(ms);
+			},
+		};
+		const settle = (verdict: Awaited<ReturnType<ToolRegistry["invoke"]>> | null): void => {
+			if (verdict?.kind === "not_visible") return;
+			const durationMs = Math.max(0, Math.round(performance.now() - started - parkedMs));
+			withToolTelemetryContext(inner, () =>
+				telemetryHub().emit("tool.settled", {
+					tool: name,
+					durationMs,
+					...(parkedMs > 0 ? { parkedMs: Math.round(parkedMs) } : {}),
+					...(verdict?.kind === "blocked"
+						? {
+								outcome: "blocked" as const,
+								blocked: verdict.deniedPark
+									? ("denied-park" as const)
+									: verdict.redundantRepeat
+										? ("redundant-repeat" as const)
+										: ("refused" as const),
+							}
+						: {
+								outcome: verdict === null || verdict.result.kind === "error" ? ("error" as const) : ("ok" as const),
+								...(verdict === null ? {} : { resultBytes: Buffer.byteLength(toolResultContextText(verdict.result)) }),
+							}),
+					inner: true,
+				}),
+			);
+		};
+		let verdict: Awaited<ReturnType<ToolRegistry["invoke"]>>;
+		try {
+			verdict = await registry.invoke({ tool: name, args }, inner);
+		} catch (error) {
+			settle(null);
+			throw error;
+		}
+		settle(verdict);
+		return verdict;
+	};
+
 	const runCall = async (
 		args: Record<string, unknown>,
 		options: ToolInvokeOptions | undefined,
@@ -891,7 +949,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		// progress, park accounting) minus any one-shot approval, which was
 		// granted to the gateway call and must not travel to the capability.
 		const { approval: _approval, ...outer } = options ?? {};
-		const verdict = await registry.invoke({ tool: spec.name, args: validated }, { ...outer, nested: !allowDirect });
+		const verdict = await invokeInner(spec.name, validated, { ...outer, nested: !allowDirect });
 		if (verdict.kind === "not_visible") return { kind: "error", message: `gateway: ${verdict.reason}` };
 		const admission = allowDirect
 			? {
@@ -966,10 +1024,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			if (op === "describe") return runDescribe(args, options);
 			if (op === "call") return runCall(args, options);
 			if (op === "chain") {
-				// One canonical shape: steps nested in args is refused with the shape, never run (bt-23 N4).
-				if (args.steps === undefined && isRecord(args.args) && args.args.steps !== undefined) {
-					return { kind: "error", message: `gateway: invalid chain: ${chainShapeHint}` };
-				}
+				// `steps` nested in args was lifted beside op on normalize (C-8).
 				const executed: ToolResult[] = [];
 				const result = await runGatewayChain(
 					args.steps,

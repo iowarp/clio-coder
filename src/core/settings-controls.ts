@@ -488,9 +488,11 @@ const MENU_ROWS = new Set([
 	"fleet.worktrees.root",
 	"context.memory.surfaces.observe",
 	"context.memory.surfaces.delivery",
+	"context.memory.surfaces.lessons",
 	"context.memory.surfaces.correct",
 	"context.memory.surfaces.bank",
 	"context.memory.sideShare",
+	"context.memory.surfaces.history",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -553,8 +555,10 @@ const CHOICES: Record<string, readonly string[]> = {
 	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"context.memory.surfaces.observe": ["off", "on"],
 	"context.memory.surfaces.delivery": ["off", "section", "decision", "broadcast"],
+	"context.memory.surfaces.lessons": ["agent", "rules", "side", "off"],
 	"context.memory.surfaces.correct": ["rules", "model"],
 	"context.memory.surfaces.bank": ["rules", "model"],
+	"context.memory.surfaces.history": ["off", "on"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -657,6 +661,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Lesson delivery",
 		"Where kept lessons reach the model: off, the Memory section only, the section plus reminders at decision points (a failed command, a verification gap, a touched file, the turn's task), or those plus the first-change broadcast. Decision by default; memory_recall works in every mode.",
 	],
+	"context.memory.surfaces.lessons": [
+		"Note authorship",
+		"Who writes notes for later sessions: agent (the main agent gets memory_note in sessions that start with it, and Clio binds its command or read as evidence), rules (Clio files a failed command and the option change that fixed it), side (adds the memory model's lesson pass, only after such a fix), or off. Agent by default as a policy choice, not a measured win.",
+	],
 	"context.memory.surfaces.correct": [
 		"Correction tier",
 		"Rules, the default, warns after a repeated failure with no model call. Model also asks the memory model after two tool errors in a row or a loop-guard block. Rules by default as a policy choice: the model tier was measured costing calls without producing reminders.",
@@ -668,6 +676,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.sideShare": [
 		"Memory side share",
 		"After three automatic memory calls, a session skips more while its memory output tokens (and premium units, where the route reports them) exceed this share of its main output. Calls you ask for, such as remember, are never skipped. 0 turns the governor off.",
+	],
+	"context.memory.surfaces.history": [
+		"History mining",
+		"Let the memory model read the repository's earlier sessions while this one is idle and file the lessons it finds. Off by default; clio-coder memory consolidate tidies the store without a model call either way.",
 	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",

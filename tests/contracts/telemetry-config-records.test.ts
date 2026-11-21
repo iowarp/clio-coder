@@ -10,15 +10,20 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
 import { createTelemetryHub, telemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ConfigChangePayload } from "../../src/core/telemetry/live-events.js";
+import { unboundTelemetrySession } from "../../src/core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-fingerprint.js";
+import { observationEvent } from "../../src/domains/memory/observation-events.js";
+import { recordFiredRules } from "../../src/domains/middleware/fired-record.js";
 import { openCallJournalHealth, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { grantTelemetryConsent } from "../../src/domains/telemetry/consent.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import { readTelemetryObject } from "../../src/domains/telemetry/objects.js";
-import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { telemetryProcessDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { telemetryProcessId } from "../../src/domains/telemetry/process-journal.js";
+import { JOURNAL_IDLE_CLOSE_MS } from "../../src/domains/telemetry/session-journals.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { telemetryCall } from "../harness/telemetry-view.js";
 
@@ -191,6 +196,116 @@ it("a session created after boot binds the live read model, which folds its call
 		strictEqual(contract.sessionSpend().usd, 0.25);
 	} finally {
 		await extension.stop?.();
+		env.restore();
+	}
+});
+
+it("the live session's writer stays open while idle, and an unchanged reopen records no second snapshot (C-18)", async () => {
+	const env = await isolateClioEnv("clio-coder-live-writer-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const config = { get: () => settings, onChange: () => () => {} } as unknown as ConfigContract;
+	const bus = createTelemetryHub();
+	const { contract, extension } = createTelemetryBundle({
+		bus,
+		getContract: (name: string) => (name === "config" ? config : undefined),
+	} as DomainContext);
+	const live = { id: "live-writer", cwdHash: "live-repo" };
+	const other = { id: "other-writer", cwdHash: "live-repo" };
+	const open = (id: string) => openCallJournalHealth().some(({ owner }) => owner === `session:${id}`);
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		await extension.start();
+		bus.emit("session.created", { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
+		await contract.flush();
+		await (await contract.acquireTelemetrySession?.(other, { role: "main", id: other.id }))?.release();
+		mock.timers.tick(JOURNAL_IDLE_CLOSE_MS);
+		for (let turn = 0; turn < 50 && open(other.id); turn += 1) await setImmediate();
+		strictEqual(open(other.id), false, "a session no one works in still closes idle");
+		ok(open(live.id), "the live session keeps its writer between turns");
+		await (await contract.acquireTelemetrySession?.(other, { role: "main", id: other.id }))?.release();
+		await extension.stop?.();
+		const records = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), other.id))).records;
+		strictEqual(
+			records.filter(({ record }) => record.k === "config.snapshotted").length,
+			1,
+			"a reopen under the settings already journaled snapshots nothing new",
+		);
+	} finally {
+		mock.timers.reset();
+		await extension.stop?.();
+		env.restore();
+	}
+});
+
+it("facts a fresh session's first turn emits before it binds are filed under it on bind (CLI-P47, FX-45)", async () => {
+	const turnStart = (turnId: string) =>
+		recordFiredRules(
+			{
+				hook: "turn_start",
+				input: { hook: "turn_start", turnId },
+				effects: [],
+				ruleIds: ["observer.local-clock"],
+				fired: [{ ruleId: "observer.local-clock", effects: ["inject_reminder"] }],
+			},
+			"sync",
+		);
+	const journal = async (directory: string) => (await readCallJournal(directory)).records.map(({ record }) => record);
+	let env = await isolateClioEnv("clio-coder-pre-bind-");
+	try {
+		const bus = createTelemetryHub();
+		const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
+		const first = { id: "prebind-first", cwdHash: "prebind-repo" };
+		const second = { id: "prebind-second", cwdHash: "prebind-repo" };
+		await extension.start();
+		// A fresh TUI's first submit runs turn_start before its session exists.
+		turnStart("turn-one");
+		// MD5's session-start delivery check decides before the bind too, as the memory agent.
+		observationEvent("lesson-withheld", { id: "lesson-one", reason: "unverified" }, unboundTelemetrySession());
+		// Background memory work with no owner is the process's, never the session about to open.
+		observationEvent("lesson-judgment", { count: 1 });
+		// Back to back binds: the first fresh session alone takes the hold, whichever writer opens first.
+		bus.emit("session.created", { sessionId: first.id, cwdHash: first.cwdHash, at: Date.now() });
+		bus.emit("session.created", { sessionId: second.id, cwdHash: second.cwdHash, at: Date.now() });
+		await extension.stop?.();
+		const records = await journal(telemetrySessionDirectory(clioStateDir(), first.id));
+		const fired = records.find((record) => record.k === "middleware.fired");
+		strictEqual(fired?.ctx.sessionId, first.id, "the first turn's turn_start firing reaches its session");
+		strictEqual(fired?.ctx.turnId, "turn-one");
+		const observed = records.flatMap((record) =>
+			record.k === "memory.observation_recorded" ? [[record.data.event, record.ctx.agent.role]] : [],
+		);
+		deepStrictEqual(observed, [["lesson-withheld", "memory"]], "only the delivery decision joins, as memory");
+		const later = await journal(telemetrySessionDirectory(clioStateDir(), second.id));
+		ok(!later.some((record) => record.k === "middleware.fired"), "a later bind takes nothing held");
+	} finally {
+		env.restore();
+	}
+	// A resumed session is not the one the hold waited for; an overflowed hold still reports its gap.
+	env = await isolateClioEnv("clio-coder-pre-bind-resume-");
+	try {
+		const bus = createTelemetryHub();
+		const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
+		const resumed = { id: "prebind-resumed", cwdHash: "prebind-repo" };
+		const fresh = { id: "prebind-fresh", cwdHash: "prebind-repo" };
+		await extension.start();
+		for (let n = 0; n <= 1024; n += 1) turnStart(`turn-${n}`);
+		bus.emit("session.reattached", { sessionId: resumed.id, via: "resume", at: Date.now() });
+		bus.emit("session.created", { sessionId: fresh.id, cwdHash: fresh.cwdHash, at: Date.now() });
+		await extension.stop?.();
+		for (const id of [resumed.id, fresh.id])
+			ok(
+				!(await journal(telemetrySessionDirectory(clioStateDir(), id))).some((record) => record.k === "middleware.fired"),
+				`${id} takes nothing held`,
+			);
+		const processRecords = await journal(telemetryProcessDirectory(clioStateDir(), telemetryProcessId()));
+		strictEqual(processRecords.filter((record) => record.k === "middleware.fired").length, 1024);
+		ok(
+			processRecords.some(
+				(record) => record.k === "journal.gap" && record.data.reason === "writer-drop" && record.data.count === 1,
+			),
+			"the hold's overflow is a process gap when no session takes it",
+		);
+	} finally {
 		env.restore();
 	}
 });

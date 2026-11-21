@@ -181,6 +181,12 @@ const INDEX_TAIL_BYTES = 4096;
 const INDEX_RECENT_IDS = 512;
 /** Check-start run identities kept, so a run that starts twice keeps its first binding. */
 const INDEX_RECENT_STARTS = 512;
+/**
+ * Log records an index may lag behind before an append that adds only empty check starts checkpoints it. Every verify
+ * call starts its checks, almost always with no hypothesis to bind, and rewriting the whole index for each such line
+ * costs more than folding a short tail on the next load (`loadIndex`). Any other record checkpoints at once.
+ */
+export const CLAIMS_INDEX_CHECKPOINT_LAG = 32;
 
 interface ClaimsIndexFile {
 	v: typeof CLAIMS_INDEX_VERSION;
@@ -205,6 +211,8 @@ interface ClaimsIndex {
 	pending: Set<string>;
 	hypotheses: Map<string, { id: string; subject: string; check?: string }>;
 	starts: Map<string, string[]>;
+	/** Log records folded in past the index file's `logBytes` on load; zero for a rebuilt index. Not persisted. */
+	lag: number;
 }
 
 function emptyIndex(): ClaimsIndex {
@@ -215,6 +223,7 @@ function emptyIndex(): ClaimsIndex {
 		pending: new Set(),
 		hypotheses: new Map(),
 		starts: new Map(),
+		lag: 0,
 	};
 }
 
@@ -290,9 +299,12 @@ function foldIndexLine(index: ClaimsIndex, project: string, value: Record<string
 	}
 }
 
-function foldIndexText(index: ClaimsIndex, project: string, text: string): void {
+function foldIndexText(index: ClaimsIndex, project: string, text: string): number {
+	let records = 0;
 	for (const line of text.split("\n")) {
-		if (line.trim().length === 0 || !withinLineBound(line)) continue;
+		if (line.trim().length === 0) continue;
+		records += 1;
+		if (!withinLineBound(line)) continue;
 		try {
 			const value: unknown = JSON.parse(line);
 			if (isObject(value)) foldIndexLine(index, project, value);
@@ -300,6 +312,7 @@ function foldIndexText(index: ClaimsIndex, project: string, text: string): void 
 			// A torn or foreign line: a full read counts it as unreadable, and it carries nothing an append needs.
 		}
 	}
+	return records;
 }
 
 function indexFromRead(read: ClaimsLogRead): ClaimsIndex {
@@ -412,10 +425,25 @@ function loadIndex(project: string, fd: number, size: number): ClaimsIndex | nul
 		pending: new Set(file.pending),
 		hypotheses: new Map(file.hypotheses.map(({ key, ...rest }) => [key, rest])),
 		starts: new Map(file.starts),
+		lag: 0,
 	};
-	// Lines another writer appended after the index was written, an older build included.
-	if (size > file.logBytes) foldIndexText(index, project, readRange(fd, file.logBytes, size).toString("utf8"));
+	// Lines appended after the index was written: empty check starts this build left unindexed, an older build's lines,
+	// or an append whose checkpoint a crash cut short.
+	if (size > file.logBytes)
+		index.lag = foldIndexText(index, project, readRange(fd, file.logBytes, size).toString("utf8"));
 	return index;
+}
+
+/** Whether a line this build appends is a check start that bound no hypothesis, the record most verify calls add. */
+function isEmptyCheckStartLine(line: string): boolean {
+	try {
+		const value: unknown = JSON.parse(line);
+		return (
+			isObject(value) && value.type === "check-start" && Array.isArray(value.hypotheses) && value.hypotheses.length === 0
+		);
+	} catch {
+		return false;
+	}
 }
 
 function writeIndex(project: string, index: ClaimsIndex, fd: number, size: number): void {
@@ -476,7 +504,8 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 				}
 				return full;
 			};
-			const index = loadIndex(project, fd, size) ?? indexFromRead(readFull());
+			const loaded = loadIndex(project, fd, size);
+			const index = loaded ?? indexFromRead(readFull());
 			result = index;
 			const next = lines({ index, full: readFull }).filter(withinLineBound);
 			if (next.length === 0) return;
@@ -484,7 +513,9 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 			const torn = size > 0 && readRange(fd, size - 1, size).toString("utf8") !== "\n";
 			writeSync(fd, `${torn ? "\n" : ""}${next.join("\n")}\n`);
 			fsyncSync(fd);
-			foldIndexText(index, project, next.join("\n"));
+			const lag = index.lag + foldIndexText(index, project, next.join("\n"));
+			// Empty check starts leave the index lagging, up to a bound; the next load folds them back in (C-36).
+			if (loaded !== null && lag < CLAIMS_INDEX_CHECKPOINT_LAG && next.every(isEmptyCheckStartLine)) return;
 			writeIndex(project, index, fd, fstatSync(fd).size);
 		} finally {
 			closeSync(fd);

@@ -112,7 +112,6 @@ import type { KnowledgeBase } from "../domains/providers/types/knowledge-base.js
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
-import { callChangesTree } from "../domains/safety/check-classifier.js";
 import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
@@ -125,7 +124,11 @@ import {
 } from "../domains/safety/information-flow.js";
 import { setValidationWrappers } from "../domains/safety/protected-artifacts.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
-import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
+import {
+	createRunEffectsRecorder,
+	recordToolExecutionEffects,
+	sessionChangesTree,
+} from "../domains/safety/run-effects.js";
 import type {
 	WorkerGitAllowance,
 	WorkerMcpAttestation,
@@ -203,6 +206,7 @@ import {
 	workerRefusalLimitReason,
 	workerRefusalReportDirective,
 } from "./worker-refusals.js";
+import { createThrashOutcome } from "./worker-thrash-outcome.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -412,6 +416,15 @@ function isAssistantMessage(
 ): message is AgentMessage & { role: "assistant"; stopReason?: string; errorMessage?: string } {
 	if (typeof message !== "object" || message === null) return false;
 	return "role" in message && message.role === "assistant";
+}
+
+/**
+ * An assistant turn Clio wrote itself, such as the result-contract repair exchange: zero usage marked `callInvoked:
+ * false` and a tool-use stop. A failed call is marked not invoked too, but it stops on `error` or `aborted`.
+ */
+function hostWrittenExchange(message: AgentMessage & { stopReason?: string }): boolean {
+	const usage = (message as { usage?: { callInvoked?: unknown } }).usage;
+	return usage?.callInvoked === false && message.stopReason === "toolUse" && !("failure" in message);
 }
 
 function getTerminalAgentError(messages: AgentMessage[]): string | null {
@@ -994,7 +1007,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const readStreakRegistration =
 		deliveryTools.length > 0 && workerCanWrite
 			? createReadStreakRegistration({
-					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+					// The worker's configured scratch roots count as scratch, as its run-effects recorder reads them.
+					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(() => workerSettings) },
 					workspaceRoot: () => input.cwd ?? process.cwd(),
 					surface: {
 						canWrite: true,
@@ -1153,7 +1167,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The write-side equivalent: what this run changed and what it validated,
 	// so a mutation report is judged against the run instead of believed. Scratch roots read as the orchestrator's copy
 	// reads them, so a check logged under one is output in both recorders (x6-8).
-	const runEffects = createRunEffectsRecorder(contractCwd, { scratchRoots: workerSettings.safety.scratchRoots });
+	// X4: the thrash note's settlement, from the request that carries it to the change or report that answers it.
+	const thrashOutcome = createThrashOutcome({ context: input.telemetryContext });
+	const runEffects = createRunEffectsRecorder(contractCwd, {
+		scratchRoots: workerSettings.safety.scratchRoots,
+		onWorkspaceChange: (toolCallId) => thrashOutcome.changed(toolCallId),
+	});
 	const acceptHelperResult = (data: unknown): string | null => {
 		if (!input.resultContract) return "missing helper result contract";
 		const validationInput = {
@@ -1544,7 +1563,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Each round sends through engineStreamSimple, whose guard sees the evicted request.
 		delegateGuardsToolArguments: true,
 		streamFn: (currentModel, transcript, streamOptions) => {
-			if (resultContractRepairsQueued > resultContractRepairsStarted) resultContractRepairsStarted += 1;
+			if (resultContractRepairsQueued > resultContractRepairsStarted) {
+				resultContractRepairsStarted += 1;
+				emit({ type: "clio_coder_result_contract_repair", payload: { started: resultContractRepairsStarted } });
+			}
 			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
 			const anthropicCompat =
@@ -2100,7 +2122,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		) {
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
-				workerTelemetry?.settle(event.message);
+				if (!hostWrittenExchange(event.message)) workerTelemetry?.settle(event.message);
+				// This answer is a request the thrash note may have ridden, though the round ends here.
+				thrashOutcome.observe(event);
 				// The middleware round must run before this answer can seal a terminal result (#423).
 				const tail: AgentMessage = { role: "user", content: reminder, timestamp: Date.now() };
 				if (event.message.content.some((block) => block.type === "toolCall")) agent.steer(tail);
@@ -2158,7 +2182,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			usage.callInvoked = failure?.invoked ?? true;
 			usage.usageReported = reported;
 		}
-		if (event.type === "message_end" && isAssistantMessage(event.message)) workerTelemetry?.settle(event.message);
+		// A repair exchange Clio wrote into the conversation reached no provider: the round's attempt belongs to the request
+		// that follows it, so it settles no attempt of its own (C-28).
+		if (event.type === "message_end" && isAssistantMessage(event.message) && !hostWrittenExchange(event.message))
+			workerTelemetry?.settle(event.message);
 		// Detect the whole terminal batch before any call is prepared/executed.
 		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
 		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
@@ -2180,9 +2207,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Effects and grounding come from the capability operations that
 		// settled: a gateway op=call as the capability it ran, a chain as each
 		// admitted child, once each. Provider replay keeps the wire records.
-		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+		// The result submission is this run's handoff, never a workspace call, so it opens no write record (C-14).
+		if (
+			(event.type === "tool_execution_start" || event.type === "tool_execution_end") &&
+			!(helperToolAvailable && event.toolName === INTERNAL_HELPER_RESULT_TOOL)
+		) {
 			recordToolExecutionEffects(runEffects, event);
 		}
+		// After the effects, so a call that changed the workspace has settled the note under its own id first.
+		thrashOutcome.observe(event);
 		if (event.type === "tool_execution_start") {
 			const call = effectiveToolCall(event.toolName, event.args);
 			if (call.toolName === ToolNames.Read) {
@@ -2253,6 +2286,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					telemetryHub().emit(
 						"middleware.fired",
 						{
+							firingId: thrashOutcome.fire(),
 							hook: "after_tool",
 							phase: "sync",
 							ruleId: "worker.thrash",
@@ -3013,6 +3047,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.telemetryContext ? withTelemetryContext(input.telemetryContext, work) : work();
 	const promise = runScoped(async (): Promise<WorkerRunResult> => {
 		try {
+			emit({ type: "clio_coder_result_contract_repair", payload: { started: 0 } });
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();
@@ -3085,6 +3120,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			clearTimeout(synthesisTimer);
 			clearActiveEscalation();
 			unsubscribePermission();
+			thrashOutcome.end(agent.state.messages.slice(inheritedCount));
 			// Every server this run launched closes with it; teardown reports go to
 			// stderr inside the source, never to the NDJSON lane.
 			try {

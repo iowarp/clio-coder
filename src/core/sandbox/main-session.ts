@@ -1,4 +1,16 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { YoloConfinement } from "../../domains/safety/autonomy.js";
@@ -531,15 +543,109 @@ function mainSandboxCacheDir(cacheDir: string = clioCachePath()): string {
 	return path.join(cacheDir, "sandbox-cache");
 }
 
-/** Pure: the variables that point package managers and tools at the sandbox cache. */
-function mainSandboxCacheEnv(cache: string): Record<string, string> {
+/**
+ * Pure: whether a contained command can write `target`. bwrap mounts the
+ * writable roots, then the read-only paths, then the sandbox cache, and the
+ * last mount covering a path decides; anything none covers is the read-only
+ * root.
+ */
+function sandboxWritable(
+	target: string,
+	policy: Pick<MainSandboxPolicy, "writableRoots" | "readOnlyPaths" | "sandboxCache">,
+): boolean {
+	let writable = false;
+	const layers: Array<[ReadonlyArray<string>, boolean]> = [
+		[policy.writableRoots, true],
+		[policy.readOnlyPaths, false],
+		[policy.sandboxCache !== undefined ? [policy.sandboxCache] : [], true],
+	];
+	for (const [roots, canWrite] of layers) {
+		if (roots.some((root) => !relativePathEscapes(path.relative(root, target)))) writable = canWrite;
+	}
+	return writable;
+}
+
+function envHas(env: NodeJS.ProcessEnv, name: string): boolean {
+	const lower = name.toLowerCase();
+	return Object.entries(env).some(([key, value]) => key.toLowerCase() === lower && value !== undefined && value !== "");
+}
+
+/**
+ * Pure: the variables that point package managers and tools at the sandbox
+ * cache. pnpm keeps its store under XDG_DATA_HOME or PNPM_HOME, which stay
+ * read-only. pnpm 10 places its store under PNPM_HOME and pnpm 11 and later
+ * read pnpm_config_store_dir; npm 11 warns about every npm_config_store_dir
+ * spelling, so that one is never set. A store the operator chose, or a
+ * PNPM_HOME a contained command can write, is left alone. `npmUserConfig`
+ * stands in for a masked ~/.npmrc, which npm and pnpm otherwise report as
+ * unreadable on every call, unless the operator named a user config.
+ */
+function mainSandboxCacheEnv(
+	cache: string,
+	npmUserConfig?: string,
+	env: NodeJS.ProcessEnv = process.env,
+	policy?: Pick<MainSandboxPolicy, "writableRoots" | "readOnlyPaths" | "sandboxCache">,
+): Record<string, string> {
+	const pnpmHome = env["PNPM_HOME"];
+	const storeChosen =
+		envHas(env, "npm_config_store_dir") ||
+		envHas(env, "pnpm_config_store_dir") ||
+		(pnpmHome !== undefined && pnpmHome !== "" && policy !== undefined && sandboxWritable(pnpmHome, policy));
+	const home = path.join(cache, "pnpm");
 	return {
 		XDG_CACHE_HOME: cache,
 		npm_config_cache: path.join(cache, "npm"),
+		...(storeChosen ? {} : { PNPM_HOME: home, pnpm_config_store_dir: path.join(home, "store") }),
+		...(npmUserConfig !== undefined && !envHas(env, "npm_config_userconfig")
+			? { NPM_CONFIG_USERCONFIG: npmUserConfig }
+			: {}),
 		PIP_CACHE_DIR: path.join(cache, "pip"),
 		UV_CACHE_DIR: path.join(cache, "uv"),
 		PLAYWRIGHT_BROWSERS_PATH: path.join(cache, "ms-playwright"),
 	};
+}
+
+/**
+ * Impure: the empty npm user config a contained command reads when `masks`
+ * hide the operator's ~/.npmrc, else undefined. It sits beside the sandbox
+ * cache, in Clio's cache directory, and is used only where `policy` leaves it
+ * read-only to contained commands, so none can replace, link, chmod or race
+ * it. Every launch checks it again: anything but an empty readable regular
+ * file with one link, owned by this user, is replaced by renaming a new one
+ * over it, which never follows a link. A file that cannot be made leaves the
+ * variable unset.
+ */
+export function mainSandboxNpmUserConfig(
+	cache: string,
+	masks: ReadonlyArray<SandboxMaskedPath>,
+	home: string,
+	policy: Pick<MainSandboxPolicy, "writableRoots" | "readOnlyPaths" | "sandboxCache">,
+): string | undefined {
+	const npmrc = physicalSandboxPath(path.join(home, ".npmrc"));
+	if (!masks.some((mask) => mask.path === npmrc)) return undefined;
+	const file = path.join(path.dirname(cache), "sandbox-npmrc");
+	if (sandboxWritable(file, policy)) return undefined;
+	const uid = process.getuid?.();
+	const temp = `${file}.${process.pid}.${randomUUID()}`;
+	try {
+		const stat = lstatSync(file, { throwIfNoEntry: false });
+		if (
+			stat?.isFile() === true &&
+			stat.size === 0 &&
+			stat.nlink === 1 &&
+			(stat.mode & 0o777) === 0o444 &&
+			(uid === undefined || stat.uid === uid)
+		)
+			return file;
+		writeFileSync(temp, "", { flag: "wx", mode: 0o444 });
+		chmodSync(temp, 0o444);
+		if (stat?.isDirectory() === true) rmSync(file, { recursive: true, force: true });
+		renameSync(temp, file);
+		return file;
+	} catch {
+		rmSync(temp, { force: true });
+		return undefined;
+	}
 }
 
 /**
@@ -627,6 +733,8 @@ export function mainSandboxInvocationSpec(
 	command: SandboxCommand,
 	cwd: string,
 	maskedPaths: ReadonlyArray<SandboxMaskedPath>,
+	npmUserConfig?: string,
+	env: NodeJS.ProcessEnv = process.env,
 ): SandboxInvocationSpec {
 	return {
 		command,
@@ -645,7 +753,10 @@ export function mainSandboxInvocationSpec(
 			: {
 					privateTmp: false,
 					...(policy.sandboxCache !== undefined
-						? { gitWritablePaths: [policy.sandboxCache], setEnv: mainSandboxCacheEnv(policy.sandboxCache) }
+						? {
+								gitWritablePaths: [policy.sandboxCache],
+								setEnv: mainSandboxCacheEnv(policy.sandboxCache, npmUserConfig, env, policy),
+							}
 						: {}),
 				}),
 	};
@@ -767,15 +878,30 @@ export function planMainSandboxSpawn(
 		[...baseMasks, ...secretMasks],
 	);
 	const masks = [...baseMasks, ...secretMasks, ...sockets.masks];
-	const aliased = availability.backend === "bwrap" ? withMountAliases(masks) : masks;
+	const aliased =
+		availability.backend === "bwrap"
+			? withMountAliases(masks, undefined, [
+					physicalSandboxPath(cwd),
+					physicalSandboxPath(policy.secretRoots.workspace),
+					...policy.secretRoots.scratchRoots.map(physicalSandboxPath),
+					...(policy.secretRoots.sourceCheckout !== undefined
+						? [physicalSandboxPath(policy.secretRoots.sourceCheckout)]
+						: []),
+					...physicalPolicy.writableRoots,
+				])
+			: masks;
 	if (aliased instanceof Error) {
 		return {
 			kind: "refused",
 			message: `sandbox: the main-session sandbox is unavailable (${aliased.message}); the command was not run`,
 		};
 	}
+	const npmUserConfig =
+		policy.readOnly !== true && physicalPolicy.sandboxCache !== undefined
+			? mainSandboxNpmUserConfig(physicalPolicy.sandboxCache, aliased, homedir(), physicalPolicy)
+			: undefined;
 	const spec = {
-		...mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), aliased),
+		...mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), aliased, npmUserConfig),
 		...sockets.fields,
 	};
 	const invocation = buildSandboxInvocation(spec, availability.backend, availability.executable);
@@ -971,7 +1097,7 @@ export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy):
 	const temp = writableTempDir(policy.writableRoots);
 	const cache =
 		policy.sandboxCache !== undefined
-			? ` The operator's ~/.cache and ~/.npm stay read-only because tools later run code from them outside the sandbox; contained commands get their own cache at ${policy.sandboxCache} through XDG_CACHE_HOME, npm_config_cache, PIP_CACHE_DIR, UV_CACHE_DIR and PLAYWRIGHT_BROWSERS_PATH: point any other tool's cache variable at a new directory there.`
+			? ` The operator's ~/.cache and ~/.npm stay read-only because tools later run code from them outside the sandbox; contained commands get their own cache at ${policy.sandboxCache} through XDG_CACHE_HOME, npm_config_cache, PNPM_HOME and pnpm_config_store_dir (pnpm's store), PIP_CACHE_DIR, UV_CACHE_DIR and PLAYWRIGHT_BROWSERS_PATH: point any other tool's cache variable at a new directory there.`
 			: temp === null
 				? ""
 				: ` A tool cache outside these roots, such as uv's ~/.cache/uv or a UV_CACHE_DIR set elsewhere, stays read-only because the tool later runs code from it outside the sandbox: point it at a new directory under ${temp} for this command (UV_CACHE_DIR=${path.join(temp, "uv-cache")}).`;
@@ -1010,6 +1136,7 @@ export function mainSandboxLine(
 		const details = [
 			`default-autonomy shell commands run in the ${availability.backend} sandbox`,
 			`writable roots: ${displayWritableRoots(writableRoots)}`,
+			"package managers use Clio's sandbox cache (pnpm's store through PNPM_HOME and pnpm_config_store_dir unless the operator chose one) and read an empty NPM_CONFIG_USERCONFIG in place of a masked ~/.npmrc",
 		];
 		const masked =
 			secretFiles === undefined

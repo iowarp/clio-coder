@@ -35,10 +35,15 @@ import {
 	FINISH_CONTRACT_RUN_CHECKS_PREFIX,
 } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
+import type {
+	CompactionTrigger,
+	EvictionTrigger,
+	HostInsertSource,
+	RecallTrigger,
+} from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
 import { sealCompletion } from "../tools/finish.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolBoundaryReminder, ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
 import type { HostInserts } from "./host-inserts.js";
 import type { NoticeSource } from "./notice-source.js";
@@ -76,6 +81,8 @@ export interface TurnMiddlewareDeps {
 	 * `suppressed` (memory design 4.1).
 	 */
 	suppressFirings?: (firingIds: ReadonlyArray<string>) => void;
+	/** Queues a host message for the next tool-batch boundary (`TurnQueues.queueHostMessage`); false when not queued. */
+	queueHostMessage?: (text: string, source: HostInsertSource, rule?: string) => boolean;
 }
 
 /** The admitted awaited turn_start phase's effects, each settling effect mapped to its firing. */
@@ -191,6 +198,12 @@ export interface TurnMiddleware {
 	 * `middlewareReminder` entry, so nothing it says can enter the next request.
 	 */
 	emitDeferredNotice(text: string, level?: "info" | "warning", source?: NoticeSource): void;
+	/**
+	 * Reminders a synchronous after_tool rule emitted (X6): each becomes one host-framed `<system-reminder>` user
+	 * message waiting for the next tool-batch boundary, where the turn runtime appends it to the outgoing context as a
+	 * host insert (never through the engine's steering queue). It never interrupts a running tool.
+	 */
+	applyToolBoundaryReminders(reminders: ReadonlyArray<ToolBoundaryReminder>): void;
 }
 
 /** The transcript level of a reminder: advice informs, a warning or a hard stop warns. */
@@ -962,6 +975,17 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const message = text.trim();
 			if (message.length === 0) return;
 			deps.emitNotice(message, level, source);
+		},
+
+		applyToolBoundaryReminders(reminders): void {
+			for (const reminder of reminders) {
+				const severity = reminder.severity ?? "info";
+				// Journaled as a `reminder` insert carrying its rule, a record builds before X6 still read.
+				const queued =
+					deps.queueHostMessage?.(systemReminderBlock([reminder.message]), "reminder", reminder.ruleId) ?? false;
+				// Advice for the model alone stays out of the transcript, as it does at turn_end.
+				if (queued && reminder.audience !== "model") deps.emitNotice(reminder.message, reminderNoticeLevel(severity));
+			}
 		},
 	};
 }

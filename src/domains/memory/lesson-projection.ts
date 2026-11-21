@@ -36,7 +36,8 @@ import { memoryRevision, recordClaim } from "./promotion.js";
 import { memoryStorePath, mutateMemoryRecords, readMemoryStoreSnapshot } from "./store.js";
 import type { MemoryClaimCommand, MemoryRecord } from "./types.js";
 
-export type KeptLessonApproval = "operator" | "automatic";
+/** `note`: an unpromoted fix claim a failed call matched; it rides only `_variant`, labelled unverified (DESIGN 4.4). */
+export type KeptLessonApproval = "operator" | "automatic" | "note";
 
 export interface KeptLesson {
 	readonly id: string;
@@ -65,7 +66,11 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 	const appliesWhen = record.appliesWhen.filter((condition) => !SCOPE_CONDITION.test(condition));
 	const avoidWhen = [...record.avoidWhen];
 	// A record approved before approval stamps existed was reviewed by a person (see guardian-gate).
-	const approval: KeptLessonApproval = record.approval?.by === "guardian" ? "automatic" : "operator";
+	const approval: KeptLessonApproval = !record.approved
+		? "note"
+		: record.approval?.by === "guardian"
+			? "automatic"
+			: "operator";
 	const evidenceRefs = record.evidenceRefs.filter(
 		(ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX) || ref.startsWith("source:"),
 	);
@@ -91,6 +96,7 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 /** How a reminder names who stands behind a lesson. */
 export function keptLessonLabel(lesson: KeptLesson): string {
 	if (lesson.approval === "operator") return "operator-approved";
+	if (lesson.approval === "note") return "unverified note from an earlier session";
 	if (lesson.evidenceRefs.length === 0) return "retained automatically";
 	// A file quote alone never vouches for a claim, so a lesson the gate kept on
 	// one before that rule is labelled as the unreviewed quote it is.
@@ -222,6 +228,27 @@ function memoryDeliveryCheck(record: MemoryRecord, input: DeliveryCheckInput): s
 			return `its quoted span is no longer in ${path}`;
 	}
 	return null;
+}
+
+/**
+ * The delivery check for a pass over the store outside a session, `clio-coder memory consolidate`: the same check
+ * against one checkout, each of its files read once for the pass. Null when nothing is certainly dead, otherwise why.
+ */
+export function checkoutDeliveryCheck(root: string): (record: MemoryRecord) => string | null {
+	const files = new Map<string, SourceFile | null | undefined>();
+	const file = (path: string): SourceFile | null | undefined => {
+		const key = resolve(root, path);
+		if (!files.has(key)) files.set(key, readSourceFile(root, path));
+		return files.get(key);
+	};
+	return (record) => memoryDeliveryCheck(record, { root, file });
+}
+
+/** A checkout file as the check reads it: `null` when it is gone, `undefined` when it exists but is not read. */
+function readSourceFile(root: string, path: string): SourceFile | null | undefined {
+	if (!existsSync(resolve(root, path))) return null;
+	const content = readInsideRoot(root, path);
+	return content === null ? undefined : { content };
 }
 
 /** Lines a pinned span may cover when it is looked for in its file rather than in the lesson's words. */
@@ -511,15 +538,7 @@ export class MemoryDeliveryGate {
 	/** A checkout file, read once per session: `null` when it is gone, `undefined` when it exists but is not read. */
 	#file(root: string, path: string): SourceFile | null | undefined {
 		const key = resolve(root, path);
-		if (!this.#files.has(key)) {
-			let file: SourceFile | null | undefined;
-			if (!existsSync(key)) file = null;
-			else {
-				const content = readInsideRoot(root, path);
-				file = content === null ? undefined : { content };
-			}
-			this.#files.set(key, file);
-		}
+		if (!this.#files.has(key)) this.#files.set(key, readSourceFile(root, path));
 		return this.#files.get(key);
 	}
 

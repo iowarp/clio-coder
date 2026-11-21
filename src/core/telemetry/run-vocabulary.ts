@@ -31,6 +31,10 @@ export const RUN_OUTCOME_CODES = [
 	"merge_withheld",
 	"worker_removed_tests",
 	"information_flow_blocked",
+	"acp_auth_required",
+	"acp_model_unavailable",
+	"acp_thinking_unavailable",
+	"acp_transport_error",
 ] as const;
 export type RunOutcomeCode = (typeof RUN_OUTCOME_CODES)[number];
 

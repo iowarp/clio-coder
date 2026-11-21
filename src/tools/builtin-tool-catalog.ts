@@ -216,12 +216,22 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		],
 	},
 	[ToolNames.MemoryRecall]: {
-		objective: "Recall task memory and approved durable memory that matches a query, without writing memory.",
+		objective: "Recall task memory, durable lessons and unverified notes that match a query, without writing memory.",
 		uiLabel: "Memory",
 		resultSizePolicy: {
 			kind: "bounded",
 			maxBytes: 32_768,
 			followUpHint: "Narrow the query or lower limit.",
+		},
+	},
+	[ToolNames.MemoryNote]: {
+		objective:
+			"Keep an unverified note for later sessions in this repository, bound to a command or read from this session.",
+		uiLabel: "Note",
+		resultSizePolicy: {
+			kind: "bounded",
+			maxBytes: 4_096,
+			followUpHint: "The result names the note's id; memory_recall shows it.",
 		},
 	},
 	// MUTATE: write-class, sequential, file-mutation queue.
@@ -246,7 +256,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultDisposition: BASH_DEFAULT_RESULT_DISPOSITION,
 	},
 	[ToolNames.Git]: {
-		objective: "Git through fixed argv: inspect with status, diff, log, or show; stage and record with add or commit.",
+		objective:
+			'Typed git, not argv: inspect with {op:"log",limit,stat}, {op:"diff",rev,path}, {op:"show",rev} or status; stage and record with add or commit.',
 		uiLabel: "Git",
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
 		examples: [

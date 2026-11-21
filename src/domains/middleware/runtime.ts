@@ -64,6 +64,11 @@ export interface MiddlewareHookRegistration {
 	 * that knows a narrower one reports it through `context.evidence` (#431, §8).
 	 */
 	evidence?: string;
+	/**
+	 * Every firing of this rule settles in the outcome ledger, whatever its effects: a tool-result note the ledger
+	 * settles on what the model did next (exploration design 3.4). Builtin rules only.
+	 */
+	settles?: true;
 	/** Exact tool names, same matcher semantics as `MiddlewareRuleDefinition.toolNames`. */
 	toolNames?: ReadonlyArray<string>;
 	/**
@@ -315,7 +320,7 @@ export function runMiddlewareRegistrations(
 			effects.push(cloneMiddlewareEffect(effect));
 		}
 		if (!ruleIds.includes(registration.id)) ruleIds.push(registration.id);
-		fired.push(firedRule(registration.id, emitted, evidence ?? registration.evidence));
+		fired.push(firedRule(registration, emitted, evidence ?? registration.evidence));
 	}
 	return {
 		hook: input.hook,
@@ -376,21 +381,22 @@ export async function runMiddlewareAsyncRegistrations(
 		for (const effect of emitted) effects.push(cloneMiddlewareEffect(effect));
 		if (emitted.length > 0) {
 			ruleIds.push(registration.id);
-			fired.push(firedRule(registration.id, emitted, evidence ?? registration.evidence));
+			fired.push(firedRule(registration, emitted, evidence ?? registration.evidence));
 		}
 	}
 	return { hook: input.hook, input: cloneHookInput(input), effects, ruleIds, fired };
 }
 
 function firedRule(
-	ruleId: string,
+	registration: Pick<MiddlewareHookRegistration, "id" | "settles">,
 	emitted: ReadonlyArray<MiddlewareEffect>,
 	evidence: string | undefined,
 ): MiddlewareFiredRule {
 	return {
-		ruleId,
+		ruleId: registration.id,
 		effects: emitted.map((effect) => effect.kind),
 		...(evidence !== undefined ? { evidence } : {}),
+		...(registration.settles === true ? { settles: true as const } : {}),
 	};
 }
 

@@ -17,3 +17,4 @@ effect, not your reason.
 
 - {tasks} Three or more authorized steps: put them on the `tasks` board and close each when it is done.
 - {code_nav} Finding code, never through the shell: `code_nav` for a symbol, an outline or importers.
+- {memory_note} `memory_note` is for what a later session in this repository would need and could not learn from the code.

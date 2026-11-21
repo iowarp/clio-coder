@@ -314,7 +314,15 @@ export function composeWorkerSandboxInvocation(
 		maskedPaths,
 	);
 	const masks = [...maskedPaths, ...sockets.masks];
-	const aliased = availability.backend === "bwrap" ? withMountAliases(masks) : masks;
+	const aliased =
+		availability.backend === "bwrap"
+			? withMountAliases(masks, undefined, [
+					physicalSandboxPath(cwd),
+					...policy.readableRoots.map(physicalSandboxPath),
+					...writableRoots,
+					...policy.gitWritablePaths.map(physicalSandboxPath),
+				])
+			: masks;
 	if (aliased instanceof Error)
 		throw new Error(`sandbox: no worker sandbox is available (${aliased.message}); the command was not run`);
 	const spec: SandboxInvocationSpec = {

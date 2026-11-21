@@ -298,7 +298,7 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 	if (activity !== null) {
 		const landed = mutationLanded(run, activity);
 		labels.push(
-			`work=calls:${activity.calls} ok:${activity.succeeded} failed:${activity.failed} blocked:${activity.blocked} mutations:${
+			`work=calls:${activity.calls} ok:${activity.succeeded} failed:${activity.failed} blocked:${activity.blocked}${(activity.withheld ?? 0) > 0 ? ` withheld:${activity.withheld}` : ""} mutations:${
 				landed ? "yes" : "no"
 			}${(activity.unfinished ?? 0) > 0 ? ` unfinished:${activity.unfinished}` : ""}`,
 		);

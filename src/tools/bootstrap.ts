@@ -26,6 +26,7 @@ import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import type { JobOperations } from "./job-types.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
+import { createMemoryNoteTool, type MemoryNoteDeps } from "./memory-note.js";
 import { createMemoryRecallTool, type MemoryRecallDeps } from "./memory-recall.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { musicToolSurface } from "./music-surface.js";
@@ -43,6 +44,8 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	requestSelfCompact?: RequestSelfCompact;
 	/** The session's memory stores. Only the orchestrator owns a task bank, so workers never get the tool. */
 	memoryRecall?: MemoryRecallDeps;
+	/** Present only when the session starts with `context.memory.surfaces.lessons: agent`; workers never get it. */
+	memoryNote?: MemoryNoteDeps;
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch?: DispatchContract;
 	jobTool?: ToolSpec;
@@ -154,6 +157,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	if (deps.memoryRecall)
 		registry.register(
 			builtin(createMemoryRecallTool(deps.memoryRecall), { path: "src/tools/memory-recall.ts", scope: "core" }),
+		);
+	if (deps.memoryNote)
+		registry.register(
+			builtin(createMemoryNoteTool(deps.memoryNote), { path: "src/tools/memory-note.ts", scope: "core" }),
 		);
 	if (deps.jobTool) registry.register(builtin(deps.jobTool, { path: "src/tools/job.ts", scope: "core" }));
 	if (deps.jobs && !deps.dispatch) {

@@ -184,6 +184,8 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Data:
 		// memory_recall reads the task bank and the durable store; it never writes.
 		case ToolNames.MemoryRecall:
+		// memory_note writes one unverified note to Clio's own memory store, never a workspace file.
+		case ToolNames.MemoryNote:
 		// gateway lists and describes capabilities on its own; a call carries
 		// the capability's own class through a nested admission, so the outer
 		// call stays read class.

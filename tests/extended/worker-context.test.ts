@@ -874,6 +874,9 @@ test("a writer worker reading 40 times with no write is told once, naming the st
 		// Admit an 82% request without a fold, so the context cause holds after read 46 as in the CLI-H3 row above.
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.context.compaction.threshold = 0.95;
+		// A write into this configured scratch root inside the worker's cwd is no edit, so it never resets the streak.
+		settings.safety.scratchRoots = [join(env.dir, "scratch")];
+		mkdirSync(join(env.dir, "scratch"), { recursive: true });
 		mkdirSync(join(env.dir, "config"), { recursive: true });
 		writeFileSync(join(env.dir, "config/settings.yaml"), JSON.stringify(settings));
 		// Fifty reads of one new line each: no repeat for the loop guard, nothing already shown.
@@ -941,6 +944,19 @@ test("a writer worker reading 40 times with no write is told once, naming the st
 			!chained.requests.some((request) => request.includes("Host note:")),
 			"a streak reset by the chain sends no host turn",
 		);
+
+		// A write into the configured scratch root at call 21 leaves the streak running: the host turn follows read 40.
+		const scratched = await runFauxWorker(
+			env.dir,
+			(done) =>
+				done === 20
+					? { call: { name: "write", arguments: { path: "scratch/notes.txt", content: "n\n" } }, promptTokens: 1000 }
+					: lines(44)(done),
+			{ agentId: "coder", task: "Fix a.txt.", allowedTools: ["write", "read"] },
+		);
+		match(readFileSync(join(env.dir, "scratch/notes.txt"), "utf8"), /^n/, "the scratch write landed");
+		const scratchNudged = scratched.requests.find((request) => request.includes("Host note:"));
+		equal(scratchNudged !== undefined ? toolResults(scratchNudged) : -1, 41, "a scratch-root write is no edit");
 
 		// An operator steer starts the streak over, so 50 reads with a steer at 30 never reach the second step.
 		const steered = await runFauxWorker(env.dir, lines(50), {
@@ -1188,6 +1204,87 @@ test("a worker citation grounds on a line its own bash grep -n printed (FL-12)",
 		equal(outcome.exitCode, 0, JSON.stringify(outcome).slice(0, 2000));
 		// The cited line was printed by the worker's own shell search, so no citation repair round follows.
 		equal(requests, 2, JSON.stringify(events).slice(-3000));
+	} finally {
+		process.chdir(previousCwd);
+		worker?.abort();
+		await worker?.promise;
+		server.closeAllConnections();
+		await closeServer(server);
+		env.restore();
+	}
+});
+
+test("a host-written repair exchange journals no call attempt of its own (C-28)", {
+	timeout: 20_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-repair-telemetry-");
+	// The first answer is prose the scout-report contract refuses, so the worker queues its host-written repair
+	// exchange; the second answer conforms.
+	const answers = [
+		"The marker is somewhere in notes.txt.",
+		JSON.stringify({ findings: [{ claim: "No grounded evidence." }], needsSplit: false, proposedSubtasks: [] }),
+	];
+	let requests = 0;
+	const server = createServer(async (req, res) => {
+		await readRequestBody(req);
+		const content = answers[Math.min(requests, answers.length - 1)] ?? "";
+		requests += 1;
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			`data: ${JSON.stringify({ model: "fixture", choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+		);
+	});
+	let worker: WorkerRunHandle | undefined;
+	const events: unknown[] = [];
+	const previousCwd = process.cwd();
+	process.chdir(env.dir);
+	try {
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		worker = startWorkerRun(
+			{
+				agentId: "scout",
+				systemPrompt: "Inspect and return a Scout report.",
+				task: "Find the marker.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "fixture",
+				thinkingLevel: "off",
+				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
+				allowedTools: ["read"],
+				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+				resultContract: { kind: "scout-report" },
+				telemetryContext: { sessionId: null, runId: "repairrun", agent: workerAgent("repairrun") },
+			},
+			(event) => void events.push(event),
+		);
+		const outcome = await worker.promise;
+		equal(outcome.exitCode, 0, JSON.stringify(outcome).slice(0, 2000));
+		equal(requests, 2, "one repair round followed the prose answer");
+		const records = events.flatMap((event) => {
+			const frame = event as Partial<WorkerTelemetryFrame>;
+			return frame.type === "clio_coder_telemetry" && frame.record !== undefined
+				? [frame.record as unknown as { k: string; data: Record<string, unknown> }]
+				: [];
+		});
+		const settled = records.filter((record) => record.k === "call.settled");
+		deepStrictEqual(
+			settled.map((record) => [record.data.attempt, record.data.disposition]),
+			settled.map((record) => [0, record.data.disposition === "never_sent" ? "sent" : record.data.disposition]),
+			"each sent request is its call's first attempt, with no phantom attempt for the repair exchange",
+		);
+		equal(settled.length, 2);
+		// The worker reports its own repair count: 0 as it starts, then the one round it started (C-28).
+		const reported = events.filter(
+			(event) => (event as { type?: unknown }).type === "clio_coder_result_contract_repair",
+		) as Array<{ payload: { started: number } }>;
+		deepStrictEqual(
+			reported.map((event) => event.payload.started),
+			[0, 1],
+		);
 	} finally {
 		process.chdir(previousCwd);
 		worker?.abort();
