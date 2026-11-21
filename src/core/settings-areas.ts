@@ -165,6 +165,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "fleet.staggerSharedPrefix":
 			return place("workers", "Machines");
 		case "fleet.limits.toolCallsPerRun":
+		case "fleet.limits.runTimeoutMs":
 		case "fleet.retry.maxRetries":
 			return place("workers", "Limits & retries");
 		case "fleet.limits.internalRunTimeoutMs":

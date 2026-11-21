@@ -107,6 +107,7 @@ async function nativeEvents(root: string, requiredCheck: boolean, editAfterCheck
 				role: "assistant",
 				stopReason: "stop",
 				content: JSON.stringify({
+					completion: { state: "done", limitations: [], unverified: [] },
 					mutatedPaths: ["src/solver.ts"],
 					validations: [{ name: requiredCheck ? "npm run test:solver" : "npm run lint", passed: true, evidence: "exit 0" }],
 					summary: "Updated src/solver.ts and ran validation.",

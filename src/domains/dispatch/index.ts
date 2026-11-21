@@ -30,7 +30,6 @@ export {
 	isFleetTool,
 	prepareFleetToolInstall,
 } from "./fleet-tool-install.js";
-export { FleetWorkspaceBusyError, FleetWorkspaceLockUnavailableError } from "./fleet-workspace-lock.js";
 export { gateTopology } from "./gate-topology.js";
 export { DISPATCH_INTENT_PATH_LIST_CAP, declaredScopeIntent } from "./intent.js";
 export type { RecordingReference } from "./recording.js";
@@ -45,3 +44,4 @@ export {
 } from "./run-result-facts.js";
 export type { FleetRunRecord } from "./state.js";
 export { openLedger, readFleetRun } from "./state.js";
+export { WriterSetBusyError } from "./writer-set.js";

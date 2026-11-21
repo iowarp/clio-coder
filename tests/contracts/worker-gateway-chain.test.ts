@@ -359,7 +359,13 @@ test("a chained write the policy refused is reported as refused, not as never at
 		// Writes are confined to a directory the chain's target is outside of.
 		writeRoots: ["allowed"],
 	};
-	const report = { text: JSON.stringify({ mutatedPaths: ["outside.txt"], validations: [] }) };
+	const report = {
+		text: JSON.stringify({
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: ["outside.txt"],
+			validations: [],
+		}),
+	};
 	const plan = chain([{ id: "put", capability: "write", args: { path: "outside.txt", content: "x\n" } }]);
 	const { events, dir } = await runWorker([[plan], report, report, report], coder);
 	const details = chainDetails(events);
@@ -379,8 +385,20 @@ test("zero-tool recovery leaves both result-contract repairs available", { timeo
 			{ text: "I cannot edit this file." },
 			[{ name: "write", arguments: JSON.stringify({ path: "fixed.ts", content: "export const fixed = true;\n" }) }],
 			{ text: "The edit is done." },
-			{ text: JSON.stringify({ mutatedPaths: ["fixed.ts"], validations: [{ name: "test", passed: true }] }) },
-			{ text: JSON.stringify({ mutatedPaths: ["fixed.ts"], validations: [] }) },
+			{
+				text: JSON.stringify({
+					completion: { state: "done", limitations: [], unverified: [] },
+					mutatedPaths: ["fixed.ts"],
+					validations: [{ name: "test", passed: true }],
+				}),
+			},
+			{
+				text: JSON.stringify({
+					completion: { state: "done", limitations: [], unverified: [] },
+					mutatedPaths: ["fixed.ts"],
+					validations: [],
+				}),
+			},
 		],
 		{ agentId: "coder", allowedTools: ["write", "read"], resultContract: { kind: "mutation-report" } },
 	);
@@ -393,7 +411,7 @@ test("a second zero-tool reply ends without repairing its malformed report", { t
 		[{ text: "I cannot edit this file." }, { text: "Still cannot edit." }],
 		{ agentId: "coder", allowedTools: ["write", "read"], resultContract: { kind: "mutation-report" } },
 	);
-	strictEqual(result.exitCode, 0, "the host seals worker_no_work from the empty tool activity");
+	strictEqual(result.exitCode, 0, "the host seals obligation_unmet from the empty tool activity");
 	strictEqual(requests, 2);
 	strictEqual(
 		outcomes(events).some((event) => event.outcomeCode === "result_contract_exhausted"),

@@ -355,6 +355,7 @@ async function main(): Promise<number> {
 		// Preserve the host's stable context-generation policy across the worker process boundary.
 		...(spec.sampling !== undefined ? { sampling: spec.sampling } : {}),
 		...(spec.synthesisAt !== undefined ? { synthesisAt: spec.synthesisAt } : {}),
+		limits: structuredClone(spec.limits),
 		...(spec.cacheLane !== undefined ? { cacheLane: spec.cacheLane } : {}),
 		...(spec.resultContract !== undefined ? { resultContract: spec.resultContract } : {}),
 		...(spec.helperResult === true ? { helperResult: true } : {}),

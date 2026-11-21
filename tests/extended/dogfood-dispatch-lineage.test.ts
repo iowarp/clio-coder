@@ -20,7 +20,7 @@ import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-contr
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedCheckEvents, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -102,7 +102,7 @@ async function fixture(
 				abort() {},
 				events: (async function* () {
 					if (fail) return;
-					const checks = [{ name: "fixture", passed: true, evidence: "input.txt:1" }];
+					const checks = [{ name: "npm test", passed: true, evidence: "exit 0" }];
 					const answer = spec.task.startsWith("Synthesize the council")
 						? { verdict: "supported", text: "fixture synthesis" }
 						: spec.agentId === "verifier"
@@ -117,8 +117,10 @@ async function fixture(
 					// A review gate only counts a pass from a reviewer that inspected something, and a
 					// read-scoped scout that executed no tool seals failed (FX-19).
 					if (spec.agentId === "verifier" || spec.agentId === "scout") {
-						yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
+						for (const event of observedReadEvents("input.txt")) yield event;
 					}
+					// A reviewer's claimed check must be one it ran (cited-evidence, fleet design 4.8).
+					if (spec.agentId === "verifier") for (const event of observedCheckEvents()) yield event;
 					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: JSON.stringify(answer) } };
 				})(),
 			};
@@ -596,7 +598,7 @@ function controlledWorker() {
 		},
 		events: (async function* () {
 			const result = await promise;
-			if (result.exitCode === 0) yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
+			if (result.exitCode === 0) for (const event of observedReadEvents("input.txt")) yield event;
 			if (result.exitCode === 0)
 				yield {
 					type: "message_end",

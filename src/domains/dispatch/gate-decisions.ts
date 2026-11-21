@@ -113,26 +113,19 @@ function parseReviewGateResult(output: string): GateResultParse<ReviewGateResult
 }
 
 /**
- * What the reviewer run's sealed record says it actually did. `toolCalls` is
- * its successful tool calls, null when Clio could not observe its tool lane (an
- * external CLI runtime), which is unknown rather than zero. `ungrounded` names
- * passing checks its report claims while it executed no command at all.
+ * What the grader sealed about the reviewer run (DESIGN 4.8): whether it left its cited-evidence obligation unmet,
+ * which is a pass resting on no observation or on checks its report claims and never ran. The gate reads the sealed
+ * verdict and counts nothing itself.
  */
 export interface ReviewerInspection {
-	toolCalls: number | null;
-	ungrounded: ReadonlyArray<string>;
+	obligationUnmet: boolean;
 }
 
 export function reviewerInspectionOf(run: {
-	runtimeKind: string;
-	toolActivity?: { succeeded: number } | null;
-	validationGrounding?: { basis: string; ungrounded: ReadonlyArray<string> } | null;
+	outcomeCode?: string | null;
+	verdict?: { obligation: string } | null;
 }): ReviewerInspection {
-	const observed = run.runtimeKind !== "subprocess" && run.toolActivity != null;
-	return {
-		toolCalls: observed ? (run.toolActivity?.succeeded ?? 0) : null,
-		ungrounded: run.validationGrounding?.basis === "no-command-executed" ? [...run.validationGrounding.ungrounded] : [],
-	};
+	return { obligationUnmet: run.outcomeCode === "obligation_unmet" && run.verdict?.obligation === "cited-evidence" };
 }
 
 export interface ReviewGateDecisionInput {
@@ -186,27 +179,16 @@ export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDeci
 			needsDecision: `review gate produced no structured verdict in cycle ${input.cycle}: ${parsed.reason}`,
 		};
 	}
-	const inspected =
-		input.reviewer.toolCalls === null ? "reviewerToolCalls=unobserved" : `reviewerToolCalls=${input.reviewer.toolCalls}`;
-	const grounding = input.reviewer.ungrounded.length > 0 ? "no-command-executed" : "ok";
-	const facts = `${inspected}; grounding=${grounding}`;
-	if (parsed.result.verdict === "pass") {
-		// A pass the reviewer never looked behind is a broken gate, not a verdict.
-		const unearned =
-			input.reviewer.toolCalls === 0
-				? "no tool call succeeded"
-				: input.reviewer.ungrounded.length > 0
-					? `its report claims checks it never ran (${input.reviewer.ungrounded.join(", ")})`
-					: null;
-		if (unearned !== null) {
-			const reason = `the reviewer passed the work without inspecting it: ${unearned}`;
-			return {
-				draft: { ...base, outcome: "exhausted", detail: `${reason}; ${facts}` },
-				verdict: null,
-				findings: null,
-				needsDecision: `review gate in cycle ${input.cycle}: ${reason}`,
-			};
-		}
+	const facts = `obligation=cited-evidence:${input.reviewer.obligationUnmet ? "unmet" : "met"}`;
+	// A pass the reviewer never looked behind is a broken gate, not a verdict.
+	if (parsed.result.verdict === "pass" && input.reviewer.obligationUnmet) {
+		const reason = "the reviewer passed the work without inspecting it: obligation cited-evidence unmet";
+		return {
+			draft: { ...base, outcome: "exhausted", detail: `${reason}; ${facts}` },
+			verdict: null,
+			findings: null,
+			needsDecision: `review gate in cycle ${input.cycle}: ${reason}`,
+		};
 	}
 	if (parsed.result.verdict === "pass" || input.terminalCycle) {
 		return {

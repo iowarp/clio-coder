@@ -15,6 +15,7 @@ import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import type { RunAssessmentContext } from "../evidence/assessment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
+import { type RunAssuranceFacts, runResultAssurance, type TrustVerdict } from "../evidence/trust-projection.js";
 import { runContextProvenance } from "../evidence/trust-status.js";
 import { runtimeResolutionWarnings } from "../providers/runtime-resolution.js";
 import { redactSecretString } from "../safety/redaction.js";
@@ -432,22 +433,18 @@ export function settleFinishedRun(
 				: {}),
 			...routeWarningsOf(receipt),
 			...(receipt.answerBudgetBytes !== undefined ? { answerBudgetBytes: receipt.answerBudgetBytes } : {}),
+			...(receipt.verdict !== undefined
+				? {
+						verdict: {
+							...receipt.verdict,
+							rules: receipt.verdict.rules.map((rule) => ({ ...rule })),
+						},
+					}
+				: {}),
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,
-			hostVerification: host
-				? {
-						status: host.status,
-						strategy: host.strategy ?? "single",
-						checks: host.checks.length,
-						failed: host.checks.filter((check) => check.exitCode !== 0).length,
-						failedOnBase: host.checks.filter((check) => check.exitCode !== 0 && check.baseComparison?.status === "failed")
-							.length,
-						executed: host.checks.filter((check) => !check.memo && check.notRun === undefined).length,
-						reused: host.checks.filter((check) => check.memo).length,
-						skipped: host.checks.filter((check) => !check.memo && check.notRun !== undefined).length,
-					}
-				: null,
+			hostVerification: settledHostVerification(host),
 			contextProvenance: runContextProvenance(receipt),
 			hashes: labelledRunHashes(receipt, receipt.agentId),
 		},
@@ -650,4 +647,47 @@ export function finishRunResult(
 		result: { ...draft, routingIntent: draft.routingIntent, digest: runSettledDigest(record) },
 		settlement,
 	};
+}
+
+/** The host verification counts a run.settled record keeps; null when no check was configured. */
+function settledHostVerification(host: RunResultDraft["hostVerification"]): RunAssuranceFacts["hostVerification"] {
+	if (host === undefined) return null;
+	return {
+		status: host.status,
+		strategy: host.strategy ?? "single",
+		checks: host.checks.length,
+		failed: host.checks.filter((check) => check.exitCode !== 0).length,
+		failedOnBase: host.checks.filter((check) => check.exitCode !== 0 && check.baseComparison?.status === "failed").length,
+		executed: host.checks.filter((check) => !check.memo && check.notRun === undefined).length,
+		reused: host.checks.filter((check) => check.memo).length,
+		skipped: host.checks.filter((check) => !check.memo && check.notRun !== undefined).length,
+	};
+}
+
+/**
+ * A finishing run's assurance (DESIGN 4.8), read from the facts its run.settled record will carry, in the shape that
+ * record keeps them, so the value the merge gate reads before the seal is the one the seal states.
+ */
+export function receiptAssurance(receipt: {
+	quality: Pick<RunResultDraft["quality"], "typedValidations" | "resultContract">;
+	validationGrounding?: RunResultDraft["validationGrounding"] | null;
+	hostVerification?: RunResultDraft["hostVerification"];
+	verification: RunResultDraft["verification"];
+}): TrustVerdict {
+	return runResultAssurance({
+		verification: {
+			state: receipt.verification.state,
+			basis: receipt.verification.basis,
+			...(receipt.verification.detail !== undefined ? { detail: receipt.verification.detail } : {}),
+		},
+		quality: {
+			typedValidations: receipt.quality.typedValidations.map((fact) => ({ ...fact })),
+			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: receipt.quality.resultContract ? { ...receipt.quality.resultContract } : null,
+		},
+		validationGrounding: receipt.validationGrounding
+			? { ...receipt.validationGrounding, ungrounded: [...receipt.validationGrounding.ungrounded] }
+			: null,
+		hostVerification: settledHostVerification(receipt.hostVerification),
+	});
 }

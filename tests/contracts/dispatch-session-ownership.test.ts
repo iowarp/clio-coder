@@ -23,7 +23,7 @@ import { createTurnControlRunner } from "../../src/session-control/turn-control-
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { loadVerifiedScoutSource } from "../../src/tools/dispatch-scout-admission.js";
 import { createRegistry, type ToolResult } from "../../src/tools/registry.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope } from "../harness/receipt.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -61,6 +61,8 @@ function controlledWorker() {
 				yield { type: "clio_coder_tool_start", payload };
 				yield { type: "clio_coder_tool_finish", payload: { ...payload, outcome: "blocked" } };
 			}
+			// A provenance report owes observed evidence, so a run that succeeds reads once first.
+			if (outcome.exitCode === 0) for (const event of observedReadEvents()) yield event;
 			if (outcome.exitCode === 0)
 				yield {
 					type: "message_end",
@@ -487,7 +489,7 @@ describe("dispatch session ownership", () => {
 			match(
 				(await parentTurns.run({ userTurnId: "turn-p", signal: new AbortController().signal })).block ?? "",
 				new RegExp(
-					`batch batch-r was collected by session session-f: run ${handle.runId} \\(scout\\) succeeded · 1 tool call · 1 call refused\\. It is settled`,
+					`batch batch-r was collected by session session-f: run ${handle.runId} \\(scout\\) succeeded · 2 tool calls · 1 call refused\\. It is settled`,
 				),
 			);
 		} finally {

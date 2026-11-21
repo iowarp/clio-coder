@@ -72,6 +72,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 									role: "assistant",
 									stopReason: "stop",
 									content: JSON.stringify({
+										completion: { state: "done", limitations: [], unverified: [] },
 										mutatedPaths: [],
 										validations: [{ name: "fixture", passed: true, evidence: "deterministic worker fixture" }],
 									}),

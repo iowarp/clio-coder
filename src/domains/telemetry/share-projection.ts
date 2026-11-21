@@ -260,6 +260,12 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		unclassifiedAfterLastCheck: { count: "keep", commands: "withhold" },
 		routeWarnings: "withhold",
 		answerBudgetBytes: "keep",
+		verdict: {
+			version: "keep",
+			obligation: "keep",
+			rules: { id: "keep", layer: "keep", status: "keep", code: "keep" },
+			assurance: "keep",
+		},
 		stepPipeline: STEP_PIPELINE,
 	},
 	"run.feed_appended": {

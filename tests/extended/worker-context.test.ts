@@ -1058,7 +1058,13 @@ test("every role with a result hands back at its context share, whatever tools i
 		ok(fired.some((entry) => entry.runId === "run-handback-builder" && entry.evidence === "bound:context@worker"));
 		// A builder that owes a mutation report, on a route that offers the helper only at the handoff: the crossing
 		// round itself offers the helper, and the run submits through it.
-		const report = { mutatedPaths: [], validations: [], summary: "Checked the three files.", commitMessage: null };
+		const report = {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: [],
+			validations: [],
+			summary: "Checked the three files.",
+			commitMessage: null,
+		};
 		const structured = await runFauxWorker(
 			env.dir,
 			(done) =>
@@ -1573,4 +1579,100 @@ test("worker snapshots exclude parent system prompts and declarations without ch
 		seededWorkerMessages(seed).some((message) => message.role === "system"),
 		false,
 	);
+});
+
+test("a worker the wall clock reaches hands back a report and reports worker_run_timeout (fleet M8)", {
+	timeout: 30_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-wall-");
+	const startedAt = Date.now();
+	const handbackAt = startedAt + 1_200;
+	let writes = 0;
+	const server = createServer(async (req, res) => {
+		await readRequestBody(req);
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		const frame = (data: unknown) => `data: ${JSON.stringify({ model: "fixture", ...(data as object) })}\n\n`;
+		const usage = { prompt_tokens: 1000, completion_tokens: 20 };
+		// A task that cannot finish: the model keeps porting modules until the run hands back.
+		const port = Date.now() < handbackAt;
+		if (port) writes += 1;
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			(port
+				? frame({
+						choices: [
+							{
+								index: 0,
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: `call-write-${writes}`,
+											type: "function",
+											function: {
+												name: "write",
+												arguments: JSON.stringify({ path: `src/m${writes}.ts`, content: `export const m${writes} = 1;\n` }),
+											},
+										},
+									],
+								},
+								finish_reason: "tool_calls",
+							},
+						],
+						usage,
+					})
+				: frame({
+						choices: [
+							{ index: 0, delta: { content: "PARTIAL REPORT: ported the modules written so far." }, finish_reason: "stop" },
+						],
+						usage,
+					})) + "data: [DONE]\n\n",
+		);
+	});
+	const events: unknown[] = [];
+	let worker: WorkerRunHandle | undefined;
+	const previousCwd = process.cwd();
+	try {
+		process.chdir(env.dir);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const { port } = server.address() as AddressInfo;
+		worker = startWorkerRun(
+			{
+				agentId: "coder",
+				systemPrompt: "Port every module.",
+				task: "Port every module in src/ to the new API.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "[redacted:assignment]",
+				modelCapabilities: { contextWindow: 65_536, maxTokens: 4096, tools: true },
+				allowedTools: ["write" as ToolName],
+				budget: { mode: "advisory", toolCalls: 200, readReserve: 0, synthesis: true, hardCap: 400 },
+				noSkills: true,
+				cwd: env.dir,
+				limits: {
+					version: 1,
+					context: { workShare: 0.85, noteShare: 0.6 },
+					time: { wallMs: 2_000, deadlineAt: startedAt + 2_000, handbackAt, responseMs: 30_000 },
+					tools: { ceiling: 400 },
+					retries: { max: 0 },
+					refusals: 3,
+					depth: 1,
+				},
+			},
+			(event) => void events.push(event),
+		);
+		await worker.promise;
+		const text = JSON.stringify(events);
+		match(text, /"outcomeCode":"worker_run_timeout"/);
+		match(text, /PARTIAL REPORT: ported the modules written so far\./);
+		ok(writes > 0, "the run did work before the wall clock moved it to handback");
+		equal(readFileSync(join(env.dir, "src", "m1.ts"), "utf8"), "export const m1 = 1;\n");
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		await closeServer(server);
+		process.chdir(previousCwd);
+		env.restore();
+	}
 });

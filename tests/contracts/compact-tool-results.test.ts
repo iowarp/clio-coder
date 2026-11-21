@@ -147,6 +147,7 @@ it("a session without dispatch reads an extension result's detail_ref through th
 
 const REPORT_TAIL = "Closing note: the nonuniform path never measures boundary convergence.";
 const longReport = JSON.stringify({
+	completion: { state: "done", limitations: [], unverified: [] },
 	mutatedPaths: [],
 	validations: [{ name: "source read", passed: true, evidence: "Read the requested files; no tests ran." }],
 	summary: [

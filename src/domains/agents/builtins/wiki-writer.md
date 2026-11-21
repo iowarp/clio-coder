@@ -48,5 +48,6 @@ when nothing central remains uncovered. Do not spend calls solely to exhaust the
 task has no page frontmatter, so none of this applies to it.
 
 The file you wrote is your result. When finished, call `limitation` with the scope and reason for
-anything you could not ground, then say in one line what you wrote. There is no report to file
-and no JSON to emit.
+anything you could not ground. Your final response is one JSON object and nothing else:
+`{"summary":"one line naming what you wrote","completion":{"state":"done","limitations":[],"unverified":[]}}`,
+with `state` `partly_done` or `not_done` and each limitation (`what`, `why`) when the page is not finished.
