@@ -340,6 +340,77 @@ test("the main thread's public Responses request marks the pinned prompt layer w
 	}
 });
 
+test("a public Responses request asks for cache diagnostics against the previous response and keeps the verdict (PV-2)", async () => {
+	const model = openai.synthesizeModel(
+		{ id: "fixture", runtime: "openai", url: "https://api.openai.com/v1" },
+		"gpt-6-luna",
+		null,
+	);
+	const bodies: Array<Record<string, unknown>> = [];
+	const diagnostics = { type: "cache_miss", reason: "tools_changed", cache_missed_tokens: 4096 };
+	const sse = (events: unknown[]) =>
+		new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+	const fetch = async (_url: unknown, init?: RequestInit) => {
+		bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+		const response = {
+			id: "resp_2",
+			object: "response",
+			status: "completed",
+			model: "gpt-6-luna",
+			output: [],
+			usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11, input_tokens_details: { cached_tokens: 0 } },
+			prompt_cache_diagnostics: diagnostics,
+		};
+		return sse([
+			{ type: "response.created", response: { ...response, status: "in_progress" } },
+			{ type: "response.completed", response },
+		]);
+	};
+	const previous = {
+		role: "assistant" as const,
+		content: [{ type: "text" as const, text: "Done." }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		responseId: "resp_1",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+		stopReason: "stop" as const,
+		timestamp: 0,
+	};
+	const send = async (messages: unknown[]) => {
+		const stream = streamSimple(
+			model,
+			{ systemPrompt: "# Identity", messages } as never,
+			{
+				apiKey: "sk-fixture",
+				sessionId: "session",
+				cacheRetention: "long",
+				fetch,
+			} as never,
+		);
+		return (await stream.result()) as { responsesCacheDiagnostic?: unknown };
+	};
+	const user = (content: string) => ({ role: "user", content, timestamp: 0 });
+	const first = await send([user("Task")]);
+	strictEqual(first.responsesCacheDiagnostic, undefined, "a first request has nothing to compare against");
+	deepStrictEqual(bodies[0]?.prompt_cache_options, { ttl: "30m" });
+	const second = await send([user("Task"), previous, user("Next")]);
+	// The comparison joins the options Pi built instead of replacing them.
+	deepStrictEqual(bodies[1]?.prompt_cache_options, { ttl: "30m", comparison_response_id: "resp_1" });
+	deepStrictEqual(second.responsesCacheDiagnostic, {
+		provider: "openai",
+		type: "cache_miss",
+		reason: "tools_changed",
+		missedInputTokens: 4096,
+	});
+	// A response from another route in the transcript is not a comparison this backend can resolve.
+	await send([user("Task"), { ...previous, provider: "openai-codex" }, user("Next")]);
+	deepStrictEqual(bodies[2]?.prompt_cache_options, { ttl: "30m" });
+});
+
 test("native compaction on Codex sends the pinned prompt layer as its own item, as the turns do", async () => {
 	const model = openaiCodex.synthesizeModel(
 		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },

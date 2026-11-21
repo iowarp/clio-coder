@@ -143,6 +143,19 @@ export interface CodexTransportCounters {
 }
 
 /** #423 / #427 AC4: sanitized per-call transport attribution and safe-boundary recovery. */
+/**
+ * The public Responses API's verdict on one request's prompt cache against the previous response of the same
+ * conversation (`prompt_cache_options.comparison_response_id`), as the provider stated it. `unavailable` and
+ * `comparison_response_not_found` say nothing about a hit or a miss.
+ */
+export interface ResponsesCacheDiagnostic {
+	provider: "openai";
+	type: string;
+	reason?: string;
+	missedInputTokens?: number;
+	comparisonReusableTokens?: number;
+}
+
 export interface CodexTransportObservation {
 	mode: "websocket" | "sse" | "unknown";
 	request: "full" | "delta" | "unknown";

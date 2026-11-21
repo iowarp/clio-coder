@@ -28,6 +28,7 @@ import type {
 	AnthropicResponseObservation,
 	CodexQuotaObservation,
 	CodexTransportObservation,
+	ResponsesCacheDiagnostic,
 	Usage,
 } from "../engine/types.js";
 import { type DisplayToolCall, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../tools/gateway-display.js";
@@ -71,6 +72,7 @@ export interface TurnPersistenceDeps {
 		backend?: BackendCompletionTimings,
 		anthropicResponse?: AnthropicResponseObservation,
 		transport?: CodexTransportObservation,
+		responsesDiagnostic?: ResponsesCacheDiagnostic,
 	) => Record<string, unknown>;
 	/** Counts calls that never reached the provider; absent telemetry leaves every append as it was. */
 	telemetry?: TelemetryContract | undefined;
@@ -273,7 +275,15 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
 			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse, cacheTransport);
+			const responsesDiagnostic = (message as { responsesCacheDiagnostic?: ResponsesCacheDiagnostic })
+				.responsesCacheDiagnostic;
+			payload.promptCache = deps.promptCachePayloadForAssistant(
+				usage,
+				backendTimings,
+				anthropicResponse,
+				cacheTransport,
+				responsesDiagnostic,
+			);
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		// A recovery exchange's record already holds this message and names the row it reserved for it.

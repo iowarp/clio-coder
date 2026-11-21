@@ -1880,8 +1880,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
-		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
-			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
+		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport, responsesDiagnostic) =>
+			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport, responsesDiagnostic),
 		telemetry: deps.telemetry,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
