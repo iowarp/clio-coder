@@ -1,5 +1,6 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { GRADE_LAYERS, GRADE_RULE_IDS } from "../../src/core/telemetry/run-vocabulary.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import type { GateTopologyRole } from "../../src/domains/dispatch/execution-role.js";
@@ -9,6 +10,7 @@ import {
 	decideRetry,
 	nodeComponentRemedy,
 } from "../../src/domains/dispatch/failure-classification.js";
+import { grade } from "../../src/domains/dispatch/grading.js";
 import { OBLIGATION_RETRY_LIMIT, resolveObligation, resolveRunRole } from "../../src/domains/dispatch/obligation.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
 import {
@@ -23,7 +25,7 @@ import type { ActionClass } from "../../src/domains/safety/action-classifier.js"
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
-import { BUILDER_GRADE, gradeWork } from "../harness/grade-facts.js";
+import { BUILDER_GRADE, cleanGradeFacts, gradeWork } from "../harness/grade-facts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
@@ -349,4 +351,46 @@ describe("dispatch failure classification", () => {
 		}
 		strictEqual(classifyGap("the final bulk frame was truncated"), "worker-runtime");
 	});
+});
+
+it("grades through one rule table in layer order: the first failing rule names the outcome, later ones are not reached (M9)", () => {
+	const clean = gradeWork({});
+	strictEqual(clean.outcome, "succeeded");
+	deepStrictEqual(
+		clean.rules.map((rule) => rule.id),
+		[...GRADE_RULE_IDS],
+	);
+	const layers = clean.rules.map((rule) => GRADE_LAYERS.indexOf(rule.layer));
+	deepStrictEqual(
+		layers,
+		[...layers].sort((a, b) => a - b),
+		"rules run cheapest layer first",
+	);
+	ok(clean.rules.every((rule) => rule.status === "pass" || rule.status === "not_applicable"));
+	// V2 before V3: a non-conforming report fails the run before its obligation is judged, whatever the work did.
+	const idle = { activity: { executed: 0, observations: 0, mutatingSucceeded: false, storeWritten: false } };
+	const invalid = grade(
+		BUILDER_GRADE,
+		cleanGradeFacts({ handback: { finalOutput: true, resultContract: { conformance: "fail", reason: "bad" } } }, idle),
+	);
+	strictEqual(invalid.outcomeCode, "result_contract_invalid");
+	const status = (id: string) => invalid.rules.find((rule) => rule.id === id)?.status;
+	deepStrictEqual(["result-contract", "obligation", "host-checks", "removed-tests"].map(status), [
+		"fail",
+		"not_reached",
+		"not_reached",
+		"not_reached",
+	]);
+	// The same work with a conforming report meets V3's verdict instead.
+	strictEqual(gradeWork(idle).outcomeCode, "obligation_unmet");
+	// An `always` rule still reports after an earlier failure: the worker's own code rides a failed termination.
+	const crashed = grade(
+		BUILDER_GRADE,
+		cleanGradeFacts({
+			termination: { outcome: "failed", detail: "exit code 1" },
+			workerCode: { code: "worker_context_exhausted", detail: "context passed its window" },
+		}),
+	);
+	strictEqual(crashed.outcomeCode, "worker_context_exhausted");
+	strictEqual(crashed.rules.find((rule) => rule.id === "final-output")?.status, "not_reached");
 });
