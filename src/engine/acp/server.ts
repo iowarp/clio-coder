@@ -4174,7 +4174,8 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				agentInfo: {
 					name: "clio-coder",
 					title: "CLIO Coder",
-					...(features.version !== undefined ? { version: features.version } : {}),
+					// ACP v1 requires a version on Implementation; an embedder that names none reads as a dev build.
+					version: features.version ?? "0.0.0-dev",
 				},
 				agentCapabilities: {
 					loadSession: canLoadSession,

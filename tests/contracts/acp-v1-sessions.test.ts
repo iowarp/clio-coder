@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { test } from "node:test";
+import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -19,6 +21,13 @@ import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
+import {
+	ACP_UPSTREAM_V1,
+	AcpV1InitializeResponseSchema,
+	AcpV1LoadSessionResponseSchema,
+	AcpV1NewSessionResponseSchema,
+	AcpV1ResumeSessionResponseSchema,
+} from "../../src/engine/acp/upstream-schema.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
 import { stdioPeer } from "../harness/acp-fake-transport.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -462,6 +471,28 @@ test("ACP resume restores without replay, while mode and config controls share t
 		strictEqual(peer.requests.has("_clio-coder/session/autonomy"), false);
 	} finally {
 		await peer.stop();
+	}
+});
+
+test("ACP initialize, session/new, session/load and session/resume answer as the pinned upstream v1 schema says", async () => {
+	const conforms = (schema: TSchema, value: unknown, method: string): void => {
+		const first = Value.Errors(schema, value)[0];
+		ok(first === undefined, `${method} (${ACP_UPSTREAM_V1.tag}): ${first?.instancePath} ${first?.message}`);
+	};
+	// One session per server process, so each way of opening one gets its own.
+	for (const method of ["session/new", "session/resume", "session/load"] as const) {
+		const peer = fixture();
+		try {
+			conforms(AcpV1InitializeResponseSchema, await peer.call("initialize", { protocolVersion: 1 }), "initialize");
+			const reopen = { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] };
+			if (method === "session/new")
+				conforms(AcpV1NewSessionResponseSchema, await peer.call(method, { cwd: peer.cwd, mcpServers: [] }), method);
+			else if (method === "session/resume")
+				conforms(AcpV1ResumeSessionResponseSchema, await peer.call(method, reopen), method);
+			else conforms(AcpV1LoadSessionResponseSchema, await peer.call(method, reopen), method);
+		} finally {
+			await peer.stop();
+		}
 	}
 });
 
