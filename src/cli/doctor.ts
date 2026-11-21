@@ -13,6 +13,7 @@ import {
 import { discoverSecretMasks } from "../core/sandbox/secret-files.js";
 import type { SandboxMode, UnixSocketMode } from "../core/sandbox/types.js";
 import { unixSocketHostState } from "../core/sandbox/unix-sockets.js";
+import { readLayeredSettings } from "../core/settings-layers.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import {
 	type DoctorFinding,
@@ -283,7 +284,7 @@ async function deepFindings(
 		// nothing, and on an untouched home there are no settings to read.
 		let targetCount = 0;
 		try {
-			targetCount = readSettings().targets.length;
+			targetCount = readLayeredSettings(process.cwd()).settings.targets.length;
 		} catch {
 			// The settings row already reports an unreadable document.
 		}
@@ -333,7 +334,8 @@ export function chatReadinessFinding(untouched: boolean, connectionRows: Readonl
 	if (untouched) return warn(`cannot run yet: no model target is configured; ${SETUP_COMMAND}`);
 	let settings: ClioSettings;
 	try {
-		settings = readSettings();
+		// The chat route a session here runs: a trusted project's route and targets count, an untrusted one's do not.
+		settings = readLayeredSettings(process.cwd()).settings;
 	} catch {
 		return warn("cannot run until settings.yaml loads; the settings.yaml row says why");
 	}

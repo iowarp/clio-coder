@@ -1417,6 +1417,58 @@ async function handle(frame) {
 							rawOutput: { result: "Fixture documentation" },
 						});
 					}
+					// A screenshot tool's results: the images ride in `content` (and in `rawOutput.result.content`), each
+					// beside blocks the app must drop: a type it does not draw, bytes over the bound, data that is not base64.
+					if (scenario === "tool-images") {
+						const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+						const image = (mimeType, data) => ({ type: "content", content: { type: "image", mimeType, data } });
+						const link = (uri, name) => ({
+							type: "content",
+							content: { type: "resource_link", uri, name, mimeType: "image/png" },
+						});
+						update({
+							sessionUpdate: "tool_call",
+							toolCallId: "shot-1",
+							title: "browser",
+							kind: "other",
+							status: "in_progress",
+						});
+						update({
+							sessionUpdate: "tool_call_update",
+							toolCallId: "shot-1",
+							status: "completed",
+							content: [
+								{ type: "content", content: { type: "text", text: "captured" } },
+								image("image/png", png),
+								image("image/svg+xml", png),
+								image("image/png", "A".repeat(1_048_577)),
+								image("image/jpeg", "not base64!"),
+								link("file:///work/shots/shot.png", "shot.png"),
+								link("https://example.invalid/shot.png", "remote.png"),
+							],
+						});
+						update({
+							sessionUpdate: "tool_call",
+							toolCallId: "shot-2",
+							title: "browser",
+							kind: "other",
+							status: "in_progress",
+						});
+						update({
+							sessionUpdate: "tool_call_update",
+							toolCallId: "shot-2",
+							status: "completed",
+							rawOutput: {
+								result: {
+									content: [
+										{ type: "text", text: "captured" },
+										{ type: "image", mimeType: "image/webp", data: png },
+									],
+								},
+								isError: false,
+							},
+						});
+					}
 					for (const chunk of ["Hello ", "from ", "Clio."]) {
 						if (cancelled) break;
 						text(chunk);

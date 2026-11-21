@@ -69,13 +69,21 @@ function affirmativeOption(label: string): boolean {
 }
 
 /**
+ * True when every option the operator chose on an answered ask_user round is affirmative: the round approves
+ * what its question asks. The question and labels stay the agent's text; this reads only the operator's choice.
+ */
+export function askApproves(asked: AskedApproval): boolean {
+	return asked.chosen.length > 0 && asked.chosen.every(affirmativeOption);
+}
+
+/**
  * True when an answered ask_user round approves leaving the sandbox: the question itself names
  * leaving it and every option the operator chose is affirmative. The question and the labels are the
  * agent's text, so neither counts as the operator's words for any guard; together with the operator's
  * choice they are the approval the escape backstop accepts beside the operator's own typed words.
  */
 export function askApprovesSandboxEscape(asked: AskedApproval): boolean {
-	return asked.chosen.length > 0 && LEAVES_SANDBOX.test(asked.question) && asked.chosen.every(affirmativeOption);
+	return askApproves(asked) && LEAVES_SANDBOX.test(asked.question);
 }
 
 /**
@@ -125,6 +133,18 @@ export function operatorNamedOutsideTargets(
 		if (![...spellings].some((spelling) => messages.some((text) => namesPath(text, spelling)))) return [];
 	}
 	return [...outside.keys()];
+}
+
+/**
+ * True when one of `messages` carries the absolute path `target` whole, as spelled or as `~/...` under the
+ * home directory, not as a prefix or suffix of a longer path.
+ */
+export function messagesSpellPath(messages: ReadonlyArray<string>, target: string, home: string = homedir()): boolean {
+	const spellings = [
+		target,
+		...(isSameOrDescendant(target, home) && target !== home ? [`~/${path.relative(home, target)}`] : []),
+	];
+	return spellings.some((spelling) => messages.some((text) => namesPath(text, spelling)));
 }
 
 /** True when `text` carries `spelling` as a whole path, not as a prefix or suffix of a longer one. */

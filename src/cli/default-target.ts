@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readSettings } from "../core/config.js";
-import { projectChosenTargetUrl } from "../core/project-target-urls.js";
+import { projectChosenTargetUrl, projectTargetKeyVariable } from "../core/project-target-urls.js";
 import { readSettingsDocument } from "../core/settings-document.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import {
@@ -71,7 +71,8 @@ function setupFactsFor(settings: Readonly<ClioSettings>): SetupFacts {
 	const auth = bootAuthStatus(target, runtime);
 	const envVariable = target.auth?.apiKeyEnvVar?.trim();
 	if (auth.required) {
-		const projectUrl = projectChosenTargetUrl(target, true);
+		const projectKeyNamed = runtime.auth !== "oauth" && projectTargetKeyVariable(target) !== null;
+		const projectUrl = projectKeyNamed ? null : projectChosenTargetUrl(target, true);
 		facts.credential = {
 			available: auth.available,
 			provider: auth.providerId,
