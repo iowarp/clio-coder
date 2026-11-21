@@ -356,6 +356,7 @@ import type {
 	MainGrantOutcome,
 	WorkerGrantView,
 } from "./contract.js";
+import { createCrossProcessFleet } from "./cross-process-fleet.js";
 import {
 	type EnvelopeInput,
 	envelopeApproval,
@@ -4678,6 +4679,18 @@ export function createDispatchBundle(
 			);
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
+	});
+	// Cross-process fleet state (M11): run-directory records for this process's runs and asks, and, where a person can
+	// answer, the live runs and held asks of other Clio processes on this state directory.
+	const crossProcessFleet = createCrossProcessFleet({
+		bus: context.bus,
+		isLocalRun: (runId) => active.has(runId) || currentAssignmentRun(runId) !== null,
+		grantBinding: (requestId) => {
+			const record = grantBroker.get(requestId);
+			return record === null ? null : { attempt: record.attempt, argDigest: record.argDigest };
+		},
+		resolve: (runId, requestId, decision) => contract.resolveWorkerPermission?.(runId, requestId, decision),
+		follow: options?.workerPermissionResponder === true,
 	});
 	/** Asks a fork adopted from the parked session that held them, by request id; a brokered ask's record holds its own. */
 	const adoptedAsks = new Map<string, { runId: string; sessionId: string }>();
@@ -12432,6 +12445,7 @@ export function createDispatchBundle(
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();
+				crossProcessFleet.dispose();
 				workerApprovalWindows.dispose();
 			})().then(resolveStop, rejectStop);
 			return stopPromise;
@@ -13168,6 +13182,8 @@ export function createDispatchBundle(
 				if (!result.ok) throw new Error(`resolveWorkerPermission: ${result.reason}`);
 				return;
 			}
+			// An ask another Clio process holds: the answer goes to its run directory, and that process applies it.
+			if (crossProcessFleet.answerForeign(runId, requestId, decision)) return;
 			if (workerApprovalWindows.isExpired(requestId)) {
 				throw new Error(`resolveWorkerPermission: run '${runId}' no longer accepts input for this ask; its window ended`);
 			}

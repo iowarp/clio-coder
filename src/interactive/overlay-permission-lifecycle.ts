@@ -576,7 +576,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const announceWorkerExpiry = (
 		entry: WorkerEscalationEntry,
 		fallback: "deny" | "fail",
-		cause: "timeout" | "terminal" | "late-answer" | "revoked",
+		cause: "timeout" | "terminal" | "late-answer" | "revoked" | "answered",
 	): void => {
 		const heldFor = heldWorkerCeilings.get(entry.requestId);
 		dropWorkerCountdown(entry.requestId);
@@ -594,7 +594,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					? `${call} no longer needs an answer: its run ended, and the call did not run.`
 					: cause === "revoked"
 						? `${call} no longer needs an answer: the ask was withdrawn, and the call did not run.`
-						: `Your answer to ${call} came too late. It did not run, ${after}.`;
+						: cause === "answered"
+							? `${call} was answered in another Clio session.`
+							: `Your answer to ${call} came too late. It did not run, ${after}.`;
 		deps.appendNotice("warn", `${what} /view dispatch:${entry.runId}`);
 	};
 	const removeQueuedWorkers = (matches: (entry: WorkerEscalationEntry) => boolean): WorkerEscalationEntry[] => {
@@ -609,7 +611,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	};
 	const withdrawWorkers = (
 		matches: (entry: WorkerEscalationEntry) => boolean,
-		cause: "timeout" | "terminal" | "revoked",
+		cause: "timeout" | "terminal" | "revoked" | "answered",
 		fallback?: "deny" | "fail",
 	): void => {
 		const active = pendingWorker !== null && matches(pendingWorker) ? pendingWorker : null;
@@ -700,7 +702,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			cardShown(view);
 		}) ?? (() => {});
 
-	const unsubscribeWorker = deps.bus.subscribe("approval.requested", (payload) => {
+	const onWorkerRequested = (payload: PermissionRequestedPayload): void => {
 		const entry = workerEscalationEntry(payload, deps.getAutonomy());
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
@@ -713,6 +715,22 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		deps.onOperatorParked?.();
 		workerQueue.push(entry);
 		maybeOpenWorker();
+	};
+	const unsubscribeWorker = deps.bus.subscribe("approval.requested", onWorkerRequested);
+	// An ask another Clio process holds on this state directory (cross-process fleet state): the same card, and when
+	// it settles there, whoever answered, it leaves this one.
+	const unsubscribeForeignWorker = deps.bus.subscribe("approval.foreign_changed", (change) => {
+		if (change.kind === "requested") {
+			onWorkerRequested(change.request);
+			return;
+		}
+		const { requestId, status, decidedBy } = change.resolved;
+		if (typeof requestId !== "string") return;
+		withdrawWorkers(
+			(entry) => entry.requestId === requestId,
+			status === "expired" || decidedBy === "timeout" ? "timeout" : decidedBy === "revoked" ? "revoked" : "answered",
+			change.resolved.fallback === "fail" ? "fail" : undefined,
+		);
 	});
 	const unsubscribeSessionReattached = deps.bus.subscribe("session.reattached", reconsiderWorkerOwnership);
 	const unsubscribeSessionCreated = deps.bus.subscribe("session.created", reconsiderWorkerOwnership);
@@ -723,6 +741,10 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") {
 			// A held ask its owner answered leaves silently; this session never showed it.
 			if (foreignWorkers.delete(payload.requestId)) dropWorkerCountdown(payload.requestId);
+			// Answered somewhere else, such as another Clio process on this state directory through the run's grant
+			// records: a card still open for it here leaves. A card answered here already left, so this finds nothing.
+			const requestId = payload.requestId;
+			withdrawWorkers((entry) => entry.requestId === requestId, "answered");
 			return;
 		}
 		const fallback = payload.fallback === "fail" ? "fail" : "deny";
@@ -950,6 +972,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			unsubscribePermission();
 			unsubscribeAdmissionReview();
 			unsubscribeWorker();
+			unsubscribeForeignWorker();
 			unsubscribeWorkerResolution();
 			unsubscribeWorkerCompleted();
 			unsubscribeWorkerFailed();

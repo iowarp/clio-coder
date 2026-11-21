@@ -2,8 +2,13 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { ForeignApprovalChangedPayload } from "../../src/core/telemetry/live-events.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import { createCrossProcessFleet } from "../../src/domains/dispatch/cross-process-fleet.js";
 import { evaluateJudgedGrant, evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js";
 import {
 	createGrantBroker,
@@ -11,6 +16,7 @@ import {
 	type GrantRecord,
 	type GrantRequestInput,
 } from "../../src/domains/dispatch/grant-broker.js";
+import { writeGrantAnswerRecord } from "../../src/domains/dispatch/run-directory-records.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
@@ -22,6 +28,7 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { CONTROL_FRAME_PREFIX, parseControlFrame, type WorkerGrantRequestFrame } from "../../src/worker/protocol.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../src/worker/spec-contract.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
+import { fixtureEnvelope } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -514,5 +521,117 @@ describe("worker grant binding", () => {
 		const resolved = resolutions(run.events);
 		strictEqual(resolved.length, 1);
 		ok(/no operator or granting main agent/u.test(resolved[0]?.reason ?? ""), resolved[0]?.reason);
+	});
+});
+
+describe("cross-process grant records (M11)", () => {
+	it("carries a held ask to a second process through its run directory, applies only a bound answer, and withdraws a dead owner's ask", async () => {
+		const env = await isolateClioEnv("clio-cross-grant-");
+		try {
+			const stateDir = clioStateDir();
+			const host = hostname();
+			const ownerSelf = { host, pid: 2_000_001, birthToken: "owner-birth", pidNs: null, bootId: null };
+			const viewerSelf = { host, pid: 2_000_002, birthToken: "viewer-birth", pidNs: null, bootId: null };
+			let ownerAlive = true;
+			const ownerBus = createTelemetryHub();
+			const viewerBus = createTelemetryHub();
+			const applied: Array<[string, string, string]> = [];
+			const digest = "a".repeat(64);
+			const owner = createCrossProcessFleet({
+				bus: ownerBus,
+				stateDir: () => stateDir,
+				cwd: env.dir,
+				isLocalRun: (runId) => runId === "run-x",
+				grantBinding: (requestId) => (requestId === "grant-1" ? { attempt: 0, argDigest: digest } : null),
+				resolve: (runId, requestId, decision) => {
+					applied.push([runId, requestId, decision]);
+					ownerBus.emit("approval.resolved", {
+						status: "granted",
+						requestId,
+						origin: `worker:${runId}`,
+						decidedBy: "operator",
+					});
+				},
+				follow: false,
+				timers: false,
+				self: ownerSelf,
+			});
+			const viewer = createCrossProcessFleet({
+				bus: viewerBus,
+				stateDir: () => stateDir,
+				cwd: env.dir,
+				isLocalRun: () => false,
+				grantBinding: () => null,
+				resolve: () => {
+					throw new Error("the viewer holds no ask");
+				},
+				follow: true,
+				timers: false,
+				self: viewerSelf,
+				owner: (recorded) => (recorded.pid !== ownerSelf.pid || ownerAlive ? "alive" : "gone"),
+			});
+			const changes: ForeignApprovalChangedPayload[] = [];
+			viewerBus.subscribe("approval.foreign_changed", (change) => {
+				changes.push(change);
+			});
+			writeFileSync(join(stateDir, "runs.json"), JSON.stringify([{ ...fixtureEnvelope("run-x"), status: "running" }]));
+			ownerBus.emit("run.started", {
+				runId: "run-x",
+				agentId: "coder",
+				targetId: "t",
+				wireModelId: "m",
+				runtimeId: "r",
+				runtimeKind: "subprocess",
+				requestOrigin: "agent",
+				pid: null,
+				assignmentId: "run-x",
+				attempt: 0,
+			});
+			const ask = (requestId: string): void => {
+				ownerBus.emit("approval.requested", {
+					tool: "bash",
+					actionClass: "execute",
+					requestId,
+					origin: "worker:run-x",
+					requestedBy: "run-x",
+					agentId: "coder",
+					escalation: true,
+					timeoutMs: 60_000,
+				});
+			};
+			ask("grant-1");
+			const record = JSON.parse(readFileSync(join(stateDir, "runs", "run-x", "grants", "grant-1.json"), "utf8"));
+			deepStrictEqual(
+				[record.state, record.attempt, record.argDigest, record.owner.pid],
+				["pending", 0, digest, ownerSelf.pid],
+			);
+			viewer.poll();
+			deepStrictEqual(
+				changes.map((change) => [change.kind, change.kind === "requested" ? change.request.requestId : null]),
+				[["requested", "grant-1"]],
+			);
+			// An answer that does not echo the record's nonce is taken and dropped, never applied.
+			const forged = { requestId: "grant-1", runId: "run-x", attempt: 0, argDigest: digest, nonce: "forged" };
+			ok(writeGrantAnswerRecord(stateDir, forged, "approve"));
+			owner.poll();
+			deepStrictEqual(applied, []);
+			ok(viewer.answerForeign("run-x", "grant-1", "approve"));
+			owner.poll();
+			deepStrictEqual(applied, [["run-x", "grant-1", "approve"]]);
+			viewer.poll();
+			strictEqual(changes[1]?.kind === "resolved" ? changes[1].resolved.status : null, "granted");
+			// The owner dies holding a second ask: the viewer withdraws it and will not answer it.
+			ask("grant-2");
+			viewer.poll();
+			strictEqual(changes[2]?.kind, "requested");
+			ownerAlive = false;
+			viewer.poll();
+			strictEqual(changes[3]?.kind === "resolved" ? changes[3].resolved.decidedBy : null, "revoked");
+			strictEqual(viewer.answerForeign("run-x", "grant-2", "approve"), false);
+			owner.dispose();
+			viewer.dispose();
+		} finally {
+			env.restore();
+		}
 	});
 });

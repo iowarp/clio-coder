@@ -784,6 +784,21 @@ export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<Disp
 	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
+/**
+ * Published on `run.foreign_observed` by the viewer half of cross-process fleet state
+ * (src/domains/dispatch/cross-process-fleet.ts): a live run another Clio process owns, read from its run directory.
+ * Only the live run projection folds it, so a foreign run is never journaled or recorded in this session.
+ */
+export type ForeignRunObservedPayload =
+	| { kind: "started"; run: DispatchStartedPayload }
+	| { kind: "progressed"; runId: string; agentId: string; event: unknown }
+	| { kind: "ended"; runId: string; agentId: string; outcome: string; outcomeDetail: string | null };
+
+/** Published on `approval.foreign_changed`: an operator-visible ask another Clio process holds, raised or settled. */
+export type ForeignApprovalChangedPayload =
+	| { kind: "requested"; request: PermissionRequestedPayload }
+	| { kind: "resolved"; resolved: PermissionResolvedPayload };
+
 // ---------------------------------------------------------------------------
 // Accountability
 // ---------------------------------------------------------------------------
