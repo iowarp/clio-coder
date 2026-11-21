@@ -97,7 +97,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `--deny-tools <names>` on `run`, interactive `clio-coder` and `clio-coder acp` removes tools whatever else admits them.
 - `--output-schema <file.json>` makes the final answer one JSON object validated by the host. The main agent gets one tool-free repair turn, a mismatch exits 1 `schema_mismatch`, and a schema the host cannot enforce exits 2 `schema_unsupported` before any model request.
 - `--task-file <path|->` reads a version 1 JSON task envelope. A file that adds `verify`, yolo autonomy or `cwd` needs `--trust-task-file`.
-- `run --agent` accepts `--max-cost-usd` and `--worktree`. `--timeout` and `--verify-timeout` accept durations (`90s`, `15m`, `2h`, `500ms`), and a bare number is still seconds.
+- `run --agent` accepts `--max-cost-usd` and `--worktree`. Its `run_end` envelope carries the worker's sealed `completion`. `--timeout` and `--verify-timeout` accept durations (`90s`, `15m`, `2h`, `500ms`), and a bare number is still seconds.
 - `clio-coder schema <name>` prints the shipped JSON Schema for `run-result`, `run-events`, `task`, `help` and `fleet-result`. `clio-coder help --json` prints a manifest of every command leaf with its flags, value choices, stdin use, effects and exit codes.
 
 **Completion**
@@ -238,6 +238,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 - A worker whose only state-changing call was refused no longer reports changes on an unchanged tree, and a builder whose calls were all withheld is graded as having run no tool.
 - A read-scoped worker that reports without executing any tool settles failed, so the host retries it.
+- A pytest or unittest run that collected no test counts as not run, never as a pass, and a run that collected no test is never sealed host-verified.
 - A worker that keeps recalling content it evicted, or fills 80% of its context without changing anything, is told once to write or report. A worker stopped by context exhaustion hands back its last message as partial output.
 - A dispatch to an endpoint full with worker leases queues for a slot instead of being refused as a deadlock.
 - Dispatch admission reads absolute workspace paths as workspace-relative, runs an empty `write_roots` read-only and forwards a dispatch sent through the tool gateway, each with a `[dispatch normalize]` line.
@@ -256,6 +257,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Bash text naming a secret-looking word such as `event.key` is no longer refused as a key-file read, while `cat x.key` still is.
 - Cleanup of scratch files under the temp root is recognized, including a relative delete after `cd "$TMPDIR" &&`.
 - The finish gate skips a turn declared `partly_done` or `not_done`, and a `Line N:` label in a reply no longer triggers the task-board reminder.
+- When a check ran after the last edit and failed, the finish advisory names it.
 - A safety-judge refusal of a compound bash command names the sub-command the block is about.
 - A sandbox launched inside another no longer masks `/dev/null` read-only. Contained pnpm gets its own store and an empty npm user config when `~/.npmrc` is masked, and a worker holding `web_read` gets the shell network `web_fetch` gets.
 
@@ -269,6 +271,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 **Telemetry and quota**
 
 - Every side call is attributed to the surface that made it, and each reminder that costs a round settles once.
+- Each model call journals the thinking level that was requested and the effort sent on the wire.
 - A target with declared rates is priced from its settled usage counts when the runtime computed no cost, and the cache verdict counts cache writes as uncached prefill.
 - Performance totals count only the model's own tool calls.
 - Quota readings and holds are shared across processes, a rate-limited read is held for its Retry-After, and a hold belongs to the credential that earned it.
@@ -290,6 +293,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - The interview card sizes to the pane and pages a long question.
 - After `/resume`, `/fork` or `/new`, the exit card names the session's own turns and tools beside the visit's.
 - `/context` keeps the Agent fleet and Project rows after compaction.
+- A `/compact` that changes nothing says why and names the turns it protects.
 - `/report` bundles drop image base64 and ignore a forged report block.
 
 ### Security
