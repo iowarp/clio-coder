@@ -274,6 +274,7 @@ async function releaseBrowser(): Promise<void> {
 	currentPage = undefined;
 	if (wasAttached) {
 		for (const page of opened) await page.close().catch(() => {});
+		await currentContext?.unroute("**/*", routeGranted).catch(() => {});
 	} else await currentContext?.close().catch(() => {});
 	// For a browser reached over CDP this only disconnects.
 	await current?.close().catch(() => {});
@@ -317,7 +318,7 @@ function listen(id: string, page: Any): void {
 			method: r.method(),
 			url: redact(r.url()),
 			error:
-				errorText === "net::ERR_BLOCKED_BY_CLIENT" && blockedHosts.has(host)
+				errorText.startsWith("net::ERR_BLOCKED_BY_CLIENT") && blockedHosts.has(host)
 					? `blocked: ${host} is not granted to this browser session (open a URL on it to ask for it)`
 					: clip(errorText),
 			resource: r.resourceType(),
@@ -733,6 +734,8 @@ async function attachTo(request: BrowserAttachRequest): Promise<BrowserReply> {
 		engine = `attached ${connected.version()}`;
 		context.setDefaultTimeout(ACTION_TIMEOUT_MS);
 		context.setDefaultNavigationTimeout(ACTION_TIMEOUT_MS);
+		// The same reach as the session's own browser while attached; release removes the route again.
+		await context.route("**/*", routeGranted);
 		connected.on("disconnected", () => {
 			if (browser !== connected) return;
 			lostAttach = request.endpoint;
