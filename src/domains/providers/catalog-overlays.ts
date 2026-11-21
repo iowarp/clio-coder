@@ -54,34 +54,50 @@ export function resolveModelCatalogOverlayRoots(options: { cwd?: string } = {}):
 	]).map((dir) => ({ dir, label: `overlay:${dir}` }));
 }
 
-/** Overlay entries in load order. A bad root or file throws from the constructor and from `reload`. */
+/**
+ * Overlay entries in load order. A bad root throws from the constructor and from `reload`; a malformed file is
+ * skipped alone and named in `problems()`, so the files beside it still load.
+ */
 export class ModelCatalogOverlays {
 	private readonly roots: KnowledgeBaseRoot[];
 	private loaded: KnowledgeBaseEntry[] = [];
+	private skipped: string[] = [];
 
 	constructor(roots: ReadonlyArray<string | KnowledgeBaseRoot>) {
 		this.roots = normalizeRoots(roots);
 		this.reload();
 	}
 
-	/** Rereads every root; a failure leaves the previous entries in place. */
+	/** Rereads every root; a root that cannot be listed leaves the previous entries in place. */
 	reload(): void {
 		const next: KnowledgeBaseEntry[] = [];
+		const skipped: string[] = [];
 		for (const root of this.roots) {
 			for (const file of collectYamlFiles(root.dir)) {
 				const name = root.label ? `${root.label}:${file.name}` : file.name;
-				const parsed = parseYaml(readFileSync(file.path, "utf8"));
-				if (!Array.isArray(parsed)) {
-					throw new Error(`knowledge base file ${name} must be a YAML list of KnowledgeBaseEntry`);
+				try {
+					const parsed = parseYaml(readFileSync(file.path, "utf8"));
+					if (!Array.isArray(parsed)) {
+						throw new Error(`knowledge base file ${name} must be a YAML list of KnowledgeBaseEntry`);
+					}
+					next.push(...parsed.map((item) => normalizeEntry(item, name)));
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					skipped.push(message.includes(name) ? message : `knowledge base file ${name}: ${message}`);
 				}
-				for (const item of parsed) next.push(normalizeEntry(item, name));
 			}
 		}
 		this.loaded = next;
+		this.skipped = skipped;
 	}
 
 	entries(): ReadonlyArray<KnowledgeBaseEntry> {
 		return this.loaded;
+	}
+
+	/** One message per file the last load skipped, each naming the file and what is wrong with it. */
+	problems(): ReadonlyArray<string> {
+		return this.skipped;
 	}
 }
 
