@@ -816,6 +816,8 @@ test("a TUI guardian reviews no history until a turn has bound a session, and no
 	guardian.wake("ready");
 	assert.equal(guardian.state(), "off", "a disabled guardian says so before any turn");
 	enabled = true;
+	guardian.wake("settings");
+	assert.equal(guardian.state(), "idle", "enabled before any turn, it is idle again");
 	// The first prompt's turn_start fires before the TUI creates its session; a turn refused there binds none.
 	guardian.wake("turn-start");
 	await settle();
@@ -826,11 +828,20 @@ test("a TUI guardian reviews no history until a turn has bound a session, and no
 	guardian.wake("turn-end");
 	await settle();
 	assert.ok(steps > 0, "a turn that bound its session arms the guardian");
-	// /new parks the session and resets memory: nothing runs until a turn binds the next session.
-	bound = false;
+	// /new parks the old session while it is still current, then creates the new one: nothing runs until a turn of
+	// the new session. ACP's session/close then session/new parks with the old session current too.
 	const before = steps;
 	guardian.reset();
 	guardian.wake("settings");
 	await settle();
 	assert.equal(steps, before);
+	bound = false;
+	guardian.reset();
+	bound = true;
+	guardian.wake("settings");
+	await settle();
+	assert.equal(steps, before);
+	guardian.wake("turn-end");
+	await settle();
+	assert.ok(steps > before, "the new session's first turn arms it");
 });

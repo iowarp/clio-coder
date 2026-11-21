@@ -180,6 +180,8 @@ export async function pruneOrphanedObservations(
 	stopped: () => boolean = () => false,
 ): Promise<number> {
 	const root = join(stateDir, "memory", "observations");
+	// A host stopping or a spent budget starts nothing, not even the listing.
+	if (stopped()) return 0;
 	// `memory` and `observations` both: a linked directory would carry the delete outside the state root.
 	if (!unlinkedStateDirectory(stateDir, root)) return 0;
 	let candidates: string[];
@@ -189,7 +191,7 @@ export async function pruneOrphanedObservations(
 		return 0; /* Nothing observed yet. */
 	}
 	if (candidates.length === 0) return 0;
-	const recorded = await recordedSessions(join(stateDir, "sessions"));
+	const recorded = await recordedSessions(join(stateDir, "sessions"), stopped);
 	if (recorded === null) return 0;
 	let removed = 0;
 	for (const id of candidates) {
@@ -208,8 +210,11 @@ export async function pruneOrphanedObservations(
 	return removed;
 }
 
-/** Every session id recorded under `sessions/<workspace>/<id>`, or null when any workspace cannot be listed. */
-async function recordedSessions(sessions: string): Promise<Set<string> | null> {
+/**
+ * Every session id recorded under `sessions/<workspace>/<id>`, or null when any workspace cannot be listed or the sweep
+ * stops part way, since a partial index would read the unlisted workspaces' sessions as gone.
+ */
+async function recordedSessions(sessions: string, stopped: () => boolean): Promise<Set<string> | null> {
 	let workspaces: string[];
 	try {
 		workspaces = await readdir(sessions);
@@ -218,6 +223,7 @@ async function recordedSessions(sessions: string): Promise<Set<string> | null> {
 	}
 	const ids = new Set<string>();
 	for (const workspace of workspaces) {
+		if (stopped()) return null;
 		try {
 			for (const id of await readdir(join(sessions, workspace))) ids.add(id);
 		} catch (error) {

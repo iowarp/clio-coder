@@ -391,6 +391,10 @@ test("the daily sweep removes the observations of deleted sessions only, and not
 			mkdirSync(join(observations, id), { recursive: true });
 			writeFileSync(join(observations, id, "batch.json"), "{}");
 		}
+		// A sweep stopped while it lists the sessions has no full index, so nothing goes.
+		let looks = 0;
+		strictEqual(await pruneOrphanedObservations(dir, () => ++looks > 1), 0);
+		deepStrictEqual(readdirSync(observations).sort(), ["gone", "kept"]);
 		// A workspace that cannot be listed may hold any candidate's session: nothing goes.
 		const locked = join(dir, "sessions", "locked");
 		mkdirSync(join(locked, "hidden"), { recursive: true });
