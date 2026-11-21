@@ -1041,6 +1041,11 @@ export function renderReplayElements(
 	};
 	const replayEntries = selectReplayEntries(turns, options);
 	const refusedPrompts = refusedPromptTurns(replayEntries);
+	// Without a summary in the window, the note goes right after the newest commit there: that is where the live
+	// process installed it (`installReplay` follows the persisted commit), and a later row cannot move it. At the end of
+	// history it would follow whatever prompt the render's cursor reaches, so a restore taken before a prompt and a
+	// render that includes it would disagree on the order.
+	const continuityCommitTurnId = [...replayEntries].reverse().find((entry) => entry.kind === "continuityCommit")?.turnId;
 	const latestOperator = [...replayEntries]
 		.reverse()
 		.find(
@@ -1216,10 +1221,11 @@ export function renderReplayElements(
 				break;
 		}
 		placeInserts(inserts.after.get(entry.turnId));
+		if (entry.turnId === continuityCommitTurnId) emitContinuity(entry.timestamp);
 	}
-	// No compaction summary in the replay window: an eviction-only or
-	// continuity-only outcome still has a note to carry, so it lands at the end
-	// of the replayed history rather than being dropped.
+	// Neither a compaction summary nor a commit in the replay window: the note
+	// still has to be carried, so it lands at the end of the replayed history
+	// rather than being dropped.
 	emitContinuity(activeEntries[activeEntries.length - 1]?.timestamp ?? new Date(0).toISOString());
 	out.flush();
 	return { messages: out.messages, sourceIds: out.sourceIds };
