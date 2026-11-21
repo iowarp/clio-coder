@@ -522,7 +522,7 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 		perProduct = true;
 		access = false;
 		strictEqual(await flywheel(), 1);
-		ok(err.includes("private to the Clio maintainers"), err);
+		ok(err.includes("private to the CLIO Coder maintainers"), err);
 
 		strictEqual(await flywheel("--pull", "nope"), 2);
 		strictEqual(await flywheel("--pull", "all", "--key", join(root, "missing.pem")), 1);

@@ -790,7 +790,7 @@ async function pickRuntimeFromEntries(
 }
 
 async function pickCategory(rl: ConfigurePrompts): Promise<ConfigureCategory | null> {
-	process.stdout.write("\nHow will you connect Clio to a model?\n\n");
+	process.stdout.write("\nHow will you connect CLIO Coder to a model?\n\n");
 	for (const line of formatCategoryMenu(terminalColumns())) process.stdout.write(`${line}\n`);
 	for (;;) {
 		const answer = await ask(rl, "\nSelection", "1");
@@ -1559,7 +1559,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			{
 				label: "Choose the chat model",
 				controlPath: "chat.target",
-				hint: "select a connection, then a model Clio can list for it",
+				hint: "select a connection, then a model CLIO Coder can list for it",
 				run: async (io) => assignTarget(io, "chat"),
 			},
 		],
@@ -1588,7 +1588,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			{
 				label: "Choose the default fleet model",
 				controlPath: "fleet.default.target",
-				hint: "select a connection, then a model Clio can list for it",
+				hint: "select a connection, then a model CLIO Coder can list for it",
 				run: async (io) => assignTarget(io, "fleet"),
 			},
 		],
@@ -2147,7 +2147,7 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 		rl.clearScreen();
 		const presenter = createLifecyclePresenter({ stream: streams.out });
 		presenter.header("CLIO Coder", "configure");
-		presenter.note("Start with what you recognize. Clio explains and checks the technical details.");
+		presenter.note("Start with what you recognize. CLIO Coder explains and checks the technical details.");
 		presenter.blank();
 		const choice = await pickEntry(
 			rl,

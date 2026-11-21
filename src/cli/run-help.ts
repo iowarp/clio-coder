@@ -95,7 +95,7 @@ Flags:
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
-  --worktree                run the --agent worker in a Clio-created task worktree, kept on its branch for review
+  --worktree                run the --agent worker in a CLIO Coder-created task worktree, kept on its branch for review
   --skill <path>            make one explicit skill available for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 

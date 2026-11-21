@@ -579,7 +579,7 @@ async function uninstallInactive(
 		presenter.fail("Processes still run from an inactive install");
 		for (const holder of holders) presenter.note(holder);
 		presenter.commandAdvice(
-			"Close them (for a Clio session: clio-coder session list, then clio-coder session terminate <id>) and retry:",
+			"Close them (for a CLIO Coder session: clio-coder session list, then clio-coder session terminate <id>) and retry:",
 			"clio-coder uninstall --inactive",
 		);
 		presenter.finish();
@@ -741,7 +741,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	// A root that is not provably Clio's is never deleted recursively; it is kept and named.
 	const notClio = (role: "config" | "data" | "state" | "cache", exists: boolean): string | null => {
 		const problem = exists ? removableClioRootProblem(role, dirs[role]) : null;
-		return problem ? `not a Clio-only directory (${problem}); remove Clio's files inside it by hand` : null;
+		return problem ? `not a CLIO Coder-only directory (${problem}); remove CLIO Coder's files inside it by hand` : null;
 	};
 	const refused = {
 		data: args.keepData ? null : notClio("data", dataSize.exists),
@@ -834,7 +834,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			label: "Pane host",
 			path: socket,
 			status: "remove",
-			detail: "Clio's private herdr host; stopped first",
+			detail: "CLIO Coder's private herdr host; stopped first",
 		});
 	if (npmPrefix !== null)
 		items.push({
@@ -1004,7 +1004,9 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			for (const item of web.items) presenter.completedStep(`Removed ${item.label}`);
 		} catch (error) {
 			presenter.fail(
-				error instanceof Error ? error.message : "Could not stop the graphical installation; Clio state was preserved.",
+				error instanceof Error
+					? error.message
+					: "Could not stop the graphical installation; CLIO Coder state was preserved.",
 			);
 			presenter.finish();
 			return 1;
@@ -1173,7 +1175,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		if (survivor !== null)
 			presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
 		if (Object.values(refused).some((reason) => reason !== null)) {
-			presenter.fail("uninstall kept a root that is not Clio's own; see Kept, and why");
+			presenter.fail("uninstall kept a root that is not CLIO Coder's own; see Kept, and why");
 			presenter.finish();
 			return 1;
 		}

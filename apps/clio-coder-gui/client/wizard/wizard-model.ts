@@ -331,7 +331,7 @@ export function stepFor(prompt: Prompt): StepView {
 				lede: connect?.hint ? `CLIO Coder ${connect.hint}.` : "CLIO Coder signs you in through its command-line tool.",
 			};
 		}
-		if (title === "How should Clio get the API key?")
+		if (title === "How should CLIO Coder get the API key?")
 			return {
 				kind: "credential-source",
 				stage: "connect",
@@ -360,7 +360,7 @@ export function stepFor(prompt: Prompt): StepView {
 				provider: method[1] ?? "",
 				options: prompt.choices,
 			};
-		if (title === "Clio found a way to reach a model:") {
+		if (title === "CLIO Coder found a way to reach a model:") {
 			const other = byLabel(prompt, /^Set up something else$/u);
 			return {
 				kind: "offered",
@@ -408,7 +408,7 @@ export function stepFor(prompt: Prompt): StepView {
 					return { choice, id, name, note: choice.hint || null, recommended: choice.hint === "default" };
 				}),
 			};
-		if (title === "Clio could not read a model list")
+		if (title === "CLIO Coder could not read a model list")
 			return {
 				kind: "model-missing",
 				stage: "model",
@@ -420,7 +420,7 @@ export function stepFor(prompt: Prompt): StepView {
 				change: byLabel(prompt, /^Change the connection$/u),
 				manual: byLabel(prompt, /^Enter an unverified model ID$/u),
 			};
-		if (title === "Review what Clio could verify") {
+		if (title === "Review what CLIO Coder could verify") {
 			const lines = rest(prompt);
 			const tests = lines.includes(SAVE_TESTS);
 			const { facts, notes, verified } = reviewFacts(lines.filter((line) => line !== SAVE_TESTS));

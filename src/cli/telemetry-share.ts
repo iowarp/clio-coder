@@ -111,7 +111,7 @@ function tally(counts: Record<string, number>): string {
 
 function preview(plan: SharePlan): string {
 	const lines = [
-		`share preview: ${plan.scopes.length} scope(s), profile ${plan.profile}, source ${plan.installId}, Clio ${plan.clioCoderVersion}`,
+		`share preview: ${plan.scopes.length} scope(s), profile ${plan.profile}, source ${plan.installId}, CLIO Coder ${plan.clioCoderVersion}`,
 	];
 	const byTier: Record<string, number> = {};
 	const byEvent: Record<string, number> = {};
@@ -706,7 +706,7 @@ export async function runTelemetryImport(argv: ReadonlyArray<string>): Promise<n
 					: `${scope.identical ? "already imported" : "kept the existing, different"} ${scope.kind} ${scope.id} at ${scope.directory}\n`,
 			);
 		process.stdout.write(
-			`verified ${imported.manifest.scopes.length} scope(s) from ${imported.installId} (${imported.manifest.profile}, Clio ${imported.manifest.clioCoderVersion}); read them with --imported ${imported.installId}\n`,
+			`verified ${imported.manifest.scopes.length} scope(s) from ${imported.installId} (${imported.manifest.profile}, CLIO Coder ${imported.manifest.clioCoderVersion}); read them with --imported ${imported.installId}\n`,
 		);
 		return imported.existing.every((scope) => scope.identical) ? 0 : 1;
 	} catch (error) {

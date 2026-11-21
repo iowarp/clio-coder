@@ -103,7 +103,7 @@ export function chatTestFix(
 	if (outcome.httpStatus === 404)
 		return `${route.provider} has no model ${route.model} for this account. Choose a different model.`;
 	if (outcome.stage === "transport" || /ECONNREFUSED|ENOTFOUND|fetch failed|EAI_AGAIN|ECONNRESET/u.test(outcome.message))
-		return `Clio could not connect to ${where}${proxy ? ` through the proxy ${proxy}` : ""}. Check the address.`;
+		return `CLIO Coder could not connect to ${where}${proxy ? ` through the proxy ${proxy}` : ""}. Check the address.`;
 	if (/content[- ]type|not a model reply|Unexpected token|JSON/iu.test(outcome.message))
 		return `${where} answered, but not as a model: check that the address is the API, not a web page.`;
 	return "Try again, change the key or address, or save anyway.";

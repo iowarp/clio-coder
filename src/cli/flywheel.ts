@@ -379,7 +379,7 @@ async function printBacklog(gh: Gh, view: BacklogView, out: (text: string) => vo
 		const reason = firstLine(result);
 		throw new Error(
 			/HTTP 40[34]/u.test(reason)
-				? `dev flywheel is for the Clio maintainers: ${METRICS_REPOSITORY} is private to the Clio maintainers, or it has no backlog yet (gh: ${reason})`
+				? `dev flywheel is for the CLIO Coder maintainers: ${METRICS_REPOSITORY} is private to the CLIO Coder maintainers, or it has no backlog yet (gh: ${reason})`
 				: `cannot read the flywheel backlog: ${reason}`,
 		);
 	}
@@ -564,7 +564,7 @@ async function pull(
 			if (plain.kind === "telemetry-share") {
 				const imported = await importShareArchive(deps.stateDir ?? clioStateDir(), archive);
 				out(
-					`${shareId}: telemetry share (${plain.consent.join(",")}, Clio ${plain.clio}) imported; read it with --imported ${imported.installId}\n`,
+					`${shareId}: telemetry share (${plain.consent.join(",")}, CLIO Coder ${plain.clio}) imported; read it with --imported ${imported.installId}\n`,
 				);
 				continue;
 			}
@@ -577,7 +577,7 @@ async function pull(
 			const where = pointer.issue === null ? "its discussion" : `#${pointer.issue}`;
 			if (outcome.kind === "stored")
 				out(
-					`${shareId}: report ${outcome.line.reportId} (${outcome.line.scopes.join(",")}, Clio ${outcome.line.clioCoder}) verified and stored in ${store}\n  to post on ${where}: ${outcome.acknowledgment}\n`,
+					`${shareId}: report ${outcome.line.reportId} (${outcome.line.scopes.join(",")}, CLIO Coder ${outcome.line.clioCoder}) verified and stored in ${store}\n  to post on ${where}: ${outcome.acknowledgment}\n`,
 				);
 			else if (outcome.kind === "indexed")
 				out(`${shareId}: report ${outcome.line.reportId} is already in the store (${outcome.line.status})\n`);

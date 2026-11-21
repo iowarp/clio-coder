@@ -53,7 +53,7 @@ export function workspaceEligibility(input: WorkspaceEligibilityInput): Workspac
 		if (input.env[name]) return plain(`already inside a terminal multiplexer (${name})`);
 	}
 	const inHerdr = input.env.HERDR_ENV === "1";
-	if (inHerdr && input.insideClioHost) return plain("already inside Clio's pane host");
+	if (inHerdr && input.insideClioHost) return plain("already inside CLIO Coder's pane host");
 	return { kind: "open", nested: inHerdr };
 }
 
@@ -181,9 +181,9 @@ export async function maybeLaunchWorkspace(
 	}
 	// The pane that printed the exit summary is gone; this is the terminal the operator reads.
 	if (result.exitSummary !== null) process.stdout.write(result.exitSummary);
-	if (result.exitCode !== 0) process.stderr.write(`Clio workspace ended with exit code ${result.exitCode}.\n`);
+	if (result.exitCode !== 0) process.stderr.write(`CLIO Coder workspace ended with exit code ${result.exitCode}.\n`);
 	if (result.workspaceLeftRunning) {
-		process.stdout.write("Clio workspaces are still open. Run `clio-coder` to return to them.\n");
+		process.stdout.write("CLIO Coder workspaces are still open. Run `clio-coder` to return to them.\n");
 	}
 	return result.exitCode;
 }

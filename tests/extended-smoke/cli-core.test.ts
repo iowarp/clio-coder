@@ -412,7 +412,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			const paneHost = fixedReport.findings.find((entry) => entry.name === "external tool herdr");
 			match(
 				paneHost?.detail ?? "",
-				/^pane host \S+ is not installed; run `clio-coder panes install`|Clio's pinned copy|no pinned pane host/u,
+				/^pane host \S+ is not installed; run `clio-coder panes install`|CLIO Coder's pinned copy|no pinned pane host/u,
 			);
 			for (const finding of fixedReport.findings.filter((entry) =>
 				/panes|yazi|external tool (herdr|yazi)/u.test(entry.name),
@@ -436,7 +436,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			});
 			strictEqual(firstRunCancel.code, 130, firstRunCancel.stdout + firstRunCancel.stderr);
 			// The notice wraps to the terminal (5906516d3), so the sentence may break across lines.
-			match(firstRunCancel.stdout, /Clio needs a model before it can do anything\s+else/u);
+			match(firstRunCancel.stdout, /CLIO Coder needs a model before it can do anything\s+else/u);
 			match(firstRunCancel.stderr, /configuration cancelled/u);
 		} finally {
 			firstRun.cleanup();

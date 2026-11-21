@@ -363,7 +363,7 @@ const OFFERED_STEP: Step = {
 		const chosen = answers.detectedChatRoute;
 		const previous = chosen ? answers.offered.findIndex((route) => route.target === chosen.target) : -1;
 		const result = await wizard.select<OfferedRoute | "other">({
-			heading: ["", chalk.bold("Clio found a way to reach a model:")],
+			heading: ["", chalk.bold("CLIO Coder found a way to reach a model:")],
 			choices: [
 				...answers.offered.map((route) => ({ value: route, ...offeredRow(route) })),
 				{ value: "other" as const, label: "Set up something else", hint: "an API key, a subscription, or a server" },
@@ -575,7 +575,7 @@ const FILE_STEP: Step = {
 			const confirm = await wizard.select<"apply" | "back">({
 				heading: ["", chalk.bold("This setup file will:"), ...describeImport(prepared)],
 				choices: [
-					{ value: "apply", label: "Apply", hint: "save these targets to your Clio settings" },
+					{ value: "apply", label: "Apply", hint: "save these targets to your CLIO Coder settings" },
 					{ value: "back", label: "Back", hint: "choose another file" },
 				],
 				railPrefix: wizard.rail,
@@ -612,7 +612,7 @@ const CATEGORY_STEP: Step = {
 			heading: [
 				"",
 				chalk.bold("Where does your model come from?"),
-				chalk.dim("Choose the description you recognize; Clio shows the exact providers next."),
+				chalk.dim("Choose the description you recognize; CLIO Coder shows the exact providers next."),
 			],
 			choices: available.map((choice) => ({
 				value: choice.category,
@@ -816,7 +816,7 @@ const URL_STEP: Step = {
 							: {}),
 					hint: gateway
 						? "paste the whole URL, scheme and path included"
-						: "host:port is enough; Clio fills in the scheme and the port it knows",
+						: "host:port is enough; CLIO Coder fills in the scheme and the port it knows",
 					railPrefix: wizard.rail,
 					backLabel: "back",
 					clearOnExit: true,
@@ -883,7 +883,7 @@ async function reportReachability(
 			probe = retried;
 			answers.url = secure;
 			answers.inventoryKey = undefined;
-			wizard.presenter.step(`${url} did not answer and https did, so Clio uses ${secure}`);
+			wizard.presenter.step(`${url} did not answer and https did, so CLIO Coder uses ${secure}`);
 		}
 	}
 	if (probe !== null) {
@@ -897,7 +897,7 @@ async function reportReachability(
 			return false;
 		} else if (isUntrustedCertificate(probe.error)) {
 			wizard.presenter.warn(
-				`The server answered, but Clio does not trust its certificate: ${probe.error}. Point NODE_EXTRA_CA_CERTS at its CA, or change the address.`,
+				`The server answered, but CLIO Coder does not trust its certificate: ${probe.error}. Point NODE_EXTRA_CA_CERTS at its CA, or change the address.`,
 			);
 			answers.unreachable = probe.error;
 		} else {
@@ -1152,7 +1152,7 @@ const CREDENTIAL_STEP: Step = {
 			choices.findIndex((choice) => choice.value === current),
 		);
 		const result = await wizard.select<CredentialSource>({
-			heading: ["", chalk.bold("How should Clio get the API key?"), chalk.dim(`currently: ${stored}`)],
+			heading: ["", chalk.bold("How should CLIO Coder get the API key?"), chalk.dim(`currently: ${stored}`)],
 			choices,
 			initialIndex: initial,
 			railPrefix: wizard.rail,
@@ -1184,7 +1184,7 @@ const CREDENTIAL_VALUE_STEP: Step = {
 			heading: ["", chalk.bold(wantsEnv ? "Which environment variable?" : "Paste the API key")],
 			initial: wantsEnv ? (answers.apiKeyEnv ?? runtime.credentialsEnvVar ?? "") : "",
 			hint: wantsEnv
-				? "Clio reads it every time it calls the provider, so the key never lands on disk"
+				? "CLIO Coder reads it every time it calls the provider, so the key never lands on disk"
 				: `stored at ${shortenPath(authStoragePath())} (${credentialFileProtection()}, not encrypted)`,
 			...(wantsEnv ? {} : { mask: true }),
 			validate: (value) =>
@@ -1273,11 +1273,11 @@ const MODEL_STEP: Step = {
 			const result = await wizard.select<"retry" | "back" | "manual" | "key">({
 				heading: [
 					"",
-					chalk.bold("Clio could not read a model list"),
+					chalk.bold("CLIO Coder could not read a model list"),
 					chalk.dim(
 						canDetect
 							? "Start the app or server and load a model, then retry. No generation request is sent."
-							: "This provider has no discovery API Clio can use.",
+							: "This provider has no discovery API CLIO Coder can use.",
 					),
 				],
 				choices: [
@@ -1299,7 +1299,7 @@ const MODEL_STEP: Step = {
 					{
 						value: "manual",
 						label: "Enter an unverified model ID",
-						hint: "advanced: Clio cannot verify it before saving",
+						hint: "advanced: CLIO Coder cannot verify it before saving",
 					},
 				],
 				initialIndex: 0,
@@ -1325,7 +1325,7 @@ const MODEL_STEP: Step = {
 				heading: [
 					"",
 					chalk.bold("Unverified model id"),
-					chalk.dim("Clio will send this exact text. The endpoint and capabilities remain unverified."),
+					chalk.dim("CLIO Coder will send this exact text. The endpoint and capabilities remain unverified."),
 				],
 				initial: preferred ?? "",
 				hint: "use only the exact wire id from the provider or server documentation",
@@ -1543,7 +1543,7 @@ const REVIEW_STEP: Step = {
 			const result = await wizard.select({
 				heading: [
 					"",
-					chalk.bold("Review what Clio could verify"),
+					chalk.bold("Review what CLIO Coder could verify"),
 					truncate(`Connection: ${answers.targetId}`, wizard.host ? 36 : 70),
 					truncate(`Model: ${answers.model}`, wizard.host ? 36 : 70),
 					...verificationSummary(answers),
@@ -1715,7 +1715,7 @@ async function offerKeyForApp(wizard: Wizard, answers: Answers): Promise<StepOut
 		heading: [
 			"",
 			chalk.bold("The desktop app cannot see this shell's key. Store it for the app too?"),
-			`Clio would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (${credentialFileProtection()}).`,
+			`CLIO Coder would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (${credentialFileProtection()}).`,
 		],
 		choices: [
 			{ value: false, label: "No", hint: "the app asks for the key itself" },
@@ -1851,16 +1851,20 @@ export async function runOnboardingWizard(
 	// sentence pushed the header, and the reason setup started, off the top of the screen.
 	const rows = (streams.out as { rows?: number }).rows ?? 24;
 	if (rows >= 20)
-		presenter.note("Choose what you already use. Clio checks the endpoint and model list when the provider allows it.");
+		presenter.note(
+			"Choose what you already use. CLIO Coder checks the endpoint and model list when the provider allows it.",
+		);
 	if (wizard.sendTest)
-		presenter.note("Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).");
+		presenter.note(
+			"Before saving, CLIO Coder sends the model one short test message (a few tokens; paid providers bill it).",
+		);
 	// "Nothing is saved" read as false to a first-run user who then found the
 	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
 	// hold no choice of theirs; the sentence is about the choices.
 	// Under 20 rows the selector's own legend names Esc, so this sentence gives its rows to the header above.
 	if (rows >= 20)
 		presenter.note(
-			`Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only ${wizard.sendTest ? "after the test message" : "at the review"}, except a browser sign-in you complete.`,
+			`Esc goes back a step, and from the first step leaves without saving. Your choices are written to your CLIO Coder settings only ${wizard.sendTest ? "after the test message" : "at the review"}, except a browser sign-in you complete.`,
 		);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
@@ -2014,7 +2018,7 @@ function cancel(
 	}
 	if (answers.mode === "first" && options.advise !== false)
 		presenter.commandAdvice(
-			"Clio cannot start until a model is set up. When you are ready, run:",
+			"CLIO Coder cannot start until a model is set up. When you are ready, run:",
 			"clio-coder configure",
 		);
 	presenter.done("Cancelled; nothing was saved");
@@ -2129,13 +2133,13 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 	if (contextWindowUndiscovered(descriptor, answers.probe ?? null)) {
 		presenter.warn(
 			wizard.host
-				? `${targetId} reported no context window, so Clio will use the runtime default as a guess. Set the real one in Settings → Connections: select ${targetId} and choose Edit.`
-				: `${targetId} reported no context window, so Clio will use the runtime default as a guess. Set the real one with \`clio-coder configure --id ${targetId} --runtime ${runtime.id} --context-window <N>\`.`,
+				? `${targetId} reported no context window, so CLIO Coder will use the runtime default as a guess. Set the real one in Settings → Connections: select ${targetId} and choose Edit.`
+				: `${targetId} reported no context window, so CLIO Coder will use the runtime default as a guess. Set the real one with \`clio-coder configure --id ${targetId} --runtime ${runtime.id} --context-window <N>\`.`,
 		);
 	}
 
 	if (!wizard.host) {
-		if (!wizard.startsChat) presenter.commandAdvice("Start Clio:", "clio-coder");
+		if (!wizard.startsChat) presenter.commandAdvice("Start CLIO Coder:", "clio-coder");
 		presenter.commandAdvice("Change any of this later:", "clio-coder configure");
 	}
 	presenter.done("Done");

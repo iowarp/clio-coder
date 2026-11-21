@@ -222,7 +222,7 @@ function nodeVersionError(): { message: string; detail: string } | null {
 			return {
 				message: `clio-coder requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}.`,
 				detail:
-					"Distro and cluster module Node builds are often older. Install Clio with its own Node, no root needed: curl -fsSL https://coder.iowarp.ai/install.sh | sh. Or set CLIO_CODER_NODE to a Node 22.19+ binary, or install one with nvm, fnm or conda-forge and reinstall with its npm.",
+					"Distro and cluster module Node builds are often older. Install CLIO Coder with its own Node, no root needed: curl -fsSL https://coder.iowarp.ai/install.sh | sh. Or set CLIO_CODER_NODE to a Node 22.19+ binary, or install one with nvm, fnm or conda-forge and reinstall with its npm.",
 			};
 		}
 	}

@@ -72,7 +72,7 @@ export function panesModeFinding(
 		return {
 			ok: true,
 			name,
-			detail: "Clio's private pane host opens with bare `clio-coder`; this command is not running inside one",
+			detail: "CLIO Coder's private pane host opens with bare `clio-coder`; this command is not running inside one",
 		};
 	}
 	if (eligibility.kind === "open") {
@@ -81,7 +81,7 @@ export function panesModeFinding(
 			ok: true,
 			level: "ok",
 			name,
-			detail: `nested; bare \`clio-coder\` opens Clio's private pane host inside this herdr pane with the prefix ctrl+shift+b; \`clio-coder --with-panes\` joins this herdr as a guest instead${join}`,
+			detail: `nested; bare \`clio-coder\` opens CLIO Coder's private pane host inside this herdr pane with the prefix ctrl+shift+b; \`clio-coder --with-panes\` joins this herdr as a guest instead${join}`,
 		};
 	}
 	if (guest === null) {
@@ -151,8 +151,8 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 		name: "panes protocol",
 		detail:
 			server === null
-				? `unknown; Clio's optional methods need protocol ${REQUIRED_PROTOCOL} or newer`
-				: `server ${server.version}, protocol ${server.protocol}; Clio's optional methods need ${REQUIRED_PROTOCOL} (${server.protocol >= REQUIRED_PROTOCOL ? "satisfied" : "toasts and agent focus fall back"})`,
+				? `unknown; CLIO Coder's optional methods need protocol ${REQUIRED_PROTOCOL} or newer`
+				: `server ${server.version}, protocol ${server.protocol}; CLIO Coder's optional methods need ${REQUIRED_PROTOCOL} (${server.protocol >= REQUIRED_PROTOCOL ? "satisfied" : "toasts and agent focus fall back"})`,
 	});
 
 	const entry = findPinnedTool(PANE_HOST_TOOL_ID);

@@ -176,7 +176,7 @@ export async function detectChatRoutes(
 			...(credential.type === "oauth" ? { oauthProfile: provider } : { apiKeyRef: provider }),
 		});
 		routes.push({
-			source: `Clio stored ${credential.type === "oauth" ? "login" : "API key"} (${provider})`,
+			source: `CLIO Coder stored ${credential.type === "oauth" ? "login" : "API key"} (${provider})`,
 			runtime,
 			target,
 			...(model ? { model } : {}),

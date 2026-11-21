@@ -96,7 +96,7 @@ function legacyWorktreeMarkerFinding(cwd: string): DoctorFinding {
 		detail:
 			legacy === 0
 				? "active worktree markers use canonical identifiers"
-				: `${legacy} active legacy worktree markers Clio no longer recognizes; remove their worktrees and branches by hand`,
+				: `${legacy} active legacy worktree markers CLIO Coder no longer recognizes; remove their worktrees and branches by hand`,
 	};
 }
 
