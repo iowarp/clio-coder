@@ -69,6 +69,7 @@ import {
 } from "./flow-policy-snapshot.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
+import { heredocDataText } from "./heredoc-data.js";
 import { commandInvokesGit, describeGitHookChange, type GitHookDriftGuard } from "./hook-drift.js";
 import type { FlowRestrictionSet, FlowSourceCall, InformationFlowPolicy } from "./information-flow.js";
 import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
@@ -2455,7 +2456,8 @@ function stripQuotes(token: string): string {
  * zero-access path appearing anywhere in the command is the signal.
  */
 function bashPathTokenCandidates(command: string): string[] {
-	command = withoutDataHeredocBodies(command, "stdin-only", "rails");
+	// C-22: a here-document the parsed call proves is data names no file (row 287).
+	command = heredocDataText(command) ?? withoutDataHeredocBodies(command, "stdin-only", "rails");
 	const candidates: string[] = [];
 	// `sh -c 'cat .env'` is one whitespace-bearing token below, skipped as prose,
 	// yet recognition judges exactly that inner script. Scan it as its own command.
@@ -2651,7 +2653,8 @@ const ROLE_PREFIX_WRAPPERS: ReadonlySet<string> = new Set([
  * with their roots so their walk can be judged.
  */
 function bashOperandRoles(command: string): BashOperandRoles {
-	command = withoutDataHeredocBodies(command, "stdin-only", "rails");
+	// C-22: a here-document the parsed call proves is data names no file (row 287).
+	command = heredocDataText(command) ?? withoutDataHeredocBodies(command, "stdin-only", "rails");
 	const roles: BashOperandRoles = { reads: [], pathOperands: new Set(), writes: [], searches: [] };
 	const inner = inlineShellScript(command);
 	if (inner !== null && inner !== command) {

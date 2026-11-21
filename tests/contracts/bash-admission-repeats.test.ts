@@ -53,8 +53,11 @@ test("bash admission inspects each distinct heredoc word once, however often it 
 			`yolo=${yolo}: 1600 rows took ${long.lookups} lookups, 100 took ${short.lookups}`,
 		);
 	}
-	// What blocks still blocks when it sits behind thousands of repeats. A data word blocks by naming a file (FX-7).
-	strictEqual(judge(`${heredoc(1600).slice(0, -4)}\n.env\nEOF`, false).verdict, "block:secret_path_bash");
+	// What blocks still blocks when it sits behind thousands of repeats. A quoted body copied into a file is content (C-22,
+	// row 287); a read after it, or the same word in an unquoted body, still names the file (FX-7).
+	strictEqual(judge(`${heredoc(1600)}\ncat .env`, false).verdict, "block:secret_path_bash");
+	const unquoted = heredoc(1600).replace("<<'EOF'", "<<EOF");
+	strictEqual(judge(`${unquoted.slice(0, -4)}\n.env\nEOF`, false).verdict, "block:secret_path_bash");
 	const store = join(home.dir, "config", "credentials.yaml");
 	strictEqual(judge(`${heredoc(1600)}\ncat ${store}`, true).verdict, "block:yolo-floor:yolo-floor-clio-credentials");
 });
