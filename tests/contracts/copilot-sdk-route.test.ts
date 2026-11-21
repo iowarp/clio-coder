@@ -20,6 +20,8 @@ import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
+import { createBackgroundMemoryModelClient } from "../../src/domains/memory/background-route.js";
+import type { MemoryRouteText } from "../../src/domains/memory/secret-text.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { prepareListedModelCapabilities } from "../../src/domains/providers/background-model-metadata.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -726,6 +728,48 @@ test("Copilot's listed reasoning efforts are the model's thinking levels, and ea
 		deepStrictEqual(session.switches, [{ model: "with-none", reasoningEffort: "none" }]);
 	} finally {
 		disposeCopilotConversations("effort-session");
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("a memory side call with thinking off asks a Copilot model that cannot turn it off for its lowest listed effort (C-2)", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "three-levels",
+		capabilities: { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } },
+		supportedReasoningEfforts: ["low", "medium", "high"],
+		defaultReasoningEffort: "high",
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const target = { id: "copilot-memory", runtime: "copilot-sdk", defaultModel: "three-levels" };
+	settings.targets = [target];
+	settings.context.memory.target = target.id;
+	settings.context.memory.model = "three-levels";
+	const bundle = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+	await bundle.extension.start();
+	try {
+		await prepareListedModelCapabilities(bundle.contract, target.id);
+		const route = createBackgroundMemoryModelClient(bundle.contract, settings, 5000, null);
+		ok(route);
+		await route.client.complete({
+			purpose: "memory.bank",
+			systemPrompt: "fixture",
+			userPrompt: "hello" as MemoryRouteText,
+			maxTokens: 512,
+			signal: new AbortController().signal,
+		});
+		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low", "the lowest listed effort, not the default");
+		// A caller that streams with thinking off and no clamp gets the lowest listed effort, never the server's default.
+		const model = copilotSdkRuntime.synthesizeModel(target as TargetDescriptor, "three-levels", null);
+		await engineStreamSimple(model, normalizeContext({ messages: [user("hello")] }), {
+			sessionId: "off-session",
+		}).result();
+		strictEqual(fake().sessions.at(-1)?.config.reasoningEffort, "low");
+	} finally {
+		disposeCopilotConversations("off-session");
+		await bundle.extension.stop?.();
 		models.splice(0, models.length, ...original);
 	}
 });

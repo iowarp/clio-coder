@@ -534,7 +534,9 @@ function listedLevelsOf(model: Model<Api>): readonly string[] | undefined {
 
 /**
  * The `reasoningEffort` for the resolved thinking level. The level was already mapped onto the listed set, so
- * each passes through by name. Off sends `none` only where the listing offers it; elsewhere the effort is omitted.
+ * each passes through by name. Off sends `none` where the listing offers it; elsewhere it sends the lowest listed
+ * effort, since an omitted effort runs the server's default level (C-2: memory side calls on Copilot spent three
+ * quarters of their output on reasoning they asked to turn off). With no listing the effort is omitted.
  */
 function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | undefined): string | undefined {
 	if (!model.reasoning) return undefined;
@@ -550,10 +552,18 @@ function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | un
 			return "xhigh";
 		case "max":
 			return "max";
-		default:
-			return listedLevelsOf(model)?.includes("off") ? "none" : undefined;
+		default: {
+			const listed = listedLevelsOf(model);
+			if (listed === undefined) return undefined;
+			if (listed.includes("off")) return "none";
+			const lowest = LISTED_EFFORT_ORDER.find((level) => listed.includes(level));
+			return lowest === "minimal" ? "low" : lowest;
+		}
 	}
 }
+
+/** Listed efforts from least to most reasoning, in Clio's vocabulary. */
+const LISTED_EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /** A user message's host reminders, each in its own `<system-reminder>` frame, in order. */
 function remindersOf(text: string): string[] {
