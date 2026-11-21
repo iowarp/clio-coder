@@ -152,6 +152,50 @@ test("the judge reads an approval scoped under $TMPDIR against the session's res
 	doesNotMatch(prompts[1] ?? "", /operator-named scope/u);
 });
 
+test("a scope naming a script directory reaches the judge with the script's own text and a scope fact (M-5)", async () => {
+	const temp = realpathSync(mkdtempSync(join(tmpdir(), "clio-judge-scripts-")));
+	mkdirSync(join(temp, "drv"));
+	writeFileSync(join(temp, "drv", "poll-driver.mjs"), 'console.log("poll the candidate");\n');
+	const prompts: string[] = [];
+	const judge = createSafetyJudge({
+		config: () => ({
+			...CONFIG,
+			roots: { workspace: "/work/space", scratch: [temp], temp: null },
+		}),
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		operatorMessages: () => [`Asked: run scripts under ${temp}/drv and their reruns unsandboxed`],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	await judge.review({
+		tool: ToolNames.Bash,
+		// A file outside the workspace and scratch roots is never read for the judge.
+		args: { command: "node --trace-warnings drv/poll-driver.mjs --once && bash /etc/hostname", cwd: temp },
+		decision: {
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [] },
+			confirmationRuleId: "bash-unrecognized",
+			rejection: { short: "asks", detail: "asks", hints: [] },
+		},
+		approvalAuthority: "operator",
+	});
+	const user = prompts[0] ?? "";
+	const script = join(temp, "drv", "poll-driver.mjs");
+	ok(user.includes(`script file this call runs, ${script} (35 bytes)`), user);
+	ok(user.includes('console.log("poll the candidate");'), user);
+	ok(
+		user.includes(
+			`operator-named scope: an operator message names the directory ${join(temp, "drv")}, and the script ${script} this call runs is inside it`,
+		),
+		user,
+	);
+	doesNotMatch(user, /script file this call runs, \/etc/u);
+});
+
 test("a write to an outside path the operator spelled reaches the judge as an operator-named path, not shared config", async () => {
 	const prompts: Array<{ system: string; user: string }> = [];
 	const report = join(realpathSync(tmpdir()), "lanes", "bt-chain.txt");

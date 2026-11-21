@@ -43,7 +43,7 @@ import {
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../core/safe-exec.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
-import { sandboxEnvPolicy } from "../core/sandbox/env-scrub.js";
+import { mainSandboxEnvPolicy } from "../core/sandbox/env-scrub.js";
 import { createGitHooksFingerprinter } from "../core/sandbox/git-hooks-fingerprint.js";
 import { mainShellContained, yoloScriptSandboxState } from "../core/sandbox/main-session.js";
 import {
@@ -1851,7 +1851,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		currentSessionId: () => session?.current()?.id,
-		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
+		sandboxEnv: () => mainSandboxEnvPolicy(getCurrentSettings()),
 		sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		flow: {
@@ -2258,7 +2258,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		safety,
 		autonomy: resolveEffectiveAutonomy,
 		admissionAutonomy: resolveAdmissionAutonomy,
-		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
+		sandboxEnv: () => mainSandboxEnvPolicy(getCurrentSettings()),
 		sessionCodeConsentPending: () => sessionCodeConsent.pending(),
 		untilStoppedDefault: () => getCurrentSettings().chat.loopsUntilStopped,
 		createSession: createRoutedSession,
