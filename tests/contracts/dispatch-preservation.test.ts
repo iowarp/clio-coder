@@ -9,13 +9,13 @@ import {
 	realpathSync,
 	rmSync,
 	symlinkSync,
-	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { processBirthToken } from "../../src/core/process-identity.js";
+import { LEASE_CLOCK_SKEW_MS, LEASE_HEARTBEAT_MS, LEASE_TTL_MS } from "../../src/domains/dispatch/lease-clock.js";
 import { workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import { joinWriterSet, WriterSetBusyError } from "../../src/domains/dispatch/writer-set.js";
 import {
@@ -185,14 +185,14 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 		writeFileSync(
 			path,
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				checkout: root,
 				host,
 				pid,
 				processBirthToken: "1",
 				acquiredAt: new Date().toISOString(),
 				heartbeatAt: new Date().toISOString(),
-				heartbeatExpiresMs: 120_000,
+				expiresAt: new Date(Date.now() + LEASE_TTL_MS).toISOString(),
 			}),
 		);
 	const child = spawn("sh", ["-c", "sleep 0 & echo $!; exec sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
@@ -209,14 +209,14 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 		writeFileSync(
 			path,
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				checkout: root,
 				host: hostname(),
 				pid: zombie,
 				processBirthToken: processBirthToken(zombie) ?? "x",
 				acquiredAt: new Date().toISOString(),
 				heartbeatAt: new Date().toISOString(),
-				heartbeatExpiresMs: 120_000,
+				expiresAt: new Date(Date.now() + LEASE_TTL_MS).toISOString(),
 			}),
 		);
 		(await joinWriterSet({ checkout: root, member })).release();
@@ -225,25 +225,24 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-/** Write a lease record as its holder last did `writtenAgoMs` before now, stamping `heartbeatAt` with its own clock. */
+/** Write a lease record as its holder last renewed it `writtenAgoMs` before now, stamped by the holder's own clock. */
 function writeLeaseRecord(
 	path: string,
 	record: Record<string, unknown>,
 	writtenAgoMs: number,
 	holderClockSkewMs = 0,
 ): void {
-	const writtenAt = Date.now() - writtenAgoMs;
+	const writtenAt = Date.now() - writtenAgoMs + holderClockSkewMs;
 	writeFileSync(
 		path,
 		JSON.stringify({
-			version: 1,
-			acquiredAt: new Date(writtenAt - 3_600_000 + holderClockSkewMs).toISOString(),
+			version: 2,
+			acquiredAt: new Date(writtenAt - 3_600_000).toISOString(),
 			...record,
-			heartbeatAt: new Date(writtenAt + holderClockSkewMs).toISOString(),
-			heartbeatExpiresMs: 120_000,
+			heartbeatAt: new Date(writtenAt).toISOString(),
+			expiresAt: new Date(writtenAt + LEASE_TTL_MS).toISOString(),
 		}),
 	);
-	utimesSync(path, writtenAt / 1000, writtenAt / 1000);
 }
 test("another host's writer lease is honored until its heartbeat lapses, never by a local pid check", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
@@ -274,7 +273,7 @@ test("another host's writer lease is honored until its heartbeat lapses, never b
 		rmSync(root, { recursive: true, force: true });
 	}
 });
-test("another host's writer lease ages on the shared filesystem's clock, not on either host's", async () => {
+test("another host's writer lease is judged on this host's clock within the skew tolerance (M12)", async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
 	const member = { group: "g", roots: null, isolated: false, agentId: "coder" };
 	const first = await joinWriterSet({ checkout: root, member });
@@ -288,11 +287,11 @@ test("another host's writer lease ages on the shared filesystem's clock, not on 
 			holderClockSkewMs,
 		);
 	try {
-		// A holder whose clock runs 200 s behind this one, beating now, still holds the checkout.
-		foreign(5_000, -200_000);
+		// A holder whose clock runs behind this one by less than the tolerance, beating now, still holds the checkout.
+		foreign(0, -(LEASE_CLOCK_SKEW_MS - 1_000));
 		await rejects(joinWriterSet({ deadlineAt: 0, checkout: root, member }), /on host other-node/u);
-		// A holder whose clock runs 500 s ahead, silent for 121 s, is gone.
-		foreign(121_000, 500_000);
+		// Behind by more than its TTL and the tolerance together, its record reads as lapsed even as it beats.
+		foreign(0, -(LEASE_TTL_MS + LEASE_CLOCK_SKEW_MS + 1_000));
 		(await joinWriterSet({ checkout: root, member })).release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -329,12 +328,13 @@ test("a held writer lease beats while it is held and stops when released", async
 		const lease = await joinWriterSet({ checkout: root, member });
 		const beat = () => JSON.parse(readFileSync(lease.path, "utf8"));
 		strictEqual(beat().heartbeatAt, new Date(startMs).toISOString());
-		strictEqual(beat().heartbeatExpiresMs, 120_000);
-		t.mock.timers.tick(15_000);
-		strictEqual(beat().heartbeatAt, new Date(startMs + 15_000).toISOString());
+		strictEqual(beat().expiresAt, new Date(startMs + LEASE_TTL_MS).toISOString());
+		t.mock.timers.tick(LEASE_HEARTBEAT_MS);
+		strictEqual(beat().heartbeatAt, new Date(startMs + LEASE_HEARTBEAT_MS).toISOString());
+		strictEqual(beat().expiresAt, new Date(startMs + LEASE_HEARTBEAT_MS + LEASE_TTL_MS).toISOString());
 		strictEqual(beat().acquiredAt, new Date(startMs).toISOString());
 		lease.release();
-		t.mock.timers.tick(15_000);
+		t.mock.timers.tick(LEASE_HEARTBEAT_MS);
 		ok(!existsSync(lease.path));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
