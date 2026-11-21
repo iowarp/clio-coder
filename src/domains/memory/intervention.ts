@@ -17,11 +17,12 @@ import {
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
-import { gatewayChainReceipts } from "../../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { headForRedaction } from "../evidence/redact.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
+import { callVerdict } from "../safety/check-classifier.js";
 import { hashToolCall } from "../safety/loop-detector.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
@@ -494,8 +495,11 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	 * given is null; one given that binds to nothing is refused with the reason.
 	 */
 	noteEvidence(args: Pick<MemoryNoteArgs, "note" | "command" | "path">): MemoryNoteEvidence | { refused: string };
-	/** Fix pairs rules capture saw in this session scope; completion retention under `lessons: side` is armed by one. */
-	fixPairCount(): number;
+	/**
+	 * Evidence arms rules capture saw in this session scope (fix pairs, and a declared `done` with a passed check);
+	 * completion retention under `lessons: side` is armed by one.
+	 */
+	sideArmCount(): number;
 	/** Invalidate pending content and discard all transient session/branch state. */
 	reset(): void;
 	/** Invalidate immediately without waiting for the model; refuse further work. */
@@ -597,9 +601,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * `memory_note` quote is checked against exactly these lines while the file is unchanged.
 	 */
 	const shownReads = new Map<string, ShownRead[]>();
-	/** Fix pairs since the last side lesson pass, and in the whole scope. */
-	let fixPairsSinceLessonPass = 0;
-	let fixPairsInScope = 0;
+	/** Evidence arms (fix pairs, verified declared `done`s) since the last side lesson pass, and in the whole scope. */
+	let armsSinceLessonPass = 0;
+	let armsInScope = 0;
+	/** A check passed in this operator turn: a declared `done` beside it is the third side arm (DESIGN 4.4, MD14). */
+	let checkedThisTurn = false;
 	/** Operator turns in this scope, and the one the last side lesson pass ran in: at most one pass per turn. */
 	let turnSequence = 0;
 	let lessonPassTurn = -1;
@@ -795,7 +801,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			if (args.path !== undefined) return shownQuote(args.note, args.path, root);
 			return null;
 		},
-		fixPairCount: () => fixPairsInScope,
+		sideArmCount: () => armsInScope,
 		reset,
 		dispose(): void {
 			disposed = true;
@@ -827,6 +833,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							cancelStoppedTurn();
 							return NO_EFFECTS;
 						}
+						observeDeclaration(input);
 						// Middleware continuations can evaluate turn_end again without any
 						// completed tools. They are not new memory boundaries and must not
 						// replace the prior operator-visible outcome or emit telemetry.
@@ -863,6 +870,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							operatorAskedRepeat = false;
 							turnLog.length = 0;
 							turnSequence += 1;
+							checkedThisTurn = false;
 						}
 						if (input.text?.trim()) {
 							// Bounded first: this runs synchronously at turn start on a prompt of any length.
@@ -1140,13 +1148,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const priorToolsSinceLessonPass = toolsSinceLessonPass;
 		const priorShellStepsSinceLessonPass = shellStepsSinceLessonPass;
 		const consolidates = triggers.includes("turn_end") || triggers.includes("idle_review");
-		const priorFixPairs = fixPairsSinceLessonPass;
+		const priorArms = armsSinceLessonPass;
 		const priorLessonPassTurn = lessonPassTurn;
 		toolsSinceMemoryStep = 0;
 		if (consolidates) {
 			toolsSinceLessonPass = 0;
 			shellStepsSinceLessonPass = 0;
-			fixPairsSinceLessonPass = 0;
+			armsSinceLessonPass = 0;
 			lessonPassTurn = turnSequence;
 		}
 		consecutiveErrors = 0;
@@ -1173,7 +1181,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					if (consolidates) {
 						toolsSinceLessonPass += priorToolsSinceLessonPass;
 						shellStepsSinceLessonPass += priorShellStepsSinceLessonPass;
-						fixPairsSinceLessonPass += priorFixPairs;
+						armsSinceLessonPass += priorArms;
 						lessonPassTurn = priorLessonPassTurn;
 					}
 					lastLaunchYielded = false;
@@ -1194,7 +1202,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					if (consolidates) {
 						toolsSinceLessonPass += priorToolsSinceLessonPass;
 						shellStepsSinceLessonPass += priorShellStepsSinceLessonPass;
-						fixPairsSinceLessonPass += priorFixPairs;
+						armsSinceLessonPass += priorArms;
 						lessonPassTurn = priorLessonPassTurn;
 					}
 					lastPromptedBoundary = null;
@@ -1228,12 +1236,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 
 	/**
 	 * The side-model lesson pass is an opt-in (`lessons: side`) armed by evidence, not activity (DESIGN 4.4): a fix
-	 * pair since the last pass, and at most one pass per operator turn, whether it runs at the turn's end or idle.
+	 * pair, or a `finish` declaration of `done` in an operator turn with a passed check (MD14), since the last pass, and
+	 * at most one pass per operator turn, whether it runs at the turn's end or idle.
 	 */
 	function sideLessonArmed(): boolean {
 		return (
 			lessonsMode() === "side" &&
-			fixPairsSinceLessonPass > 0 &&
+			armsSinceLessonPass > 0 &&
 			lessonPassTurn !== turnSequence &&
 			toolsSinceLessonPass >= MEMORY_INTERVENTION_TURN_END_MIN_TOOLS
 		);
@@ -1245,6 +1254,23 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 
 	function lessonsMode(): MemoryLessonsMode {
 		return settings().surfaces.lessons ?? DEFAULT_SETTINGS.context.memory.surfaces.lessons;
+	}
+
+	/**
+	 * A turn's typed `finish` declaration, never its reply text (MD14). The bank's status becomes the declared state and
+	 * its `remaining` items, the progress a compaction hands back. Under `lessons: side` a declared `done` in an operator
+	 * turn whose check passed is an evidence arm; a `done` without one arms nothing.
+	 */
+	function observeDeclaration(input: MiddlewareHookInput): void {
+		const state = input.metadata?.completionState;
+		if (state !== "done" && state !== "partly_done" && state !== "not_done") return;
+		const remaining = input.metadata?.completionRemaining;
+		const items = typeof remaining === "string" ? remaining.split("\n").filter((item) => item.length > 0) : [];
+		deps.bank.updateStatus(`declared ${state}${items.length > 0 ? `; remaining: ${items.join("; ")}` : ""}`);
+		if (state !== "done" || !checkedThisTurn || lessonsMode() !== "side") return;
+		checkedThisTurn = false;
+		armsSinceLessonPass += 1;
+		armsInScope += 1;
 	}
 
 	/** A lone shell invocation failed from the workspace root: it waits for a success that fixes it. */
@@ -1281,8 +1307,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (failed.key !== segment.key && !fixPairOf(failed, segment)) return;
 		failedForFix.delete(subject.key);
 		if (failed.key === segment.key || lessonsMode() === "off") return;
-		fixPairsSinceLessonPass += 1;
-		fixPairsInScope += 1;
+		armsSinceLessonPass += 1;
+		armsInScope += 1;
 		try {
 			deps.onFixPair?.({ failed, fixed: segment });
 		} catch {
@@ -1399,8 +1425,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		observedReads.clear();
 		failedForFix.clear();
 		shownReads.clear();
-		fixPairsSinceLessonPass = 0;
-		fixPairsInScope = 0;
+		armsSinceLessonPass = 0;
+		armsInScope = 0;
+		checkedThisTurn = false;
 		turnSequence = 0;
 		lessonPassTurn = -1;
 		trajectory.length = 0;
@@ -2026,6 +2053,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
 		if (command !== null && successfulShellReceipt(input.metadata?.resultKind === "ok", input.toolResultDetails))
 			rememberSucceededCommand(command, input.toolArgs?.cwd);
+		if (outcome === "ok" && passedCheck(input)) checkedThisTurn = true;
 		const root = workspaceRoot();
 		const readPath =
 			prepared.toolName === ToolNames.Read && outcome === "ok" && typeof input.toolArgs?.path === "string"
@@ -2609,6 +2637,13 @@ function channelCarries(
 		case "durable_lesson_task":
 			return commandEvidence(lesson) || lesson.approval === "operator";
 	}
+}
+
+/** A settled ok call that ran a check and passed it: a verify run, or a shell check that exited zero. */
+function passedCheck(input: MiddlewareHookInput): boolean {
+	const call = effectiveToolCall(input.toolName ?? "", input.toolArgs, input.toolResultDetails);
+	if (callVerdict(call.toolName, call.args === undefined ? undefined : { ...call.args }) !== "check") return false;
+	return call.toolName !== ToolNames.Bash || successfulShellReceipt(true, input.toolResultDetails);
 }
 
 function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {

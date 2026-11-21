@@ -5,9 +5,12 @@ import type { SurfaceOutcome, SurfaceSettled } from "../core/telemetry/schemas.j
 import { ToolNames } from "../core/tool-names.js";
 import { nextFiringId } from "../domains/middleware/fired-record.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../domains/middleware/index.js";
+import { callVerdict } from "../domains/safety/check-classifier.js";
+import { FINISH_CONTRACT_REGISTRATION_ID } from "../domains/safety/finish-contract-registration.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { dispatchKeysFromArgs } from "../domains/turn-control/index.js";
+import { completionOfToolResult } from "../tools/finish.js";
 import { effectiveToolCall } from "../tools/surface.js";
 
 export interface CollectedTurn {
@@ -97,16 +100,38 @@ function callIdentity(input: MiddlewareHookInput): string {
 }
 
 /**
- * The typed fact a succeeded call states for settlement: a `finish` declaration, a check's receipt, or a non-read
- * call's receipt. A read, a failed call and reply text state none (memory design 4.1).
+ * The typed fact a succeeded call states for settlement (memory design 4.1, 4.6). `progress` is what a nudge or a
+ * block claims: a `finish` declaration, a `verify` receipt, or a non-read call's receipt. `check` is what the finish
+ * gate claims: a check's receipt or a limitation receipt. `unfinished` is a declared `partly_done` or `not_done`,
+ * which settles the finish gate `moot`. A read, a failed call and reply text state none.
  */
+interface CallFact {
+	kind: SettlementFact["kind"];
+	progress: boolean;
+	check: boolean;
+	unfinished: boolean;
+}
+
 function callFact(
 	toolName: string,
 	args: Readonly<Record<string, unknown>> | undefined,
-): SettlementFact["kind"] | null {
-	if (toolName === ToolNames.Finish) return "declaration";
-	if (toolName === ToolNames.Verify) return "receipt";
-	return isReadOnlyCall(toolName, args) ? null : "receipt";
+	details: MiddlewareHookInput["toolResultDetails"],
+): CallFact | null {
+	if (toolName === ToolNames.Finish) {
+		const state = completionOfToolResult(toolName, { details })?.state;
+		const unfinished = state === "partly_done" || state === "not_done";
+		return { kind: "declaration", progress: true, check: false, unfinished };
+	}
+	if (toolName === ToolNames.Limitation) return { kind: "receipt", progress: false, check: true, unfinished: false };
+	const check = callVerdict(toolName, args === undefined ? undefined : { ...args }) === "check";
+	const progress = toolName === ToolNames.Verify || !isReadOnlyCall(toolName, args);
+	if (!progress && !check) return null;
+	return { kind: "receipt", progress, check, unfinished: false };
+}
+
+/** Whether a firing of this surface names the fact a call states: the finish gate names only checks (4.6). */
+function claimsFact(surface: string, call: CallFact): boolean {
+	return surface === FINISH_CONTRACT_REGISTRATION_ID ? call.check : call.progress;
 }
 
 function emptyTurn(previousClarificationStreak: number): CollectedTurn {
@@ -227,13 +252,18 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		return true;
 	};
 	/**
-	 * One terminal fact credits one firing: the most recently admitted claimant. Every other claimant of the same fact
-	 * settles `moot`. A block never claims its own call's later success.
+	 * One terminal fact credits one firing: the most recently admitted firing whose surface names it. Every other
+	 * claimant of the same fact settles `moot`. A block never claims its own call's later success. A declared unfinished
+	 * state first settles every admitted finish-gate firing `moot`: the turn claimed no completion to check (4.6).
 	 */
-	const credit = (fact: SettlementFact, identity: string): void => {
+	const credit = (call: CallFact, fact: SettlementFact, identity: string): void => {
+		if (call.unfinished)
+			for (const firing of [...open.values()])
+				if (firing.admitted !== null && firing.surface === FINISH_CONTRACT_REGISTRATION_ID) settle(firing, "moot", fact);
 		const claimants = [...open.values()].filter(
 			(firing) =>
 				firing.admitted !== null &&
+				claimsFact(firing.surface, call) &&
 				(firing.kind === "nudge" ||
 					(firing.credit === undefined && firing.exhausted === undefined && firing.identity !== identity)),
 		);
@@ -436,9 +466,13 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 					active = { ...active, readOnlyCallsBeforeFirstDispatch: active.readOnlyCallsBeforeFirstDispatch + 1 };
 				}
 			} else if (input.hook === "after_tool" && input.metadata?.resultKind === "ok" && input.toolName !== undefined) {
-				const kind = callFact(toolName, args);
-				if (kind !== null)
-					credit({ kind, ...(input.toolCallId !== undefined ? { ref: input.toolCallId } : {}) }, callIdentity(input));
+				const call = callFact(toolName, args, input.toolResultDetails);
+				if (call !== null)
+					credit(
+						call,
+						{ kind: call.kind, ...(input.toolCallId !== undefined ? { ref: input.toolCallId } : {}) },
+						callIdentity(input),
+					);
 			}
 			if (input.hook === "after_tool" && toolName === ToolNames.Dispatch && !isDispatchListing(args)) {
 				// A dispatch whose worker failed or was aborted still launched a run

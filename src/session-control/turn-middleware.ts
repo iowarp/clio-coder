@@ -24,6 +24,7 @@ import {
 	type MiddlewareReminderSeverity,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
+import { STALLED_TURN_REQUEST_CONTINUATION_MESSAGE } from "../domains/middleware/stalled-turn.js";
 import { withPluginDiscoveryPass } from "../domains/plugins/index.js";
 import {
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
@@ -128,11 +129,17 @@ export interface TurnMiddleware {
 		pendingSkillRequestCount?: number,
 		userTurnId?: string,
 	): Promise<TurnStartGate>;
+	/**
+	 * `pinFinishRound` says whether this turn's one pinned `finish` round would go out were the turn counted as work.
+	 * Resolves true when the stalled-turn nudge yielded to that round (memory design 4.6, MD14): the caller then spends
+	 * the round as if the turn had done work.
+	 */
 	fireTurnEnd(
 		agentRuntime: AgentRuntime,
 		messages: ReadonlyArray<AgentMessage>,
 		terminalToolResult?: { toolCallId: string; toolName: string },
-	): Promise<void>;
+		pinFinishRound?: () => boolean,
+	): Promise<boolean>;
 	fireCompactionHook(
 		stage:
 			| "mask_observations"
@@ -727,15 +734,15 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			return { refusal: null, ...NO_HOOK_RESULT };
 		},
 
-		async fireTurnEnd(agentRuntime, messages, terminalToolResult): Promise<void> {
+		async fireTurnEnd(agentRuntime, messages, terminalToolResult, pinFinishRound): Promise<boolean> {
 			// Fleet design 4.3: the host seals every ended turn, the claim beside its assessment from the turn's facts.
 			state.turnSealedCompletion = sealCompletion(state.turnCompletion, deps.hostCompletionFacts?.() ?? []);
-			if (!deps.middleware) return;
+			if (!deps.middleware) return false;
 			// A turn `finish` ended closes on the reply the model wrote beside it (fleet design 4.3): that text is the
 			// final answer, as a settled stop turn's would be. Any other terminal tool's result stands in for the reply.
 			const declared = terminalToolResult?.toolName === ToolNames.Finish;
 			const message = terminalToolResult === undefined ? lastAssistantMessage(messages) : null;
-			if (message === null && terminalToolResult === undefined) return;
+			if (message === null && terminalToolResult === undefined) return false;
 			const text = declared ? lastAssistantReplyText(messages) : message === null ? "" : extractText(message);
 			// Empty error/abort completions still close a tool-bearing turn. Let
 			// lifecycle observers settle their state even without final prose.
@@ -755,6 +762,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
 				...turnOriginMetadata(state.currentTurnOrigin),
 				...(state.turnCompletion !== null ? { completionState: state.turnCompletion.state } : {}),
+				// Metadata carries scalars, so the declaration's `remaining` items ride one per line (memory design MD14).
+				...(state.turnCompletion?.remaining?.length
+					? {
+							completionRemaining: state.turnCompletion.remaining.map((item) => item.replace(/\s+/gu, " ").trim()).join("\n"),
+						}
+					: {}),
 			};
 			// The final call's input includes cache tokens and measures the context
 			// a plan-close continuation would repeat (#431).
@@ -820,7 +833,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			}
 			if (stopReason === "error" || stopReason === "aborted") {
 				suppressUnentered(firings, entered);
-				return;
+				return false;
 			}
 			// A continuation paired with a reminder of the same text is written to the ledger by the reminder alone.
 			const paired = new Set(
@@ -842,6 +855,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				effect.severity !== "hard-block" &&
 				(effect.fact !== undefined || (pairedReminderPersists(effect) && voiced.has(effect.message)));
 			if (declaredTurn) announceAssessment(effects);
+			let yieldedToFinish = false;
 			for (const effect of effects) {
 				if (sealedOnly(effect)) continue;
 				if (effect.kind === "inject_reminder") {
@@ -857,6 +871,21 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					continue;
 				}
 				if (effect.kind === "request_continuation" && declaredTurn) continue;
+				// Memory design 4.6 (MD14): on an unattended turn the stalled-turn nudge yields to the turn's pinned `finish`
+				// round, which asks for the typed declaration instead of prose. Its firing rides that round's request. Where no
+				// pinned round can go out (an attended turn, a spent round, locked tools, no `finish`), the nudge stands.
+				if (
+					effect.kind === "request_continuation" &&
+					effect.message === STALLED_TURN_REQUEST_CONTINUATION_MESSAGE &&
+					turnAllowsContinuation(state.currentTurnConstraints) &&
+					pinFinishRound?.() === true
+				) {
+					yieldedToFinish = true;
+					const firingId = firings.get(effect);
+					if (firingId !== undefined) armed.add(firingId);
+					enter(effect, true);
+					continue;
+				}
 				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
 					// A locked request cannot call the tool a nudge asks for: a plan close
 					// here reasoned over that conflict for 131k tokens until max_tokens.
@@ -877,6 +906,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			}
 			// A declared turn, a locked request or a spent nudge left these firings nothing to carry.
 			suppressUnentered(firings, entered);
+			return yieldedToFinish;
 		},
 
 		/**

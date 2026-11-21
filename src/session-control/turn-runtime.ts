@@ -1851,8 +1851,27 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			context.flushReconciledSnapshot();
 			turnEndFiredFor = turn.message;
 			stallSuspendDepth += 1;
+			// Fleet design 4.3: an unattended turn that did work and ended undeclared gets one round pinned to finish. A
+			// zero-tool turn the stalled-turn nudge flags counts as work there, the nudge yielding to it (memory design MD14).
+			const finishRoundFor = (calledWork: boolean): boolean =>
+				finishRoundDue({
+					headless: deps.headless === true,
+					origin: state.currentTurnOrigin?.origin,
+					declared: state.turnCompletion !== null,
+					calledWork,
+					spent: state.finishRoundSpent,
+					toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
+					endedOnTerminalTool: terminal !== null,
+					finishAttached: localRuntime.agent.state.tools.some((tool) => tool.name === ToolNames.Finish),
+				});
+			let stalledYield = false;
 			try {
-				await middleware.fireTurnEnd(localRuntime, localRuntime.agent.state.messages, terminal ?? undefined);
+				stalledYield = await middleware.fireTurnEnd(
+					localRuntime,
+					localRuntime.agent.state.messages,
+					terminal ?? undefined,
+					() => finishRoundFor(true),
+				);
 			} finally {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
@@ -1862,20 +1881,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// `finish` is turn-terminal (fleet design 4.3): a declared turn takes no further round, whatever asked.
 			if (state.turnCompletion !== null) return undefined;
 			if (!state.continuation.requested) {
-				// Fleet design 4.3: an unattended turn that did work and ended undeclared gets one round pinned to finish.
-				if (
-					!finishRoundDue({
-						headless: deps.headless === true,
-						origin: state.currentTurnOrigin?.origin,
-						declared: state.turnCompletion !== null,
-						calledWork: state.turnCalledWork,
-						spent: state.finishRoundSpent,
-						toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
-						endedOnTerminalTool: terminal !== null,
-						finishAttached: localRuntime.agent.state.tools.some((tool) => tool.name === ToolNames.Finish),
-					})
-				)
-					return undefined;
+				if (!finishRoundFor(state.turnCalledWork || stalledYield)) return undefined;
 				state.finishRoundSpent = true;
 				middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Finish }]);
 				requiredToolReminder = FINISH_DECLARATION_REMINDER;
