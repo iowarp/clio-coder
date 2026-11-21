@@ -829,6 +829,7 @@ export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
 	"count:enumerated-steps@operator-request",
 	"count:failure-recurrence@task-memory",
 	"count:open-tasks@turn-end",
+	"count:read-class-calls-and-areas@user-turn",
 	"count:ready-detached-batches@turn-end",
 	"count:repeated-call@tool-args",
 	"diff:mutating-turn@board-scope",
