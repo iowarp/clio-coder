@@ -381,7 +381,7 @@ class Parser {
 				if (next === "") fail();
 				this.pos += 2;
 				literal(/[$`"\\]/u.test(next) ? next : `\\${next}`, true);
-			} else if (char === "`") parts.push({ kind: "command", script: this.readBacktick(), quoted: true });
+			} else if (char === "`") parts.push({ kind: "command", script: this.readBacktick(true), quoted: true });
 			else if (char === "$") this.readDollar(parts, literal, true);
 			else {
 				literal(char, true);
@@ -390,7 +390,8 @@ class Parser {
 		}
 	}
 
-	private readBacktick(): string {
+	/** A backtick script; inside double quotes `\"` is a quote in it too, as bash reads it. */
+	private readBacktick(inDouble = false): string {
 		let script = "";
 		this.pos += 1;
 		for (;;) {
@@ -400,7 +401,7 @@ class Parser {
 				this.pos += 1;
 				return script;
 			}
-			if (char === "\\" && /[$`\\]/u.test(this.peek(1))) {
+			if (char === "\\" && (inDouble ? /[$`\\"]/u : /[$`\\]/u).test(this.peek(1))) {
 				script += this.peek(1);
 				this.pos += 2;
 				continue;

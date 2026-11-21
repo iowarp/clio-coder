@@ -94,6 +94,7 @@ import {
 	declaredWrapperReadings,
 	decodedLocaleQuoting,
 	extractCommandCdScopedTargets,
+	extractCommandCdTargets,
 	extractCommandDeleteTargets,
 	extractCommandPathWalks,
 	extractCommandWriteTargets,
@@ -1083,8 +1084,21 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const scanned = pathPolicyTargets(call, callCwd)
 			.filter((target) => target.operation !== "read")
 			.map((target) => ({ ...target, path: accountHomeExpanded(target.path) }));
-		const targets = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, callCwd, trees.roots)];
-		if (targets.length === 0) return false;
+		const written = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, callCwd, trees.roots)];
+		if (written.length === 0) return false;
+		// Each target also as the command's own assignments spell it, so a path split over them is judged whole.
+		const targets =
+			command === null
+				? written
+				: [
+						...written,
+						...written.flatMap((target) =>
+							assignedSpellings(command, target.path).map((spelling) => ({
+								...target,
+								path: accountHomeExpanded(spelling),
+							})),
+						),
+					];
 		const spelled = targets.some(
 			(target) =>
 				CLIO_OWNED_VARIABLE.test(target.path) ||
@@ -4516,6 +4530,8 @@ function writesThroughClioVariable(
 	const referenced = new Set(
 		targets.flatMap((target) => [...target.path.matchAll(/\$\{?([A-Za-z_]\w*)/gu)].map((match) => match[1] as string)),
 	);
+	// `$1`, `$@` and their kin hold what `set --` or a function call passes, which the command's text may name.
+	if (targets.some((target) => /\$\{?[0-9@*]/u.test(target.path)) && namesClioTree(command, trees)) return true;
 	if (referenced.size === 0) return false;
 	const assignments = commandAssignments(command);
 	const tainted = new Set<string>();
@@ -4537,6 +4553,49 @@ function writesThroughClioVariable(
 			name === "REPLY" ||
 			name === "MAPFILE" ||
 			forms.some((form) => new RegExp(`(?<![\\w$]|\\$\\{)${name}(?!\\w)`, "u").test(form)),
+	);
+}
+
+/**
+ * The spellings a target takes once the command's own assignments stand in for its references, each value a name
+ * holds in the order the assignments run (`A=$HOME`, `D=cli; D+=o`), so a path split over assignments the pins do not
+ * read is judged whole. A value holding a substitution is not one the text fixes and stands in for nothing; a name the
+ * command does not assign stays as written.
+ */
+function assignedSpellings(command: string, target: string): string[] {
+	if (!target.includes("$")) return [];
+	const held = new Map<string, string[]>();
+	for (const match of command.matchAll(/(?<![\w$])([A-Za-z_]\w*)(\+?)=([^\s;&|()<>]*)/gu)) {
+		const [, name = "", append, raw = ""] = match;
+		if (/\$\(|`/u.test(raw)) continue;
+		const values = held.get(name) ?? [];
+		const text = raw.replace(/["']/gu, "");
+		values.push(append === "+" ? (values.at(-1) ?? "") + text : text);
+		held.set(name, values);
+	}
+	if (held.size === 0) return [];
+	const reference = /\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*)(?!\w))/gu;
+	let forms = [target];
+	for (let depth = 0; depth < 4; depth += 1) {
+		const next = new Set<string>();
+		for (const form of forms) {
+			const found = [...form.matchAll(reference)].find((match) => held.has(match[1] ?? match[2] ?? ""));
+			if (found === undefined) {
+				next.add(form);
+				continue;
+			}
+			const before = form.slice(0, found.index);
+			const after = form.slice(found.index + found[0].length);
+			for (const value of held.get(found[1] ?? found[2] ?? "") ?? []) next.add(`${before}${value}${after}`);
+		}
+		forms = [...next].slice(0, 64);
+	}
+	// A form is judged only when what is left unresolved is a leading reference the spellings know; another reference
+	// would be read as a cwd-relative segment that a later `..` folds away.
+	return forms.filter(
+		(form) =>
+			form !== target &&
+			!/\$/u.test(form.replace(/^\$\{?(?:HOME|CLIO_CODER_\w+|XDG_(?:CONFIG|DATA|STATE|CACHE)_HOME)(?![\w])\}?/u, "")),
 	);
 }
 
@@ -4574,8 +4633,11 @@ function mktempTargets(args: ReadonlyArray<string>, temps: ReadonlyArray<string>
 		}
 		if (word === "--dry-run") return [];
 		if (word === "--tmpdir") underTemp = true;
-		else if (word.startsWith("--tmpdir=")) dir = word.slice("--tmpdir=".length);
-		else if (word === "--suffix") index += 1;
+		// An empty directory is no directory: mktemp falls back to TMPDIR.
+		else if (word.startsWith("--tmpdir=")) {
+			dir = word.slice("--tmpdir=".length) || null;
+			underTemp = true;
+		} else if (word === "--suffix") index += 1;
 		else if (word.startsWith("--")) continue;
 		else if (word.startsWith("-") && word.length > 1) {
 			// A cluster's flags run up to `p`, whose value is the rest of the word or the next one.
@@ -4585,8 +4647,9 @@ function mktempTargets(args: ReadonlyArray<string>, temps: ReadonlyArray<string>
 			if (flags.includes("t")) underTemp = true;
 			if (valued >= 0) {
 				const rest = word.slice(valued + 1);
-				dir = rest.length > 0 ? rest : (args[index + 1] ?? null);
+				dir = (rest.length > 0 ? rest : args[index + 1]) || null;
 				if (rest.length === 0) index += 1;
+				underTemp = true;
 			}
 		} else template ??= word;
 	}
@@ -4629,6 +4692,16 @@ function sameCommandWriteTargets(
 			.filter(({ name }) => name === "TMPDIR")
 			.map(({ text }) => expand(text.replace(/["']/gu, ""))),
 	];
+	// A relative link source is read from the cwd and from each directory the command's cds reach.
+	const bases = [cwd];
+	for (const destination of extractCommandCdTargets(command))
+		bases.push(path.resolve(bases.at(-1) as string, expand(destination)));
+	// The directories a link may land in: `$TMPDIR` is a temp directory above; any other variable leaves it unplaced.
+	const placed = (destination: string): string[] =>
+		temps
+			.map((temp) => destination.replace(/\$\{TMPDIR\}|\$TMPDIR(?!\w)/gu, temp))
+			.filter((spelled) => !/[$`]/u.test(spelled))
+			.flatMap((spelled) => bases.map((base) => path.resolve(base, expand(spelled))));
 	for (const step of shellCommandSteps(command, home)) {
 		if (step.executable === "mktemp") {
 			for (const made of mktempTargets(step.args, temps)) found.push({ operation: "write", path: expand(made) });
@@ -4664,16 +4737,19 @@ function sameCommandWriteTargets(
 			continue;
 		}
 		if (!links) continue;
-		// A source is resolved from the link's directory, which may be the cwd or the named destination; both count.
+		// A source is resolved from the link's directory, which may be the cwd, a cd's, or the named destination; all count.
 		const sources = targetDir !== null || operands.length === 1 ? operands : operands.slice(0, -1);
 		const destination = targetDir ?? (operands.length > 1 ? (operands.at(-1) as string) : ".");
-		const linkDir = /[$`]/u.test(destination) ? null : path.resolve(cwd, expand(destination));
+		const linkDirs = placed(destination);
 		for (const source of sources) {
-			linked(source, cwd);
-			if (linkDir !== null && !path.isAbsolute(expand(source))) {
+			for (const base of bases) linked(source, base);
+			if (path.isAbsolute(expand(source))) continue;
+			for (const linkDir of linkDirs) {
 				linked(source, linkDir);
 				linked(source, path.dirname(linkDir));
 			}
+			// A link a variable places may sit at any depth, where its `..` climbs as far as `/`.
+			if (linkDirs.length === 0) linked(source.replace(/^(?:\.\.?\/)+/u, ""), "/");
 		}
 	}
 	return found;

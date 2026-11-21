@@ -1352,8 +1352,14 @@ function pinsHold(commands: ReadonlyArray<ShellSimpleCommand>, pins: ReadonlyMap
 			if (value !== null && CODE_RUNNERS.has(path.basename(value))) return false;
 		}
 		for (const redirect of command.redirects) {
-			const body = redirect.heredoc?.quoted === true ? redirect.heredoc.body : "";
-			if (names.some((name) => spellsReference(body, name))) return false;
+			const heredoc = redirect.heredoc;
+			if (heredoc === undefined) continue;
+			// A quoted body is data a raw-text reading may still put a pin in. An unquoted one expands as the shell
+			// reads it, and a `${NAME:=...}` or `${NAME=...}` there assigns the pin.
+			const spelled = heredoc.quoted
+				? (name: string) => spellsReference(heredoc.body, name)
+				: (name: string) => new RegExp(`\\$\\{${name}:?=`, "u").test(heredoc.body);
+			if (names.some(spelled)) return false;
 		}
 		const first = command.words[0];
 		if (first === undefined) continue;
@@ -1483,7 +1489,41 @@ function pinWordValue(
 		if (!PIN_PLAIN.test(text)) return null;
 		add({ fresh: text, failed: text });
 	}
-	return PIN_VALUE.test(fresh) && PIN_VALUE.test(failed) ? { value: { fresh, failed }, mktemp: false } : null;
+	const tidy = { fresh: tidyPinValue(fresh), failed: tidyPinValue(failed) };
+	if (tidy.fresh === null || tidy.failed === null) return null;
+	return PIN_VALUE.test(tidy.fresh) && PIN_VALUE.test(tidy.failed)
+		? { value: { fresh: tidy.fresh, failed: tidy.failed }, mktemp: false }
+		: null;
+}
+
+/**
+ * A value led by an unresolved reference, with the empty and `.` segments after it dropped and `x/..` folded, so it
+ * spells a tree the way the judgment's textual spellings do (`${HOME}/` is `${HOME}`, `${HOME}/./.x` is `${HOME}/.x`);
+ * null when a `..` climbs above the reference, which no spelling places. Any other value is returned as it is.
+ */
+function tidyPinValue(value: string): string | null {
+	const reference = /^\$\{\w+\}/u.exec(value)?.[0];
+	if (reference === undefined) return value;
+	const rest = value.slice(reference.length);
+	if (rest !== "" && !rest.startsWith("/")) return value;
+	const segments: string[] = [];
+	for (const segment of rest.split("/")) {
+		if (segment === "" || segment === ".") continue;
+		if (segment !== "..") segments.push(segment);
+		else if (segments.pop() === undefined) return null;
+	}
+	return reference + segments.map((segment) => `/${segment}`).join("");
+}
+
+/**
+ * What a `~` reads as under a pinned HOME. A value that is HOME itself or below it keeps the tilde (`~` + the rest),
+ * which every placement expands to the home directory; `${HOME}` in its place is a name a cd base never resolves.
+ */
+function tildePin(home: PinValue): PinValue {
+	const reference = `\${HOME}`;
+	const keep = (value: string) =>
+		value === reference || value.startsWith(`${reference}/`) ? `~${value.slice(reference.length)}` : value;
+	return { fresh: keep(home.fresh), failed: keep(home.failed) };
 }
 
 /** The session's TMPDIR: unset or empty, `$TMPDIR` expands empty and mktemp uses /tmp; anything but a plain absolute path is not read. */
@@ -1569,7 +1609,8 @@ function renderPins(
 	pins: ReadonlyMap<string, PinValue>,
 	guarded: boolean,
 ): string[] {
-	const home = pins.get("HOME");
+	const pinned = pins.get("HOME");
+	const home = pinned === undefined ? undefined : tildePin(pinned);
 	const edits: Array<{ start: number; end: number; pin: PinValue }> = [];
 	for (const item of script.items) {
 		for (const pipeline of item.andOr.pipelines) {
@@ -1615,11 +1656,12 @@ function renderPinsInText(text: string, pins: ReadonlyMap<string, PinValue>, gua
 	const names = [...pins.keys()].join("|");
 	const tilde = pins.has("HOME") ? String.raw`|(?<=^|[\s;&|<>])~(?=\/|$|[\s;&|<>])` : "";
 	const pattern = new RegExp(String.raw`\$\{(${names})\}|\$(${names})(?![A-Za-z0-9_])${tilde}`, "gu");
+	const home = pins.get("HOME");
 	const reading = (key: keyof PinValue) =>
-		text.replace(
-			pattern,
-			(_all, braced?: string, bare?: string) => (pins.get(braced ?? bare ?? "HOME") as PinValue)[key],
-		);
+		text.replace(pattern, (_all, braced?: string, bare?: string) => {
+			const name = braced ?? bare;
+			return name === undefined ? tildePin(home as PinValue)[key] : (pins.get(name) as PinValue)[key];
+		});
 	const failing = !guarded && [...pins.values()].some((pin) => pin.fresh !== pin.failed);
 	return failing ? [reading("fresh"), reading("failed")] : [reading("fresh")];
 }

@@ -542,6 +542,31 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`true; A=~/${base}/'config'; touch "$A/pwn"`,
 		// The failed-mktemp reading: HOME falls back to the account's home when H is empty and the write still runs.
 		`H=$(mktemp -d "$TMPDIR/home.XXXX"); export HOME=$H${account}; echo x > ~/${base}/state/f`,
+		// Second neon read of the pins. 1: an unquoted here-document body expands `${X:=...}` over an empty pin.
+		`CLIO_CODER_HOME=""\ncat <<EOF >/dev/null\n\${CLIO_CODER_HOME:=$CLIO_CODER_STATE_DIR}\nEOF\necho x > "$CLIO_CODER_HOME/pwn"`,
+		`HOME=""\n: <<EOF\n\${HOME:=${account}}\nEOF\necho x > ~/${base}/state/pwn`,
+		// 2: inside a double-quoted backtick script `\"` is a quote, so the `'` after it opens nothing.
+		`HOME=${scratchHome}; echo "\`echo \\"'\\"; unset HOME; echo x > ~/${base}/state/pwn; echo \\"'\\"\`"`,
+		// 3 and 4: a pinned HOME that ends in `/` or `/.`, or that is HOME itself, still reads `~` as the home.
+		`H=$HOME/; HOME=$H; echo x > ~/${base}/state/pwn`,
+		`H=~/.; HOME=$H; echo x > ~/${base}/state/pwn`,
+		"HOME=$XDG_STATE_HOME/; echo x > ~/clio-coder/pwn",
+		`H=~; HOME=$H; cd ~/${base}/state && echo x > pwn`,
+		// 7: a path split over assignments the pins do not read.
+		`true; A=$HOME; echo x > "$A/${base}/state/pwn"`,
+		`D=${base.slice(0, 3)}; D+=${base.slice(3)}; echo x > ~/$D/state/pwn`,
+		`true; A=~; echo x > "$A/${base}/state/pwn"`,
+		// 8: positional parameters set by `set --` or a function call.
+		`set -- ~/${base}/state; echo x > "$1/pwn"`,
+		`f() { rm -rf "$1"; }; f ~/${base}/state`,
+		// 10: an empty mktemp directory falls back to TMPDIR.
+		`TMPDIR=~/${base}/state mktemp -d --tmpdir=`,
+		`TMPDIR=~/${base}/state mktemp -d -p ""`,
+		// 11: a relative link source after a cd, or resolved from a link directory a variable names.
+		`cd ~ && ln ${base}/state/f "$TMPDIR/hl" && echo x > "$TMPDIR/hl"`,
+		`cd ~ && cp -l ${base}/state/f "$TMPDIR/hl" && echo x > "$TMPDIR/hl"`,
+		`cd ~ && ln -sr ${base}/state "$TMPDIR/link" && echo x > "$TMPDIR/link/pwn"`,
+		`ln -s ${relative(process.env.TMPDIR as string, join(home.dir, "state"))} "$TMPDIR/link" && echo x > "$TMPDIR/link/pwn"`,
 	];
 	// 10: `~user` is the account's passwd home whatever HOME holds; spelled only when the tree lies under it.
 	const account10 = relative(userInfo().homedir, home.dir);
@@ -891,7 +916,6 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		// `${B:=...}`, a prefix on a special builtin, a split value or a background job, keeps the pin dead.
 		'B=$TMPDIR/base; node -e 1; rm -rf "$B/x"',
 		'B=$TMPDIR/base; unset B; rm -rf "$B/src"',
-		'B=$TMPDIR/base; B+=/../..; rm -rf "$B"',
 		'B=$TMPDIR/base; declare -n B=PWD; rm -rf "$B"',
 		'B=$TMPDIR/base; ${B:=/etc}; rm -rf "$B"',
 		'H=$(mktemp -d; cd /); rm -rf "$H"',
@@ -913,6 +937,12 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
 	}
+	// An append keeps the pin dead, and the floor reads the value whole: above TMPDIR lie this test's Clio home and its
+	// workspace, so the delete is a floor block as the literal path is (second neon read, item 7).
+	const appended = 'B=$TMPDIR/base; B+=/../..; rm -rf "$B"';
+	strictEqual(verdict(appended), "block/damage-control:delete-outside-workspace", appended);
+	match(verdict(`rm -rf "${temp}/base/../.."`, "yolo"), /^block\/yolo-floor:/u);
+	strictEqual(verdict(appended, "yolo"), "block/yolo-floor:clio-owned-state", appended);
 	// The shell keeps the whitespace in a TMPDIR value and word-splits it, so a padded TMPDIR is no stable temp root,
 	// even when the padded name links to the directory itself.
 	const paddedTemp = join(linkDir, "padded");
