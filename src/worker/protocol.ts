@@ -700,6 +700,14 @@ export function workerPermitDigest(permit: {
 }
 
 /**
+ * Digest over a worker envelope without its own digest field. Both ends compute it: the host seals the envelope with
+ * it, and the worker refuses a spec whose envelope was edited after admission.
+ */
+export function workerEnvelopeDigest(body: unknown): string {
+	return sha256Hex(`clio-coder.workerEnvelope:${canonicalJson(body)}`);
+}
+
+/**
  * The one signature of a tool surface by name: sha256 over the JSON array of its sorted names. Receipts, route
  * history and plan approvals store this digest, so the worker's announce carries the same one rather than a second
  * form of it (#434). The main agent's signature commits to its tool schemas instead, a different subject.

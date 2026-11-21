@@ -384,6 +384,25 @@
 						}
 					}
 				},
+				"envelope": {
+					"version": 1,
+					"digest": "<volatile>",
+					"permitDigest": "<sha256>",
+					"role": "explorer",
+					"write": {
+						"mode": "none",
+						"roots": [],
+						"commandsBounded": false
+					},
+					"confinesWrites": true,
+					"withheld": [
+						{
+							"capability": "asks:judge",
+							"reason": "judge-unseated",
+							"remedy": "this process seats no safety judge for worker asks (`run --agent` and the fleet CLI have no main session); the safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on"
+						}
+					]
+				},
 				"toolTelemetry": {
 					"coverage": "complete",
 					"ingestionErrors": 0,
@@ -648,7 +667,14 @@
 				"ledgerId": null,
 				"readRoots": [],
 				"writeRoots": [],
-				"scopeSource": "none"
+				"scopeSource": "none",
+				"withheld": [
+					{
+						"capability": "asks:judge",
+						"reason": "judge-unseated",
+						"remedy": "this process seats no safety judge for worker asks (`run --agent` and the fleet CLI have no main session); the safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on"
+					}
+				]
 			},
 			"budget": {
 				"version": 1,
@@ -1310,7 +1336,14 @@
 				"ledgerId": null,
 				"readRoots": [],
 				"writeRoots": [],
-				"scopeSource": "none"
+				"scopeSource": "none",
+				"withheld": [
+					{
+						"capability": "asks:judge",
+						"reason": "judge-unseated",
+						"remedy": "this process seats no safety judge for worker asks (`run --agent` and the fleet CLI have no main session); the safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on"
+					}
+				]
 			},
 			"budget": {
 				"version": 1,

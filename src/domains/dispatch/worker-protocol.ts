@@ -13,7 +13,6 @@
 import { createHash } from "node:crypto";
 import type { ToolName } from "../../core/tool-names.js";
 import { attestedToolNames, attestedToolSchemaSignature } from "../../engine/worker-tools.js";
-import type { ToolProfileName } from "../../tools/profiles.js";
 import {
 	canonicalJson,
 	endpointIdentityHash,
@@ -145,29 +144,28 @@ export function approvedIdentityForSpec(spec: {
 	runtimeId: string;
 	wireModelId: string;
 	target: { id: string; url?: string };
-	allowedTools: ReadonlyArray<string>;
+	envelope: { tools: { direct: ReadonlyArray<string>; gateway: ReadonlyArray<string> } };
 	helperResult?: true;
-	toolProfile?: ToolProfileName;
 	agentId?: string;
 	task?: string;
 	runtimeResolution?: { capabilities: { tools: boolean | null } };
 	runtime?: { kind: string; id: string };
 }): ApprovedWorkerIdentity {
-	// The spec carries the final runtime-narrowed admission surface. The
-	// worker fingerprints its independently resolved registry intersection,
-	// so a missing, added, or differently filtered tool fails admission.
+	// The envelope carries the final admitted surface (fleet M7). The worker
+	// fingerprints its registry's intersection with it, so a tool its build
+	// does not register, or one added after admission, fails admission.
+	const admitted = [...spec.envelope.tools.direct, ...spec.envelope.tools.gateway].sort() as ToolName[];
 	const toolNames =
 		spec.helperResult === true
 			? attestedToolNames({
-					allowedTools: spec.allowedTools as ReadonlyArray<ToolName>,
+					allowedTools: admitted,
 					toolsSupported: spec.runtimeResolution?.capabilities.tools === true,
 					helperResult: true,
-					...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 					...(spec.agentId !== undefined ? { agentId: spec.agentId } : {}),
 					...(spec.task !== undefined ? { task: spec.task } : {}),
 					...(spec.runtime !== undefined ? { runtime: spec.runtime } : {}),
 				})
-			: [...spec.allowedTools];
+			: admitted;
 	return {
 		specVersion: spec.specVersion,
 		settingsFingerprint: spec.settingsFingerprint,

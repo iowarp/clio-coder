@@ -40,7 +40,6 @@ import { effectiveToolNames, wireParameterSchema } from "../tools/agent-tools.js
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
 import type { McpCapabilitySource } from "../tools/gateway/index.js";
 import { registerHarnessExtensionTools } from "../tools/harness-extensions.js";
-import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
 import { runtimeAttachesGateway } from "../tools/surface.js";
 import { type AgentLedgerPort, canonicalJson, toolSignatureOf } from "../worker/protocol.js";
@@ -235,7 +234,6 @@ export interface AttestedToolIdentityInput {
 	helperResult?: true;
 	/** False when the resolved runtime mediates no tool calls at all. */
 	toolsSupported: boolean;
-	toolProfile?: ToolProfileName;
 	agentId?: string;
 	task?: string;
 	/**
@@ -285,7 +283,6 @@ export function attestedToolNames(input: AttestedToolIdentityInput): string[] {
 		registry,
 		allowedTools: input.toolsSupported ? input.allowedTools : [],
 		includeInteractiveTools: false,
-		...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
 		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
 		...(input.task !== undefined ? { task: input.task } : {}),
 	});

@@ -14,7 +14,7 @@ import { createClioToolBridge } from "../../src/engine/claude/clio-tool-bridge.j
 import { emitClaudeToolPermissionDecision, mapClaudeToolCall } from "../../src/engine/claude/tool-safety.js";
 import { attestedToolSignature, createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { toolSignatureOf } from "../../src/worker/protocol.js";
-import type { WorkerSpec } from "../../src/worker/spec-contract.js";
+import { type WorkerSpec, workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -86,20 +86,19 @@ describe("claude-sdk: Clio context, artifact and verify tools", () => {
 				const spec = specs[0];
 				ok(spec, `${agentId} must reach worker creation on claude-sdk`);
 				strictEqual(spec.runtimeId, "claude-sdk");
-				for (const tool of carries) ok(spec.allowedTools.includes(tool), `${agentId} must carry ${tool}`);
+				for (const tool of carries) ok(workerSpecToolNames(spec).includes(tool), `${agentId} must carry ${tool}`);
 				// Read-only is enforced per call at the permission gate, not by trimming the surface.
-				strictEqual(spec.readOnly === true, readOnly);
+				strictEqual(spec.envelope.write.mode === "none", readOnly);
 				// #449: the worker's own projection must sign exactly what admission approved.
 				strictEqual(
 					attestedToolSignature({
-						allowedTools: spec.allowedTools,
+						allowedTools: workerSpecToolNames(spec),
 						toolsSupported: true,
-						...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 						agentId: spec.agentId,
 						task: spec.task,
 						runtime: spec.runtime,
 					}),
-					toolSignatureOf(spec.allowedTools),
+					toolSignatureOf(workerSpecToolNames(spec)),
 				);
 			} finally {
 				await bundle.extension.stop?.();

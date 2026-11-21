@@ -81,6 +81,7 @@ export const RUN_HASH_SUBJECTS = [
 	"project-safety-policy",
 	"protected-artifacts",
 	"worker-permit",
+	"worker-envelope",
 	"mcp-server",
 	"checkout-tree",
 	"check-payload",

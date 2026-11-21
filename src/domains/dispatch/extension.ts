@@ -138,12 +138,7 @@ import {
 } from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
-import {
-	effectiveToolCall,
-	gatewayChainReceipts,
-	runtimeAttachesGateway,
-	withGatewayForCapabilities,
-} from "../../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts, runtimeAttachesGateway } from "../../tools/surface.js";
 import type { TaskWorktreePreview } from "../../tools/task-worktree.js";
 import {
 	applyTaskWorktree,
@@ -261,7 +256,6 @@ import { assessFinishContract, type FinishContractAssessment } from "../safety/f
 import type { GitHookDriftGuard } from "../safety/hook-drift.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import { isFlowRestrictionSet, mergeFlowRestrictions } from "../safety/information-flow.js";
-import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import {
@@ -358,6 +352,20 @@ import type {
 	WorkerGrantView,
 } from "./contract.js";
 import {
+	envelopeForPermit,
+	envelopeRole,
+	envelopeToolNames,
+	placedInWorktree,
+	requestedWriteNone,
+	resolveWorkerEnvelope,
+	resolveWriteMode,
+	type WithheldCapability,
+	type WorkerEnvelope,
+	waivedRequirements,
+	withheldLines,
+	writeModeLine,
+} from "./envelope.js";
+import {
 	createWorkerOutputCapture,
 	durableAssistantTextFromEvent,
 	startDispatchEventPump,
@@ -414,7 +422,7 @@ import {
 	hostVerificationSandbox,
 	runHostVerification,
 } from "./host-verification.js";
-import { renderChecksWithheldNotice, renderDispatchIntentRequirements } from "./intent-requirements.js";
+import { renderDispatchIntentRequirements, renderWithheldNotice } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
 	configuredJointNodes,
@@ -438,13 +446,7 @@ import {
 	taskRequestsTestRemoval,
 	taskWorktreeCommitMessage,
 } from "./merge-gate.js";
-import {
-	OBLIGATION_RETRY_LIMIT,
-	type Obligation,
-	type RunRole,
-	resolveObligation,
-	resolveRunRole,
-} from "./obligation.js";
+import { OBLIGATION_RETRY_LIMIT, type Obligation, type RunRole, resolveObligation } from "./obligation.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
@@ -2156,8 +2158,8 @@ export interface WorkerDynamicContext {
 	projectReadTools?: boolean | null;
 	/** External runtimes do not promise the native read schema. */
 	projectExternalReadTools?: boolean;
-	/** Check tools admission withheld because no OS sandbox enforces the run's write roots. */
-	checksWithheld?: ReadonlyArray<string>;
+	/** What the run's envelope withheld, told to the worker as it is told to the parent (M7). */
+	withheld?: ReadonlyArray<WithheldCapability>;
 	/** Render ledger call guidance only for a known, admitted native tool. */
 	ledgerToolAvailable?: boolean;
 	/** Structured CLIO-CODER.md fields; null when CLIO-CODER.md is absent or malformed. */
@@ -2326,9 +2328,9 @@ export function buildDynamicPromptMessages(
 	if (scope.length > 0) {
 		messages.push({ id: "dispatch-turn-scope", body: scope, contentHash: sha256(scope) });
 	}
-	const withheld = renderChecksWithheldNotice(dynamicContext.checksWithheld ?? [], req.intent);
+	const withheld = renderWithheldNotice(dynamicContext.withheld ?? [], req.intent);
 	if (withheld !== null) {
-		messages.push({ id: "dispatch-checks-withheld", body: withheld, contentHash: sha256(withheld) });
+		messages.push({ id: "dispatch-withheld", body: withheld, contentHash: sha256(withheld) });
 	}
 	const requirements = renderDispatchIntentRequirements(req.intent);
 	if (requirements !== null) {
@@ -2522,7 +2524,8 @@ interface DispatchWorkerSpecInput {
 	credentialExpiresAt?: number;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 	protectedArtifactState?: ProtectedArtifactState;
-	readOnly: boolean;
+	/** The run's envelope, sealed over `permit`; the worker reads its tools, write mode and roots from it (M7). */
+	envelope: WorkerEnvelope;
 	/** The harness starts without its repository instruction files; their rules ride compiled in the prompt. */
 	skipRepositoryInstructions?: boolean;
 	budget: WorkerBudget;
@@ -2583,8 +2586,8 @@ interface DispatchLifecycleStage {
 	/** Decision refs sealed on the request by the dispatch tool; null when the parent board was empty. */
 	decisionRefs: ReadonlyArray<string> | null;
 	projectContext: RunProjectContextProvenance;
-	/** Check tools withheld because no OS sandbox enforces the write roots; recorded on the run's ledger projection. */
-	checksWithheld?: ReadonlyArray<string>;
+	/** The run's capability envelope, resolved once; everything after admission reads it (M7). */
+	envelope: WorkerEnvelope;
 	/** What to write over a delegated harness's instruction files in the run's task worktree; absent without an overlay. */
 	peerOverlay?: ReadonlyArray<{ file: string; content: string }>;
 	/** The run's prompt with the rules in the message instead, for when the overlay cannot be written at spawn. */
@@ -2715,6 +2718,144 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 
 type WorkerPermissionMode = NonNullable<WorkerSpec["onPermission"]>;
 
+/** Only the roots merge back from a rooted run's own worktree (ruling 3). */
+function lifecycleMergeRoots(envelope: WorkerEnvelope): { mergeRoots?: ReadonlyArray<string> } {
+	return envelope.write.mode === "worktree" && envelope.write.roots.length > 0
+		? { mergeRoots: envelope.write.roots }
+		: {};
+}
+
+/** The run's envelope with the permit it wraps; preview and run both resolve it here and nowhere else (M7). */
+interface DispatchEnvelopeStage {
+	envelope: WorkerEnvelope;
+	/** `envelopeToolNames(envelope)`: what the worker registers, attests and is told. */
+	tools: ReadonlyArray<ToolName>;
+	permit: WorkerPermit;
+	/** `envelope.write.mode === "none"`. */
+	readOnly: boolean;
+	/** Why judge-routed asks are denied here, for the one-time scope notice; null when they are not. */
+	judgeWithheld: string | null;
+}
+
+/**
+ * The facts a run's write mode is resolved from. The dispatch wrapper reads them to place an unconfined rooted
+ * builder in its own worktree before any lease, and the envelope reads the same ones, so the two never disagree (M7).
+ */
+function writeModeInput(input: {
+	req: DispatchRequest;
+	recipe: AgentRecipe;
+	spec: Pick<ReturnType<typeof normalizeAgentSpec>, "capabilityClass">;
+	pathScope: DispatchPathScope;
+	target: ResolvedTarget;
+	settings: EffectiveSettings;
+	placement: () => RunNodeIdentity;
+}): Parameters<typeof resolveWriteMode>[0] {
+	const { req } = input;
+	const writeNone = requestedWriteNone({
+		readOnly: req.readOnly,
+		capabilityClass: input.spec.capabilityClass,
+		hoareContract: isHoareResultContract(dispatchResultContract(req, input.recipe)),
+	});
+	return {
+		writeNone,
+		roots: writeNone ? [] : input.pathScope.writeBoundaries,
+		worktree: req.taskWorktree !== undefined || req.worktree === true,
+		confinesWrites: osSandboxConfinesWrites(input.target.runtime.kind, input.settings, input.placement),
+		gitCheckout: gitCheckoutRoot(resolvePath(req.cwd ?? process.cwd())) !== null,
+		scopeEnforcement: runtimeEnforcement(input.target.runtime).scopeEnforcement,
+	};
+}
+
+function resolveDispatchEnvelopeStage(input: {
+	req: DispatchRequest;
+	recipe: AgentRecipe;
+	spec: ReturnType<typeof normalizeAgentSpec>;
+	admission: DispatchAdmissionStage;
+	target: ResolvedTarget;
+	settings: EffectiveSettings;
+	/** `settings` with the main session's live autonomy, which the permit is resolved under. */
+	liveSettings: EffectiveSettings;
+	pathScope: DispatchPathScope;
+	judgeSeated: boolean;
+	placement: () => RunNodeIdentity;
+}): DispatchEnvelopeStage {
+	const { req, recipe, spec, admission, target, pathScope } = input;
+	const settings = input.liveSettings;
+	const facts = writeModeInput({ ...input, settings: input.settings });
+	const { confinesWrites } = facts;
+	const role = envelopeRole({
+		gateRole: req.gate?.role,
+		capabilityClass: spec.capabilityClass,
+		writeNone: facts.writeNone,
+	});
+	const mode = resolveWriteMode(facts);
+	const cwd = req.cwd ?? process.cwd();
+	const ownLoop = runtimeAttachesGateway(target.runtime);
+	const envelopeInput: Omit<Parameters<typeof resolveWorkerEnvelope>[0], "permitDigest"> = {
+		role,
+		recipeTools: (recipe.tools ?? []) as ReadonlyArray<ToolName>,
+		profiledTools: admission.allowedTools,
+		denied: deniedToolNames(req),
+		ledger: req.ledger !== undefined,
+		write: { mode, roots: facts.roots },
+		runtime: {
+			toolsSupported: targetToolCapability(target),
+			ownLoop,
+			offers: (tool) => target.runtime.id !== "claude-sdk" || isClaudeSdkTool(tool),
+		},
+		host: {
+			// A hermetic process registers no network plane, and a host with no bash registers no shell (#421), so the
+			// worker's registry drops them whatever the recipe declared.
+			networkStripped: networkToolsDisabled(),
+			shellStripped: bashShellPath() === null,
+			confinesWrites,
+			harnessTools:
+				ownLoop && admission.allowedTools.some(isHarnessExtensionToolName)
+					? enabledHarnessExtensionToolNames(cwd)
+					: new Set<string>(),
+		},
+		...(admission.mcp !== undefined ? { mcp: admission.mcp } : {}),
+	};
+	const draft = resolveWorkerEnvelope({ ...envelopeInput, permitDigest: "" });
+	const tools = envelopeToolNames(draft);
+	const readOnly = mode === "none";
+	const { permit, narrowedToDeny } = resolveDispatchPermit(
+		req,
+		recipe,
+		spec,
+		tools,
+		readOnly,
+		pathScope,
+		settings,
+		target,
+		input.judgeSeated,
+		admission.mcp,
+	);
+	const judgeWithheld = judgeWithheldCause(workerJudgeState(settings, target, input.judgeSeated));
+	const approvalWithheld: WithheldCapability[] = [
+		...(judgeWithheld !== null
+			? [
+					{
+						capability: "asks:judge",
+						reason: "judge-unseated" as const,
+						remedy: `${judgeWithheld}; the safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on`,
+					},
+				]
+			: []),
+		...(narrowedToDeny
+			? [
+					{
+						capability: "asks:main",
+						reason: "main-route-unavailable" as const,
+						remedy: "a run started outside the dispatch tool has no main agent waiting on its asks",
+					},
+				]
+			: []),
+	];
+	const envelope = resolveWorkerEnvelope({ ...envelopeInput, approvalWithheld, permitDigest: permit.digest });
+	return { envelope, tools, permit, readOnly, judgeWithheld };
+}
+
 /** The attempt's immutable permit from recipe, settings, task narrowing and any inherited cap. */
 function resolveDispatchPermit(
 	req: DispatchRequest,
@@ -2727,7 +2868,7 @@ function resolveDispatchPermit(
 	target: ResolvedTarget,
 	judgeSeated: boolean,
 	mcp?: WorkerMcpAttestation,
-): WorkerPermit {
+): { permit: WorkerPermit; narrowedToDeny: boolean } {
 	const permit = resolveDispatchPermitOnce(
 		req,
 		recipe,
@@ -2749,20 +2890,23 @@ function resolveDispatchPermit(
 		req.mainGrantRoute === undefined &&
 		!judgeRoutedPermit(permit, settings)
 	) {
-		return resolveDispatchPermitOnce(
-			{ ...req, permitNarrowing: { ...(req.permitNarrowing ?? {}), asks: "deny" } },
-			recipe,
-			spec,
-			tools,
-			readOnly,
-			pathScope,
-			settings,
-			target,
-			judgeSeated,
-			mcp,
-		);
+		return {
+			permit: resolveDispatchPermitOnce(
+				{ ...req, permitNarrowing: { ...(req.permitNarrowing ?? {}), asks: "deny" } },
+				recipe,
+				spec,
+				tools,
+				readOnly,
+				pathScope,
+				settings,
+				target,
+				judgeSeated,
+				mcp,
+			),
+			narrowedToDeny: true,
+		};
 	}
-	return permit;
+	return { permit, narrowedToDeny: false };
 }
 
 /** What decides whether the safety judge can answer this dispatch's worker asks. */
@@ -2861,6 +3005,24 @@ function receiptPermitSummary(
 				: {}),
 		},
 		...("recordOnly" in permit ? { recordOnly: { ...permit.recordOnly } } : {}),
+	};
+}
+
+function receiptEnvelopeSummary(
+	envelope: WorkerEnvelope,
+): NonNullable<NonNullable<RunResultDraft["safety"]>["envelope"]> {
+	return {
+		version: envelope.version,
+		digest: envelope.digest,
+		permitDigest: envelope.permitDigest,
+		role: envelope.role,
+		write: {
+			mode: envelope.write.mode,
+			roots: [...envelope.write.roots],
+			commandsBounded: envelope.write.commandsBounded,
+		},
+		confinesWrites: envelope.sandbox.confinesWrites,
+		withheld: envelope.withheld.map((entry) => ({ ...entry })),
 	};
 }
 
@@ -3037,74 +3199,6 @@ export function explicitToolCapability(
 	return typeof fromKnowledgeBase === "boolean" ? fromKnowledgeBase : null;
 }
 
-function effectiveToolNames(
-	allowedTools: ReadonlyArray<ToolName>,
-	target: ResolvedTarget,
-	/**
-	 * True when this run declares write roots. The confinement rail refuses
-	 * shell, verify, and dispatch by name, so offering them would hand the
-	 * model a tool whose every call is refused; it spends budget discovering
-	 * that and reads the refusal as something to retry.
-	 */
-	writeConfined = false,
-	/**
-	 * Names the request asked not to be offered. Purely subtractive, so it can
-	 * only ever shrink what admission already resolved. A caller that knows a
-	 * tool cannot produce anything for the job it is dispatching removes it
-	 * here rather than leaving the model to spend budget finding that out.
-	 */
-	denied: ReadonlySet<string> = new Set(),
-	cwd = process.cwd(),
-	mcp?: WorkerMcpAttestation,
-): ReadonlyArray<ToolName> {
-	if (!targetToolCapability(target)) return [];
-	// An execute-class MCP tool escapes write roots no OS sandbox enforces, the
-	// way bash does, so the confinement rail refuses every call of it.
-	const writeEscapingMcp = new Set(
-		writeConfined
-			? (mcp?.tools ?? [])
-					.filter((entry) => entry.actionClass === "execute")
-					.map((entry) => `mcp_${entry.serverId}__${entry.tool}`)
-			: [],
-	);
-	// A hermetic process registers no network plane, so the worker's registry
-	// would drop web_fetch whatever the recipe declared. Subtracting it here too
-	// keeps the signature the orchestrator expects equal to the one the worker
-	// attests; otherwise the run is refused for a mismatch instead of simply
-	// running without network.
-	const networkStripped = networkToolsDisabled();
-	// A host with no bash registers none in the worker's registry either (#421).
-	const shellStripped = bashShellPath() === null;
-	const harnessTools =
-		target.runtime.kind === "http" && !writeConfined && allowedTools.some(isHarnessExtensionToolName)
-			? enabledHarnessExtensionToolNames(cwd)
-			: new Set<string>();
-	const mediated = runtimeAttachesGateway(target.runtime);
-	const names = allowedTools.filter(
-		(tool): tool is ToolName =>
-			// Admission attested every MCP name and refused a runtime that cannot
-			// mediate it, so only a mediated worker still carries one here.
-			(isBuiltinToolName(tool) || harnessTools.has(tool) || (mediated && isMcpToolName(tool))) &&
-			tool !== ToolNames.AskUser &&
-			// consult is registered on the session alone, so a worker registry
-			// never holds it and a recipe naming it would drift the attestation.
-			tool !== ToolNames.Consult &&
-			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
-			!(shellStripped && tool === ToolNames.Bash) &&
-			!denied.has(tool) &&
-			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
-			!writeEscapingMcp.has(tool) &&
-			(target.runtime.id !== "claude-sdk" || isClaudeSdkTool(tool)),
-	);
-	// A native worker reaches a gateway-placed capability (git, web_fetch, an
-	// extension command) through the attached `gateway` tool, so the admitted
-	// list gains `gateway` whenever it names one. The worker's own narrowing
-	// (tools/agent-tools.ts effectiveToolNames) applies the same rule, which is
-	// what keeps the approved tool signature equal to the attested one.
-	const surface = mediated ? withGatewayForCapabilities(names) : [...new Set(names)];
-	return surface.sort();
-}
-
 /**
  * The request's denied tool names, case-normalized the way a declared skill
  * surface is. An MCP name keeps its case: the server's tool name is part of
@@ -3125,18 +3219,9 @@ function deniedToolNames(req: DispatchRequest): ReadonlySet<string> {
 function assertPostRuntimeToolCompatibility(
 	agentId: string,
 	spec: ReturnType<typeof normalizeAgentSpec>,
-	effectiveTools: ReadonlyArray<ToolName>,
+	envelope: WorkerEnvelope,
 	target: ResolvedTarget,
-	writeConfined: boolean,
-	explicitReadOnly: boolean,
-	writeRoots: ReadonlyArray<string>,
-	mcp: WorkerMcpAttestation | undefined,
-	councilMember = false,
 ): void {
-	// A council member's profile is its ceiling by design: any recipe may sit
-	// on a council and argue, but none may act beyond the read-only council
-	// surface, so a required tool the profile removes is waived, not refused.
-	if (councilMember) return;
 	// The shipped coder may use a named subprocess peer. Its native Clio tool
 	// requirements cannot be matched to the peer's opaque tool loop. Keep custom
 	// recipes on the normal compatibility gate, since their declared required
@@ -3144,26 +3229,19 @@ function assertPostRuntimeToolCompatibility(
 	// coder's external tool boundary as unavailable telemetry and approximated
 	// authority; write roots and protected artifacts keep their separate gates.
 	if (target.runtime.kind === "subprocess" && spec.source === "builtin" && spec.id === "coder") return;
-	const compatibility = resolveAgentToolCompatibility(spec, effectiveTools, {
+	const compatibility = resolveAgentToolCompatibility(spec, envelopeToolNames(envelope), {
 		mediatesDispatch: WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH,
-		explicitReadOnly,
+		waived: waivedRequirements(envelope),
 	});
 	if (compatibility.compatible) return;
-	// Name the narrowing that removed the tool: blaming the runtime sends the
-	// caller to another model when its own write roots caused the refusal.
-	// An execute-class MCP tool is withheld for the same reason bash is: no OS
-	// sandbox holds it to the write roots.
-	const executeMcp = new Set(
-		(mcp?.tools ?? [])
-			.filter((entry) => entry.actionClass === "execute")
-			.map((entry) => `mcp_${entry.serverId}__${entry.tool}`),
+	// Name the layer that removed the tool: blaming the runtime sends the caller
+	// to another model when its own write roots caused the refusal.
+	const unconfined = envelope.withheld.filter(
+		(entry) => entry.reason === "write-roots-unconfined" && compatibility.missingRequired.includes(entry.capability),
 	);
-	const confined = writeConfined
-		? compatibility.missingRequired.filter((tool) => WRITE_ROOT_REFUSED_TOOLS.has(tool) || executeMcp.has(tool))
-		: [];
 	const cause =
-		confined.length > 0
-			? `; declared write roots ${writeRoots.join(", ")} have no OS sandbox enforcing them here, so ${confined.join(", ")} ${confined.length === 1 ? "is" : "are"} withheld. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend, omit write roots, or use worktree: true for this agent`
+		unconfined.length > 0
+			? `; declared write roots ${envelope.write.roots.join(", ")} have no OS sandbox or worktree binding commands to them here, so ${unconfined.map((entry) => entry.capability).join(", ")} ${unconfined.length === 1 ? "is" : "are"} withheld. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend, run in a git checkout, or omit write roots`
 			: "";
 	throw new Error(
 		`dispatch: admission denied: agent '${agentId}' is incompatible with runtime '${target.runtime.id}' after tool narrowing; missing required tools: ${compatibility.missingRequired.join(", ")}${cause}`,
@@ -3400,10 +3478,11 @@ function resolveDispatchAdmissionStage(
 	let mcpNetworkWithheld: WorkerMcpNetworkWithheld[] = [];
 	if (mcp !== null) {
 		// The write roots the run's sandbox binds (workerSandboxFor), so the grant follows what the worker can write.
-		const readOnly =
-			req.readOnly === true ||
-			normalizeAgentSpec(recipe).capabilityClass === "read-only" ||
-			isHoareResultContract(dispatchResultContract(req, recipe));
+		const readOnly = requestedWriteNone({
+			readOnly: req.readOnly,
+			capabilityClass: normalizeAgentSpec(recipe).capabilityClass,
+			hoareContract: isHoareResultContract(dispatchResultContract(req, recipe)),
+		});
 		const treeRoot = req.taskWorktree?.path ?? req.cwd ?? process.cwd();
 		const writeRoots = readOnly ? [] : pathScope.writeBoundaries.length > 0 ? pathScope.writeBoundaries : [treeRoot];
 		const scoped = withholdWritableMcpNetwork(mcp, { writeRoots, launchRoot: treeRoot });
@@ -3442,17 +3521,6 @@ function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyCon
 		requestedActions,
 		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
 	};
-}
-
-/**
- * A run with no ledger never sees the ledger tool. toolSignature is computed
- * from the actual spec on both ends, so narrowing here stays consistent through
- * attestation, and a solo worker is never shown a coordination tool that can do
- * nothing but tell it there is no board.
- */
-function withLedgerToolNarrowing(tools: ReadonlyArray<ToolName>, req: DispatchRequest): ReadonlyArray<ToolName> {
-	if (req.ledger !== undefined) return tools;
-	return tools.filter((tool) => tool !== ToolNames.Ledger);
 }
 
 /**
@@ -3595,6 +3663,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		input.admission.allowedTools.length,
 	);
 	const settings = input.settings ?? config?.get();
+	const readOnly = input.envelope.write.mode === "none";
 	const spec: WorkerSpec = {
 		...(input.req.runIdHint
 			? {
@@ -3623,7 +3692,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		runtimeId: input.target.runtime.id,
 		wireModelId: input.target.wireModelId,
 		thinkingLevel: input.target.thinkingLevel,
-		allowedTools: input.admission.allowedTools,
+		envelope: input.envelope,
 		...(input.req.ledger !== undefined ? { ledger: input.req.ledger } : {}),
 		budget: input.budget,
 		middlewareSnapshot: input.middlewareSnapshot,
@@ -3803,22 +3872,22 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		}
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
-	// Carry canonical write boundaries to the worker safety seam. Exact files
-	// remain exact and trailing-slash entries remain subtrees after resolution.
-	if (input.pathScope.writeBoundaries.length > 0) spec.writeRoots = [...input.pathScope.writeBoundaries];
-	if (input.req.storeTags !== undefined && input.req.storeTags.length > 0 && !input.readOnly) {
+	if (input.envelope.permitDigest !== input.permit.digest) {
+		throw new Error("dispatch: the worker envelope wraps another permit than the one the spec carries");
+	}
+	if (input.req.storeTags !== undefined && input.req.storeTags.length > 0 && !readOnly) {
 		spec.storeGrant = {
 			tags: [...input.req.storeTags],
 			...(input.req.runIdHint ? { dispatchRunId: input.req.runIdHint } : {}),
 		};
 	}
-	assertWriteRootsEnforceable(input.target.runtime, spec.writeRoots);
+	assertWriteRootsEnforceable(input.target.runtime, input.envelope.write.roots);
 	const sandbox = workerSandboxFor({
 		resultContract: workerResultContract ?? null,
 		runtimeKind: input.target.runtime.kind,
 		req: input.req,
 		pathScope: input.pathScope,
-		readOnly: input.readOnly,
+		readOnly,
 		allowedTools: input.admission.allowedTools,
 		settings,
 	}).spec;
@@ -3840,7 +3909,6 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
-	if (input.readOnly) spec.readOnly = true;
 	if (input.skipRepositoryInstructions === true) spec.skipRepositoryInstructions = true;
 	if (input.req.contextSeed && input.target.runtime.kind === "http")
 		spec.contextSeed = parseWorkerContextSeed(input.req.contextSeed);
@@ -6400,6 +6468,45 @@ export function createDispatchBundle(
 		return { spec, capabilityMismatch };
 	}
 
+	/**
+	 * Ruling 3 (M7): a builder whose write roots its placement cannot confine runs in its own task worktree, keeps
+	 * bash and verify, and merges back only its roots. Decided from the facts the envelope reads; a request that
+	 * cannot be resolved here is left as it is for admission to refuse with its own reason.
+	 */
+	function placedInOwnWorktree(req: DispatchRequest): boolean {
+		if (req.worktree === true || req.taskWorktree !== undefined || req.gate !== undefined) return false;
+		try {
+			const recipe = agents.get(req.agentId);
+			if (!recipe) return false;
+			const pathScope = withStoreGrantBoundaries(req, resolveDispatchPathScope(req));
+			if (pathScope.writeBoundaries.length === 0) return false;
+			const settings = getEffectiveSettings();
+			const targets = readWorkerTargets(settings);
+			const target = resolveDispatchTarget(
+				req,
+				recipe,
+				targets.workerDefault,
+				targets.workerProfiles,
+				targets.agentBindings,
+				targets.targetOrder,
+				providers,
+			);
+			return placedInWorktree(
+				writeModeInput({
+					req,
+					recipe,
+					spec: normalizeAgentSpec(recipe),
+					pathScope,
+					target,
+					settings,
+					placement: () => previewNode(req).node,
+				}),
+			);
+		} catch {
+			return false;
+		}
+	}
+
 	async function resolveLifecycle(
 		req: DispatchRequest,
 		settings: EffectiveSettings,
@@ -6474,49 +6581,32 @@ export function createDispatchBundle(
 		}
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const cwd = req.cwd ?? process.cwd();
-		const readOnly =
-			req.readOnly === true ||
-			spec.capabilityClass === "read-only" ||
-			isHoareResultContract(dispatchResultContract(req, recipe));
-		await assertStoreGrantAdmissible(req, readOnly);
 		assertDenyToolsEnforceable(target.runtime, req.denyTools);
-		const writeConfined =
-			pathScope.writeBoundaries.length > 0 &&
-			!osSandboxConfinesWrites(target.runtime.kind, settings, () => previewNode(req).node);
-		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(
-				admission.allowedTools,
-				target,
-				writeConfined,
-				deniedToolNames(req),
-				req.cwd ?? process.cwd(),
-				admission.mcp,
-			),
+		const stage = resolveDispatchEnvelopeStage({
 			req,
-		);
-		// The check tools the write roots cost this run; the parent's dispatch result and the worker's prompt both name them (CLI-H2).
-		const checksWithheld = writeConfined
-			? admission.allowedTools.filter((tool) => WRITE_ROOT_REFUSED_TOOLS.has(tool) && tool !== ToolNames.Dispatch).sort()
-			: [];
-		if (writeConfined) {
+			recipe,
+			spec,
+			admission,
+			target,
+			settings,
+			liveSettings: withLiveAutonomy(settings),
+			pathScope,
+			judgeSeated: options?.workerAskJudge !== undefined,
+			placement: () => previewNode(req).node,
+		});
+		const { envelope, permit, readOnly, judgeWithheld } = stage;
+		const effectiveTools = stage.tools;
+		await assertStoreGrantAdmissible(req, readOnly);
+		// A capability the write roots cost this run reaches the parent's dispatch result and the worker's prompt (CLI-H2).
+		if (envelope.withheld.some((entry) => entry.reason === "write-roots-unconfined")) {
 			context.bus.emit("run.scope_notice_raised", {
 				code: "write_roots_checks_withheld",
 				level: "warning",
 				message:
-					"[dispatch scope] Narrow write roots have no OS sandbox enforcing them, so bash and verify are withheld and the worker cannot run checks. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend to keep these tools while enforcing the write roots.",
+					"[dispatch scope] Narrow write roots have neither an OS sandbox nor a task worktree binding commands to them, so bash and verify are withheld and the worker cannot run checks. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend, or dispatch from a git checkout so the run gets its own worktree.",
 			});
 		}
-		assertPostRuntimeToolCompatibility(
-			req.agentId,
-			spec,
-			effectiveTools,
-			target,
-			writeConfined,
-			req.readOnly === true,
-			pathScope.writeBoundaries,
-			admission.mcp,
-			req.toolProfile === "council-read-only" && req.gate?.role === "member",
-		);
+		assertPostRuntimeToolCompatibility(req.agentId, spec, envelope, target);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http", agents.listSpecs());
 		announceMcpSandboxNoNetwork(
 			req,
@@ -6528,22 +6618,7 @@ export function createDispatchBundle(
 			admission.mcp,
 			admission.mcpNetworkWithheld,
 		);
-		const permit = resolveDispatchPermit(
-			req,
-			recipe,
-			spec,
-			effectiveTools,
-			readOnly,
-			pathScope,
-			withLiveAutonomy(settings),
-			target,
-			options?.workerAskJudge !== undefined,
-			admission.mcp,
-		);
 		if (!judgeRoutedPermit(permit, settings)) assertMainGrantRoutable(req, target.runtime, permit);
-		const judgeWithheld = judgeWithheldCause(
-			workerJudgeState(withLiveAutonomy(settings), target, options?.workerAskJudge !== undefined),
-		);
 		if (judgeWithheld !== null && req.requestOrigin !== "internal" && !judgeWithheldAnnounced) {
 			judgeWithheldAnnounced = true;
 			context.bus.emit("run.scope_notice_raised", {
@@ -6653,7 +6728,7 @@ export function createDispatchBundle(
 						return null;
 					})
 				: null;
-		const runRole = resolveRunRole({ gateRole: req.gate?.role, capabilityClass: spec.capabilityClass, readOnly });
+		const runRole = envelope.role;
 		const answerBudgetBytes = sealedAnswerBudgetBytes(req.answerBudgetBytes);
 		const dynamicContext: WorkerDynamicContext = {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
@@ -6684,7 +6759,7 @@ export function createDispatchBundle(
 						? targetToolCapability(target)
 						: false,
 			projectExternalReadTools: target.runtime.kind === "subprocess",
-			...(checksWithheld.length > 0 ? { checksWithheld } : {}),
+			withheld: envelope.withheld,
 			ledgerToolAvailable:
 				target.runtime.kind === "http" && targetToolCapability(target) && effectiveTools.includes(ToolNames.Ledger),
 			workspace: readWorkspaceRootFacts(cwd, req.taskWorktree?.root),
@@ -6773,7 +6848,7 @@ export function createDispatchBundle(
 			personaOverride,
 			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
-			...(checksWithheld.length > 0 ? { checksWithheld } : {}),
+			envelope,
 			...(peerStale !== null ? { peerStale } : {}),
 			...(peer?.overlay !== undefined
 				? {
@@ -8409,7 +8484,7 @@ export function createDispatchBundle(
 							? { authProfile: launchAuthProfile }
 							: {}),
 						...(launchCredential?.expiresAt !== undefined ? { credentialExpiresAt: launchCredential.expiresAt } : {}),
-						readOnly: lifecycle.readOnly,
+						envelope: envelopeForPermit(lifecycle.envelope, lifecycle.permit.digest),
 						...(lifecycle.projectContext?.peerInstructions?.delivery === "single-source"
 							? { skipRepositoryInstructions: true }
 							: {}),
@@ -9394,7 +9469,7 @@ export function createDispatchBundle(
 		let identity!: ReturnType<typeof detectRunIdentity>;
 		try {
 			envelope = ledgerRef.create({
-				projection: runLedgerProjection(req, lifecycle.pathScope, lifecycle.checksWithheld),
+				projection: runLedgerProjection(req, lifecycle.pathScope, lifecycle.envelope.withheld),
 				...(req.runIdHint !== undefined ? { id: req.runIdHint } : {}),
 				agentId: req.agentId,
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
@@ -9871,6 +9946,7 @@ export function createDispatchBundle(
 					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
 					...(req.externalReadApproval !== undefined ? { externalReadApproval: { ...req.externalReadApproval } } : {}),
 					permit: receiptPermitSummary(lifecycle.permit, lifecycle.admission.mcpNetworkWithheld),
+					envelope: receiptEnvelopeSummary(envelopeForPermit(lifecycle.envelope, lifecycle.permit.digest)),
 					toolTelemetry: {
 						coverage: toolTelemetryCoverage,
 						ingestionErrors: telemetryIngestionErrors,
@@ -10422,6 +10498,7 @@ export function createDispatchBundle(
 						protectedPaths,
 						commitMessage: taskCommitMessage,
 						authoredPaths,
+						...lifecycleMergeRoots(lifecycle.envelope),
 						onAccounted,
 					});
 					worktreeReceipt = withStrayWrites(worktreeReceipt, req.taskWorktree, observedRunEffects.mutatedPaths);
@@ -10527,6 +10604,7 @@ export function createDispatchBundle(
 								protectedPaths: mergeProtectedPaths,
 								commitMessage: taskCommitMessage,
 								authoredPaths,
+								...lifecycleMergeRoots(lifecycle.envelope),
 								...(preview !== undefined ? { preview } : {}),
 								onAccounted,
 							});
@@ -11021,6 +11099,7 @@ export function createDispatchBundle(
 		}
 		// Every attempt takes its own run identity before the writer lease; retries
 		// join the original writer group through lineage.rootRunId (#434).
+		if (placedInOwnWorktree(req)) req = { ...req, worktree: true };
 		if (req.runIdHint === undefined && req.worktree !== true) req = { ...req, runIdHint: newRunId() };
 		let prepared =
 			preparation?.deadlineAt === undefined
@@ -11364,48 +11443,23 @@ export function createDispatchBundle(
 		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
 		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		assertDenyToolsEnforceable(target.runtime, req.denyTools);
-		const writeConfined =
-			pathScope.writeBoundaries.length > 0 &&
-			!osSandboxConfinesWrites(target.runtime.kind, settings, () => previewNode(req).node);
-		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(
-				admission.allowedTools,
-				target,
-				writeConfined,
-				deniedToolNames(req),
-				req.cwd ?? process.cwd(),
-				admission.mcp,
-			),
-			req,
-		);
-		assertPostRuntimeToolCompatibility(
-			req.agentId,
-			agentSpec,
-			effectiveTools,
-			target,
-			writeConfined,
-			req.readOnly === true,
-			pathScope.writeBoundaries,
-			admission.mcp,
-			req.toolProfile === "council-read-only" && req.gate?.role === "member",
-		);
-		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http", agents.listSpecs());
-		// Preview refuses exactly what dispatch would: a widening narrowing, an
-		// orchestration worker, or a route the runtime cannot honor.
-		const previewPermit = resolveDispatchPermit(
+		// Preview resolves the envelope the run will: one function, so the card shows what the run gets (M7).
+		const stage = resolveDispatchEnvelopeStage({
 			req,
 			recipe,
-			agentSpec,
-			effectiveTools,
-			req.readOnly === true ||
-				agentSpec.capabilityClass === "read-only" ||
-				isHoareResultContract(dispatchResultContract(req, recipe)),
-			pathScope,
-			withLiveAutonomy(settings),
+			spec: agentSpec,
+			admission,
 			target,
-			options?.workerAskJudge !== undefined,
-			admission.mcp,
-		);
+			settings,
+			liveSettings: withLiveAutonomy(settings),
+			pathScope,
+			judgeSeated: options?.workerAskJudge !== undefined,
+			placement: () => previewNode(req).node,
+		});
+		const effectiveTools = stage.tools;
+		const previewPermit = stage.permit;
+		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, stage.envelope, target);
+		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http", agents.listSpecs());
 		if (!judgeRoutedPermit(previewPermit, settings)) assertMainGrantRoutable(req, target.runtime, previewPermit);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionModeForPermit(previewPermit.allowance));
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
@@ -11423,10 +11477,7 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 			runtime: target.runtime,
-			readOnly:
-				req.readOnly === true ||
-				agentSpec.capabilityClass === "read-only" ||
-				isHoareResultContract(dispatchResultContract(req, recipe)),
+			readOnly: stage.readOnly,
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
 		const outputBoundTokens = admissionMaxOutputTokens(settings, target.modelCapabilities);
@@ -11455,6 +11506,8 @@ export function createDispatchBundle(
 				nativeWorker: target.runtime.kind === "http",
 				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
 			}),
+			writes: writeModeLine(stage.envelope.write),
+			...(stage.envelope.withheld.length > 0 ? { withheld: withheldLines(stage.envelope.withheld) } : {}),
 		};
 		return {
 			resolution,
@@ -11633,11 +11686,11 @@ export function createDispatchBundle(
 		const tags = routed.storeTags ?? [];
 		if (tags.length > 0) {
 			const recipe = agents.get(routed.agentId);
-			const readOnly =
-				routed.readOnly === true ||
-				(recipe !== null &&
-					(normalizeAgentSpec(recipe).capabilityClass === "read-only" ||
-						isHoareResultContract(dispatchResultContract(routed, recipe))));
+			const readOnly = requestedWriteNone({
+				readOnly: routed.readOnly,
+				capabilityClass: recipe === null ? null : normalizeAgentSpec(recipe).capabilityClass,
+				hoareContract: recipe !== null && isHoareResultContract(dispatchResultContract(routed, recipe)),
+			});
 			const scope = storeGrantScopeRefusal(routed, readOnly);
 			if (scope !== null) throw new Error(scope);
 			const remote = remoteStoreGrantRefusal(routed, resolution.node);

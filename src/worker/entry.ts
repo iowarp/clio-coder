@@ -65,7 +65,7 @@ import {
 } from "./protocol.js";
 import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
-import { validateRehydratedWorkerRuntime, type WorkerSpec } from "./spec-contract.js";
+import { validateRehydratedWorkerRuntime, type WorkerSpec, workerSpecToolNames } from "./spec-contract.js";
 import { createOrderedSteerHandler, createWorkerStdinDemux } from "./stdin-demux.js";
 
 /** Bound between channel-close abort and forced exit for a hung run. */
@@ -107,10 +107,9 @@ function announcedProcessGroupId(): number | null {
 function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
 	const specDigest = workerSpecDigest(spec);
 	const toolNames = attestedToolNames({
-		allowedTools: spec.allowedTools,
+		allowedTools: workerSpecToolNames(spec),
 		toolsSupported: workerProviderSupportsTools(input),
 		...(spec.helperResult === true ? { helperResult: true } : {}),
-		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		agentId: spec.agentId,
 		task: spec.task,
 		runtime: spec.runtime,
@@ -270,7 +269,7 @@ async function main(): Promise<number> {
 		target: spec.target,
 		runtime,
 		wireModelId: spec.wireModelId,
-		allowedTools: spec.allowedTools,
+		allowedTools: workerSpecToolNames(spec),
 		budget: spec.budget,
 		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
 		...(spec.turnConstraints !== undefined ? { turnConstraints: spec.turnConstraints } : {}),
@@ -293,9 +292,12 @@ async function main(): Promise<number> {
 			? { emitGrantRequest: (request) => emitControlFrame({ kind: "grant_request", request }) }
 			: {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
-		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
+		// The envelope is the one source of the run's write scope (fleet M7).
+		...(spec.envelope.write.mode === "none" ? { readOnly: true } : {}),
 		...(spec.skipRepositoryInstructions === true ? { skipRepositoryInstructions: true } : {}),
-		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
+		...(spec.envelope.write.roots.length > 0
+			? { writeRoots: [...spec.envelope.write.roots], writeRootsCommandsBounded: spec.envelope.write.commandsBounded }
+			: {}),
 		...(spec.storeGrant !== undefined ? { storeGrant: structuredClone(spec.storeGrant) } : {}),
 		...(spec.flowPolicy !== undefined ? { flowPolicy: structuredClone(spec.flowPolicy) } : {}),
 		...(spec.flowRestrictions !== undefined ? { flowRestrictions: structuredClone(spec.flowRestrictions) } : {}),

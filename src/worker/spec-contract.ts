@@ -11,6 +11,7 @@ import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-cons
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
+import type { WorkerEnvelope } from "../domains/dispatch/envelope.js";
 import type { RunRole } from "../domains/dispatch/obligation.js";
 import type { MiddlewareEffectKind, MiddlewareHook, MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
@@ -32,6 +33,7 @@ import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	WORKER_EXTENSION_HOOKS_MAX,
 	type WorkerExtensionHook,
+	workerEnvelopeDigest,
 	workerPermitDigest,
 } from "./protocol.js";
 
@@ -46,10 +48,13 @@ import {
  * version 8 worker would run every call unhooked. Only a spec that carries
  * them is version 9, so a node one release behind still serves hook-free
  * dispatch; a worker reads both.
+ * Versions 10 and 11 replace allowedTools, readOnly and writeRoots with the sealed capability envelope (`envelope`,
+ * fleet M7): the worker reads its tools, write mode and roots from it alone, so an older worker refuses the document.
+ * 11 carries extension hooks, 10 does not.
  */
-export const WORKER_SPEC_VERSION = 9;
-/** The version of a spec without extension hooks, which a version 8 worker serves exactly. */
-export const WORKER_SPEC_HOOKLESS_VERSION = 8;
+export const WORKER_SPEC_VERSION = 11;
+/** The version of a spec without extension hooks. */
+export const WORKER_SPEC_HOOKLESS_VERSION = 10;
 /** Every spec version this worker reads, lowest first. */
 export const WORKER_SPEC_VERSIONS: ReadonlyArray<number> = [WORKER_SPEC_HOOKLESS_VERSION, WORKER_SPEC_VERSION];
 export type WorkerSpecVersion = typeof WORKER_SPEC_HOOKLESS_VERSION | typeof WORKER_SPEC_VERSION;
@@ -193,7 +198,12 @@ interface WorkerSpecFields {
 	ledger?: { id: string; sequence: number };
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
-	allowedTools: ReadonlyArray<ToolName>;
+	/**
+	 * The run's capability envelope, sealed over `permit` (fleet M7). Its tools are the admitted surface, its write
+	 * mode the one definition of read-only, its roots the write boundaries the safety seam enforces (exact files lack
+	 * a trailing slash, subtrees keep one), and `write.commandsBounded` whether the run's commands are bound to them.
+	 */
+	envelope: WorkerEnvelope;
 	middlewareSnapshot?: MiddlewareSnapshot;
 	/** The dispatching session's extension tool hooks; each matching call waits for the orchestrator to run it. */
 	extensionHooks?: ReadonlyArray<WorkerExtensionHook>;
@@ -226,7 +236,7 @@ interface WorkerSpecFields {
 	 */
 	devRootOwner?: string;
 	/**
-	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
+	 * Dispatch-time tool profile that narrowed the envelope's tools. Carried so
 	 * black-box external CLI runtimes that cannot mediate per-tool calls can
 	 * refuse a narrowing profile. Undefined or "full-agent" imposes no
 	 * narrowing.
@@ -243,7 +253,7 @@ interface WorkerSpecFields {
 	onPermission?: "deny" | "fail" | "escalate";
 	/**
 	 * The host's immutable permit for this attempt: hard ceiling and standing
-	 * allowance. `onPermission`, `readOnly` and `writeRoots` must agree with it.
+	 * allowance. `onPermission` and the envelope must agree with it.
 	 */
 	permit: WorkerPermit;
 	/**
@@ -259,18 +269,8 @@ interface WorkerSpecFields {
 	 * Defaults: 120000 ms, "deny".
 	 */
 	escalation?: WorkerEscalationConfig;
-	/** Dispatch restriction for this worker run. */
-	readOnly?: boolean;
 	/** Start a subprocess harness without its repository instruction files (see WorkerRunInput). */
 	skipRepositoryInstructions?: boolean;
-	/**
-	 * Absolute path boundaries write-class tool calls are confined to for this run.
-	 * Exact files omit a trailing slash and subtrees retain one.
-	 * Enforced at the shared worker safety seam so a write/edit target outside
-	 * every root is a final block. Only set on runtimes that mediate per-tool
-	 * calls (native, claude-sdk); dispatch refuses it on subprocess runtimes.
-	 */
-	writeRoots?: ReadonlyArray<string>;
 	/** Store tags this run may put into and the dispatch run its records name (M-31). */
 	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
 	/**
@@ -628,10 +628,68 @@ function validateCapabilityPatch(value: unknown, source: string): void {
 	}
 }
 
-function validateAllowedTools(value: unknown): void {
-	for (const name of readStringArray(value, "WorkerSpec.allowedTools")) {
-		if (name.trim().length === 0) throw new Error("WorkerSpec.allowedTools entries must be non-empty strings");
+const ENVELOPE_ROLES = ["explorer", "builder", "checker", "reviewer", "judge", "seat"] as const;
+const ENVELOPE_WRITE_MODES = ["none", "roots", "worktree", "workspace"] as const;
+const ENVELOPE_WITHHELD_REASONS = [
+	"role",
+	"tool-profile",
+	"denied",
+	"runtime",
+	"no-network",
+	"no-shell",
+	"write-roots-unconfined",
+	"judge-unseated",
+	"main-route-unavailable",
+] as const;
+
+/** Strict shape and seal of the envelope; its agreement with the permit is checked with the permit. */
+function validateWorkerEnvelope(value: unknown): void {
+	const envelope = readRecord(value, "WorkerSpec.envelope");
+	exactKeys(
+		envelope,
+		["version", "role", "tools", "write", "sandbox", "withheld", "permitDigest", "digest"],
+		"WorkerSpec.envelope",
+	);
+	if (envelope.version !== 1) throw new Error("WorkerSpec.envelope.version must be 1");
+	readEnum(envelope.role, "WorkerSpec.envelope.role", ENVELOPE_ROLES);
+	const tools = readRecord(envelope.tools, "WorkerSpec.envelope.tools");
+	exactKeys(tools, ["direct", "gateway"], "WorkerSpec.envelope.tools");
+	for (const key of ["direct", "gateway"] as const) {
+		for (const name of readStringArray(tools[key], `WorkerSpec.envelope.tools.${key}`)) {
+			if (name.trim().length === 0) throw new Error(`WorkerSpec.envelope.tools.${key} entries must be non-empty strings`);
+		}
 	}
+	const write = readRecord(envelope.write, "WorkerSpec.envelope.write");
+	exactKeys(write, ["mode", "roots", "commandsBounded"], "WorkerSpec.envelope.write");
+	const mode = readEnum(write.mode, "WorkerSpec.envelope.write.mode", ENVELOPE_WRITE_MODES);
+	const roots = readStringArray(write.roots, "WorkerSpec.envelope.write.roots");
+	for (const root of roots) {
+		if (root.trim().length === 0) throw new Error("WorkerSpec.envelope.write.roots entries must be non-empty strings");
+	}
+	if (mode === "none" && roots.length > 0)
+		throw new Error("WorkerSpec.envelope.write.roots must be empty for mode none");
+	if (mode === "roots" && roots.length === 0)
+		throw new Error("WorkerSpec.envelope.write.roots must be non-empty for mode roots");
+	if (typeof write.commandsBounded !== "boolean")
+		throw new Error("WorkerSpec.envelope.write.commandsBounded must be a boolean");
+	const sandbox = readRecord(envelope.sandbox, "WorkerSpec.envelope.sandbox");
+	exactKeys(sandbox, ["confinesWrites"], "WorkerSpec.envelope.sandbox");
+	if (typeof sandbox.confinesWrites !== "boolean")
+		throw new Error("WorkerSpec.envelope.sandbox.confinesWrites must be a boolean");
+	if (!Array.isArray(envelope.withheld)) throw new Error("WorkerSpec.envelope.withheld must be an array");
+	for (const [index, raw] of envelope.withheld.entries()) {
+		const source = `WorkerSpec.envelope.withheld[${index}]`;
+		const entry = readRecord(raw, source);
+		exactKeys(entry, ["capability", "reason", "remedy"], source);
+		readString(entry.capability, `${source}.capability`);
+		readEnum(entry.reason, `${source}.reason`, ENVELOPE_WITHHELD_REASONS);
+		readOptionalString(entry, "remedy", source);
+	}
+	const permitDigest = readString(envelope.permitDigest, "WorkerSpec.envelope.permitDigest");
+	if (!/^[0-9a-f]{64}$/.test(permitDigest))
+		throw new Error("WorkerSpec.envelope.permitDigest must be a sha256 hex digest");
+	const { digest, ...body } = envelope;
+	if (workerEnvelopeDigest(body) !== digest) throw new Error("WorkerSpec.envelope.digest does not match the envelope");
 }
 
 /** Structural check only; the worker may not value-import the safety domain's guard. */
@@ -922,21 +980,20 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	if (asks === "main" && authority === "main" && escalation?.grant === undefined) {
 		throw new Error("WorkerSpec.escalation.grant is required when the permit routes asks to the main agent");
 	}
-	if ((spec.readOnly === true) !== ceiling.readOnly) {
-		throw new Error("WorkerSpec.readOnly disagrees with the permit ceiling");
+	// The envelope wraps this permit: the same write scope and no tool past its ceiling, or the document was edited
+	// after admission.
+	const envelope = spec.envelope as WorkerEnvelope;
+	if (envelope.permitDigest !== digest) throw new Error("WorkerSpec.envelope wraps another permit");
+	if ((envelope.write.mode === "none") !== ceiling.readOnly) {
+		throw new Error("WorkerSpec.envelope write mode disagrees with the permit ceiling");
 	}
-	const specRoots = spec.writeRoots === undefined ? [] : readStringArray(spec.writeRoots, "WorkerSpec.writeRoots");
-	if (specRoots.length !== roots.length || specRoots.some((root, index) => root !== roots[index])) {
-		throw new Error("WorkerSpec.writeRoots disagree with the permit ceiling");
+	const envelopeRoots = envelope.write.roots;
+	if (envelopeRoots.length !== roots.length || envelopeRoots.some((root, index) => root !== roots[index])) {
+		throw new Error("WorkerSpec.envelope write roots disagree with the permit ceiling");
 	}
-	// The host builds the ceiling from the same admitted surface it writes as
-	// allowedTools, so a tool outside it means the document was edited after
-	// admission; the ceiling is the bound nothing grants past.
-	const outside = readStringArray(spec.allowedTools, "WorkerSpec.allowedTools").filter(
-		(tool) => !ceilingTools.has(tool),
-	);
+	const outside = [...envelope.tools.direct, ...envelope.tools.gateway].filter((tool) => !ceilingTools.has(tool));
 	if (outside.length > 0) {
-		throw new Error(`WorkerSpec.allowedTools exceed the permit ceiling: ${outside.join(", ")}`);
+		throw new Error(`WorkerSpec.envelope tools exceed the permit ceiling: ${outside.join(", ")}`);
 	}
 	// Admission and the receipt name the permit by this digest. Recomputing it
 	// here keeps a permit edited after sealing from running under authority no
@@ -1074,6 +1131,11 @@ function validateWorkerFlowPolicy(value: unknown): void {
 	}
 }
 
+/** The capability names a spec's envelope admits, sorted: what the worker registers and attests. */
+export function workerSpecToolNames(spec: Pick<WorkerSpec, "envelope">): ToolName[] {
+	return [...spec.envelope.tools.direct, ...spec.envelope.tools.gateway].sort() as ToolName[];
+}
+
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
 	const version = spec.specVersion;
@@ -1149,7 +1211,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 			throw new Error("WorkerSpec.responseSchema requires resolved JSON-schema model capability");
 		}
 	}
-	validateAllowedTools(spec.allowedTools);
+	validateWorkerEnvelope(spec.envelope);
 	if (spec.helperResult !== undefined) {
 		if (spec.helperResult !== true) throw new Error("WorkerSpec.helperResult must be true when present");
 		const contract = readRecord(spec.resultContract, "WorkerSpec.resultContract");
@@ -1234,9 +1296,6 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 			}
 		}
 	}
-	if (spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {
-		throw new Error("WorkerSpec.readOnly must be a boolean");
-	}
 	if (spec.skipRepositoryInstructions !== undefined && typeof spec.skipRepositoryInstructions !== "boolean") {
 		throw new Error("WorkerSpec.skipRepositoryInstructions must be a boolean");
 	}
@@ -1254,13 +1313,6 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		readString(ledger.id, "WorkerSpec.ledger.id");
 		if (typeof ledger.sequence !== "number" || !Number.isSafeInteger(ledger.sequence) || ledger.sequence < 0) {
 			throw new Error("WorkerSpec.ledger.sequence must be a non-negative safe integer");
-		}
-	}
-	if (spec.writeRoots !== undefined) {
-		const roots = readStringArray(spec.writeRoots, "WorkerSpec.writeRoots");
-		if (roots.length === 0) throw new Error("WorkerSpec.writeRoots must be a non-empty array when present");
-		for (const root of roots) {
-			if (root.trim().length === 0) throw new Error("WorkerSpec.writeRoots entries must be non-empty strings");
 		}
 	}
 	if (spec.storeGrant !== undefined) {

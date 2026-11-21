@@ -112,7 +112,10 @@ describe("a worker's request for wider write roots", () => {
 			ok(outcome.ok, outcome.message);
 			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
 			strictEqual(fleet.specs.length, 2);
-			ok(fleet.specs[1]?.writeRoots?.includes(join(scratch.dir, "tests/a.test.ts")), "the new attempt may write the path");
+			ok(
+				fleet.specs[1]?.envelope.write.roots.includes(join(scratch.dir, "tests/a.test.ts")),
+				"the new attempt may write the path",
+			);
 			match(JSON.stringify(fleet.specs[1]), /widened your write roots to include tests\/a\.test\.ts/u);
 			const assignment = fleet.bundle.contract.assignments?.get(first.runId);
 			strictEqual(assignment?.attempts.length, 2);

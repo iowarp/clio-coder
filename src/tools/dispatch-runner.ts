@@ -30,6 +30,7 @@ import {
 } from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type { AbortReason, DispatchContract, DispatchRequest, WorkerGrantView } from "../domains/dispatch/contract.js";
+import type { WithheldCapability } from "../domains/dispatch/envelope.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { compileExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import {
@@ -337,10 +338,14 @@ async function runDetached(
 	const lines = [
 		`dispatch (detached) batch=${handle.batchId} started ${runs.length} run(s)`,
 		...runs.map((run) => {
-			const withheld = deps.dispatch.getRun(run.runId)?.projection?.checksWithheld ?? [];
-			return `- ${run.assignmentId} agent=${run.agentId}${withheld.length > 0 ? ` [withheld: ${withheld.join(", ")}]` : ""}`;
+			const withheld = deps.dispatch.getRun(run.runId)?.projection?.withheld ?? [];
+			return `- ${run.assignmentId} agent=${run.agentId}${withheld.length > 0 ? ` [withheld: ${withheld.map((entry) => entry.capability).join(", ")}]` : ""}`;
 		}),
-		...(runs.some((run) => (deps.dispatch.getRun(run.runId)?.projection?.checksWithheld?.length ?? 0) > 0)
+		...(runs.some((run) =>
+			(deps.dispatch.getRun(run.runId)?.projection?.withheld ?? []).some(
+				(entry) => entry.reason === "write-roots-unconfined",
+			),
+		)
 			? [CHECKS_WITHHELD_DETACHED]
 			: []),
 		"",
@@ -364,13 +369,23 @@ async function runDetached(
  * could not run (CLI-H2), so the start result says it per run.
  */
 const CHECKS_WITHHELD_DETACHED =
-	"Runs marked [withheld] have write roots without an OS sandbox enforcing them, so they cannot run checks: they report edits, and you run the checks after collect. worktree: true, or no write roots, keeps bash and verify.";
+	"Runs whose [withheld] list names bash or verify have write roots with neither an OS sandbox nor a task worktree binding commands to them, so they cannot run checks: they report edits, and you run the checks after collect. worktree: true, or no write roots, keeps bash and verify.";
 
-/** The sync counterpart, read back from the run's ledger projection. */
-function checksWithheldNotice(run: CompletedRun): string | null {
-	const withheld = run.checksWithheld ?? [];
+/**
+ * The sync counterpart, read back from the run's ledger projection: every capability its envelope withheld, grouped
+ * by reason on one line. The remedies are on the plan card and in the worker's prompt; this line stays short because
+ * it leads the bounded summary.
+ */
+function withheldNotice(run: CompletedRun): string | null {
+	const withheld = run.withheld ?? [];
 	if (withheld.length === 0) return null;
-	return `${run.receipt.runId} ran without ${withheld.join(", ")}: write roots without an OS sandbox enforcing them withheld them, so it ran no checks; run them in the host workspace before reporting them passed.`;
+	const groups = new Map<string, string[]>();
+	for (const entry of withheld) groups.set(entry.reason, [...(groups.get(entry.reason) ?? []), entry.capability]);
+	const listed = [...groups].map(([reason, capabilities]) => `${capabilities.join(", ")} (${reason})`).join("; ");
+	const checks = groups.has("write-roots-unconfined")
+		? ": its write roots had neither an OS sandbox nor a task worktree binding commands to them, so it ran no checks; run them in the host workspace before reporting them passed"
+		: "";
+	return `${run.receipt.runId} ran without ${listed}${checks}.`;
 }
 
 /**
@@ -602,8 +617,8 @@ interface CompletedRun {
 	failedAttempts?: ReadonlyArray<FailedAttempt>;
 	/** Why the assignment settled on this failed attempt with no further attempt, such as a suppressed retry. */
 	notRetried?: string;
-	/** Check tools the run's write roots cost it (no OS sandbox enforced them). */
-	checksWithheld?: ReadonlyArray<string>;
+	/** What the run's envelope withheld, read back from its ledger projection (M7). */
+	withheld?: ReadonlyArray<WithheldCapability>;
 }
 
 export interface FailedAttempt {
@@ -682,19 +697,12 @@ function completeRun(
 	receipt: RunResult,
 	summary: EventSummary,
 	pendingGate?: PendingGateDecisionHandle,
-	request?: DispatchRequest,
 ): CompletedRun {
 	const envelope = deps.dispatch.getRun(receipt.runId);
 	const failedAttempts = earlierFailedAttempts((id) => deps.dispatch.getRun(id), envelope?.lineage ?? receipt.lineage);
-	const capabilityClass = deps.getAgentSpecs().find((spec) => spec.id === receipt.agentId)?.capabilityClass;
-	const gateRole = receipt.gate?.role;
-	const readOnly =
-		request?.readOnly === true ||
-		capabilityClass === "read-only" ||
-		gateRole === "reviewer" ||
-		gateRole === "judge" ||
-		gateRole === "synthesis" ||
-		gateRole === "member";
+	// The sealed permit carries the envelope's write mode (M7). A receipt with no permit ceiling never ran a worker
+	// under one, so it changed nothing.
+	const readOnly = receipt.safety?.permit?.ceiling?.readOnly ?? true;
 	return {
 		readOnly,
 		receipt,
@@ -702,7 +710,7 @@ function completeRun(
 		summary,
 		...(pendingGate !== undefined ? { pendingGate } : {}),
 		...(failedAttempts.length > 0 ? { failedAttempts } : {}),
-		...(envelope?.projection?.checksWithheld !== undefined ? { checksWithheld: envelope.projection.checksWithheld } : {}),
+		...(envelope?.projection?.withheld !== undefined ? { withheld: envelope.projection.withheld } : {}),
 	};
 }
 
@@ -821,7 +829,7 @@ export function formatDispatchOutput(
 			runs
 				.flatMap((run) => [
 					nextHostValidationAction(run.receipt, run.readOnly === true),
-					checksWithheldNotice(run),
+					withheldNotice(run),
 					withheldMergeNotice(run.receipt),
 					mcpSandboxNoNetworkNotice(run.receipt),
 					...routeWarningLines(run.receipt),
@@ -1293,7 +1301,7 @@ async function runReviewGated(
 		} finally {
 			activeRunId = null;
 		}
-		const completed = completeRun(deps, receipt, summary, pendingGate, request);
+		const completed = completeRun(deps, receipt, summary, pendingGate);
 		runs.push(completed);
 		return completed;
 	};
@@ -1806,7 +1814,7 @@ async function runCompete(
 		const summaryWithGate = summaryResult.status === "fulfilled" ? summaryResult.value : null;
 		const receipt = receiptResult.status === "fulfilled" ? receiptResult.value : null;
 		if (summaryWithGate === null || receipt === null) throw new Error(`run ${handle.runId} produced no settled result`);
-		return completeRun(deps, receipt, summaryWithGate.summary, summaryWithGate.pendingGate, request);
+		return completeRun(deps, receipt, summaryWithGate.summary, summaryWithGate.pendingGate);
 	};
 	const admitOwnedRun = async (request: DispatchRequest, label: string): Promise<OwnedCompeteRun> => {
 		try {
@@ -2609,7 +2617,7 @@ async function runCouncil(
 				consumeGateSensitiveDispatchEvents(deps, handle.runId, request.agentId, handle.events),
 				handle.finalPromise,
 			]);
-			const completed = completeRun(deps, receipt, summary, undefined, request);
+			const completed = completeRun(deps, receipt, summary);
 			// A deadline that fires while a finished member winds down did not cut it off.
 			if (request.council !== undefined && !isPipelineStepFailure(completed.receipt))
 				timedOut.delete(request.council.label);
@@ -3489,7 +3497,7 @@ async function runSequential(
 				);
 			}
 			activeRunId = null;
-			runs.push(completeRun(deps, settled.value.receipt, settled.value.summary, undefined, request));
+			runs.push(completeRun(deps, settled.value.receipt, settled.value.summary));
 		}
 		return runs;
 	} finally {
@@ -3560,7 +3568,7 @@ async function runPipeline(
 			const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
 			const { receipt, summary } = await registered.completion;
 			activeRunId = null;
-			runs.push(completeRun(deps, receipt, summary, undefined, request));
+			runs.push(completeRun(deps, receipt, summary));
 			// Execution can succeed while a conforming report records a failed
 			// check. Keep that receipt truthful, but do not feed failed quality
 			// into a dependent step. Review/compete use failure to drive their
@@ -3697,7 +3705,7 @@ async function runWriterLimitedBatch(
 		const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
 		const value = await registered.completion;
 		activeIds.delete(handle.runId);
-		const run = completeRun(deps, value.receipt, value.summary, undefined, request);
+		const run = completeRun(deps, value.receipt, value.summary);
 		completed.set(request, run);
 		return run;
 	};

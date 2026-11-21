@@ -590,6 +590,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			routeApproval: resolution.routeApproval,
 			...(resolution.checkedAtRun !== undefined ? { checkedAtRun: [...resolution.checkedAtRun] } : {}),
 			...(resolution.limits !== undefined ? { limits: resolution.limits } : {}),
+			...(resolution.writes !== undefined ? { writes: resolution.writes } : {}),
+			...(resolution.withheld !== undefined ? { withheld: [...resolution.withheld] } : {}),
 			agentSelection: request.agentSelection === undefined ? null : structuredClone(request.agentSelection),
 			stepId: null,
 			dependencies: [],
