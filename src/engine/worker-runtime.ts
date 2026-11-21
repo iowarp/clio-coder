@@ -94,7 +94,7 @@ import type { AgentProduct } from "../domains/agents/spec.js";
 import { HANDBACK_CONTEXT_SHARE, HANDBACK_NOTE_SHARE } from "../domains/dispatch/handback.js";
 import type { RunRole } from "../domains/dispatch/obligation.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
-import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
+import { createMiddlewareToolChoiceControl, createReadStreakRegistration } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import type { AuthResolution } from "../domains/providers/auth/storage.js";
@@ -123,7 +123,11 @@ import {
 	resolveModelDestination,
 } from "../domains/safety/information-flow.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
-import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
+import {
+	createRunEffectsRecorder,
+	recordToolExecutionEffects,
+	sessionChangesTree,
+} from "../domains/safety/run-effects.js";
 import type {
 	WorkerGitAllowance,
 	WorkerMcpAttestation,
@@ -167,6 +171,7 @@ import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
 import { observeExternalWorkerRun } from "./external-call-telemetry.js";
 import { startExternalCliWorkerRun } from "./external-cli/connectors.js";
 import {
+	callRepeatsAsRead,
 	createLoopGuardRegistration,
 	isLockedSynthesisFallbackOnly,
 	isLoopGuardSynthesisBackstopReason,
@@ -200,6 +205,7 @@ import {
 	workerRefusalLimitReason,
 	workerRefusalReportDirective,
 } from "./worker-refusals.js";
+import { createThrashOutcome } from "./worker-thrash-outcome.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -748,17 +754,29 @@ const THRASH_CONTEXT_FRACTION = 0.8;
 const THRASH_CHANGED_PATHS_SHOWN = 10;
 
 /** The one host turn a thrashing worker gets: what the host saw, then write now or report what it has. */
-function thrashHostNote(cause: "recall" | "context", recalls: number, canWrite: boolean, roleShare: boolean): string {
+function thrashHostNote(
+	cause: "recall" | "context" | "streak",
+	count: number,
+	canWrite: boolean,
+	roleShare: boolean,
+	canPlan: boolean,
+): string {
 	const seen =
 		cause === "recall"
-			? `this run has recalled its own evicted observations ${recalls} times`
-			: roleShare
-				? `this run's context passed ${Math.round(HANDBACK_NOTE_SHARE * 100)}% of its usable context without a workspace change`
-				: `this run's context passed ${Math.round(THRASH_CONTEXT_FRACTION * 100)}% of the model window without a workspace change`;
+			? `this run has recalled its own evicted observations ${count} times`
+			: cause === "streak"
+				? `this run has made ${count} read-only calls in a row without an edit${canPlan ? " or a plan update" : ""}`
+				: roleShare
+					? `this run's context passed ${Math.round(HANDBACK_NOTE_SHARE * 100)}% of its usable context without a workspace change`
+					: `this run's context passed ${Math.round(THRASH_CONTEXT_FRACTION * 100)}% of the model window without a workspace change`;
+	const why =
+		cause === "streak"
+			? "Another read will not make the decision for you."
+			: "Recalling or re-reading more will not make room; the run fails when the window is full.";
 	const ask = canWrite
 		? "Write the change now from what you already hold, or stop and return a partial report that names what is done, what is left and the files involved."
 		: "Stop gathering and return your report now, marking what is unfinished.";
-	return `Host note: ${seen}. Recalling or re-reading more will not make room; the run fails when the window is full. ${ask}`;
+	return `Host note: ${seen}. ${why} ${ask}`;
 }
 
 /** The paths an exhausted run changed, for its outcome detail, so the parent knows what the partial work touched. */
@@ -874,6 +892,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let contextPressureWindow = 0;
 	let contextPressureCrossed = false;
 	let thrashNudged = false;
+	// X3: the read-only streak a writer worker reached when the read-streak rule handed it the second step, whether
+	// the streak note went out, and whether it still stands (no progress since), which holds back the other causes.
+	let readStreakEscalated = 0;
+	let streakNudged = false;
+	let streakNoteOpen = false;
 	// Last HTTP status a provider answered. Pi's error messages drop it on some
 	// APIs (openai-codex keeps only the body text), and the dispatch retry policy
 	// needs it to tell a rejected request from a transient failure.
@@ -963,6 +986,33 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			: {}),
 	});
 	const seedLineage = seedRecallLineage(input.contextSeed);
+	// X3: a writer worker gets the main agent's read-streak rule. Its first note rides the tool result; the second
+	// step is this run's thrash host note, with the streak as its cause. Writing means holding edit or write, not
+	// merely a delivery tool: an orientation run delivers through code_nav.
+	const workerCanWrite =
+		input.readOnly !== true && activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write);
+	const workerCanPlan = activeWorkerTools.includes(ToolNames.Tasks);
+	const readStreakRegistration =
+		deliveryTools.length > 0 && workerCanWrite
+			? createReadStreakRegistration({
+					// The worker's configured scratch roots count as scratch, as its run-effects recorder reads them.
+					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(() => workerSettings) },
+					workspaceRoot: () => input.cwd ?? process.cwd(),
+					surface: {
+						canWrite: true,
+						canPlan: workerCanPlan,
+						canAsk: activeWorkerTools.includes(ToolNames.AskUser),
+					},
+					secondStep: (count) => {
+						readStreakEscalated = count;
+					},
+					// A later step of the same call (a chain's edit) that resets the streak withdraws the second step.
+					onReset: () => {
+						readStreakEscalated = 0;
+						streakNoteOpen = false;
+					},
+				})
+			: null;
 	const observations = createWorkerObservationStore(input.telemetryContext?.runId, seedLineage);
 	// Run-scoped ledger: the inherited set plus what this run's reads add. It
 	// lives in memory only; every growth is reported to the parent at once and
@@ -1021,6 +1071,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// abort a worker that keeps calling tools anyway.
 		[
 			loopGuardRegistration,
+			...(readStreakRegistration !== null ? [readStreakRegistration] : []),
 			protectedArtifacts,
 			// The dispatching session's extension gates, run there for each call they match.
 			...(input.extensionHookHost !== undefined
@@ -1104,7 +1155,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The write-side equivalent: what this run changed and what it validated,
 	// so a mutation report is judged against the run instead of believed. Scratch roots read as the orchestrator's copy
 	// reads them, so a check logged under one is output in both recorders (x6-8).
-	const runEffects = createRunEffectsRecorder(contractCwd, { scratchRoots: workerSettings.safety.scratchRoots });
+	// X4: the thrash note's settlement, from the request that carries it to the change or report that answers it.
+	const thrashOutcome = createThrashOutcome({ context: input.telemetryContext });
+	const runEffects = createRunEffectsRecorder(contractCwd, {
+		scratchRoots: workerSettings.safety.scratchRoots,
+		onWorkspaceChange: (toolCallId) => thrashOutcome.changed(toolCallId),
+	});
 	const acceptHelperResult = (data: unknown): string | null => {
 		if (!input.resultContract) return "missing helper result contract";
 		const validationInput = {
@@ -2052,6 +2108,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
 				workerTelemetry?.settle(event.message);
+				// This answer is a request the thrash note may have ridden, though the round ends here.
+				thrashOutcome.observe(event);
 				// The middleware round must run before this answer can seal a terminal result (#423).
 				const tail: AgentMessage = { role: "user", content: reminder, timestamp: Date.now() };
 				if (event.message.content.some((block) => block.type === "toolCall")) agent.steer(tail);
@@ -2134,6 +2192,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
 			recordToolExecutionEffects(runEffects, event);
 		}
+		// After the effects, so a call that changed the workspace has settled the note under its own id first.
+		thrashOutcome.observe(event);
 		if (event.type === "tool_execution_start") {
 			const call = effectiveToolCall(event.toolName, event.args);
 			if (call.toolName === ToolNames.Read) {
@@ -2161,47 +2221,68 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			observeChainChildren(event.toolName, event.result);
 			// Only a recall that returned an archived observation brings evicted content back.
 			if (pendingRecallCalls.delete(event.toolCallId) && event.isError !== true) evictedRecalls += 1;
-			// One host turn per run, delivered after this tool batch, never once the run is answering or bound.
-			const cause =
+			// One recall or context host turn per run and one streak turn per run, delivered after this tool batch, never
+			// once the run is answering or bound. A standing streak note holds back the other causes until progress.
+			const thrashCause =
 				evictedRecalls > THRASH_RECALL_LIMIT
 					? ("recall" as const)
 					: contextPressureCrossed && runEffects.snapshot().mutatedPaths.size === 0
 						? ("context" as const)
 						: null;
+			const cause =
+				thrashCause !== null && !thrashNudged && !streakNoteOpen
+					? thrashCause
+					: readStreakEscalated > 0 && !streakNudged && !thrashNudged
+						? ("streak" as const)
+						: null;
 			if (
 				cause !== null &&
-				!thrashNudged &&
 				!synthesisToolLock &&
 				!helperTerminalPhase &&
 				workerBoundFailure === null &&
 				refusalReportRound === null
 			) {
-				thrashNudged = true;
-				const canWrite =
-					input.readOnly !== true && activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write);
+				if (cause === "streak") {
+					streakNudged = true;
+					streakNoteOpen = true;
+				} else thrashNudged = true;
 				agent.steer({
 					role: "user",
-					content: thrashHostNote(cause, evictedRecalls, canWrite, input.role !== undefined),
+					content: thrashHostNote(
+						cause,
+						cause === "streak" ? readStreakEscalated : evictedRecalls,
+						workerCanWrite,
+						input.role !== undefined,
+						workerCanPlan,
+					),
 					timestamp: Date.now(),
 				});
 				process.stderr.write(
-					`[worker] thrash guard: ${cause === "recall" ? `${evictedRecalls} recalls of evicted observations` : "context past the thrash share with no change"}; told the worker to write now or report\n`,
+					`[worker] thrash guard: ${cause === "recall" ? `${evictedRecalls} recalls of evicted observations` : cause === "streak" ? `${readStreakEscalated} read-only calls in a row` : "context past the thrash share with no change"}; told the worker to write now or report\n`,
 				);
 				if (input.telemetryContext)
 					telemetryHub().emit(
 						"middleware.fired",
 						{
+							firingId: thrashOutcome.fire(),
 							hook: "after_tool",
 							phase: "sync",
 							ruleId: "worker.thrash",
 							effects: ["inject_reminder"],
 							severity: "warn",
-							evidence: cause === "recall" ? "count:evicted-recall@worker" : "share:context-window@worker",
+							evidence:
+								cause === "recall"
+									? "count:evicted-recall@worker"
+									: cause === "streak"
+										? "count:read-class-calls@worker"
+										: "share:context-window@worker",
 							...(cause === "recall" ? { tool: ToolNames.Context } : {}),
 						},
 						input.telemetryContext,
 					);
 			}
+			// The streak's second step is judged at the tool end that raised it, never carried to a later call.
+			readStreakEscalated = 0;
 		}
 		// Synthesis-locked run: the round ships no tool surface, so a model that
 		// calls a tool anyway lands its chat template's tool-call syntax in the
@@ -3016,6 +3097,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			clearTimeout(synthesisTimer);
 			clearActiveEscalation();
 			unsubscribePermission();
+			thrashOutcome.end(agent.state.messages.slice(inheritedCount));
 			// Every server this run launched closes with it; teardown reports go to
 			// stderr inside the source, never to the NDJSON lane.
 			try {
@@ -3053,6 +3135,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		steer: (text: string) => {
 			const trimmed = text.trim();
 			if (trimmed.length === 0) return false;
+			// A worker reports no turn_start, so its operator's steer is where the read streak starts over.
+			readStreakRegistration?.resetStreak();
 			agent.steer(taskMessage(trimmed));
 			return true;
 		},

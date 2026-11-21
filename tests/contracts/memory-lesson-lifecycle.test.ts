@@ -60,14 +60,14 @@ import { writeSettledRun } from "../harness/settled-run.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
 
-/** An operator-approved repository lesson as the store projects one. */
-const keptLesson = (id: string, lesson: string) =>
+/** An operator-approved repository lesson as the store projects one; `refs` are its evidence refs. */
+const keptLesson = (id: string, lesson: string, refs: string[] = []) =>
 	projectKeptLesson({
 		id,
 		scope: "repo",
 		key: id,
 		lesson,
-		evidenceRefs: [],
+		evidenceRefs: refs,
 		appliesWhen: [],
 		avoidWhen: [],
 		confidence: 1,
@@ -391,6 +391,8 @@ test("an approved command lesson surfaces once at the first non-documentation ed
 	const held: string[] = [];
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
+		// The first-change broadcast is the documented opt-in, `context.memory.surfaces.delivery: broadcast`.
+		getDelivery: () => "broadcast",
 		getKeptLessons: () => [keptLesson("mem-recipe", `Validation requires \`${COMMAND}\`.`)],
 		onDurableLessonOutcomes: (outcome) => {
 			delivered.push(...outcome.delivered);
@@ -434,7 +436,9 @@ test("a failing variant of a remembered recipe gets the recipe on its failed res
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
 		workspaceRoot: () => root,
-		getKeptLessons: () => [keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`)],
+		getKeptLessons: () => [
+			keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`, [commandEvidenceRef(COMMAND)]),
+		],
 		onDurableLessonOutcomes: (outcome) => delivered.push(...outcome.delivered),
 	});
 	const failed = (command: string, id: string) =>
@@ -471,7 +475,9 @@ test("a verification gap and a read of the lesson's own file each bring the reci
 		createMemoryInterventionRegistration({
 			bank: new TaskMemoryBank(),
 			workspaceRoot: () => root,
-			getKeptLessons: () => [keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`)],
+			getKeptLessons: () => [
+				keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`, [commandEvidenceRef(COMMAND)]),
+			],
 			telemetry: { record: (row) => triggers.push(...row.triggerReasons) },
 		});
 	const verify = make();
@@ -874,6 +880,7 @@ test("evidence identity grounds and counts use only for the command that ran, se
 			[COMMAND, COMMAND],
 			[COMMAND, `node scripts/build.mjs && ${COMMAND}`],
 			[PNPM, `cd ${root} && corepack pnpm -s run check`],
+			[PNPM, `cd "${root}"; corepack pnpm -s run check`],
 		];
 		for (const [claimed, receipt] of positives) {
 			strictEqual(grounds(claimed, receipt), "command", receipt);

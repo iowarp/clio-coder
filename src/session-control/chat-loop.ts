@@ -2307,7 +2307,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						cause: "tool_budget" as const,
 						reason: `it reached the per-turn ${budgetRoll === "calls" ? "tool-call" : "observation"} budget and rolled over`,
 						next:
-							"Its last tool batch ran and the results are above; a call that did not run says so. Continue the work from there with a fresh budget. No summary is needed.",
+							"Its last tool batch ran and the results are above; a call that did not run says so. Continue the work from there with a fresh budget. No recap of earlier turns is needed; answer the operator when the work is done.",
 						rolled: true as const,
 					}
 				: guardInterrupted
@@ -3475,7 +3475,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					machinePreparation.runtime = agentRuntime;
 				if (refuseSkillRequests(options.pendingSkillRequests ?? [], options.workingContextPaths ?? [])) return;
 				// A request continuation resumes the turn in progress, so it keeps that turn's origin.
-				if (options.requestContinuation !== true) state.currentTurnOrigin = submittedTurnOrigin(options);
+				if (options.requestContinuation !== true) {
+					// CLI-P46: a yolo continuation belongs to the prompt its chain started from, an operator message handed in included.
+					const prior = state.currentTurnOrigin?.origin ?? null;
+					state.currentTurnOrigin = submittedTurnOrigin(options);
+					if (options.yoloContinuation !== true) state.promptOrigin = state.currentTurnOrigin.origin;
+					else if (prior !== "continuation") state.promptOrigin = prior;
+				}
 				if (deps.promptSubmit && options.requestContinuation !== true) {
 					markPreparationStep("prompt-hook");
 					const origin = state.currentTurnOrigin ?? { origin: "operator" as const };
@@ -4333,6 +4339,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
+					// A turn that ended without its turn_end hook (a throw or an abort before any reply) ended here, while this
+					// submit still owns the stream and its lease: a resubmit below can take ownership and return before its turn_start.
+					if (promptStarted && submitOwner === owner) outcomeCollector.endTurn();
 					state.streaming = false;
 					// A run that ended without reaching its tool boundary has nothing left to stop.
 					boundaryStop = null;
@@ -4575,8 +4584,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 			} finally {
-				await turnLease?.release();
+				// Settlements land before the lease release flushes, and possibly seals, the session's journal.
 				middleware.releaseTurnHolds(turnHolds);
+				await turnLease?.release();
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
@@ -4902,6 +4912,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queues.reset({ keepOperator: sessionId !== null && sessionId === queueSessionId });
 			queueSessionId = sessionId;
 			middleware.clearPendingReminders();
+			// The turn the reset cut off never reaches its turn_end hook: what its requests carried settles with it now.
+			outcomeCollector.closeSession();
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			state.lastRunSnapshot = null;

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { withoutLeadingCdTo } from "../../core/leading-cd.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
@@ -346,14 +347,18 @@ function writesTree(
  */
 export function classifyCall(
 	toolName: string,
-	args: Record<string, unknown> | undefined,
+	rawArgs: Record<string, unknown> | undefined,
 	context: ClassifierContext,
 ): CallClassification {
 	const { cwd, gitHelpers = false, outputTarget = NO_OUTPUT_TARGET, declaredChecks = [] } = context;
-	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
+	const base = typeof rawArgs?.cwd === "string" && rawArgs.cwd.length > 0 ? path.resolve(cwd, rawArgs.cwd) : cwd;
+	// A leading `cd` into the directory the call already runs in moves nothing, so the call is read, named and settled
+	// as the command after it: `cd <root> && npm test` is `npm test` (XR-9). What ran is untouched.
+	const rawCommand = toolName === ToolNames.Bash ? commandOf(rawArgs) : null;
+	const command = rawCommand === null ? null : withoutLeadingCdTo(rawCommand, base);
+	const args = command === rawCommand ? rawArgs : { ...rawArgs, command };
 	// The helper probe only describes the recorder's repository, not a rebased bash call's.
 	const gitCwd = path.relative(cwd, base) === "" ? cwd : undefined;
-	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 	const targets = mutationTargets(toolName, args);
 	const paths = targets.map((target) => path.resolve(base, target));
@@ -427,14 +432,6 @@ export function classifyCall(
 						: `check:${check}`,
 		declared: [...new Set(declaredRuns.map((run) => run.check.id))],
 	};
-}
-
-/**
- * Whether a call changed the workspace tree, by the same reading the finish gate makes ({@link classifyCall}). The
- * read-streak rule resets on it, so a `sed -i` or a `git apply` counts as the edit it is.
- */
-export function callChangesTree(toolName: string, args: Record<string, unknown> | undefined, cwd: string): boolean {
-	return classifyCall(toolName, args, { cwd }).changesTree;
 }
 
 export interface CheckCallSettlement {

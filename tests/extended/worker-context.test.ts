@@ -690,6 +690,9 @@ async function runFauxWorker(
 		role?: RunRole;
 		runId?: string;
 		mutationReport?: true;
+		product?: "orientation";
+		/** An operator steer sent while the request with this many tool results is answered. */
+		steerAt?: number;
 	},
 ): Promise<{ requests: string[]; events: unknown[]; exitCode: number }> {
 	const requests: string[] = [];
@@ -698,6 +701,7 @@ async function runFauxWorker(
 		requests.push(raw);
 		const body = JSON.parse(raw) as { messages?: Array<{ role?: string }> };
 		const done = (body.messages ?? []).filter((message) => message.role === "tool").length;
+		if (options.steerAt === done) worker?.steer?.("Keep going.");
 		const { call, content, promptTokens } = step(done, requests.length);
 		const frame = (data: unknown) => `data: ${JSON.stringify({ model: "fixture", ...(data as object) })}\n\n`;
 		const delta = call
@@ -742,6 +746,7 @@ async function runFauxWorker(
 				budget: { mode: "advisory", toolCalls: 60, readReserve: 0, synthesis: true, hardCap: 80 },
 				noSkills: true,
 				cwd: dir,
+				...(options.product !== undefined ? { product: options.product } : {}),
 				...(options.role !== undefined ? { role: options.role } : {}),
 				...(options.mutationReport === true
 					? { helperResult: true as const, resultContract: { kind: "mutation-report" as const } }
@@ -856,6 +861,125 @@ test("a worker past 80% of its window with no change is told once to report, unl
 		);
 		ok(writer.requests.length > 2, "the writer reached requests past 80%");
 		ok(!writer.requests.some((request) => request.includes("Host note:")), "a worker that wrote gets no host turn");
+	} finally {
+		env.restore();
+	}
+});
+
+test("a writer worker reading 40 times with no write is told once, naming the streak, and a later cause adds nothing (X3)", {
+	timeout: 90_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-streak-");
+	try {
+		// Admit an 82% request without a fold, so the context cause holds after read 46 as in the CLI-H3 row above.
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.context.compaction.threshold = 0.95;
+		// A write into this configured scratch root inside the worker's cwd is no edit, so it never resets the streak.
+		settings.safety.scratchRoots = [join(env.dir, "scratch")];
+		mkdirSync(join(env.dir, "scratch"), { recursive: true });
+		mkdirSync(join(env.dir, "config"), { recursive: true });
+		writeFileSync(join(env.dir, "config/settings.yaml"), JSON.stringify(settings));
+		// Fifty reads of one new line each: no repeat for the loop guard, nothing already shown.
+		const { requests } = await runFauxWorker(
+			env.dir,
+			(done) => ({
+				call: done < 50 ? { name: "read", arguments: { path: "a.txt", offset: done + 1, limit: 1 } } : null,
+				promptTokens: done < 45 ? 1000 : done === 45 ? 53_000 : 40_000,
+			}),
+			{
+				agentId: "coder",
+				task: "Fix a.txt.",
+				allowedTools: ["write", "read", "context"],
+				contextWindow: 65_536,
+			},
+		);
+		const toolResults = (raw: string) =>
+			((JSON.parse(raw) as { messages?: Array<{ role?: string }> }).messages ?? []).filter((m) => m.role === "tool")
+				.length;
+		const first = requests.find((request) => request.includes("[CLIO Coder] 25 read-only calls"));
+		equal(first !== undefined ? toolResults(first) : -1, 25, "the first note rides the 25th read's result");
+		match(first ?? "", /25 read-only calls in a row with no edit\. .*Then act on it: make the edit\./);
+		ok(!(first ?? "").includes("ask the one question"), "a worker without ask_user is not told to ask");
+		ok(!requests.some((request) => /\[CLIO Coder\] (40|60) read-only/.test(request)), "the second step is no tool note");
+		const nudged = requests.filter((request) => request.includes("Host note:"));
+		equal(nudged[0] !== undefined ? toolResults(nudged[0]) : -1, 40, "the host turn follows the 40th read");
+		// The worker holds no tasks tool, so the note does not name a plan update.
+		match(nudged[0] ?? "", /Host note: this run has made 40 read-only calls in a row without an edit\. Another read/);
+		match(nudged[0] ?? "", /Write the change now/);
+		equal(nudged.at(-1)?.split("Host note:").length, 2, "the context cause after read 46 sends no second host turn");
+		ok(requests.length > 47, "the run reached the requests past 80%");
+
+		const lines = (until: number) => (done: number) => ({
+			call: done < until ? { name: "read", arguments: { path: "a.txt", offset: done + 1, limit: 1 } } : null,
+			promptTokens: 1000,
+		});
+		// Read 40 rides a chain whose next step edits: the streak resets inside the call, so no host turn follows it.
+		const chained = await runFauxWorker(
+			env.dir,
+			(done) =>
+				done === 39
+					? {
+							call: {
+								name: "gateway",
+								arguments: {
+									op: "chain",
+									steps: [
+										{ id: "r", capability: "read", args: { path: "a.txt", offset: 40, limit: 1 } },
+										{
+											id: "e",
+											capability: "edit",
+											args: { path: "a.txt", edits: [{ oldText: "a.txt pump", newText: "a.txt pumped" }] },
+											after: ["r"],
+										},
+									],
+								},
+							},
+							promptTokens: 1000,
+						}
+					: lines(44)(done),
+			{ agentId: "coder", task: "Fix a.txt.", allowedTools: ["edit", "read", "gateway"] },
+		);
+		match(readFileSync(join(env.dir, "a.txt"), "utf8"), /^a\.txt pumped/, "the chained edit landed");
+		ok(
+			!chained.requests.some((request) => request.includes("Host note:")),
+			"a streak reset by the chain sends no host turn",
+		);
+
+		// A write into the configured scratch root at call 21 leaves the streak running: the host turn follows read 40.
+		const scratched = await runFauxWorker(
+			env.dir,
+			(done) =>
+				done === 20
+					? { call: { name: "write", arguments: { path: "scratch/notes.txt", content: "n\n" } }, promptTokens: 1000 }
+					: lines(44)(done),
+			{ agentId: "coder", task: "Fix a.txt.", allowedTools: ["write", "read"] },
+		);
+		match(readFileSync(join(env.dir, "scratch/notes.txt"), "utf8"), /^n/, "the scratch write landed");
+		const scratchNudged = scratched.requests.find((request) => request.includes("Host note:"));
+		equal(scratchNudged !== undefined ? toolResults(scratchNudged) : -1, 41, "a scratch-root write is no edit");
+
+		// An operator steer starts the streak over, so 50 reads with a steer at 30 never reach the second step.
+		const steered = await runFauxWorker(env.dir, lines(50), {
+			agentId: "coder",
+			task: "Fix a.txt.",
+			allowedTools: ["write", "read"],
+			steerAt: 30,
+		});
+		ok(steered.requests.length > 50, "the steered run read 50 times");
+		ok(!steered.requests.some((request) => request.includes("Host note:")), "a steer resets the streak");
+
+		// An orientation worker that is not read-only but holds no edit or write tool gets no writer streak.
+		const orienting = await runFauxWorker(env.dir, lines(42), {
+			agentId: "scout",
+			task: "Map a.txt.",
+			allowedTools: ["read", "code_nav"],
+			product: "orientation",
+		});
+		ok(orienting.requests.length > 42, "the orientation run read 42 times");
+		ok(
+			!orienting.requests.some((request) => /\[CLIO Coder\] 25 read-only|Host note:/.test(request)),
+			"no writer streak note for a worker that cannot write",
+		);
 	} finally {
 		env.restore();
 	}
