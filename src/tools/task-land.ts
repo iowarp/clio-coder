@@ -17,6 +17,7 @@ import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { SAFE_TASK_RUN_ID } from "../core/task-worktree-claim.js";
+import { dropHostTerminalEnv, TOOL_SESSION_SPAWN } from "../core/tool-env-controls.js";
 import {
 	COMMIT_IDENTITY,
 	cleanupAccountedTaskWorktree,
@@ -88,7 +89,9 @@ function run(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): GitResul
 		encoding: "utf8",
 		timeout: 60_000,
 		maxBuffer: 16 * 1024 * 1024,
-		env: { ...withoutRepositoryEnv(), LC_ALL: "C", LANGUAGE: "", ...env },
+		// A merge runs the repository's hooks: away from the TUI's terminal and its pane host (M-12).
+		...TOOL_SESSION_SPAWN,
+		env: { ...dropHostTerminalEnv(withoutRepositoryEnv()), LC_ALL: "C", LANGUAGE: "", ...env },
 	});
 	return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
