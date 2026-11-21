@@ -2,7 +2,7 @@
 	"openapi": "3.1.0",
 	"jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
 	"info": {
-		"title": "Clio Coder",
+		"title": "CLIO Coder",
 		"version": "0.0.0"
 	},
 	"paths": {
@@ -1260,7 +1260,7 @@
 		"/api/system": {
 			"get": {
 				"operationId": "system",
-				"summary": "Read-only doctor findings and the four resolved Clio paths",
+				"summary": "Read-only doctor findings and the four resolved CLIO Coder paths",
 				"security": [
 					{
 						"bearer": []
@@ -8197,7 +8197,7 @@
 		"/api/workspaces/{id}/runs/{runId}/verify": {
 			"post": {
 				"operationId": "runRecordVerify",
-				"summary": "Recheck record integrity against its run through Clio",
+				"summary": "Recheck record integrity against its run through CLIO Coder",
 				"security": [
 					{
 						"bearer": []
@@ -13853,7 +13853,7 @@
 		"/api/sessions/{id}/decisions/supersede": {
 			"post": {
 				"operationId": "supersedeDecision",
-				"summary": "Mark a decision superseded; a correction also returns the request that tells Clio Coder",
+				"summary": "Mark a decision superseded; a correction also returns the request that tells CLIO Coder",
 				"security": [
 					{
 						"bearer": []
@@ -15903,7 +15903,7 @@
 		"/api/sessions/{id}/context": {
 			"get": {
 				"operationId": "sessionContext",
-				"summary": "The context window as Clio Coder accounts for it",
+				"summary": "The context window as CLIO Coder accounts for it",
 				"security": [
 					{
 						"bearer": []
@@ -21813,7 +21813,7 @@
 		"/api/meta": {
 			"get": {
 				"operationId": "meta",
-				"summary": "Application and Clio versions",
+				"summary": "Application and CLIO Coder versions",
 				"security": [
 					{
 						"bearer": []

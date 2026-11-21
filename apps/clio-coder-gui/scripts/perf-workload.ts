@@ -38,7 +38,7 @@ const TURNS = Math.max(2, Number(values.turns));
 const BYTES = Number(values.bytes);
 const WORKLOAD = BYTES > 0 ? `[workload ${BYTES}]` : "[workload]";
 const HISTORY = Math.max(0, Number(values.history));
-const TYPED = "Typing a follow-up question while Clio Coder is still streaming.";
+const TYPED = "Typing a follow-up question while CLIO Coder is still streaming.";
 
 /** Installed before any app script so the record clock and the render counters exist from the start. */
 const INSTRUMENTATION = `(() => {

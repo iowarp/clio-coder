@@ -35,7 +35,7 @@ export class EvidenceService {
 			fingerprint: fingerprint({ workspaceId, runId, action: "verify" }),
 			cancellable: false,
 			run: async (progress): Promise<EvidenceOperationResult> => {
-				progress("Clio is checking the record against its recorded run.");
+				progress("CLIO Coder is checking the record against its recorded run.");
 				const verification = Value.Clean(
 					RunRecordVerification,
 					await this.runner.run({ kind: "run.verify", id: runId }, workspace.path),

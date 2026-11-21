@@ -423,11 +423,11 @@ test("restoring removed queue messages preserves overflow and leaves the limit t
 // --- refusals --------------------------------------------------------------
 
 test("a 409 reads as a refusal sentence, never as a failure", () => {
-	const conflict = { problem: { status: 409, detail: "This Clio build does not expose mid-turn steering." } };
-	assert.equal(capabilityRefusal(conflict), "This Clio build does not expose mid-turn steering.");
+	const conflict = { problem: { status: 409, detail: "This CLIO Coder build does not expose mid-turn steering." } };
+	assert.equal(capabilityRefusal(conflict), "This CLIO Coder build does not expose mid-turn steering.");
 	assert.deepEqual(noticeForError(conflict), {
 		tone: "warn",
-		message: "This Clio build does not expose mid-turn steering.",
+		message: "This CLIO Coder build does not expose mid-turn steering.",
 	});
 	assert.equal(capabilityRefusal({ problem: { status: 500, detail: "boom" } }), null);
 	assert.equal(capabilityRefusal(new Error("offline")), null);

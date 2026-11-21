@@ -89,10 +89,11 @@ export class SessionService {
 				const raw = await client.request<unknown>(ACP_SESSION_LIST_METHOD, { cwd, ...(cursor ? { cursor } : {}) });
 				const page = Value.Clean(AcpSessionList, raw);
 				if (!Value.Check(AcpSessionList, page))
-					throw new AppProblem("upstream_acp", "Clio returned invalid session history.");
+					throw new AppProblem("upstream_acp", "CLIO Coder returned invalid session history.");
 				for (const row of page.sessions) {
 					const meta = row._meta?.[ACP_SESSION_META_KEY];
-					if (!meta || row.cwd !== cwd) throw new AppProblem("upstream_acp", "Clio omitted workspace session metadata.");
+					if (!meta || row.cwd !== cwd)
+						throw new AppProblem("upstream_acp", "CLIO Coder omitted workspace session metadata.");
 					const projected = Value.Clean(SessionSummary, {
 						...meta,
 						id: row.sessionId,
@@ -101,13 +102,13 @@ export class SessionService {
 						lastActivityAt: meta.lastActivityAt ?? row.updatedAt,
 					});
 					if (!Value.Check(SessionSummary, projected))
-						throw new AppProblem("upstream_acp", "Clio returned invalid session metadata.");
+						throw new AppProblem("upstream_acp", "CLIO Coder returned invalid session metadata.");
 					history.push(projected);
 				}
 				cursor = page.nextCursor;
 				if (cursor) {
 					if (cursors.has(cursor) || page.sessions.length === 0)
-						throw new AppProblem("upstream_acp", "Clio returned an invalid history cursor.");
+						throw new AppProblem("upstream_acp", "CLIO Coder returned an invalid history cursor.");
 					cursors.add(cursor);
 				}
 			} while (cursor);
