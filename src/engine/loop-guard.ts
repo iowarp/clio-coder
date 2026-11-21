@@ -378,10 +378,32 @@ function stagnationFingerprint(tool: string, args: Record<string, unknown> | und
 	return hashToolCall(tool, reduced);
 }
 
-function stagnationBlockReason(tool: string, identicalResults: number): string {
+function stagnationBlockReason(
+	tool: string,
+	args: Record<string, unknown> | undefined,
+	identicalResults: number,
+): string {
+	// Word the refusal by what the call can change (FX-48): a bash or typed git
+	// call has a command and no paging, and only a call carrying size arguments
+	// can be told that raising them adds nothing.
+	const call = effectiveToolCall(tool, args);
+	if (call.toolName === ToolNames.Bash || call.toolName === ToolNames.Git) {
+		return (
+			`loop detected: the same ${call.toolName} command returned byte-identical output ${identicalResults} times in a row. ` +
+			"Change the command or stop repeating it, and answer from the result above if it already says what you need."
+		);
+	}
+	const sizeKeys = [...SIZE_ONLY_ARG_KEYS].filter((key) => call.args?.[key] !== undefined);
+	if (sizeKeys.length > 0) {
+		return (
+			`loop detected: the last ${identicalResults} ${tool} calls returned byte-identical results even though ` +
+			`size arguments (${sizeKeys.join("/")}) changed. Raising them is not producing new information. ` +
+			`Re-read the result above, change the query or tool, or answer from what you have.`
+		);
+	}
 	return (
-		`loop detected: the last ${identicalResults} ${tool} calls returned byte-identical results even though ` +
-		`size arguments (limit/offset) changed. Raising them is not producing new information. ` +
+		`loop detected: the last ${identicalResults} ${tool} calls with the same arguments returned byte-identical results. ` +
+		`Repeating the call is not producing new information. ` +
 		`Re-read the result above, change the query or tool, or answer from what you have.`
 	);
 }
@@ -2535,7 +2557,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 							turnKey,
 							toolName,
 							entry.streak + 1,
-							stagnationBlockReason(toolName, entry.streak),
+							stagnationBlockReason(toolName, input.toolArgs, entry.streak),
 							now,
 						);
 					}
