@@ -255,6 +255,14 @@ function printRun(dto: RunTelemetryV1): string {
 	return `${lines.join("\n")}\n`;
 }
 
+/** A seat-billed call's premium requests and AI credits; `n/a` for a call that journaled no seat billing. */
+function billingCell(billing: CallsReportV1["calls"][number]["billing"]): string {
+	if (billing === null) return "n/a";
+	const { premiumRequests, nanoAiu } = billing;
+	if (premiumRequests.fact.kind === "unknown" && nanoAiu.fact.kind === "unknown") return "unknown";
+	return `${premiumRequests.display} premium, ${nanoAiu.display} nAIU`;
+}
+
 function printCalls(dto: CallsReportV1): string {
 	const rows = dto.calls.map((call) => [
 		call.startedAt,
@@ -264,9 +272,10 @@ function printCalls(dto: CallsReportV1): string {
 		call.usage ? show(call.usage.total) : "none",
 		show(call.usd),
 		show(call.timing.ttft),
+		billingCell(call.billing),
 		call.stop?.failure ?? "",
 	]);
-	const header = ["started", "role", "disposition", "target/model", "tokens", "cost", "ttft", "failure"];
+	const header = ["started", "role", "disposition", "target/model", "tokens", "cost", "ttft", "billing", "failure"];
 	const shown =
 		dto.matched > dto.calls.length ? `\n${dto.calls.length} of ${dto.matched} matching attempts shown\n` : "";
 	return rows.length === 0 ? "no matching attempts\n" : `${formatColumns([header, ...rows])}${shown}`;
