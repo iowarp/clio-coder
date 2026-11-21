@@ -509,7 +509,7 @@ export function planInteropAdoption(input: {
 				reason:
 					item.scope === "project"
 						? "Ported into the project hooks file; it runs only after `clio-coder config trust hooks` approves the changed file."
-						: "Ported into your Clio hooks file: the same shell command, the event as JSON on stdin, exit 2 blocks.",
+						: "Ported into your CLIO Coder hooks file: the same shell command, the event as JSON on stdin, exit 2 blocks.",
 				...(mapping.notes.length ? { unsupported: mapping.notes } : {}),
 			});
 			continue;
@@ -563,7 +563,7 @@ export function planInteropAdoption(input: {
 				reason:
 					item.scope === "project"
 						? `Declared in the project MCP config; it launches only after \`clio-coder mcp trust ${mapping.server.id}\`.`
-						: "Declared in your Clio MCP config, which Clio trusts as your own; it gets no network grant unless you add `network: true`.",
+						: "Declared in your CLIO Coder MCP config, which CLIO Coder trusts as your own; it gets no network grant unless you add `network: true`.",
 				...(mapping.omittedFields.length ? { unsupported: mapping.omittedFields.map((f) => `field ${f}`) } : {}),
 			});
 			continue;

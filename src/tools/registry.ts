@@ -3529,7 +3529,7 @@ const ESCAPE_SCOPE_WAIT = "Until the operator answers, do not retry this call or
 
 /** Why a refused sandbox escape gets no session option, and what can still let it run. */
 function escapeNoScopeLine(why: string): string {
-	return `Clio offers no session option for this call because ${why}; it runs only when an operator message, or an ask_user question the operator approves, names running it outside the sandbox.`;
+	return `CLIO Coder offers no session option for this call because ${why}; it runs only when an operator message, or an ask_user question the operator approves, names running it outside the sandbox.`;
 }
 
 /** The ask a granted escape scope answered, as the allow that runs it. */

@@ -1336,7 +1336,7 @@ test("a judge-blocked contained-yolo escape gives one retry account: the scoped 
 	);
 	ok(
 		unscoped.reason.includes(
-			`Clio offers no session option for this call because its script ${join(outside, "far.sh")} lies outside the workspace and scratch roots`,
+			`CLIO Coder offers no session option for this call because its script ${join(outside, "far.sh")} lies outside the workspace and scratch roots`,
 		),
 		unscoped.reason,
 	);

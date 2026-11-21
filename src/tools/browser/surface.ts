@@ -231,12 +231,12 @@ function browserConfirmation(
 	const reasons = [
 		...(provision
 			? [
-					`First use installs the browser component: playwright-core@${PLAYWRIGHT_CORE_VERSION} and a headless Chromium shell (about 110 MiB) under Clio's data directory.`,
+					`First use installs the browser component: playwright-core@${PLAYWRIGHT_CORE_VERSION} and a headless Chromium shell (about 110 MiB) under CLIO Coder's data directory.`,
 				]
 			: []),
 		...(endpoint !== undefined
 			? [
-					`Clio attaches to the browser behind ${endpoint} for the rest of this session (not after /new, a fork, a resume or a session switch) and can read and drive every page it has open, signed-in sites included. While attached, its pages reach only loopback and hosts granted in this session. That browser runs where it was started, outside Clio's sandbox; its page content is untrusted.`,
+					`CLIO Coder attaches to the browser behind ${endpoint} for the rest of this session (not after /new, a fork, a resume or a session switch) and can read and drive every page it has open, signed-in sites included. While attached, its pages reach only loopback and hosts granted in this session. That browser runs where it was started, outside CLIO Coder's sandbox; its page content is untrusted.`,
 				]
 			: []),
 		...(outward.length > 0
