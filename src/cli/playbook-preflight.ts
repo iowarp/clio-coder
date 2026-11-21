@@ -154,7 +154,7 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 						: context.gateAuthorRole === true
 							? gateAuthorContractKind(role)
 							: context.gateRole === "reviewer"
-								? "verifier-report"
+								? "review-verdict"
 								: spec.resultContract.kind,
 				executionRole: withAttemptRole(role, context.attempt),
 			};

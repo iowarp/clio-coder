@@ -513,7 +513,7 @@ async function runFleetTracked(
 							: context.gateAuthorRole === true
 								? gateAuthorContractKind(requestRole)
 								: context.gateRole === "reviewer"
-									? "verifier-report"
+									? "review-verdict"
 									: spec.resultContract.kind,
 					executionRole: withAttemptRole(requestRole, context.attempt),
 				};

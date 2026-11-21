@@ -240,9 +240,10 @@ export interface DispatchResultContractRequest {
  * the worker repairs against exactly the contract the receipt will name.
  *
  * Precedence: a gate role that answers its topology gets that topology's verdict
- * contract and never its recipe's; otherwise the coordinator's override, else the seated recipe's. A
+ * contract and never its recipe's; a council member gets only the topology's
+ * override; otherwise the coordinator's override, else the seated recipe's. A
  * caller's summary allowance then applies to a mutation report only. A
- * topology-owned override (ballot, plan, artifact) and a batch-level default
+ * topology-owned override (ballot, plan, gate author) and a batch-level default
  * inherited by a non-mutation step ignore it, because the allowance was never
  * about that step. An explicit per-task allowance on a recipe with no summary
  * field is a caller error and fails here, before any model boots.
