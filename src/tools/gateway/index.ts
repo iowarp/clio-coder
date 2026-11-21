@@ -927,15 +927,18 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (allowed !== null && !allowed.has(name)) {
 			// A read-only run's envelope withholds its writes, and admission refuses a write as read-only before it
 			// weighs tool scope, so the model hears why and what lifts it, not to widen a scope that never would.
-			// Only a call a read-only run can never make takes that route, so admission's read-only denial fires
-			// before anything could run; every other off-surface name is refused here without an invocation.
+			// Nothing off the surface is ever invoked: the registry decides admission alone and renders its read-only
+			// denial, and anything admission would not deny as read-only gets the surface refusal.
 			const innerArgs = isRecord(args.args) ? args.args : {};
 			if ((deps.readOnly === true || options?.turnConstraints?.readOnly === true) && readOnlyRefuses(name, innerArgs)) {
 				const { approval: _approval, ...outer } = options ?? {};
-				const verdict = await invokeInner(name, innerArgs, { ...outer, nested: !allowDirect });
-				const reasonCode = verdict.kind === "blocked" ? verdict.decision.policy?.reasonCode : undefined;
-				if (verdict.kind === "blocked" && (reasonCode === "dispatch:read_only" || reasonCode === "task:read_only"))
-					return nestedBlockedResult(verdict);
+				const refusal = registry.readOnlyRefusal?.(
+					{ tool: name, args: innerArgs },
+					{ ...outer, nested: !allowDirect, gatewayInner: true },
+				);
+				const reasonCode = refusal?.decision.policy?.reasonCode;
+				if (refusal != null && (reasonCode === "dispatch:read_only" || reasonCode === "task:read_only"))
+					return nestedBlockedResult(refusal);
 			}
 			return outsideSurface(name, allowed, options);
 		}
