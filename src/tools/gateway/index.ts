@@ -5,7 +5,7 @@ import type { CatalogRanker, PrecomputedRanking } from "../../core/precomputed-r
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { withToolTelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
-import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
+import { isBuiltinToolName, isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { toolSurfaceSources } from "../../core/turn-constraints.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { StringEnum, validateEngineToolArguments } from "../../engine/ai.js";
@@ -96,6 +96,8 @@ export interface GatewayToolDeps {
 	rankCapabilities?: CatalogRanker;
 	/** A capability the model called through the gateway, which feeds the capability gate's usage prior. */
 	onCapabilityCalled?: (name: string) => void;
+	/** The registry serves a read-only run (a read-only worker), whose envelope withholds every write. */
+	readOnly?: boolean;
 }
 
 const DESCRIPTION =
@@ -890,7 +892,23 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const allowed = allowedSet(options);
 		// A restricted run gets one refusal for every name off its surface, so it
 		// cannot probe which registered tools or declared MCP servers exist.
-		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed, options);
+		if (allowed !== null && !allowed.has(name)) {
+			// A read-only run's envelope withholds its writes, and admission refuses a write as read-only before it
+			// weighs tool scope, so the model hears why and what lifts it, not to widen a scope that never would.
+			// Admission refuses every name off the run's allowed tools, so this call cannot run.
+			if (
+				(deps.readOnly === true || options?.turnConstraints?.readOnly === true) &&
+				isBuiltinToolName(name as ToolName) &&
+				registry.get(name as ToolName) !== undefined
+			) {
+				const { approval: _approval, ...outer } = options ?? {};
+				const verdict = await invokeInner(name, isRecord(args.args) ? args.args : {}, { ...outer, nested: !allowDirect });
+				const reasonCode = verdict.kind === "blocked" ? verdict.decision.policy?.reasonCode : undefined;
+				if (verdict.kind === "blocked" && (reasonCode === "dispatch:read_only" || reasonCode === "task:read_only"))
+					return nestedBlockedResult(verdict);
+			}
+			return outsideSurface(name, allowed, options);
+		}
 		if (allowed === null && unknownCapability(name))
 			return {
 				kind: "error",
