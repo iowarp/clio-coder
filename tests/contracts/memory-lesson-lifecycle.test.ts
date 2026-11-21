@@ -400,21 +400,31 @@ test("an approved command lesson surfaces once at the first non-documentation ed
 		},
 	});
 	let call = 0;
+	let evidence: string | undefined;
 	const after = (toolName: string, toolArgs: Record<string, unknown>, extra: Partial<MiddlewareHookInput> = {}) =>
-		memory.evaluate({
-			hook: "after_tool",
-			sessionId: "B",
-			toolName,
-			toolCallId: String(++call),
-			toolArgs,
-			metadata: { resultKind: "ok", actionClass: toolName === "bash" ? "execute" : "write" },
-			...extra,
-		});
+		memory.evaluate(
+			{
+				hook: "after_tool",
+				sessionId: "B",
+				toolName,
+				toolCallId: String(++call),
+				toolArgs,
+				metadata: { resultKind: "ok", actionClass: toolName === "bash" ? "execute" : "write" },
+				...extra,
+			},
+			{
+				priorEffects: [],
+				evidence: (value) => {
+					evidence = value;
+				},
+			},
+		);
 	try {
 		memory.evaluate({ hook: "turn_start", sessionId: "B", text: "Add a helper and validate it." });
 		deepStrictEqual(after("edit", { path: "README.md" }), [], "a prose-only edit is not what the command exercises");
 		const surfaced = after("edit", { path: "src/rates.mjs" });
 		strictEqual(surfaced[0]?.kind, "annotate_tool_result");
+		strictEqual(evidence, "match:durable-lesson@task-memory", "a lesson delivery is not a failure recurrence (C-32)");
 		const message = surfaced[0]?.kind === "annotate_tool_result" ? surfaced[0].message : "";
 		match(message, /^Memory: \[mem-recipe\]/u);
 		deepStrictEqual(after("edit", { path: "src/other.mjs" }), [], "one surfacing per session");

@@ -1,6 +1,8 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import type { SessionObservation } from "./contract.js";
 import { isSessionObservation, OBSERVATION_MAX_BATCHES, OBSERVATION_MAX_BYTES } from "./observations.js";
@@ -163,4 +165,72 @@ export function pruneConsumedObservations(
 	} catch {
 		/* Optional sidecar cleanup cannot change a durable checkpoint. */
 	}
+}
+
+/**
+ * Remove the observations of sessions no longer recorded under the state root, for the daily retention sweep (C-35).
+ * Only an orphan goes: a recorded session keeps its observations however old, a tombstoned one keeps them with its
+ * directory, and nothing goes when the sessions root or any workspace under it cannot be listed, since an unlisted
+ * workspace may record any candidate. The candidates are listed before the sessions are read once: a session directory
+ * is created before its first observation, so a candidate's session, if any, is in that read. Asynchronous and
+ * stopped between entries, like the other passes of the sweep. Returns how many directories went. Best effort.
+ */
+export async function pruneOrphanedObservations(
+	stateDir: string,
+	stopped: () => boolean = () => false,
+): Promise<number> {
+	const root = join(stateDir, "memory", "observations");
+	// A host stopping or a spent budget starts nothing, not even the listing.
+	if (stopped()) return 0;
+	// `memory` and `observations` both: a linked directory would carry the delete outside the state root.
+	if (!unlinkedStateDirectory(stateDir, root)) return 0;
+	let candidates: string[];
+	try {
+		candidates = (await readdir(root)).filter((name) => /^[a-zA-Z0-9_-]{1,128}$/u.test(name));
+	} catch {
+		return 0; /* Nothing observed yet. */
+	}
+	if (candidates.length === 0) return 0;
+	const recorded = await recordedSessions(join(stateDir, "sessions"), stopped);
+	if (recorded === null) return 0;
+	let removed = 0;
+	for (const id of candidates) {
+		if (stopped()) break;
+		if (recorded.has(id)) continue;
+		const directory = join(root, id);
+		// Containment is proven after the last await: a directory swapped for a link must not redirect the delete.
+		if (!unlinkedStateDirectory(stateDir, directory)) continue;
+		try {
+			await rm(directory, { recursive: true, force: true });
+			removed += 1;
+		} catch {
+			// An undeletable directory stays; no session reads it.
+		}
+	}
+	return removed;
+}
+
+/**
+ * Every session id recorded under `sessions/<workspace>/<id>`, or null when any workspace cannot be listed or the sweep
+ * stops part way, since a partial index would read the unlisted workspaces' sessions as gone.
+ */
+async function recordedSessions(sessions: string, stopped: () => boolean): Promise<Set<string> | null> {
+	let workspaces: string[];
+	try {
+		workspaces = await readdir(sessions);
+	} catch {
+		return null; /* No readable sessions root says nothing about which sessions are gone. */
+	}
+	const ids = new Set<string>();
+	for (const workspace of workspaces) {
+		if (stopped()) return null;
+		try {
+			for (const id of await readdir(join(sessions, workspace))) ids.add(id);
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			// Gone since the listing, or a file rather than a workspace: it records nothing. Anything else fails closed.
+			if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+		}
+	}
+	return ids;
 }

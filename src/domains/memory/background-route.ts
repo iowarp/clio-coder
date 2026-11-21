@@ -25,7 +25,7 @@ import { endpointCapacityUsage } from "../dispatch/capacity-lease.js";
 import { announceMemoryStepEndpoint } from "../middleware/memory-step-endpoint.js";
 import { prepareBackgroundModelMetadata } from "../providers/background-model-metadata.js";
 import { resolveEffectivePricing } from "../providers/catalog.js";
-import type { ProvidersContract, TargetDescriptor } from "../providers/index.js";
+import type { ProvidersContract, ResolvedRuntimeTarget, TargetDescriptor } from "../providers/index.js";
 import {
 	applyModelCapabilityPatch,
 	backgroundMemoryAdmissionLimit,
@@ -38,6 +38,7 @@ import {
 	refineRuntimeTargetWithModelHints,
 	resolveEndpointCapacities,
 	resolveRuntimeTarget,
+	VALID_THINKING_LEVELS,
 } from "../providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../providers/model-runtime-capabilities.js";
@@ -357,6 +358,17 @@ export function prepareBackgroundMemoryModel(
 	return { model, refined };
 }
 
+/**
+ * The least reasoning a memory call can ask of its route: off where the model can turn thinking off, and where it
+ * takes no level at all (none, or always on); else its lowest supported level, which the wire then names explicitly.
+ * An off the model does not list otherwise leaves the effort out, and the server's default level runs (C-2).
+ */
+function leastThinkingLevel(refined: ResolvedRuntimeTarget): ThinkingLevel {
+	const { mechanism, supportedLevels } = refined.modelRuntime.thinking;
+	if (supportedLevels.includes("off") || mechanism === "none" || mechanism === "always-on") return "off";
+	return VALID_THINKING_LEVELS.find((level) => supportedLevels.includes(level)) ?? "off";
+}
+
 /** A bounded preparation capacity when no foreground actor budget exists. Never activates actor context. */
 export function memoryObservationCapacity(providers: ProvidersContract, settings: Readonly<ClioSettings>): number {
 	const route = resolveMemoryRoute(settings);
@@ -613,11 +625,13 @@ function prepareBackgroundMemoryRoute(
 										? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
 										: request.maxTokens,
 								// `context.memory.thinkingLevel`, never the operator's chat level. Off
-								// (the default) asks for no reasoning; another level is the route's
-								// clamped level. A model that reasons anyway still works:
-								// `completeEngineText` keeps only text blocks, and the memory output
-								// budget leaves room for the preamble.
-								thinkingLevel: thinkingLevel === "off" ? "off" : refined.effectiveThinkingLevel,
+								// (the default) asks for the least reasoning the model allows: none where
+								// it can turn thinking off, else its lowest level, sent explicitly so the
+								// server's default never runs (C-2). Another level is the route's clamped
+								// level. A model that reasons anyway still works: `completeEngineText`
+								// keeps only text blocks, and the memory output budget leaves room for the
+								// preamble.
+								thinkingLevel: thinkingLevel === "off" ? leastThinkingLevel(refined) : refined.effectiveThinkingLevel,
 								// Memory decides what to keep; the same completed task must get the same answer.
 								// A live Ornith review retained a validator recipe in one run and abstained on
 								// the identical trajectory in the next, at the server's default temperature.

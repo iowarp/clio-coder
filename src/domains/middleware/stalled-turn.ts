@@ -5,6 +5,11 @@ import { type MiddlewareHookInput, metadataNumber, metadataString } from "./type
 
 export const STALLED_TURN_REGISTRATION_ID = "nudge.stalled-turn";
 
+/**
+ * The prose nudge for an attended turn. On an unattended turn (headless, a job, a yolo continuation) the host spends the
+ * turn's pinned `finish` round in its place whenever that round can go out, so the model declares through the typed
+ * channel instead of being told to act (memory design 4.6, MD14; the swap is the turn middleware's, keyed on this text).
+ */
 export const STALLED_TURN_REQUEST_CONTINUATION_MESSAGE =
 	"You ended your turn after announcing an action without executing it: no tools were called. Continue now and perform the announced action, or state plainly that you are finished and waiting for the user.";
 
@@ -158,7 +163,9 @@ export const STALLED_TURN_RULE_DEFINITION: MiddlewareRuleDefinition = {
 			note: "the reply announced an action without running it",
 		},
 	],
-	predicate: shouldRequestStalledTurnContinuation,
+	// Once an unattended turn's pinned `finish` round is spent, the prose nudge ("waiting for the user") is not its
+	// fallback: nothing fires (memory design MD14).
+	predicate: (input) => input.metadata?.finishRoundSpent !== true && shouldRequestStalledTurnContinuation(input),
 };
 
 // "run /skill X or say skip", "Suggested skill: /skill x", "want me to use
