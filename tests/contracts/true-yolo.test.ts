@@ -484,12 +484,38 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
 		'set -e; B="$TMPDIR/base-w8"; rm -rf "$B"; mkdir -p "$B"; git archive HEAD | tar -x -C "$B"; ln -s "$PWD/node_modules" "$B/node_modules"',
 		`cd ${process.cwd()} && B=$TMPDIR/base && rm -rf $B && mkdir -p $B`,
-		'H=$(mktemp -d); node -e 1 > "$H/out"; rm -rf "$H"',
+		// Row 261 bounce: a redirection on the delete, `cd --`, and a variable reused for a second scratch path.
+		'B=$TMPDIR/base; rm -rf "$B" 2>/dev/null; mkdir -p "$B"',
+		'cd -- "$TMPDIR" && rm -rf probe-rows',
+		'B=$TMPDIR/a; rm -rf "$B"; B=$TMPDIR/b; rm -rf "$B"',
 	]) {
 		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
 	}
+	// Row 261 bounce: a step the XR-43 reader does not fully recognise (a program, a leading redirection, a quoted or
+	// escaped builtin, `$[...]`) forgets every pin, so the delete keeps its base reading, and one that may change
+	// directory (pushd, a quoted or `command` cd, a redirection before cd) ends the temp cd chain.
+	for (const command of [
+		'H=$(mktemp -d); node -e 1 > "$H/out"; rm -rf "$H"',
+		'B=$TMPDIR/base; >/dev/null B=.git; rm -rf "$B"',
+		'B=$TMPDIR/base; A=1 >/dev/null B=.git; rm -rf "$B"',
+		'B=$TMPDIR/base; \\read B <<< .git; rm -rf "$B"',
+		'B=$TMPDIR/base; \\declare B=.git; rm -rf "$B"',
+		"B=$TMPDIR/base; p''rintf -v B .git; rm -rf \"$B\"",
+		"B=$TMPDIR/base; t''rap 'B=.git' DEBUG; rm -rf \"$B\"",
+		'B=$TMPDIR/base; : $[B=0]; rm -rf "$B"',
+	]) {
+		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
+		strictEqual(decision.kind, "ask", `${command}: ${decision.reasonCode}`);
+	}
+	for (const command of [
+		`cd "$TMPDIR" && pushd ${cwd} && rm -rf .git`,
+		`cd "$TMPDIR" && 'cd' ${cwd} && rm -rf .git`,
+		`cd "$TMPDIR" && command cd ${cwd} && rm -rf .git`,
+		`cd "$TMPDIR" && >/dev/null cd ${cwd} && rm -rf .git`,
+	])
+		strictEqual(verdict(command, "yolo"), "block/yolo-floor:yolo-floor-workspace-git", command);
 	// A failed cd leaves the shell in the workspace, where a delete after `;` or a newline still runs, and a TMPDIR that
 	// is no directory never moves the shell: each keeps the .git block, which is the floor's once the operator's scope
 	// judges it (row 261), and any other workspace delete keeps the snapshot ask.
