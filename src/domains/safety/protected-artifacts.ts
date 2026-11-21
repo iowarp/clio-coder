@@ -6,6 +6,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { gitCommitReadsStdinAsMessage, heredocDataText } from "./heredoc-data.js";
 import { isSameOrDescendant } from "./path-policy.js";
+import { resetLeavesPath } from "./reset-reach.js";
 import { FILE_WRITER_COMMANDS, isRefusedValidationWrapper, validationWrapperProblem } from "./validation-wrappers.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
@@ -32,6 +33,7 @@ export type DestructiveCommandOperation =
 	| "git_checkout"
 	| "git_restore"
 	| "git_reset_hard"
+	| "git_clean"
 	| "find_delete";
 
 export interface ProtectedArtifactCommandMatch {
@@ -179,18 +181,23 @@ function classifyDestructiveCommand(
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
 	// C-7: a here-document the parsed call proves is data is content, not shell text (row 287).
-	const segments = splitSegments(scanShellLike(heredocDataText(command) ?? command)).flatMap((tokens) => [
-		tokens,
-		...substitutionSegments(tokens, 0),
-	]);
+	const text = heredocDataText(command) ?? command;
+	const scanned = scanShellLike(text);
+	const segments = splitSegments(scanned).flatMap((tokens) => [tokens, ...substitutionSegments(tokens, 0)]);
+	// M-27: a hard reset is judged by what it rewrites only while every step before it leaves git's state alone.
+	let priorReads = resetShapeHolds(text, scanned);
+	let moved = false;
 	for (const tokens of segments) {
 		const segment = shellCommandArguments(tokens);
 		const redirect = classifyRedirect(tokens, artifacts);
 		if (redirect.kind === "destructive") return redirect;
 
 		const commandIndex = commandTokenIndex(segment);
+		const reading = { precise: priorReads && !pipedOnward(scanned, tokens), moved };
+		priorReads &&= stepOnlyReads(tokens, segment, commandIndex);
 		if (commandIndex === null) continue;
 		const executable = basenameToken(segment[commandIndex]);
+		if (executable === "cd" || executable === "pushd" || executable === "popd") moved = true;
 		if (executable === "rm") {
 			const result = classifyPathOperation(
 				"rm",
@@ -234,7 +241,10 @@ function classifyDestructiveCommand(
 			continue;
 		}
 		if (executable === "git") {
-			const result = classifyGitOperation(segment.slice(commandIndex + 1), artifacts);
+			const result = classifyGitOperation(segment.slice(commandIndex + 1), artifacts, {
+				...reading,
+				precise: reading.precise && commandIndex === 0 && segment[0] === "git",
+			});
 			if (result.kind === "destructive") return result;
 			continue;
 		}
@@ -3815,18 +3825,41 @@ function classifyRedirect(
 function classifyGitOperation(
 	args: ReadonlyArray<string>,
 	artifacts: ReadonlyArray<NormalizedArtifact>,
+	reading: { precise: boolean; moved: boolean },
 ): DestructiveCommandClassification {
 	const subcommand = args[0];
-	if (subcommand === "reset" && args.includes("--hard")) {
+	const at = gitSubcommandIndex(args);
+	const rest = args.slice(at + 1);
+	// `-C` moves where git runs, which the reading of each path's own repository already covers; any other global
+	// option (`--git-dir`, `--work-tree`, `-c core.worktree=`) may point the reset elsewhere.
+	const plainGlobals = args.slice(0, at).every((word, index, globals) => word === "-C" || globals[index - 1] === "-C");
+	if (args[at] === "reset" && rest.includes("--hard")) {
+		const target = reading.precise && plainGlobals ? hardResetTarget(rest) : null;
+		const reached =
+			target === null ? artifacts : artifacts.filter(({ artifact }) => !resetLeavesPath(artifact.path, target));
+		if (reached.length === 0) return { kind: "benign", matches: [] };
 		return {
 			kind: "destructive",
 			operation: "git_reset_hard",
-			matches: artifacts.map(({ artifact }) => ({
+			matches: reached.map(({ artifact }) => ({
 				artifactPath: artifact.path,
 				commandPath: ".",
 				reason: "git reset --hard can overwrite protected artifacts",
 			})),
 		};
+	}
+
+	// `clean -x` and `-X` delete ignored files, where a desk keeps its records (M-27).
+	if (args[at] === "clean") {
+		const clean = cleanReading(rest);
+		if (clean.dryRun || !clean.ignored) return { kind: "benign", matches: [] };
+		const reason = "git clean -x or -X can delete protected artifacts";
+		const matches =
+			clean.paths.length === 0 || reading.moved || at > 0
+				? artifacts.map(({ artifact }) => ({ artifactPath: artifact.path, commandPath: ".", reason }))
+				: matchesForPaths(clean.paths, artifacts, "intersects", reason);
+		if (matches.length > 0) return { kind: "destructive", operation: "git_clean", matches };
+		return { kind: "benign", matches: [] };
 	}
 
 	if (subcommand === "checkout" && args.includes("--")) {
@@ -3859,6 +3892,160 @@ function classifyGitOperation(
 	}
 
 	return { kind: "benign", matches: [] };
+}
+
+/** Git global options that take the next word as their value. */
+const GIT_GLOBAL_VALUED: ReadonlySet<string> = new Set([
+	"-C",
+	"-c",
+	"--git-dir",
+	"--work-tree",
+	"--namespace",
+	"--super-prefix",
+	"--config-env",
+	"--exec-path",
+]);
+
+/** Where the subcommand stands in git's words, past its global options. */
+function gitSubcommandIndex(args: ReadonlyArray<string>): number {
+	let index = 0;
+	while (index < args.length && (args[index] as string).startsWith("-")) {
+		index += GIT_GLOBAL_VALUED.has(args[index] as string) ? 2 : 1;
+	}
+	return index;
+}
+
+/** The commit a `reset --hard` moves to, or null when its words hold anything else (a flag, a second operand). */
+function hardResetTarget(rest: ReadonlyArray<string>): string | null {
+	const operands: string[] = [];
+	for (const word of rest) {
+		if (word === "--hard" || word === "-q" || word === "--quiet") continue;
+		if (word.startsWith("-")) return null;
+		operands.push(word);
+	}
+	if (operands.length > 1) return null;
+	return operands[0] ?? "HEAD";
+}
+
+/** A `git clean`'s dry run, whether it deletes ignored files (`-x`, `-X`), and its pathspecs. */
+function cleanReading(rest: ReadonlyArray<string>): { dryRun: boolean; ignored: boolean; paths: string[] } {
+	const out = { dryRun: false, ignored: false, paths: [] as string[] };
+	for (let index = 0, ended = false; index < rest.length; index += 1) {
+		const word = rest[index] as string;
+		if (ended || !word.startsWith("-") || word === "-") {
+			out.paths.push(word);
+			continue;
+		}
+		if (word === "--") {
+			ended = true;
+			continue;
+		}
+		if (word.startsWith("--")) {
+			if (word === "--dry-run") out.dryRun = true;
+			if (word === "--exclude") index += 1;
+			continue;
+		}
+		for (const [at, flag] of [...word.slice(1)].entries()) {
+			if (flag === "n") out.dryRun = true;
+			if (flag === "x" || flag === "X") out.ignored = true;
+			if (flag === "e") {
+				if (at === word.length - 2) index += 1;
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+/** Words that open a loop, a function or a coprocess, whose body may run again before or beside a later step. */
+const REPEATING_WORDS: ReadonlySet<string> = new Set(["for", "while", "until", "select", "function", "coproc"]);
+
+/**
+ * Whether a command runs its steps once, in the order written: no background job, loop, function, substitution or
+ * script the scanner cannot read. Only then does what a step before a hard reset leaves decide what the reset finds.
+ */
+function resetShapeHolds(text: string, tokens: ReadonlyArray<ShellToken>): boolean {
+	if (hasUnparsedShellScript(text)) return false;
+	return tokens.every(
+		(token) =>
+			!(token.operator && (token.value === "&" || token.value === "|&")) &&
+			(token.substitutions?.length ?? 0) === 0 &&
+			token.hiddenContent !== true &&
+			token.unterminated !== true &&
+			(token.operator || token.quoted || !REPEATING_WORDS.has(token.value)),
+	);
+}
+
+/** Whether the step's output is piped into a later step, which then runs beside it. */
+function pipedOnward(tokens: ReadonlyArray<ShellToken>, step: ReadonlyArray<ShellToken>): boolean {
+	const last = step.at(-1);
+	if (last === undefined) return false;
+	const next = tokens.find((token) => token.start >= last.end && token !== last);
+	return next?.operator === true && next.value === "|";
+}
+
+/** Plain readers a step before a hard reset may run: none of them changes what git tracks. */
+const READER_COMMANDS: ReadonlySet<string> = new Set([
+	"cd",
+	"pwd",
+	"echo",
+	"printf",
+	"true",
+	"false",
+	":",
+	"test",
+	"[",
+	"ls",
+	"cat",
+	"wc",
+	"head",
+	"tail",
+	"grep",
+	"sort",
+	"uniq",
+	"cut",
+	"date",
+]);
+
+/** Git subcommands a step before a hard reset may run: they read the repository and move no ref or index entry. */
+const GIT_READ_STEPS: ReadonlySet<string> = new Set([
+	"log",
+	"status",
+	"diff",
+	"show",
+	"rev-parse",
+	"rev-list",
+	"ls-files",
+	"cat-file",
+	"describe",
+]);
+
+/**
+ * Whether one step leaves git's state as it found it: a plain reader or a git read, with no prefix, wrapper or
+ * assignment, writing only to /dev/null, a descriptor, `$TMPDIR` or a literal path outside any `.git`.
+ */
+function stepOnlyReads(
+	tokens: ReadonlyArray<ShellToken>,
+	words: ReadonlyArray<string>,
+	commandIndex: number | null,
+): boolean {
+	if (commandIndex !== 0) return false;
+	const executable = words[0] ?? "";
+	const reads =
+		READER_COMMANDS.has(executable) ||
+		(executable === "git" &&
+			GIT_READ_STEPS.has(words[1] ?? "") &&
+			!words.some((word) => word.startsWith("--output") || word.startsWith("--ext-diff")));
+	if (!reads) return false;
+	return tokens.every((token, index) => {
+		if (!token.operator || !SHELL_WRITE_REDIRECTIONS.has(token.value)) return true;
+		const target = tokens[index + 1];
+		if (target === undefined || target.operator) return false;
+		const value = target.value;
+		if (value === "/dev/null" || /^(?:\d+|-)$/u.test(value)) return true;
+		if (/^\$(?:TMPDIR|\{TMPDIR\})\/[^$`]*$/u.test(value)) return !value.split("/").includes(".git");
+		return !/[$`~*?[]/u.test(value) && !value.split("/").some((part) => part === ".git" || part === "..");
+	});
 }
 
 function classifyFindDelete(

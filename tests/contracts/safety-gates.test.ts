@@ -1358,6 +1358,72 @@ describe("safety gate boundary", () => {
 			strictEqual(reason(command) !== null, true, command);
 	});
 
+	it("refuses a hard reset only where it rewrites a tracked protected path, and clean -x/-X wherever it reaches one (M-27)", (t) => {
+		if (spawnSync("git", ["--version"]).status !== 0) {
+			t.skip("git is not installed");
+			return;
+		}
+		const repo = join(scratch, "repo");
+		mkdirSync(join(repo, "desk"), { recursive: true });
+		const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
+		const git = (...args: string[]) =>
+			strictEqual(spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, env }).status, 0);
+		git("init", "-q");
+		writeFileSync(join(repo, ".gitignore"), "records/\n");
+		writeFileSync(join(repo, "desk", "keep.txt"), "k");
+		git("add", ".");
+		git("commit", "-qm", "one");
+		writeFileSync(join(repo, "desk", "new.json"), "{}");
+		git("add", ".");
+		git("commit", "-qm", "two");
+		mkdirSync(join(repo, "records", "log"), { recursive: true });
+		writeFileSync(join(repo, "records", "log", "r.json"), "{}");
+		process.chdir(repo);
+		const at = (path: string) => ({
+			artifacts: [
+				{ path: join(repo, path), protectedAt: "2026-11-21T00:00:00Z", reason: "desk", source: "user" as const },
+			],
+		});
+		const refused = (path: string, command: string) =>
+			protectedArtifactMutationBlockReason(at(path), ToolNames.Bash, { command }) !== null;
+		// Ignored, untracked records: reset --hard never touches them, after plain reads too.
+		for (const command of [
+			"git reset --hard HEAD~1",
+			"git reset --hard",
+			"git -C . reset -q --hard HEAD~1",
+			"git log -1 | head -1; git diff --binary > $TMPDIR/x.patch && git reset --hard HEAD~1",
+			"git clean -ndx",
+			"git clean -fd",
+			"git clean -fdx build",
+		])
+			strictEqual(refused("records/log", command), false, command);
+		// What the reading cannot vouch for, and every clean that deletes ignored files there, still refuses.
+		for (const command of [
+			"git add -A && git reset --hard HEAD~1",
+			"git reset --hard HEAD~1 & true",
+			"git reset --hard HEAD~1 | git add -A",
+			"GIT_INDEX_FILE=x git reset --hard",
+			"git --work-tree=. reset --hard",
+			"git reset --hard no-such-rev",
+			"git reset --hard $(echo HEAD~1)",
+			"git clean -fdx",
+			"git clean -fdX",
+			"git clean -xfd records",
+			"git -C . clean -fdx",
+			"cd build && git clean -fdx .",
+		])
+			strictEqual(refused("records/log", command), true, command);
+		// A tracked record the target deletes, an uncommitted edit, and a staged record the reset drops all refuse.
+		strictEqual(refused("desk", "git reset --hard HEAD~1"), true);
+		strictEqual(refused("desk", "git reset --hard"), false);
+		writeFileSync(join(repo, "desk", "keep.txt"), "edited");
+		strictEqual(refused("desk", "git reset --hard"), true);
+		git("checkout", "--", "desk/keep.txt");
+		writeFileSync(join(repo, "desk", "staged.json"), "{}");
+		git("add", "desk/staged.json");
+		strictEqual(refused("desk", "git reset --hard"), true);
+	});
+
 	it("keeps a child whose name starts with .. inside its parent", () => {
 		const artifact = (path: string) => ({
 			path,
