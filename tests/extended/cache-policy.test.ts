@@ -277,6 +277,69 @@ test("the main thread's Codex request sends the pinned prompt layer as its own i
 	}
 });
 
+test("the main thread's public Responses request marks the pinned prompt layer with its own breakpoint (PV-3)", async () => {
+	const pinned = "Install-wide identity and harness.\n";
+	const tail = "Project handbook and runtime.\n";
+	const hash = createHash("sha256").update(pinned).digest("hex");
+	const dir = mkdtempSync(join(tmpdir(), "clio-responses-split-"));
+	const previous = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+	type Body = { input: Array<{ role?: string; content?: unknown }>; prompt_cache_options?: unknown };
+	let calls = 0;
+	const send = async (
+		modelId: string,
+		scope: "main" | "side",
+		cacheRetention?: "none" | "short",
+		prefixHash = hash,
+	): Promise<Body> => {
+		const model = openai.synthesizeModel(
+			{ id: "fixture", runtime: "openai", url: "https://api.openai.com/v1" },
+			modelId,
+			null,
+		);
+		const path = join(dir, `${calls++}.jsonl`);
+		process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+		const abort = new AbortController();
+		const options = {
+			apiKey: "sk-fixture",
+			sessionId: "session",
+			signal: abort.signal,
+			clioCoderPinnedPrefix: { chars: pinned.length, hash: prefixHash },
+			...(cacheRetention ? { cacheRetention } : {}),
+			onPayload: () => {
+				abort.abort();
+				return undefined;
+			},
+		};
+		const context = { systemPrompt: pinned + tail, messages: [{ role: "user" as const, content: "Task", timestamp: 0 }] };
+		const stream = (scope === "main" ? engineMainStreamSimple : streamSimple)(model, context, options as never);
+		for await (const _event of stream) {
+			/* Drain to the aborted end. */
+		}
+		return (JSON.parse(readFileSync(path, "utf8").trim()) as { payloads: Body[] }).payloads.at(-1) as Body;
+	};
+	try {
+		const main = await send("gpt-6-luna", "main");
+		deepStrictEqual(main.input[0]?.content, [
+			{ type: "input_text", text: pinned, prompt_cache_breakpoint: { mode: "explicit" } },
+			{ type: "input_text", text: tail },
+		]);
+		const side = await send("gpt-6-luna", "side");
+		strictEqual(side.input[0]?.content, pinned + tail, "workers and side calls keep Pi's request");
+		deepStrictEqual({ ...main.input[0], content: side.input[0]?.content }, side.input[0]);
+		deepStrictEqual(main.input.slice(1), side.input.slice(1));
+		// Before GPT-5.6, with caching off, or when the leading bytes are not the pinned layer: the request Pi built.
+		strictEqual((await send("gpt-5.5", "main")).input[0]?.content, pinned + tail);
+		const off = await send("gpt-6-luna", "main", "none");
+		deepStrictEqual(off.prompt_cache_options, { mode: "explicit" });
+		strictEqual(off.input[0]?.content, pinned + tail);
+		strictEqual((await send("gpt-6-luna", "main", undefined, "0".repeat(64))).input[0]?.content, pinned + tail);
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("native compaction on Codex sends the pinned prompt layer as its own item, as the turns do", async () => {
 	const model = openaiCodex.synthesizeModel(
 		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },
