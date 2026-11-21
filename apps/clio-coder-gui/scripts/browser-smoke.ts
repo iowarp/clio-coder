@@ -934,7 +934,7 @@ try {
 				.locator("main")
 				.getByRole("link", { name: /^Add a connection/ })
 				.click();
-			await page.getByRole("heading", { name: "Where does your model come from?", exact: true }).waitFor();
+			await page.getByRole("heading", { name: "What do you have?", exact: true }).waitFor();
 			await check("targets-onboarding");
 			if (width === 1600 || width === 390)
 				await page.screenshot({ path: join(output, `targets-onboarding-${width}.png`), fullPage: true });
