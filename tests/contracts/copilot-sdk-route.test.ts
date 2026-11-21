@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -13,7 +14,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { after, before, mock, test } from "node:test";
-import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
@@ -46,7 +47,7 @@ import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { copilotSdkAccount, copilotSdkRestartIdle, listCopilotSdkModels } from "../../src/engine/ai.js";
-import { engineStreamSimple } from "../../src/engine/api-registry.js";
+import { engineMainStreamSimple, engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
 import {
@@ -1204,6 +1205,47 @@ test("the provider dump records each request Clio hands the Copilot runtime (c2b
 	strictEqual(results[0]?.[0]?.textResultForLlm, fake().toolResults.at(-1)?.textResultForLlm);
 	// A result with no host reminder after it reaches Copilot as Clio wrote it.
 	strictEqual(results[0]?.[0]?.textResultForLlm, "file body");
+});
+
+test("a main session sends the pinned layer as a static cached block and the session layer dynamic (row 335)", async () => {
+	const pinned = "Pinned identity and tool contract.\n\n";
+	const systemPrompt = `${pinned}Session handbook for repo A.`;
+	const prefix = { chars: pinned.length, hash: createHash("sha256").update(pinned).digest("hex") };
+	const path = join(env.dir, "copilot-blocks-dump.jsonl");
+	process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+	const main = (sessionId: string, pinnedPrefix: typeof prefix) =>
+		engineMainStreamSimple(model, normalizeContext({ systemPrompt, messages: [user("hello")] }), {
+			sessionId,
+			clioCoderPinnedPrefix: pinnedPrefix,
+		} as SimpleStreamOptions).result();
+	try {
+		strictEqual((await main("blocks-session", prefix)).stopReason, "stop");
+		deepStrictEqual(fake().sessions.at(-1)?.config.systemMessage, {
+			mode: "replace",
+			content: systemPrompt,
+			contentBlocks: [
+				{ content: pinned, isStatic: true, cacheBreakpoint: true },
+				{ content: "Session handbook for repo A." },
+			],
+		});
+		// A prefix whose hash no longer matches the prompt's head sends the prompt as one block.
+		await main("stale-blocks-session", { ...prefix, hash: "0".repeat(64) });
+		deepStrictEqual(fake().sessions.at(-1)?.config.systemMessage, { mode: "replace", content: systemPrompt });
+	} finally {
+		delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		disposeCopilotConversations("blocks-session");
+		disposeCopilotConversations("stale-blocks-session");
+	}
+	ok(await eventually(() => existsSync(path) && readFileSync(path, "utf8").trim().split("\n").length === 2));
+	const [split] = readFileSync(path, "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as { payloads: Array<Record<string, unknown>> });
+	// The dump names each block's size and marks, so a cache A/B can see what the runtime was offered.
+	deepStrictEqual(split?.payloads[0]?.systemMessageBlocks, [
+		{ chars: pinned.length, hash: prefix.hash, isStatic: true, cacheBreakpoint: true },
+		{ chars: "Session handbook for repo A.".length },
+	]);
 });
 
 test("a call to a tool Copilot was never given reseeds the next call instead of waiting on Copilot's own run", async () => {

@@ -45,6 +45,7 @@ import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
 import { claimWireEffort, stampWireEffort } from "../../core/telemetry/call-effort.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
+import type { PinnedPromptPrefix } from "../apis/anthropic-system-split.js";
 import type { AgentMessage } from "../types.js";
 import {
 	COPILOT_CLIENT_NAME,
@@ -1241,6 +1242,8 @@ async function openConversationHeld(input: {
 	key: string;
 	model: Model<Api>;
 	systemPrompt: string;
+	/** The prompt cut at its pinned boundary, when a main call named one that still leads the prompt. */
+	systemBlocks?: ReadonlyArray<SystemBlock>;
 	tools: ReadonlyArray<Tool>;
 	reasoningEffort: string | undefined;
 	contextTier: ContextTier;
@@ -1261,7 +1264,11 @@ async function openConversationHeld(input: {
 		streaming: true,
 		// Replace, not append: Clio's compiled prompt carries its identity, safety rules and tool contract, and
 		// Copilot's default sections describe built-in tools that are excluded here.
-		systemMessage: { mode: "replace" as const, content: input.systemPrompt },
+		systemMessage: {
+			mode: "replace" as const,
+			content: input.systemPrompt,
+			...(input.systemBlocks !== undefined ? { contentBlocks: input.systemBlocks } : {}),
+		},
 		tools: declareTools(() => conversation, input.tools),
 		availableTools: ["custom:*"],
 		infiniteSessions: { enabled: false },
@@ -1309,6 +1316,30 @@ async function openConversationHeld(input: {
 
 interface Plan {
 	conversation: Conversation | null;
+}
+
+/** One block of a replace-mode system message, in the runtime's experimental wire shape (SDK 1.0.26 rpc.d.ts). */
+interface SystemBlock {
+	content: string;
+	isStatic?: boolean;
+	cacheBreakpoint?: boolean;
+}
+
+/**
+ * The install-wide pinned layer as a static block with a cache breakpoint after it, and the session layer (handbook,
+ * workspace) as a dynamic block, so a fresh session in another repository can read the same head from cache (row 335).
+ * The blocks concatenate to the prompt. None when the boundary is absent, empty, the whole prompt, or its hash no
+ * longer matches the prompt's head.
+ */
+function pinnedSystemBlocks(
+	systemPrompt: string,
+	prefix: PinnedPromptPrefix | undefined,
+): ReadonlyArray<SystemBlock> | undefined {
+	if (prefix === undefined || !Number.isSafeInteger(prefix.chars) || prefix.chars <= 0) return undefined;
+	if (systemPrompt.length <= prefix.chars) return undefined;
+	const pinned = systemPrompt.slice(0, prefix.chars);
+	if (createHash("sha256").update(pinned).digest("hex") !== prefix.hash) return undefined;
+	return [{ content: pinned, isStatic: true, cacheBreakpoint: true }, { content: systemPrompt.slice(prefix.chars) }];
 }
 
 /** A model the runtime does not serve fails with the account's listed models named, so the fix is one copy away. */
@@ -1480,8 +1511,33 @@ async function runStep(
 
 	let bound = false;
 	let origin: CopilotSessionOrigin = continued ? "continued" : reused ? "spare" : "new";
-	const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
-	const session = { model: model.id, systemMessage: systemPrompt, tools, reasoningEffort, contextTier };
+	const systemBlocks = pinnedSystemBlocks(
+		systemPrompt,
+		(options as { clioCopilotPinnedPrefix?: PinnedPromptPrefix } | undefined)?.clioCopilotPinnedPrefix,
+	);
+	const base = {
+		key,
+		model,
+		systemPrompt,
+		...(systemBlocks !== undefined ? { systemBlocks } : {}),
+		tools,
+		reasoningEffort,
+		contextTier,
+	};
+	// The dump names each block's size and marks (the static one by its hash), not its text twice.
+	const systemMessageBlocks = systemBlocks?.map(({ content, ...marks }) => ({
+		chars: content.length,
+		...(marks.isStatic ? { hash: createHash("sha256").update(content).digest("hex") } : {}),
+		...marks,
+	}));
+	const session = {
+		model: model.id,
+		systemMessage: systemPrompt,
+		...(systemMessageBlocks !== undefined ? { systemMessageBlocks } : {}),
+		tools,
+		reasoningEffort,
+		contextTier,
+	};
 	try {
 		if (!conversation) {
 			evictFor(key);
