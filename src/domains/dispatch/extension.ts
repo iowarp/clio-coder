@@ -10703,7 +10703,7 @@ export function createDispatchBundle(
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
-							finalDetail = `${finalDetail}; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`clio-coder fleet land ${req.taskWorktree.branch}\` applies it if you accept the failed check`;
+							finalDetail = `${finalDetail}; its work is committed on the preserved branch ${req.taskWorktree.branch}, \`clio-coder fleet land ${req.taskWorktree.branch}\` previews the merge and \`clio-coder fleet land ${req.taskWorktree.branch} --yes\` lands it if you accept the failed check`;
 							failureMessage = finalDetail;
 						}
 					} else if (mergeWithheld) {
