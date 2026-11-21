@@ -129,7 +129,7 @@ test("with the read path gone, a retired key is an ordinary unknown key and an o
 	);
 });
 
-test("a settings failure names `clio-coder upgrade` while a registered migration is pending, and only then", async (t) => {
+test("a settings failure names `clio-coder upgrade` only for a key or value its pending migration rewrites", async (t) => {
 	const home = await isolateClioEnv("clio-retired-settings-advice-");
 	t.after(() => home.restore());
 	const config = join(home.dir, "config");
@@ -154,6 +154,25 @@ test("a settings failure names `clio-coder upgrade` while a registered migration
 			ok(advice.test(text), text);
 		}
 	}
+	// The one-line form leads with the key and its cause and names the file once (M-30).
+	const file = join(config, "settings.yaml");
+	const line = formatSettingsIssues(validateSettingsFile().issues);
+	ok(
+		line.startsWith("settings.yaml failed validation: fleet.speculativeDispatch: unknown key. Run `clio-coder upgrade`"),
+		line,
+	);
+	strictEqual(line.split(file).length, 2, line);
+	// A key no release ever read: the pending migration cannot fix it, so the upgrade is not advised.
+	writeFileSync(file, "version: 2\nsafety:\n  bogusKey: 1\n");
+	for (const text of surfaces()) {
+		ok(/safety\.bogusKey: unknown key/u.test(text), text);
+		ok(!/clio-coder upgrade/u.test(text), text);
+	}
+	strictEqual(
+		formatSettingsIssues(validateSettingsFile().issues),
+		`settings.yaml failed validation: safety.bogusKey: unknown key. Edit the named keys in ${file}. Run \`clio-coder doctor --fix\` for safe repairs.`,
+	);
+	writeFileSync(file, "version: 2\nfleet:\n  speculativeDispatch: true\n");
 	// Everything recorded: the upgrade has nothing to apply, so it is not advised.
 	writeFileSync(manifest, JSON.stringify({ applied: REGISTERED_MIGRATION_IDS }));
 	for (const text of surfaces()) {
