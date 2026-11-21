@@ -475,6 +475,8 @@ type ToolSegment = {
 	approvalDocked?: true | undefined;
 	/** The axis an operator grant answered, kept past settlement (BT-003). Live only, like `approvalView`. */
 	operatorGrant?: string | undefined;
+	/** Who gave that grant when it was not the operator at this terminal (`attach c2 (apr)`). Live only. */
+	grantedBy?: string | undefined;
 	autoApproved?: "yolo" | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
 	/**
@@ -2462,6 +2464,7 @@ function renderToolSegmentLines(
 		evictedReason: seg.evictedReason,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
+		grantedBy: seg.grantedBy,
 		autoApproved: seg.autoApproved,
 		...shellActor(seg, nameRequester),
 	};
@@ -2560,6 +2563,7 @@ function finishedCall(seg: ToolSegment, nameRequester = true): ToolExecutionFini
 		cardAttached: seg.cardAttached,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
+		grantedBy: seg.grantedBy,
 		autoApproved: seg.autoApproved,
 		...shellActor(seg, nameRequester),
 	};
@@ -4938,8 +4942,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const tool = owner?.segment;
 				if (tool && !tool.finished) {
 					// Only the grant path resumes a parked call; a denial settles it blocked.
-					if (event.state === "resumed" && tool.approvalView !== undefined)
+					if (event.state === "resumed" && tool.approvalView !== undefined) {
 						tool.operatorGrant = approvalAxisText(tool.approvalView);
+						tool.grantedBy = event.grantedBy;
+					}
 					// Time on the card is not time running: an allowed command starts its clock now.
 					if (event.state === "resumed") tool.startedAtMs = now();
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;

@@ -183,6 +183,8 @@ export interface ToolExecutionFinished {
 	 * approval event, which never reaches the session ledger.
 	 */
 	operatorGrant?: string | undefined;
+	/** Who gave `operatorGrant` when it was not the operator at this terminal, as `attach c2 (apr)`. Live only. */
+	grantedBy?: string | undefined;
 	autoApproved?: "yolo" | undefined;
 	/**
 	 * A worker card sits under this dispatch call and states the run's outcome,
@@ -973,7 +975,8 @@ function approvalReceiptRows(
 			: [];
 	// The operator's own mark: `?` is the class of a call that asks, and read as a question still open under a call
 	// that had already been allowed.
-	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
+	const by = "result" in call ? call.grantedBy : undefined;
+	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by ${by ?? "you"} · ${axis}`)}`, width, failure);
 }
 
 /**
@@ -1027,6 +1030,8 @@ function blockReasonClause(reason: string): string {
  */
 /** The first words of the denial Clio writes for a card nobody answered (`unattendedPermissionReason`). */
 const UNATTENDED_REFUSAL = /^The operator did not answer this \S+ approval within (\d+) s/u;
+/** A card a person denied: `User` at this terminal, or an attached approver by name (`overlay-permission-lifecycle`). */
+const DENIED_AT_PROMPT = /^(?:User|attach \S+(?: \([^)]*\))?) denied this call at the permission prompt/u;
 
 function refusalTail(reason: string): string {
 	// `The operator did not answer…, so Clio…` lost its point to the cut; the operator is the reader here.
@@ -1034,6 +1039,7 @@ function refusalTail(reason: string): string {
 	if (unattended) return `no answer in ${unattended[1]} s, so Clio denied it`;
 	const clause = blockReasonClause(reason);
 	if (/^User denied this call/u.test(clause)) return clause.replace(/^User denied/u, "you denied");
+	// An attached approver's denial already names that client (`attach c2 (apr) denied this call…`).
 	const blocked = /^(\S+ blocked: )([a-z_]+)( in \S+)?$/u.exec(clause);
 	return blocked ? `${blocked[1]}${actionClassWords(blocked[2] ?? "")}${blocked[3] ?? ""}` : clause;
 }
@@ -2646,8 +2652,8 @@ export function renderToolPreview(
 		const tailStatesRefusal = refusal !== undefined && blockReasonClause(refusal) === refusal.replace(/\.$/u, "");
 		let text = refusal && tailStatesRefusal ? withoutLeadingLine(told, refusal) : told;
 		if (finished?.outcome !== undefined) {
-			// An operator's own denial needs no account back; the tail says it, and /view keeps what the model read.
-			text = refusal?.startsWith("User denied") === true ? "" : withoutModelRejectionAdvice(text);
+			// A person's own denial needs no account back; the tail says it, and /view keeps what the model read.
+			text = refusal !== undefined && DENIED_AT_PROMPT.test(refusal) ? "" : withoutModelRejectionAdvice(text);
 		}
 		// The action row already names this run. A short monitor summary can
 		// start with the same id; keep the remainder here and the raw result in

@@ -1,10 +1,18 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
 import type { ApprovalRequestView } from "../../src/interactive/permission-overlay.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
+import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 // BT-003: after Enter on an `Approve system change` card the only surviving row
 // was `$ ran \`git restore .\` · exit 0 …`, identical to a call that never asked.
@@ -145,6 +153,70 @@ test("compact never folds an allowed call into its neighbors", () => {
 	const rendered = panel.render(100).map(stripTerminalSequences).join("\n");
 	match(rendered, /› allowed by you/u, rendered);
 	match(rendered, /\/etc\/passwd/u, rendered);
+});
+
+// M-22: a card an attached approver answered read `allowed by you` / `you denied` on the host's row.
+test("a card an attached approver answers names that client on the row, for a grant and for a denial", async () => {
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd: realpathSync(mkdtempSync(join(tmpdir(), "clio-attach-grant-"))) }),
+		autonomy: () => "default",
+	});
+	registry.register({
+		name: ToolNames.Bash,
+		description: "fake bash",
+		parameters: {} as ToolSpec["parameters"],
+		baseActionClass: "execute",
+		run: async () => ({ kind: "ok", output: "marked" }),
+	});
+	const panel = createChatPanel({ getOutputStyle: () => "standard", now: () => 1_000 });
+	const lifecycle = createOverlayPermissionLifecycle({
+		toolRegistry: registry,
+		bus: createTelemetryHub(),
+		dispatch: {},
+		getAutonomy: () => "default",
+		getOverlayState: () => "closed",
+		openPermissionOverlay: () => true,
+		closeOverlay: () => lifecycle.onPermissionOverlayClosed(),
+		appendNotice: () => {},
+		applyApprovalState: (event) => panel.applyEvent(event),
+		requestRender: () => {},
+		stopActiveTurn: () => {},
+	});
+	const run = async (id: string, decision: "approve" | "deny") => {
+		const parked = new Promise<void>((resolve) => {
+			const stop = registry.onPermissionRequired(() => {
+				stop();
+				resolve();
+			});
+		});
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName: "bash", args: { command: "./mark.sh" } });
+		const pending = registry.invoke({ tool: ToolNames.Bash, args: { command: "./mark.sh" } }, { toolCallId: id });
+		await parked;
+		const card = lifecycle.cardOnScreen();
+		ok(card, "the parked call is the card on screen");
+		ok(lifecycle.answerOnScreen(card.requestId, decision, { decidedBy: "attach:c2", name: "attach c2 (apr)" }));
+		const verdict = await pending;
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: id,
+			toolName: "bash",
+			result: verdict.kind === "ok" ? RESULT : { content: [{ type: "text", text: "" }] },
+			isError: verdict.kind !== "ok",
+			...(verdict.kind === "blocked" ? { outcome: "blocked", blockReason: verdict.reason } : {}),
+		} as ChatLoopEvent);
+		return verdict;
+	};
+	try {
+		strictEqual((await run("bash-a", "approve")).kind, "ok");
+		const denied = await run("bash-b", "deny");
+		strictEqual(denied.kind, "blocked");
+		const rendered = panel.render(120).map(stripTerminalSequences).join("\n");
+		match(rendered, /› allowed by attach c2 \(apr\) · default autonomy/u, rendered);
+		match(rendered, /attach c2 \(apr\) denied this call at the permission prompt/u, rendered);
+		doesNotMatch(rendered, /allowed by you|you denied/u, rendered);
+	} finally {
+		lifecycle.dispose();
+	}
 });
 
 test("a parked row drops the facts its docked card already shows, and keeps them once the card leaves", () => {
