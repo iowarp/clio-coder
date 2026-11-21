@@ -158,7 +158,7 @@ function plainFailure(body: string): string | null {
 export function workerFailureHeadline(detail: string | null | undefined): string | null {
 	const text = (detail ?? "").replace(/\s+/gu, " ").trim();
 	if (text.length === 0) return null;
-	const exit = /^(?:exit=\d+ )?(exit code \d+);? ?/u.exec(text);
+	const exit = /^(?:exit=\d+ )?(exit code \d+)(?: \(stopReason=[^)]*\))?;? ?/u.exec(text);
 	const body = (exit === null ? text : text.slice(exit[0].length)).replace(/^permission_required; /u, "");
 	if (body.length === 0) return exit === null ? null : "the worker stopped with an error before it gave an answer";
 	const plain = plainFailure(body);

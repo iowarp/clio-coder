@@ -676,7 +676,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					const updatedOptions = isRecord(updated) ? updated.configOptions : undefined;
 					const applied = peerSelectOption(updatedOptions, "model", "model")?.currentValue;
 					if (typeof applied === "string" && applied !== selected) {
-						throw new Error(`ACP peer kept model '${applied}' after Clio selected '${selected}'`);
+						throw new AcpError("acp_model_unavailable", `ACP peer kept model '${applied}' after Clio selected '${selected}'`);
 					}
 					// Thinking levels differ per model (agy offers some models none), so the new state replaces the old.
 					if (Array.isArray(updatedOptions)) thoughtOption = peerSelectOption(updatedOptions, "thought_level");
@@ -705,7 +705,10 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 						"thought_level",
 					)?.currentValue;
 					if (typeof applied === "string" && applied !== level) {
-						throw new Error(`ACP peer kept thinking level '${applied}' after Clio selected '${level}'`);
+						throw new AcpError(
+							"acp_thinking_unavailable",
+							`ACP peer kept thinking level '${applied}' after Clio selected '${level}'`,
+						);
 					}
 				}
 			}
