@@ -1275,6 +1275,8 @@ export interface AcpArtifactPage {
 	nextOffset: number | null;
 	/** Lines cut to fit one page; reassembly is exact only when this is absent. */
 	clippedLines?: number;
+	/** An `image` artifact's picture, on the first page when it fits one; absent otherwise. */
+	image?: { mimeType: string; data: string };
 	/** The overlay's `i` view, read with `details: true`. */
 	details?: { format: ViewArtifactFormat; lineCount: number };
 	refused?: { reason: string };
