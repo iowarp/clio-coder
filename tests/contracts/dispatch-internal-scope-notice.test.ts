@@ -12,6 +12,7 @@ import { declaredScopeReplacementDiagnostic, resolveDispatchPathScope } from "..
 import { localNodeIdentity } from "../../src/domains/dispatch/transport.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
 import { workerSpecToolNames } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -384,6 +385,34 @@ it("names the deny permit a judge-mode dispatch runs with when no safety judge i
 		strictEqual(permissions[0] ?? "deny", "deny");
 		await dispatchOnce({ workerAskJudge: { seat: () => undefined, autonomy: () => "default" } });
 		strictEqual(notices.length, 1, "a seated judge answers the asks, so nothing is announced");
+		// M7 acceptance: the plan card names the withheld judge route before anything runs.
+		const context = dispatchStubContext({ settings });
+		const bundle = makeDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				dispatch: bundle.contract,
+				getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+				getAutonomy: () => "default",
+			});
+			const prepared = tool.prepareAdmissionArguments?.({
+				agent: "coder",
+				mode: "sequential",
+				tasks: [{ task: "Rename the helper." }, { task: "Update its callers." }],
+			});
+			ok(prepared);
+			strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+			const card = tool.describeDispatchPlan?.(prepared).text ?? "";
+			tool.disposeAdmissionArguments?.(prepared);
+			const lines = card.split("\n").filter((line) => line.startsWith("    withheld: asks:judge: "));
+			strictEqual(lines.length, 2, card);
+			match(
+				lines[0] ?? "",
+				/^ {4}withheld: asks:judge: no safety judge can answer this run's asks, so they are denied \(this process seats no safety judge/u,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	} finally {
 		env.restore();
 	}
