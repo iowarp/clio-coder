@@ -1,5 +1,6 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -13,6 +14,7 @@ import {
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
+import { resolveRunWall, runWallCapMs } from "../../src/domains/dispatch/run-limits.js";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
@@ -472,6 +474,158 @@ describe("dispatch advisory admission and explicit authority", () => {
 			ok(envelope);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+});
+
+describe("the run wall clock (DESIGN 4.5, fleet M8)", () => {
+	beforeEach(() => isolateDispatchState());
+	afterEach(() => restoreDispatchState());
+	const checkout = (): string => {
+		const repo = realpathSync(mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "clio-coder-wall-")));
+		const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+		git("init", "-q");
+		git("config", "user.name", "Contract");
+		git("config", "user.email", "contract@example.invalid");
+		writeFileSync(join(repo, "base.txt"), "base\n");
+		git("add", ".");
+		git("commit", "-qm", "base");
+		return repo;
+	};
+	const coder = (cwd: string) => ({
+		agentId: "coder",
+		task: "Port every module in src/ to the new API.",
+		executionRole: "builder" as const,
+		requestOrigin: "internal" as const,
+		cwd,
+	});
+	const partial = (cwd: string): void => {
+		mkdirSync(join(cwd, "src"), { recursive: true });
+		writeFileSync(join(cwd, "src", "partial.ts"), "export const ported = 1;\n");
+	};
+
+	it("the wall clock only lowers, and a spec without agreeing sealed limits is refused", async () => {
+		// The cap is the operator's; a recipe or an earlier deadline lowers it, nothing raises it.
+		deepStrictEqual(resolveRunWall({ capMs: 1_800_000, startedAt: 1000 }), { wallMs: 1_800_000, deadlineAt: 1_801_000 });
+		deepStrictEqual(resolveRunWall({ capMs: 1_800_000, recipeMs: 60_000, startedAt: 1000 }), {
+			wallMs: 60_000,
+			deadlineAt: 61_000,
+		});
+		deepStrictEqual(resolveRunWall({ capMs: 60_000, recipeMs: 600_000, startedAt: 1000, deadlineAt: 11_000 }), {
+			wallMs: 10_000,
+			deadlineAt: 11_000,
+		});
+		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "internal"), DEFAULT_SETTINGS.fleet.limits.internalRunTimeoutMs);
+		equal(runWallCapMs(DEFAULT_SETTINGS.fleet.limits, "user"), 1_800_000);
+		let observed: unknown;
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec) => {
+				observed = JSON.parse(JSON.stringify(spec));
+				throw new Error("fixture launch reached");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(bundle.contract.dispatch(coder(process.cwd())), /fixture launch/u);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+		const spec = observed as { limits: Record<string, unknown> & { time: { deadlineAt: number } } };
+		const parsed = parseWorkerSpec(spec);
+		ok(parsed.limits.time.handbackAt < parsed.limits.time.deadlineAt);
+		equal(parsed.limits.tools.ceiling, parsed.budget.ceiling ?? parsed.budget.hardCap);
+		const { limits: _limits, ...withoutLimits } = spec;
+		throws(() => parseWorkerSpec(withoutLimits), /limits/u);
+		throws(() => parseWorkerSpec({ ...spec, limits: { ...spec.limits, tools: { ceiling: 1 } } }), /ceiling/u);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...spec,
+					limits: { ...spec.limits, time: { ...spec.limits.time, handbackAt: spec.limits.time.deadlineAt + 1 } },
+				}),
+			/handbackAt must not be after deadlineAt/u,
+		);
+	});
+
+	it("a coder the wall clock moved to handback seals timed_out with its report and the paths it changed", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const report = "PARTIAL REPORT: ported src/partial.ts; 11 modules remain.";
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: () => {
+				partial(repo);
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						yield {
+							type: "clio_coder_run_outcome",
+							payload: {
+								outcomeCode: "worker_run_timeout",
+								detail: "worker_run_timeout: the run reached 85% of its 1800 s wall clock and handed back its report",
+							},
+						};
+						yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: report } };
+					})(),
+					abort() {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch(coder(repo));
+			const receipt = await run.finalPromise;
+			equal(receipt.outcome, "timed_out");
+			deepStrictEqual(receipt.checkoutChanges?.changedPaths, ["src/partial.ts"]);
+			ok(JSON.stringify(receipt).includes("11 modules remain"), "the receipt keeps the handback report");
+			match(receipt.outcomeDetail ?? "", /wall clock/u);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("a coder the host stops at fleet.limits.runTimeoutMs seals timed_out with the paths it changed", {
+		timeout: 20_000,
+	}, async () => {
+		const repo = checkout();
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.limits.runTimeoutMs = 400;
+		settings.fleet.limits.internalRunTimeoutMs = 400;
+		let aborts = 0;
+		let wallMs: number | undefined;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			spawnWorker: (spec) => {
+				wallMs = (spec as { limits?: { time: { wallMs: number } } }).limits?.time.wallMs;
+				partial(repo);
+				let finish!: (value: { exitCode: number; signal: null }) => void;
+				return {
+					pid: null,
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					promise: new Promise((resolve) => {
+						finish = resolve;
+					}),
+					events: (async function* () {})(),
+					abort() {
+						aborts++;
+						finish({ exitCode: 1, signal: null });
+					},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch(coder(repo));
+			const receipt = await run.finalPromise;
+			ok(wallMs !== undefined && wallMs <= 400, `the sealed wall clock is the setting's: ${wallMs}`);
+			equal(aborts, 1);
+			equal(receipt.outcome, "timed_out");
+			deepStrictEqual(receipt.checkoutChanges?.changedPaths, ["src/partial.ts"]);
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
 		}
 	});
 });

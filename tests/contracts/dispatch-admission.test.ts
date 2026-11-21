@@ -56,9 +56,11 @@ import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copi
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { planFacts, readDispatchPlan } from "../../src/interactive/dispatch-plan-summary.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { normalizeDispatchAdmission } from "../../src/tools/dispatch-normalize.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
+import type { DispatchToolDeps } from "../../src/tools/dispatch-types.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -313,6 +315,37 @@ describe("dispatch admission boundary", () => {
 		strictEqual(small?.[2], "100");
 		strictEqual(large?.[2], "4000");
 		ok(small?.[1] !== large?.[1], `${small?.[1]} moves with the output bound to ${large?.[1]}`);
+	});
+
+	it("runs a 6-task plan on a 4-slot endpoint as two waves with a notice, not a refusal (M8)", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [
+			{ id: "local", runtime: "openai", defaultModel: "gpt-4o", url: "http://127.0.0.1:9/v1", maxConcurrentRequests: 4 },
+		];
+		settings.fleet.default = { ...settings.fleet.default, target: "local", model: "gpt-4o" };
+		const context = dispatchStubContext({ settings });
+		const bundle = makeDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			const admission = createDispatchAdmissionController({
+				dispatch: bundle.contract,
+				getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+				getAutonomy: () => "yolo",
+			} as DispatchToolDeps);
+			const prepared = admission.prepareAdmissionArguments({
+				agent: "scout",
+				mode: "parallel",
+				tasks: [1, 2, 3, 4, 5, 6].map((n) => ({ task: `Inspect module ${n} of the fixture.` })),
+			});
+			ok(prepared);
+			strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined, JSON.stringify(prepared));
+			const snapshot = admission.state.trustedExecutionSnapshots.get(prepared);
+			const notices = snapshot?.kind === "dispatch" ? (snapshot.notices ?? []) : [];
+			match(notices.join("\n"), /^dispatch waves: the 6 tasks run as 2 waves of at most 4,/mu, JSON.stringify(notices));
+			admission.disposeAdmissionArguments(prepared);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("preserves declared intent through admission when briefing quotes an absolute workspace", async () => {
