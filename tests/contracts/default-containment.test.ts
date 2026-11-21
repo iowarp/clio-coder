@@ -20,9 +20,11 @@ import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { AUTONOMY_HELP } from "../../src/core/settings-awareness.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { denialLines } from "../../src/domains/safety/denial.js";
 import { createEscapeScopeLedger, ESCAPE_SCOPE_CUSTOM_TYPE } from "../../src/domains/safety/escape-scope.js";
 import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
 import { isSameOrDescendant } from "../../src/domains/safety/path-policy.js";
@@ -43,6 +45,7 @@ import {
 	createWorkspaceSnapshots,
 	type WorkspaceSnapshotOutcome,
 } from "../../src/domains/workspace-snapshots/store.js";
+import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createAskUserTool } from "../../src/tools/ask-user.js";
 import { bashTool } from "../../src/tools/bash.js";
@@ -56,6 +59,7 @@ import {
 import { createRunScriptTool } from "../../src/tools/run-script.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
+import { loopSafety } from "../harness/loop-guard.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function workspace(prefix: string): string {
@@ -1068,4 +1072,61 @@ test("a sandbox escape approved for this session covers reruns of the same uncha
 		ok(labels.at(-1)?.startsWith(`Approve for this session: script ${join(cwd, "other", "c.sh")} (sha256:`));
 	}
 	strictEqual((await yolo.registry.invoke(unsandboxed("bash other/c.sh"))).kind, "ok");
+});
+
+// M-7 bounce: the refused escape says one true thing about retrying, and once the operator grants its scope the
+// refusal is no failed attempt the loop guard counts, so two reruns in the same turn both run.
+test("a contained-yolo escape refusal tells when to retry, and a granted rerun is not a repeat of a failed attempt", async (t) => {
+	const cwd = workspace("clio-escape-loop-");
+	writeFileSync(join(cwd, "probe.sh"), "echo hi\\n");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const entries: unknown[] = [];
+	const escapeScopes = createEscapeScopeLedger({
+		session: () => "session-1",
+		entries: () => entries,
+		append: (grant) => entries.push({ kind: "custom", customType: ESCAPE_SCOPE_CUSTOM_TYPE, data: grant }),
+		roots: () => [cwd],
+	});
+	const guard = createLoopGuardRegistration({ safety: loopSafety() });
+	const yolo = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: false },
+		{
+			escapeScopes,
+			unattendedAsks: () => true,
+			middleware: createMiddlewareBundle({ registrations: [guard] }).contract,
+		},
+	);
+	yolo.registry.register(
+		createAskUserTool({
+			askUser: async (questions) => {
+				const label = questions[0]?.options?.at(-1)?.label ?? "";
+				return { answers: [{ question: questions[0]?.question ?? "", answer: label, options: [label] }] };
+			},
+		}),
+	);
+	const turn = { sessionId: "session-1", turnId: "turn-1" };
+	const call = bash("bash probe.sh", { unsandboxed: true });
+	const refused = await yolo.registry.invoke(call, turn);
+	ok(refused.kind === "blocked" && refused.denial !== undefined);
+	const [account, remedy] = denialLines(refused.denial);
+	strictEqual(account.includes("Not retryable"), false, account);
+	match(account, /until the operator answers an ask_user question/u);
+	match(remedy, /session option/u);
+	match(refused.reason, /rerun the call after they choose it/u);
+	await yolo.registry.invoke(
+		{
+			tool: ToolNames.AskUser,
+			args: {
+				action: "ask",
+				mode: "single_question",
+				questions: [{ question: "Run probe.sh outside the sandbox?", options: [{ label: "Yes, once" }] }],
+			},
+		},
+		turn,
+	);
+	strictEqual(entries.length, 1);
+	for (const rerun of [1, 2]) strictEqual((await yolo.registry.invoke(call, turn)).kind, "ok", `rerun ${rerun}`);
 });

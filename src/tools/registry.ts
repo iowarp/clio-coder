@@ -2126,6 +2126,39 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return refused;
 	};
 
+	/**
+	 * A sandbox escape contained yolo refused while its session option rides the next ask_user question (M-7):
+	 * the account says its repeat is refused only until the operator answers, which is when the registry forgets
+	 * refusals, and what the operator chooses to allow it. The denial object is amended in place, so the unattended
+	 * refusal stays one the registry remembers.
+	 */
+	const escapeAnswerable = <V extends RegistryVerdict>(verdict: V): V => {
+		if (verdict.kind !== "blocked" || verdict.denial === undefined) return verdict;
+		verdict.denial.untilOperatorAnswers = true;
+		verdict.denial.allowedBy = ESCAPE_SCOPE_ALLOWED_BY;
+		return verdict;
+	};
+
+	/**
+	 * Escape refusals already left out of the loop guard, by turn, mutation epoch and call identity (M-7). The first
+	 * refusal of a sandbox escape whose session option ask_user carries is the operator's decision still to come, not a
+	 * failed attempt: once they grant the scope, the reruns are the call's first runs. A later refusal of the same call
+	 * (a repeat before any answer, or after an answer that granted nothing) counts as usual, so repeats stay bounded.
+	 */
+	const uncountedEscapes = new Set<string>();
+	const firstEscapeRefusal = (call: ClassifierCall, options: ToolInvokeOptions | undefined): boolean => {
+		const turnId = options?.turnId;
+		if (turnId === undefined) return false;
+		const key = `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
+		if (uncountedEscapes.has(key)) return false;
+		uncountedEscapes.add(key);
+		if (uncountedEscapes.size > DENIED_CALL_MEMORY_LIMIT) {
+			const oldest = uncountedEscapes.values().next().value;
+			if (oldest !== undefined) uncountedEscapes.delete(oldest);
+		}
+		return true;
+	};
+
 	/** Registry verdict and audit row for a hard denial past the safety net. */
 	const deniedVerdict = (
 		call: ClassifierCall,
@@ -2663,10 +2696,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					decision: blocked,
 				},
 				"clio_policy",
-				judged.allowedBy,
+				scopeHint === null ? judged.allowedBy : ESCAPE_SCOPE_ALLOWED_BY,
 				reasonCode,
 			);
-			return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
+			if (scopeHint === null) return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
+			const answerable = escapeAnswerable(verdict);
+			if (firstEscapeRefusal(admissionCall, options)) return answerable;
+			return observeBlockedAttempt(admissionCall, answerable, options) ?? answerable;
 		}
 		const judgeGate = judged.kind === "park" ? { gateReason: judged.gateReason, gateBuild: judged.build } : {};
 		if (unattended) {
@@ -2678,8 +2714,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			else if (judged.kind === "park")
 				observeUnattendedRefusal(admissionCall, outcome.decision, "no-verdict", judged.cause);
 			else observeUnattendedRefusal(admissionCall, outcome.decision, "operator-only");
-			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
-			return (
+			const loopReason =
+				scopeHint !== null && firstEscapeRefusal(admissionCall, options)
+					? null
+					: observeRejectedAttempt(admissionCall, outcome.decision, options);
+			const refused =
 				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
 				parkDenial(
 					parkAnsweredBlockedVerdict(
@@ -2689,8 +2728,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						judged.kind === "park" ? judged.gateReason : outwardUnnamed ? containedOutwardReason(judged.rule) : undefined,
 					),
 					CONTAINED_YOLO_REASON,
-				)
-			);
+				);
+			return scopeHint === null || loopReason !== null ? refused : escapeAnswerable(refused);
 		}
 		// A park settles only through a listener's answer, so with no listener
 		// the promise would never resolve. Refuse the call instead, fail closed.
@@ -3331,6 +3370,9 @@ const CONTAINED_YOLO_ALLOWED_BY =
 	"only the operator can decide it, when they are back; contained yolo never waits for them.";
 /** Audit code of a sandbox escape that ran inside a scope the operator approved for the session (M-7). */
 const ESCAPE_SCOPE_ALLOW_REASON_CODE = "escape_scope_session";
+/** What allows a sandbox escape whose session option ask_user carries (M-7). */
+const ESCAPE_SCOPE_ALLOWED_BY =
+	"the operator chooses the session option Clio adds to an ask_user question that names running it outside the sandbox; then rerun the call.";
 /** Why contained yolo refused a sandbox escape that a session option could approve. */
 const CONTAINED_YOLO_ESCAPE_REASON =
 	"refused: contained yolo runs without waiting for the operator, and this call leaves the sandbox, which needs their decision.";
