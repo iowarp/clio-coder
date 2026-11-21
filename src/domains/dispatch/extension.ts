@@ -172,6 +172,7 @@ import {
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
+	WORKER_REFUSAL_LIMIT,
 	WORKER_REFUSAL_LIMIT_PREFIX,
 	WORKER_SPEC_HOOKLESS_VERSION,
 	type WorkerBudget,
@@ -345,7 +346,6 @@ import {
 	createNodeLeaseUsageReader,
 	mainCacheLaneStore,
 } from "./capacity-lease.js";
-import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	AbortReason,
 	DispatchAdmissionObserver,
@@ -416,7 +416,7 @@ import {
 	judgeWithheldCause,
 } from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
-import { answerBudgetMessage, sealedAnswerBudgetBytes } from "./handback.js";
+import { answerBudgetMessage, sealedAnswerBudgetBytes, wallHandbackOutcomeDetail } from "./handback.js";
 import {
 	classifyHeartbeat,
 	DEFAULT_HEARTBEAT_SPEC,
@@ -469,7 +469,6 @@ import {
 	runStatusForOutcome,
 } from "./outcome.js";
 import { dispatchOwnership, sessionAncestorIds } from "./ownership.js";
-import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
@@ -536,7 +535,7 @@ import {
 	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
-import { planCardLimits } from "./run-limits.js";
+import { planCardLimits, resolveRunLimits, resolveRunWall, runWallCapMs, wallClockMessage } from "./run-limits.js";
 import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
@@ -655,6 +654,7 @@ import {
 	writeRootRequestDetail,
 	writeRootRequestFromEntries,
 } from "./write-root-requests.js";
+import { canonicalWriteRoots, joinWriterSet, type WriterSetLease } from "./writer-set.js";
 
 /**
  * What a running worker has spent, as its own call telemetry folds it. Absent until the first frame reaches the
@@ -1485,6 +1485,8 @@ function reportDispatchDiagnostic(scope: string, error: unknown): void {
 const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	// The same restricted context meets the same target on every attempt.
 	"information_flow_blocked",
+	// The wall clock moved the run to handback; whatever it hit after that, it seals timed_out (fleet M8).
+	"worker_run_timeout",
 	"worker_context_exhausted",
 	"worker_turn_timeout",
 	"worker_output_cap_exhausted",
@@ -1531,6 +1533,9 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 	const code = OUTCOME_CODE_SPECIFICITY.find((candidate) => codes.has(candidate)) ?? null;
 	if (codes.size <= 1) return { code, conflict: null };
 	if ([...codes].every((candidate) => LOOP_DEGENERATION_CODES.has(candidate))) return { code, conflict: null };
+	// A run the wall clock moved to handback that then ends without an answer is one story, told at settle (fleet M8).
+	if (code === "worker_run_timeout" && codes.size === 2 && codes.has("worker_final_output_missing"))
+		return { code, conflict: null };
 	return {
 		code,
 		conflict: `conflicting trusted outcome codes: ${[...codes].sort().join(", ")}`,
@@ -2147,6 +2152,8 @@ export interface WorkerDynamicContext {
 	ledgerAssignments?: ReadonlyArray<LedgerAssignment>;
 	/** The run's answer budget; the worker is told it so it writes to fit (M3). */
 	answerBudgetBytes?: number;
+	/** The run's wall clock; the worker is told it so it reports before the wall (M8). */
+	wallClockMs?: number;
 	/** Selects the handbook audience with the capability class; never tier policy. */
 	capabilityClass?: AgentCapabilityClass | null;
 	/** Recipe id, which names the handbook audience for built-in roles. */
@@ -2366,6 +2373,10 @@ export function buildDynamicPromptMessages(
 	if (dynamicContext.answerBudgetBytes !== undefined) {
 		const body = answerBudgetMessage(dynamicContext.answerBudgetBytes);
 		messages.push({ id: "dispatch-answer-budget", body, contentHash: sha256(body) });
+	}
+	if (dynamicContext.wallClockMs !== undefined) {
+		const body = wallClockMessage(dynamicContext.wallClockMs);
+		messages.push({ id: "dispatch-wall-clock", body, contentHash: sha256(body) });
 	}
 	if (req.briefing !== undefined) {
 		const body = [
@@ -2700,32 +2711,32 @@ function supportsRequiredCapabilities(
 
 function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	if (runtimeKind === "sdk" && runtimeId === "claude-sdk") {
-		return ["Claude Agent SDK executes Claude Code tools; Clio mediates canUseTool decisions and records denials"];
+		return ["Claude Agent SDK executes Claude Code tools; CLIO Coder mediates canUseTool decisions and records denials"];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "claude-code") {
 		return [
-			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
+			"Claude CLI subprocess executes Claude Code tools; CLIO Coder constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "codex-cli") {
 		return [
-			"Codex CLI executes its own tools; Clio selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
-			"Codex CLI login and model configuration belong to the installed codex command; Clio only observes its JSONL run stream",
+			"Codex CLI executes its own tools; CLIO Coder selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
+			"Codex CLI login and model configuration belong to the installed codex command; CLIO Coder only observes its JSONL run stream",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "opencode-cli") {
 		return [
-			"OpenCode CLI owns its tools and permissions; Clio observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
+			"OpenCode CLI owns its tools and permissions; CLIO Coder observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "pi-cli") {
 		return [
-			"Pi CLI owns its tools; Clio can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
+			"Pi CLI owns its tools; CLIO Coder can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "antigravity-code") {
 		return [
-			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; Clio observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
+			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; CLIO Coder observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
 			"Antigravity resumes a conversation only when the caller supplies its id explicitly",
 			"Antigravity runs are one-shot and never retried automatically",
 		];
@@ -3169,7 +3180,7 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	if (!writeRoots || writeRoots.length === 0) return;
 	if (runtimeEnforcement(runtime).scopeEnforcement) return;
 	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
+		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without CLIO Coder per-tool mediation. Dispatch to a native or claude-sdk worker.`,
 	);
 }
 
@@ -3436,7 +3447,7 @@ function assertResponseSchemaEnforceable(
 
 function acpRuntimeLimitations(): string[] {
 	return [
-		"external ACP agent executes its own unknown tool surface; Clio mediates permission requests and records decisions",
+		"external ACP agent executes its own unknown tool surface; CLIO Coder mediates permission requests and records decisions",
 	];
 }
 
@@ -3733,6 +3744,26 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	);
 	const settings = input.settings ?? config?.get();
 	const readOnly = input.envelope.write.mode === "none";
+	// DESIGN 4.5: what stops this run, sealed once. Dispatch stamped the wall clock; a direct builder resolves it here.
+	const limitSettings = settings ?? DEFAULT_SETTINGS;
+	const wall =
+		input.req.runWallMs !== undefined && input.req.assignmentDeadlineAt !== undefined
+			? { wallMs: input.req.runWallMs, deadlineAt: input.req.assignmentDeadlineAt }
+			: resolveRunWall({
+					capMs: runWallCapMs(limitSettings.fleet.limits, input.req.requestOrigin),
+					...(input.recipe?.budget?.timeoutMs !== undefined ? { recipeMs: input.recipe.budget.timeoutMs } : {}),
+					startedAt: Date.now(),
+					...(input.req.assignmentDeadlineAt !== undefined ? { deadlineAt: input.req.assignmentDeadlineAt } : {}),
+				});
+	const limits = resolveRunLimits({
+		role: input.role,
+		wallMs: wall.wallMs,
+		deadlineAt: wall.deadlineAt,
+		responseSeconds: limitSettings.safety.limits.workerResponseSeconds,
+		toolCeiling: input.budget.ceiling ?? input.budget.hardCap,
+		maxRetries: limitSettings.fleet.retry.maxRetries,
+		refusals: WORKER_REFUSAL_LIMIT,
+	});
 	const spec: WorkerSpec = {
 		...(input.req.runIdHint
 			? {
@@ -3764,6 +3795,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		envelope: input.envelope,
 		...(input.req.ledger !== undefined ? { ledger: input.req.ledger } : {}),
 		budget: input.budget,
+		limits,
 		middlewareSnapshot: input.middlewareSnapshot,
 		permit: input.permit,
 		...(input.flowPolicy !== undefined ? { flowPolicy: structuredClone(input.flowPolicy) } : {}),
@@ -5389,7 +5421,7 @@ export function createDispatchBundle(
 			return {
 				scheduled: false,
 				settlementDetail:
-					"automatic retry suppressed because this external agent loop is one-shot and Clio cannot prove replay is side-effect-free",
+					"automatic retry suppressed because this external agent loop is one-shot and CLIO Coder cannot prove replay is side-effect-free",
 			};
 		}
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
@@ -6089,10 +6121,13 @@ export function createDispatchBundle(
 		}
 	}
 
-	/** Explicit deadlines outlive queue admission and use the ordinary truthful abort path. */
-	function watchAssignmentDeadline(run: ActiveRun, callerDeadlineAt?: number): void {
+	/**
+	 * Every run's deadline (its wall clock, or an earlier one the call set) outlives queue admission and the caller, so a
+	 * detached run is stopped too; it seals timed_out through the ordinary abort path (DESIGN 4.5).
+	 */
+	function watchAssignmentDeadline(run: ActiveRun): void {
 		const deadlineAt = run.req.assignmentDeadlineAt;
-		if (deadlineAt === undefined || (callerDeadlineAt !== undefined && deadlineAt >= callerDeadlineAt)) return;
+		if (deadlineAt === undefined) return;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let settled = false;
 		const check = (): void => {
@@ -6833,6 +6868,7 @@ export function createDispatchBundle(
 		const dynamicContext: WorkerDynamicContext = {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
 			answerBudgetBytes,
+			...(req.runWallMs !== undefined ? { wallClockMs: req.runWallMs } : {}),
 			capabilityClass: spec.capabilityClass,
 			agentId: recipe.id,
 			workingContextPaths: pathScope.workingContextPaths,
@@ -6996,7 +7032,7 @@ export function createDispatchBundle(
 		assertWorkerContextRequest(req, false);
 		if (req.storeTags !== undefined && req.storeTags.length > 0) {
 			throw new Error(
-				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no Clio store tool. Dispatch to a native worker.",
+				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no CLIO Coder store tool. Dispatch to a native worker.",
 			);
 		}
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
@@ -7007,7 +7043,7 @@ export function createDispatchBundle(
 		// so no ACP peer can keep a read-only run from changing user files.
 		if (req.readOnly === true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so Clio cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
+				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so CLIO Coder cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
 			);
 		}
 		// Operator decision Q6: agent-managed governance approves every call the
@@ -7015,7 +7051,7 @@ export function createDispatchBundle(
 		// operator's explicit trust.
 		if (toolGovernance === "agent-managed" && configured.trustedUnmediated !== true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so Clio cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so CLIO Coder cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
@@ -7278,7 +7314,6 @@ export function createDispatchBundle(
 		routeDecision: RouteDecisionV1,
 		probeClaims: ProbeClaim[],
 		observer?: DispatchAdmissionObserver,
-		callerDeadlineAt?: number,
 		hostRun?: DispatchPreparationOptions["hostRun"],
 		signal?: AbortSignal,
 	): Promise<{
@@ -8240,7 +8275,7 @@ export function createDispatchBundle(
 		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
-		watchAssignmentDeadline(activeRun, callerDeadlineAt);
+		watchAssignmentDeadline(activeRun);
 		// The handle goes out once the running row is durable, as it did with the
 		// sync writer: a sibling session's steer reads ownership from runs.json,
 		// and without the row it fell through to the assignment and let a foreign
@@ -8378,7 +8413,6 @@ export function createDispatchBundle(
 				routeObservation.decision,
 				probeClaims,
 				observer,
-				preparation?.deadlineAt,
 				hostRun,
 				preparation?.signal,
 			);
@@ -8589,7 +8623,7 @@ export function createDispatchBundle(
 				: null;
 			if (claudeLaunch && lifecycle.authProfile && !launchCredential) {
 				throw new Error(
-					"Clio's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
+					"CLIO Coder's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
 				);
 			}
 			const launchAuthProfile = claudeLaunch
@@ -8987,7 +9021,13 @@ export function createDispatchBundle(
 			throw error;
 		}
 		if (!heldFollower) timing.workerSpawnedAt = new Date(now()).toISOString();
-		const abort = () => worker.abort();
+		// The wall clock and a call's timeout_ms can both stop a run; its worker is stopped once (fleet M8).
+		let workerAborted = false;
+		const abort = (): void => {
+			if (workerAborted) return;
+			workerAborted = true;
+			worker.abort();
+		};
 		const sendToWorker = worker.send?.bind(worker);
 		answerHook = sendToWorker;
 		const steeringProvenance: RunSteeringProvenance[] = [];
@@ -10264,6 +10304,24 @@ export function createDispatchBundle(
 				// The worker's own reason is what separates a model that cannot
 				// meet a grounding rule from a prompt that asks for the impossible.
 				const outcomeCodeDetail = outcomeCode === null ? undefined : trustedOutcomeDetails.get(outcomeCode);
+				// DESIGN 4.5 (fleet M8): a run its wall clock moved to handback seals timed_out, and the host, not the
+				// worker's line written at the handback, says whether a report came back.
+				if (outcomeCode === "worker_run_timeout") {
+					const handback = wallHandbackOutcomeDetail({
+						reported: hasDurableFinalOutput(outputCapture.snapshot()),
+						unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+						hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+						exitCode: result.exitCode ?? null,
+						signal: result.signal ?? null,
+					});
+					if (finalOutcome === "succeeded" || finalOutcome === "failed") {
+						finalOutcome = "timed_out";
+						finalDetail = handback;
+						failureMessage = finalDetail;
+					} else if (finalOutcome === "timed_out") {
+						finalDetail = [handback, finalDetail].filter(Boolean).join("; ");
+					}
+				}
 				if (outcomeCodeDetail !== undefined && finalOutcome === "failed") {
 					finalDetail = [finalDetail, outcomeCodeDetail].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
@@ -10605,7 +10663,8 @@ export function createDispatchBundle(
 				// A worker stopped at its tool-call cap, or one that reported it did not
 				// finish, commits what it changed on its preserved branch as a partial
 				// result: never merged, never dropped.
-				const cappedPartial = !workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined);
+				const cappedPartial =
+					!workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined, finalOutcome);
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
@@ -10658,7 +10717,7 @@ export function createDispatchBundle(
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
-							finalDetail = `${finalDetail}; its work is committed on the preserved branch ${req.taskWorktree.branch}, and \`clio-coder fleet land ${req.taskWorktree.branch}\` applies it if you accept the failed check`;
+							finalDetail = `${finalDetail}; its work is committed on the preserved branch ${req.taskWorktree.branch}, \`clio-coder fleet land ${req.taskWorktree.branch}\` previews the merge and \`clio-coder fleet land ${req.taskWorktree.branch} --yes\` lands it if you accept the failed check`;
 							failureMessage = finalDetail;
 						}
 					} else if (mergeWithheld) {
@@ -11148,7 +11207,7 @@ export function createDispatchBundle(
 
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
-		watchAssignmentDeadline(activeRun, preparation?.deadlineAt);
+		watchAssignmentDeadline(activeRun);
 		// Same as the ACP path: return the handle once the running row is durable (#428).
 		await runningRowPersisted;
 
@@ -11241,15 +11300,25 @@ export function createDispatchBundle(
 		// join the original writer group through lineage.rootRunId (#434).
 		if (placedInOwnWorktree(req)) req = { ...req, worktree: true };
 		if (req.runIdHint === undefined && req.worktree !== true) req = { ...req, runIdHint: newRunId() };
-		let prepared =
-			preparation?.deadlineAt === undefined
-				? req
-				: {
-						...req,
-						assignmentDeadlineAt: Math.min(req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY, preparation.deadlineAt),
-					};
+		// DESIGN 4.5: every run has a wall clock from this call, so time queued for a slot counts; a retry keeps its root's.
+		const wallRecipe = agents.get(req.agentId);
+		const recipeWallMs = wallRecipe === null ? undefined : normalizeAgentSpec(wallRecipe).budget?.timeoutMs;
+		const wallClock = resolveRunWall({
+			capMs: runWallCapMs((getEffectiveSettings() ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
+			...(recipeWallMs !== undefined ? { recipeMs: recipeWallMs } : {}),
+			startedAt: now(),
+			deadlineAt: Math.min(
+				req.assignmentDeadlineAt ?? Number.POSITIVE_INFINITY,
+				preparation?.deadlineAt ?? Number.POSITIVE_INFINITY,
+			),
+		});
+		let prepared: DispatchRequest = {
+			...req,
+			assignmentDeadlineAt: wallClock.deadlineAt,
+			runWallMs: req.runWallMs ?? wallClock.wallMs,
+		};
 		let createdWorktree: DispatchRequest["taskWorktree"];
-		let writerLease: CheckoutWriterLease | undefined;
+		let writerLease: WriterSetLease | undefined;
 		const writerRecipe = agents.get(req.agentId);
 		if (writerRecipe !== null && normalizeAgentSpec(writerRecipe).capabilityClass === "workspace-edit") {
 			const checkout = req.taskWorktree?.root ?? gitCheckoutRoot(req.cwd ?? process.cwd());
@@ -11257,9 +11326,16 @@ export function createDispatchBundle(
 				const roots = canonicalWriteRoots(req);
 				const runId = req.runIdHint ?? req.lineage?.rootRunId;
 				try {
-					writerLease = acquireCheckoutWriterLease({
+					// A writer that would overlap a live set queues behind it until its run's deadline (DESIGN 4.5).
+					writerLease = await joinWriterSet({
 						checkout,
-						...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
+						deadlineAt: wallClock.deadlineAt,
+						...(preparation?.signal !== undefined ? { signal: preparation.signal } : {}),
+						onQueued: (waitingOn) =>
+							reportDispatchDiagnostic(
+								`writer set for ${req.agentId}`,
+								new Error(`queued behind ${waitingOn}; it starts when that settles`),
+							),
 						// A read-only run writes nothing, so it carries no holder: the envelope's one definition of read-only.
 						...(requestedWriteNone({
 							readOnly: req.readOnly,
@@ -11268,7 +11344,7 @@ export function createDispatchBundle(
 						})
 							? {}
 							: {
-									holder: {
+									member: {
 										// One dispatch call's requests, and their retries, share a group.
 										group: req.parentToolCallId ?? req.lineage?.rootRunId ?? req.runIdHint ?? newRunId(),
 										roots: roots.length > 0 ? roots : null,
@@ -11649,6 +11725,11 @@ export function createDispatchBundle(
 				budget,
 				nativeWorker: target.runtime.kind === "http",
 				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
+				wallMs: resolveRunWall({
+					capMs: runWallCapMs((settings ?? DEFAULT_SETTINGS).fleet.limits, req.requestOrigin),
+					...(agentSpec.budget?.timeoutMs !== undefined ? { recipeMs: agentSpec.budget.timeoutMs } : {}),
+					startedAt: 0,
+				}).wallMs,
 			}),
 			writes: writeModeLine(stage.envelope.write),
 			...(stage.envelope.withheld.length > 0 ? { withheld: withheldLines(stage.envelope.withheld) } : {}),

@@ -512,7 +512,7 @@ export function verifyTelemetryScope(files: TelemetryScopeFiles, scans?: readonl
 		const undecoded = walk.skipped.get(id);
 		if (!undecoded) return null;
 		const version = readClioVersion();
-		return `${label} ${id}${undecoded.k !== undefined ? ` (${undecoded.k})` : ""} is present but does not decode: ${undecoded.reason}${manifest.clioCoderVersion !== version ? `; written by Clio ${manifest.clioCoderVersion}, read by Clio ${version}` : ""}`;
+		return `${label} ${id}${undecoded.k !== undefined ? ` (${undecoded.k})` : ""} is present but does not decode: ${undecoded.reason}${manifest.clioCoderVersion !== version ? `; written by CLIO Coder ${manifest.clioCoderVersion}, read by CLIO Coder ${version}` : ""}`;
 	};
 	const unreadable = unreadableRecord(manifest.seal.recordId, "seal record");
 	if (!last) return failed({ kind: "seal", detail: unreadable ?? `seal record ${manifest.seal.recordId} not found` });

@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -246,7 +246,7 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 		match(text, /approved before the batch detaches/);
 		match(text, /dispatch \(detached\) batch=/);
 		deepStrictEqual(approvals, [root, root, root]);
-		// A detach the runner cannot honour is refused before any approval is asked.
+		// Each run's own deadline enforces timeout_ms, so a detached call keeps it (DESIGN 4.5, M8).
 		const timed = tool.prepareAdmissionArguments?.({
 			...scout,
 			task: "Inspect the sibling checkout.",
@@ -254,12 +254,10 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 			timeout_ms: 60_000,
 		});
 		ok(timed);
-		const timedOut = await tool.run(timed);
-		equal(timedOut.kind, "error");
-		match(timedOut.kind === "error" ? timedOut.message : "", /detach cannot enforce timeout_ms/);
-		// The refused call carries no normalize notice promising an approval and a detached start (CLI-P34).
-		doesNotMatch(timedOut.kind === "error" ? timedOut.message : "", /dispatch normalize/);
-		deepStrictEqual(approvals, [root, root, root]);
+		const timedDetached = await tool.run(timed);
+		equal(timedDetached.kind, "ok", JSON.stringify(timedDetached));
+		match(timedDetached.kind === "ok" ? timedDetached.output : "", /dispatch \(detached\) batch=/);
+		deepStrictEqual(approvals, [root, root, root, root]);
 	} finally {
 		await bundle.extension.stop?.();
 	}

@@ -220,7 +220,7 @@ it("explains a discovered but untrusted skill without claiming it is unknown or 
 			{ pendingSkillPolicy: automaticPolicy() },
 		);
 		ok(result.kind === "error");
-		match(result.message, /not imported into Clio/);
+		match(result.message, /not imported into CLIO Coder/);
 		deepStrictEqual(result.details?.refusal, {
 			subject: "skill",
 			name: "foreign-only",

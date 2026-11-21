@@ -358,5 +358,5 @@ it("closed sessions carry no success claim, and the legend names the row marker 
 	assert.match(f.lines().join("\n"), /Failed task/u);
 	assert.doesNotMatch(f.lines().join("\n"), /✓/u);
 	assert.ok(f.lines().some((line) => line.includes("◌ 3 turns")));
-	assert.ok(f.lines().some((line) => line.includes("● open in a running Clio · ◌ not open")));
+	assert.ok(f.lines().some((line) => line.includes("● open in a running CLIO Coder · ◌ not open")));
 });

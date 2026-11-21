@@ -132,7 +132,7 @@ function resolved(api: Api): EngineRegisteredApiProvider {
 function refuseRetiredCopilotProvider(model: Model<Api>): void {
 	if (model.provider === "github-copilot") {
 		throw new Error(
-			"Clio does not stream through Pi's github-copilot provider; use a target on the copilot-sdk runtime.",
+			"CLIO Coder does not stream through Pi's github-copilot provider; use a target on the copilot-sdk runtime.",
 		);
 	}
 }

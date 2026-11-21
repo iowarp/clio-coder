@@ -75,7 +75,7 @@ export class ClaudeAgentSdkUnavailableError extends Error {
 		super(
 			prepared
 				? `No ${CLAUDE_AGENT_SDK_PACKAGE} in prepared prefix ${prepared}. Ask its administrator to provision node_modules/${CLAUDE_AGENT_SDK_PACKAGE}, or unset CLIO_CODER_CLAUDE_SDK_DIR and run: ${CLAUDE_AGENT_SDK_INSTALL_COMMAND}`
-				: `The Claude SDK runtime needs ${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION}. Run: ${CLAUDE_AGENT_SDK_INSTALL_COMMAND}. This installs a separate component at ${operatorComponentDir(COMPONENT_ID, CLAUDE_AGENT_SDK_VERSION)}; it does not change Clio's installation.`,
+				: `The Claude SDK runtime needs ${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION}. Run: ${CLAUDE_AGENT_SDK_INSTALL_COMMAND}. This installs a separate component at ${operatorComponentDir(COMPONENT_ID, CLAUDE_AGENT_SDK_VERSION)}; it does not change CLIO Coder's installation.`,
 		);
 		this.name = "ClaudeAgentSdkUnavailableError";
 	}
@@ -101,7 +101,7 @@ export function claudeSdkNpmCommand(
 		}
 	}
 	throw new Error(
-		`No npm available for Node at ${node}${managed ? " in its managed runtime" : " beside Node or on PATH"}. Install npm through your system's supported method${managed ? " or repair the managed runtime" : " and put it on PATH"}${preparedPrefixHint}. Clio will not download Node or npm.`,
+		`No npm available for Node at ${node}${managed ? " in its managed runtime" : " beside Node or on PATH"}. Install npm through your system's supported method${managed ? " or repair the managed runtime" : " and put it on PATH"}${preparedPrefixHint}. CLIO Coder will not download Node or npm.`,
 	);
 }
 

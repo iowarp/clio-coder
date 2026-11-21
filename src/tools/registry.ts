@@ -655,6 +655,12 @@ export interface ToolInvokeOptions {
 	supportsImages?: boolean;
 	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
 	contextWindow?: number;
+	/**
+	 * Dispatched workers only (DESIGN 4.5): the run's observation pool, keyed by `runId` instead of a turn and sized from
+	 * the usable window's work share; `resultCapBytes` caps one result at what the work share has left.
+	 * `runObservationPool` in `observation.ts` sizes it.
+	 */
+	observationRunPool?: { limitBytes: number; resultCapBytes: number };
 	/** Trusted model the call runs on, as tool hooks receive it; the worker's own model in a worker. */
 	model?: ModelRunInfo;
 	signal?: AbortSignal;
@@ -2089,7 +2095,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					? `the project's safety policy${policy.ruleId !== undefined ? ` rule ${policy.ruleId}` : ""} must change, which only the operator can do.`
 					: policy?.reasonCode.startsWith(YOLO_FLOOR_REASON_PREFIX) === true
 						? "nothing within this run; it is the yolo floor, which holds at every autonomy level."
-						: "nothing within this run; it is a hard block of Clio's safety net.";
+						: "nothing within this run; it is a hard block of CLIO Coder's safety net.";
 			return {
 				kind: "terminal",
 				verdict: withDenial(
@@ -3529,7 +3535,7 @@ const ESCAPE_SCOPE_WAIT = "Until the operator answers, do not retry this call or
 
 /** Why a refused sandbox escape gets no session option, and what can still let it run. */
 function escapeNoScopeLine(why: string): string {
-	return `Clio offers no session option for this call because ${why}; it runs only when an operator message, or an ask_user question the operator approves, names running it outside the sandbox.`;
+	return `CLIO Coder offers no session option for this call because ${why}; it runs only when an operator message, or an ask_user question the operator approves, names running it outside the sandbox.`;
 }
 
 /** The ask a granted escape scope answered, as the allow that runs it. */
@@ -3544,7 +3550,7 @@ function escapeScopeAllowedDecision(ask: SafetyDecision): SafetyDecision {
 }
 /** Why contained yolo refused an outward call the judge allowed under a rule other than operator-named. */
 function containedOutwardReason(rule: string): string {
-	return `Clio's safety judge allowed this outward call under rule ${rule}, but contained yolo publishes only what an operator message explicitly names.`;
+	return `CLIO Coder's safety judge allowed this outward call under rule ${rule}, but contained yolo publishes only what an operator message explicitly names.`;
 }
 const PARK_ABORT_REASON = "run aborted before the operator decided";
 /** Audit and event code of an identical repeat refused from the turn's denial memory. */

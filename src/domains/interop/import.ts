@@ -261,7 +261,7 @@ export function libraryImportPlanSummary(plan: LibraryImportPlan): Omit<LibraryI
 
 export function renderLibraryImportPlan(plan: LibraryImportPlan): string {
 	const lines = [
-		`Import ${plan.source.transport === "github" ? plan.source.url : plan.source.path} into Clio (${plan.scope})?`,
+		`Import ${plan.source.transport === "github" ? plan.source.url : plan.source.path} into CLIO Coder (${plan.scope})?`,
 		`  Format: ${plan.format ?? "unknown"}${plan.detection.manifestPath ? ` (${plan.detection.manifestPath})` : ""}`,
 		...(plan.action === "install"
 			? [`  Package: ${plan.id} ${plan.version}`, `  Destination: ${plan.destination}`, `  SHA-256: ${plan.digest}`]

@@ -66,7 +66,7 @@ function runsInContainer(facts: YoloHostFacts): boolean {
 
 /** What the operator reads when yolo is refused. */
 export const YOLO_ROOT_REFUSAL =
-	"yolo is refused: Clio runs as root outside a container, where an unattended command can damage the whole host. Run as a regular user, run inside a container, or set CLIO_CODER_SANDBOXED=1 to attest that this process is already sandboxed.";
+	"yolo is refused: CLIO Coder runs as root outside a container, where an unattended command can damage the whole host. Run as a regular user, run inside a container, or set CLIO_CODER_SANDBOXED=1 to attest that this process is already sandboxed.";
 
 /** The refusal, or null when yolo may run here. */
 export function yoloRootRefusal(facts: YoloHostFacts = readYoloHostFacts()): string | null {

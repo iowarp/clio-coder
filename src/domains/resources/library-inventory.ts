@@ -581,7 +581,7 @@ function fromSkill(skill: Skill, index: OwnerIndex): LibraryComponent {
 		: !skill.trusted
 			? skill.source === "plugin"
 				? "imported package is untrusted; review it and enable integrations.projectResources.trustProjectImports"
-				: "discovered only; explicitly import into Clio with interop adopt or library import"
+				: "discovered only; explicitly import into CLIO Coder with interop adopt or library import"
 			: undefined;
 	const scope = skill.scope === "cli" ? "user" : skill.scope;
 	return {
@@ -617,7 +617,7 @@ function fromPrompt(template: PromptTemplate, index: OwnerIndex): LibraryCompone
 		: !template.trusted
 			? scope === "package"
 				? "imported package is untrusted; review it and enable integrations.projectResources.trustProjectImports"
-				: "discovered only; explicitly import into Clio with interop adopt or library import"
+				: "discovered only; explicitly import into CLIO Coder with interop adopt or library import"
 			: undefined;
 	return {
 		key: libraryComponentKey(

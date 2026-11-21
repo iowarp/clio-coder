@@ -138,7 +138,7 @@ export function assertClioDirLayout(dirs: ClioDirs = resolveClioDirs()): void {
 	const problems = clioDirLayoutProblems(dirs);
 	if (problems.length === 0) return;
 	throw new Error(
-		`Unsafe Clio directory layout:\n${problems.map((problem) => `  - ${problem}`).join("\n")}\n` +
+		`Unsafe CLIO Coder directory layout:\n${problems.map((problem) => `  - ${problem}`).join("\n")}\n` +
 			"Set four absolute, distinct, non-nesting CLIO_CODER_*_DIR paths, then run `clio-coder doctor`.",
 	);
 }
@@ -365,7 +365,7 @@ export function removableClioRootProblem(role: ClioDirRole, path: string): strin
 		if (role === "config" || role === "state") return null;
 		const foreign = foreignRootEntry(role, path);
 		if (foreign === null) return null;
-		return `no ${CLIO_ROOT_MARKER} inside and it holds ${foreign}, which Clio does not create there`;
+		return `no ${CLIO_ROOT_MARKER} inside and it holds ${foreign}, which CLIO Coder does not create there`;
 	}
 	return `no ${ROLE_OWNERSHIP_FILE[role]} inside and not named clio-coder`;
 }

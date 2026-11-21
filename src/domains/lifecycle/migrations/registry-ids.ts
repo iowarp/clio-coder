@@ -17,6 +17,7 @@ export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-10-31-remove-old-telemetry",
 	"2026-11-02-approvals-to-config",
 	"2026-11-07-remove-copilot-consent",
+	"2026-11-21-retire-fleet-locks",
 ]);
 
 /**
@@ -51,8 +52,10 @@ export function legacyMigrationManifestPath(stateDir: string): string {
 }
 
 /**
- * What to tell an operator whose settings.yaml fails validation while a
- * registered migration is unrecorded: `clio-coder upgrade` applies it. A home
+ * What to tell an operator whose settings.yaml fails on a key or value the
+ * unrecorded `2026-11-21-retired-settings` migration rewrites: `clio-coder
+ * upgrade` applies it. The caller decides whether an issue is one; no other
+ * migration repairs a validation failure, so none is advised for one. A home
  * upgraded by a package manager, or a settings file provisioned with no
  * manifest, reaches the strict reader without that run. This only names the
  * command; nothing is read in the migration's place. Null when nothing is
@@ -72,8 +75,6 @@ export function pendingMigrationAdvice(): string | null {
 	if (!Array.isArray(applied)) return null;
 	const recorded = new Set(applied);
 	const pending = REGISTERED_MIGRATION_IDS.filter((id) => !recorded.has(id));
-	if (pending.length === 0) return null;
-	if (pending.includes("2026-11-21-retired-settings"))
-		return "run `clio-coder upgrade`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings";
-	return `run \`clio-coder upgrade\` to apply ${pending.length} pending migration${pending.length === 1 ? "" : "s"}`;
+	if (!pending.includes("2026-11-21-retired-settings")) return null;
+	return "run `clio-coder upgrade`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings";
 }

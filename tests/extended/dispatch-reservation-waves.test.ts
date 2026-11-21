@@ -118,8 +118,9 @@ for (const dimension of ["global", "node", "endpoint"] as const) {
 	for (const holder of ["other owner", "same-wave peer"] as const) {
 		it(`preserves ${holder} capacity at the ${dimension} limit`, () => {
 			const cap = { global: 2, nodes: { local: 2 }, endpoints: { [endpointKey]: 2 } };
-			const reservation = reserve(holder === "same-wave peer" ? [0, 0, 1, 1] : [0, 1], cap);
+			// An earlier plan keeps its place: a later one waits behind it (M8).
 			if (holder === "other owner") reserve([0], cap);
+			const reservation = reserve(holder === "same-wave peer" ? [0, 0, 1, 1] : [0, 1], cap);
 			const constrained = structuredClone(cap);
 			if (dimension === "global") constrained.global = 1;
 			else if (dimension === "node") constrained.nodes.local = 1;
@@ -221,8 +222,10 @@ it("another owner still sees the future reserved peak after the current wave rel
 	const first = transfer(reservation.ownerId, "task-1");
 	releaseCapacityLease(first.leaseId);
 	await releaseDispatchReservationMemberAsync(reservation.ownerId, "task-1");
+	// A later plan that fits the limits is reserved, not refused, and its members queue behind the earlier plan (M8).
+	const later = reserve();
 	const before = durableBytes();
-	throws(() => reserve(), /global concurrency capacity exceeded/);
+	throws(() => transfer(later.ownerId, "task-1"), /capacity reached/);
 	throws(
 		() => acquireCapacityLease({ assignmentId: "outsider", nodeId: "local", endpointKey, limits }),
 		/capacity reached/,
@@ -552,4 +555,69 @@ it("this host's own leases still enforce the global cap alongside another host's
 	releaseCapacityLease(second.leaseId);
 	releaseCapacityLease(first.leaseId);
 	releaseCapacityLease(foreignNamed.leaseId);
+});
+
+it("splits a 6-task plan on a 4-slot endpoint into two waves instead of refusing it (M8)", () => {
+	const cap = { global: 8, nodes: { local: 8 }, endpoints: { [endpointKey]: 4 } };
+	const reservation = createDispatchReservation({
+		topology: "parallel",
+		tasks: Array.from({ length: 6 }, (_, index) => ({
+			memberId: `task-${index + 1}`,
+			wave: 0,
+			nodeId: "local",
+			endpointKey,
+			costUpperBoundUsd: 0,
+		})),
+		capacity: {
+			global: { active: 0, limit: cap.global },
+			nodes: { local: { active: 0, limit: cap.nodes.local } },
+			endpoints: { [endpointKey]: { active: 0, limit: 4 } },
+			budget: { currentUsd: 0, ceilingUsd: 100 },
+		},
+	});
+	deepStrictEqual(
+		reservation.members.map((member) => member.wave),
+		[0, 0, 0, 0, 1, 1],
+	);
+	const first = ["task-1", "task-2", "task-3", "task-4"].map((memberId) => transfer(reservation.ownerId, memberId, cap));
+	throws(() => transfer(reservation.ownerId, "task-5", cap), /capacity reached/);
+	for (const lease of first) releaseCapacityLease(lease.leaseId);
+	const second = ["task-5", "task-6"].map((memberId) => transfer(reservation.ownerId, memberId, cap));
+	for (const lease of second) releaseCapacityLease(lease.leaseId);
+	releaseDispatchReservation(reservation.ownerId);
+});
+
+it("sizes waves to the endpoint slots the main turn leaves free, so every wave admits (M8)", () => {
+	// Main and workers share one capped target: the main turn holds a slot for as long as its dispatch call runs.
+	const cap = { global: 8, nodes: { local: 8 }, endpoints: { [endpointKey]: 4 } };
+	const releaseMain = registerForegroundStream(endpointKey);
+	try {
+		const reservation = createDispatchReservation({
+			topology: "parallel",
+			tasks: Array.from({ length: 6 }, (_, index) => ({
+				memberId: `task-${index + 1}`,
+				wave: 0,
+				nodeId: "local",
+				endpointKey,
+				costUpperBoundUsd: 0,
+			})),
+			capacity: {
+				global: { active: 0, limit: cap.global },
+				nodes: { local: { active: 0, limit: cap.nodes.local } },
+				endpoints: { [endpointKey]: { active: 1, limit: 4, leases: 0, foregroundStreams: 1 } },
+				budget: { currentUsd: 0, ceilingUsd: 100 },
+			},
+		});
+		deepStrictEqual(
+			reservation.members.map((member) => member.wave),
+			[0, 0, 0, 1, 1, 1],
+		);
+		const first = ["task-1", "task-2", "task-3"].map((memberId) => transfer(reservation.ownerId, memberId, cap));
+		for (const lease of first) releaseCapacityLease(lease.leaseId);
+		const second = ["task-4", "task-5", "task-6"].map((memberId) => transfer(reservation.ownerId, memberId, cap));
+		for (const lease of second) releaseCapacityLease(lease.leaseId);
+		releaseDispatchReservation(reservation.ownerId);
+	} finally {
+		releaseMain();
+	}
 });

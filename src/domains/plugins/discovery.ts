@@ -128,7 +128,7 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 		new Set(["manifestVersion", "kind", "requires", "compatibility", "resources", "components"]),
 		PLUGIN_EXTENSION_KEY,
 	);
-	if (value !== undefined && raw.manifestVersion !== 1) throw new Error("Clio plugin manifestVersion must be 1");
+	if (value !== undefined && raw.manifestVersion !== 1) throw new Error("CLIO Coder plugin manifestVersion must be 1");
 	const kind = raw.kind ?? "plugin";
 	if (!isLibraryKind(kind) || kind === "extension")
 		throw new Error("package kind must be plugin, skill, agent, prompt, or playbook");

@@ -108,12 +108,12 @@ export function createCodexQuotaProvider(options: CodexQuotaOptions = {}): Quota
 		async fetch(): Promise<UsageSnapshot> {
 			const credentials = await readCredentials();
 			if (credentials === null) {
-				return snapshot("no_credentials", "Clio holds no OpenAI Codex OAuth credential");
+				return snapshot("no_credentials", "CLIO Coder holds no OpenAI Codex OAuth credential");
 			}
 			if (credentials.expiresAtMs !== null && credentials.expiresAtMs <= now().getTime()) {
 				return snapshot(
 					"expired",
-					credentials.hasRefreshToken ? "Clio's OpenAI Codex token expired; the next turn refreshes it" : LOGIN_AGAIN,
+					credentials.hasRefreshToken ? "CLIO Coder's OpenAI Codex token expired; the next turn refreshes it" : LOGIN_AGAIN,
 				);
 			}
 

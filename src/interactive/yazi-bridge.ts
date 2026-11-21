@@ -160,7 +160,7 @@ export async function runYaziTerminalChooser(options: YaziTerminalChooserOptions
 				})
 			: null;
 	if (options.profileMode === "managed" && !profile) {
-		return { status: "profile-error", reason: "Clio could not generate a valid managed Yazi profile" };
+		return { status: "profile-error", reason: "CLIO Coder could not generate a valid managed Yazi profile" };
 	}
 	try {
 		writeFileSync(chooserPath, "");

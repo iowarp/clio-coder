@@ -311,7 +311,7 @@ describe("session integrity", () => {
 			try {
 				if (version === 2 || version > CURRENT_SESSION_FORMAT_VERSION) {
 					const before = fs.readFileSync(paths.meta, "utf8");
-					throws(() => current.resume(candidate.meta.id), /unsupported format version|newer Clio/u);
+					throws(() => current.resume(candidate.meta.id), /unsupported format version|newer CLIO Coder/u);
 					strictEqual(current.current()?.id, old.id);
 					strictEqual(fs.readFileSync(paths.meta, "utf8"), before);
 					current.append(turn("continued", "old"));
@@ -761,7 +761,7 @@ describe("session integrity", () => {
 				const preservedPaths = [paths.meta, `${paths.current}.tmp`, sessionPaths(old).meta, sessionPaths(old).current];
 				const before = preservedPaths.map((path) => fs.readFileSync(path));
 				try {
-					throws(() => current[transition](candidate.meta.id), /unsupported format version|newer Clio/u);
+					throws(() => current[transition](candidate.meta.id), /unsupported format version|newer CLIO Coder/u);
 					strictEqual(fs.existsSync(paths.current), false);
 					deepStrictEqual(
 						preservedPaths.map((path) => fs.readFileSync(path)),

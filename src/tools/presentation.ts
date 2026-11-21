@@ -342,7 +342,7 @@ function interviewPairs(args: ToolRowArgs, details: Readonly<Record<string, unkn
 		// An answer Clio chose because nobody answered in time says so on the row (#421).
 		const auto = !complete && fields.auto === true;
 		if (question !== null && answer !== null)
-			pairs.push({ question, answer: auto ? `${answer} (chosen by Clio)` : answer });
+			pairs.push({ question, answer: auto ? `${answer} (chosen by CLIO Coder)` : answer });
 	}
 	return pairs;
 }
@@ -569,7 +569,7 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.ClioDocs]: {
 		class: "knowledge",
 		verbs: CLASS_VERBS.knowledge,
-		object: (args) => plain(joinDefined("Clio docs", quoted(text(args, "query")))),
+		object: (args) => plain(joinDefined("CLIO Coder docs", quoted(text(args, "query")))),
 		consumes: ["query"],
 	},
 	[ToolNames.ClioLibrary]: {

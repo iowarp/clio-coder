@@ -97,7 +97,7 @@ it("does not call the endpoint when the stored credential has expired", async ()
 	const snapshot = await stale.fetch();
 
 	assert.equal(snapshot.status, "expired");
-	assert.equal(snapshot.message, "Clio's Anthropic token expired; the next turn refreshes it");
+	assert.equal(snapshot.message, "CLIO Coder's Anthropic token expired; the next turn refreshes it");
 	assert.equal(calls.length, 0);
 });
 
@@ -118,7 +118,7 @@ it("reports an absent credential without a network call", async () => {
 	const snapshot = await absent.fetch();
 
 	assert.equal(snapshot.status, "no_credentials");
-	assert.equal(snapshot.message, "Clio holds no Anthropic OAuth credential");
+	assert.equal(snapshot.message, "CLIO Coder holds no Anthropic OAuth credential");
 	assert.equal(await absent.detect(), false);
 	assert.equal(calls.length, 0);
 });

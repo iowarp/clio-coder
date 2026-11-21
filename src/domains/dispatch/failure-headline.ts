@@ -23,20 +23,21 @@ const HEADLINE_MAX_CHARS = 140;
  * Why a stalled run ended. Its receipt names the kill signal and the output the
  * kill cut short, which are what stopping a silent worker costs, not why it stopped.
  */
-export const STALLED_RUN_HEADLINE = "stopped responding, so Clio stopped it";
+export const STALLED_RUN_HEADLINE = "stopped responding, so CLIO Coder stopped it";
 
 const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	vram_capacity_fit_failure: "model did not fit in memory",
 	worker_tool_call_cap_exhausted: "hit the tool-call limit",
 	worker_context_exhausted: "ran out of context",
 	worker_turn_timeout: "timed out",
+	worker_run_timeout: "reached its wall clock",
 	worker_output_cap_exhausted: "hit the output limit",
 	loop_guard_tools_disabled_exhausted: "stopped for repeating calls",
 	exploration_stalled: "kept reading without deciding",
 	result_contract_exhausted: "no usable answer",
 	result_contract_invalid: "answer in the wrong format",
 	worker_final_output_missing: "no final answer",
-	host_verification_rejected: "Clio's checks failed",
+	host_verification_rejected: "CLIO Coder's checks failed",
 	worker_no_work: "did no work",
 	worker_partial_work: "did not finish",
 	worker_mutation_blocked: "change was blocked",
@@ -102,7 +103,7 @@ const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) =
 	],
 	[
 		/result contract failed after \d+ bounded repair rounds?: /iu,
-		() => "its answer was not in the format Clio asked for",
+		() => "its answer was not in the format CLIO Coder asked for",
 	],
 	[
 		/^(?:\[worker\] )?synthesis lock\b/iu,

@@ -271,9 +271,9 @@ function recoveryText(
 		const left: string[] = [];
 		if (queued.length > 0) {
 			const count = queued.length === 1 ? "Queued message" : `${queued.length} queued messages`;
-			left.push(`${count}, not delivered to Clio:\n${queued.join("\n\n")}`);
+			left.push(`${count}, not delivered to CLIO Coder:\n${queued.join("\n\n")}`);
 		}
-		if (draft.length > 0) left.push(`Unsent draft, not delivered to Clio:\n${draft}`);
+		if (draft.length > 0) left.push(`Unsent draft, not delivered to CLIO Coder:\n${draft}`);
 		return left.join("\n\n");
 	}
 	const sections = records.map((record) => `[queued ${record.sequence}] ${record.rawText}`);

@@ -630,7 +630,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				const answeredAlone = event.isError ? 0 : autoResolvedQuestions(event.toolName, event.result);
 				if (answeredAlone > 0) {
 					unattended.questions += answeredAlone;
-					highlight(`Clio answered ${answeredAlone} unanswered question${answeredAlone === 1 ? "" : "s"}`);
+					highlight(`CLIO Coder answered ${answeredAlone} unanswered question${answeredAlone === 1 ? "" : "s"}`);
 				}
 				if (call) {
 					const payload = { ...event };

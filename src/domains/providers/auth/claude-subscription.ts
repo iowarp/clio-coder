@@ -40,7 +40,7 @@ export async function resolveClaudeLaunchCredential(
 	const storage = new AuthStorage(new FileAuthStorageBackend());
 	const credential = storage.get(profile);
 	if (storage.damageReason())
-		throw new Error("Clio's credentials could not be read. Repair the credential store before starting Claude.");
+		throw new Error("CLIO Coder's credentials could not be read. Repair the credential store before starting Claude.");
 	if (!credential) {
 		if (explicit) throw new Error(`Claude credential '${profile}' is missing. Log in before starting this run.`);
 		return null;

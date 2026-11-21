@@ -3194,11 +3194,9 @@ export async function runDispatchTool(
 						? "a review gate holds its cycle state in this turn"
 						: mode === "pipeline" && requests.length > 1
 							? "a pipeline threads each step's output through this turn"
-							: timeoutMs !== undefined
-								? `this call set timeout_ms=${timeoutMs} and nobody would be left to enforce the deadline`
-								: deps.dispatch.detached === undefined
-									? "detached batch records are unavailable in this context"
-									: null;
+							: deps.dispatch.detached === undefined
+								? "detached batch records are unavailable in this context"
+								: null;
 	// Phase D: a worker ask routed to the main agent needs a caller that can
 	// yield. The same topologies that cannot move to the background cannot
 	// yield, and dispatch refuses main routing for them at admission.
@@ -3231,13 +3229,6 @@ export async function runDispatchTool(
 			return {
 				kind: "error",
 				message: "dispatch: detach cannot combine with a review gate; run gated dispatch attached",
-			};
-		}
-		if (timeoutMs !== undefined) {
-			return {
-				kind: "error",
-				message:
-					'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
 			};
 		}
 	}
