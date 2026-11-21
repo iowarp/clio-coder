@@ -112,7 +112,6 @@ import type { KnowledgeBase } from "../domains/providers/types/knowledge-base.js
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
-import { callChangesTree } from "../domains/safety/check-classifier.js";
 import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
@@ -124,7 +123,11 @@ import {
 	resolveModelDestination,
 } from "../domains/safety/information-flow.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
-import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
+import {
+	createRunEffectsRecorder,
+	recordToolExecutionEffects,
+	sessionChangesTree,
+} from "../domains/safety/run-effects.js";
 import type {
 	WorkerGitAllowance,
 	WorkerMcpAttestation,
@@ -992,7 +995,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const readStreakRegistration =
 		deliveryTools.length > 0 && workerCanWrite
 			? createReadStreakRegistration({
-					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+					// The worker's configured scratch roots count as scratch, as its run-effects recorder reads them.
+					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(() => workerSettings) },
 					workspaceRoot: () => input.cwd ?? process.cwd(),
 					surface: {
 						canWrite: true,
