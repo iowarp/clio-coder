@@ -5054,11 +5054,11 @@ export function validationWrappersInForce(): ReadonlyArray<string> {
  * What a declared wrapper word runs: the file it names by path from the working directory, or the first match for a
  * bare name on PATH, links resolved; null when it names no file this can resolve (a variable, `~`, a glob, none found).
  */
-function resolvedWrapperTarget(word: string): string | null {
+function resolvedWrapperTarget(word: string, cwd: string = process.cwd()): string | null {
 	if (/[~$`*?[\]{}]/u.test(word)) return null;
 	const normalized = word.replace(/\\/gu, "/");
 	const candidates = normalized.includes("/")
-		? [path.resolve(process.cwd(), normalized)]
+		? [path.resolve(cwd, normalized)]
 		: (process.env.PATH ?? "")
 				.split(path.delimiter)
 				.filter((directory) => directory !== "")
@@ -5078,7 +5078,7 @@ function resolvedWrapperTarget(word: string): string | null {
  * The word must resolve to a file whose real name the shared list does not refuse, so a link to `rm` or a word naming
  * no file is no wrapper; a refused entry never matches, whatever the settings say.
  */
-function isValidationWrapper(word: string): boolean {
+function isValidationWrapper(word: string, cwd?: string): boolean {
 	const entries = validationWrappers();
 	if (entries.length === 0) return false;
 	const name = basenameToken(word);
@@ -5091,7 +5091,7 @@ function isValidationWrapper(word: string): boolean {
 		return spelled === wanted || (!wanted.startsWith("/") && spelled.endsWith(`/${wanted}`));
 	});
 	if (!declared) return false;
-	const target = resolvedWrapperTarget(word);
+	const target = resolvedWrapperTarget(word, cwd);
 	return target !== null && !isRefusedValidationWrapper(target);
 }
 
@@ -5146,12 +5146,17 @@ function pastTimeOptions(segment: ReadonlyArray<string>, start: number): number 
 	return next;
 }
 
-/** The index past a declared wrapper at `index` and its leading options. */
-function pastWrapperOptions(segment: ReadonlyArray<string>, index: number): number {
+/**
+ * The index past a declared wrapper at `index` and its leading options; with `values`, a separate option that may take
+ * a value (`-s 1`, `--slot 1`) takes the word after it too, since nothing here knows the wrapper's own options.
+ */
+function pastWrapperOptions(segment: ReadonlyArray<string>, index: number, values = false): number {
 	let next = index + 1;
 	for (let option = segment[next]; option?.startsWith("-") === true; option = segment[next]) {
 		next += 1;
 		if (option === "--") break;
+		const value = segment[next];
+		if (values && /^(?:-[A-Za-z]|--[\w-]+)$/u.test(option) && value !== undefined && !value.startsWith("-")) next += 1;
 	}
 	return next;
 }
@@ -5196,43 +5201,66 @@ function checkBehindWrapper(
  * wrapper standing at `index`, its leading options and the built-in prefixes after it, as `timeout` or `nice` is read
  * through; null when no declared wrapper stands there or nothing follows it. An undeclared script stays opaque.
  */
-function pastDeclaredWrapper(argv: ReadonlyArray<string>, index: number): number | null {
+function pastDeclaredWrapper(argv: ReadonlyArray<string>, index: number, cwd?: string, values = false): number | null {
 	const word = argv[index];
-	if (word === undefined || !isValidationWrapper(word)) return null;
-	return builtinCommandIndex(argv, pastWrapperOptions(argv, index));
+	if (word === undefined || !isValidationWrapper(word, cwd)) return null;
+	return builtinCommandIndex(argv, pastWrapperOptions(argv, index, values));
 }
 
-/**
- * The command with each declared validation wrapper (and its leading options) at a top-level command position
- * blanked out, so the rails read what it runs (FX-46): `scripts/test-slot.sh rm -rf .git` reads as `rm -rf .git`.
- * Redirections, here-documents and every other word stay where they were. The command itself when no declared
- * wrapper stands at a command position. Admission judges both readings and keeps the stricter, so this only tightens.
- */
-export function withoutDeclaredWrappers(command: string): string {
-	if (validationWrappers().length === 0) return command;
-	const blanks: Array<{ start: number; end: number }> = [];
-	for (const segment of splitSegments(scanShellLike(command, true))) {
-		// Words only: a redirection operator and its target are not argv.
-		const words = segment.filter(
-			(token, at) =>
-				!token.operator && !(segment[at - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[at - 1]?.value ?? "")),
-		);
-		const argv = words.map((token) => token.value);
-		let index = builtinCommandIndex(argv);
-		for (let hop = 0; index !== null && hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
-			const next = pastDeclaredWrapper(argv, index);
-			if (next === null) break;
-			const start = words[index]?.start;
-			const end = words[next - 1]?.end;
-			if (start !== undefined && end !== undefined) blanks.push({ start, end });
-			index = next;
-		}
-	}
-	if (blanks.length === 0) return command;
-	let out = command;
-	for (const { start, end } of blanks.sort((left, right) => right.start - left.start))
+/** `text` with each span replaced by spaces, so offsets and every other character stay where they were. */
+function blankedSpans(text: string, spans: ReadonlyArray<{ start: number; end: number }>): string {
+	let out = text;
+	for (const { start, end } of [...spans].sort((left, right) => right.start - left.start))
 		out = `${out.slice(0, start)}${" ".repeat(end - start)}${out.slice(end)}`;
 	return out;
+}
+
+/** A word that may stand as a command word in a nested script (`sh -c '...'`, `$(...)`), with the option words after it. */
+const NESTED_COMMAND_WORD = /(^|[\s'"(;&|`])([^\s'"();&|`<>]+)((?:[ \t]+-[^\s'"();&|`<>]*)*)/gu;
+
+/**
+ * The readings of a command with its declared validation wrappers blanked out, so the rails read what they run (FX-46):
+ * `scripts/test-slot.sh rm -rf .git` reads as `rm -rf .git`. A wrapper at a top-level command position is blanked with
+ * its leading options, once with each option read as a flag and once with a separate option taking the word after it
+ * as its value (`-s 1`), since nothing here knows the wrapper's options; redirections between them stay. A wrapper word
+ * anywhere else, inside `sh -c '...'` or a substitution, is blanked as text with the option words after it. A word is
+ * a wrapper by the call's own working directory. Empty when no declared wrapper stands anywhere. Admission judges every
+ * reading beside the command as written and keeps the strictest, so a reading only tightens.
+ */
+export function declaredWrapperReadings(command: string, cwd: string = process.cwd()): string[] {
+	const entries = validationWrappers();
+	if (entries.length === 0) return [];
+	const names = new Set(entries.map((entry) => basenameToken(entry.replace(/\\/gu, "/"))));
+	const readings = new Set<string>();
+	for (const values of [false, true]) {
+		const blanks: Array<{ start: number; end: number }> = [];
+		for (const segment of splitSegments(scanShellLike(command, true))) {
+			// Words only: a redirection operator and its target are not argv, and stay in the reading.
+			const words = segment.filter(
+				(token, at) =>
+					!token.operator && !(segment[at - 1]?.operator === true && SHELL_REDIRECTIONS.has(segment[at - 1]?.value ?? "")),
+			);
+			const argv = words.map((token) => token.value);
+			let index = builtinCommandIndex(argv);
+			for (let hop = 0; index !== null && hop < CHECK_PREFIX_MAX_HOPS; hop += 1) {
+				const next = pastDeclaredWrapper(argv, index, cwd, values);
+				if (next === null) break;
+				for (const word of words.slice(index, next)) blanks.push({ start: word.start, end: word.end });
+				index = next;
+			}
+		}
+		if (blanks.length > 0) readings.add(blankedSpans(command, blanks));
+	}
+	const nested: Array<{ start: number; end: number }> = [];
+	for (const match of command.matchAll(NESTED_COMMAND_WORD)) {
+		const word = match[2] ?? "";
+		if (!names.has(basenameToken(word.replace(/\\/gu, "/"))) || !isValidationWrapper(word, cwd)) continue;
+		const start = match.index + (match[1] ?? "").length;
+		nested.push({ start, end: start + word.length + (match[3] ?? "").length });
+	}
+	if (nested.length > 0) readings.add(blankedSpans(command, nested));
+	readings.delete(command);
+	return [...readings];
 }
 
 /**

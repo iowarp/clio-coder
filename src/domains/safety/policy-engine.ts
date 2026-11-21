@@ -90,6 +90,7 @@ import {
 import {
 	bareInlineShellScript,
 	commandArgumentSegments,
+	declaredWrapperReadings,
 	decodedLocaleQuoting,
 	extractCommandCdScopedTargets,
 	extractCommandDeleteTargets,
@@ -107,7 +108,6 @@ import {
 	shellCommandSteps,
 	shellScriptSources,
 	withoutDataHeredocBodies,
-	withoutDeclaredWrappers,
 } from "./protected-artifacts.js";
 import {
 	fetchCouldCarryLocalData,
@@ -2142,16 +2142,51 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const command = rawCall.tool === ToolNames.Bash ? commandArg(rawCall.args) : null;
 		if (command === null || decision.kind === "block") return decision;
 		// FX-46: a declared validation wrapper runs the rest of its line, so what it runs is judged as if written bare,
-		// and the stricter of the two readings stands. An undeclared script stays opaque.
-		const inner = withoutDeclaredWrappers(command);
-		if (inner === command) return decision;
-		const through = evaluateScopedReading({ ...rawCall, args: { ...rawCall.args, command: inner } }, posture, scope);
+		// and the strictest reading stands; readings at the same verdict merge. An undeclared script stays opaque.
+		const { callCwd } = commandUnderJudgment(normalizeCallPaths(rawCall));
 		const rank = (kind: SafetyPolicyDecision["kind"]) => (kind === "block" ? 2 : kind === "ask" ? 1 : 0);
-		if (rank(through.kind) <= rank(decision.kind)) return decision;
+		let result = decision;
+		for (const inner of declaredWrapperReadings(command, callCwd)) {
+			const through = evaluateScopedReading({ ...rawCall, args: { ...rawCall.args, command: inner } }, posture, scope);
+			if (rank(through.kind) < rank(result.kind)) continue;
+			result =
+				rank(through.kind) === rank(result.kind)
+					? mergedWrapperReading(result, through, inner)
+					: {
+							...through,
+							...(decision.command !== undefined ? { command: decision.command } : {}),
+							reasons: [
+								`a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`,
+								...through.reasons,
+							],
+						};
+			if (result.kind === "block") break;
+		}
+		return result;
+	};
+
+	/**
+	 * Two readings at the same verdict merge rather than one replacing the other: a snapshot requirement either holds
+	 * stays, the more specific rule (a damage-control or path match over a catch-all) names the call, and both readings'
+	 * reasons are kept.
+	 */
+	const mergedWrapperReading = (
+		decision: SafetyPolicyDecision,
+		through: SafetyPolicyDecision,
+		inner: string,
+	): SafetyPolicyDecision => {
+		// The reading that names a rule (damage control, a path rule) names the call over one that names none.
+		const specific = (reading: SafetyPolicyDecision) =>
+			reading.match !== undefined || reading.reasonCode.includes("damage-control:");
+		const own = specific(through) && !specific(decision) ? through : decision;
+		const other = own === decision ? through : decision;
+		const note = `a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`;
+		const reasons = [...new Set([...(own === through ? [note] : []), ...own.reasons, ...other.reasons])];
 		return {
-			...through,
+			...own,
 			...(decision.command !== undefined ? { command: decision.command } : {}),
-			reasons: [`a declared validation wrapper runs the rest of its line, judged as ${inner.trim()}`, ...through.reasons],
+			...(decision.recoverable === true || through.recoverable === true ? { recoverable: true as const } : {}),
+			reasons,
 		};
 	};
 

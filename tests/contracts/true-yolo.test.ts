@@ -2064,6 +2064,24 @@ test("a declared validation wrapper is judged by what it runs, at least as stric
 	const kinds = (command: string) => verdicts(command).map((verdict) => verdict.split("/")[0]);
 	deepStrictEqual(kinds(`timeout 60 scripts/slot.sh -q ${outside}`), kinds(outside));
 	strictEqual(verdicts(`scripts/slot.sh ${outside}`)[0], "block/damage-control:delete-outside-workspace");
+	// Row 261 bounce: an option's value, a redirection between the wrapper and its options, and a wrapper inside a nested
+	// script are read through; a tie keeps the stricter reading's rule and snapshot requirement; and the wrapper is found
+	// from the call's own working directory.
+	for (const command of [
+		"scripts/slot.sh -s 1 rm -rf .git",
+		"scripts/slot.sh >/dev/null -q rm -rf .git",
+		"sh -c 'scripts/slot.sh rm -rf .git'",
+	])
+		strictEqual(verdicts(command)[2], git, command);
+	strictEqual(engine.evaluate(bash("scripts/slot.sh rm -rf src"), "default", contained).recoverable, true);
+	strictEqual(verdicts(`scripts/slot.sh ${outside}`)[2], verdicts(outside)[2]);
+	process.chdir(savedCwd);
+	try {
+		const call = { tool: ToolNames.Bash, args: { command: "scripts/slot.sh rm -rf .git", cwd } };
+		strictEqual(engine.evaluate(call, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:yolo-floor-workspace-git");
+	} finally {
+		process.chdir(cwd);
+	}
 	// An undeclared script stays opaque, and a check behind the declared wrapper is not judged more strictly.
 	deepStrictEqual(verdicts(undeclared), before);
 	deepStrictEqual(verdicts("scripts/slot.sh ls"), verdicts("scripts/x.sh ls"));
