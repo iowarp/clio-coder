@@ -315,6 +315,63 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		};
 		strictEqual(advisory(tsc("tsc-1", 2)), FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE);
 		strictEqual(advisory(tsc("tsc-1", 2), tsc("tsc-2", 0)), FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
+		// With no pass beside it, a red that ran after the edit is named on a typed field for the operator; the model-facing
+		// message stays the base advisory, and a check started before the edit is not one the edit met (CLI-P54).
+		const failedAfter = (...checks: unknown[][]) => {
+			const assessment = assessFinishContract({
+				sessionEntries: [...mutationWindow(), ...checks.flat(), assistantMessage("assistant-1", "Done.")],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+			});
+			strictEqual(assessment.kind === "engage" && assessment.message, FINISH_CONTRACT_ADVISORY_MESSAGE);
+			return assessment.kind === "engage" ? assessment.failedAfterEdit : undefined;
+		};
+		const failing = (id: string, command: string) => [
+			toolCall(id, ToolNames.Bash, { command }),
+			{
+				kind: "message",
+				role: "tool_result",
+				turnId: id,
+				payload: { toolName: ToolNames.Bash, toolCallId: id, isError: true, result: { details: { exitCode: 1 } } },
+			},
+		];
+		deepStrictEqual(failedAfter(tsc("tsc-1", 2)), ["npx tsc --noEmit"]);
+		deepStrictEqual(failedAfter(tsc("tsc-1", 2), failing("py-1", 'pytest -k "a, b"')), [
+			"npx tsc --noEmit",
+			'pytest -k "a, b"',
+		]);
+		const [secret] =
+			failedAfter(failing("tsc-s", `API_KEY=sk-live-0123456789abcdef npx tsc --noEmit -p ${"x".repeat(200)}`)) ?? [];
+		ok(secret?.startsWith("API_KEY=[redacted] npx tsc") && secret.length <= 120, secret);
+		const [call, result] = tsc("tsc-0", 2);
+		const [user, write, written] = mutationWindow();
+		const overlapping = assessFinishContract({
+			sessionEntries: [user, call, write, written, result, assistantMessage("assistant-1", "Done.")],
+			assistantTurnId: "assistant-1",
+			workspaceRoot: root,
+		});
+		strictEqual(overlapping.kind === "engage" && overlapping.failedAfterEdit, undefined);
+	});
+
+	it("carries a failed check to a high-rigor turn that cannot recover as data, never in the notice text (CLI-P54)", async () => {
+		const effects = await createFinishContractRegistration({
+			readSessionEntries: () => [
+				...mutationWindow(),
+				toolCall("tsc-1", ToolNames.Bash, { command: "npx tsc --noEmit" }),
+				{
+					kind: "message",
+					role: "tool_result",
+					turnId: "tsc-1",
+					payload: { toolName: ToolNames.Bash, toolCallId: "tsc-1", isError: true, result: { details: { exitCode: 2 } } },
+				},
+			],
+			resolveRigor: () => "high",
+			getTurnConstraints: () => ({ mode: "proposal", allowedTools: ["read", "edit"] }),
+		}).evaluate({ hook: "turn_end", text: "Done." });
+		const reminder = effects.find((effect) => effect.kind === "inject_reminder");
+		ok(reminder?.kind === "inject_reminder");
+		deepStrictEqual(reminder.failedChecks, ["npx tsc --noEmit"]);
+		ok(reminder.message.startsWith(FINISH_CONTRACT_ADVISORY_MESSAGE) && !reminder.message.includes("tsc"));
 	});
 
 	it("retains explicitly requested check scope and limitations without turning unknown coverage into a gate", async () => {
