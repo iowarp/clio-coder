@@ -449,6 +449,11 @@ export function demoteHandbookHeadings(text: string): string {
 		.join("\n");
 }
 
+/** The operator's user handbook, ahead of every project handbook and named apart from them. */
+export function renderUserContextFragment(text: string, sourcePath: string): string {
+	return `<user-context path="${escapeXmlAttribute(sourcePath)}">\n${demoteHandbookHeadings(text)}\n</user-context>`;
+}
+
 export function renderProjectContextFragment(parsed: ParsedClioMd | string, sourcePath?: string): string {
 	const source = sourcePath ? ` path="${escapeXmlAttribute(sourcePath)}"` : "";
 	if (typeof parsed === "string") {

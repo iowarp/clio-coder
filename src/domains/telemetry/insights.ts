@@ -324,7 +324,7 @@ export function classifySession(signals: InsightSignals): InsightCategory {
 		researchSkill ||
 		researcher;
 	if (!research) {
-		const software = count(tools, SOFTWARE_TOOLS) + count(checks, ["command", "perf-budget"]);
+		const software = count(tools, SOFTWARE_TOOLS) + count(checks, ["command", "perf-budget", "browser"]);
 		return software > 0 || code > 0 ? "software (non-research)" : "other";
 	}
 	const gathering = (tools.web_fetch ?? 0) > 0;
@@ -339,7 +339,7 @@ export function classifySession(signals: InsightSignals): InsightCategory {
 		"data gathering": 2 * (tools.web_fetch ?? 0) + (gathering ? 2 * dataFiles : 0),
 		"reading and knowledge acquisition": 2 * (tools.web_read ?? 0) + (researcher ? 2 : 0),
 		"theoretical analysis": 0,
-		"design and development": code + count(checks, ["command", "perf-budget"]),
+		"design and development": code + count(checks, ["command", "perf-budget", "browser"]),
 		"ideation and hypothesis generation": 2 * ((tools.decide ?? 0) + (tools.consult ?? 0)),
 		other: 0,
 		"software (non-research)": 0,

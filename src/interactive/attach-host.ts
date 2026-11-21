@@ -22,7 +22,7 @@
 
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { AttachHost, AttachOperations, AttachSessionPort, AttachTransport } from "../domains/attach/host.js";
-import { createAttachHost } from "../domains/attach/host.js";
+import { attachActorName, createAttachHost } from "../domains/attach/host.js";
 import type { AttachBlock, AttachRole } from "../domains/attach/protocol.js";
 import { attachApprovalView } from "../domains/attach/protocol.js";
 import { createUnixSocketTransport } from "../domains/attach/socket.js";
@@ -104,7 +104,7 @@ export function createAttachController(deps: AttachControllerDeps): AttachContro
 			return card === null ? [] : [attachApprovalView(card)];
 		},
 		resolveApproval: (requestId, decision, by) =>
-			deps.cards().answerOnScreen(requestId, decision, `attach:${by.clientId}`)
+			deps.cards().answerOnScreen(requestId, decision, { decidedBy: `attach:${by.clientId}`, name: attachActorName(by) })
 				? { status: "resolved" }
 				: { status: "stale" },
 		say: (text, by) => {

@@ -85,6 +85,8 @@ problem.
 | `plugins/` | Library package state (`state.json`) and one directory per installed package |
 | `library.yaml`, `skill-marketplace.json`, `skill-promotion-declines.json` | Library catalog, marketplace registry and declined skill promotions |
 | `mcp.yaml`, `mcp-trust.json` | User MCP servers and the trust records for project-declared servers |
+| `hooks.yaml` | User middleware hooks, trusted as the operator's own and loaded ahead of project hooks |
+| `CLIO-CODER.md` | User handbook, loaded ahead of project handbooks in every session; `interop adopt` writes marked sections into it |
 | `workspace-trust/` | Per-workspace approvals from `clio-coder config trust` |
 | `migrations.json` | Applied migration ids, machine-written and kept beside the settings whose shape it records |
 

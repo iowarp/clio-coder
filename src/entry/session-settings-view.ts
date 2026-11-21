@@ -388,6 +388,7 @@ export function createSessionSettingsView(deps: SessionSettingsViewDeps) {
 			model: settings.chat.model,
 			thinkingLevel: settings.chat.thinkingLevel ?? "off",
 			autonomy: settings.safety.autonomy,
+			containment: { sandbox: settings.safety.sandbox, judgeEnabled: settings.safety.judge.enabled },
 		};
 	};
 	/**

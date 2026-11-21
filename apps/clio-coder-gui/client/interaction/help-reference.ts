@@ -163,7 +163,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 			{
 				term: "yolo",
 				meaning:
-					"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
+					"Runs without stopping for you: commands run as default runs them, in the OS sandbox only when safety.sandbox and the host provide one, the safety judge reviews only when safety.judge.enabled is on, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo). The autonomy menu names this host's sandbox backend and judge state.",
 			},
 		],
 	},

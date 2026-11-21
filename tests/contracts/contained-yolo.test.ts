@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { readSettings, recordYoloConfinementOnce, settingsPath } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { yoloContainedMigrationNotice } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -346,6 +347,19 @@ test("the contained migration records the confinement once and keeps an operator
 	writeFileSync(settingsPath(), "version: 2\nsafety:\n  yoloConfinement: unconfined\n");
 	strictEqual(recordYoloConfinementOnce(), false);
 	match(readFileSync(settingsPath(), "utf8"), /yoloConfinement: unconfined/u);
+});
+
+test("the contained-yolo notice states the sandbox backend and judge state a yolo run records", () => {
+	const bwrap = { available: true, backend: "bwrap" as const, executable: "/usr/bin/bwrap", reason: null };
+	const off = yoloContainedMigrationNotice("off", bwrap, true);
+	match(off, /without an OS sandbox \(safety\.sandbox is off\)/u);
+	doesNotMatch(off, /OS sandbox and the safety judge stay on|in the bwrap/u);
+	match(off, /the safety judge reviews/u);
+	const on = yoloContainedMigrationNotice("auto", bwrap, false);
+	match(on, /commands run in the bwrap OS sandbox/u);
+	match(on, /the safety judge is off \(safety\.judge\.enabled\)/u);
+	const none = { available: false, backend: null, executable: null, reason: "bwrap not found" };
+	match(yoloContainedMigrationNotice("auto", none, true), /without an OS sandbox \(bwrap not found\)/u);
 });
 
 test("contained yolo runs an outward call the judge allows only when the operator named it", async () => {

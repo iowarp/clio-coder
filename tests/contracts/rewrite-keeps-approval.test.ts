@@ -1,18 +1,21 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunPlanProvenance } from "../../src/domains/dispatch/types.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { MiddlewareEffect, MiddlewareHookRegistration } from "../../src/domains/middleware/index.js";
+import type { SafetyDecision } from "../../src/domains/safety/contract.js";
+import type { SafetyJudgeOutcome, SafetyJudgeSeat } from "../../src/domains/safety/safety-judge.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRewriteNarrows } from "../../src/tools/dispatch-narrowing.js";
 import type { DispatchExecutionSnapshot } from "../../src/tools/dispatch-types.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
 import { isolateDispatchState, restoreDispatchState } from "../harness/dispatch.js";
 
 // WX2: a before_tool hook that only narrows an operator-approved plan-scale
@@ -414,5 +417,141 @@ describe("parallel worktree tasks with overlapping write roots", () => {
 			["write_roots_overlap"],
 		);
 		match(notices[0]?.message ?? "", /task 1 \(coder\) and task 2 \(coder\): \S*src ~ \S*src\/parser$/u);
+	});
+});
+
+// EX-4: a hook's `ask` is an approval request through the same card, grant and refusal path as any ask.
+describe("a before_tool hook that asks for approval", () => {
+	function asking(deps: Partial<RegistryDeps> = {}) {
+		let hookRuns = 0;
+		const middleware = createMiddlewareBundle({
+			registrations: [
+				{
+					id: "user:env-guard",
+					description: "asks before .env is touched",
+					hooks: ["before_tool"],
+					evaluate: () => {
+						hookRuns += 1;
+						return [{ kind: "request_approval", reason: "reads .env" }];
+					},
+				},
+			],
+		}).contract;
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			autonomy: () => "default",
+			middleware,
+			...deps,
+		});
+		const ran: string[] = [];
+		const tool = (name: ToolSpec["name"], baseActionClass: ToolSpec["baseActionClass"]): ToolSpec => ({
+			name,
+			description: `fake ${name}`,
+			parameters: {} as ToolSpec["parameters"],
+			baseActionClass,
+			async run() {
+				ran.push(name);
+				return { kind: "ok", output: "ran" };
+			},
+		});
+		registry.register(tool(ToolNames.Read, "read"));
+		registry.register(tool(ToolNames.Bash, "execute"));
+		registry.register({
+			...tool(ToolNames.ConfigureClio, "write"),
+			confirmationRuleId: "fleet-routing-settings",
+		});
+		const cards: SafetyDecision[] = [];
+		const answer = (approve: boolean) =>
+			registry.onPermissionRequired((_call, decision, meta) => {
+				cards.push(decision);
+				if (approve)
+					void registry.resumeParkedCalls({
+						actionClass: decision.classification.actionClass,
+						requestId: meta.requestId,
+						requestedBy: "tool:one_shot",
+					});
+				else registry.cancelParkedCall(meta.requestId, "operator denied");
+			});
+		return { registry, ran, cards, answer, hookRuns: () => hookRuns };
+	}
+	const cardText = (decision: SafetyDecision | undefined): string =>
+		decision?.kind === "ask" ? `${decision.rejection.short} ${decision.rejection.detail}` : "";
+
+	it("parks a call admission allowed on the operator card, runs it once approved, and runs its hooks once", async () => {
+		const probe = asking();
+		probe.answer(true);
+		const verdict = await probe.registry.invoke({ tool: ToolNames.Read, args: { path: "notes.md" } });
+		strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+		deepStrictEqual(probe.ran, [ToolNames.Read]);
+		strictEqual(probe.cards.length, 1);
+		strictEqual(probe.cards[0]?.kind, "ask");
+		match(cardText(probe.cards[0]), /reads \.env/);
+		strictEqual(probe.hookRuns(), 1, "the approved call reuses what its hooks decided");
+	});
+
+	it("refuses the call when the operator denies the card, without running it", async () => {
+		const probe = asking();
+		probe.answer(false);
+		const verdict = await probe.registry.invoke({ tool: ToolNames.Read, args: { path: "notes.md" } });
+		strictEqual(verdict.kind, "blocked");
+		deepStrictEqual(probe.ran, []);
+		strictEqual(probe.hookRuns(), 1);
+	});
+
+	it("refuses it headless, where no operator can answer, like any ask", async () => {
+		const probe = asking();
+		const verdict = await probe.registry.invoke({ tool: ToolNames.Read, args: { path: "notes.md" } });
+		strictEqual(verdict.kind, "blocked");
+		match(JSON.stringify(verdict), /"ruleId":"middleware-hook-ask"/, "the refusal names the hook's rail");
+		match(JSON.stringify(verdict), /a hook asked \(reads \.env\)/, "and why the hook asked");
+		deepStrictEqual(probe.ran, []);
+	});
+
+	it("routes it to the safety judge under contained yolo, like any ask", async () => {
+		const judge = (outcome: SafetyJudgeOutcome) => {
+			const reviewed: string[] = [];
+			const seat: SafetyJudgeSeat = {
+				review: (subject) => {
+					reviewed.push(cardText(subject.decision));
+					return outcome;
+				},
+				operatorApproved: () => {},
+			};
+			return { seat, reviewed };
+		};
+		const allow = judge({ kind: "allow", rule: "operator-named", reason: "asked", build: "b", latencyMs: 0 });
+		const allowed = asking({ safetyJudge: allow.seat, unattendedAsks: () => true });
+		const released = await allowed.registry.invoke({ tool: ToolNames.Read, args: { path: "notes.md" } });
+		strictEqual(released.kind, "ok", JSON.stringify(released));
+		deepStrictEqual(allowed.ran, [ToolNames.Read]);
+		strictEqual(allow.reviewed.length, 1);
+		match(allow.reviewed[0] ?? "", /reads \.env/);
+		strictEqual(allowed.hookRuns(), 1);
+		const block = judge({
+			kind: "block",
+			rule: "secrets",
+			refusal: "no",
+			allowedBy: "the operator",
+			build: "b",
+			latencyMs: 0,
+		} as SafetyJudgeOutcome);
+		const blocked = asking({ safetyJudge: block.seat, unattendedAsks: () => true });
+		strictEqual((await blocked.registry.invoke({ tool: ToolNames.Read, args: { path: "notes.md" } })).kind, "blocked");
+		deepStrictEqual(blocked.ran, []);
+		const unjudged = asking({ unattendedAsks: () => true });
+		unjudged.answer(true);
+		strictEqual((await unjudged.registry.invoke({ tool: ToolNames.Read, args: { path: "notes.md" } })).kind, "blocked");
+		deepStrictEqual(unjudged.cards, [], "contained yolo never parks an ask");
+	});
+
+	it("asks once for a call admission already parked, since the operator's approval answers both", async () => {
+		const probe = asking();
+		probe.answer(true);
+		const verdict = await probe.registry.invoke({ tool: ToolNames.ConfigureClio, args: { action: "preview" } });
+		strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+		strictEqual(probe.cards.length, 1);
+		doesNotMatch(cardText(probe.cards[0]), /a hook asked/, "the one card is admission's own");
+		deepStrictEqual(probe.ran, [ToolNames.ConfigureClio]);
+		strictEqual(probe.hookRuns(), 1);
 	});
 });
