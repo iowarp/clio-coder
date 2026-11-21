@@ -508,7 +508,7 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Recon
 		facts,
 		"about-to-evict",
 		"info",
-		`unloading ${entry.modelId}, which Clio loaded, from ${facts.targetId} to fit ${facts.keepModelId}.`,
+		`unloading ${entry.modelId}, which CLIO Coder loaded, from ${facts.targetId} to fit ${facts.keepModelId}.`,
 		entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : undefined,
 	);
 }
@@ -586,7 +586,7 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 						facts,
 						"co-resident",
 						"info",
-						`'${facts.targetId}' serves '${facts.keepModelId}' alongside ${names}. Clio leaves co-resident models loaded; keep the setup only while weights and KV caches fit in GPU memory.`,
+						`'${facts.targetId}' serves '${facts.keepModelId}' alongside ${names}. CLIO Coder leaves co-resident models loaded; keep the setup only while weights and KV caches fit in GPU memory.`,
 						facts.capacity !== undefined
 							? { residentCount: facts.resident.length, maxInstances: facts.capacity }
 							: { residentCount: facts.resident.length },
@@ -603,7 +603,7 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 			.filter((entry) => !allowed.includes(entry))
 			.map(
 				(entry) =>
-					`'${entry.modelId}' (${!entry.loadedByClio ? "this Clio session did not load it" : entry.protection === "config" ? "settings still use it" : entry.protection === "worker" ? "a worker is using it" : "the server pins it"})`,
+					`'${entry.modelId}' (${!entry.loadedByClio ? "this CLIO Coder session did not load it" : entry.protection === "config" ? "settings still use it" : entry.protection === "worker" ? "a worker is using it" : "the server pins it"})`,
 			)
 			.join(", ");
 	// Only loads attributed to this Clio session may be eviction candidates.
@@ -673,7 +673,7 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 						facts,
 						"will-not-fit",
 						"error",
-						`cannot load '${facts.keepModelId}' on '${facts.targetId}': the server holds ${facts.capacity} ${facts.capacity === 1 ? "model" : "models"} at a time, and Clio may not unload ${unloadBlockers(others, candidates)}. Unload one on the server or raise its max instances.`,
+						`cannot load '${facts.keepModelId}' on '${facts.targetId}': the server holds ${facts.capacity} ${facts.capacity === 1 ? "model" : "models"} at a time, and CLIO Coder may not unload ${unloadBlockers(others, candidates)}. Unload one on the server or raise its max instances.`,
 						{ residentCount: facts.resident.length, maxInstances: facts.capacity },
 					),
 				);

@@ -46,8 +46,8 @@ for (const audience of ["internal", "shadow"] as const)
 			audience === "internal"
 				? []
 				: [
-						"Clio's Context-bootstrap helper is working",
-						"Clio's Context-bootstrap helper failed; your turn is not affected · /fleet shows why",
+						"CLIO Coder's Context-bootstrap helper is working",
+						"CLIO Coder's Context-bootstrap helper failed; your turn is not affected · /fleet shows why",
 					],
 		);
 		strictEqual(islands, audience === "internal" ? 0 : 2);
@@ -106,7 +106,7 @@ test("S3-01: live hook trust diagnostics reach the footer notice area and unsubs
 	strictEqual(notices[1]?.level, "warning");
 	strictEqual(
 		notices[1]?.text,
-		"Clio's safety net blocked bash because it changes the system. This gate applies at every autonomy level, and /view names the rule.",
+		"CLIO Coder's safety net blocked bash because it changes the system. This gate applies at every autonomy level, and /view names the rule.",
 	);
 	projection.dispose();
 	bus.emit("extension.load_failed", { message });

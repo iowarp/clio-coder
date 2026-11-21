@@ -461,7 +461,7 @@ export class OperatorExtensionRuntime {
 		// A reload this reconcile started belongs to the session the command runs in; wait for it.
 		while (this.reloading && this.reloadTask && !this.closed) await this.reloadTask;
 		if (this.closed) throw new Error("extension runtimes have shut down");
-		if (!this.options.isIdle()) throw new Error("Clio is busy; run it again once the current turn finishes");
+		if (!this.options.isIdle()) throw new Error("CLIO Coder is busy; run it again once the current turn finishes");
 		if (Buffer.byteLength(args) > RUNTIME_LIMITS.argumentBytes) throw new Error("extension arguments exceed 16 KiB");
 		const row = this.commands(promptNames).find((row) => row.invocation === invocation);
 		if (!row?.available) throw new Error(row?.reason ?? `/${invocation} is not an available extension command`);

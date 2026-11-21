@@ -701,14 +701,14 @@ function admissionFacts(
 			// The lock is Clio's machinery; what the operator needs is who is changing the server's models and to what.
 			const holder = admission.holder;
 			// A process id is not a name an operator knows a session by; the host is, when it is another machine.
-			const who = holder === null ? null : holder.host ? `the Clio session on ${holder.host}` : "that session";
+			const who = holder === null ? null : holder.host ? `the CLIO Coder session on ${holder.host}` : "that session";
 			const doing = holder?.wants ? `is loading ${nickname(holder.wants)}` : "is changing the loaded model";
 			const held: RailFact = {
-				text: holder === null ? "who holds it is unknown" : holder.self ? `this Clio ${doing}` : `${who} ${doing}`,
+				text: holder === null ? "who holds it is unknown" : holder.self ? `this CLIO Coder ${doing}` : `${who} ${doing}`,
 				...(holder === null
 					? {}
 					: holder.self
-						? { short: "this Clio" }
+						? { short: "this CLIO Coder" }
 						: holder.wants
 							? { short: `loading ${nickname(holder.wants)}` }
 							: {}),
@@ -716,9 +716,9 @@ function admissionFacts(
 				keep: room >= 58 ? RAIL_ACTION_KEEP : 6,
 			};
 			return {
-				head: holder?.self === true ? "is waiting for its own model load" : "is waiting for another Clio session",
+				head: holder?.self === true ? "is waiting for its own model load" : "is waiting for another CLIO Coder session",
 				tight: "is waiting its turn",
-				subject: "Clio",
+				subject: "CLIO Coder",
 				facts: [elapsed, held, way],
 			};
 		}
@@ -726,28 +726,28 @@ function admissionFacts(
 			return {
 				head: `is unloading ${nickname(admission.model)}`,
 				tight: "is unloading",
-				subject: "Clio",
+				subject: "CLIO Coder",
 				facts: [elapsed, way],
 			};
 		case "switching":
 			return {
 				head: `is replacing ${nickname(admission.from)} with ${nickname(admission.to)}`,
 				tight: `is replacing ${nickname(admission.from)}`,
-				subject: "Clio",
+				subject: "CLIO Coder",
 				facts: [elapsed, { text: "unloading", keep: 2 }, way],
 			};
 		case "restoring":
 			return {
 				head: `is restoring ${nickname(admission.model)}`,
 				tight: "is restoring",
-				subject: "Clio",
+				subject: "CLIO Coder",
 				facts: [elapsed, way],
 			};
 		case "ceiling":
 			return {
 				head: "is holding the request at the cost ceiling",
 				tight: "is holding at ceiling",
-				subject: "Clio",
+				subject: "CLIO Coder",
 				facts: [
 					elapsed,
 					{
@@ -1039,7 +1039,7 @@ function toolActivity(
 	// and the choice keys on the terminal's width so the rail and the strip spell it the same.
 	// The operator's own line reads `you` on a narrow rail in every state, as its card does (`you are stopping`).
 	const tight = width < TOOL_ACTOR_TIGHT_WIDTH && (verb === null || mine);
-	const subject = mine ? (tight ? "you" : "your shell") : "Clio";
+	const subject = mine ? (tight ? "you" : "your shell") : "CLIO Coder";
 	// A call the safety judge still holds is not running; the claim waits for admission (B01).
 	const judging = verb === null && tool?.judging === true;
 	const full = judging

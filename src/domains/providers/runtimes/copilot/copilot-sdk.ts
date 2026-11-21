@@ -23,7 +23,7 @@ export const COPILOT_SDK_RUNTIME_ID = "copilot-sdk";
 export const COPILOT_SDK_DEFAULT_MODEL = "gpt-6-luna";
 
 export const COPILOT_SDK_AUTH_NOTICE =
-	"Uses your GitHub Copilot subscription through the official Copilot SDK, as the account signed in with `copilot login`; your organization's Copilot policies apply. Clio stores no Copilot token.";
+	"Uses your GitHub Copilot subscription through the official Copilot SDK, as the account signed in with `copilot login`; your organization's Copilot policies apply. CLIO Coder stores no Copilot token.";
 
 const copilotCapabilities: CapabilityFlags = {
 	chat: true,

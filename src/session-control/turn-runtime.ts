@@ -1632,7 +1632,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					localRuntime.lastAuthResolution = resolved;
 					// A refusal is not "no credential": Pi's "No API key" error would hide why, and the engine's env fallback must not run.
 					if (resolved.refused)
-						throw new Error(resolved.detail ?? `Clio refuses to send a credential to target '${localRuntime.targetId}'.`);
+						throw new Error(
+							resolved.detail ?? `CLIO Coder refuses to send a credential to target '${localRuntime.targetId}'.`,
+						);
 					// A failed OAuth refresh carries its remedy in detail; Pi's own "No API key" error would drop it.
 					if (
 						resolved.apiKey === undefined &&

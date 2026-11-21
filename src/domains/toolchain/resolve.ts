@@ -180,7 +180,7 @@ export function describeResolution(status: ToolStatus): string {
 		// The remedy is deliberately absent here. The rejection cost the operator
 		// nothing: Clio has a copy at the pin and is running it, and printing an
 		// install command that would change nothing is its own kind of dishonesty.
-		const rejected = rejection === null ? "" : `; ${rejection}, so Clio runs the vendored copy`;
+		const rejected = rejection === null ? "" : `; ${rejection}, so CLIO Coder runs the vendored copy`;
 		return `vendored ${resolution.binaryPath} (${status.version})${rejected}`;
 	}
 	if (!status.supported) {

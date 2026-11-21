@@ -89,7 +89,7 @@ export { WorkerChannelFailure } from "./worker-protocol.js";
  */
 export function missingChunkNotice(stderr: string, buildId: string | null): string | null {
 	if (!/ERR_MODULE_NOT_FOUND|Cannot find module/u.test(stderr)) return null;
-	return `[worker] A module of the parent's build ${buildId ?? "(source run)"} is missing from dist/; a later build may have pruned it. Restart Clio to load the current build.\n`;
+	return `[worker] A module of the parent's build ${buildId ?? "(source run)"} is missing from dist/; a later build may have pruned it. Restart CLIO Coder to load the current build.\n`;
 }
 
 export interface WorkerProcessCleanup extends ProcessGroupCleanupStatus {

@@ -597,7 +597,7 @@ export async function runFleetNodePreflight(
 			`project root ${projectRoot} missing on node (provide shared storage or a matching clean checkout at this path)`,
 		);
 	if (clioValue === "unverified-entry")
-		failures.push("custom worker entry needs clioCoderVersionCommand printing its exact Clio version");
+		failures.push("custom worker entry needs clioCoderVersionCommand printing its exact CLIO Coder version");
 	else if (!checks.clioPresent)
 		failures.push(
 			`clio-coder not found on the node's SSH PATH (run 'clio-coder fleet nodes setup ${node.id} --yes', or set fleet.nodes[].clioCoderEntry)`,

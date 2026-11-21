@@ -50,7 +50,7 @@ export function restartRequiredNotice(payload: unknown): string | null {
 	const paths = raw.filter((p): p is string => typeof p === "string" && p.length > 0);
 	if (paths.length === 0) return null;
 	const label = paths.length === 1 ? "setting" : "settings";
-	return `[config] ${label} ${paths.join(", ")} changed; restart Clio to apply.`;
+	return `[config] ${label} ${paths.join(", ")} changed; restart CLIO Coder to apply.`;
 }
 
 function isSafetyBlockedPayload(value: unknown): value is SafetyBlockedPayload {
@@ -269,7 +269,7 @@ export function safetyBlockedNotice(payload: unknown): BusNotice | null {
 	if (!isSafetyBlockedPayload(payload)) return null;
 	return {
 		level: "warn",
-		text: `Clio's safety net blocked ${payload.tool} because it ${actionClassWords(payload.actionClass)}. This gate applies at every autonomy level, and /view names the rule.`,
+		text: `CLIO Coder's safety net blocked ${payload.tool} because it ${actionClassWords(payload.actionClass)}. This gate applies at every autonomy level, and /view names the rule.`,
 		source: "safety",
 	};
 }

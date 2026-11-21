@@ -151,7 +151,7 @@ function decisionLines(
 		facts.push({ label: "answer", value: decision.value });
 		// Clio's own choices, an absent operator's question included (#421), say why.
 		if (decision.source === "agent" && decision.rationale)
-			facts.push({ label: "chosen by Clio", value: decision.rationale });
+			facts.push({ label: "chosen by CLIO Coder", value: decision.rationale });
 		if (decision.operator_choice === true) facts.push({ label: "chosen by", value: "you, as your own choice" });
 		if (decision.source === "operator-message" && decision.quote)
 			facts.push({ label: "from your message", value: decision.quote });
@@ -185,7 +185,7 @@ function formatDecisionsOverlayBodyLines(
 	const theme = clioTheme();
 	if (interviews.length === 0) {
 		const lines = emptyState(theme, "No questions have been answered on this branch yet.", width, {
-			remedy: "When Clio asks you something and you answer or cancel it, the answer is listed here.",
+			remedy: "When CLIO Coder asks you something and you answer or cancel it, the answer is listed here.",
 		}).map((line) => fitRow(line, width));
 		return { lines, selectedStart: 0, selectedEnd: 0 };
 	}

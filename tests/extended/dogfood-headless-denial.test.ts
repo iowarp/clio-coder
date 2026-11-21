@@ -90,7 +90,7 @@ test("interactive denials remain terminal, while actual hard blocks retain hard-
 		ok(error instanceof Error);
 		strictEqual(
 			error.message,
-			`Operator denied this action.\nRefused by operator approval (bash-hidden-content); Clio classifies this call as execute. Not retryable: an identical call asks the operator again.\nTo allow it: the operator must approve it; ask what to do instead of repeating it.\n${pivot}`,
+			`Operator denied this action.\nRefused by operator approval (bash-hidden-content); CLIO Coder classifies this call as execute. Not retryable: an identical call asks the operator again.\nTo allow it: the operator must approve it; ask what to do instead of repeating it.\n${pivot}`,
 		);
 		return true;
 	});

@@ -110,7 +110,7 @@ function loadClioCodewikiForTool(): { ok: true; loaded: LoadedNavSource } | { ok
 		const message = err instanceof Error ? err.message : String(err);
 		return {
 			ok: false,
-			message: `code_nav: bundled Clio code map unavailable at ${CLIO_CODEWIKI_RELATIVE_PATH}: ${message}`,
+			message: `code_nav: bundled CLIO Coder code map unavailable at ${CLIO_CODEWIKI_RELATIVE_PATH}: ${message}`,
 		};
 	}
 }
@@ -810,8 +810,8 @@ export const codeNavTool: ToolSpec = {
 			return {
 				kind: "error",
 				message: admitted
-					? "code_nav: source=clio does not provide mode=wiki/project; use the clio_docs capability through gateway for Clio documentation"
-					: "code_nav: source=clio does not provide mode=wiki/project, and Clio documentation is not available on this run",
+					? "code_nav: source=clio does not provide mode=wiki/project; use the clio_docs capability through gateway for CLIO Coder documentation"
+					: "code_nav: source=clio does not provide mode=wiki/project, and CLIO Coder documentation is not available on this run",
 			};
 		}
 

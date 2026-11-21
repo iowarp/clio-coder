@@ -161,7 +161,7 @@ describe("arcade egg", () => {
 	});
 
 	it("keeps the phrase out of the ask_user card a paused game stepped aside for (M-14)", async () => {
-		assert.match(ARCADE_PAUSED_NOTICE, /answer Clio, then type the phrase to play on$/u);
+		assert.match(ARCADE_PAUSED_NOTICE, /answer CLIO Coder, then type the phrase to play on$/u);
 		let paused = true;
 		let phrases = 0;
 		const screenKeys = createArcadePhraseScreen({ active: () => paused, onPhrase: () => phrases++ });

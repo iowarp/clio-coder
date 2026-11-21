@@ -158,7 +158,7 @@ export function mapForeignHooks(item: InteropInventoryItem, host: InteropAgentId
 		},
 	);
 	const problems = loaded.issues.flatMap((issue) => issue.issues);
-	if (problems.length > 0) return { ok: false, reason: `Not adoptable as a Clio hook: ${problems.join("; ")}.` };
+	if (problems.length > 0) return { ok: false, reason: `Not adoptable as a CLIO Coder hook: ${problems.join("; ")}.` };
 	return {
 		ok: true,
 		hooks,
@@ -198,7 +198,7 @@ export function hookDestinationConflict(
 		present.length === hooks.length &&
 		present.every((hook) => JSON.stringify(byId.get(hook.id)) === JSON.stringify(hook))
 	)
-		return "Already declared: same hooks in the Clio hooks file.";
+		return "Already declared: same hooks in the CLIO Coder hooks file.";
 	return `Hook id collision: ${present.map((hook) => hook.id).join(", ")} already declared in ${destination}; existing content will not be replaced.`;
 }
 

@@ -1094,7 +1094,7 @@ function targetUrlCta(): SettingsCenterItem {
 		label: "Connect by URL",
 		currentValue: "Enter an endpoint URL",
 		description:
-			"Connect a model server or API by its URL: Clio reads its model list, asks for a key only when the endpoint needs one, and uses the model you choose for chat.",
+			"Connect a model server or API by its URL: CLIO Coder reads its model list, asks for a key only when the endpoint needs one, and uses the model you choose for chat.",
 		section: "models",
 		configPath: "targets.url-cta",
 		affordance: "Enter: connect by URL",
@@ -1133,10 +1133,10 @@ const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
 		};
 		list.onCancel = () => done();
 		active = new SubmenuWrapper(
-			"Before Clio answers",
+			"Before CLIO Coder answers",
 			list,
 			[{ key: "Enter", verb: "toggle or apply" }],
-			"Choose which preparation Clio may start before responding.",
+			"Choose which preparation CLIO Coder may start before responding.",
 		);
 	};
 	showChoices(0);
@@ -1518,7 +1518,7 @@ export function buildSettingItems(
 		settingItem("setting.fleet.defaultNode", settings.fleet.defaultNode ?? "(unset)", {
 			label: "Standing worker node preference",
 			description:
-				"Unpinned work stays local. Leave unset to allow Clio's once-per-session placement question; explicit and profile pins take priority.",
+				"Unpinned work stays local. Leave unset to allow CLIO Coder's once-per-session placement question; explicit and profile pins take priority.",
 			submenu: selectListSubmenu("Standing worker node preference", [
 				{ value: "(unset)", label: "No standing preference (local until chosen)" },
 				{ value: "local", label: "Always prefer local" },
@@ -1683,7 +1683,7 @@ export function buildSettingItems(
 			"integrations.runtimePlugins",
 			settings.integrations.runtimePlugins.length > 0 ? settings.integrations.runtimePlugins.join(", ") : "(none)",
 			{
-				submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart Clio to load changes."),
+				submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart CLIO Coder to load changes."),
 				affordance: "free text",
 			},
 		),
@@ -1935,7 +1935,7 @@ function profileNodeChoices(
 ): Array<{ value: string; label: string }> {
 	const live = new Map(options?.getFleetNodes?.().map((node) => [node.id, node] as const) ?? []);
 	return [
-		{ value: AUTO_PLACEMENT_CHOICE, label: "Let Clio choose" },
+		{ value: AUTO_PLACEMENT_CHOICE, label: "Let CLIO Coder choose" },
 		{ value: "local", label: "local (never remote)" },
 		...settings.fleet.nodes.map((node) => {
 			const state = live.get(node.id);

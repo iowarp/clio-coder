@@ -95,6 +95,19 @@ export interface SettingsIssue {
 	message: string;
 	kind?: SettingsIssueKind;
 	repair?: SettingsScalarRepair;
+	/** `2026-11-21-retired-settings` rewrites this key or value, so `clio-coder upgrade` repairs it. */
+	upgrade?: true;
+}
+
+/**
+ * The upgrade advice, only when a pending migration rewrites one of these
+ * issues. A key no release ever read is not one, and advising the upgrade for
+ * it sent the operator to run a command that changes nothing (M-30).
+ */
+function upgradeAdvice(issues: ReadonlyArray<SettingsIssue>): string | null {
+	return issuesKind(issues) === "schema" && issues.some((issue) => issue.upgrade === true)
+		? pendingMigrationAdvice()
+		: null;
 }
 
 /**
@@ -141,7 +154,7 @@ export class SettingsValidationError extends Error {
 				? issues.map((issue) => `  ${issue.path}: ${issue.message}`)
 				: issues.map((issue) => `  ${issue.message}`);
 		const headline = kind === "schema" ? "settings.yaml failed validation:" : "settings.yaml cannot be loaded:";
-		const upgrade = kind === "schema" ? pendingMigrationAdvice() : null;
+		const upgrade = upgradeAdvice(issues);
 		super(
 			`${headline}\n${lines.join("\n")}\n\n` +
 				(upgrade === null ? "" : `${upgrade.charAt(0).toUpperCase()}${upgrade.slice(1)}.\n`) +
@@ -189,12 +202,11 @@ function settingsFailureHeadline(kind: SettingsIssueKind): string {
  * actually failed. Doctor renders it as its settings row and the runtime
  * reload path renders it as a TUI notice, so both speak with one voice.
  *
- * Order is load-bearing: kind, then remedy, then detail. Both live surfaces
- * clamp this to the frame width with no way to expand it, so a line that ended
- * with the remedy ended with the only part the operator could act on cut off,
- * and every notice read as a complaint with no fix attached. Detail is last
- * because it is the part a clamp can afford to lose: the remedy already names
- * the file to go and look at.
+ * Order: kind, then the failing keys and their cause, then the remedy, which
+ * names the file once. The cause leads because it decides which remedy is
+ * right: a remedy read before the key it applies to sent the operator to the
+ * wrong one (M-30). A surface that clamps keeps the key through
+ * {@link settingsReloadFailure}'s headline.
  */
 export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): string {
 	if (issues.length === 0) return "";
@@ -206,10 +218,11 @@ export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): stri
 		kind === "schema"
 			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
 			: issues.map((issue) => issue.message.replace(/^(?:invalid YAML|unreadable): /u, "")).join("; ");
-	// A pending migration's command leads: it is the repair that rewrites what the reader refuses.
-	const upgrade = kind === "schema" ? pendingMigrationAdvice() : null;
+	// A pending migration's command comes first among the remedies: it is the repair that rewrites what the reader refuses.
+	const upgrade = upgradeAdvice(issues);
+	const remedy = `${upgrade === null ? "" : `${upgrade}, or `}${settingsRemedyInline(kind, path)}`;
 	return foldToOneLine(
-		`${settingsFailureHeadline(kind)}: ${upgrade === null ? "" : `${upgrade}, or `}${settingsRemedyInline(kind, path)}. Run \`clio-coder doctor --fix\` for safe repairs. ${detail}`,
+		`${settingsFailureHeadline(kind)}: ${detail.replace(/\.$/u, "")}. ${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}. Run \`clio-coder doctor --fix\` for safe repairs.`,
 	);
 }
 
@@ -239,8 +252,8 @@ export interface SettingsReloadFailure {
 
 /**
  * {@link formatSettingsFailure} with the failing key split out. The full line
- * leads with its kind and remedy, which is right for doctor, but a footer in a
- * narrow pane clamps it to `[config] settings…` and loses the key (M-25). The
+ * leads with its kind, which is right for doctor, but a footer in a narrow
+ * pane clamps it to `[config] settings…` and loses the key (M-25). The
  * headline is the part a clamp must keep, so it names the key first.
  */
 export function settingsReloadFailure(error: unknown): SettingsReloadFailure {
@@ -936,7 +949,7 @@ type ExternalAgent = ClioSettings["integrations"]["externalAgents"]["entries"][n
 type FleetNodeConfig = ClioSettings["fleet"]["nodes"][number];
 
 const EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED =
-	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds Clio's own ACP server";
+	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds CLIO Coder's own ACP server";
 const EXTERNAL_AGENT_LABELS_RETIRED = "nothing read or displayed external agent labels";
 const EXCLUDE_LAST_TURNS_RETIRED =
 	"only the temporary legacy mask used it; context.workingSet.protectLastTurns remains";
@@ -968,9 +981,65 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"turnControl.interpretation": "no harness workflow reads the request before a turn any more",
 	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
 	"interface.panes.enabled":
-		"Clio always opens its own private pane host when the terminal allows it; --with-panes joins an existing host instead",
+		"CLIO Coder always opens its own private pane host when the terminal allows it; --with-panes joins an existing host instead",
 	"systemOne.engines.*.mode": "every llm engine reads as one batch request",
 } as const);
+
+/** Old value spellings `2026-11-21-retired-settings` renames, by dotted key path. */
+export const SETTINGS_V2_RETIRED_VALUE_SPELLINGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
+	Object.freeze({
+		"interface.exitSummary": { full: "standard" },
+		"interface.outputDetail": { minimal: "compact", default: "standard", verbose: "detailed" },
+	});
+
+/** `turnControl.workflows` entries `2026-11-21-retired-settings` removes. */
+export const SETTINGS_V2_RETIRED_WORKFLOWS: ReadonlySet<unknown> = new Set([
+	"orientation",
+	"direction",
+	"ledger-facts",
+]);
+
+/** Every key path `2026-11-21-retired-settings` removes or renames, as issue-path patterns. */
+const RETIRED_SETTINGS_KEY_PATTERNS: ReadonlyArray<RegExp> = [
+	...Object.keys(SETTINGS_V1_RETIRED_PATHS),
+	"fleet.nodes[].clioEntry",
+].map(
+	(pattern) =>
+		new RegExp(
+			`^${pattern
+				.split(".")
+				.map((segment) =>
+					segment === "*" ? "[^.\\[]+" : segment.endsWith("[]") ? `${segment.slice(0, -2)}\\[\\d+\\]` : segment,
+				)
+				.join("\\.")}$`,
+			"u",
+		),
+);
+
+function valueAtIssuePath(raw: unknown, path: string): unknown {
+	let current = raw;
+	for (const part of path.match(/[^.[\]]+/gu) ?? []) {
+		if (Array.isArray(current) && /^\d+$/u.test(part)) current = current[Number(part)];
+		else if (isPlainObject(current)) current = current[part];
+		else return undefined;
+	}
+	return current;
+}
+
+/**
+ * Whether `2026-11-21-retired-settings` rewrites what this issue names: a
+ * retired key it removes or renames, or an old value spelling it renames. It
+ * reads the same tables the migration does, so the advice cannot promise a
+ * rewrite the migration does not make.
+ */
+function rewrittenByRetiredSettings(raw: Record<string, unknown>, issue: SettingsIssue): boolean {
+	if (raw.version !== undefined && raw.version !== 2) return false;
+	if (issue.message === "unknown key") return RETIRED_SETTINGS_KEY_PATTERNS.some((pattern) => pattern.test(issue.path));
+	const value = valueAtIssuePath(raw, issue.path);
+	if (/^turnControl\.workflows\[\d+\]$/u.test(issue.path)) return SETTINGS_V2_RETIRED_WORKFLOWS.has(value);
+	const spellings = SETTINGS_V2_RETIRED_VALUE_SPELLINGS[issue.path];
+	return spellings !== undefined && typeof value === "string" && Object.hasOwn(spellings, value);
+}
 
 function validateRoute(
 	issues: Issues,
@@ -2295,7 +2364,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 										? "no target with this id"
 										: LIVE_CHECK_LOGIN_RUNTIMES.has(target.runtime)
 											? null
-											: `runtime ${target.runtime} has no login file Clio can reveal (only ${[...LIVE_CHECK_LOGIN_RUNTIMES].join(", ")})`;
+											: `runtime ${target.runtime} has no login file CLIO Coder can reveal (only ${[...LIVE_CHECK_LOGIN_RUNTIMES].join(", ")})`;
 								if (problem !== null) issues.add("safety.liveCheckTargets", `${id}: ${problem}`);
 								return problem === null;
 							}),
@@ -2705,7 +2774,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	if ("prompts" in raw) validatePrompts(issues, raw.prompts, settings);
 	if ("models" in raw) validateModels(issues, raw.models, settings);
 
-	return { settings, issues: issues.list, coercions: issues.coercions };
+	const list = issues.list.map((issue) =>
+		rewrittenByRetiredSettings(raw, issue) ? { ...issue, upgrade: true as const } : issue,
+	);
+	return { settings, issues: list, coercions: issues.coercions };
 }
 
 export function validateSettingsFile(): SettingsValidationResult {

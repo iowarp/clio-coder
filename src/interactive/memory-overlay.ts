@@ -278,15 +278,15 @@ export class MemoryOverlayView implements Component {
 	private emptyMessage(): string {
 		switch (this.list.activeTab()?.id) {
 			case "task":
-				return "Nothing recorded for the current task yet. Clio keeps task notes here as it works; they stay in this session.";
+				return "Nothing recorded for the current task yet. CLIO Coder keeps task notes here as it works; they stay in this session.";
 			case "review":
-				return "Nothing waits for review. Lessons Clio proposes, and ones it set aside, appear here.";
+				return "Nothing waits for review. Lessons CLIO Coder proposes, and ones it set aside, appear here.";
 			case "diagnostics":
 				return "No memory diagnostics captured.";
 			default:
 				return this.getStatus().enabled
-					? "No saved lessons apply here yet. Clio proposes lessons from what worked or failed in earlier tasks, and they wait under Review until they are approved or kept. Opening this view changes nothing."
-					: "Background memory is off, so Clio saves no lessons. /settings, Context and memory, turns it on.";
+					? "No saved lessons apply here yet. CLIO Coder proposes lessons from what worked or failed in earlier tasks, and they wait under Review until they are approved or kept. Opening this view changes nothing."
+					: "Background memory is off, so CLIO Coder saves no lessons. /settings, Context and memory, turns it on.";
 		}
 	}
 

@@ -1051,7 +1051,7 @@ test("ACP resume refuses a session another process claims between its check and 
 		// A session a newer build wrote says how to resume it, not that loading failed (B-2).
 		peer.session.resume = () => {
 			throw new Error(
-				"session was written by a newer Clio (format version 99, this build reads version 7): /home/u/s/meta.json. Upgrade clio-coder to resume this session.",
+				"session was written by a newer CLIO Coder (format version 99, this build reads version 7): /home/u/s/meta.json. Upgrade clio-coder to resume this session.",
 			);
 		};
 		await rejects(
@@ -1060,7 +1060,7 @@ test("ACP resume refuses a session another process claims between its check and 
 				err.rpcCode === -32602 &&
 				err.detail.code === "session_format" &&
 				err.message ===
-					"session was written by a newer Clio (format version 99, this build reads version 7). Upgrade clio-coder to resume this session.",
+					"session was written by a newer CLIO Coder (format version 99, this build reads version 7). Upgrade clio-coder to resume this session.",
 		);
 	} finally {
 		await peer.stop();

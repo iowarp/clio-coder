@@ -43,10 +43,10 @@ import {
 import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 export const REWIND_EMPTY =
-	"No workspace snapshots in this session yet. Clio takes one before it first changes files in a turn and before every destructive command, in a Git work tree with safety.snapshots on.";
+	"No workspace snapshots in this session yet. CLIO Coder takes one before it first changes files in a turn and before every destructive command, in a Git work tree with safety.snapshots on.";
 
 export const REWIND_TURN_RUNNING =
-	"Clio is working, so nothing restores now. Wait for the turn to finish, or close this and stop it.";
+	"CLIO Coder is working, so nothing restores now. Wait for the turn to finish, or close this and stop it.";
 
 /** Differences from the work tree: still counting, counted, or not countable. */
 export type RewindCounts = "pending" | SnapshotDifferences;
@@ -202,7 +202,7 @@ export function openRewindListOverlay(tui: TUI, options: OpenRewindListOptions):
 		status: (width) => {
 			if (!turnRunning() || options.records.length === 0) return undefined;
 			const text = `${GLYPH.warn} ${REWIND_TURN_RUNNING}`;
-			const fitted = visibleWidth(text) <= width ? text : `${GLYPH.warn} Clio is working, so nothing restores now.`;
+			const fitted = visibleWidth(text) <= width ? text : `${GLYPH.warn} CLIO Coder is working, so nothing restores now.`;
 			return clioTheme().fg("warning", truncateToWidth(fitted, width, GLYPH.ellipsis));
 		},
 		onSelect: (item) => options.onSelect(Number(item.id)),
