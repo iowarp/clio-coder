@@ -35,6 +35,7 @@ export function delegationEntryForKind(
 		args: [...recipe.args],
 		connectTimeoutMs: defaults.connectTimeoutMs,
 		turnTimeoutMs: defaults.turnTimeoutMs,
+		...(recipe.postSettleMs !== undefined ? { postSettleMs: recipe.postSettleMs } : {}),
 		toolGovernance: "clio-coder-policy",
 	};
 }

@@ -442,6 +442,12 @@ export interface DelegationAgentConfig {
 	 * Defaults to 300000; <= 0 disables the check.
 	 */
 	stallTimeoutMs?: number;
+	/**
+	 * How long the session stays open after a prompt returns while the peer still reports live background work (a tool
+	 * call left running, a v2 `state_update` with background), so its follow-up updates count toward the run. Absent or
+	 * 0 is off; the built-in Antigravity recipe writes 120000.
+	 */
+	postSettleMs?: number;
 	toolGovernance?: DelegationToolGovernance;
 	/**
 	 * Operator opt-in for toolGovernance agent-managed, where the peer decides

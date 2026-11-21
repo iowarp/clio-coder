@@ -821,6 +821,44 @@ test("ACP adapter reopens an earlier session by session/resume over session/load
 	}
 });
 
+test("ACP adapter keeps a session open after its prompt for background work within postSettleMs, and not when it is off", async () => {
+	const cwd = process.cwd();
+	const peer = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	const settle = async (scenario: "complete" | "hang", postSettleMs: number) => {
+		const run = startAcpDelegationRun({
+			agent: { id: "settle-fixture", command: process.execPath, args: [peer, "post-settle", scenario], postSettleMs },
+			task: "build it",
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+			postSettleQuietMs: 50,
+		});
+		const result = await run.promise;
+		const events: Array<{ type: string; message?: { content: Array<{ type: string; text?: string }> } }> = [];
+		for await (const event of run.events) events.push(event as (typeof events)[number]);
+		const end = events.find((event) => event.type === "message_end");
+		const text = end?.message?.content.find((part) => part.type === "text")?.text ?? "";
+		return { result, text, events };
+	};
+	const held = await settle("complete", 60_000);
+	strictEqual(held.result.exitCode, 0, held.result.failureMessage);
+	strictEqual(held.text, "started the build. background done");
+	strictEqual(held.result.delegation.postSettle?.ended, "quiet");
+	strictEqual(held.result.delegation.postSettle?.updates, 2);
+	ok(
+		held.events.some((event) => event.type === "tool_execution_end"),
+		"the background call settled inside the run",
+	);
+
+	const off = await settle("complete", 0);
+	strictEqual(off.result.delegation.postSettle, undefined);
+	strictEqual(off.text, "started the build.");
+
+	const bounded = await settle("hang", 200);
+	strictEqual(bounded.result.exitCode, 0, bounded.result.failureMessage);
+	strictEqual(bounded.result.delegation.postSettle?.ended, "bound");
+	strictEqual(bounded.text, "started the build.");
+});
+
 test("ACP adapter fails a prompt response missing stopReason", async () => {
 	const terminal = new AcpEventMapper().finalEvents({})[0] as {
 		message: { stopReason: string; errorMessage: string };

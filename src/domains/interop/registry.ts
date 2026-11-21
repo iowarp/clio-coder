@@ -215,6 +215,8 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		acp: {
 			command: "agy",
 			args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+			// agy can leave work running in the background when its prompt answers and report on it afterwards.
+			postSettleMs: 120_000,
 		},
 		versionProbe: false,
 		headlessRuntimeId: "antigravity-code",

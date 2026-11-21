@@ -456,6 +456,13 @@ export type AcpDelegationFailureCode =
 	| "acp_thinking_unavailable"
 	| "acp_transport_error";
 
+/** How a post-settle window ran: how long it held the session, the updates it took, and why it closed. */
+export interface AcpPostSettle {
+	waitedMs: number;
+	updates: number;
+	ended: "quiet" | "idle" | "bound" | "aborted";
+}
+
 export interface AcpDelegationResult {
 	messages: AgentMessage[];
 	exitCode: number;
@@ -472,9 +479,11 @@ export interface AcpDelegationResult {
 	delegation: {
 		acpSessionId: string | null;
 		/** How the peer session opened: a new one, or an earlier one reopened by `session/resume` or `session/load`. */
-		opened?: "new" | "resume" | "load";
+		opened: "new" | "resume" | "load";
 		/** History updates a `session/load` replayed before it answered, kept out of the run's events. */
 		replayedUpdates?: number;
+		/** The window the session stayed open after the prompt returned for the peer's background work. */
+		postSettle?: AcpPostSettle;
 		/** The peer session cannot take another turn; a later turn starts a fresh session. */
 		nonResumable?: { reason: string };
 		selectedModelId?: string;

@@ -342,8 +342,34 @@ function reopenPeer(request) {
 	} else reply({});
 }
 
+// post-settle: a prompt that answers while its command still runs; the command ends and the peer reports on it after.
+// argv[3] "complete" ends it 300 ms later, "hang" never does.
+function postSettlePeer(request) {
+	if (request.id === undefined) return;
+	const sessionId = "settle-session";
+	const update = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+	const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+	if (request.method === "initialize")
+		reply({ protocolVersion: 1, agentInfo: { name: "settle-fixture", version: "1.0.0" } });
+	else if (request.method === "session/new") reply({ sessionId });
+	else if (request.method === "session/prompt") {
+		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "started the build." } });
+		update({ sessionUpdate: "tool_call", toolCallId: "bg-1", kind: "execute", status: "in_progress", title: "make" });
+		reply({ stopReason: "end_turn" });
+		if (process.argv[3] === "complete")
+			void setTimeout(300).then(() => {
+				update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", status: "completed" });
+				update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: " background done" } });
+			});
+	} else reply({});
+}
+
 for await (const line of createInterface({ input: process.stdin })) {
 	const request = JSON.parse(line);
+	if (mode === "post-settle") {
+		postSettlePeer(request);
+		continue;
+	}
 	if (reopenKind !== null) {
 		reopenPeer(request);
 		continue;

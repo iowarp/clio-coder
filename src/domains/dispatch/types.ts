@@ -634,10 +634,12 @@ export interface RunResultDelegation {
 	/** Present when agent-managed governance ran under the operator's trustedUnmediated opt-in. */
 	trustedUnmediated?: true;
 	toolCallLog: DelegationToolCallLogEntry[];
-	/** How the run opened its peer session; absent on runs before continuations, which all opened a new one. */
-	opened?: "new" | "resume" | "load";
+	/** How the run opened its peer session: a new one, or an earlier one reopened by `session/resume` or `session/load`. */
+	opened: "new" | "resume" | "load";
 	/** Peer updates a `session/load` replayed as history and Clio kept out of this run's events. */
 	replayedUpdates?: number;
+	/** The window the peer session stayed open after its prompt returned, for background work that outlived it. */
+	postSettle?: { waitedMs: number; updates: number; ended: "quiet" | "idle" | "bound" | "aborted" };
 	/** The earlier run this one continued; `freshReason` says why it opened a new session instead of that one. */
 	continuedFrom?: { runId: string; acpSessionId: string; freshReason?: string };
 	/** The peer marked this run's session unable to take another turn. */

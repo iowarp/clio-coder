@@ -7812,8 +7812,9 @@ export function createDispatchBundle(
 						? { trustedUnmediated: true as const }
 						: {}),
 					toolCallLog: acp.toolCallLog(),
-					...(result.delegation.opened !== undefined ? { opened: result.delegation.opened } : {}),
+					opened: result.delegation.opened,
 					...(result.delegation.replayedUpdates !== undefined ? { replayedUpdates: result.delegation.replayedUpdates } : {}),
+					...(result.delegation.postSettle !== undefined ? { postSettle: { ...result.delegation.postSettle } } : {}),
 					...(continuation !== null
 						? {
 								continuedFrom: {
