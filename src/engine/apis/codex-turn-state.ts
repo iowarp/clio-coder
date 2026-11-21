@@ -1,5 +1,6 @@
 import type { Api, Context, Model, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
 import { registerSessionResourceCleanup } from "@earendil-works/pi-ai";
+import { cacheConversationOf } from "./cache-family.js";
 import { codexUserTurn } from "./codex-configuration.js";
 
 /** The Codex backend's sticky-routing token, named as native Codex names it (codex-rs `X_CODEX_TURN_STATE_HEADER`). */
@@ -68,7 +69,7 @@ export function withCodexTurnState<T extends StreamOptions | SimpleStreamOptions
 	context: Context,
 	options: T | undefined,
 ): T | undefined {
-	const sessionId = options?.cacheRetention === "none" ? undefined : options?.sessionId;
+	const sessionId = cacheConversationOf(options);
 	if (model.api !== "openai-codex-responses" || !sessionId) return options;
 	const opened = turnOf(context);
 	if (opened === undefined) return options;

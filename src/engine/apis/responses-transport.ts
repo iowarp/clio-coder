@@ -2,6 +2,7 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Model, StreamO
 import { createAssistantMessageEventStream, registerSessionResourceCleanup } from "@earendil-works/pi-ai";
 import { isProviderAuthRejection } from "../../core/provider-auth-error.js";
 import type { CodexTransportCounters, CodexTransportObservation } from "../types.js";
+import { cacheConversationOf, withoutCacheConversation } from "./cache-family.js";
 import { withProxyConnectionNote } from "./proxy-connection-error.js";
 import {
 	newTransportCall,
@@ -48,28 +49,30 @@ function flavorOf(model: Model<Api>): ResponsesWebSocketFlavor | undefined {
  */
 export function observeResponsesTransport<T extends StreamOptions>(
 	model: Model<Api>,
-	options: T | undefined,
+	requested: T | undefined,
 	invoke: (options: T | undefined) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
+	// A routed main request's lanes and counters are its own conversation's, whatever cache it is routed to (M-11).
+	const session = cacheConversationOf(requested);
+	const options = withoutCacheConversation(requested);
 	const flavor = flavorOf(model);
 	if (flavor === undefined) return invoke(options);
-	const requested = options?.transport ?? "auto";
-	const session = options?.cacheRetention === "none" ? undefined : options?.sessionId;
+	const requestedTransport = options?.transport ?? "auto";
 	// Without a session the public API has no conversation to continue, so a socket would only add a handshake.
-	if (flavor === "public" && (session === undefined || requested === "sse")) return invoke(options);
+	if (flavor === "public" && (session === undefined || requestedTransport === "sse")) return invoke(options);
 	const totalsKey = session === undefined ? undefined : `${flavor}\n${session}`;
 	const call = newTransportCall();
 	const base = options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
 	const routed = {
 		...options,
 		transport: "sse",
-		...(requested === "sse"
+		...(requestedTransport === "sse"
 			? {}
 			: {
 					fetch: responsesWebSocketFetch({
 						flavor,
 						base,
-						continuation: requested !== "websocket",
+						continuation: requestedTransport !== "websocket",
 						call,
 						...(session !== undefined ? { session } : {}),
 						...(options?.signal !== undefined ? { signal: options.signal } : {}),
@@ -85,7 +88,7 @@ export function observeResponsesTransport<T extends StreamOptions>(
 			finished = true;
 			if (message.stopReason === "error" && message.errorMessage !== undefined && flavor === "codex")
 				message.errorMessage = withProxyConnectionNote(message.errorMessage, model.baseUrl);
-			const mode = requested === "sse" ? "sse" : call.mode;
+			const mode = requestedTransport === "sse" ? "sse" : call.mode;
 			const before = totalsKey === undefined ? undefined : (totals.get(totalsKey) ?? zero());
 			let recovery: CodexTransportObservation["recovery"];
 			if (call.recovered && before) {
