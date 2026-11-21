@@ -10,7 +10,7 @@ import {
 
 const SEVERITY_ORDER: ReadonlyArray<MiddlewareReminderSeverity> = ["info", "advisory", "warn", "hard-block"];
 /** The evidence class shape middleware.fired admits; a class built from an operator's id that misses it is dropped. */
-const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$/;
+export const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$/;
 /** The process's one firing sequence: every owner draws from it, so no owner is ever forgotten and handed an id again. */
 let firingSequence = 0;
 /**
