@@ -4,6 +4,7 @@ import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
+import { heredocDataText } from "./heredoc-data.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import { FILE_WRITER_COMMANDS, isRefusedValidationWrapper, validationWrapperProblem } from "./validation-wrappers.js";
 
@@ -177,7 +178,8 @@ function classifyDestructiveCommand(
 	const artifacts = normalizedArtifacts(protectedArtifacts);
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
-	const segments = splitSegments(scanShellLike(command)).flatMap((tokens) => [
+	// C-7: a here-document the parsed call proves is data is content, not shell text (row 287).
+	const segments = splitSegments(scanShellLike(heredocDataText(command) ?? command)).flatMap((tokens) => [
 		tokens,
 		...substitutionSegments(tokens, 0),
 	]);
