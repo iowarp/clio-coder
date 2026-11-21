@@ -116,7 +116,7 @@ export interface YoloFloorHit {
  * commands. If the path walk also reads the original body because it may run in this call, so does the floor.
  */
 export function yoloFloorCommandText(command: string): string {
-	const text = withoutDataHeredocBodies(command);
+	const text = withoutDataHeredocBodies(command, "all", "rails");
 	return text !== command && extractCommandPathWalks(command).length === 1 ? text : command;
 }
 
@@ -183,7 +183,7 @@ function stepGrantsTrust(executable: string, args: ReadonlyArray<string>, verbOn
  */
 export function yoloFloorTrustGrant(command: string, rawText = false): boolean {
 	const texts = [command];
-	if (/<<(?!<)/u.test(command)) texts.push(...withoutDataHeredocBodies(command).split(/\r?\n/u));
+	if (/<<(?!<)/u.test(command)) texts.push(...withoutDataHeredocBodies(command, "all", "rails").split(/\r?\n/u));
 	return texts.some((text) =>
 		shellCommandSteps(text).some((step) => stepGrantsTrust(step.executable, step.args, rawText)),
 	);

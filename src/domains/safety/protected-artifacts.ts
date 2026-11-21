@@ -907,14 +907,16 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
  * TypeScript body is not a redirect. A body that may feed a shell or an
  * unknown command is still read as commands, and so is one whose
  * file a later command names, since that command may run it, or a script
- * file a step such as `make` may run without naming it.
+ * file a step such as `make` may run without naming it. The safety rails (`reader` "rails") further keep a body as
+ * commands unless {@link heredocDataTrusted}; the finish contract reads it as b1c4855bf did ("base").
  */
-export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
+export function extractCommandPathWalks(command: string, reader: HeredocReader = "rails"): CommandPathEvent[][] {
 	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
 	if (withoutBodies === command) return [extractCommandPathWalk(command)];
 	const removedAll = !scanShellLike(withoutBodies).some((token) => token.operator && token.value === "<<");
 	const baseStrips = removedAll && dataOutputs !== null && !mayRunHeredocOutputs(withoutBodies, dataOutputs);
-	if (baseStrips && heredocDataTrusted(withoutBodies, dataOutputs ?? [])) return [extractCommandPathWalk(withoutBodies)];
+	if (baseStrips && (reader === "base" || heredocDataTrusted(withoutBodies, dataOutputs ?? [])))
+		return [extractCommandPathWalk(withoutBodies)];
 	const full = extractCommandPathWalk(command, !removedAll);
 	const stripped = extractCommandPathWalk(withoutBodies);
 	if (baseStrips) {
@@ -929,6 +931,8 @@ export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 const HEREDOC_DATA_CONSUMERS: ReadonlySet<string> = new Set(["cat", "tee"]);
 const HEREDOC_NON_READERS: ReadonlySet<string> = new Set([":", "true", "false", "echo", "printf", "pwd"]);
 type HeredocDataMode = "all" | "stdin-only";
+/** Who reads a here-document: the safety rails, or a reader that keeps b1c4855bf's reading (row 261). */
+type HeredocReader = "rails" | "base";
 
 /** XR-43: only direct commands with known stdin semantics can make a body inert without copying it. */
 function isHeredocStdinData(head: ReadonlyArray<ShellToken>): boolean {
@@ -1231,9 +1235,14 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
  * command may redefine the recipient. The floor needs every body to be known
  * data, including copies by `cat` or `tee` whose output is run separately
  * (SF-5, SF-6). The secret rail leaves file copies and ambiguous readers in
- * place, but can omit known stdin data before them (XR-43).
+ * place, but can omit known stdin data before them (XR-43). Only the safety rails (`reader` "rails") also require
+ * {@link heredocDataTrusted}; every other reader, such as a check's exit scope, keeps b1c4855bf's reading (row 261).
  */
-export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode = "all"): string {
+export function withoutDataHeredocBodies(
+	command: string,
+	mode: HeredocDataMode = "all",
+	reader: HeredocReader = "base",
+): string {
 	if (!command.includes("<<")) return command;
 	const { text, dataOutputs } = removeHeredocBodies(command, false, mode);
 	if (text === command) return command;
@@ -1242,7 +1251,9 @@ export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode 
 		(dataOutputs === null || scanShellLike(text).some((token) => token.operator && token.value === "<<"))
 	)
 		return command;
-	return mayRedefineHeredocCopier(text) || !heredocDataTrusted(text, dataOutputs ?? []) ? command : text;
+	return mayRedefineHeredocCopier(text) || (reader === "rails" && !heredocDataTrusted(text, dataOutputs ?? []))
+		? command
+		: text;
 }
 
 /**

@@ -2448,7 +2448,7 @@ function stripQuotes(token: string): string {
  * zero-access path appearing anywhere in the command is the signal.
  */
 function bashPathTokenCandidates(command: string): string[] {
-	command = withoutDataHeredocBodies(command, "stdin-only");
+	command = withoutDataHeredocBodies(command, "stdin-only", "rails");
 	const candidates: string[] = [];
 	// `sh -c 'cat .env'` is one whitespace-bearing token below, skipped as prose,
 	// yet recognition judges exactly that inner script. Scan it as its own command.
@@ -2644,7 +2644,7 @@ const ROLE_PREFIX_WRAPPERS: ReadonlySet<string> = new Set([
  * with their roots so their walk can be judged.
  */
 function bashOperandRoles(command: string): BashOperandRoles {
-	command = withoutDataHeredocBodies(command, "stdin-only");
+	command = withoutDataHeredocBodies(command, "stdin-only", "rails");
 	const roles: BashOperandRoles = { reads: [], pathOperands: new Set(), writes: [], searches: [] };
 	const inner = inlineShellScript(command);
 	if (inner !== null && inner !== command) {
