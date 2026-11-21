@@ -24,6 +24,8 @@ import type {
 	DomainFailedPayload,
 	EvidenceAssessedPayload,
 	ExtensionsLoadIssuePayload,
+	ForeignApprovalChangedPayload,
+	ForeignRunObservedPayload,
 	GitHooksChangedPayload,
 	InternalGitDriftPayload,
 	JobClockResumedPayload,
@@ -510,6 +512,8 @@ export const EVENTS = {
 	"run.progressed": live<DispatchProgressPayload>(),
 	"run.completed": live<DispatchCompletedPayload>(),
 	"run.failed": live<DispatchFailedPayload>(),
+	"run.foreign_observed": live<ForeignRunObservedPayload>(),
+	"approval.foreign_changed": live<ForeignApprovalChangedPayload>(),
 	"compaction.started": live<CompactionPayload>(),
 	"compaction.ended": live<CompactionPayload>(),
 	"middleware.hook_failed": journal(S.MiddlewareHookFailedSchema, {

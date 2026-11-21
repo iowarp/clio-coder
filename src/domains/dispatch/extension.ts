@@ -360,6 +360,7 @@ import type {
 	MainGrantOutcome,
 	WorkerGrantView,
 } from "./contract.js";
+import { createCrossProcessFleet, type ForeignAnswerOrigin } from "./cross-process-fleet.js";
 import {
 	type EnvelopeInput,
 	envelopeApproval,
@@ -4564,6 +4565,13 @@ export function createDispatchBundle(
 		...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
 		...(record.reviewer !== undefined ? { reviewer: record.reviewer } : {}),
 	});
+	/**
+	 * Answers another Clio process gave through a run's grant records, by request id, until their resolution is
+	 * published: the resolution then names that process instead of reading like this process's own card.
+	 */
+	const answeredElsewhere = new Map<string, ForeignAnswerOrigin>();
+	const answeredElsewhereReason = (decision: "approve" | "deny", origin: ForeignAnswerOrigin): string =>
+		`${decision === "approve" ? "approved" : "denied"} by the operator in another Clio process (pid ${origin.pid}${origin.host !== null ? ` on ${origin.host}` : ""})`;
 	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
@@ -4653,12 +4661,15 @@ export function createDispatchBundle(
 				: record.state === "canceled"
 					? "revoked"
 					: record.issuer !== undefined
-						? record.forwardedByMain === true && record.issuer === "operator"
-							? "operator:forwarded-by-main"
-							: record.reviewer === "safety-judge" && record.issuer === "main"
-								? "safety-judge"
-								: record.issuer
+						? record.issuer === "operator" && answeredElsewhere.has(record.requestId)
+							? "operator:another-process"
+							: record.forwardedByMain === true && record.issuer === "operator"
+								? "operator:forwarded-by-main"
+								: record.reviewer === "safety-judge" && record.issuer === "main"
+									? "safety-judge"
+									: record.issuer
 						: "worker";
+		answeredElsewhere.delete(record.requestId);
 		emitApproval(context.bus, "approval.resolved", {
 			status,
 			tool: record.tool,
@@ -4702,6 +4713,26 @@ export function createDispatchBundle(
 			);
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
+	});
+	// Cross-process fleet state (M11): run-directory records for this process's runs and asks, and, where a person can
+	// answer, the live runs and held asks of other Clio processes on this state directory.
+	const crossProcessFleet = createCrossProcessFleet({
+		bus: context.bus,
+		isLocalRun: (runId) => active.has(runId) || currentAssignmentRun(runId) !== null,
+		grantBinding: (requestId) => {
+			const record = grantBroker.get(requestId);
+			return record === null ? null : { attempt: record.attempt, argDigest: record.argDigest };
+		},
+		resolve: (runId, requestId, decision, answeredBy) => {
+			answeredElsewhere.set(requestId, answeredBy);
+			try {
+				contract.resolveWorkerPermission?.(runId, requestId, decision);
+			} catch (error) {
+				answeredElsewhere.delete(requestId);
+				throw error;
+			}
+		},
+		follow: options?.workerPermissionResponder === true,
 	});
 	/** Asks a fork adopted from the parked session that held them, by request id; a brokered ask's record holds its own. */
 	const adoptedAsks = new Map<string, { runId: string; sessionId: string }>();
@@ -9601,18 +9632,26 @@ export function createDispatchBundle(
 				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 				const source = event.payload.source;
 				const granted = (source === "operator" || source === "main") && event.payload.decision === "approved";
+				// An answer another Clio process gave through the run's grant records names that process.
+				const elsewhere =
+					source === "operator" && typeof event.payload.requestId === "string"
+						? answeredElsewhere.get(event.payload.requestId)
+						: undefined;
+				if (elsewhere !== undefined) answeredElsewhere.delete(event.payload.requestId as string);
 				const decidedBy =
-					source === "operator"
-						? "operator"
-						: source === "main"
-							? "main"
-							: source === "remembered"
-								? "remembered-denial"
-								: source === "timeout"
-									? "timeout"
-									: source === "binding"
-										? "policy:grant-binding"
-										: "policy:no-operator";
+					elsewhere !== undefined
+						? "operator:another-process"
+						: source === "operator"
+							? "operator"
+							: source === "main"
+								? "main"
+								: source === "remembered"
+									? "remembered-denial"
+									: source === "timeout"
+										? "timeout"
+										: source === "binding"
+											? "policy:grant-binding"
+											: "policy:no-operator";
 				const requestId =
 					typeof event.payload.requestId === "string"
 						? event.payload.requestId
@@ -9622,7 +9661,11 @@ export function createDispatchBundle(
 				const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
 				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
 				const reason =
-					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+					elsewhere !== undefined
+						? answeredElsewhereReason(granted ? "approve" : "deny", elsewhere)
+						: typeof event.payload.reason === "string"
+							? event.payload.reason
+							: `${event.payload.tool} requires approval`;
 				// A remembered answer never raised an escalation card, so it mints
 				// the adjacent request/resolve pair the way policy denials do.
 				if (
@@ -12527,6 +12570,7 @@ export function createDispatchBundle(
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();
+				crossProcessFleet.dispose();
 				workerApprovalWindows.dispose();
 			})().then(resolveStop, rejectStop);
 			return stopPromise;
@@ -13144,6 +13188,8 @@ export function createDispatchBundle(
 			return { receipt, receipts };
 		},
 		abort(runId, reason) {
+			// A run another Clio process owns: its owner takes the durable cancel request and seals it canceled.
+			if (currentAssignmentRun(runId) === null && crossProcessFleet.cancelForeign(runId, reason?.detail ?? null)) return;
 			const rootRunId = controlRootFor(runId);
 			const run = currentAssignmentRun(runId);
 			canceledControlRoots.add(rootRunId);
@@ -13259,10 +13305,18 @@ export function createDispatchBundle(
 			// answer is bound to the attempt and argument digest the worker parked.
 			const brokered = grantBroker.get(requestId);
 			if (brokered !== null) {
-				const result = grantBroker.decide(requestId, { decision, issuer: "operator", runId });
+				const elsewhere = answeredElsewhere.get(requestId);
+				const result = grantBroker.decide(requestId, {
+					decision,
+					issuer: "operator",
+					runId,
+					...(elsewhere !== undefined ? { reason: answeredElsewhereReason(decision, elsewhere) } : {}),
+				});
 				if (!result.ok) throw new Error(`resolveWorkerPermission: ${result.reason}`);
 				return;
 			}
+			// An ask another Clio process holds: the answer goes to its run directory, and that process applies it.
+			if (crossProcessFleet.answerForeign(runId, requestId, decision)) return;
 			if (workerApprovalWindows.isExpired(requestId)) {
 				throw new Error(`resolveWorkerPermission: run '${runId}' no longer accepts input for this ask; its window ended`);
 			}
