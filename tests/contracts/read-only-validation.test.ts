@@ -298,7 +298,10 @@ it("the merge gate reads the run's assurance, never the task's words (M9)", () =
 	};
 	const detail = mergeWithheldDetail(failing) ?? "";
 	match(detail, /the worker's own report lists a failing validation \(npm test\)/u);
-	match(detail, /`clio-coder fleet land clio-coder\/task\/check` applies it if that failure was already there/u);
+	match(
+		detail,
+		/`clio-coder fleet land clio-coder\/task\/check` previews the merge and `clio-coder fleet land clio-coder\/task\/check --yes` lands it if that failure was already there/u,
+	);
 	doesNotMatch(detail, /requested validation/u);
 });
 
