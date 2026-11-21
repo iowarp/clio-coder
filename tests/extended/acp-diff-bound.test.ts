@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { ACP_MAX_RAW_DIFF_BYTES, ACP_MAX_RAW_RECORD_BYTES, ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
@@ -129,5 +129,48 @@ describe("contracts/acp keeps a whole multi-hunk diff on the wire", () => {
 			strictEqual(rawOutput.truncated, undefined, row.name);
 			ok(Buffer.byteLength(JSON.stringify(rawOutput), "utf8") <= ACP_MAX_RAW_RECORD_BYTES, row.name);
 		}
+	});
+});
+
+describe("contracts/acp shows a tool's screenshots to the client", () => {
+	it("sends result images as image content, keeps their bytes out of rawOutput, and links each screenshot file", async () => {
+		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+		const result = {
+			content: [
+				{ type: "text", text: "browser look page p1\nscreenshots:\n  /scratch/shots/001-look-1280x800.png (1280x800)" },
+				{ type: "image", mimeType: "image/png", data: png },
+				{ type: "image", mimeType: "image/svg+xml", data: png },
+			],
+			details: { op: "look", shots: ["/scratch/shots/001-look-1280x800.png", "relative.png"] },
+		};
+		const peer = fakeTransport();
+		const chat = scriptedChat((emit) => {
+			emit({ type: "tool_execution_start", toolCallId: "call-shot", toolName: "browser", args: { op: "look" } });
+			emit({ type: "tool_execution_end", toolCallId: "call-shot", toolName: "browser", result, isError: false });
+		});
+		const served = serveClioAcpAgent({ transport: peer.transport, chat, cwd: process.cwd() });
+		await peer.call("initialize", { protocolVersion: 1 });
+		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+		await peer.call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "look" }] });
+		peer.transport.close();
+		strictEqual(await served, 0);
+		const terminal = peer.notifications
+			.filter((entry) => entry.method === "session/update")
+			.map((entry) => (entry.params as { update: Record<string, unknown> }).update)
+			.find((update) => update.sessionUpdate === "tool_call_update" && update.status === "completed");
+		ok(terminal !== undefined, "the turn produced no terminal tool_call_update");
+		const content = (terminal.content as Array<{ content: Record<string, unknown> }>).map((entry) => entry.content);
+		strictEqual(content[0]?.type, "text");
+		// The SVG block is not drawable and the relative path is not a file a client can open.
+		deepStrictEqual(content.slice(1), [
+			{ type: "image", mimeType: "image/png", data: png },
+			{
+				type: "resource_link",
+				uri: "file:///scratch/shots/001-look-1280x800.png",
+				name: "001-look-1280x800.png",
+				mimeType: "image/png",
+			},
+		]);
+		ok(!JSON.stringify(terminal.rawOutput).includes(png), "the image bytes travel once, in content");
 	});
 });

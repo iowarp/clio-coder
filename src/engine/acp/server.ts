@@ -51,8 +51,8 @@ export type { AcpSafeSettingsPatch, AcpThinkingLevel } from "./types.js";
 
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { isAbsolute, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, isAbsolute, resolve as resolvePath } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { type BashCommandProgress, combineLiveBashOutput } from "../../core/bash-exec.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
@@ -77,6 +77,7 @@ import type {
 } from "../../core/telemetry/live-events.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { displayImageMimeType, toolResultImages, toolResultShotPaths } from "../../core/tool-result-images.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { StartupHint } from "../../domains/context/contract.js";
@@ -935,6 +936,62 @@ function toolKind(name: string | undefined): AcpToolKind {
 /** ACP `ToolCallContent[]`. The `content` variant wraps a regular ContentBlock. */
 function toolCallContent(text: string): Array<{ type: "content"; content: { type: "text"; text: string } }> {
 	return [{ type: "content", content: textContent(text) }];
+}
+
+/**
+ * Image characters one settled tool update may carry. The update is one stdio line and a peer reads at most
+ * `ACP_MAX_INPUT_LINE_BYTES`, so images stay well under it; one that does not fit is still named by its file link.
+ */
+const ACP_MAX_TOOL_IMAGE_CHARS = 256 * 1024;
+
+/**
+ * A settled tool call's content: its text, the result's images as ACP image blocks (at most
+ * {@link ACP_MAX_PROMPT_IMAGES}, within {@link ACP_MAX_TOOL_IMAGE_CHARS}), and each screenshot file it names as a
+ * `resource_link`, so a client sees a screenshot even when the model's route took no image.
+ */
+function toolResultContent(
+	output: string,
+	result: unknown,
+): Array<{ type: "content"; content: Record<string, unknown> }> {
+	const content: Array<{ type: "content"; content: Record<string, unknown> }> =
+		output.length > 0 ? toolCallContent(output) : [];
+	let room = ACP_MAX_TOOL_IMAGE_CHARS;
+	let images = 0;
+	for (const image of toolResultImages(result)) {
+		if (images >= ACP_MAX_PROMPT_IMAGES) break;
+		if (image.data.length > room) continue;
+		content.push({ type: "content", content: { type: "image", mimeType: image.mimeType, data: image.data } });
+		room -= image.data.length;
+		images += 1;
+	}
+	for (const path of toolResultShotPaths(result)) {
+		const uri = pathToFileURL(path).href;
+		if (utf8Bytes(uri) > ACP_MAX_LOCATION_PATH_BYTES) continue;
+		content.push({
+			type: "content",
+			content: {
+				type: "resource_link",
+				uri,
+				name: boundString(basename(path), ACP_MAX_TOOL_TITLE_BYTES),
+				mimeType: displayImageMimeType(path) ?? "image/png",
+			},
+		});
+	}
+	return content;
+}
+
+/** A result for `rawOutput` with image data left out: the image travels once, as a content block. */
+function withoutImageData(result: unknown): unknown {
+	if (!isRecord(result) || !Array.isArray(result.content)) return result;
+	if (!result.content.some((block) => isRecord(block) && block.type === "image")) return result;
+	return {
+		...result,
+		content: result.content.map((block) =>
+			isRecord(block) && block.type === "image"
+				? { type: "image", ...(typeof block.mimeType === "string" ? { mimeType: block.mimeType } : {}), omitted: true }
+				: block,
+		),
+	};
 }
 
 function contentText(value: unknown): string {
@@ -2138,6 +2195,7 @@ function handleChatEvent(
 		active.terminalToolCalls.add(toolCallId);
 		// Redacted before the bound, which could otherwise cut a password into a piece nothing recognizes (#446).
 		const output = boundString(redactUrlCredentials(outputText(event.result)), ACP_MAX_CHUNK_BYTES);
+		const content = toolResultContent(output, event.result);
 		const started = active.toolCallSnapshots.get(toolCallId);
 		sendUpdate(
 			transport,
@@ -2149,9 +2207,9 @@ function handleChatEvent(
 				title: started?.title ?? boundString(redactUrlCredentials(toolName ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
 				kind: started?.kind ?? toolKind(toolName),
 				status: toolStatus(event),
-				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
+				...(content.length > 0 ? { content } : {}),
 				rawOutput: boundRawRecord({
-					result: event.result,
+					result: withoutImageData(event.result),
 					isError: toolFailed(event),
 					...(toolNotRun(event) !== undefined ? { notRun: toolNotRun(event) } : {}),
 				}),
@@ -2706,6 +2764,7 @@ function prepareAcpReplay(
 				notRun === undefined &&
 				(payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked");
 			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
+			const content = toolResultContent(output, payload?.result);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
 			current.frames.push({
 				update: {
@@ -2714,9 +2773,9 @@ function prepareAcpReplay(
 					title: name,
 					kind: toolKind(name),
 					status: (failed ? "failed" : "completed") satisfies AcpToolCallStatus,
-					...(output.length > 0 ? { content: toolCallContent(output) } : {}),
+					...(content.length > 0 ? { content } : {}),
 					rawOutput: boundRawRecord({
-						result: payload?.result,
+						result: withoutImageData(payload?.result),
 						isError: failed,
 						...(notRun !== undefined ? { notRun } : {}),
 					}),
