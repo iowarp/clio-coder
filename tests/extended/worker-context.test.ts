@@ -874,6 +874,9 @@ test("a writer worker reading 40 times with no write is told once, naming the st
 		// Admit an 82% request without a fold, so the context cause holds after read 46 as in the CLI-H3 row above.
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.context.compaction.threshold = 0.95;
+		// A write into this configured scratch root inside the worker's cwd is no edit, so it never resets the streak.
+		settings.safety.scratchRoots = [join(env.dir, "scratch")];
+		mkdirSync(join(env.dir, "scratch"), { recursive: true });
 		mkdirSync(join(env.dir, "config"), { recursive: true });
 		writeFileSync(join(env.dir, "config/settings.yaml"), JSON.stringify(settings));
 		// Fifty reads of one new line each: no repeat for the loop guard, nothing already shown.
@@ -941,6 +944,19 @@ test("a writer worker reading 40 times with no write is told once, naming the st
 			!chained.requests.some((request) => request.includes("Host note:")),
 			"a streak reset by the chain sends no host turn",
 		);
+
+		// A write into the configured scratch root at call 21 leaves the streak running: the host turn follows read 40.
+		const scratched = await runFauxWorker(
+			env.dir,
+			(done) =>
+				done === 20
+					? { call: { name: "write", arguments: { path: "scratch/notes.txt", content: "n\n" } }, promptTokens: 1000 }
+					: lines(44)(done),
+			{ agentId: "coder", task: "Fix a.txt.", allowedTools: ["write", "read"] },
+		);
+		match(readFileSync(join(env.dir, "scratch/notes.txt"), "utf8"), /^n/, "the scratch write landed");
+		const scratchNudged = scratched.requests.find((request) => request.includes("Host note:"));
+		equal(scratchNudged !== undefined ? toolResults(scratchNudged) : -1, 41, "a scratch-root write is no edit");
 
 		// An operator steer starts the streak over, so 50 reads with a steer at 30 never reach the second step.
 		const steered = await runFauxWorker(env.dir, lines(50), {
