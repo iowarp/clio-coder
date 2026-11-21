@@ -53,7 +53,8 @@ type MergedToolCall = AcpToolCallUpdate & { name?: string; args?: Record<string,
 /** Whether a mapped call names what it acts on yet: a known Clio tool with its target, or bash with its command. */
 function resolvesCall(mapped: ReturnType<typeof mapAcpToolCall>): boolean {
 	if (!mapped.known || mapped.validationError !== undefined) return false;
-	if (mapped.tool !== ToolNames.Bash) return true;
+	// An argument-free mapping (a search before its pattern arrives) names nothing yet.
+	if (mapped.tool !== ToolNames.Bash) return Object.keys(mapped.args).length > 0;
 	return typeof mapped.args.command === "string" && mapped.args.command.trim().length > 0;
 }
 
@@ -71,6 +72,8 @@ export class AcpEventMapper {
 	private readonly toolCalls = new Map<string, MergedToolCall>();
 	/** The Clio tool name each call's `tool_execution_start` carried, which its end repeats. */
 	private readonly executionNames = new Map<string, string>();
+	/** Calls that already settled: a repeated or late frame for one emits nothing, so each call starts and ends once. */
+	private readonly settledCalls = new Set<string>();
 
 	/** Some ACP bridges stream a provider error as text, then report `end_turn`. */
 	reportedFailure(): string | null {
@@ -152,6 +155,8 @@ export class AcpEventMapper {
 
 	private mapToolUpdate(update: AcpToolCallUpdate): Array<AgentEvent | ClioWorkerEvent> {
 		const toolCallId = update.toolCallId ?? update.title ?? `acp-tool-${this.toolStarts.size + 1}`;
+		// Only a peer-given id identifies one call; a title stand-in may name the next call too.
+		if (update.toolCallId !== undefined && this.settledCalls.has(update.toolCallId)) return [];
 		if (!this.toolKinds.has(toolCallId)) this.toolKinds.set(toolCallId, update.kind ?? "other");
 		const tool = this.toolKinds.get(toolCallId) ?? "other";
 		const status = update.status ?? "pending";
@@ -221,6 +226,7 @@ export class AcpEventMapper {
 			this.toolKinds.delete(toolCallId);
 			this.toolCalls.delete(toolCallId);
 			this.executionNames.delete(toolCallId);
+			if (update.toolCallId !== undefined) this.settledCalls.add(update.toolCallId);
 		}
 		return out;
 	}

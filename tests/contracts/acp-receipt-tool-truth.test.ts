@@ -169,6 +169,27 @@ it("hands the finish contract the mapped Clio tool, paths and commands of ACP ca
 			{ command: "python3 -c 'print(1)'", cwd },
 		],
 	);
+	// A search starts only once its pattern arrives, and a repeated or late frame after the call settled emits nothing.
+	const frame = (status: string, extra: Record<string, unknown> = {}) =>
+		mapper.mapUpdate({ update: { sessionUpdate: "tool_call_update", toolCallId: "s1", status, ...extra } });
+	const search = [
+		...mapper.mapUpdate({
+			update: { sessionUpdate: "tool_call", toolCallId: "s1", kind: "search", status: "pending", rawInput: {} },
+		}),
+		...frame("in_progress", { rawInput: { pattern: "sum", path: cwd } }),
+		...frame("completed"),
+		...frame("completed"),
+		...frame("in_progress"),
+	];
+	deepStrictEqual(
+		search
+			.filter((event) => event.type === "tool_execution_start" || event.type === "tool_execution_end")
+			.map((event) => [event.type, (event as { args?: unknown }).args]),
+		[
+			["tool_execution_start", { pattern: "sum", path: cwd }],
+			["tool_execution_end", undefined],
+		],
+	);
 });
 
 // One native and one ACP run, each sealed and each failing finalization, against a
