@@ -999,6 +999,16 @@ export interface ToolRegistry {
 	 */
 	invoke(call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict>;
 	/**
+	 * Admission's read-only denial of a registered call, decided without running it: the shared evaluator's
+	 * disposition, rendered by the same denial path `invoke` uses (text, hints, remedy, reason code) and audited as
+	 * denied. Null when the call is not registered or admission would not deny it as read-only, so a caller can never
+	 * mistake an admitted call for a refused one. Nothing executes either way.
+	 */
+	readOnlyRefusal?(
+		call: ClassifierCall,
+		options?: ToolInvokeOptions,
+	): Extract<RegistryVerdict, { kind: "blocked" }> | null;
+	/**
 	 * True while at least one call awaits operator confirmation. The interactive
 	 * layer reads this from `closeOverlay()` to re-open the confirmation overlay
 	 * whenever an unrelated overlay closes with a parked call still pending.
@@ -2022,11 +2032,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	/** The session's test-runner consent ask, the only obstacle among a call's host effects. */
 	type SessionConsentObstacle = { kind: "session-consent"; label: string; decision: SafetyDecision };
 
-	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
-		const spec = tools.get(call.tool as ToolName);
-		if (!spec) {
-			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
-		}
+	/**
+	 * The shared evaluator's disposition of one registered call, with what admit needs beside it. Pure apart from the
+	 * policy engine's own audit side effects: it records no disposition and runs nothing.
+	 */
+	const evaluateCallAdmission = (
+		call: ClassifierCall,
+		spec: ToolSpec,
+		grant: OneShotGrant | undefined,
+		options: ToolInvokeOptions | undefined,
+	): {
+		admission: AdmissionDisposition;
+		level: AutonomyLevel;
+		dispatchPlan: DispatchPlanView | null;
+		planScale: boolean;
+	} => {
 		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
 		const projectedCall = spec.safetyCall?.(call.args ?? {});
 		// Plan-scale dispatch calls (multi-task, compete, remote node) carry the
@@ -2087,6 +2107,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
 			...(deps.hookDrift !== undefined && (deps.principal ?? "main") === "main" ? { hookDrift: deps.hookDrift } : {}),
 		});
+		return { admission, level, dispatchPlan, planScale };
+	};
+
+	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
+		const spec = tools.get(call.tool as ToolName);
+		if (!spec) {
+			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
+		}
+		const { admission, level, dispatchPlan, planScale } = evaluateCallAdmission(call, spec, grant, options);
 		if (admission.kind === "deny" && admission.code === "safety_net") {
 			recordRegistryDisposition(call, admission.decision, "blocked");
 			const policy = admission.decision.policy;
@@ -2987,6 +3016,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				.map((spec) => spec.name),
 		listVisible: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "direct"),
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
+		readOnlyRefusal(call, options) {
+			return withRegistryScope(options, () => {
+				const spec = tools.get(call.tool as ToolName);
+				if (spec === undefined) return null;
+				const { admission } = evaluateCallAdmission(call, spec, undefined, options);
+				if (admission.kind !== "deny" || admission.code !== "read_only") return null;
+				return deniedVerdict(call, admission, options?.turnConstraints);
+			});
+		},
 		async invoke(call, options) {
 			return withRegistryScope(options, async () => {
 				if (deps.principal === "worker") return invokeAdmitted(call, options);
