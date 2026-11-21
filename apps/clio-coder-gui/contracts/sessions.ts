@@ -212,6 +212,33 @@ export const TimelineItem = Type.Object(
 		durationMs: Type.Optional(Type.Integer({ minimum: 0 })),
 		/** The engine's words while the safety judge holds this open call (`clio-coder/admission`); gone once admitted. */
 		admission: Type.Optional(Type.String({ maxLength: 128 })),
+		/**
+		 * Images a settled call returned (a browser screenshot), lifted out of its content so `rawOutput` stays
+		 * small: allow-listed raster types, base64 data, at most four per call.
+		 */
+		images: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						mimeType: Type.Union([
+							Type.Literal("image/png"),
+							Type.Literal("image/jpeg"),
+							Type.Literal("image/gif"),
+							Type.Literal("image/webp"),
+						]),
+						data: Type.String({ minLength: 1, maxLength: 1_048_576 }),
+					},
+					closed,
+				),
+				{ maxItems: 4 },
+			),
+		),
+		/** Local image files a settled call named instead of sending bytes (a route that takes no images). */
+		imageLinks: Type.Optional(
+			Type.Array(Type.Object({ path: Type.String({ maxLength: 4096 }), name: Type.String({ maxLength: 1024 }) }, closed), {
+				maxItems: 4,
+			}),
+		),
 		provenance: Type.Optional(Provenance),
 	},
 	closed,

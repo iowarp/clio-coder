@@ -1,11 +1,13 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
 import { explicitToolCapability, targetToolCapability } from "../../src/domains/dispatch/extension.js";
+import { runDoctorHarnessChecks, withDoctorCommand } from "../../src/domains/lifecycle/doctor.js";
 import {
 	MODEL_CATALOG_DIRS_ENV,
 	resolveModelCatalogOverlayRoots,
@@ -30,6 +32,7 @@ import {
 	setGlobalDefaultMaxOutputTokens,
 } from "../../src/engine/apis/output-budget.js";
 import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("the packaged profiles and their substring fallback tier agree on upstream local models", () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-model-profiles-"));
@@ -295,6 +298,65 @@ it("loads model-catalog.d overlays from the config, project and env dirs in that
 		if (saved.dirs === undefined) delete process.env[MODEL_CATALOG_DIRS_ENV];
 		else process.env[MODEL_CATALOG_DIRS_ENV] = saved.dirs;
 		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+it("a malformed model-catalog.d file is skipped and named, and the overlays beside it still merge", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-model-catalog-bad-"));
+	try {
+		const dir = join(root, "model-catalog.d");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "10-good.yaml"),
+			"- family: acme-coder\n  matchPatterns: [acme-coder]\n  capabilities: {}\n  quirks: { sampling: { instruct: { temperature: 0.42 } } }\n",
+		);
+		writeFileSync(join(dir, "20-bad.yaml"), "- family: broken\n  matchPatterns: [acme\n  quirks: {sampling: : }\n");
+		writeFileSync(join(dir, "30-shape.yaml"), "- family: broken\n  matchPatterns: acme\n");
+		const errors: string[] = [];
+		const kb = createProfileKnowledgeBase({
+			overlayRoots: [dir],
+			userPath: join(root, "absent.yaml"),
+			onError: (message) => errors.push(message),
+		});
+		deepStrictEqual(kb.lookup("acme-coder-7b")?.entry.quirks, { sampling: { instruct: { temperature: 0.42 } } });
+		// One line per skipped file: its real path, then the first line of what is wrong.
+		deepStrictEqual(errors, [
+			`model catalog overlay skipped: ${join(dir, "20-bad.yaml")}: Flow sequence in block collection must be sufficiently indented and end with a ] at line 3, column 3`,
+			`model catalog overlay skipped: ${join(dir, "30-shape.yaml")}: entry 'broken' needs matchPatterns: string[]`,
+		]);
+		// A reload rereads the files; the bad one is skipped again instead of throwing.
+		kb.reload();
+		deepStrictEqual(kb.lookup("acme-coder-7b")?.entry.quirks, { sampling: { instruct: { temperature: 0.42 } } });
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+it("doctor names the loaded model-catalog.d overlays and warns on each file it skipped", async () => {
+	const home = await isolateClioEnv("clio-model-catalog-doctor-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(workspace, { recursive: true });
+		strictEqual(
+			runDoctorHarnessChecks(workspace).some((row) => row.name.startsWith("model catalog")),
+			false,
+			"no overlay, no row",
+		);
+		const dir = join(resolveClioDirs().config, "model-catalog.d");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "10-good.yaml"), "- family: acme-coder\n  matchPatterns: [acme-coder]\n  capabilities: {}\n");
+		writeFileSync(join(dir, "20-bad.yaml"), "- family: broken\n  matchPatterns: [acme\n  quirks: {sampling: : }\n");
+		const rows = runDoctorHarnessChecks(workspace).filter((row) => row.name.startsWith("model catalog"));
+		const loaded = rows.find((row) => row.name === "model catalog overlays");
+		ok(loaded?.ok && loaded.level === undefined, JSON.stringify(rows));
+		match(loaded.detail, /1 entry \(acme-coder\) from .*model-catalog\.d/u);
+		const skipped = rows.find((row) => row.name === "model catalog file");
+		strictEqual(skipped?.level, "warn", JSON.stringify(rows));
+		ok(skipped.detail.startsWith(`${join(dir, "20-bad.yaml")}: Flow sequence in block collection`), skipped.detail);
+		match(skipped.detail, /at line 3, column 3:\n\n {2}matchPatterns: \[acme\n.*skipped.*rerun `clio-coder doctor`$/su);
+		strictEqual(withDoctorCommand(skipped).detail, skipped.detail, "no configure hint for an overlay file");
+	} finally {
+		home.restore();
 	}
 });
 

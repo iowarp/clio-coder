@@ -31,8 +31,6 @@ export interface KnowledgeBase {
 
 export interface KnowledgeBaseRoot {
 	dir: string;
-	/** Human-readable label used in parse/validation diagnostics. */
-	label?: string;
 	/** Missing optional roots are ignored; non-optional roots must exist. */
 	optional?: boolean;
 }

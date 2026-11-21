@@ -44,7 +44,7 @@ import {
 } from "./config.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 import { clioProjectRoot } from "./project-root.js";
-import { noteProjectTargets } from "./project-target-urls.js";
+import { isProjectKeyVariableName, noteProjectTargets } from "./project-target-urls.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import type { SettingsDocumentRead } from "./settings-document.js";
 import { readSettingsDocument } from "./settings-document.js";
@@ -223,6 +223,11 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
 	if (!isRecord(value)) return value;
 	const out: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(value)) {
+		if (key === "auth" && /^targets\[\d+\]$/u.test(path) && isRecord(child)) {
+			const kept = projectTargetKeyName(child, origin, `${path}.auth`, issues);
+			if (kept !== undefined) out[key] = kept;
+			continue;
+		}
 		if (CREDENTIAL_KEYS.has(key.toLowerCase())) {
 			issues.push({
 				origin,
@@ -234,6 +239,35 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
 		out[key] = stripCredentials(child, origin, path ? `${path}.${key}` : key, issues);
 	}
 	return out;
+}
+
+/**
+ * A project target may name the variable that holds its key (`auth.apiKeyEnvVar`), never a key: the name is what
+ * the trust card shows ("sends $NAME to <url>"), and auth resolution sends that variable alone to the project's
+ * URL. Every other auth key, and a value that is not a variable name, is dropped.
+ */
+function projectTargetKeyName(
+	auth: Record<string, unknown>,
+	origin: SettingsOrigin,
+	path: string,
+	issues: SettingsLayerIssue[],
+): { apiKeyEnvVar: string } | undefined {
+	let kept: { apiKeyEnvVar: string } | undefined;
+	for (const [key, child] of Object.entries(auth)) {
+		if (key === "apiKeyEnvVar" && typeof child === "string" && isProjectKeyVariableName(child)) {
+			kept = { apiKeyEnvVar: child };
+			continue;
+		}
+		issues.push({
+			origin,
+			path: `${path}.${key}`,
+			message:
+				key === "apiKeyEnvVar"
+					? "a project target's auth.apiKeyEnvVar must be an environment variable name; key ignored"
+					: "credentials are not allowed in project settings; key ignored",
+		});
+	}
+	return kept;
 }
 
 /** The operator's own level, which a project layer may tighten but never loosen. */

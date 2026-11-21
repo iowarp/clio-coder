@@ -35,7 +35,10 @@ export class ProfileKnowledgeBase implements KnowledgeBase {
 		return this.current;
 	}
 
-	/** Picks up an edited user profile file or catalog overlay without restarting. A bad overlay throws. */
+	/**
+	 * Picks up an edited user profile file or catalog overlay without restarting. A bad overlay root throws; a
+	 * malformed overlay file is skipped alone (`clio-coder doctor` names it).
+	 */
 	reload(): void {
 		try {
 			this.loadTiers();
@@ -86,13 +89,18 @@ export interface ProfileKnowledgeBaseOptions {
 /**
  * The packaged profiles with the user's override layered on, plus the fallback tier. A profile file that
  * fails to load leaves every switched field to the live server, the operator's limits and the Pi catalog,
- * and an overlay that fails to load is dropped; both are reported and neither is fatal.
+ * and an overlay file that fails to load is skipped; both are reported and neither is fatal.
  */
 export function createProfileKnowledgeBase(options: ProfileKnowledgeBaseOptions = {}): ProfileKnowledgeBase {
 	const onError = options.onError ?? (() => undefined);
 	let overlays: ModelCatalogOverlays | null = null;
 	try {
 		overlays = new ModelCatalogOverlays(options.overlayRoots ?? resolveModelCatalogOverlayRoots());
+		// One line per skipped file; `clio-coder doctor` shows the whole message.
+		for (const { path, message } of overlays.problems()) {
+			const first = (message.split("\n", 1)[0] ?? "").trim().replace(/:$/u, "");
+			onError(`model catalog overlay skipped: ${path}: ${first}`);
+		}
 	} catch (err) {
 		onError(`model catalog overlays disabled: ${err instanceof Error ? err.message : String(err)}`);
 	}

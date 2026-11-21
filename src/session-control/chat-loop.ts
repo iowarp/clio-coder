@@ -437,6 +437,8 @@ export type ToolApprovalStateEvent =
 			 * grant or the judge's allow, and its body runs from here.
 			 */
 			state: "judging" | "resumed";
+			/** On `resumed`: who allowed it when that was not the operator at this terminal, as `attach c2 (apr)`. */
+			grantedBy?: string;
 	  };
 
 export type ChatLoopEvent = (
@@ -2513,6 +2515,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			api.getSessionId() === sessionId &&
 			!state.streaming &&
 			!turnActive;
+		if (!current()) return;
+		// M-26: the probe a submit awaits restores the session's thinking level and served window, so the budget priced
+		// here, the pre-warm and the send compile one prompt. It joins the probe the resume starts, never a second one.
+		await turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
 		if (!current()) return;
 		let runtime: AgentRuntime | null;
 		try {

@@ -186,6 +186,17 @@ export function discoverInteropInventory(
 		...layout.projectRoots.map((root) => ({ root: path.join(cwd, root), scope: "project" as const })),
 	];
 	const pluginRoots = new Set<string>();
+	if (userRoot !== undefined)
+		for (const relative of layout.userInstructions ?? []) {
+			const file = path.join(userRoot, relative);
+			try {
+				const stat = lstatSync(file);
+				if (stat.isFile()) add(file, "instructions", "user", undefined, { name: relative });
+				else unknown(`Instruction file is not a regular file: ${file}`);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") unknown(`Cannot inspect ${file}`);
+			}
+		}
 	const plugin = (root: string, scope: "user" | "project", metadata: Partial<InteropInventoryItem> = {}): void => {
 		if (pluginRoots.has(`${scope}:${root}`)) return;
 		pluginRoots.add(`${scope}:${root}`);

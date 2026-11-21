@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
+import { basename } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { ArtifactRead } from "../../contracts/artifacts.js";
@@ -171,6 +173,99 @@ function toolProgressText(content: unknown): string | undefined {
 		return inner.type === "text" && typeof inner.text === "string" ? [inner.text] : [];
 	});
 	return parts.length === 0 ? undefined : parts.join("");
+}
+
+/** Image types a tool card draws; anything else (SVG included, which can carry script) is dropped. */
+const TOOL_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+type ToolImage = NonNullable<TimelineItem["images"]>[number];
+const toolImageType = (value: unknown): value is ToolImage["mimeType"] =>
+	typeof value === "string" && TOOL_IMAGE_TYPES.has(value);
+const TOOL_IMAGES_MAX = 4;
+const TOOL_IMAGE_DATA_MAX = 1_048_576;
+/**
+ * All of one call's image data together stays inside half the timeline's 2 MiB retention bound, as one long
+ * message does (session-projection.ts STREAM_LIMIT): four full-size images in one row would evict the rest
+ * of the conversation from the snapshot.
+ */
+const TOOL_IMAGES_TOTAL_MAX = 1_048_576;
+const TOOL_IMAGE_LINK_MAX = 4096;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** An image block, bare (`rawOutput.result.content`) or wrapped as ACP tool content (`{type:"content", content}`). */
+function imageBlock(value: unknown): Record<string, unknown> | undefined {
+	const entry = record(value);
+	const inner = entry.type === "content" ? record(entry.content) : entry;
+	return inner.type === "image" ? inner : undefined;
+}
+
+/** The drawable images of a content array: allow-listed types, base64 data, bounded in count and size. */
+function toolImages(content: unknown): ToolImage[] {
+	if (!Array.isArray(content)) return [];
+	const images: ToolImage[] = [];
+	let total = 0;
+	for (const value of content) {
+		if (images.length >= TOOL_IMAGES_MAX) break;
+		const block = imageBlock(value);
+		if (block === undefined || !toolImageType(block.mimeType)) continue;
+		const data = block.data;
+		if (typeof data !== "string" || data.length > TOOL_IMAGE_DATA_MAX || total + data.length > TOOL_IMAGES_TOTAL_MAX)
+			continue;
+		if (!BASE64.test(data)) continue;
+		total += data.length;
+		images.push({ mimeType: block.mimeType, data });
+	}
+	return images;
+}
+
+/** Screenshot file paths sent as `resource_link` entries beside the image blocks: local `file:` URIs only. */
+function toolImageLinks(content: unknown): Array<{ path: string; name: string }> {
+	if (!Array.isArray(content)) return [];
+	const links: Array<{ path: string; name: string }> = [];
+	for (const value of content) {
+		if (links.length >= TOOL_IMAGES_MAX) break;
+		const entry = record(value);
+		const inner = entry.type === "content" ? record(entry.content) : entry;
+		if (inner.type !== "resource_link" || typeof inner.uri !== "string") continue;
+		if (!toolImageType(inner.mimeType)) continue;
+		if (inner.uri.length > TOOL_IMAGE_LINK_MAX || !inner.uri.startsWith("file:")) continue;
+		let path: string;
+		try {
+			path = fileURLToPath(inner.uri);
+		} catch {
+			continue;
+		}
+		const name = typeof inner.name === "string" && inner.name.length > 0 ? inner.name : basename(path);
+		links.push({ path: boundedText(path, TOOL_IMAGE_LINK_MAX), name: boundedText(name, 1024) });
+	}
+	return links;
+}
+
+/**
+ * A content array with every image's bytes replaced by `{type:"image", mimeType, omitted:true}`. The bytes
+ * ride on `TimelineItem.images`; left in `rawOutput` they would push the record past `raw`'s 32 KiB cap and
+ * turn the whole result into a truncated snippet.
+ */
+function withoutImageData(content: unknown): unknown {
+	if (!Array.isArray(content)) return content;
+	return content.map((value) => {
+		const block = imageBlock(value);
+		if (block === undefined) return value;
+		const omitted = {
+			type: "image",
+			...(typeof block.mimeType === "string" ? { mimeType: boundedText(block.mimeType, 128) } : {}),
+			omitted: true,
+		};
+		return record(value).type === "content" ? { ...record(value), content: omitted } : omitted;
+	});
+}
+
+/** `rawOutput` with the image bytes in `result.content` omitted, as `withoutImageData` does for `content`. */
+function rawOutputWithoutImageData(rawOutput: unknown): Record<string, unknown> {
+	const output = record(rawOutput);
+	const result = record(output.result);
+	return Array.isArray(result.content)
+		? { ...output, result: { ...result, content: withoutImageData(result.content) } }
+		: output;
 }
 
 type Entry = {
@@ -1272,11 +1367,22 @@ export class Supervisor {
 			const partial = settled ? undefined : toolProgressText(update.content);
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
 			else if (settled) delete item.partialOutput;
+			// A settled call's images come from its content, or from the result's own blocks when the content has none.
+			if (settled) {
+				const fromContent = toolImages(update.content);
+				const images = fromContent.length > 0 ? fromContent : toolImages(record(record(update.rawOutput).result).content);
+				if (images.length > 0) item.images = images;
+				else delete item.images;
+				const links = toolImageLinks(update.content);
+				if (links.length > 0) item.imageLinks = links;
+				else delete item.imageLinks;
+			}
+			const content = withoutImageData(update.content);
 			// A shell line's terminal frame has its facts in `rawOutput` and its output only in `content`.
-			if (update.rawOutput && settled && update.content && meta[ACP_SHELL_META_KEY] !== undefined)
-				item.rawOutput = this.raw({ ...record(update.rawOutput), content: update.content });
-			else if (update.rawOutput) item.rawOutput = this.raw(update.rawOutput);
-			else if (settled && update.content) item.rawOutput = this.raw({ content: update.content });
+			if (update.rawOutput && settled && content && meta[ACP_SHELL_META_KEY] !== undefined)
+				item.rawOutput = this.raw({ ...rawOutputWithoutImageData(update.rawOutput), content });
+			else if (update.rawOutput) item.rawOutput = this.raw(rawOutputWithoutImageData(update.rawOutput));
+			else if (settled && content) item.rawOutput = this.raw({ content });
 			this.publish({ type: "turn.tool", payload: { resource: entry.id, revision: this.revision(entry.id), item } });
 			return;
 		}

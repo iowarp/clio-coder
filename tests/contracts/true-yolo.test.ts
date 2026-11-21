@@ -576,6 +576,63 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 			`cd ~${userInfo().username}/${account10}/config && touch pwn`,
 			`mktemp -d ~${userInfo().username}/${account10}/config/x.XXXX`,
 		);
+	// Row 314, the second neon read's items that predate the pins. 5: a cd or pushd through $HOME or a Clio variable.
+	neon.push(
+		`cd "$HOME/${base}/state" && echo x > pwn`,
+		`cd "\${HOME}/${base}/state" && touch pwn`,
+		'cd "$CLIO_CODER_STATE_DIR" && echo x > pwn',
+		`pushd "$HOME/${base}/state" && rm -f sessions.db`,
+		// 6: a here-document or here-string a shell reads, a sourced process substitution, a script the command writes.
+		`sh <<'EOF'\necho x > ~/${base}/state/pwn\nEOF`,
+		`sh <<< 'echo x > ~/${base}/state/pwn'`,
+		`source <(printf 'echo x > ~/${base}/state/pwn\\n')`,
+		`cat <<'EOF' > "$TMPDIR/x.sh"\necho x > ~/${base}/state/pwn\nEOF\nsource "$TMPDIR/x.sh"`,
+		// 9: an expansion operator, a doubled slash or a dot segment after $HOME or an XDG variable.
+		`echo x > "\${HOME:-/tmp}/${base}/state/pwn"`,
+		`echo x > "$HOME//${base}/state/pwn"`,
+		`echo x > "$HOME/./${base}/state/pwn"`,
+		`echo x > "$HOME/x/../${base}/state/pwn"`,
+		'echo x > "$XDG_STATE_HOME//clio-coder/pwn"',
+		'echo x > "${XDG_STATE_HOME%/}/clio-coder/pwn"',
+		`dd if=/dev/zero of="$HOME//${base}/state/pwn" count=1`,
+		`echo x | tee "$HOME//${base}/state/pwn"`,
+		// 12: a valued option after the operands, and install -d.
+		`rsync src ~/${base}/state/pwn -T /tmp`,
+		`rsync src ~/${base}/state/pwn --chown u:g`,
+		`cp src ~/${base}/state/pwn -S .bak`,
+		`install src ~/${base}/state/pwn -m 644`,
+		`install -d ~/${base}/state/pwn`,
+		// 13: CDPATH, OLDPWD with `cd -`, and env -C.
+		`CDPATH=~/${base}; cd state && echo x > pwn`,
+		`OLDPWD=~/${base}/state; cd - && echo x > pwn`,
+		`env -C ~/${base}/state touch pwn`,
+		`env --chdir "$HOME/${base}/state" touch pwn`,
+		// 14: /proc/self/cwd is the shell's directory after its cd.
+		`cd ~/${base}/state && echo x > /proc/self/cwd/pwn`,
+		`cd ~/${base}/state && echo x > /proc/$$/cwd/pwn`,
+		// 15: a glob or a brace expansion that names a Clio tree (here the home's own name, which `~/<base>` would spell).
+		`touch ~/${base.slice(0, -2)}*/state/pwn`,
+		`echo x | tee ~/${base.slice(0, -1)}?/config/settings.yaml`,
+		`touch ~/{${base},other}/state/pwn`,
+		// 16: writers and deleters the extractors did not know.
+		`truncate -s 0 ~/${base}/config/settings.yaml`,
+		`unlink ~/${base}/state/f`,
+		`rmdir ~/${base}/state/sub`,
+		`shred -u ~/${base}/state/f`,
+		`find ~/${base}/state -exec rm -rf {} +`,
+		`find . -maxdepth 0 -fprint ~/${base}/state/pwn`,
+		`printf '%s\\n' ~/${base}/state/f | xargs rm -f`,
+		`tar -xf archive.tar -C ~/${base}/state`,
+		`git -C ~/${base}/state init`,
+		`git config --file ~/${base}/config/settings.yaml a.b c`,
+		// 17: a recursive copy into the directory above a Clio tree lands the tree.
+		`cp -r ${base} ~/`,
+		`rsync -a ${base} ~/`,
+		// 18: an alias the command defines runs its text.
+		`shopt -s expand_aliases\nalias w='echo x > ~/${base}/state/pwn'\nw`,
+		// 19: a case-insensitive filesystem reads another case as the same tree.
+		`echo x > "$HOME/${base.toUpperCase()}/state/pwn"`,
+	);
 	const admitted = neon.filter(
 		(command) =>
 			sessionEngine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode !== "yolo-floor:clio-owned-state",
@@ -592,6 +649,13 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		scratch('mkdir -p "$CLIO_CODER_HOME/state" && node -e "console.log(1)"'),
 		scratch('mkdir -p "$CLIO_CODER_HOME/state" && echo "HOME=$HOME"'),
 		`H=$(mktemp -d "$TMPDIR/home.XXXX") && export HOME=$H${account} && mkdir -p ~/${base}/state && echo x > ~/${base}/state/f`,
+		// Row 314: what those readings place outside Clio's trees still runs.
+		`rsync -a ~/${base}/state/ "$TMPDIR/backup/"`,
+		`cp -r ~/${base}/state "$TMPDIR/"`,
+		`sh <<'EOF'\necho x > "$TMPDIR/out"\nEOF`,
+		'cd "$HOME" && echo x > "$TMPDIR/out"',
+		'tar -xf a.tar -C "$TMPDIR/x" && git -C "$TMPDIR/repo" init',
+		`find . -name '*.log' -fprint "$TMPDIR/list"`,
 	]) {
 		strictEqual(sessionEngine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
 	}

@@ -24,6 +24,13 @@ export function isArcadeTrigger(text: string): boolean {
 	return ARCADE_ALIASES.some((alias) => alias === said);
 }
 
+/** Whether text typed so far is the arcade phrase or could still become it, one key at a time. */
+export function mayBecomeArcadeTrigger(text: string): boolean {
+	if (isArcadeTrigger(text)) return true;
+	const said = text.toLowerCase().trimStart().replace(/\s+/gu, " ");
+	return said.length > 0 && ARCADE_ALIASES.some((alias) => alias.startsWith(said));
+}
+
 /** Ephemeral presentation opt-in; neither discovery nor consent admits any tool action. */
 export function createConversationEggs(deps: {
 	identity(): string | null;

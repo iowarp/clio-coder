@@ -8,6 +8,7 @@ import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { renderCalls, renderCompactCount, renderPricing } from "../../core/telemetry/render.js";
 import type { RunResultObject } from "../../core/telemetry/schemas.js";
+import { displayImageMimeType, toolResultShotPaths } from "../../core/tool-result-images.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
 import type { DispatchContract } from "../dispatch/contract.js";
@@ -64,15 +65,24 @@ export type ViewArtifactCategory =
 	| "task-ledger"
 	| "workspace"
 	| "tool-output"
+	| "screenshots"
 	| "protected-artifact"
 	| "compaction"
 	| "prompt-manifest"
 	| "audit";
-export type ViewArtifactFormat = "markdown" | "text" | "json";
+export type ViewArtifactFormat = "markdown" | "text" | "json" | "image";
+
+/** The picture an `image` artifact shows; its `lines` describe it for a surface that draws no images. */
+export interface ViewArtifactImage {
+	mimeType: string;
+	data: string;
+	path: string;
+}
 
 export interface ViewArtifactLoadResult {
 	lines: string[];
 	format: ViewArtifactFormat;
+	image?: ViewArtifactImage;
 	details?: { lines: string[]; format: ViewArtifactFormat };
 	/**
 	 * The same content laid out by its own renderer at a given width. A
@@ -153,6 +163,7 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"task-ledger",
 	"workspace",
 	"tool-output",
+	"screenshots",
 	"protected-artifact",
 	"compaction",
 	"prompt-manifest",
@@ -1289,6 +1300,62 @@ export class ToolOutputArtifactProvider implements ArtifactProvider {
 	}
 }
 
+/** A screenshot file read for `/view` is refused above this size; its row still names the path. */
+const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
+
+async function loadScreenshot(path: string): Promise<ViewArtifactLoadResult> {
+	const mimeType = displayImageMimeType(path) ?? "image/png";
+	try {
+		const info = statSync(path);
+		if (!info.isFile()) return { lines: [`${path} is not a file`], format: "text" };
+		if (info.size > MAX_SCREENSHOT_BYTES)
+			return { lines: [path, `${mimeType} · ${info.size} bytes, too large to show here`], format: "text" };
+		const data = readFileSync(path).toString("base64");
+		return { lines: [path, `${mimeType} · ${info.size} bytes`], format: "image", image: { mimeType, data, path } };
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return { lines: [`unable to read ${path}: ${message}`], format: "text" };
+	}
+}
+
+/** Screenshots the session's tool calls wrote (`details.shots`), one row per file still on disk, newest first. */
+export class ScreenshotArtifactProvider implements ArtifactProvider {
+	readonly category = "screenshots" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const out: ViewArtifact[] = [];
+		const seen = new Set<string>();
+		for (const entry of sessionEntries(this.deps)) {
+			if (entry.kind !== "message" || entry.role !== "tool_result") continue;
+			for (const result of expandChainMessages([entry])) {
+				if (result.kind !== "message" || result.role !== "tool_result") continue;
+				const payload = messagePayload(result);
+				const toolName = toolNameFor(result);
+				for (const path of toolResultShotPaths(payload?.result)) {
+					if (seen.has(path)) continue;
+					seen.add(path);
+					const sizeBytes = maybeSizeBytes(path);
+					if (sizeBytes === undefined) continue;
+					out.push({
+						id: `shot:${result.turnId}:${basename(path)}`,
+						category: this.category,
+						title: safeTitle(`${toolName} · ${basename(path)}`, "Screenshot"),
+						timestamp: parseTime(result.timestamp),
+						sizeBytes,
+						path,
+						toolName,
+						searchText: ["screenshot", toolName, result.turnId, path, basename(path)],
+						load: () => loadScreenshot(path),
+					});
+				}
+			}
+		}
+		return out;
+	}
+}
+
 function protectedArtifactTitle(entry: ProtectedArtifactEntry): string {
 	const name = basename(entry.artifact.path) || entry.artifact.path || entry.turnId;
 	return safeTitle(`Protected · ${name}`, "Protected artifact");
@@ -1647,6 +1714,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		new TaskLedgerArtifactProvider(deps),
 		new WorkspaceArtifactProvider(deps),
 		new ToolOutputArtifactProvider(deps),
+		new ScreenshotArtifactProvider(deps),
 		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),
 		new PromptManifestArtifactProvider(deps),

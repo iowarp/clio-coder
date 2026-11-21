@@ -12,6 +12,8 @@ import type { MusicOperations } from "../domains/mux/music-operations.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
+import type { BrowserTool } from "./browser/index.js";
+import { browserToolSurface } from "./browser/surface.js";
 import { builtin, toolPromptHintsForNames } from "./builtin-tool-catalog.js";
 import type { CompeteMuxWorktrees } from "./compete-worktrees.js";
 import { createConfigureClioTool } from "./configure-clio.js";
@@ -283,6 +285,21 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			),
 		});
 	}
+	// The browser is the main agent's alone; its session workers end with the session (below).
+	let browserTool: BrowserTool | undefined;
+	if (registration.includeNetworkTools) {
+		registry.register({
+			...builtin(
+				lazyTool(browserToolSurface, async () => {
+					browserTool = (await import("./browser/index.js")).createBrowserTool({
+						getWorkspaceRoot: () => deps.session?.current()?.cwd ?? cwd,
+					});
+					return browserTool;
+				}),
+				{ path: "src/tools/browser/index.ts", scope: "core" },
+			),
+		});
+	}
 	assertRegisteredBuiltinTools(registry, registration, Boolean(deps.dispatch), Boolean(deps.panes));
 	for (const diagnostic of registerHarnessExtensionTools(registry, cwd)) {
 		deps.bus?.emit("extension.load_failed", { message: diagnostic.message });
@@ -306,7 +323,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const close = (): Promise<void> => {
 		if (closePromise === undefined) {
 			for (const dispose of disposeCloseListeners.splice(0)) dispose();
-			closePromise = Promise.resolve(mcpCapabilities?.close())
+			closePromise = Promise.all([mcpCapabilities?.close(), browserTool?.closeSessions()])
 				.then(() => undefined)
 				.finally(() => {
 					// PERF W3: early ShutdownRequested keeps the awaited hook until teardown settles.
@@ -316,13 +333,13 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		}
 		return closePromise;
 	};
-	if (mcpCapabilities) {
+	if (mcpCapabilities || registration.includeNetworkTools) {
 		const disposeTerminate = deps.termination?.onTerminate(close, {
 			timeoutMs: DEFAULT_KILL_GRACE_MS + DEFAULT_TEARDOWN_BOUND_MS + 1_000,
 		});
 		if (typeof disposeTerminate === "function") disposeTerminateHook = disposeTerminate;
 	}
-	if (mcpCapabilities && deps.bus) {
+	if ((mcpCapabilities || registration.includeNetworkTools) && deps.bus) {
 		disposeCloseListeners.push(deps.bus.subscribe("session.ended", close));
 		disposeCloseListeners.push(deps.bus.subscribe("shutdown.requested", close));
 	}
