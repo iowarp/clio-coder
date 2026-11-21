@@ -3923,7 +3923,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				let result = await compileWith(frozenInputs);
 				let compiledKey = promptKey(frozenInputs);
 				let compiledMemory = frozenMemory;
-				const previousHash = postureGeneration?.promptHash ?? sessionPromptHash ?? lastRecordedPromptHash();
+				// M-21: in a session a pending compile was never recorded nor sent, since a submit logs it before its request,
+				// as when a resume prices its budget before the turn restores its thinking level and window; this one follows
+				// the prompt that pending compile followed, the recorded one. A sessionless loop never logs, so it chains on.
+				const previousHash =
+					pendingPromptLogEntry && deps.session?.current()
+						? (pendingPromptLogEntry.previousHash ?? lastRecordedPromptHash())
+						: (postureGeneration?.promptHash ?? sessionPromptHash ?? lastRecordedPromptHash());
 				// A prompt that changes for another reason is cold already, so it
 				// takes the live memory instead of carrying a reminder for it.
 				if (previousHash !== null && result.systemPromptHash !== previousHash && frozenMemory !== liveMemorySection) {
