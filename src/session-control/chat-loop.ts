@@ -1625,9 +1625,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			messagePath.queueEvent(event);
 			steerInterrupter.poke();
 		},
-		recordHostMessage: (source, message) => {
-			hostInserts.record(source, [message]);
-		},
 	});
 
 	const hostInserts = createHostInserts({
@@ -1649,7 +1646,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stepTurnEnd: () => stepTurnEnd(),
 		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
-		queueHostMessage: (text, source) => queues.queueHostMessage(text, source),
+		queueHostMessage: (text, source, rule) => queues.queueHostMessage(text, source, rule),
 	});
 	// A reminder an after_tool rule emits for this session's call rides the next tool-batch boundary (X6).
 	const detachBoundaryReminders = deps.toolRegistry?.onToolBoundaryReminders?.((reminders, input) => {
@@ -1881,8 +1878,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
-		// A host message the queue handed over is already written as a host insert; it files no user turn.
-		consumePersistedEcho: (text) => queues.acknowledgeHostInjected(text) || queues.consumePersistedEcho(text),
+		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
@@ -2138,6 +2134,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queueHandOver: {
 			atFinishTurn: (final) => queues.handOverAtFinishTurn(final),
 			afterPrepareNextTurn: () => queues.handOverAfterPrepareNextTurn(),
+			takeHostMessages: () => queues.takeHostMessages(),
 		},
 		middlewareToolChoice,
 		persistence,

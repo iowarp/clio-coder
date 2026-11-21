@@ -159,7 +159,6 @@ export const HOST_INSERT_SOURCES = [
 	"repetition-recovery",
 	"thinking-length-recovery",
 	"synthesis-recovery",
-	"read-streak",
 ] as const;
 export type HostInsertSource = (typeof HOST_INSERT_SOURCES)[number];
 
@@ -185,6 +184,11 @@ export interface HostInsertRecord {
 	/** The record a reissue replaced, on older format 7 records. No longer written, and nothing reads it. */
 	reissueOf?: string;
 	restoration?: HostInsertRestoration;
+	/**
+	 * The middleware rule that emitted a `reminder` record (X6), such as `nudge.read-streak`. A field, not a new
+	 * source, so a build that predates it still validates the record and ignores the field.
+	 */
+	rule?: string;
 }
 
 export interface HostInsertRetraction {
@@ -230,6 +234,7 @@ export function isHostInsertData(value: unknown): value is HostInsertData {
 		(isString(place.before) || isString(place.after)) &&
 		(value.replaces === undefined || isStringArray(value.replaces)) &&
 		isOptionalString(value.reissueOf) &&
+		isOptionalString(value.rule) &&
 		(value.restoration === undefined || isHostInsertRestoration(value.restoration))
 	);
 }

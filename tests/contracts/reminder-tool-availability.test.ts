@@ -1,22 +1,17 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { hostFramedTexts } from "../../src/core/reminder-framing.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { type TurnConstraints, templateToolConstraints } from "../../src/core/turn-constraints.js";
 import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import { createMarketplaceOfferRegistration } from "../../src/domains/middleware/marketplace-offer.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
-import { createReadStreakRegistration, READ_STREAK_REGISTRATION_ID } from "../../src/domains/middleware/read-streak.js";
+import { createReadStreakRegistration } from "../../src/domains/middleware/read-streak.js";
 import { createScoutNudgeRegistration } from "../../src/domains/middleware/scout-nudge.js";
 import { createTaskBoardReminderRegistration } from "../../src/domains/middleware/task-board-reminder.js";
 import { createCitationGroundingRegistration } from "../../src/domains/safety/citation-grounding.js";
 import { callChangesTree } from "../../src/domains/safety/index.js";
 import { callRepeatsAsRead } from "../../src/engine/loop-guard.js";
-import type { AgentMessage } from "../../src/engine/types.js";
-import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
-import { createTurnQueues } from "../../src/session-control/turn-queues.js";
-import { createTurnState } from "../../src/session-control/turn-state.js";
 
 // The host reports the turn's callable tools as activeCapabilityNames: the
 // attached and gateway-reachable tools the turn's constraints admit. A
@@ -306,75 +301,6 @@ describe("reminders gate on the turn's callable tools", () => {
 			notes(["c2", "c3", "c4", "c5"].flatMap((id) => chain(id, 1))).map((note) => note.at),
 			[7],
 		);
-	});
-
-	it("the read streak's second step reaches the model as a host-framed user message at a tool-batch boundary", () => {
-		const rule = createReadStreakRegistration({
-			classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
-			workspaceRoot: () => process.cwd(),
-		});
-		rule.evaluate({
-			hook: "turn_start",
-			sessionId: "s1",
-			metadata: { turnOrigin: "operator", activeCapabilityNames: surface(ToolNames.Read, ToolNames.Edit) },
-		});
-		const fired = Array.from({ length: 40 }, (_, index) =>
-			rule.evaluate({
-				hook: "after_tool",
-				sessionId: "s1",
-				toolName: ToolNames.Read,
-				toolArgs: { path: `src/h-${index}.ts` },
-				metadata: { resultKind: "ok", batchSize: 3 },
-			}),
-		);
-		// The first step stays a note on the read's result; the second is a reminder for the model alone.
-		strictEqual(fired[24]?.[0]?.kind, "annotate_tool_result");
-		const n2 = fired[39]?.[0];
-		ok(n2?.kind === "inject_reminder" && n2.audience === "model");
-		const state = createTurnState();
-		const steered: AgentMessage[] = [];
-		const recorded: string[] = [];
-		state.streaming = true;
-		state.runtime = { agent: { steer: (message: AgentMessage) => steered.push(message) } } as never;
-		const queues = createTurnQueues({
-			state,
-			emitQueueUpdateEvent: () => {},
-			emitQueuedUserTurn: () => {},
-			emitNotice: () => {},
-			submit: async () => {},
-			recordHostMessage: (source) => recorded.push(source),
-		});
-		const notices: string[] = [];
-		const middleware = createTurnMiddleware({
-			state,
-			middlewareToolChoice: {} as never,
-			emitNotice: (text) => notices.push(text),
-			emitFooterNotice: () => {},
-			queueHostMessage: (text, source) => queues.queueHostMessage(text, source),
-		});
-		const deliver = () =>
-			middleware.applyToolBoundaryReminders([
-				{ message: n2.message, ruleId: READ_STREAK_REGISTRATION_ID, severity: "info", audience: "model" },
-			]);
-		deliver();
-		// It waits outside the operator's queue and is no pending steer, so it never interrupts a running tool.
-		deepStrictEqual(queues.queuedMessages(), { steer: [], followUp: [] });
-		strictEqual(queues.hasPendingSteer(), false);
-		queues.handOverAtFinishTurn(false);
-		strictEqual(steered.length, 1);
-		strictEqual(steered[0]?.role, "user");
-		deepStrictEqual(hostFramedTexts(steered), [n2.message]);
-		deepStrictEqual(recorded, ["read-streak"]);
-		deepStrictEqual(notices, []);
-		// Its injection files no user turn, once.
-		const text = steered[0]?.content as string;
-		ok(queues.acknowledgeHostInjected(text));
-		ok(!queues.acknowledgeHostInjected(text));
-		// A run's final turn never carries it on: the message is dropped.
-		deliver();
-		queues.handOverAtFinishTurn(true);
-		queues.handOverAtFinishTurn(false);
-		strictEqual(steered.length, 1);
 	});
 
 	it("citation grounding asks for a numbered re-read only when read and grep are callable", () => {

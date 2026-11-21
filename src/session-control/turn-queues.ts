@@ -151,9 +151,14 @@ export interface TurnQueuesDeps {
 			constraints?: TurnConstraints;
 		},
 	) => Promise<void>;
-	/** Writes a host message durably (a `clio-coder.host-insert` record) just before the engine is handed it. */
-	recordHostMessage?: (source: HostInsertSource, message: AgentMessage) => void;
 	now?: () => number;
+}
+
+/** A host message waiting for the next tool-batch boundary (X6), with the rule that emitted it. */
+export interface QueuedHostMessage {
+	text: string;
+	source: HostInsertSource;
+	rule?: string;
 }
 
 export interface TurnQueues {
@@ -166,14 +171,15 @@ export interface TurnQueues {
 	): QueuedChatMessage | null;
 	queuedMessages(): QueuedMessagesSnapshot;
 	/**
-	 * A host-framed message for the running turn (X6): it rides the steering queue at the next tool-batch boundary
-	 * that carries the run on, ahead of the operator's steers, and is dropped when the run ends first. It is never
-	 * shown in the queue panel, never counts as a pending steer (so it never interrupts a running tool) and never
-	 * starts a user turn. False when nothing is running or the same text already waits.
+	 * A host-framed message for the running turn (X6): it waits for the next tool-batch boundary that carries the run
+	 * on, where the turn runtime takes it ({@link takeHostMessages}) and appends it as a host insert, and is dropped
+	 * when the run ends first. It never reaches the engine's steering queue, is never shown in the queue panel, never
+	 * counts as a pending steer (so it never interrupts a running tool) and never starts a user turn. False when
+	 * nothing is running or the same text already waits.
 	 */
-	queueHostMessage(text: string, source: HostInsertSource): boolean;
-	/** The engine injected this host message: true (and consumed) when it was one, so it files no user turn. */
-	acknowledgeHostInjected(text: string): boolean;
+	queueHostMessage(text: string, source: HostInsertSource, rule?: string): boolean;
+	/** The host messages waiting for this boundary, in queue order; taking them empties the lane. */
+	takeHostMessages(): QueuedHostMessage[];
 	/** Copies of the entries still in Clio's hands, in delivery order. */
 	entries(): QueuedChatMessage[];
 	/** True while a next-slot message is queued or handed over but not yet injected. */
@@ -268,19 +274,17 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	let reportedHeld = new WeakSet<QueuedChatMessage>();
 	let announcedHeld = 0;
 	let flushNext = false;
-	// Host messages waiting for the next tool-batch boundary, and those handed to the engine and not yet injected.
-	const hostQueue: Array<{ text: string; source: HostInsertSource }> = [];
-	const hostInFlight: string[] = [];
+	// Host messages waiting for the next tool-batch boundary.
+	const hostQueue: QueuedHostMessage[] = [];
 	const dropHost = (): void => {
 		hostQueue.length = 0;
-		hostInFlight.length = 0;
 	};
 
 	const emitQueueUpdate = (): void => {
 		deps.emitQueueUpdateEvent(queue.map((entry) => ({ ...entry })));
 	};
 
-	const toAgentMessage = (entry: Pick<QueuedChatMessage, "text">): AgentMessage =>
+	const toAgentMessage = (entry: QueuedChatMessage): AgentMessage =>
 		({ role: "user", content: entry.text, timestamp: now() }) as AgentMessage;
 
 	// Enqueue is silent in the transcript: the queue panel is the one signal
@@ -391,18 +395,13 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	return {
 		steer: (text, display, options) => enqueue(text, "steer", display, options),
 		queueFollowUp: (text, display, options) => enqueue(text, "follow-up", display, options),
-		queueHostMessage(text, source) {
+		queueHostMessage(text, source, rule) {
 			if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
 			if (hostQueue.some((entry) => entry.text === text)) return false;
-			hostQueue.push({ text, source });
+			hostQueue.push({ text, source, ...(rule !== undefined ? { rule } : {}) });
 			return true;
 		},
-		acknowledgeHostInjected(text) {
-			const idx = hostInFlight.indexOf(text);
-			if (idx < 0) return false;
-			hostInFlight.splice(idx, 1);
-			return true;
-		},
+		takeHostMessages: () => hostQueue.splice(0, hostQueue.length),
 		queuedMessages(): QueuedMessagesSnapshot {
 			return {
 				steer: queue.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
@@ -474,23 +473,10 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			return [...inFlight, ...queue].filter((entry) => !fromMachine(entry)).map((entry) => ({ ...entry }));
 		},
 		handOverAtFinishTurn(final) {
+			// A host message rides only a boundary the run continues past; at its final turn it would carry a finished run on.
+			if (final) dropHost();
 			const agent = state.runtime?.agent;
 			if (!agent || heldFor !== null) return;
-			// A host message rides only a boundary the run continues past: handed over at its final turn it would carry
-			// a finished run on. It goes ahead of the operator's steers, so their words are the newest the model reads.
-			const host = hostQueue.splice(0, hostQueue.length);
-			if (!final) {
-				for (const entry of host) {
-					const message = toAgentMessage(entry);
-					try {
-						deps.recordHostMessage?.(entry.source, message);
-					} catch {
-						// The record is best effort; the message still rides the request it was meant for.
-					}
-					hostInFlight.push(entry.text);
-					agent.steer(message);
-				}
-			}
 			const steered = handOver(agent, "steer", "finish-turn");
 			if (final && steered === 0) handOver(agent, "follow-up", "finish-turn");
 		},
