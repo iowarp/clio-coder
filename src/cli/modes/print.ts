@@ -37,7 +37,7 @@ import {
 } from "../../domains/dispatch/run-findings.js";
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
 import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
-import { newRunId, openLedger } from "../../domains/dispatch/state.js";
+import { type CreateRunInput, newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
 	RunEnvelope,
 	RunKind,
@@ -75,7 +75,7 @@ import { telemetryRunDirectory, telemetrySessionDirectory } from "../../domains/
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
-import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
+import type { ChatLoop, ChatLoopEvent, ChatLoopRunSnapshot } from "../../session-control/chat-loop.js";
 import {
 	CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
 	classifyTurnEnding,
@@ -940,6 +940,43 @@ async function sessionCompletion(
 	}
 }
 
+/** The ledger row a headless main-agent run opens with, from the route its loop resolved. */
+function mainAgentRow(
+	runId: string,
+	task: string,
+	snapshot: ChatLoopRunSnapshot,
+	sessionId: string | null,
+): CreateRunInput {
+	return {
+		id: runId,
+		agentId: "main-agent",
+		executionRole: "builder",
+		requestOrigin: "user",
+		task,
+		targetId: snapshot.targetId,
+		wireModelId: snapshot.wireModelId,
+		runtimeId: snapshot.runtimeId,
+		runtimeKind: snapshot.runtimeKind,
+		sessionId,
+		cwd: snapshot.cwd,
+	};
+}
+
+/**
+ * Publish the run's ledger row as running once its loop has resolved a route, before any child it dispatches settles,
+ * with this process's pid so recovery can tell a live parent from an abandoned one (C-13). A run whose route is never
+ * resolved gets its row at settlement, as before.
+ */
+async function openRunningMainAgentRow(runId: string, chat: ChatLoop, task: string, startedAt: string): Promise<void> {
+	const snapshot = chat.lastRunSnapshot?.();
+	if (!snapshot || !isMainAgentRunKind(snapshot.runtimeKind)) return;
+	const ledger = openLedger();
+	if (ledger.get(runId) !== null) return;
+	ledger.create(mainAgentRow(runId, task, snapshot, snapshot.sessionId ?? chat.getSessionId()));
+	ledger.update(runId, { status: "running", startedAt, pid: process.pid, heartbeatAt: new Date().toISOString() });
+	await ledger.persist();
+}
+
 /**
  * Settle the main-agent run the way dispatch settles a worker (#434): one result built with its run.settled, the
  * record made durable and the run scope sealed, and only then the ledger row published terminal, so `fleet verify`
@@ -977,19 +1014,8 @@ async function recordHeadlessMainAgentRun(input: {
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
 	const sessionId = snapshot.sessionId ?? input.chat.getSessionId();
 	const ledger = openLedger();
-	const envelope = ledger.create({
-		id: input.runId,
-		agentId: "main-agent",
-		executionRole: "builder",
-		requestOrigin: "user",
-		task: input.task,
-		targetId: snapshot.targetId,
-		wireModelId: snapshot.wireModelId,
-		runtimeId: snapshot.runtimeId,
-		runtimeKind: snapshot.runtimeKind,
-		sessionId,
-		cwd: snapshot.cwd,
-	});
+	// The row the run opened as running when its route was known is the one it settles (C-13).
+	const envelope = ledger.get(input.runId) ?? ledger.create(mainAgentRow(input.runId, input.task, snapshot, sessionId));
 	const lineage = {
 		parentRunId: null,
 		rootRunId: envelope.id,
@@ -1274,6 +1300,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
 	let entriesBefore = 0;
+	// The running ledger row, opened at the first loop event after the route resolved (C-13).
+	let runningRow: Promise<void> | null = null;
 	const recordRun = (
 		terminal: HeadlessTerminalOutcome,
 		acceptance: ReadonlyArray<RunJsonVerifyResult> | null = null,
@@ -1282,6 +1310,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
 		sealed = (async () => {
+			// Settlement updates the running row, so it waits for that row to be on disk.
+			await runningRow;
 			// A read model that cannot answer leaves the message fold for the row; the run still settles (#434).
 			const calls = (await options.runUsage?.(startedAt).catch(() => null)) ?? null;
 			if (calls !== null && runResultV2Active()) await noteRunUsageV2(options, startedAt, calls);
@@ -1498,6 +1528,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let permissionStop: string | null = null;
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
+		if (runningRow === null && chat.lastRunSnapshot?.()) {
+			runningRow = openRunningMainAgentRow(runId, chat, options.prompt, startedAt).catch((error: unknown) => {
+				process.stderr.write(
+					`clio-coder run: running ledger row write failed: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			});
+		}
 		if (mode === "json") {
 			const messages = event.type === "agent_end" ? event.messages : [];
 			const frames = jsonProjector
