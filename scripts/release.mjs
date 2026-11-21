@@ -27,6 +27,7 @@ import {
 	rehearseBytes,
 	requireIntegrity,
 } from "./release-publish.mjs";
+import { creditsSection, releaseCredits } from "./report-credits.mjs";
 
 const repository = "iowarp/clio-coder";
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,12 +172,27 @@ async function requireReady({ rehearse }) {
 	} catch (error) {
 		problems.push(`origin is unreachable: ${error.message.split("\n")[0]}`);
 	}
+	// Reporter credits for the release notes (R-22), read before any build or push. The candidate is the clean committed
+	// tree, so a stable release needs CHAMPIONS.md regenerated and committed first (RL-5).
+	let credits = null;
+	try {
+		credits = releaseCredits(version);
+		if (!rehearse && credits.champions?.changed)
+			problems.push(`CHAMPIONS.md lacks newly credited reporters; run \`${credits.regenerate}\`, review it and commit`);
+	} catch (error) {
+		problems.push(`reporter credits could not be read: ${error.message.split("\n")[0]}`);
+	}
 	if (problems.length) throw new Error(`Not ready to release:\n${problems.map((line) => `  - ${line}`).join("\n")}`);
+	return credits;
 }
+
+/** The `credits` input for ci.yml's prepare: the handles alone, or empty so the notes stay as they were. */
+const creditsInput = (release) =>
+	release.credits.handles.length ? JSON.stringify({ handles: release.credits.handles }) : "";
 
 /** Read-only: what `pnpm run release` would find and do next. Needs no terminal and writes nothing. */
 async function check(values) {
-	await requireReady(values);
+	const release = await requireReady(values);
 	const commit = git("rev-parse", "HEAD");
 	const directory = join(releaseState(), `c-${commit.slice(0, 12)}`);
 	const local = QUALIFIED_MAJORS.filter((major) => qualifiedOn(directory, commit, major));
@@ -186,6 +202,9 @@ async function check(values) {
 	);
 	console.log(
 		`CI qualification: ${qualification ? `${qualification.conclusion ?? qualification.status} ${qualification.html_url}` : "none for this commit; the release pushes and dispatches it after local qualification"}`,
+	);
+	console.log(
+		`Reporter credits ${release.since ?? "(first release)"}..${release.until}: ${release.credits.handles.join(", ") || "none"}; CHAMPIONS.md ${release.champions === null ? "is not regenerated for a prerelease" : release.champions.changed ? "needs regenerating" : "is current"}`,
 	);
 	console.log("Ready: pnpm run release");
 }
@@ -202,7 +221,7 @@ async function main() {
 	});
 	if (values.help) {
 		console.log(
-			"pnpm run release [-- --platforms]\npnpm run release -- --check     read-only readiness report; needs no terminal\npnpm run release:rehearse [-- --platforms]\nInteractive qualification, owner npm publication, and release dispatch. The release environment requires the owner's final approval.\nRehearsal uses a temporary rehearse/* branch and makes no package, tag, main, or site changes.",
+			"pnpm run release [-- --platforms]\npnpm run release -- --check     read-only readiness report; needs no terminal\npnpm run release:rehearse [-- --platforms]\nInteractive qualification, owner npm publication, and release dispatch. The release environment requires the owner's final approval.\nRehearsal uses a temporary rehearse/* branch and makes no package, tag, main, or site changes.\nRelease notes thank reporters who opted in (scripts/report-credits.mjs); a stable release first needs CHAMPIONS.md regenerated and committed.",
 		);
 		return;
 	}
@@ -211,7 +230,7 @@ async function main() {
 		throw new Error(
 			"Run this interactive command in a visible terminal. `pnpm run release -- --check` reports readiness without one.",
 		);
-	await requireReady(values);
+	const release = await requireReady(values);
 	const prompt = createInterface({ input: process.stdin, output: process.stdout });
 	// Remote writes need the typed phrase, so a stray "y" in a busy terminal cannot publish.
 	const ask = async (description, phrase) => {
@@ -288,6 +307,7 @@ async function main() {
 				version_branch: branch,
 				rehearse: Boolean(values.rehearse),
 				platforms: Boolean(values.platforms),
+				credits: creditsInput(release),
 			});
 			await watch(qualification);
 		} else {
@@ -336,6 +356,12 @@ async function main() {
 			branch,
 		]);
 		const candidate = verifyCandidate(scratchDirectory, commit);
+		// A reused or hand-dispatched qualification may have prepared its notes without this release's credits (RL-5).
+		const thanks = creditsSection(release.credits).trim();
+		if (thanks && !readFileSync(join(scratchDirectory, "release-notes.md"), "utf8").includes(thanks))
+			throw new Error(
+				`Qualification ${qualification.html_url} prepared its release notes without the reporter credits. Nothing was published. Qualify again with them, then rerun pnpm run release:\n  gh workflow run ci.yml --repo ${repository} --ref ${branch} -f sha=${commit} -f version_branch=${branch} -f credits='${creditsInput(release)}'`,
+			);
 		const plan = publicationPlan(candidate, branch);
 		// The rehearsal's publication check, on the bytes about to be published: npm's own dry run of the
 		// qualified tarball under the release's dist-tag. It writes nothing and needs no rehearsal run.
