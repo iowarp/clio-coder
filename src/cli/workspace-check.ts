@@ -56,9 +56,9 @@ export async function confirmStartupWorkspace(
 		concern === "home"
 			? "This is your home folder. It includes personal files and application settings."
 			: "This is a system or shared folder. Changes here can affect more than one project.",
-		"Clio can read files and, depending on permissions, edit files and run commands.",
+		"CLIO Coder can read files and, depending on permissions, edit files and run commands.",
 		options.afterSetup
-			? "Clio works in a project folder: cd into one and run clio-coder there."
+			? "CLIO Coder works in a project folder: cd into one and run clio-coder there."
 			: "Open a project folder instead if you did not intend this scope.",
 		"",
 	];

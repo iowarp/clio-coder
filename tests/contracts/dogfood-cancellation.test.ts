@@ -738,9 +738,10 @@ it("a reply the repetition guard stops after a plain and a changed recovery fail
 		deepStrictEqual(changed?.chat_template_kwargs, { enable_thinking: false });
 		doesNotMatch(JSON.stringify(plain?.messages), /stopped again/u);
 		match(JSON.stringify(changed?.messages), /stopped again/u);
-		// One turn, one outcome footer, however many recoveries it took (bt-48-1).
+		// One turn, one outcome footer, however many recoveries it took (bt-48-1). The guard stopped it, not the operator.
 		const rendered = f.panel.render(120).map(stripTerminalSequences).join("\n");
-		strictEqual(rendered.split("⊘ Cancelled").length - 1, 1, rendered);
+		strictEqual(rendered.split("Generation stopped").length - 1, 1, rendered);
+		doesNotMatch(rendered, /Cancelled/u);
 		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
 		match(envelope?.outcomeDetail ?? "", /^\[CLIO Coder\] stopped a model response that kept repeating itself/u);
 		doesNotMatch(stderr.join(""), /target 'cancellation-fixture'|Request was aborted/u);
@@ -1315,6 +1316,12 @@ it("a reply cut off while thinking is dropped and re-run once, one thinking step
 		match(resent, /hit the output limit while still thinking/u);
 		const notice = f.events.find((event) => event.type === "notice" && event.key === "turn.thinking-length-recovery");
 		match(notice?.type === "notice" ? notice.text : "", /with thinking off instead of high\.$/u);
+		// The cut-off attempt closes an attempt, not the turn, so no interim "Output limit" outcome shows (f-repeat).
+		const cut = f.events.find(
+			(event) => event.type === "message_end" && (event.message as { stopReason?: unknown }).stopReason === "length",
+		) as { retryPending?: { recovery?: boolean } } | undefined;
+		strictEqual(cut?.retryPending?.recovery, true);
+		doesNotMatch(f.panel.render(120).map(stripTerminalSequences).join("\n"), /Output limit/u);
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
 		await f.close();

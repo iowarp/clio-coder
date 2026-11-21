@@ -2076,6 +2076,12 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		} catch (error) {
 			if (input.signal?.aborted) offersFailed();
 			input.signal?.throwIfAborted();
+			// A stalled live call means the route is wedged: the portable request goes to the same route and would only
+			// spend a second stall window before failing the same way (f-r-summary-stall).
+			if (error instanceof SummaryStallError) {
+				offersFailed();
+				throw error;
+			}
 			// The failed call reported its own usage; the portable requests below still produce the checkpoint.
 			if (observationTracing())
 				traceObservation("compaction-live-prefix-fallback", {

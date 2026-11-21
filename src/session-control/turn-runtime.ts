@@ -19,6 +19,7 @@ import { observationTracing, traceObservation } from "../domains/memory/observat
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
+import { missingOutputRefusal } from "../domains/session/output-obligations.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
 import { cachePhysics, journaledStructure, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
@@ -330,6 +331,8 @@ export interface TurnRuntimeDeps {
 	telemetry?: TelemetryContract | undefined;
 	scheduling?: SchedulingContract | undefined;
 	headless?: boolean | undefined;
+	/** The outputs the session's operator prompts named that do not exist now (M-4); finish(done) is refused once over them. */
+	missingOutputs?: (() => string[]) | undefined;
 	createAgent: typeof createEngineAgent;
 	/** Every main-turn request as sent, for the hosted cache keepalive (#423). */
 	noteMainRequest?: (
@@ -766,8 +769,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Preflight and the wire budget share the session's effective settings,
 		// including overrides that never reach the saved providers snapshot.
 		setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
-		if (!options?.silent)
-			context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new TurnAdmissionError(
 				`[CLIO Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
@@ -1175,6 +1176,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let requiredToolReminder: string | null = null;
 		// FX-40: bare finish calls admitted after their user turn's one refusal; each result records the missing reply.
 		const bareFinishCalls = new Set<string>();
+		// M-4: the first finish(done) of an operator prompt while an output its session named is absent does not run.
+		const missingOutputGate = (toolCall: { name: string; arguments: unknown }) => {
+			if (state.finishOutputRefused) return undefined;
+			const effective = effectiveToolCall(toolCall.name, toolCall.arguments);
+			if (effective.toolName !== ToolNames.Finish || effective.args?.state !== "done") return undefined;
+			const missing = deps.missingOutputs?.() ?? [];
+			if (missing.length === 0) return undefined;
+			state.finishOutputRefused = true;
+			return { block: true as const, reason: missingOutputRefusal(missing) };
+		};
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		// The user turn the run started under, so a call a steer moved to its own entry settles with it (bt-26 N2h).
@@ -1393,7 +1404,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					repliedThisTurn: state.turnReplied,
 				});
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
-				if (verdict !== "refuse") return undefined;
+				if (verdict !== "refuse") return missingOutputGate(toolCall);
 				state.finishReplyRefused = true;
 				const active = state.activeUserTurnId;
 				// Keyed like turnCalls (bt-26 N2h): a refusal after a steer settles under the user turn the run started under.
@@ -1788,17 +1799,19 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					handoffChanged ||
 					continued ||
 					requirementChanged;
+				// Retracting or installing only replaces or appends messages, so the install's publications read the history the
+				// guard's last publication checked: the guard runs it in that settled stretch (SC-6).
+				let restored = false as boolean;
 				const update = await context
-					.postToolContinuationGuard(localRuntime, signal, contextChanged)
+					.postToolContinuationGuard(localRuntime, signal, contextChanged, () => {
+						if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return;
+						restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
+					})
 					.catch((error: unknown) => {
 						// Clio's guard, not the route, ended the turn (CLI-3).
 						if (error instanceof Error && error.name === OVERSIZED_RESULT_STOP) guardStopCause = "oversized_tool_result";
 						throw error;
 					});
-				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
-				// Retracting or installing only replaces or appends messages, so the install's second publication reads the
-				// history its first one checked (SC-6).
-				const restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// A tool hook changed a pinned block, or the guard's compaction dropped one: it rides the next request.
 				const pinned = context.appendPinnedContext(localRuntime);
@@ -2173,7 +2186,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						terminal.stopReason === "aborted" && state.activeInterruptReason === null
 							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
-					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
+					if (harnessStop !== null)
+						Object.assign(message, {
+							errorMessage: harnessStop,
+							harnessStopped: true,
+							// The repetition guard stopped the generation; the operator did not cancel it (f-repeat).
+							...(state.repetitionAbortReason !== null ? { clioCoderAbortReason: "repetition" } : {}),
+						});
 					// An interrupt (the operator's cancel, triage, autonomy) is no route failure either, so it names no route.
 					else if (harnessCause === undefined || harnessCause === "route_moved")
 						Object.assign(message, {

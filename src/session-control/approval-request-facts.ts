@@ -13,6 +13,7 @@ import { askAxis } from "../domains/safety/approval-axis.js";
 import { describeMainCallConsequences, mainCallExposure } from "../domains/safety/call-consequence.js";
 import { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import { escapeScopeOptionConsequence, escapeScopeOptionLabel } from "../domains/safety/escape-scope.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { isOperatorTypedUserPayload, operatorTextOfUserPayload } from "../domains/session/history.js";
@@ -314,5 +315,13 @@ export function mainApprovalRequestView(
 		...(task !== undefined ? { task } : {}),
 		// A contained call stays contained once approved; only `unsandboxed: true` leaves, under its own ask.
 		...(decision.policy?.shellSandbox !== undefined ? { sandboxed: true as const } : {}),
+		...(meta?.escapeScope !== undefined
+			? {
+					escapeScope: {
+						label: escapeScopeOptionLabel(meta.escapeScope),
+						consequence: escapeScopeOptionConsequence(meta.escapeScope),
+					},
+				}
+			: {}),
 	};
 }

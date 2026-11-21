@@ -436,7 +436,7 @@ export function contextWindowUndiscovered(descriptor: TargetDescriptor, probe: P
 export function warnUndiscoveredContextWindow(descriptor: TargetDescriptor, probe: ProbeResult | null): void {
 	if (!contextWindowUndiscovered(descriptor, probe)) return;
 	process.stdout.write(
-		"  warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.\n",
+		"  warning: the target reported no context window; CLIO Coder will use the runtime default as a guess. Set one with --context-window.\n",
 	);
 }
 
@@ -491,7 +491,7 @@ export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): st
 				probe.failureKind === "missing"
 					? "install the official Antigravity CLI and put `agy` on PATH"
 					: probe.failureKind === "authentication"
-						? "run `agy` yourself and complete sign-in; Clio never reads or manages that session"
+						? "run `agy` yourself and complete sign-in; CLIO Coder never reads or manages that session"
 						: probe.failureKind === "unsupported-feature"
 							? "update `agy`; this integration requires its structured JSON model catalog"
 							: "run `agy` directly to inspect setup, then re-run `clio-coder targets --probe`";
@@ -502,7 +502,7 @@ export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): st
 				probe.failureKind === "missing"
 					? "install the Copilot SDK component with `clio-coder tools install copilot-sdk`, then re-run `clio-coder targets --probe`"
 					: probe.failureKind === "authentication"
-						? "sign in with `copilot login` or `gh auth login`; Clio never signs in to Copilot itself. A login kept only in the system keychain is closed to headless runs; `clio-coder doctor` in a terminal shows which login the runtime sees"
+						? "sign in with `copilot login` or `gh auth login`; CLIO Coder never signs in to Copilot itself. A login kept only in the system keychain is closed to headless runs; `clio-coder doctor` in a terminal shows which login the runtime sees"
 						: "check that `copilot login` succeeded and the account has Copilot models enabled, then re-run `clio-coder targets --probe`";
 			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
 		}
@@ -516,7 +516,7 @@ export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): st
 	if (readings.length > 0) return [`probe ok${latency} ${readings.join(", ")}`];
 	return [
 		`probe reachable${latency}, but the target answered no model list and no version`,
-		"  Clio cannot verify the model id or the context window from here and will send both as written.",
+		"  CLIO Coder cannot verify the model id or the context window from here and will send both as written.",
 		"  re-read them once the server serves them with: clio-coder targets --probe",
 	];
 }

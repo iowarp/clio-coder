@@ -209,7 +209,12 @@ test("an unscripted question cancels with reason unscripted and ends the run wit
 			return () => {};
 		},
 		getSessionId: () => null,
-		cancel: (options: unknown) => cancels.push(options),
+		cancel: (options: unknown) => {
+			cancels.push(options);
+			// The chat loop reports the cancel reason as a transcript notice, as a live run does.
+			const reason = (options as { reason?: string }).reason ?? "";
+			handler({ type: "notice", surface: "transcript", text: reason });
+		},
 		submit: async () => {
 			handler({ type: "agent_start" });
 			await fresh.interview([{ question: "Ship it?", header: "Release" }]);
@@ -220,6 +225,11 @@ test("an unscripted question cancels with reason unscripted and ends the run wit
 		isStreaming: () => false,
 	};
 	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
+	const stderr: string[] = [];
+	t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+		stderr.push(String(chunk));
+		return true;
+	});
 	const code = await runHeadlessMainAgent(chat as never, {
 		prompt: "x",
 		mode: "text",
@@ -229,6 +239,14 @@ test("an unscripted question cancels with reason unscripted and ends the run wit
 	strictEqual(code, UNSCRIPTED_EXIT_CODE);
 	strictEqual(cancels.length, 1);
 	strictEqual((cancels[0] as { atToolBoundary?: boolean }).atToolBoundary, true);
+	// The unscripted question is told once, with one prefix.
+	const lines = stderr.join("").split("\n");
+	strictEqual(lines.filter((line) => line.includes("unscripted question")).length, 1, lines.join("\n"));
+	strictEqual(
+		lines.some((line) => line.startsWith("clio-coder run: clio-coder run:")),
+		false,
+		lines.join("\n"),
+	);
 });
 
 test("a bad answers file names the file and the offending entry", async (t) => {

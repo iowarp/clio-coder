@@ -11,6 +11,7 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import type { AttachOperations } from "../domains/attach/host.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
 import {
 	applyInitImplications,
@@ -273,6 +274,8 @@ type SlashCommandVariant =
 	  }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
+	/** `/attach`: open, narrow, widen or close this session's attach socket. */
+	| { kind: "attach"; action: "observe" | "approve" | "pair" | "off" | "status" }
 	/** `/panes`: mode, health, pane inventory, effective settings. */
 	| { kind: "panes" }
 	| { kind: "panes-show"; target: string }
@@ -1310,6 +1313,8 @@ export interface SessionCommandContext {
 	 * absent only when the host did not compose pane operations at all.
 	 */
 	panes?: PanesOperations;
+	/** The attach socket behind `/attach`. Absent outside the interactive terminal. */
+	attach?: AttachOperations;
 	/** The music pane. Absent when the session started without panes. */
 	music?: MusicOperations;
 	/** The shared job control behind `/loop`. Absent where no session-owned job host exists. */
@@ -2936,6 +2941,51 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const block = formatRunVerificationBlock(command.runId, result);
 			if (result.ok) ctx.notice(result.compromised ? "warn" : "success", block);
 			else ctx.notice("error", block);
+		},
+	},
+	{
+		name: "attach",
+		rank: 3,
+		acp: false,
+		description: "Let another terminal watch this session, answer its approvals, or pair",
+		group: "Clio",
+		kinds: ["attach"],
+		args: {
+			subcommands: { observe: {}, approve: {}, pair: {}, off: {} },
+		},
+		subcommandDescriptions: {
+			observe: "Open attach for watchers only",
+			approve: "Also let attached clients answer the approval card",
+			pair: "Also let attached clients steer or start turns with plain text",
+			off: "Close the attach socket and drop every client",
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return usageError("attach", parsed.error, parsed.subcommand);
+			if (parsed.positionals.length > 0) return usageError("attach", `Unexpected argument: ${parsed.positionals[0]}`);
+			const action = parsed.subcommand;
+			if (action === "observe" || action === "approve" || action === "pair" || action === "off")
+				return { kind: "attach", action };
+			return { kind: "attach", action: "status" };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "attach") return;
+			if (!ctx.attach) {
+				ctx.notice("warn", "attach is available only in the interactive terminal");
+				return "rejected";
+			}
+			if (command.action === "status") {
+				ctx.notice("info", ctx.attach.status());
+				return;
+			}
+			const ceiling =
+				command.action === "off"
+					? null
+					: command.action === "observe"
+						? "observer"
+						: command.action === "approve"
+							? "approver"
+							: "pair";
+			void ctx.attach.admit(ceiling).then((result) => ctx.notice(result.level, result.text));
 		},
 	},
 	{

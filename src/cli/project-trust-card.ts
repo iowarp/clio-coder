@@ -179,7 +179,7 @@ export function buildProjectTrustCard(cwd: string): ProjectTrustCardModel | null
 }
 
 export function renderProjectTrustCard(model: ProjectTrustCardModel): string[] {
-	const lines = ["", "This repository has its own Clio configuration.", `  ${clean(model.workspaceRoot)}`, ""];
+	const lines = ["", "This repository has its own CLIO Coder configuration.", `  ${clean(model.workspaceRoot)}`, ""];
 	for (const item of model.surfaces) {
 		lines.push(`  ${item.surface}${item.changed ? " (changed since you trusted it)" : ""}`);
 		for (const line of item.summary) lines.push(`    ${line}`);

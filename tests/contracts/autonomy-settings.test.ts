@@ -9,7 +9,6 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { applyControlValue } from "../../src/core/settings-controls.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
-import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import { autonomyFromUserInput } from "../../src/domains/safety/autonomy.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -32,19 +31,6 @@ test("the user settings loader accepts only default and yolo autonomy", async (t
 			},
 			value,
 		);
-	}
-});
-
-test("the v1 rewrite retains canonical autonomy and resets every other value with a note", () => {
-	for (const value of ["default", "yolo"]) {
-		const result = migrateSettingsV1Document({ version: 1, autonomy: value });
-		strictEqual((result.document.safety as { autonomy: unknown }).autonomy, value);
-		strictEqual(result.notes.length, 0);
-	}
-	for (const value of ["suggest", "auto-edit", "full-auto", "read-only", "other", 42]) {
-		const result = migrateSettingsV1Document({ version: 1, autonomy: value });
-		strictEqual((result.document.safety as { autonomy: unknown }).autonomy, "default");
-		match(result.notes.join(" "), /autonomy.*default/u);
 	}
 });
 

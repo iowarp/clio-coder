@@ -9,9 +9,7 @@ import { clioStateDir, resolveClioDirs } from "../../../core/xdg.js";
  * load when its registry drifts from this list.
  */
 export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
-	"2026-09-01-settings-v2",
 	"2026-11-21-retired-settings",
-	"2026-09-01-retire-panes-knobs",
 	"2026-10-06-playbooks-and-packages",
 	"2026-10-07-acp-adapters",
 	"2026-10-07-claude-subscription",
@@ -31,6 +29,8 @@ export const RETIRED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-08-18-lmstudio-runtime-id",
 	"2026-09-01-clio-coder-naming",
 	"2026-09-01-extension-install-digests",
+	"2026-09-01-retire-panes-knobs",
+	"2026-09-01-settings-v2",
 	"2026-09-18-ollama-runtime-id",
 ]);
 

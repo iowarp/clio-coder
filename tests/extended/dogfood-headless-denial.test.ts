@@ -330,6 +330,38 @@ describe("headless no-op contract through the built binary", () => {
 		);
 	});
 
+	test("an --output the run never writes refuses the first finish(done), then seals partly_done: exit 1, cause missing_output (M-4)", async () => {
+		const finishDone = (id: string): OpenAICompatToolCallScript => ({
+			id,
+			name: "finish",
+			arguments: { state: "done" },
+			text: "The report is written.",
+		});
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [finishDone("f1"), finishDone("f2")],
+			failOnNoop: false,
+			prompt: "Write the report.",
+			flags: ["--output", "report.md", "--output-format", "json"],
+		});
+		strictEqual(turn.code, 1, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "missing_output");
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 2);
+		// The flag is the prompt's marker line; the one refusal names the absent path, and the second finish runs.
+		ok(JSON.stringify(mainLoop[0]?.messages).includes("output: report.md"));
+		ok(JSON.stringify(mainLoop[1]?.messages).includes("the operator named an output that does not exist: report.md"));
+		const result = lastJson(turn.stdout);
+		strictEqual(result.outcome, "failed");
+		strictEqual((result.causes as Array<Record<string, unknown>>)[0]?.code, "missing_output");
+		const completion = result.completion as { claimed?: string; state?: string; facts?: string[]; unverified?: string[] };
+		deepStrictEqual(
+			{ claimed: completion.claimed, state: completion.state, facts: completion.facts },
+			{ claimed: "done", state: "partly_done", facts: ["missing_output"] },
+		);
+		ok(completion.unverified?.includes("missing output: report.md"), JSON.stringify(completion));
+	});
+
 	for (const failOnNoop of [true, false]) {
 		test(`a run whose shell write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {
 			// Hidden shell content asks in default mode, and a headless run has no

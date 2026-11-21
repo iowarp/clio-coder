@@ -227,6 +227,8 @@ describe("win32 files pane keymap", () => {
 				`shell -- "${ya}" pub-to %%YAZI_ID%% clio-coder-pick --list %%CLIO_CODER_YAZI_PICK_TOKEN%% %s`,
 				`plugin clio-enter -- '"${ya}" pub-to %%YAZI_ID%% clio-coder-pick --list %%CLIO_CODER_YAZI_PICK_TOKEN%% %s'`,
 				`shell -- "${ya}" pub-to %%YAZI_ID%% clio-coder-dock --list %%CLIO_CODER_YAZI_PICK_TOKEN%%`,
+				"shell --interactive --cursor=0 -- >NUL 2>&1",
+				"shell --block --interactive --cursor=0 -- >CON 2>&1",
 			],
 		);
 	});

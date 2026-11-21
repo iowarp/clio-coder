@@ -76,6 +76,8 @@ export interface TurnMiddlewareDeps {
 	stepTurnEnd?: () => { continues: boolean; startTurnId?: string } | null;
 	/** Facts the host itself seals on every ended turn beside the middleware's, such as a headless run's spent observation pool (CLI-P42). */
 	hostCompletionFacts?: () => CompletionFact[];
+	/** The outputs the session's operator prompts named that do not exist at the seal (M-4): each is a `missing_output`. */
+	missingOutputs?: () => string[];
 	/**
 	 * The settling firings whose effect never entered a request: a spent or declared-away continuation, a turn that
 	 * errored or was aborted, a refused turn start, a released reminder buffer. The outcome ledger settles them
@@ -99,6 +101,7 @@ const COMPLETION_FACT_NOTES: Record<CompletionFact, string> = {
 	uncollected_run: "detached runs are still uncollected",
 	open_task: "tasks are still open",
 	observation_budget: "the observation pool refused the last reads, so what they would return was not read",
+	missing_output: "a file the operator asked for does not exist",
 };
 
 /** The awaited turn_start phase's answer: the turn's refusal, or the effects an admitted turn applies. */
@@ -753,7 +756,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 		async fireTurnEnd(agentRuntime, messages, terminalToolResult, pinFinishRound): Promise<boolean> {
 			// Fleet design 4.3: the host seals every ended turn, the claim beside its assessment from the turn's facts.
-			state.turnSealedCompletion = sealCompletion(state.turnCompletion, deps.hostCompletionFacts?.() ?? []);
+			state.turnSealedCompletion = sealCompletion(
+				state.turnCompletion,
+				deps.hostCompletionFacts?.() ?? [],
+				deps.missingOutputs?.() ?? [],
+			);
 			if (!deps.middleware) return false;
 			// A turn `finish` ended closes on the reply the model wrote beside it (fleet design 4.3): that text is the
 			// final answer, as a settled stop turn's would be. Any other terminal tool's result stands in for the reply.
@@ -834,10 +841,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					? [effect.fact]
 					: [],
 			);
-			state.turnSealedCompletion = sealCompletion(state.turnCompletion, [
-				...facts,
-				...(deps.hostCompletionFacts?.() ?? []),
-			]);
+			state.turnSealedCompletion = sealCompletion(
+				state.turnCompletion,
+				[...facts, ...(deps.hostCompletionFacts?.() ?? [])],
+				deps.missingOutputs?.() ?? [],
+			);
 			// `finish` is turn-terminal: a declared turn never continues, and what a nudge would have asked is sealed
 			// as a fact above. An undeclared turn keeps today's continuations.
 			const declaredTurn = state.turnCompletion !== null;
