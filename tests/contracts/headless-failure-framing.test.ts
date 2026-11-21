@@ -820,16 +820,25 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 		},
 	];
 	for (const { name, before, last, expected, extra = { declared } } of scenarios) {
+		// M-6: a finish that ended the run with no reply text is not a success: exit 1, cause no_reply_text.
+		const bare = expected.length === 0 && !("terminating" in extra);
 		rmSync(join(env.dir, "out.txt"), { force: true });
 		const text = await writtenCallRun(undefined, last, { path: "out.txt", cwd: env.dir }, { before, ...extra });
-		strictEqual(text.code, 0, `${name}: ${text.stderr}`);
+		strictEqual(text.code, bare ? 1 : 0, `${name}: ${text.stderr}`);
 		strictEqual(text.stdout, expected.length > 0 ? `${expected}\n` : "", name);
 		ok(!text.stdout.includes("completion declared"), name);
 		if (expected.length > 0) strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`, name);
 		else ok(!existsSync(join(env.dir, "out.txt")) || readFileSync(join(env.dir, "out.txt"), "utf8").trim() === "", name);
 		const v2 = await writtenCallRun("json", last, undefined, { before, ...extra });
-		const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
+		const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as {
+			result?: { text?: string };
+			outcome?: string;
+			causes?: Array<{ code?: string }>;
+		};
 		strictEqual(envelope.result?.text, expected, `${name}: ${v2.stdout}`);
+		strictEqual(v2.code, bare ? 1 : 0, `${name}: ${v2.stdout}`);
+		strictEqual(envelope.outcome, bare ? "failed" : "succeeded", name);
+		strictEqual(envelope.causes?.[0]?.code, bare ? "no_reply_text" : undefined, name);
 	}
 	// Tools ran and the closing message is empty: no answer anywhere, and the narration reaches only stderr.
 	const closingEmpty = assistant("stop", []);

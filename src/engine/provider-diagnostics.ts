@@ -6,7 +6,15 @@ import type { TargetCacheSettings } from "../domains/providers/types/target-desc
 import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { splitAnthropicSystem } from "./apis/anthropic-system-split.js";
 import { splitCodexInstructions } from "./apis/codex-instructions-split.js";
+import { splitOpenAISystem } from "./apis/openai-system-split.js";
 import { findEngineEnvKeys } from "./env-api-keys.js";
+
+/** GPT-5.6 and later on the public Responses API: cache lookup at breakpoints, explicit marks accepted (PV-3). */
+function explicitPromptCacheMode(model: Model<Api>): boolean {
+	return (
+		(model.compat as { supportsExplicitPromptCacheMode?: boolean } | undefined)?.supportsExplicitPromptCacheMode === true
+	);
+}
 
 /**
  * Which caller a provider call serves. A subscription runtime may give the
@@ -58,6 +66,7 @@ export function instrumentProviderCall<T extends StreamOptions>(
 	if (clioCoderPinnedPrefix !== undefined) {
 		// Clio's compiler metadata never reaches Pi or a provider option surface (#423).
 		effective = providerOptions as T;
+		const longRetention = effective?.cacheRetention === "long";
 		// Only the main thread splits; workers, side calls and any other API keep the request Pi built.
 		const split =
 			scope !== "main"
@@ -66,7 +75,9 @@ export function instrumentProviderCall<T extends StreamOptions>(
 					? splitAnthropicSystem
 					: model.api === "openai-codex-responses"
 						? splitCodexInstructions
-						: undefined;
+						: model.api === "openai-responses" && explicitPromptCacheMode(model)
+							? (payload: unknown, prefix: PinnedPromptPrefix) => splitOpenAISystem(payload, prefix, longRetention)
+							: undefined;
 		if (split !== undefined) {
 			const onPayload = effective.onPayload;
 			effective = {

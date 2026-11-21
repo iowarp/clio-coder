@@ -32,7 +32,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 - `chat.target`: default chat target id (`null`).
 - `chat.model`: default chat model id (`null`).
 - `chat.thinkingLevel`: default reasoning effort for the chat model (`"low"`; clamped to supported provider levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`).
-- `chat.prewarm`: whether prompt-prefix prewarming runs on session start (`false`). When enabled, prewarming prefills the prompt prefix before the first turn, and again after a resume or a compaction settles. It runs only against a target that binds `cache.deployment` with backend `llamacpp` or `lmstudio`: directly on that runtime, or for `lmstudio` also through `litellm`. A `llamacpp` binding names `controlUrl`, `model` and the server's `build`; an `lmstudio` binding names `controlUrl` and `model` and also needs `cache.warm.startup: true`. Every other runtime and tier is skipped whatever this setting says, and in the terminal UI a `llamacpp` or `lmstudio` target with no binding says so once in the transcript instead of skipping silently. Dispatched workers and headless runs do not prewarm.
+- `chat.prewarm`: whether prompt-prefix prewarming runs on session start (`false`). When enabled, prewarming prefills the prompt prefix before the first turn, and again after a resume or a compaction settles. It runs only against a target that binds `cache.deployment` with backend `llamacpp` or `lmstudio`: directly on that runtime, or for `lmstudio` also through `litellm`. A `llamacpp` binding names `controlUrl`, `model` and the server's `build`; an `lmstudio` binding names `controlUrl` and `model` and also needs `cache.warm.startup: true`. On the `openai-codex` runtime it sends the prefix as a `generate: false` request, which the backend caches without producing output. Every other runtime and tier is skipped whatever this setting says, and in the terminal UI a `llamacpp` or `lmstudio` target with no binding says so once in the transcript instead of skipping silently. Dispatched workers and headless runs do not prewarm.
 - `chat.maxOutputTokens`: per-turn output token limit (`0`, meaning each model's own cap and its profile's recommended output budget).
 - `chat.cacheKeepalive`: whether CLIO Coder refreshes a hosted provider's prompt cache while a turn waits on its own tools (`true`). A hosted cache entry expires after a few idle minutes, and a turn that waits on an attached dispatch can outlast it. The entry's lifetime is the one the route declares; an OpenAI Responses route that declares none lives 24 hours under `long` retention (30 minutes in explicit prompt-cache mode) and 5 minutes otherwise, and Codex always assumes 5 minutes. CLIO Coder then replays the turn's last request, with the route's smallest output cap (1 token on Anthropic, 16 on OpenAI Responses and Codex), at 90% of the entry's lifetime, only when the refresh is expected to save at least $0.05 over the miss it prevents, counting the refreshes already sent for the same request, so their total never exceeds that one miss. A refresh that reports a cache read of zero ends the keepalive. The keepalive follows one turn for up to two hours while a dispatch is attached and up to one hour for any other tool. It stands down while a permission ask or `ask_user` round waits on a person, between turns, and when the route declares no lifetime, retention is `none`, or the cost ceiling would be reached. Each refresh is booked as `prewarm` usage and recorded on the session ledger. `false` turns it off.
 - `chat.retry.*`: retry backoff (`baseDelayMs: 2000`, `maxDelayMs: 60000`), attempt limit (`maxRetries: 3`), and stream stall timeouts (`streamStallMs: 180000`, `firstTokenStallMs: 600000`). CLIO Coder never retries before a wait the provider states, whether in a `Retry-After` header or in the error text (`retry after 30s`, `try again in 5m`). When the failure is one that waiting can clear, it honors such a wait in every autonomy mode while `chat.retry.enabled` is on, even with `maxRetries: 0`, with a countdown that Esc cancels, and the wait does not spend one of `maxRetries`. Each attempt in a chain still grows the retry backoff, and CLIO Coder waits the larger of that backoff and the stated wait. One request waits at most one hour in total and sits out at most 30 stated waits; a wait that would pass either limit stops the turn without retrying, and the notice names the wait the provider asked for. Plain-text headless `run` prints a stderr line when a retry waits 5 s or more, and on every fifth retry. `maxDelayMs` limits only CLIO Coder's own backoff and never shortens a stated wait.
@@ -261,139 +261,13 @@ For an ACP peer, `integrations.externalAgents.entries[].env` may use an exact
 peer at launch and refuses a missing reference. Keep provider keys out of the
 settings file; see [Coding Agent Interoperability](interop.md).
 
-## Version 1 to version 2 key map
+## Version 1 settings
 
-`clio-coder upgrade` runs the version-1 to version-2 migration and keeps the original as `settings.yaml.v1.bak`. Validation is strict and has no read-time aliases: a version-2 file that still names a version-1 path is rejected with a message naming the replacement. The manifest is `SETTINGS_V1_PATH_MOVES` in [`src/core/config.ts`](../../src/core/config.ts). `*` stands for a map key and `[]` for a list element, and values move without reinterpretation. A non-canonical v1 `autonomy` value becomes `default` and the migration report says so.
-
-### Chat
-
-| Version 1 path | Version 2 path |
-| --- | --- |
-| `orchestrator.target` | `chat.target` |
-| `orchestrator.model` | `chat.model` |
-| `orchestrator.thinkingLevel` | `chat.thinkingLevel` |
-| `scope[]` | `chat.modelPicker.cycleSet[]` |
-| `modelSelector.favorites[]` | `chat.modelPicker.favorites[]` |
-| `modelSelector.recentLimit` | `chat.modelPicker.recentLimit` |
-| `defaults.maxTokens` | `chat.maxOutputTokens` |
-| `prewarm.enabled` | `chat.prewarm` |
-| `retry.enabled` | `chat.retry.enabled` |
-| `retry.maxRetries` | `chat.retry.maxRetries` |
-| `retry.baseDelayMs` | `chat.retry.baseDelayMs` |
-| `retry.maxDelayMs` | `chat.retry.maxDelayMs` |
-| `retry.streamStallMs` | `chat.retry.streamStallMs` |
-
-### Fleet
-
-| Version 1 path | Version 2 path |
-| --- | --- |
-| `workers.default.target` | `fleet.default.target` |
-| `workers.default.model` | `fleet.default.model` |
-| `workers.default.thinkingLevel` | `fleet.default.thinkingLevel` |
-| `workers.default.node` | `fleet.default.node` |
-| `workers.profiles.*.target` | `fleet.profiles.*.target` |
-| `workers.profiles.*.model` | `fleet.profiles.*.model` |
-| `workers.profiles.*.thinkingLevel` | `fleet.profiles.*.thinkingLevel` |
-| `workers.profiles.*.node` | `fleet.profiles.*.node` |
-| `workers.rosters.*.members[].label` | `fleet.rosters.*.members[].label` |
-| `workers.rosters.*.members[].target` | `fleet.rosters.*.members[].target` |
-| `workers.rosters.*.members[].model` | `fleet.rosters.*.members[].model` |
-| `workers.rosters.*.members[].thinking` | `fleet.rosters.*.members[].thinkingLevel` |
-| `workers.rosters.*.members[].color` | `fleet.rosters.*.members[].color` |
-| `workers.agentBindings.*` | `fleet.agentProfiles.*` |
-| `routing.activeRoles[]` | `fleet.adaptiveRouting.roles[]` |
-| `routing.activePostures[]` | `fleet.adaptiveRouting.postures[]` |
-| `routing.agentAutomation.activeAgentRoles[].agentId` | `fleet.adaptiveRouting.agentRoles[].agentId` |
-| `routing.agentAutomation.activeAgentRoles[].executionRole` | `fleet.adaptiveRouting.agentRoles[].executionRole` |
-| `budget.concurrency` | `fleet.concurrency` |
-| `workers.maxRetries` | `fleet.retry.maxRetries` |
-| `workers.resilienceCooldownMs` | `fleet.retry.routeCooldownMs` |
-| `workers.onPermission` | `fleet.permissions.mode` |
-| `workers.escalation.timeoutMs` | `fleet.permissions.escalation.timeoutMs` |
-| `workers.escalation.fallback` | `fleet.permissions.escalation.fallback` |
-| `guardrails.workerToolCallCap` | `fleet.limits.toolCallsPerRun` |
-| `guardrails.internalDispatchTimeoutMs` | `fleet.limits.internalRunTimeoutMs` |
-| `guardrails.maxDispatchRuns` | `fleet.history.maxRuns` |
-| `panes.journal` | `fleet.history.journal` |
-
-Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file that still says `clioEntry` is refused with the same replacement message, and the migrator renames it.
-
-### Context and memory
-
-| Version 1 path | Version 2 path |
-| --- | --- |
-| `compaction.auto` | `context.compaction.auto` |
-| `compaction.threshold` | `context.compaction.threshold` |
-| `compaction.model` | `context.compaction.model` |
-| `compaction.systemPrompt` | `context.compaction.systemPrompt` |
-| `background.target` | `context.memory.target` |
-| `background.model` | `context.memory.model` |
-| `memory.intervention.enabled` | `context.memory.enabled` |
-| `memory.intervention.everyNTools` | `context.memory.cadenceToolCalls` |
-| `memory.intervention.windowSteps` | `context.memory.trajectorySteps` |
-| `memory.intervention.maxTokens` | `context.memory.maxOutputTokens` |
-| `memory.intervention.timeoutMs` | `context.memory.timeoutMs` |
-
-### Safety
-
-| Version 1 path | Version 2 path |
-| --- | --- |
-| `autonomy` | `safety.autonomy` |
-| `budget.sessionCeilingUsd` | `safety.limits.sessionCostUsd` |
-| `guardrails.turnToolCallBudget` | `safety.limits.chatToolCallsPerTurn` |
-| `guardrails.readMaxBytes` | `safety.limits.readBytesPerCall` |
-| `guardrails.observationTurnBudgetBytes` | `safety.limits.observationBytesPerTurn` |
-| `watchdog.enabled` | `safety.review.enabled` |
-| `watchdog.target` | `safety.review.target` |
-| `watchdog.cadenceToolCalls` | `safety.review.cadenceToolCalls` |
-
-### Interface
-
-| Version 1 path | Version 2 path |
-| --- | --- |
-| `terminal.outputVerbosity` | `interface.outputDetail` |
-| `terminal.smoothStreaming` | `interface.smoothStreaming` |
-| `terminal.tuiMode` | `interface.mode` |
-| `terminal.fullscreenScrollbar` | `interface.fullscreenScrollbar` |
-| `terminal.showTerminalProgress` | `interface.terminalProgress` |
-| `terminal.notify` | `interface.desktopNotifications` |
-| `panes.enabled` | `interface.panes.enabled` |
-| `panes.notifications` | `interface.panes.notifications` |
-| `panes.yazi.enabled` | `interface.panes.files.enabled` |
-| `panes.yazi.mode` | `interface.panes.files.mode` |
-| `panes.yazi.profile` | `interface.panes.files.profile` |
-| `panes.yazi.followCwd` | `interface.panes.files.followCwd` |
-| `keybindings.*` | `interface.keybindings.*` |
-
-### Integrations
-
-| Version 1 path | Version 2 path |
-| --- | --- |
-| `skills.trustProjectCompatRoots` | `integrations.projectResources.trustProjectImports` |
-| `delegation.defaults.connectTimeoutMs` | `integrations.externalAgents.defaults.connectTimeoutMs` |
-| `delegation.defaults.turnTimeoutMs` | `integrations.externalAgents.defaults.turnTimeoutMs` |
-| `delegation.defaults.permissionTimeoutMs` | `integrations.externalAgents.defaults.permissionTimeoutMs` |
-| `delegation.defaults.toolGovernance` | `integrations.externalAgents.defaults.toolGovernance` |
-| `delegation.agents[].id` | `integrations.externalAgents.entries[].id` |
-| `delegation.agents[].command` | `integrations.externalAgents.entries[].command` |
-| `delegation.agents[].args[]` | `integrations.externalAgents.entries[].args[]` |
-| `delegation.agents[].cwd` | `integrations.externalAgents.entries[].cwd` |
-| `delegation.agents[].env.*` | `integrations.externalAgents.entries[].env.*` |
-| `delegation.agents[].connectTimeoutMs` | `integrations.externalAgents.entries[].connectTimeoutMs` |
-| `delegation.agents[].turnTimeoutMs` | `integrations.externalAgents.entries[].turnTimeoutMs` |
-| `delegation.agents[].stallTimeoutMs` | `integrations.externalAgents.entries[].stallTimeoutMs` |
-| `delegation.agents[].toolGovernance` | `integrations.externalAgents.entries[].toolGovernance` |
-| `delegation.agents[].projectContext` | `integrations.externalAgents.entries[].projectContext` |
-| `runtimePlugins[]` | `integrations.runtimePlugins[]` |
-| `library.catalog` | `integrations.library.catalog` |
-| `library.remote` | `integrations.library.remote` |
-| `library.confirmedRemote` | `integrations.library.confirmedRemote` |
-| `library.sync` | `integrations.library.sync` |
-| `attribution.gitCommits` | `integrations.git.commitAttribution` |
+Only a version-2 `settings.yaml` is read. A version-1 file fails validation and is not converted: move it aside and the next `clio-coder` run writes a version-2 file with the defaults.
 
 ## Retired keys and values
 
-`SETTINGS_V1_RETIRED_PATHS` in [`src/core/config.ts`](../../src/core/config.ts) lists keys removed with no replacement. `clio-coder upgrade` (migration `2026-11-21-retired-settings`) removed each one from the user `settings.yaml`, reported it with the reason below and kept the previous file as `settings.yaml.retired.bak`. The reader no longer tolerates them: a retired key, like a renamed path from the [key map](#version-1-to-version-2-key-map), is an unknown key. The v1 migrator drops the version-1 entries and records the reason in its migration report.
+`SETTINGS_V1_RETIRED_PATHS` in [`src/core/config.ts`](../../src/core/config.ts) lists keys removed with no replacement. `clio-coder upgrade` (migration `2026-11-21-retired-settings`) removed each one from the user `settings.yaml`, reported it with the reason below and kept the previous file as `settings.yaml.retired.bak`. The reader no longer tolerates them: a retired key is an unknown key.
 
 | Retired path | Reason |
 | --- | --- |

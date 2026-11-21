@@ -22,10 +22,6 @@ import { readLifecycleReceipts } from "../../src/core/library-receipts.js";
 import { extensionContentDigest } from "../../src/domains/extensions/integrity.js";
 import { applyPendingMigrationsAtBoot } from "../../src/domains/lifecycle/boot-migrations.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
-import settingsV2, {
-	SETTINGS_V2_MIGRATION_ID,
-	SettingsV2CollisionError,
-} from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import claudeSubscription from "../../src/domains/lifecycle/migrations/2026-10-07-claude-subscription.js";
 import {
 	listMigrations,
@@ -187,51 +183,18 @@ describe("settings and migration boundary", () => {
 		ok(invalid.issues.some((issue) => issue.path === "targets[0].litellm.request.timeoutSeconds"));
 	});
 
-	it("migrates v1 atomically, keeps the original backup, and is idempotent", async () => {
-		const original = `version: 1
-orchestrator: { target: local, model: qwen }
-workers:
-  default: { target: local, model: worker-model, thinkingLevel: high }
-targets:
-  - { id: local, runtime: lmstudio, url: http://127.0.0.1:1234 }
-`;
+	it("refuses a version-1 settings file and converts nothing (f-compat)", async () => {
+		const original = "version: 1\norchestrator: { target: local, model: qwen }\n";
 		writeFileSync(settingsFile, original, "utf8");
-
-		await settingsV2.up(stateDir);
-		strictEqual(readFileSync(`${settingsFile}.v1.bak`, "utf8"), original);
-		const migrated = parseYaml(readFileSync(settingsFile, "utf8")) as Record<string, unknown>;
-		strictEqual(migrated.version, 2);
-		deepStrictEqual(migrated.chat, { target: "local", model: "qwen" });
-		deepStrictEqual((migrated.fleet as { default: unknown }).default, {
-			target: "local",
-			model: "worker-model",
-			thinkingLevel: "high",
-		});
-		const firstWrite = readFileSync(settingsFile, "utf8");
-		await settingsV2.up(stateDir);
-		strictEqual(readFileSync(settingsFile, "utf8"), firstWrite);
-		strictEqual(readFileSync(`${settingsFile}.v1.bak`, "utf8"), original);
-		strictEqual(readSettings().interface.panes.layout, "off");
-		strictEqual(readSettings().interface.panes.files.enabled, false);
-		strictEqual(readSettings().context.toolResultMaxBytes, 65_536);
-	});
-
-	it("carries only explicit v1 pane choices into v2", async () => {
-		writeFileSync(settingsFile, "version: 1\npanes:\n  enabled: auto\n  yazi:\n    enabled: true\n", "utf8");
-
-		await settingsV2.up(stateDir);
-		const migrated = readSettings().interface.panes;
-		// panes.enabled moves to its v2 spelling, which is retired: ignored, never blocking.
-		strictEqual("enabled" in migrated, false);
-		strictEqual(migrated.layout, "off");
-		strictEqual(migrated.files.enabled, true);
-	});
-
-	it("refuses a v1/v2 collision without replacing or backing up the file", async () => {
-		const mixed = "version: 1\norchestrator: { target: old }\nchat: { target: new }\n";
-		writeFileSync(settingsFile, mixed, "utf8");
-		await rejects(settingsV2.up(stateDir), (error: unknown) => error instanceof SettingsV2CollisionError);
-		strictEqual(readFileSync(settingsFile, "utf8"), mixed);
+		const result = validateSettings(parseYaml(original));
+		ok(
+			result.issues.some(
+				(issue) => issue.path === "version" && /only version 2 is read: move settings\.yaml aside/u.test(issue.message),
+			),
+			JSON.stringify(result.issues),
+		);
+		await runPending(stateDir);
+		strictEqual(readFileSync(settingsFile, "utf8"), original);
 		strictEqual(existsSync(`${settingsFile}.v1.bak`), false);
 	});
 
@@ -356,11 +319,8 @@ targets:
 
 	it("orders migrations before strict readers and records each migration once", async () => {
 		const ids = listMigrations().map((migration) => migration.id);
-		const retiredPanes = "2026-09-01-retire-panes-knobs";
 		deepStrictEqual(ids, [
-			SETTINGS_V2_MIGRATION_ID,
 			"2026-11-21-retired-settings",
-			retiredPanes,
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
@@ -371,10 +331,9 @@ targets:
 			"2026-11-21-retire-fleet-locks",
 		]);
 
-		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
+		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const first = await runPending(stateDir);
-		ok(first.applied.includes(SETTINGS_V2_MIGRATION_ID));
-		ok(first.applied.includes(retiredPanes));
+		ok(first.applied.includes("2026-11-21-retired-settings"));
 		ok(first.applied.includes(PLAYBOOKS_MIGRATION_ID));
 		deepStrictEqual((await runPending(stateDir)).applied, []);
 	});
@@ -414,10 +373,10 @@ targets:
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
 		strictEqual(current?.ok, true);
 		strictEqual(current?.level, undefined);
-		ok(current?.detail.includes("already satisfy 3 unrecorded"));
+		ok(current?.detail.includes("already satisfy 1 unrecorded"), current?.detail);
 		strictEqual(readFileSync(manifest, "utf8"), recorded);
 		strictEqual(readFileSync(settingsFile, "utf8"), "version: 2\n");
-		for (const settings of ["version: 1\n", "version: 2\npanes: { agents: off }\n", "version: [\n"]) {
+		for (const settings of ["version: 1\n", "version: [\n"]) {
 			writeFileSync(settingsFile, settings, "utf8");
 			const pending = runDoctor().find((finding) => finding.name === "lifecycle migrations");
 			strictEqual(pending?.level, "warn");

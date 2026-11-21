@@ -53,7 +53,7 @@ export async function runHostedQuickConnect(host: ConfigureWizardHost): Promise<
 			for (const raw of lines) {
 				const line = raw.trim();
 				if (!line) continue;
-				if (line === "Start Clio:") {
+				if (line === "Start CLIO Coder:") {
 					skipCommand = true;
 					continue;
 				}

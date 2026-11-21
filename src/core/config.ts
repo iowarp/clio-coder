@@ -901,115 +901,6 @@ type ExternalAgentDefaults = ClioSettings["integrations"]["externalAgents"]["def
 type ExternalAgent = ClioSettings["integrations"]["externalAgents"]["entries"][number];
 type FleetNodeConfig = ClioSettings["fleet"]["nodes"][number];
 
-/**
- * Complete durable path manifest for the settings-v1 to settings-v2 rename.
- * `*` denotes a map key and `[]` denotes a list element. Values are copied
- * without reinterpretation unless a separate retired-path entry says they are
- * deliberately dropped.
- */
-export const SETTINGS_V1_PATH_MOVES = Object.freeze([
-	["autonomy", "safety.autonomy"],
-	["orchestrator.target", "chat.target"],
-	["orchestrator.model", "chat.model"],
-	["orchestrator.thinkingLevel", "chat.thinkingLevel"],
-	["scope[]", "chat.modelPicker.cycleSet[]"],
-	["modelSelector.favorites[]", "chat.modelPicker.favorites[]"],
-	["modelSelector.recentLimit", "chat.modelPicker.recentLimit"],
-	["defaults.maxTokens", "chat.maxOutputTokens"],
-	["prewarm.enabled", "chat.prewarm"],
-	["retry.enabled", "chat.retry.enabled"],
-	["retry.maxRetries", "chat.retry.maxRetries"],
-	["retry.baseDelayMs", "chat.retry.baseDelayMs"],
-	["retry.maxDelayMs", "chat.retry.maxDelayMs"],
-	["retry.streamStallMs", "chat.retry.streamStallMs"],
-	["workers.default.target", "fleet.default.target"],
-	["workers.default.model", "fleet.default.model"],
-	["workers.default.thinkingLevel", "fleet.default.thinkingLevel"],
-	["workers.default.node", "fleet.default.node"],
-	["workers.profiles.*.target", "fleet.profiles.*.target"],
-	["workers.profiles.*.model", "fleet.profiles.*.model"],
-	["workers.profiles.*.thinkingLevel", "fleet.profiles.*.thinkingLevel"],
-	["workers.profiles.*.node", "fleet.profiles.*.node"],
-	["workers.rosters.*.members[].label", "fleet.rosters.*.members[].label"],
-	["workers.rosters.*.members[].target", "fleet.rosters.*.members[].target"],
-	["workers.rosters.*.members[].model", "fleet.rosters.*.members[].model"],
-	["workers.rosters.*.members[].thinking", "fleet.rosters.*.members[].thinkingLevel"],
-	["workers.rosters.*.members[].color", "fleet.rosters.*.members[].color"],
-	["workers.agentBindings.*", "fleet.agentProfiles.*"],
-	["routing.activeRoles[]", "fleet.adaptiveRouting.roles[]"],
-	["routing.activePostures[]", "fleet.adaptiveRouting.postures[]"],
-	["routing.agentAutomation.activeAgentRoles[].agentId", "fleet.adaptiveRouting.agentRoles[].agentId"],
-	["routing.agentAutomation.activeAgentRoles[].executionRole", "fleet.adaptiveRouting.agentRoles[].executionRole"],
-	["budget.concurrency", "fleet.concurrency"],
-	["workers.maxRetries", "fleet.retry.maxRetries"],
-	["workers.resilienceCooldownMs", "fleet.retry.routeCooldownMs"],
-	["workers.onPermission", "fleet.permissions.mode"],
-	["workers.escalation.timeoutMs", "fleet.permissions.escalation.timeoutMs"],
-	["workers.escalation.fallback", "fleet.permissions.escalation.fallback"],
-	["guardrails.workerToolCallCap", "fleet.limits.toolCallsPerRun"],
-	["guardrails.internalDispatchTimeoutMs", "fleet.limits.internalRunTimeoutMs"],
-	["guardrails.maxDispatchRuns", "fleet.history.maxRuns"],
-	["compaction.auto", "context.compaction.auto"],
-	["compaction.threshold", "context.compaction.threshold"],
-	["compaction.model", "context.compaction.model"],
-	["compaction.systemPrompt", "context.compaction.systemPrompt"],
-	["background.target", "context.memory.target"],
-	["background.model", "context.memory.model"],
-	["memory.intervention.enabled", "context.memory.enabled"],
-	["memory.intervention.everyNTools", "context.memory.cadenceToolCalls"],
-	["memory.intervention.windowSteps", "context.memory.trajectorySteps"],
-	["memory.intervention.maxTokens", "context.memory.maxOutputTokens"],
-	["memory.intervention.timeoutMs", "context.memory.timeoutMs"],
-	["budget.sessionCeilingUsd", "safety.limits.sessionCostUsd"],
-	["guardrails.turnToolCallBudget", "safety.limits.chatToolCallsPerTurn"],
-	["guardrails.readMaxBytes", "safety.limits.readBytesPerCall"],
-	["guardrails.observationTurnBudgetBytes", "safety.limits.observationBytesPerTurn"],
-	["watchdog.enabled", "safety.review.enabled"],
-	["watchdog.target", "safety.review.target"],
-	["watchdog.cadenceToolCalls", "safety.review.cadenceToolCalls"],
-	["terminal.outputVerbosity", "interface.outputDetail"],
-	["terminal.smoothStreaming", "interface.smoothStreaming"],
-	["terminal.tuiMode", "interface.mode"],
-	["terminal.fullscreenScrollbar", "interface.fullscreenScrollbar"],
-	["terminal.showTerminalProgress", "interface.terminalProgress"],
-	["terminal.notify", "interface.desktopNotifications"],
-	// The panes keys shipped for exactly one release (v0.4.0, the day before
-	// this rework) but they did ship, and each has a direct v2 successor with
-	// an identical value domain, so they move like everything else. The
-	// retired agents/keepFailed pair and the `panes` root are dropped by the
-	// v1 migrator.
-	["panes.enabled", "interface.panes.enabled"],
-	["panes.notifications", "interface.panes.notifications"],
-	["panes.journal", "fleet.history.journal"],
-	["panes.yazi.enabled", "interface.panes.files.enabled"],
-	["panes.yazi.mode", "interface.panes.files.mode"],
-	["panes.yazi.profile", "interface.panes.files.profile"],
-	["panes.yazi.followCwd", "interface.panes.files.followCwd"],
-	["keybindings.*", "interface.keybindings.*"],
-	["skills.trustProjectCompatRoots", "integrations.projectResources.trustProjectImports"],
-	["delegation.defaults.connectTimeoutMs", "integrations.externalAgents.defaults.connectTimeoutMs"],
-	["delegation.defaults.turnTimeoutMs", "integrations.externalAgents.defaults.turnTimeoutMs"],
-	["delegation.defaults.permissionTimeoutMs", "integrations.externalAgents.defaults.permissionTimeoutMs"],
-	["delegation.defaults.toolGovernance", "integrations.externalAgents.defaults.toolGovernance"],
-	["delegation.agents[].id", "integrations.externalAgents.entries[].id"],
-	["delegation.agents[].command", "integrations.externalAgents.entries[].command"],
-	["delegation.agents[].args[]", "integrations.externalAgents.entries[].args[]"],
-	["delegation.agents[].cwd", "integrations.externalAgents.entries[].cwd"],
-	["delegation.agents[].env.*", "integrations.externalAgents.entries[].env.*"],
-	["delegation.agents[].connectTimeoutMs", "integrations.externalAgents.entries[].connectTimeoutMs"],
-	["delegation.agents[].turnTimeoutMs", "integrations.externalAgents.entries[].turnTimeoutMs"],
-	["delegation.agents[].stallTimeoutMs", "integrations.externalAgents.entries[].stallTimeoutMs"],
-	["delegation.agents[].toolGovernance", "integrations.externalAgents.entries[].toolGovernance"],
-	["delegation.agents[].projectContext", "integrations.externalAgents.entries[].projectContext"],
-	["runtimePlugins[]", "integrations.runtimePlugins[]"],
-	["library.catalog", "integrations.library.catalog"],
-	["library.remote", "integrations.library.remote"],
-	["library.confirmedRemote", "integrations.library.confirmedRemote"],
-	["library.sync", "integrations.library.sync"],
-	["attribution.gitCommits", "integrations.git.commitAttribution"],
-	["fleet.nodes[].clioEntry", "fleet.nodes[].clioCoderEntry"],
-] as const);
-
 const EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED =
 	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds Clio's own ACP server";
 const EXTERNAL_AGENT_LABELS_RETIRED = "nothing read or displayed external agent labels";
@@ -1478,7 +1369,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	}
 	issues.unknownKeys("", raw, TOP_LEVEL_KEYS);
 	if ("version" in raw && raw.version !== 2) {
-		issues.add("version", `expected 2, got ${describe(raw.version)}; run \`clio-coder upgrade\` for version 1`);
+		issues.add(
+			"version",
+			`expected 2, got ${describe(raw.version)}; only version 2 is read: move settings.yaml aside and the next clio-coder run writes a version-2 file with the defaults`,
+		);
 	}
 	if ("turnControl" in raw) {
 		if (!isPlainObject(raw.turnControl)) issues.add("turnControl", `expected a map, got ${describe(raw.turnControl)}`);

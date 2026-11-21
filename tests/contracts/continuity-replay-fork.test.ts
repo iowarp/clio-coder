@@ -532,6 +532,36 @@ describe("continuity through real forks, replay and export", () => {
 		strictEqual(continuityReplayBlocks(projection).length, 1);
 	});
 
+	it("keeps a summary-less note at its commit when a later prompt joins the render (restore and verify agree)", () => {
+		const meta = contract.create({ cwd: scratch.dir });
+		contract.append({ id: "m1", parentId: null, at: AT, kind: "user", payload: { text: "first" } });
+		contract.append({ id: "m2", parentId: "m1", at: AT, kind: "assistant", payload: { text: "second" } });
+		const shape: HandoffShape = { prefix: "a", sessionId: meta.id, anchor: "m2", initiating: "m1" };
+		const onlyCommit: ContinuityCommitData = {
+			outcome: "continuity_only",
+			entry: { turnId: "a-commit-entry", parentTurnId: "m2", timestamp: AT },
+			transition: { entryId: "a-commit-entry", prevEntryId: "a-reduce", sequence: 2, attempt: 1 },
+			tokensBefore: 30_000,
+			tokensAfter: 30_000,
+		};
+		contract.appendEntry(tx(shape, "a-prep", null, 0, 0, { phase: "prepared", accepted: NOTE_A, policy: policy() }));
+		contract.appendEntry(tx(shape, "a-reduce", "a-prep", 1, 1, { phase: "reducing" }));
+		contract.appendEntry(commitEntry(checkpoint(shape, NOTE_A, { commit: onlyCommit })));
+		const render = (entries: ReadonlyArray<SessionEntry>) =>
+			buildModelReplayAgentMessagesFromTurns(entries, {
+				continuity: { ...continuityContextFromSession(contract), nowMs: NOW },
+			}).map((message) => JSON.stringify(message.content));
+		// What a --continue restore installs: the ledger as it stood before the new prompt.
+		const restored = render(childEntries(meta.id));
+		contract.append({ id: "m3", parentId: "m2", at: AT, kind: "user", payload: { text: "third" } });
+		// What the verifier renders at that request's cursor, which includes the prompt.
+		const verified = render(childEntries(meta.id));
+		const noteAt = verified.findIndex((text) => text.includes(NOTE_A.note));
+		const promptAt = verified.findIndex((text) => text.includes("third"));
+		ok(noteAt >= 0 && noteAt < promptAt, `the note precedes the later prompt: ${verified.join(" | ")}`);
+		deepStrictEqual(verified.slice(0, restored.length), restored);
+	});
+
 	it("reconstructs a missing evicted commit from the eviction plus the carry that describes it", () => {
 		const meta = contract.create({ cwd: scratch.dir });
 		contract.append({ id: "m1", parentId: null, at: AT, kind: "user", payload: { text: "first" } });

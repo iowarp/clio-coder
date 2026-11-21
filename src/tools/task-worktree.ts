@@ -24,6 +24,7 @@ import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { SAFE_TASK_RUN_ID, TASK_WORKTREE_KIND, TASK_WORKTREE_OWNER_SUFFIX } from "../core/task-worktree-claim.js";
+import { dropHostTerminalEnv, TOOL_SESSION_SPAWN } from "../core/tool-env-controls.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
 import { diskWorktreeParent } from "./worktree-root.js";
 
@@ -148,7 +149,9 @@ function gitBytes(root: string, args: string[], options: GitOptions = {}): Buffe
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
 		...options,
-		env: withoutRepositoryEnv(options.env),
+		// `worktree add` runs the repository's hooks: away from the TUI's terminal and its pane host (M-12).
+		...TOOL_SESSION_SPAWN,
+		env: dropHostTerminalEnv(withoutRepositoryEnv(options.env)),
 	});
 }
 

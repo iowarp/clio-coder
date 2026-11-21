@@ -76,8 +76,6 @@ export interface ContextWindowDetails {
 	 * operator surfaces can render `196,608 (786,432 / 4 slots)`.
 	 */
 	contextWindowSlots: ContextWindowSlots | null;
-	/** Legacy diagnostic slot; no minimum size warning is emitted. */
-	warning: string | null;
 	/** Actionable guidance when the serving window is unknown. */
 	provenanceNotice: string | null;
 }
@@ -519,9 +517,6 @@ export function resolveRuntimeTarget(
 		status.health?.lastCheckAt ?? null,
 	);
 	capabilities.maxTokens = maxOutputTokensField.value ?? 0;
-	if (contextWindowDetails.warning) {
-		diagnostics.push(diagnostic("warning", "context-window-low", contextWindowDetails.warning));
-	}
 	if (contextWindowDetails.provenanceNotice) {
 		// Keep the unknown state visible during execution: the server will be
 		// the first authority to reject a request that exceeds its limit.
@@ -936,7 +931,6 @@ export function resolveContextWindowDetails(
 		source = "target-override";
 		kind = "request-choice";
 	}
-	const warning: string | null = null;
 	const provenanceNotice =
 		effective === 0
 			? "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
@@ -968,7 +962,6 @@ export function resolveContextWindowDetails(
 		effectiveContextWindow: effective,
 		contextWindowSource: source,
 		contextWindowSlots,
-		warning,
 		provenanceNotice,
 	};
 }

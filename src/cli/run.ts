@@ -273,7 +273,10 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		return 2;
 	}
 	return {
-		prompt: initial.initialMessage,
+		prompt:
+			parsed.outputs.length > 0
+				? `${initial.initialMessage}\n\n${parsed.outputs.map((path) => `output: ${path}`).join("\n")}`
+				: initial.initialMessage,
 		...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
 		...(fileRefs.referencedPaths.length > 0 ? { workingContextPaths: fileRefs.referencedPaths } : {}),
 	};
@@ -1147,7 +1150,8 @@ async function runDispatch(
 			else if (schemaCheck !== undefined && structuredVerdict !== null && !structuredVerdict.ok)
 				process.stderr.write(`${schemaCheck.finish.schemaMismatchMessage(structuredVerdict.errors)}\n`);
 			else process.stdout.write(formatDispatchHumanOutput(answer, receipt));
-			if (recording) process.stderr.write(`Recording manifest (relative to Clio state): ${recording.manifestPath}\n`);
+			if (recording)
+				process.stderr.write(`Recording manifest (relative to CLIO Coder state): ${recording.manifestPath}\n`);
 		}
 
 		process.off("SIGINT", onSignal);

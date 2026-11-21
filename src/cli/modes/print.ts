@@ -1269,7 +1269,12 @@ async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, m
 	});
 }
 
+/** How every line this run writes to stderr starts. */
+const RUN_STDERR_PREFIX = "clio-coder run: ";
+
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
+	/** The unscripted question that stopped the turn, and whether its cancel notice already told the operator. */
+	let unscriptedStop = null as { text: string; told: boolean } | null;
 	if (runOverrides().requirePriced === true) {
 		const delegating = options.constraints?.delegation !== "forbidden";
 		const unpriced = options.unpricedRoutes?.(delegating ? "delegating" : "main") ?? [];
@@ -1610,7 +1615,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				event.source === "reminder"
 					? `reminder to the model: ${reminderGist(event.text.replace(/^\s*\[(?:CLIO|Clio) Coder\]\s*/u, ""))}`
 					: event.text;
-			process.stderr.write(`clio-coder run: ${redactUrlCredentials(text)}\n`);
+			// A stop reason this run wrote, such as an unscripted question, already carries the prefix.
+			const line = text.startsWith(RUN_STDERR_PREFIX) ? text.slice(RUN_STDERR_PREFIX.length) : text;
+			if (unscriptedStop !== null && text.trim() === unscriptedStop.text) unscriptedStop.told = true;
+			process.stderr.write(`${RUN_STDERR_PREFIX}${redactUrlCredentials(line)}\n`);
 		}
 		if (event.type === "notice" && unreportedUsage === null && isUnreportedUsageNotice(event.text))
 			unreportedUsage = event.text;
@@ -1660,9 +1668,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// The first question the answers file does not script stops the turn once the call that asked it settles,
 	// so an extension still hears its step cancelled as unscripted before the run ends.
 	const scripted = options.answers;
-	const unsubscribeUnscripted = scripted?.onUnscripted((question) =>
-		chat.cancel({ reason: unscriptedRunMessage(scripted, question), atToolBoundary: true }),
-	);
+	const unsubscribeUnscripted = scripted?.onUnscripted((question) => {
+		unscriptedStop = { text: unscriptedRunMessage(scripted, question), told: false };
+		chat.cancel({ reason: unscriptedStop.text, atToolBoundary: true });
+	});
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
 		// A line written before the first turn streams waits for that turn instead of being refused.
@@ -1883,6 +1892,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
+	} else if (result.terminatedByFinish && printedAnswer(result).length === 0) {
+		// M-6: the bare-finish refusal is one-shot, so the second bare finish settles the run partly_done with no reply
+		// text (CLI-P49). The typed fact is an empty answer under a finish, never the prompt's wording: there is nothing
+		// for the caller to read, so the run did not succeed.
+		const failureMessage =
+			"clio-coder run: the agent declared completion through finish without writing a reply, so there is no answer to print";
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "no_reply_text" };
+		stderrMessage = failureMessage;
 	} else {
 		// A normal provider stop does not erase an explicit limitation or a
 		// block with no applied change. Judge settled tool outcomes, not prose
@@ -1997,13 +2014,21 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			failureMessage,
 			outcomeDetail: "unscripted",
 		};
-		stderrMessage = failureMessage;
+		// The stop's own notice already told the operator, so the closing line does not say it again.
+		stderrMessage = unscriptedStop?.told === true && unscriptedStop.text === failureMessage ? null : failureMessage;
 		answerMessage = null;
+	}
+	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);
+	// M-4: an output the operator named is still absent at the seal, so the run did not succeed, whatever it claimed.
+	if (terminal.exitCode === 0 && sealedCompletion.facts.includes("missing_output")) {
+		const missing = sealedCompletion.unverified.filter((line) => line.startsWith("missing output: "));
+		const failureMessage = `clio-coder run: ${missing.length > 0 ? missing.join("; ") : "missing output"}`;
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "missing_output" };
+		stderrMessage = [stderrMessage, failureMessage].filter(Boolean).join("\n");
 	}
 	const exitCode = terminal.exitCode;
 	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
 	// the claim, its assessment from the turn's facts, and state = assessed, which `--exit-code` maps (ruling 7).
-	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);
 	noteRunCompletion({
 		declared: sealedCompletion.declared,
 		claimed: sealedCompletion.claimed,

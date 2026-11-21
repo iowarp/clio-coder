@@ -341,6 +341,11 @@ export interface ChatTurnState {
 	 */
 	finishReplyRefused: boolean;
 	/**
+	 * This operator prompt's one refusal of a `finish(done)` while an output its session named is absent is spent (M-4);
+	 * reset with `finishReplyRefused`, and a yolo continuation of the prompt keeps it.
+	 */
+	finishOutputRefused: boolean;
+	/**
 	 * An assistant text block settled since the operator's prompt (CLI-P49): a headless run whose turn wrote none has its
 	 * first bare `finish` refused. Reset with `finishReplyRefused`; a yolo continuation of the prompt keeps it.
 	 */
@@ -407,6 +412,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "turnCalledWork"
 	| "finishRoundSpent"
 	| "finishReplyRefused"
+	| "finishOutputRefused"
 	| "turnReplied"
 >;
 
@@ -447,6 +453,7 @@ export type TurnPersistenceState = TurnStateView<
 	| "activeUserTurnId"
 	| "currentTurnOrigin"
 	| "finishReplyRefused"
+	| "finishOutputRefused"
 	| "turnReplied"
 	| "interruptedAssistantMessage"
 	| "interruptedCall"
@@ -525,6 +532,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnCalledWork: false,
 		finishRoundSpent: false,
 		finishReplyRefused: false,
+		finishOutputRefused: false,
 		turnReplied: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,

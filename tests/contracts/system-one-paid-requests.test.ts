@@ -289,8 +289,10 @@ describe("System One paid requests: admission and accounting", () => {
 			onUsage: (usage) => charge?.(usage),
 		});
 		strictEqual(result.text, "A");
-		strictEqual(bodies.length, 2);
-		ok(bodies[0]?.response_format !== undefined && bodies[1]?.response_format === undefined);
+		// Clio's own wire (the one sessions use) may read the server first with a bodiless request; count the attempts.
+		const attempts = bodies.filter((body) => Object.keys(body).length > 0);
+		strictEqual(attempts.length, 2);
+		ok(attempts[0]?.response_format !== undefined && attempts[1]?.response_format === undefined);
 		strictEqual(admitted(), 2, "both attempts were admitted");
 		const charges = await journaled();
 		strictEqual(charges.length, 2);

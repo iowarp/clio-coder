@@ -763,6 +763,7 @@ it("admission sizes each main request on one history walk, as one publication do
 			timestamp: Date.now(),
 		},
 		{ ...base, content: [{ type: "text" as const, text: "done" }], stopReason: "stop" as const, timestamp: Date.now() },
+		{ ...base, content: [{ type: "text" as const, text: "again" }], stopReason: "stop" as const, timestamp: Date.now() },
 	]);
 	const capabilities = { chat: true, tools: true, reasoning: false, contextWindow: 131072, maxTokens: 8192 };
 	const runtime = {
@@ -829,6 +830,9 @@ it("admission sizes each main request on one history walk, as one publication do
 	let walks = 0;
 	let counted = false;
 	const perAdmission: number[] = [];
+	// Walks a submit makes before its first request is admitted: the window-fit gate's publication and fit count.
+	let submitStart: number | null = null;
+	const perSubmit: number[] = [];
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		providers,
@@ -859,6 +863,10 @@ it("admission sizes each main request on one history walk, as one publication do
 							},
 						});
 					}
+					if (submitStart !== null) {
+						perSubmit.push(walks - submitStart);
+						submitStart = null;
+					}
 					const before = walks;
 					const admission = await admit(request);
 					perAdmission.push(walks - before);
@@ -884,6 +892,11 @@ it("admission sizes each main request on one history walk, as one publication do
 		// The first admission folds the new prompt rather than walking it; base walked [1, 2] (refresh, then anchor).
 		deepStrictEqual(perAdmission, [0, 1], "each admission walks the history at most once, as one publication does");
 		strictEqual(loop.modelRequest()?.modelId, "chat", "and both requests were admitted and sent");
+		// A follow-up prompt walks for the pre-turn compaction check, once for the window-fit gate's publication and fit
+		// count together (base walked twice there, [4]), and for the turn snapshot; awaits separate the three.
+		submitStart = walks;
+		await loop.submit("and again");
+		deepStrictEqual(perSubmit, [3], "a submit's fit gate walks the settled history once");
 	} finally {
 		loop.dispose();
 		faux.unregister();

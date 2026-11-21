@@ -23,7 +23,8 @@ import { effectiveToolCall } from "./surface.js";
 /**
  * How a turn ended as the host seals it (fleet design 4.3): the claim as given beside the host's assessment.
  * `assessed` is min(claimed, facts): a `done` claim over any open coordinator obligation is `partly_done`; an
- * undeclared turn is `unknown`.
+ * undeclared turn is `unknown`. `missingOutputs` are the files the operator named as outputs that do not exist at the
+ * seal (M-4): each is the `missing_output` fact and an unverified `missing output: <path>` line.
  */
 export interface SealedCompletion {
 	declared: boolean;
@@ -38,17 +39,21 @@ export interface SealedCompletion {
 export function sealCompletion(
 	declaration: CompletionDeclaration | null,
 	facts: ReadonlyArray<CompletionFact>,
+	missingOutputs: ReadonlyArray<string> = [],
 ): SealedCompletion {
-	const unique = [...new Set(facts)];
+	const unique = [
+		...new Set<CompletionFact>([...facts, ...(missingOutputs.length > 0 ? ["missing_output" as const] : [])]),
+	];
+	const missing = [...new Set(missingOutputs)].map((path) => `missing output: ${path}`);
 	if (declaration === null)
-		return { declared: false, claimed: null, assessed: "unknown", facts: unique, limitations: [], unverified: [] };
+		return { declared: false, claimed: null, assessed: "unknown", facts: unique, limitations: [], unverified: missing };
 	return {
 		declared: true,
 		claimed: declaration.state,
 		assessed: declaration.state === "done" && unique.length > 0 ? "partly_done" : declaration.state,
 		facts: unique,
 		limitations: declaration.limitations,
-		unverified: declaration.unverified,
+		unverified: [...declaration.unverified, ...missing.filter((line) => !declaration.unverified.includes(line))],
 		...(declaration.remaining !== undefined ? { remaining: declaration.remaining } : {}),
 	};
 }
