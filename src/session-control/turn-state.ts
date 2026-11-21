@@ -24,6 +24,7 @@
  *   assigns a continuation field.
  */
 
+import type { CompletionDeclaration } from "../core/completion.js";
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
@@ -39,7 +40,7 @@ import type {
 import type { createEngineAgent } from "../engine/agent.js";
 import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { CompletionDeclaration, SealedCompletion } from "../tools/finish.js";
+import type { SealedCompletion } from "../tools/finish.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
 import type { ToolMarkupRepromptBudget } from "./chat-loop-messages.js";
 import { RunEvidenceLog } from "./run-evidence.js";

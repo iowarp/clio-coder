@@ -1,3 +1,4 @@
+import type { CompletionDeclaration } from "../../core/completion.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
@@ -93,7 +94,7 @@ import {
 	turnNoAnswerSentence,
 	validateStructuredAnswer,
 } from "../../session-control/chat-loop-messages.js";
-import { type CompletionDeclaration, completionOfToolResult, sealCompletion } from "../../tools/finish.js";
+import { completionOfToolResult, sealCompletion } from "../../tools/finish.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
