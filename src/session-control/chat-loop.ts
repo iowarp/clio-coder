@@ -4432,15 +4432,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								stopReason: record.stopReason,
 								retries: turnRetryAttempts + providerRetryAttempts,
 								// The post-tool guard stops between calls, so no call carries its cause; the ledger reply does (CLI-3).
+								// A loop-guard or turn-budget-roll stop is the guard's, read off the owner it aborted (C-10).
 								cause: canceled
 									? "operator_cancel"
 									: autonomyStopped
 										? "autonomy_stop"
 										: jobClockStopped
 											? "job_clock"
-											: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
-												? "oversized_tool_result"
-												: undefined,
+											: owner !== null && owner === guardStoppedOwner
+												? "loop_guard"
+												: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
+													? "oversized_tool_result"
+													: undefined,
 								noAnswer: ending?.kind === "no_answer" ? ending.cause : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,

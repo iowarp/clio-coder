@@ -287,6 +287,15 @@ it("a headless yolo run whose turn budget rolls at the tool boundary exits 0 on 
 		) as { text?: string; redirect?: true } | undefined;
 		ok(closing?.text?.includes("Turn budget rolled"), JSON.stringify(closing));
 		strictEqual(closing?.redirect, true);
+		// The roll's stop is the guard's, landed between calls: no stage of the rolled turn's last call was cut (C-10).
+		const { turns } = await f.journal();
+		deepStrictEqual(
+			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.stage]),
+			[
+				["aborted", "loop_guard", null],
+				["stop", null, "streaming"],
+			],
+		);
 	} finally {
 		await f.close();
 	}
