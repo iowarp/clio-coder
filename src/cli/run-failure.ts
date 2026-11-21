@@ -31,6 +31,7 @@ import {
 	resolveRunExit,
 	signalForExitCode,
 	verifyChecksV2,
+	verifyNotImplicated,
 } from "./modes/run-json-schema-v2.js";
 import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js";
 import { steerChannelRefusal } from "./steer-channel.js";
@@ -584,7 +585,9 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 				return [{ code: "schema_mismatch", errors: structuredNote.errors, ...message }];
 			// `--fail-on-verify` (SPEC 6.10) ranks above a sealed verdict: the failed checks are what that verdict judged.
 			if (detail === "verify_failed") {
-				const checks = (seen.verify ?? []).filter((check) => !check.passed).map((check) => check.command);
+				const checks = (seen.verify ?? [])
+					.filter((check) => !check.passed && !verifyNotImplicated(check))
+					.map((check) => check.command);
 				return [{ code: "verify_failed", checks, ...message }];
 			}
 			if (seen.verdict === "failed" || (seen.failedChecks?.length ?? 0) > 0)

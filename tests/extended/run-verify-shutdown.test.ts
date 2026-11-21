@@ -1,9 +1,17 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { type HeadlessVerifyShutdownHooks, runHeadlessVerifyChecks } from "../../src/cli/modes/run-verify.js";
+import { verifyChecksV2 } from "../../src/cli/modes/run-json-schema-v2.js";
+import {
+	acceptanceHostVerification,
+	type HeadlessVerifyShutdownHooks,
+	runHeadlessVerifyChecks,
+	verifyBaseOf,
+} from "../../src/cli/modes/run-verify.js";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 
 const scratch: string[] = [];
 const survivors: number[] = [];
@@ -122,5 +130,43 @@ describe("run --verify shutdown", () => {
 		);
 		strictEqual(results[0]?.exitCode, 0);
 		strictEqual(results[0]?.passed, false);
+	});
+});
+
+describe("run --verify base comparison (CLI-4)", () => {
+	const bwrap = sandboxAvailability();
+	it("reports a check its base already fails the same way as base.status failed and not_implicated", {
+		skip: bwrap.available && bwrap.backend === "bwrap" ? false : "the isolated base replay needs bubblewrap",
+		timeout: 60_000,
+	}, async () => {
+		const repo = mkdtempSync(join(tmpdir(), "clio-verify-base-"));
+		scratch.push(repo);
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-C", repo, "-c", "user.name=Fixture", "-c", "user.email=f@example.invalid", ...args], {
+				stdio: "pipe",
+			});
+		git("init", "-q");
+		writeFileSync(join(repo, "test.js"), 'console.error("1 failing: base is red"); process.exit(1);\n');
+		git("add", "-A");
+		git("commit", "-qm", "red base");
+		const base = verifyBaseOf(repo);
+		ok(base);
+		// The run edits something unrelated; the check still fails exactly as it does on the base.
+		writeFileSync(join(repo, "notes.txt"), "run change\n");
+		const previous = process.cwd();
+		process.chdir(repo);
+		const command = `${JSON.stringify(process.execPath)} test.js`;
+		const results = await runHeadlessVerifyChecks(
+			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 30_000, credited: () => new Set(), base },
+			fakeShutdown().hooks,
+		).finally(() => process.chdir(previous));
+		strictEqual(results[0]?.passed, false);
+		strictEqual(results[0]?.base?.status, "failed", JSON.stringify(results[0]?.base));
+		const [v2] = verifyChecksV2([command], results, "interrupted");
+		strictEqual(v2?.status, "not_implicated");
+		strictEqual(v2?.base?.status, "failed");
+		const sealed = acceptanceHostVerification(results, repo);
+		strictEqual(sealed?.status, "not_implicated");
+		strictEqual(sealed?.reason, "failures_present_on_base");
 	});
 });
