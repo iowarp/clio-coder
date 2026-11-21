@@ -9,10 +9,11 @@ import { validPayload } from "../../src/core/telemetry/events.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { abandonedSettlement, beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
-import { DELTA_GAP_BOUNDS_MS } from "../../src/core/telemetry/schemas.js";
+import { countsAsToolCall, DELTA_GAP_BOUNDS_MS } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
+import { foldDecisions } from "../../src/domains/telemetry/fact-folds.js";
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { readSessionPromptCompiles } from "../../src/domains/telemetry/session-artifacts.js";
@@ -21,6 +22,7 @@ import { researchCaptureFor } from "../../src/engine/research-capture.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { prefixBlocksOf } from "../../src/session-control/prefix-blocks.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 
 function capture(sessionId: string, admitResearch = false) {
@@ -66,6 +68,61 @@ test("a settled tool call records tool.settled under its session, turn and tool 
 		);
 		strictEqual(settled.ctx.turnId, "turn-1");
 		strictEqual(settled.ctx.toolCallId, "tool-call-1");
+	} finally {
+		sink.release();
+	}
+});
+
+test("every tool.decided under a gateway call or chain settles once under its own id, inner rows marked (C-9)", async () => {
+	const sink = capture("producer-gateway");
+	try {
+		const registry = createRegistry({ safety: createWorkerSafety() });
+		registry.register({
+			name: ToolNames.Read,
+			placement: "gateway",
+			description: "Read fixture",
+			parameters: Type.Object({ path: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "fixture" }),
+		});
+		registry.register(createGatewayTool({ registry }));
+		const tool = resolveAgentTools({
+			registry,
+			allowedTools: [ToolNames.Gateway, ToolNames.Read],
+			invokeOptions: () => ({ sessionId: "producer-gateway", turnId: "turn-1" }),
+		}).find((candidate) => candidate.name === ToolNames.Gateway);
+		ok(tool);
+		await tool.execute("g-call", { op: "call", capability: ToolNames.Read, args: { path: "a" } });
+		await tool.execute("g-chain", {
+			op: "chain",
+			steps: [
+				{ id: "one", capability: ToolNames.Read, args: { path: "a" } },
+				{ id: "two", capability: ToolNames.Read, args: { path: "b" } },
+			],
+		});
+		const key = (record: PendingTelemetry) =>
+			`${record.ctx?.toolCallId} ${(record.data as { tool: string }).tool} ${(record.data as { inner?: true }).inner === true}`;
+		const decided = sink.of("tool.decided").map(key).sort();
+		deepStrictEqual(decided, [
+			"g-call gateway false",
+			"g-call read true",
+			"g-chain gateway false",
+			"g-chain:one read true",
+			"g-chain:two read true",
+		]);
+		deepStrictEqual(sink.of("tool.settled").map(key).sort(), decided);
+		for (const record of [...sink.of("tool.settled"), ...sink.of("tool.decided")])
+			ok(validPayload(record.kind, record.data), JSON.stringify(record.data));
+		// Counters count the two calls the model made, not their inner rows.
+		const journal = sink.records.map((record, index) => ({
+			id: `r${index}`,
+			t: "2026-11-20T00:00:00.000Z",
+			k: record.kind,
+			data: record.data,
+			ctx: record.ctx,
+		}));
+		strictEqual(foldDecisions(journal as never).tools.allowed, 2);
+		strictEqual(sink.of("tool.settled").filter((record) => countsAsToolCall(record.data as never)).length, 2);
 	} finally {
 		sink.release();
 	}

@@ -12,7 +12,7 @@
 
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EVENTS, JournalEventName } from "../../core/telemetry/events.js";
-import type { ToolFileKind } from "../../core/telemetry/schemas.js";
+import { countsAsToolCall, type ToolFileKind } from "../../core/telemetry/schemas.js";
 import { TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../session/task-board.js";
 
 export const INSIGHT_CATEGORIES = [
@@ -206,6 +206,7 @@ export function sessionSignals(
 	const turns = new Map<string, { from: number; to: number }>();
 	const tool = (record: TelemetryRecord<"tool.settled">): void => {
 		const data = record.data;
+		if (!countsAsToolCall(data)) return;
 		if (
 			((data.tool === "write" || data.tool === "edit") && data.fileExt === undefined) ||
 			(data.tool === "gateway" && data.capabilities === undefined && data.outcome === "ok")

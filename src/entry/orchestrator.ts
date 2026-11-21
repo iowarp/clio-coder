@@ -1722,8 +1722,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	// After the drain hooks settled the chat, before persist closes the journal: the end carries the final usage.
 	bus.subscribe("shutdown.drained", () => autonomyWindow.end());
-	bus.subscribe("tool.settled", (_payload, context) => {
-		if (context?.agent.role === "main") autonomyWindow.toolCall();
+	bus.subscribe("tool.settled", (payload, context) => {
+		if (context?.agent.role === "main" && payload.inner !== true) autonomyWindow.toolCall();
 	});
 	bus.subscribe("call.settled", (payload, context) => {
 		if (context?.agent.role === "main") autonomyWindow.tokens(settledCallTokens(payload.usage));
