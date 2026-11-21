@@ -6,7 +6,7 @@ import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
-import type { ObjectRef, RunResultObject } from "../../core/telemetry/schemas.js";
+import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { EvidenceFindingsObjectSchema, ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { matchesTrace, traceValue } from "../../core/value-trace.js";
 import type { RedactionTally } from "../evidence/redact.js";
@@ -304,28 +304,25 @@ export function redactTelemetryValue<T>(value: T, tally: RedactionTally, secretM
 }
 
 /**
- * A structured answer's `text` is its data as JSON, so storing both kept the answer twice (C-28). Version 2 of the
- * stored `run-result` keeps the structured data alone; {@link readStoredRunResult} derives the text on every read.
- * An output whose text is anything else keeps version 1 with both.
- */
-function storedRunResult(value: RunResultObject): unknown {
-	const output = value.output;
-	if (output?.structured === undefined || output.text !== JSON.stringify(output.structured.data)) return value;
-	const { text: _derived, ...kept } = output;
-	return { ...value, version: 2, output: kept };
-}
-
-/**
- * A stored `run-result` as readers use it: version 2 regains its derived `text` and reads as version 1; a version 1
- * record, which holds both, reads as it was written.
+ * A stored `run-result` as readers use it (C-28). A version 2 record keeps a structured answer once, as its data, and
+ * regains `text` here as the data's canonical JSON, reading as version 1; anything else, version 1 records included,
+ * reads as it was written. A malformed version 2 record is returned unchanged for the schema check to refuse.
+ * Writers still store version 1 so binaries without this reader keep reading the shared state root.
  */
 export function readStoredRunResult(value: unknown): unknown {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
 	const record = value as { version?: unknown; output?: unknown };
 	if (record.version !== 2 || record.output === null || typeof record.output !== "object") return value;
-	const output = record.output as { text?: unknown; structured?: { data?: unknown } };
-	if (output.text !== undefined || output.structured === undefined) return value;
-	return { ...record, version: 1, output: { ...output, text: JSON.stringify(output.structured.data) } };
+	const output = record.output as { text?: unknown; structured?: unknown };
+	const structured = output.structured;
+	if (output.text !== undefined || structured === null || typeof structured !== "object") return value;
+	const data = (structured as { data?: unknown }).data;
+	if (data === null || typeof data !== "object" || Array.isArray(data)) return value;
+	try {
+		return { ...record, version: 1, output: { ...output, text: canonicalJson(data) } };
+	} catch {
+		return value;
+	}
 }
 
 /** The redacted canonical bytes an object stores and the reference they hash to; no I/O. */
@@ -334,9 +331,8 @@ function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRe
 	const shape = contentSchemas[subject];
 	if (shape !== undefined && !Value.Check(shape, value))
 		throw new Error(`telemetry ${subject} object contains unsupported fields`);
-	const stored = subject === "run-result" ? storedRunResult(value as RunResultObject) : value;
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
-	const bytes = canonicalJson(redactTelemetryValue(stored, createRedactionTally(), subject === "config"));
+	const bytes = canonicalJson(redactTelemetryValue(value, createRedactionTally(), subject === "config"));
 	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
 	return { ref: reference(subject, bytes, "resolvable"), bytes };
 }

@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -1696,11 +1696,11 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 	}
 });
 
-test("a structured run result is stored once, read back whole, and an older record holding both still reads (C-28)", async () => {
+test("a run result written as version 2 reads back with its text derived, and the writer still keeps version 1 (C-28)", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-result-"));
 	try {
 		const data = { findings: [{ claim: "The marker is on line 2." }], needsSplit: false, proposedSubtasks: [] };
-		const text = JSON.stringify(data);
+		const text = canonicalJson(data);
 		const result = {
 			version: 1 as const,
 			output: {
@@ -1716,23 +1716,34 @@ test("a structured run result is stored once, read back whole, and an older reco
 			checkoutChanges: null,
 			hostVerification: null,
 		};
+		// Installed binaries without the version 2 reader share the state root, so the writer keeps both forms for now.
 		const ref = await storeTelemetryObject(directory, "run-result", result);
 		const stored = JSON.parse(await readFile(join(directory, "objects", `${ref.id}.json`), "utf8"));
-		strictEqual(stored.version, 2);
-		ok(!("text" in stored.output), "the answer is kept once, as structured data");
+		strictEqual(stored.version, 1);
+		strictEqual(stored.output.text, text);
 		deepStrictEqual(await readTelemetryObject(directory, ref), { kind: "resolved", value: result });
-		deepStrictEqual(readTelemetryObjectSync(directory, ref), { kind: "resolved", value: result });
-		// A record written before C-28 holds the text beside its structured data and reads as it was written.
-		const legacyBytes = canonicalJson(result);
-		const legacy = {
-			label: "resolvable" as const,
-			function: "sha256" as const,
-			canonicalization: "json-sorted-v1" as const,
-			subject: "run-result" as const,
-			id: `obj_${createHash("sha256").update(legacyBytes, "utf8").digest("hex")}`,
+		const raw = async (value: unknown) => {
+			const bytes = canonicalJson(value);
+			const id = `obj_${createHash("sha256").update(bytes, "utf8").digest("hex")}`;
+			await writeFile(join(directory, "objects", `${id}.json`), bytes);
+			return {
+				label: "resolvable" as const,
+				function: "sha256" as const,
+				canonicalization: "json-sorted-v1" as const,
+				subject: "run-result" as const,
+				id,
+			};
 		};
-		await writeFile(join(directory, "objects", `${legacy.id}.json`), legacyBytes);
-		deepStrictEqual(await readTelemetryObject(directory, legacy), { kind: "resolved", value: result });
+		// A version 2 record keeps the answer once, as data; every read derives the text and returns version 1.
+		const { text: _text, ...once } = result.output;
+		const compact = await raw({ ...result, version: 2, output: once });
+		deepStrictEqual(await readTelemetryObject(directory, compact), { kind: "resolved", value: result });
+		deepStrictEqual(readTelemetryObjectSync(directory, compact), { kind: "resolved", value: result });
+		// A malformed version 2 record cannot throw in the reader; the shape check refuses it.
+		const broken = { ...result, version: 2, output: { ...once, structured: null } };
+		deepStrictEqual(await readTelemetryObject(directory, await raw(broken)), { kind: "resolved", value: broken });
+		const brokenRef = await raw(broken);
+		throws(() => readTelemetryObjectSync(directory, brokenRef), /invalid telemetry object shape/);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
