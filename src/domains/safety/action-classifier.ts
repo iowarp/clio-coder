@@ -1,4 +1,4 @@
-import { globSync, lstatSync } from "node:fs";
+import { globSync, lstatSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
@@ -464,11 +464,15 @@ const TEMP_DIR_ASSIGNERS =
  * The command is returned unchanged when anything in it can assign TMPDIR (every mention of the name must be a plain
  * reference, and no dynamic assigner may appear), when a quoted here-document or ANSI-C string could hold the
  * reference as text, or when TMPDIR is not the directory `tmpdir()` resolves to or is `/`, the home or above it.
- * Single-quoted and escaped references are text to the outer shell and stay as they are.
+ * Single-quoted and escaped references are text to the outer shell and stay as they are. A TMPDIR that is not an
+ * existing directory is no temp root at all: a cd into it fails and the shell stays where it was. The value is never
+ * trimmed: the shell keeps leading and trailing whitespace and word-splits an unquoted reference on it, so a padded
+ * TMPDIR fails the character check and stays named.
  */
 function stableTempDir(): string | null {
-	const value = process.env.TMPDIR?.trim().replace(/(.)\/+$/u, "$1");
+	const value = process.env.TMPDIR?.replace(/(.)\/+$/u, "$1");
 	if (value === undefined || !path.isAbsolute(value) || !/^[\w./+@%,:-]+$/u.test(value)) return null;
+	if (statSync(value, { throwIfNoEntry: false })?.isDirectory() !== true) return null;
 	const temp = canonicalizePath(tmpdir());
 	const home = canonicalizePath(homedir());
 	if (
@@ -552,7 +556,7 @@ function scratchTemplate(raw: string, temp: string): string | null {
 /**
  * XR-43: project operands only for the path classifier and the snapshot check, never for command execution or
  * other rails. Only a closed allowlist projects: every step is a plain assignment, `mkdir [-p]` of a pinned or
- * temp path, a leading cd to the temp root, or rm, rmdir or unlink; any other command, operator, substitution
+ * temp path, a leading cd to the temp root that `&&` joins to every later step, or rm, rmdir or unlink; any other command, operator, substitution
  * (but the exact mktemp form) or word leaves the original command to the conservative walk. A conditional
  * assignment or reassignment kills the old proof, and a name the shell manages is never pinned. Text is no proof
  * of where a path lands across calls, so every delete operand the projection vouches for is resolved through the
@@ -570,6 +574,9 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 	const expanded = expandTempDirReferences(command);
 	const tokens = scanShellLike(expanded);
 	if (tokens.some((t) => t.operator && t.value !== ";" && t.value !== "&&")) return unchanged;
+	// A failed cd leaves the shell where it was, and only `&&` stops what follows: a relative delete is placed under the
+	// temp root only when an unbroken `&&` chain runs from the cd through it (a `;` or newline runs it in place).
+	const andChain = tokens.every((t) => !t.operator || t.value === "&&");
 	const segments = splitSegments(tokens);
 	const pins = new Map<string, { target: string; fresh: boolean }>();
 	const assigned = new Set<string>();
@@ -623,7 +630,8 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 		if (words.some((word) => word === null)) return unchanged;
 		if (raw === "cd") {
 			const target = words[0];
-			if (index !== 0 || words.length !== 1 || typeof target !== "string" || !isTempRoot(target)) return unchanged;
+			if (index !== 0 || !andChain || words.length !== 1 || typeof target !== "string" || !isTempRoot(target))
+				return unchanged;
 			leadingCd = operands[0]?.value ?? null;
 			continue;
 		}
@@ -663,6 +671,9 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 				!underTemp(target)
 			)
 				return unchanged;
+			// After the leading temp cd a relative operand is that temp path: spelled out, the snapshot and scratch-only checks
+			// place it where it lands instead of reading it as a workspace delete (XR-43).
+			if (target !== null && !path.isAbsolute(word)) edits.push({ start: token.start, end: token.end, target });
 		}
 	}
 	if (!hasDelete) return unchanged;

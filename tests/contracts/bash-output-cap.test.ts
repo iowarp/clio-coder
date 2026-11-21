@@ -74,6 +74,9 @@ it("marks an exit status that belongs only to a chained command's last command",
 		["(exit 1) && echo 'a; b || c'", 1, false],
 		["(exit 3) 2>&1 | tail -1", 3, false],
 		["printf 'ok\\n' >&2", 0, false],
+		// XR-9: a leading cd into the directory bash already runs in moves nothing; a cd anywhere else still might fail.
+		[`cd ${process.cwd()}; (exit 3)`, 3, false],
+		["cd /; true", 0, true],
 	] as const) {
 		const result = await bashTool.run({ command, timeout_ms: 2000 });
 		strictEqual(result.details?.exitCode, exitCode, command);

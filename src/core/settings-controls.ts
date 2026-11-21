@@ -487,6 +487,7 @@ const MENU_ROWS = new Set([
 	"chat.steering.triage.enabled",
 	"fleet.worktrees.root",
 	"context.memory.surfaces.observe",
+	"context.memory.surfaces.delivery",
 	"context.memory.surfaces.correct",
 	"context.memory.surfaces.bank",
 	"context.memory.sideShare",
@@ -551,6 +552,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"chat.steering.triage.thinkingLevel": THINKING_LEVELS,
 	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"context.memory.surfaces.observe": ["off", "on"],
+	"context.memory.surfaces.delivery": ["off", "section", "decision", "broadcast"],
 	"context.memory.surfaces.correct": ["rules", "model"],
 	"context.memory.surfaces.bank": ["rules", "model"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
@@ -650,6 +652,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.surfaces.observe": [
 		"Continuity preparation",
 		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Starts only near a compaction that would send history to a separate summary request. Needs proactive memory on; off by default.",
+	],
+	"context.memory.surfaces.delivery": [
+		"Lesson delivery",
+		"Where kept lessons reach the model: off, the Memory section only, the section plus reminders at decision points (a failed command, a verification gap, a touched file, the turn's task), or those plus the first-change broadcast. Decision by default; memory_recall works in every mode.",
 	],
 	"context.memory.surfaces.correct": [
 		"Correction tier",

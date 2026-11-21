@@ -212,6 +212,7 @@ test("a workspace scan is reused past 10 s while the git index is unchanged, and
 test("a secret the write tool creates is masked on the next scan inside the reuse window", async (t) => {
 	const isolated = await isolateClioEnv("clio-secret-write-");
 	t.after(() => isolated.restore());
+	process.env.HOME = isolated.dir;
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-write-ws-")));
 	execFileSync("git", ["init", "-q"], { cwd: root });
 	mkdirSync(join(root, "sub"));
@@ -245,6 +246,8 @@ test("under bwrap a secret whose parent a verify script renamed is masked at its
 	}
 	const isolated = await isolateClioEnv("clio-secret-rename-");
 	t.after(() => isolated.restore());
+	// bwrap masks home credential files by path, and a host agent renaming one over mid-launch fails the launch.
+	process.env.HOME = isolated.dir;
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-rename-ws-")));
 	execFileSync("git", ["init", "-q"], { cwd: root });
 	writeFileSync(join(root, ".gitignore"), ".env.local\n");
@@ -277,6 +280,7 @@ test("under bwrap a contained command cannot read .env or credential variables, 
 	}
 	const isolated = await isolateClioEnv("clio-contained-secrets-");
 	t.after(() => isolated.restore());
+	process.env.HOME = isolated.dir;
 	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-contained-secrets-ws-")));
 	writeFileSync(join(cwd, ".env"), "FAKE_ENV_FILE=fake-file-value\n");
 	// Admission refuses a literal `cat .env`; a script reads it where no command text names it.
@@ -316,6 +320,7 @@ test("under bwrap a contained command cannot read .env or credential variables, 
 test("typed read and grep refuse Clio's settings and MCP files while they hold a secret, as the sandbox hides them", async (t) => {
 	const isolated = await isolateClioEnv("clio-config-secrets-");
 	t.after(() => isolated.restore());
+	process.env.HOME = isolated.dir;
 	const config = join(isolated.dir, "config");
 	mkdirSync(config, { recursive: true });
 	const settings = join(config, "settings.yaml");
