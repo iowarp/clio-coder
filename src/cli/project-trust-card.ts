@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
+import { isProjectKeyVariableName } from "../core/project-target-urls.js";
 import {
 	captureProjectSurface,
 	type ProjectSurfaceSnapshot,
@@ -53,8 +54,16 @@ function settingsSummary(snapshot: ProjectSurfaceSnapshot): string[] {
 			if (key !== "targets" || !Array.isArray(value)) continue;
 			for (const target of value) {
 				if (target === null || typeof target !== "object") continue;
-				const { id, url } = target as { id?: unknown; url?: unknown };
-				if (typeof url === "string") connections.push(`connection ${clean(id ?? "(unnamed)")} → ${clean(url)}`);
+				const { id, url, auth } = target as { id?: unknown; url?: unknown; auth?: unknown };
+				if (typeof url !== "string") continue;
+				const name = clean(id ?? "(unnamed)");
+				const variable = (auth as { apiKeyEnvVar?: unknown } | null | undefined)?.apiKeyEnvVar;
+				// The one key settings keep from a project target: trusting this card is consent to send it there.
+				connections.push(
+					typeof variable === "string" && isProjectKeyVariableName(variable)
+						? `connection ${name} sends $${variable} to ${clean(url)}`
+						: `connection ${name} → ${clean(url)}`,
+				);
 			}
 		}
 	}
@@ -64,7 +73,8 @@ function settingsSummary(snapshot: ProjectSurfaceSnapshot): string[] {
 /**
  * For each connection the project's settings define, the key or sign-in it still needs from this shell, in the
  * setup status's words. Read after trust, so a team member is told at once what the project's connections need.
- * Project layers carry no credentials, so every key named here is the member's own.
+ * Project layers carry no credentials, only the name of a target's key variable, so every key named here is the
+ * member's own.
  */
 export function projectConnectionNeeds(cwd: string, settings: Readonly<ClioSettings>): string[] {
 	const ids = new Set<string>();
