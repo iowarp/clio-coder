@@ -341,6 +341,8 @@ export interface ChatTurnState {
 	currentTurnConstraints: TurnConstraints | undefined;
 	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
 	currentTurnOrigin: TurnOrigin | null;
+	/** Who started the prompt a yolo continuation's chain belongs to, which decides whether it is watched (CLI-P46). */
+	promptOrigin: TurnOrigin["origin"] | null;
 	/**
 	 * Tool surface an activated skill narrowed, held across the operator's
 	 * later turns. Replaced when the operator activates a different skill,
@@ -371,6 +373,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "continuation"
 	| "currentAskUserPolicy"
 	| "currentTurnOrigin"
+	| "promptOrigin"
 	| "lastRunSnapshot"
 	| "replayedContextMessages"
 	| "routeMove"
@@ -512,6 +515,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		currentTurnOrigin: null,
+		promptOrigin: null,
 		activeSkillSurface: undefined,
 		currentAskUserPolicy: undefined,
 		lastRunSnapshot: null,
