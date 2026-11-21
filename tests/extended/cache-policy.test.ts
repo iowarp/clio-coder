@@ -177,12 +177,15 @@ test("workers with one stable head share a session id only where the backend rou
 		{ ...head, tools: [read, { ...read, name: "grep" }] },
 	])
 		ok(workerCacheFamilyId(other) !== family);
-	// Only a measured session-routed backend takes the shared id; elsewhere a worker keeps an id of its own.
-	for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
+	// Only a measured session-routed backend takes the shared id; elsewhere a worker keeps an id of its own. The
+	// public Responses API takes one too, as measured (SESSION_ROUTED_APIS), on a family of its own: the api is in the head.
+	const responses = workerCacheFamilyId({ ...head, api: "openai-responses", provider: "openai" });
+	ok(responses !== undefined && /^clio-coder-w-[a-f0-9]{40}-0$/u.test(responses) && responses !== family);
+	for (const api of ["anthropic-messages", "openai-completions"])
 		strictEqual(workerCacheFamilyId({ ...head, api }), undefined);
 });
 
-test("tool-free side calls of one head share a session id on Codex and only there (OI-6)", async () => {
+test("tool-free side calls of one head share a session id only on session-routed APIs (OI-6)", async () => {
 	const model = openaiCodex.synthesizeModel(
 		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },
 		"gpt-6-luna",
@@ -222,7 +225,7 @@ test("tool-free side calls of one head share a session id on Codex and only ther
 		strictEqual(await key("# Memory review", "first task"), family);
 		strictEqual(await key("# Memory review", "another task"), family);
 		ok((await key("# Judge", "first task")) !== family);
-		for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
+		for (const api of ["anthropic-messages", "openai-completions"])
 			strictEqual(
 				sideCallCacheFamilyId({ api, provider: "p", modelId: "m", thinkingLevel: "low", systemPrompt: "x" }),
 				undefined,
