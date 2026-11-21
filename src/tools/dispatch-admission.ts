@@ -1,6 +1,7 @@
 import { relative, resolve } from "node:path";
 import { relativePathEscapes } from "../core/path-containment.js";
 import { ToolNames } from "../core/tool-names.js";
+import { isReadOnlyExplorer } from "../domains/agents/spec.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type {
 	DispatchDerivedGrants,
@@ -391,8 +392,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				const ids = new Set(declared.filter((check) => check.runs === undefined).map((check) => check.id));
 				return operatorNamedChecks(turnText, ids);
 			},
-			isReadOnlyScout: (id) =>
-				deps.getAgentSpecs().some((spec) => spec.id === id && id === "scout" && spec.capabilityClass === "read-only"),
+			isReadOnlyScout: (id) => isReadOnlyExplorer(deps.getAgentSpecs().find((spec) => spec.id === id)),
 			resolveFacts: roleFacts,
 			hasAgent: (id) => deps.getAgentSpecs().some((spec) => spec.id === id),
 			writesArtifact: (id) =>
@@ -519,10 +519,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		planView: {
 			...describeDispatchPlan(args),
 			...(fields.requests.some((request) => request.externalReadRoot !== undefined) &&
-			fields.requests.every(
-				(request) =>
-					request.agentId === "scout" &&
-					deps.getAgentSpecs().some((spec) => spec.id === request.agentId && spec.capabilityClass === "read-only"),
+			fields.requests.every((request) =>
+				isReadOnlyExplorer(deps.getAgentSpecs().find((spec) => spec.id === request.agentId)),
 			)
 				? { planScale: false }
 				: {}),
@@ -1021,7 +1019,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										task: renderCouncilVoteMemberTask(base.task),
 										resultContractOverride: councilBallotContract(base.task),
-										...councilVoterPersona(member.agent ?? base.agentId),
+										...councilVoterPersona(deps.getAgentSpecs().find((spec) => spec.id === (member.agent ?? base.agentId))),
 									}
 								: {}),
 							target: member.target,

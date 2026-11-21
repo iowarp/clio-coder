@@ -11,8 +11,9 @@ category: internal
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: none
-budget: {toolCalls: 40, readReserve: 8, synthesis: true}
+budget: {toolCalls: 40, synthesis: true}
 resultContract: {kind: context-handbook}
+traits: [context-generator]
 tags: [context, handbook, bootstrap]
 ---
 

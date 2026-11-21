@@ -84,7 +84,7 @@ function workerInput(cwd: string): WorkerRunInput {
 		allowedTools: ["read"],
 		autonomy: "default",
 		readOnly: true,
-		budget: { toolCalls: 10, readReserve: 0, synthesis: true, hardCap: 20 },
+		budget: { toolCalls: 10, synthesis: true, hardCap: 20 },
 	};
 }
 

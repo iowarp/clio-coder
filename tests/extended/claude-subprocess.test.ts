@@ -94,7 +94,7 @@ function workerInput(root: string, patch: Partial<WorkerRunInput> = {}): WorkerR
 		runtime: claudeCodeRuntime,
 		wireModelId: "claude-sonnet-5",
 		allowedTools: [],
-		budget: { toolCalls: 20, readReserve: 0, synthesis: true, hardCap: 50 },
+		budget: { toolCalls: 20, synthesis: true, hardCap: 50 },
 		readOnly: true,
 		cwd: root,
 		...patch,

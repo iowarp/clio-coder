@@ -1,7 +1,7 @@
 ---
 name: hoare-verification
 description: Reviews named functions for correctness with Hoare logic. States each precondition and postcondition with its source, adds loop invariants, variants and frame conditions, derives the verification conditions with the language's hazard obligations, and discharges each one by a declared prover check or a written argument. Reports every obligation with an honest status. Use for C, C++, Python or Fortran functions that have a statable contract. Not for whole programs, concurrency proofs or floating-point error analysis; those are reported as limitations.
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 triggers:
   - hoare logic

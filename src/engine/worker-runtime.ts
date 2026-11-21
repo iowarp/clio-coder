@@ -581,7 +581,7 @@ function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	}
 	const task = codeNavTaskSteering({
 		task: input.task,
-		agentId: input.agentId,
+		orientation: input.product === "orientation" && input.readOnly === true,
 		...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
 		tools: workerProviderSupportsTools(input) ? input.allowedTools : [],
 	})
@@ -972,10 +972,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const STOP_AFTER_ANY_TOOL_RESULT = Symbol("stop-after-any-tool-result");
 	let stopAfterToolResultCallId: string | typeof STOP_AFTER_ANY_TOOL_RESULT | null = null;
 	const workerBudget = resolveWorkerRuntimeBudget(input);
-	const readReserve = input.allowedTools.includes(ToolNames.Read) ? workerBudget.readReserve : 0;
-	// The reserve ends discovery, not the run's own product. An agent that was
-	// granted mutation tools delivers by writing, so those stay admitted in the
-	// reserve window; a read-only agent has none and the window stays read-only.
+	// The soft budget ends discovery, not the run's own product. An agent that was
+	// granted mutation tools delivers by writing, so those stay admitted past it;
+	// a read-only agent has none and ends in synthesis.
 	const deliveryTools = resolveDeliveryTools(input.allowedTools, input.product);
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	// Tool calls emitted by one provider response share this correlation. The
@@ -994,7 +993,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// A worker's blocks all land in one run-long bucket, so the bound on
 		// them is a statement about this run's length, not about a turn.
 		turnBlockBudget: workerLoopBlockBudget(workerBudget.revision?.toolCalls ?? workerBudget.toolCalls),
-		toolCallSoftReadReserve: readReserve,
 		...(deliveryTools.length > 0 ? { deliveryTools } : {}),
 		turnSynthesisLockout: workerBudget.synthesis,
 		// Once locked, the next model round is forced text-only at the
@@ -1009,14 +1007,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						// Native agent tool calls carry a stable provider id. The wildcard
 						// keeps even an invariant violation on the post-result path.
 						stopAfterToolResultCallId = toolCallId ?? STOP_AFTER_ANY_TOOL_RESULT;
-					},
-				}
-			: {}),
-		// Requiring read is correct only when reading is the whole reserve.
-		...(readReserve > 0 && deliveryTools.length === 0
-			? {
-					onSoftReadReserve: () => {
-						middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Read }]);
 					},
 				}
 			: {}),

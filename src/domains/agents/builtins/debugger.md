@@ -11,8 +11,9 @@ category: quality
 capabilityClass: verification
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 24, readReserve: 4, synthesis: true}
+budget: {toolCalls: 24, synthesis: true}
 resultContract: {kind: debugger-report}
+handbook: [verify, write]
 tags: [debugging, root-cause, tests]
 ---
 

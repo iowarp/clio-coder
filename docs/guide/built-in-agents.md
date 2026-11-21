@@ -42,7 +42,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Onl
 
 ## Built-in catalog
 
-The catalog equals the files under `src/domains/agents/builtins/`: sixteen recipes. Every recipe declares `synthesis: true`. Budgets read `toolCalls/readReserve`. Tools are shown as the recipe declares them: `anyOf` groups mean at least one must be admitted, and every other required tool must be present on the target.
+The catalog equals the files under `src/domains/agents/builtins/`: sixteen recipes. Every recipe declares `synthesis: true`. Budgets read `toolCalls`. Tools are shown as the recipe declares them: `anyOf` groups mean at least one must be admitted, and every other required tool must be present on the target.
 
 ### Shipped Base Agents
 User-facing agents visible in `clio-coder agents`. All declare `projectContextTier: bounded`.
@@ -78,7 +78,7 @@ Internal orchestration helpers and internal process agents. They are hidden from
 
 The builtin `architect` also serves as the default author for a version 5 playbook `plan` step. In that role it returns the coordinator-owned `delegation-plan` result shape instead of writing its ordinary plan artifact. It may name only agents from the playbook's roster. The coordinator supplies the plan step's target or profile to every admitted task.
 
-`scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose findings each carry the `claim` it observed and the `path:line` that grounds it, and wiki or index content is orientation only, never citable as evidence. A finding that omits `path` and `line` is accepted as an ungrounded lead and never as evidence. The recipe budget of 18 calls, 4 of them reserved for citation reads, is an advisory plan stated in the persona. A native scout run is read-only research, which enters a tool-free synthesis phase after at most 36 observed calls (see [Budget semantics](#budget-semantics)). Tool calls issued together in one model round count as one round against the synthesis backstop, so a wide parallel batch cannot consume it as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
+`scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose findings each carry the `claim` it observed and the `path:line` that grounds it, and wiki or index content is orientation only, never citable as evidence. A finding that omits `path` and `line` is accepted as an ungrounded lead and never as evidence. The recipe budget of 18 calls is an advisory plan stated in the persona; like every recipe, the run stops at the advisory ceiling or at its handback (see [Budget semantics](#budget-semantics)). Tool calls issued together in one model round count as one round against the synthesis backstop, so a wide parallel batch cannot consume it as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
 
 Grounding is checked against the run's own reads, not just against the file. The worker records the exact line span every successful read returned, and a cited line must fall inside one. A line that exists in the file but was never read fails, which is what stops an approximated or inferred line number from passing as observation. A citation of a directory needs only that the directory exists, because a survey lists a directory rather than reading it. `grep` and `code_nav` hits are leads: read the file before citing what they point at. When a run ends on a bound with a degraded result, a citation that does not ground is dropped and its claim kept as an ungrounded lead instead of failing the run.
 
@@ -181,21 +181,22 @@ latencyClass: balanced                # fast | balanced | deep
 projectContextTier: bounded           # none | bounded: whether the worker is briefed with project context
 tags: [implementation, repair]        # short lowercase routing hints for catalog display
 budget:                               # required worker-loop phase policy
-  toolCalls: 150                      # estimate, and the boundary of enforced phases
-  readReserve: 5                      # tail of the estimate reserved for reads and delivery tools
+  toolCalls: 150                      # advisory estimate
   synthesis: true                     # true: text-only final round; false: stop immediately
-  # maximum: {toolCalls: 150, readReserve: 16}   # optional ceiling (architect ships one)
+  # maximum: {toolCalls: 150}         # optional ceiling (architect ships one)
 resultContract: {kind: mutation-report}  # typed result shape the worker must return
 permissions: {git: worktree}          # optional standing allowance: git inspect|worktree, asks deny|fail|main
 product: orientation                  # optional: orientation makes code_nav a delivery tool
+traits: [peer-tool-loop]              # optional: context-generator | peer-tool-loop | inline-deliverable
+handbook: [verify, write]             # optional: handbook sections beyond the capability class default
 ---
 ```
 
-The closed key set is defined in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts): thirteen required keys (`version`, `name`, `description`, `tools`, `skills`, `audience`, `category`, `capabilityClass`, `latencyClass`, `projectContextTier`, `budget`, `resultContract`, `tags`) and two optional keys, `product` and `permissions`. An unknown key rejects the recipe. There are no
+The closed key set is defined in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts): thirteen required keys (`version`, `name`, `description`, `tools`, `skills`, `audience`, `category`, `capabilityClass`, `latencyClass`, `projectContextTier`, `budget`, `resultContract`, `tags`) and four optional keys, `product`, `permissions`, `traits` and `handbook`. An unknown key rejects the recipe. There are no
 `model`, `target`, `thinkingLevel`, or `output` frontmatter keys. Target and
 model selection belong to dispatch, not the recipe.
 
-Every recipe must declare `name`, `description`, `budget`, and every other key in the required set; no display defaults are synthesized. `budget` must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis`, plus an optional `maximum` ceiling object such as architect's `maximum: {toolCalls: 150, readReserve: 16}`. The numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean; `maximum` must not be smaller than the default phase. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; the `coder` recipe declares `150/5/true`. The model-visible catalog shows the declared policy, never a mutable effective cap.
+Every recipe must declare `name`, `description`, `budget`, and every other key in the required set; no display defaults are synthesized. `budget` must be a non-null YAML object containing `toolCalls` and `synthesis`, plus an optional `maximum` ceiling object such as architect's `maximum: {toolCalls: 150}`. `toolCalls` must be a safe integer greater than 0; `synthesis` must be a boolean; `maximum` must not be smaller than the default phase. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/true`; the `coder` recipe declares `150/true`. The model-visible catalog shows the declared policy, never a mutable effective cap.
 
 Only shipped recipes may declare the `base`, `shadow`, or `internal` audience, and a shipped recipe may not declare `custom`. Plugin, user, and project recipes must declare `audience: custom`; the discovery root determines that provenance and the parser refuses a conflicting claim.
 
@@ -205,12 +206,10 @@ A recipe must also pass the capability policy before it enters any catalog. A `w
 
 ### Budget semantics
 
-`budget` is the recipe's default worker-loop phase policy. A native worker applies it in one of two modes.
+`budget` is the recipe's default worker-loop phase policy. A native worker applies it as an advisory estimate.
 
-*   **Advisory estimate (default).** `toolCalls` and `readReserve` plan the run and are not a cutoff. When the call count reaches `toolCalls`, the next tool result carries a one-time notice to reassess and finish, and tools stay available. The hard ceiling is `fleet.limits.toolCallsPerRun` (default `300`), tightened to the recipe's `maximum.toolCalls` when the recipe declares one, and it never falls below an estimate or result-contract revision the request was admitted with. Admission holds such an estimate at `fleet.limits.toolCallsPerRun`, so a request never raises the ceiling above that cap. A dispatch can supply its own `budget` estimate (`toolCalls`, `readReserve`, optional `retryRevision`) for one run. What happens at the ceiling depends on the worker; see [Reporting workers and the finishing rule](../architecture/worker-dispatch-mechanics.md#reporting-workers-and-the-finishing-rule).
-*   **Enforced research phases.** Native runs of `scout`, `provenance`, and `context-bootstrap` are read-only research, so their budget is enforced. After at most 36 observed tool calls (`READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS`; fewer when `fleet.limits.toolCallsPerRun` is smaller, and for `context-bootstrap` when its recipe or request budget is smaller) the runtime removes the tools and runs one text-only synthesis round. The last `readReserve` calls of the phase admit only `read` and the recipe's delivery tools: `write` and `edit`, plus `code_nav` for `product: orientation`.
-
-`readReserve` is clamped to zero when canonical `read` is absent after tool admission, and to at most one less than `toolCalls`. The operator cap cannot be widened by a recipe. The admitted envelope (recipe policy, request, effective budget, and each clamp reason) is kept on the run ledger row and in the `budget` field of the run's `run.settled`, under the run seal. The Claude SDK runtime applies both modes: at the advisory ceiling it denies every further tool call.
+*   **Advisory estimate (default).** `toolCalls` plans the run and is not a cutoff. When the call count reaches `toolCalls`, the next tool result carries a one-time notice to reassess and finish, and tools stay available. The hard ceiling is `fleet.limits.toolCallsPerRun` (default `300`), tightened to the recipe's `maximum.toolCalls` when the recipe declares one, and it never falls below an estimate or result-contract revision the request was admitted with. Admission holds such an estimate at `fleet.limits.toolCallsPerRun`, so a request never raises the ceiling above that cap. A dispatch can supply its own `budget` estimate (`toolCalls`, optional `retryRevision`) for one run. What happens at the ceiling depends on the worker; see [Reporting workers and the finishing rule](../architecture/worker-dispatch-mechanics.md#reporting-workers-and-the-finishing-rule).
+The operator cap cannot be widened by a recipe. The admitted envelope (recipe policy, request, effective budget, and each clamp reason) is kept on the run ledger row and in the `budget` field of the run's `run.settled`, under the run seal. At the advisory ceiling the Claude SDK runtime denies every further tool call.
 
 ### Skills
 Skills are knowledge attachments declared under `skills: [...]` in the YAML frontmatter.
@@ -390,7 +389,7 @@ category: quality
 capabilityClass: artifact-write
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 20, readReserve: 4, synthesis: true}
+budget: {toolCalls: 20, synthesis: true}
 resultContract: {kind: artifact-report}
 tags: [review]
 ---

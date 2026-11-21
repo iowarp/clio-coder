@@ -11,8 +11,9 @@ category: quality
 capabilityClass: verification
 latencyClass: fast
 projectContextTier: bounded
-budget: {toolCalls: 20, readReserve: 3, synthesis: true}
+budget: {toolCalls: 20, synthesis: true}
 resultContract: {kind: verifier-report}
+handbook: [verify, write]
 tags: [verification, gates, review]
 ---
 

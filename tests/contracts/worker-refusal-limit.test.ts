@@ -68,7 +68,7 @@ async function runDenyWorker(rounds: Round[], helper = false) {
 				thinkingLevel: "off",
 				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
 				allowedTools: ["bash"],
-				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+				budget: { mode: "advisory", toolCalls: 18, synthesis: true, hardCap: 150 },
 				noSkills: true,
 				cwd: env.dir,
 				onPermission: "deny",

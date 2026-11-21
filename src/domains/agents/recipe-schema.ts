@@ -5,15 +5,19 @@ import {
 	type AgentAudience,
 	type AgentCapabilityClass,
 	type AgentCategory,
+	type AgentHandbookAudience,
 	type AgentLatencyClass,
 	type AgentProduct,
 	type AgentProjectContextTier,
+	type AgentTrait,
 	isAgentAudience,
 	isAgentCapabilityClass,
 	isAgentCategory,
+	isAgentHandbookAudience,
 	isAgentLatencyClass,
 	isAgentProduct,
 	isAgentProjectContextTier,
+	isAgentTrait,
 } from "./spec.js";
 
 /**
@@ -39,7 +43,7 @@ export const RECIPE_KEYS = [
 	"tags",
 ] as const;
 
-export const OPTIONAL_RECIPE_KEYS = ["product", "permissions"] as const;
+export const OPTIONAL_RECIPE_KEYS = ["product", "permissions", "traits", "handbook"] as const;
 const ALL_RECIPE_KEYS = [...RECIPE_KEYS, ...OPTIONAL_RECIPE_KEYS] as const;
 
 export interface ParseRecipeSchemaInput {
@@ -66,6 +70,12 @@ function requiredStringArray(value: unknown, path: string): string[] {
 function enumValue<T extends string>(value: unknown, path: string, predicate: (value: unknown) => value is T): T {
 	if (!predicate(value)) throw new Error(`agent recipe: ${path} has an unsupported value`);
 	return value;
+}
+
+function enumArray<T extends string>(value: unknown, path: string, predicate: (value: unknown) => value is T): T[] {
+	const entries = requiredStringArray(value, path);
+	if (entries.length === 0) throw new Error(`agent recipe: ${path} must not be empty`);
+	return entries.map((entry, index) => enumValue(entry, `${path}[${index}]`, predicate));
 }
 
 /**
@@ -351,6 +361,16 @@ export function parseAgentRecipeSchemaIssues(input: ParseRecipeSchemaInput): Par
 		frontmatter.product === undefined
 			? undefined
 			: attempt("product", () => enumValue<AgentProduct>(frontmatter.product, `${filepath}: product`, isAgentProduct));
+	const traits =
+		frontmatter.traits === undefined
+			? undefined
+			: attempt("traits", () => enumArray<AgentTrait>(frontmatter.traits, `${filepath}: traits`, isAgentTrait));
+	const handbook =
+		frontmatter.handbook === undefined
+			? undefined
+			: attempt("handbook", () =>
+					enumArray<AgentHandbookAudience>(frontmatter.handbook, `${filepath}: handbook`, isAgentHandbookAudience),
+				);
 	const tagProblems = "tags" in frontmatter ? stringArrayIssues(frontmatter.tags, `${filepath}: tags`, "tags") : [];
 	issues.push(...tagProblems);
 	if (
@@ -386,6 +406,8 @@ export function parseAgentRecipeSchemaIssues(input: ParseRecipeSchemaInput): Par
 			budget,
 			resultContract,
 			...(product === undefined ? {} : { product }),
+			...(traits === undefined ? {} : { traits }),
+			...(handbook === undefined ? {} : { handbook }),
 			...(permissions === undefined ? {} : { permissions }),
 			tags: frontmatter.tags as string[],
 			source: input.source,

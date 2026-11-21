@@ -324,7 +324,7 @@ category: science
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 32, readReserve: 4, synthesis: true}
+budget: {toolCalls: 32, synthesis: true}
 resultContract: {kind: scout-report}
 tags: [test]
 ---
@@ -557,7 +557,7 @@ category: science
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 16, readReserve: 4, synthesis: true}
+budget: {toolCalls: 16, synthesis: true}
 resultContract: {kind: scout-report}
 tags: [curation, review]
 ---

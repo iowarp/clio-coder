@@ -14,6 +14,7 @@ for (const audience of ["internal", "shadow"] as const)
 		const noop = (): void => undefined;
 		const subscriptions = createInteractiveSubscriptions({
 			bus,
+			agentTraits: (agentId) => (agentId === "context-bootstrap" ? ["context-generator"] : []),
 			refreshFooter: noop,
 			renderTaskIsland: noop,
 			renderContextIsland: noop,

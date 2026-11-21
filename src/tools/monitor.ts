@@ -5,6 +5,7 @@ import {
 	formatBudgetReasons,
 	formatBudgetRequest,
 	formatEffectiveBudget,
+	readRecordedBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { sealedAnswerBudgetBytes } from "../domains/dispatch/handback.js";
@@ -208,12 +209,14 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 			`council: role=${run.gate?.role === "synthesis" ? "synthesis" : "member"} group=${run.council?.group ?? run.gate?.group ?? "unknown"}${run.council?.label ? ` label=${run.council.label}` : ""}`,
 		);
 	}
-	if (run.budget !== undefined) {
+	// The ledger row is run history: an envelope recorded before fleet M12 renders as it was recorded.
+	const budget = readRecordedBudgetEnvelope(run.budget);
+	if (budget !== undefined) {
 		lines.push(
-			`recipe policy: ${formatBudgetPolicy(run.budget)}`,
-			`requested envelope: ${formatBudgetRequest(run.budget)}`,
-			`effective envelope: ${formatEffectiveBudget(run.budget)}`,
-			`clamp or escalation reason: ${formatBudgetReasons(run.budget)}`,
+			`recipe policy: ${formatBudgetPolicy(budget)}`,
+			`requested envelope: ${formatBudgetRequest(budget)}`,
+			`effective envelope: ${formatEffectiveBudget(budget)}`,
+			`clamp or escalation reason: ${formatBudgetReasons(budget)}`,
 		);
 	}
 	if (live) {

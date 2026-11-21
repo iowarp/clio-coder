@@ -11,7 +11,7 @@ category: quality
 capabilityClass: verification
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 20, readReserve: 3, synthesis: true}
+budget: {toolCalls: 20, synthesis: true}
 resultContract: {kind: review-verdict}
 tags: [review, verification]
 ---

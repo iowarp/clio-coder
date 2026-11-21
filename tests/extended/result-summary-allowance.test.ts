@@ -647,6 +647,7 @@ it("labels a Documenter summary above the default allowance as the inline delive
 				assessment: receipt.assessment,
 			},
 			PRODUCER_INTEGRITY,
+			(agentId) => bundle.contract.agentTraits?.(agentId) ?? [],
 		);
 		ok(
 			labels.some((label) => label.includes("the inline deliverable or limitation is in output.text JSON field summary")),

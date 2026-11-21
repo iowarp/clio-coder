@@ -114,7 +114,7 @@ async function runWorker(
 				thinkingLevel: "off",
 				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
 				allowedTools: ["grep", "read", "gateway"],
-				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+				budget: { mode: "advisory", toolCalls: 18, synthesis: true, hardCap: 150 },
 				product: "orientation",
 				noSkills: true,
 				cwd: env.dir,
@@ -421,7 +421,7 @@ test("a second zero-tool reply ends without repairing its malformed report", { t
 
 const capBudget = (hardCap: number): Partial<WorkerRunInput> => ({
 	// toolCalls above the cap disables the soft phase, so the lifetime cap is the only bound.
-	budget: { mode: "enforced", toolCalls: hardCap + 1, readReserve: 0, synthesis: true, hardCap },
+	budget: { mode: "enforced", toolCalls: hardCap + 1, synthesis: true, hardCap },
 });
 const SYNTHESIS = "Synthesized from the evidence gathered.";
 
@@ -589,7 +589,7 @@ test("an unavailable verifier entry cannot rerun with changed arguments and stil
 			agentId: "verifier",
 			allowedTools: ["verify", "read"],
 			resultContract: { kind: "verifier-report" },
-			budget: { mode: "advisory", toolCalls: 2, readReserve: 0, synthesis: true, hardCap: 150, ceiling: 2 },
+			budget: { mode: "advisory", toolCalls: 2, synthesis: true, hardCap: 150, ceiling: 2 },
 		},
 		{ "pyproject.toml": "[tool.pytest.ini_options]\n", "uv.lock": "version = 1\n" },
 	);

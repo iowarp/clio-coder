@@ -85,7 +85,7 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 function formatSpecLine(spec: AgentSpec, suffix: string): string {
 	const tags = spec.tags.length > 0 ? `, tags=${spec.tags.join("/")}` : "";
 	const skills = spec.skills.length > 0 ? `, skills=${spec.skills.join("/")}` : "";
-	const maximum = spec.budget.maximum ? `..${spec.budget.maximum.toolCalls}/${spec.budget.maximum.readReserve}` : "";
-	const budget = `, budget=${spec.budget.toolCalls}/${spec.budget.readReserve}${maximum}/${spec.budget.synthesis ? "synthesize" : "stop"}`;
+	const maximum = spec.budget.maximum ? `..${spec.budget.maximum.toolCalls}` : "";
+	const budget = `, budget=${spec.budget.toolCalls}${maximum}/${spec.budget.synthesis ? "synthesize" : "stop"}`;
 	return `- ${spec.name} [${spec.id}] (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills}${budget})${suffix}`;
 }

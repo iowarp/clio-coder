@@ -100,7 +100,7 @@ describe("worker handbook selection", () => {
 
 	it("gives a coder in the GUI the invariants and the GUI recipe, but not release or orchestrator rules", () => {
 		const selected = selectWorkerHandbook(handbooks, {
-			audience: workerHandbookAudience("coder", "workspace-edit"),
+			audience: workerHandbookAudience(undefined, "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: ["apps/web/client/Strip.tsx"],
 			maxChars: 4000,
@@ -116,7 +116,7 @@ describe("worker handbook selection", () => {
 
 	it("sits the handbook's headings one level below the worker prompt's sections", () => {
 		const selected = selectWorkerHandbook(handbooks, {
-			audience: workerHandbookAudience("coder", "workspace-edit"),
+			audience: workerHandbookAudience(undefined, "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: ["apps/web/client/Strip.tsx"],
 			maxChars: 4000,
@@ -132,14 +132,14 @@ describe("worker handbook selection", () => {
 
 	it("routes release rules to git-master and verification rules to the verifier", () => {
 		const git = selectWorkerHandbook(handbooks, {
-			audience: workerHandbookAudience("git-master", "workspace-edit"),
+			audience: workerHandbookAudience(["git", "write"], "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: [],
 			maxChars: 4000,
 		});
 		ok(git.text.includes("Bump `package.json`"));
 		const verifier = selectWorkerHandbook(handbooks, {
-			audience: workerHandbookAudience("verifier", "verification"),
+			audience: workerHandbookAudience(["verify", "write"], "verification"),
 			cwd: "/repo",
 			workingPaths: ["/repo/vendor/lib.c"],
 			maxChars: 4000,
@@ -149,7 +149,7 @@ describe("worker handbook selection", () => {
 
 	it("fills invariants first under a tight budget and never exceeds it", () => {
 		const selected = selectWorkerHandbook(handbooks, {
-			audience: workerHandbookAudience("coder", "workspace-edit"),
+			audience: workerHandbookAudience(undefined, "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: ["src/core/defaults.ts"],
 			maxChars: 470,
@@ -159,7 +159,7 @@ describe("worker handbook selection", () => {
 		ok(selected.text.includes("real home"));
 		ok(!selected.text.includes("Relative imports"), "a convention never displaces an invariant");
 		const starved = selectWorkerHandbook(handbooks, {
-			audience: workerHandbookAudience("coder", "workspace-edit"),
+			audience: workerHandbookAudience(undefined, "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: [],
 			maxChars: 420,
@@ -179,7 +179,7 @@ describe("worker handbook selection", () => {
 		);
 		ok(big);
 		const selected = selectWorkerHandbook([big], {
-			audience: workerHandbookAudience("coder", "workspace-edit"),
+			audience: workerHandbookAudience(undefined, "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: [],
 			maxChars: 6000,
@@ -205,7 +205,7 @@ describe("worker handbook selection", () => {
 		);
 		ok(small);
 		const selected = selectWorkerHandbook([small], {
-			audience: workerHandbookAudience("coder", "workspace-edit"),
+			audience: workerHandbookAudience(undefined, "workspace-edit"),
 			cwd: "/repo",
 			workingPaths: [],
 			maxChars: 6000,
@@ -292,7 +292,7 @@ describe("peer handbook compile", () => {
 			const compiled = compileHandbook(handbook, join(cwd, "CLIO-CODER.md"));
 			ok(compiled);
 			const peer = compilePeerHandbook([compiled], {
-				audience: workerHandbookAudience("coder", "workspace-edit"),
+				audience: workerHandbookAudience(undefined, "workspace-edit"),
 				cwd,
 				workingPaths: [],
 				maxChars: 6000,
@@ -315,7 +315,7 @@ describe("peer handbook compile", () => {
 			// Deterministic for unchanged inputs.
 			strictEqual(
 				compilePeerHandbook([compiled], {
-					audience: workerHandbookAudience("coder", "workspace-edit"),
+					audience: workerHandbookAudience(undefined, "workspace-edit"),
 					cwd,
 					workingPaths: [],
 					maxChars: 6000,
@@ -362,7 +362,7 @@ describe("peer handbook compile", () => {
 			const compiled = compileHandbook(handbook, join(cwd, "CLIO-CODER.md"));
 			ok(compiled);
 			const peer = compilePeerHandbook([compiled], {
-				audience: workerHandbookAudience("coder", "workspace-edit"),
+				audience: workerHandbookAudience(undefined, "workspace-edit"),
 				cwd,
 				workingPaths: [],
 				maxChars: 6000,
@@ -406,7 +406,7 @@ describe("peer handbook compile", () => {
 			];
 			const compiled = compileHandbook(handbook.join("\n"), join(cwd, "CLIO-CODER.md"));
 			ok(compiled);
-			const audience = workerHandbookAudience("coder", "workspace-edit");
+			const audience = workerHandbookAudience(undefined, "workspace-edit");
 			const native = selectWorkerHandbook([compiled], { audience, cwd, workingPaths: [], maxChars: 6000 });
 			const carried = (text: string): number[] => [
 				...new Set([...text.matchAll(/Invariant (\d+):/g)].map((match) => Number(match[1]))),
@@ -443,7 +443,7 @@ describe("peer handbook compile", () => {
 				declared: opencodeCliRuntime.repositoryInstructions,
 				cwd,
 				handbookSources: [{ source: HANDBOOK, path: join(root, "CLIO-CODER.md") }],
-				audience: workerHandbookAudience("coder", "workspace-edit"),
+				audience: workerHandbookAudience(undefined, "workspace-edit"),
 				workingPaths: [],
 				maxChars: 6000,
 				clioNames: [],
@@ -483,7 +483,7 @@ describe("peer handbook compile", () => {
 				declared: piCliRuntime.repositoryInstructions,
 				cwd: root,
 				handbookSources: [{ source: HANDBOOK, path: join(root, "CLIO-CODER.md") }],
-				audience: workerHandbookAudience("coder", "workspace-edit"),
+				audience: workerHandbookAudience(undefined, "workspace-edit"),
 				workingPaths: [],
 				maxChars: 1500,
 				clioNames: [],

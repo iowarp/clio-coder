@@ -25,7 +25,7 @@ import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RuntimeEnforcement, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
-import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
+import type { RecordedRunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { DispatchIntent } from "./intent.js";
 import type { DispatchPathScopeProvenance } from "./path-scope.js";
@@ -480,7 +480,7 @@ export interface RunEnvelope {
 	rootRequestOrigin?: DispatchRequestOrigin;
 	task: string;
 	/** Immutable recipe policy, invocation request, effective phase, and admission reasons. */
-	budget?: RunToolBudgetEnvelope;
+	budget?: RecordedRunToolBudgetEnvelope;
 	/** Present only when a bounded parent briefing was sent as dynamic task data. */
 	briefing?: RunBriefingProvenance;
 	workerContext?: WorkerContextProvenance;
@@ -1085,7 +1085,7 @@ export interface RunResult {
 	 */
 	pathScope?: DispatchPathScopeProvenance;
 	/** Integrity-sealed recipe policy, invocation request, effective phase, and admission reasons. */
-	budget?: RunToolBudgetEnvelope;
+	budget?: RecordedRunToolBudgetEnvelope;
 	/** Bytes of the answer the parent sees at sync, collect and record, fixed at dispatch (M3). Absent on older runs. */
 	answerBudgetBytes?: number;
 	/**

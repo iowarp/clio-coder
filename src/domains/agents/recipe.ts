@@ -6,17 +6,17 @@ import type {
 	AgentAudience,
 	AgentCapabilityClass,
 	AgentCategory,
+	AgentHandbookAudience,
 	AgentLatencyClass,
 	AgentProduct,
 	AgentProjectContextTier,
+	AgentTrait,
 } from "./spec.js";
 
 /** One bounded worker-loop phase policy. */
 export interface AgentBudgetPhase {
 	/** Admitted tool-call boundary before the final-response phase. */
 	toolCalls: number;
-	/** Tail of the admitted boundary reserved for canonical `read` calls. */
-	readReserve: number;
 }
 
 /** Authored worker-loop phase policy carried by an agent recipe. */
@@ -29,19 +29,17 @@ export interface AgentBudget extends AgentBudgetPhase {
 	timeoutMs?: number;
 }
 
-const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis", "maximum", "timeoutMs"] as const;
+const AGENT_BUDGET_KEYS = ["toolCalls", "synthesis", "maximum", "timeoutMs"] as const;
 
-function parseAgentBudgetPhase(value: unknown, prefix: string, relationTarget: string): AgentBudgetPhase {
+function parseAgentBudgetPhase(value: unknown, prefix: string): AgentBudgetPhase {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		throw new Error(`${prefix} must be a non-null YAML object`);
 	}
 	const record = value as Record<string, unknown>;
 	for (const key of Object.keys(record)) {
-		if (key !== "toolCalls" && key !== "readReserve") throw new Error(`${prefix}.${key} is unknown`);
+		if (key !== "toolCalls") throw new Error(`${prefix}.${key} is unknown`);
 	}
-	for (const key of ["toolCalls", "readReserve"] as const) {
-		if (!Object.hasOwn(record, key)) throw new Error(`${prefix}.${key} is required`);
-	}
+	if (!Object.hasOwn(record, "toolCalls")) throw new Error(`${prefix}.toolCalls is required`);
 
 	const toolCalls = record.toolCalls;
 	if (typeof toolCalls !== "number" || !Number.isSafeInteger(toolCalls)) {
@@ -49,14 +47,7 @@ function parseAgentBudgetPhase(value: unknown, prefix: string, relationTarget: s
 	}
 	if (toolCalls <= 0) throw new Error(`${prefix}.toolCalls must be greater than 0`);
 
-	const readReserve = record.readReserve;
-	if (typeof readReserve !== "number" || !Number.isSafeInteger(readReserve)) {
-		throw new Error(`${prefix}.readReserve must be a finite safe integer`);
-	}
-	if (readReserve < 0) throw new Error(`${prefix}.readReserve must be greater than or equal to 0`);
-	if (readReserve >= toolCalls) throw new Error(`${prefix}.readReserve must be less than ${relationTarget}`);
-
-	return { toolCalls, readReserve };
+	return { toolCalls };
 }
 
 /** Strict parser shared by the one recipe schema and direct contract fixtures. */
@@ -73,30 +64,18 @@ export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudge
 			throw new Error(`${prefix}.${key} is unknown`);
 		}
 	}
-	for (const key of ["toolCalls", "readReserve", "synthesis"] as const) {
+	for (const key of ["toolCalls", "synthesis"] as const) {
 		if (!Object.hasOwn(record, key)) throw new Error(`${prefix}.${key} is required`);
 	}
 
-	const phase = parseAgentBudgetPhase(
-		{ toolCalls: record.toolCalls, readReserve: record.readReserve },
-		prefix,
-		"budget.toolCalls",
-	);
+	const phase = parseAgentBudgetPhase({ toolCalls: record.toolCalls }, prefix);
 
 	const synthesis = record.synthesis;
 	if (typeof synthesis !== "boolean") throw new Error(`${prefix}.synthesis must be a boolean`);
 
-	const maximum =
-		record.maximum === undefined
-			? undefined
-			: parseAgentBudgetPhase(record.maximum, `${prefix}.maximum`, "budget.maximum.toolCalls");
-	if (maximum !== undefined) {
-		if (maximum.toolCalls < phase.toolCalls) {
-			throw new Error(`${prefix}.maximum.toolCalls must be greater than or equal to budget.toolCalls`);
-		}
-		if (maximum.readReserve < phase.readReserve) {
-			throw new Error(`${prefix}.maximum.readReserve must be greater than or equal to budget.readReserve`);
-		}
+	const maximum = record.maximum === undefined ? undefined : parseAgentBudgetPhase(record.maximum, `${prefix}.maximum`);
+	if (maximum !== undefined && maximum.toolCalls < phase.toolCalls) {
+		throw new Error(`${prefix}.maximum.toolCalls must be greater than or equal to budget.toolCalls`);
 	}
 
 	const timeoutMs = record.timeoutMs;
@@ -144,6 +123,10 @@ export interface AgentRecipe {
 	budget: AgentBudget;
 	resultContract: ResultContract;
 	product?: AgentProduct;
+	/** How the host treats this recipe's runs; see {@link AgentTrait}. */
+	traits?: ReadonlyArray<AgentTrait>;
+	/** Handbook sections its workers receive; absent derives them from the capability class. */
+	handbook?: ReadonlyArray<AgentHandbookAudience>;
 	/** Standing allowance for the worker permit: `git` and `asks`. Absent keeps git inspect and settings routing. */
 	permissions?: WorkerPermissionDeclaration;
 	tags: ReadonlyArray<string>;

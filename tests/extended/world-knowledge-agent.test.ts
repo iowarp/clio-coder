@@ -89,9 +89,8 @@ describe("world-knowledge agent contract", () => {
 	it("records native per-tool advisory observation and classifies opaque loops as external one-shot", () => {
 		const input = {
 			recipeId: "world-knowledge",
-			policy: { toolCalls: 20, readReserve: 3, synthesis: true },
+			policy: { toolCalls: 20, synthesis: true },
 			hardCap: 50,
-			hasReadTool: true,
 			retry: false,
 			revision: false,
 		};
@@ -104,7 +103,7 @@ describe("world-knowledge agent contract", () => {
 		equal(budgetEnforcementForRuntime({ kind: "sdk" }), "native-per-tool");
 		equal(budgetEnforcementForRuntime({ kind: "subprocess" }), "external-one-shot");
 
-		const external = resolveToolBudgetEnvelope({ ...input, hasReadTool: false, enforcement: "external-one-shot" });
+		const external = resolveToolBudgetEnvelope({ ...input, enforcement: "external-one-shot" });
 		equal(external.enforcement.classification, "external-one-shot");
 		equal(external.enforcement.perTool, "unobserved-not-enforced");
 		match(formatEffectiveBudget(external), /per-tool unobserved\/not enforced/u);

@@ -804,7 +804,7 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 				agent: "lineage-fixture",
 				task: "Inspect input.txt",
 				cwd: process.cwd(),
-				budget: { toolCalls: 1000, readReserve: 10 },
+				budget: { toolCalls: 1000 },
 			},
 			{ hostRun },
 		);

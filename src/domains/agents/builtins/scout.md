@@ -11,7 +11,7 @@ category: explore
 capabilityClass: read-only
 latencyClass: fast
 projectContextTier: none
-budget: {toolCalls: 18, readReserve: 4, synthesis: true}
+budget: {toolCalls: 18, synthesis: true}
 resultContract: {kind: scout-report}
 product: orientation
 tags: [codewiki, reconnaissance, symbols]
