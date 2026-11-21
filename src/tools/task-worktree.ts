@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
 	closeSync,
+	constants,
 	existsSync,
+	fstatSync,
 	lstatSync,
 	mkdirSync,
 	openSync,
@@ -711,6 +713,31 @@ function insidePaths(root: string, base: string, paths: ReadonlyArray<string>): 
 }
 
 /**
+ * An untracked file's bytes, at most `limit`, or a note saying why none were read. Only a regular file is read: a
+ * symlink could name a secret outside the checkout and a device or FIFO could never end. The file is opened without
+ * following a final symlink and checked again through the handle, so a swap after the first look reads nothing.
+ */
+function readUntrackedBody(file: string, limit: number): Buffer | string {
+	if (!lstatSync(file).isFile()) return "not shown: not a regular file\n";
+	const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile()) return "not shown: not a regular file\n";
+		if (stat.size > limit) return `not shown: ${stat.size} bytes, over the packet's diff budget\n`;
+		const buffer = Buffer.alloc(limit);
+		let length = 0;
+		while (length < limit) {
+			const read = readSync(fd, buffer, length, limit - length, null);
+			if (read === 0) break;
+			length += read;
+		}
+		return buffer.subarray(0, length);
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
  * The diff of `paths` (all of `root` when null) against `against`, with each new untracked file shown as added. Untracked
  * bodies share one byte budget, and a file is sized before it is read: one over what is left is named, never read.
  */
@@ -733,11 +760,10 @@ function pathsDiff(
 		const file = resolve(root, path);
 		let body: string;
 		try {
-			const size = lstatSync(file).size;
-			if (size > remaining || size > UNTRACKED_FILE_READ_BYTES) {
-				body = `not shown: ${size} bytes, over the packet's diff budget\n`;
+			const bytes = readUntrackedBody(file, Math.min(remaining, UNTRACKED_FILE_READ_BYTES));
+			if (typeof bytes === "string") {
+				body = bytes;
 			} else {
-				const bytes = readFileSync(file);
 				remaining -= bytes.byteLength;
 				body = bytes.includes(0)
 					? `Binary file (${bytes.byteLength} bytes) not shown\n`

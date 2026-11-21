@@ -459,4 +459,33 @@ describe("a reviewer's packet diff (M10)", () => {
 			rmSync(top, { recursive: true, force: true });
 		}
 	});
+
+	it("never reads an untracked entry that is not a regular file", () => {
+		const top = realpathSync(mkdtempSync(join(tmpdir(), "review-diff-links-")));
+		try {
+			const repo = join(top, "repo");
+			mkdirSync(repo);
+			const git = (...args: string[]) =>
+				execFileSync("git", ["-C", repo, "-c", "user.name=F", "-c", "user.email=f@example.invalid", ...args], {
+					encoding: "utf8",
+				}).trim();
+			git("init", "-q");
+			writeFileSync(join(repo, "a.txt"), "a\n");
+			git("add", "-A");
+			git("commit", "-qm", "base");
+			const base = git("rev-parse", "HEAD");
+			writeFileSync(join(top, "credentials"), "outside the checkout\n");
+			symlinkSync(join(top, "credentials"), join(repo, "leak"));
+			// A link to a device that never ends is named, not read: the diff returns.
+			if (existsSync("/dev/zero")) symlinkSync("/dev/zero", join(repo, "zero"));
+			writeFileSync(join(repo, "new.txt"), "builder file\n");
+			const diff = builderChangeDiff({ cwd: repo, worktree: { path: repo, root: repo, base }, recorded: null });
+			strictEqual(diff?.scope, "task-worktree");
+			match(diff?.patch ?? "", /\+builder file/u);
+			ok(!diff?.patch.includes("outside the checkout"), diff?.patch);
+			match(diff?.patch ?? "", /b\/leak\n[\s\S]*not a regular file/u);
+		} finally {
+			rmSync(top, { recursive: true, force: true });
+		}
+	});
 });
