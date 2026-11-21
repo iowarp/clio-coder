@@ -58,6 +58,11 @@ export const CODE_STEP_EXCERPT_MAX_BYTES = 8_000;
 
 export const CODE_STEP_TIMEOUT_EXIT_CODE = 124;
 export const CODE_STEP_SPAWN_FAILURE_EXIT_CODE = 127;
+/** What the captured output ends with when the command's cleanup did not finish; its exit is then not the runner's last word. */
+export const CODE_STEP_CLEANUP_FAILURES = [
+	"command process group survived bounded cleanup",
+	"command output pipes did not drain before the cleanup deadline",
+] as const;
 /** A commit step asked to record a tree with nothing in it. */
 export const CODE_STEP_EMPTY_DIFF_EXIT_CODE = 125;
 export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace has no changes to record";
@@ -595,9 +600,9 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 			input.signal?.removeEventListener("abort", onAbort);
 			child.unref();
 			const cleanupFailure = cleanupStatus.incomplete
-				? "command process group survived bounded cleanup"
+				? CODE_STEP_CLEANUP_FAILURES[0]
 				: pipeDrainIncomplete
-					? "command output pipes did not drain before the cleanup deadline"
+					? CODE_STEP_CLEANUP_FAILURES[1]
 					: null;
 			const exitCode = timedOut
 				? CODE_STEP_TIMEOUT_EXIT_CODE

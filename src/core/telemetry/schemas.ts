@@ -1473,7 +1473,9 @@ export const RunResultObjectSchema = Type.Object(
 								outputTail: Type.String(),
 								evidenceRunId: nullable(Type.String()),
 								/** Why the check ran nothing (refused, unconfigured, or its executable never started); absent when it ran. */
-								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed", "shutdown"])),
+								notRun: Type.Optional(
+									vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed", "shutdown", "no-tests"]),
+								),
 								/** The same check replayed on the task base; null when it was not compared. */
 								baseComparison: nullable(
 									Type.Object(

@@ -387,7 +387,10 @@ it("admits a toolchain check verify lists in a Python project and seals the argv
 	ok(stateDir);
 	const root = join(dirname(stateDir), "python-project");
 	mkdirSync(join(root, "tests"), { recursive: true });
-	writeFileSync(join(root, "tests", "test_greet.py"), "import unittest\n");
+	writeFileSync(
+		join(root, "tests", "test_greet.py"),
+		"import unittest\n\nclass GreetTest(unittest.TestCase):\n\tdef test_greet(self):\n\t\tpass\n",
+	);
 	const previousCwd = process.cwd();
 	process.chdir(root);
 	try {

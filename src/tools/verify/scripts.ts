@@ -352,6 +352,99 @@ export function unavailableCheck(check: ToolchainCheck): ToolResult {
 	);
 }
 
+/** The exit status pytest (`NO_TESTS_COLLECTED`) and unittest (`NO TESTS RAN`, Python 3.12+) give a run that collected no test. */
+const NO_TESTS_COLLECTED_EXIT = 5;
+
+/** `uv run` options that take a value, so the token after one is not the command. */
+const UV_RUN_VALUE_OPTIONS = new Set([
+	"--with",
+	"--with-editable",
+	"--with-requirements",
+	"--python",
+	"-p",
+	"--project",
+	"--directory",
+	"--package",
+	"--extra",
+	"--group",
+	"--only-group",
+	"--no-group",
+	"--env-file",
+	"--index",
+	"--default-index",
+	"--index-url",
+	"--extra-index-url",
+	"--find-links",
+	"-f",
+	"--cache-dir",
+	"--config-file",
+]);
+
+/** Python options that take a value before `-m`. */
+const PYTHON_VALUE_OPTIONS = new Set(["-W", "-X", "--check-hash-based-pycs"]);
+
+function executableName(arg: string | undefined): string {
+	return (
+		(arg ?? "")
+			.split(/[\\/]/u)
+			.pop()
+			?.replace(/\.exe$/iu, "") ?? ""
+	);
+}
+
+/** Where the launched command starts: after `uv run [options] [--]`, `poetry run [--]` or `pipenv run [--]`, else 0. */
+function launchedCommandIndex(argv: ReadonlyArray<string>): number {
+	const launcher = executableName(argv[0]);
+	if (argv[1] !== "run" || !["uv", "poetry", "pipenv"].includes(launcher)) return 0;
+	let index = 2;
+	while (launcher === "uv" && argv[index]?.startsWith("-") === true && argv[index] !== "--") {
+		const option = argv[index] ?? "";
+		index += UV_RUN_VALUE_OPTIONS.has(option) ? 2 : 1;
+	}
+	return argv[index] === "--" ? index + 1 : index;
+}
+
+/**
+ * Whether an argv runs pytest or unittest, read from its start: an optional `uv run`, `poetry run` or `pipenv run`
+ * launcher, then a Python interpreter with `-m pytest|unittest`, or a `pytest` / `py.test` executable. A `-m pytest`
+ * handed to anything else (`npm run pytest`, a script given `-m pytest`) is not a Python test runner.
+ */
+function pythonTestRunnerArgv(argv: ReadonlyArray<string>): boolean {
+	let index = launchedCommandIndex(argv);
+	const executable = executableName(argv[index]);
+	if (/^py\.?test$/u.test(executable)) return true;
+	if (!/^python(?:\d+(?:\.\d+)?)?$/u.test(executable)) return false;
+	index += 1;
+	while (index < argv.length && argv[index] !== "-m") {
+		const option = argv[index] ?? "";
+		// A script path or `-c` code before `-m` means the interpreter runs that instead.
+		if (!option.startsWith("-") || option === "-c" || option === "-") return false;
+		index += PYTHON_VALUE_OPTIONS.has(option) ? 2 : 1;
+	}
+	const module = argv[index + 1];
+	return argv[index] === "-m" && (module === "pytest" || module === "unittest");
+}
+
+/**
+ * Whether the runner's own summary says it collected no test and nothing failed: unittest's `NO TESTS RAN` (a
+ * `setUpClass` or `setUpModule` error also exits 5 on Python 3.12+, but prints `FAILED`), or pytest's `no tests ran`
+ * / `collected 0 items` with no failure or error section.
+ */
+function reportsNoTests(output: string): boolean {
+	if (/^FAILED\b|^ERROR:|\b\d+ (?:failed|errors?)\b|=+ (?:ERRORS|FAILURES) =+/mu.test(output)) return false;
+	return /^NO TESTS RAN\s*$/mu.test(output) || /\bno tests ran\b|^collected 0 items\b/mu.test(output);
+}
+
+/**
+ * A pytest or unittest run that exited 5 and whose own summary says no test was collected judged nothing: a
+ * script-style test file with module-level asserts is not a test case either runner collects (CLI-P51). Exit 5
+ * alone is not enough, since a fixture error or `sys.exit(5)` can give it too. Host verification seals the same
+ * run as not run.
+ */
+export function collectedNoTests(argv: ReadonlyArray<string>, exitCode: number | null, output: string): boolean {
+	return exitCode === NO_TESTS_COLLECTED_EXIT && pythonTestRunnerArgv(argv) && reportsNoTests(output);
+}
+
 /** Startup diagnostics only: a test assertion mentioning permissions is still a failed test. */
 function classifyUnavailable(result: ToolResult, check: string, command: ReadonlyArray<string>): ToolResult {
 	if (
@@ -361,6 +454,22 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 		(Array.isArray(result.details?.completedRuns) && result.details.completedRuns.length > 0)
 	)
 		return result;
+	if (
+		collectedNoTests(
+			command,
+			typeof result.details?.exitCode === "number" ? result.details.exitCode : null,
+			result.message,
+		) &&
+		!result.details?.timedOut &&
+		!result.details?.aborted &&
+		!result.details?.outputCapped
+	) {
+		return {
+			...result,
+			message: `verify: unavailable '${check}': no tests collected (${command.join(" ")} exited with code ${NO_TESTS_COLLECTED_EXIT}), so it judged nothing. Rerunning this entry cannot help; run the project's own test command instead (a script-style test file runs as its own script), or report the limitation and stop.`,
+			details: { ...result.details, check, noTestsCollected: true, judgement: judgement("unavailable", "not-run") },
+		};
+	}
 	const message = result.message;
 	const diagnostic = message
 		.replace(

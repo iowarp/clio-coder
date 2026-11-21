@@ -24,7 +24,10 @@ beforeEach(async () => {
 	cwd = join(isolated.dir, "repo");
 	write("pyproject.toml", '[project]\nname = "harbor"\nversion = "0.1.0"\n');
 	write("uv.lock", "version = 1\n");
-	write("tests/test_harbor.py", "import unittest\n");
+	write(
+		"tests/test_harbor.py",
+		"import unittest\n\nclass HarborTest(unittest.TestCase):\n\tdef test_harbor(self):\n\t\tpass\n",
+	);
 	write("src/harbor/__init__.py", "");
 	write(
 		".github/workflows/gate.yml",

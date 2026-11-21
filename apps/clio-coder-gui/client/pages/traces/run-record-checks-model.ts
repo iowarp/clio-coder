@@ -171,6 +171,7 @@ const HOST_SOURCE =
 
 const HOST_REASONS: Record<string, string> = {
 	worker_not_successful: "The worker did not succeed, so the declared checks did not run.",
+	no_tests_collected: "The test runner collected no tests, so no declared check judged the result.",
 };
 
 /** Why a host check never started; mirrors `hostCheckNotRunNote` in the dispatch domain. */
@@ -180,6 +181,7 @@ const NOT_RUN_REASONS: Record<string, string> = {
 	"spawn-failed": "its process could not start",
 	"nothing-changed": "nothing changed under it",
 	shutdown: "a shutdown stopped it before it finished",
+	"no-tests": "its runner collected no tests",
 };
 
 function hostChecks(value: Sealed["hostVerification"]): CheckRow {
