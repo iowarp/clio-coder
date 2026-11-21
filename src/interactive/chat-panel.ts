@@ -92,7 +92,12 @@ import {
 } from "./renderers/tool-execution.js";
 import type { WorkerEntryRenderOptions } from "./renderers/worker-entry.js";
 import { renderWorkerEntryLines, workerTelemetryDisplay } from "./renderers/worker-entry.js";
-import { compactReasoningTokens, type ReasoningUsageView, UNMEASURED_REASONING } from "./status/index.js";
+import {
+	compactReasoningTokens,
+	isGenerationGuardAbort,
+	type ReasoningUsageView,
+	UNMEASURED_REASONING,
+} from "./status/index.js";
 import {
 	clioTheme,
 	fgSequence,
@@ -3665,7 +3670,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						(stop?.stopReason === "error"
 							? "Failed"
 							: stop?.stopReason === "aborted"
-								? stop.clioCoderAbortReason === "tool_argument_generation"
+								? isGenerationGuardAbort(stop.clioCoderAbortReason)
 									? "Generation stopped"
 									: "Cancelled"
 								: stop?.stopReason === "length"

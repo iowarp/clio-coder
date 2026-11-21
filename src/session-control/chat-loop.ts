@@ -2049,6 +2049,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						? repetitionRecoveryStage(state)
 						: null;
 				if (repetitionStage !== null) attemptRetryForecast = repetitionRecoveryForecast(repetitionStage);
+				// A thinking-only output-limit stop whose one recovery follows closes an attempt too, so the footer does not
+				// read "Output limit" before the recovered turn's own outcome (f-repeat).
+				else if (
+					attemptRetryForecast === null &&
+					state.activeInterruptReason === null &&
+					state.activeUserTurnId !== null &&
+					state.thinkingLengthRecoveryTurnId !== state.activeUserTurnId &&
+					isThinkingOnlyLengthStop(event.message)
+				)
+					attemptRetryForecast = { attempt: 1, maxAttempts: 1, recovery: true };
 				if (attemptRetryForecast !== null) Object.assign(event, { retryPending: attemptRetryForecast });
 			}
 			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {

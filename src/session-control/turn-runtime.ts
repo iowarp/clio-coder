@@ -2173,7 +2173,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						terminal.stopReason === "aborted" && state.activeInterruptReason === null
 							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
-					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
+					if (harnessStop !== null)
+						Object.assign(message, {
+							errorMessage: harnessStop,
+							harnessStopped: true,
+							// The repetition guard stopped the generation; the operator did not cancel it (f-repeat).
+							...(state.repetitionAbortReason !== null ? { clioCoderAbortReason: "repetition" } : {}),
+						});
 					// An interrupt (the operator's cancel, triage, autonomy) is no route failure either, so it names no route.
 					else if (harnessCause === undefined || harnessCause === "route_moved")
 						Object.assign(message, {

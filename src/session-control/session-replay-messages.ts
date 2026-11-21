@@ -282,8 +282,8 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 	if (entry.role === "assistant") {
 		const failure = messageFailure(entry);
 		message.stopReason = failure?.stopReason ?? stopReason ?? "stop";
-		if (obj?.clioCoderAbortReason === "tool_argument_generation")
-			message.clioCoderAbortReason = "tool_argument_generation";
+		if (obj?.clioCoderAbortReason === "tool_argument_generation" || obj?.clioCoderAbortReason === "repetition")
+			message.clioCoderAbortReason = obj.clioCoderAbortReason;
 		if (failure) message.errorMessage = failure.errorMessage;
 		for (const key of [
 			"usage",
