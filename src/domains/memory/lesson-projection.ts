@@ -36,7 +36,8 @@ import { memoryRevision, recordClaim } from "./promotion.js";
 import { memoryStorePath, mutateMemoryRecords, readMemoryStoreSnapshot } from "./store.js";
 import type { MemoryClaimCommand, MemoryRecord } from "./types.js";
 
-export type KeptLessonApproval = "operator" | "automatic";
+/** `note`: an unpromoted fix claim a failed call matched; it rides only `_variant`, labelled unverified (DESIGN 4.4). */
+export type KeptLessonApproval = "operator" | "automatic" | "note";
 
 export interface KeptLesson {
 	readonly id: string;
@@ -65,7 +66,11 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 	const appliesWhen = record.appliesWhen.filter((condition) => !SCOPE_CONDITION.test(condition));
 	const avoidWhen = [...record.avoidWhen];
 	// A record approved before approval stamps existed was reviewed by a person (see guardian-gate).
-	const approval: KeptLessonApproval = record.approval?.by === "guardian" ? "automatic" : "operator";
+	const approval: KeptLessonApproval = !record.approved
+		? "note"
+		: record.approval?.by === "guardian"
+			? "automatic"
+			: "operator";
 	const evidenceRefs = record.evidenceRefs.filter(
 		(ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX) || ref.startsWith("source:"),
 	);
@@ -91,6 +96,7 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 /** How a reminder names who stands behind a lesson. */
 export function keptLessonLabel(lesson: KeptLesson): string {
 	if (lesson.approval === "operator") return "operator-approved";
+	if (lesson.approval === "note") return "unverified note from an earlier session";
 	if (lesson.evidenceRefs.length === 0) return "retained automatically";
 	// A file quote alone never vouches for a claim, so a lesson the gate kept on
 	// one before that rule is labelled as the unreviewed quote it is.

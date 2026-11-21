@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import {
+	AGENT_NOTE_EVIDENCE_PREFIX,
 	MEMORY_LEGACY_VERSION,
 	MEMORY_VERSION,
 	type MemoryRecord,
@@ -220,8 +221,8 @@ const LEGACY_OBSERVATION_FIELDS: ReadonlySet<string> = new Set(["at", "sessionId
 
 /**
  * At the cap, make room from notes nobody decided on: first those with no
- * command or source evidence ref (no agent authors one yet, so none is spared
- * as an agent's), then the other unpromoted notes, the one observed longest
+ * command or source evidence ref that no agent wrote through `memory_note`,
+ * then the other unpromoted notes, the one observed longest
  * ago first. A lesson, an operator approval or rejection, and a record this
  * write adds are never evicted, so a write never reports a record it already
  * dropped.
@@ -255,7 +256,10 @@ function lastObservedAt(record: MemoryRecord): string {
 }
 
 function hasEvidenceRef(record: MemoryRecord): boolean {
-	return record.evidenceRefs.some((ref) => /^(?:command|source):/u.test(ref));
+	return (
+		record.evidenceRefs.some((ref) => /^(?:command|source):/u.test(ref)) ||
+		record.provenance?.evidenceId?.startsWith(AGENT_NOTE_EVIDENCE_PREFIX) === true
+	);
 }
 
 /**

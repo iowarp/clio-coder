@@ -2282,7 +2282,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!isPlainObject(memory.surfaces))
 							issues.add("context.memory.surfaces", `expected a map, got ${describe(memory.surfaces)}`);
 						else {
-							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe", "delivery", "correct", "bank"]);
+							issues.unknownKeys("context.memory.surfaces", memory.surfaces, [
+								"observe",
+								"delivery",
+								"lessons",
+								"correct",
+								"bank",
+							]);
 							if ("observe" in memory.surfaces) {
 								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
 									"off",
@@ -2298,6 +2304,15 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 									"broadcast",
 								] as const);
 								if (parsed !== undefined) settings.context.memory.surfaces.delivery = parsed;
+							}
+							if ("lessons" in memory.surfaces) {
+								const parsed = expectEnum(issues, "context.memory.surfaces.lessons", memory.surfaces.lessons, [
+									"off",
+									"rules",
+									"agent",
+									"side",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces.lessons = parsed;
 							}
 							for (const key of ["correct", "bank"] as const) {
 								if (!(key in memory.surfaces)) continue;

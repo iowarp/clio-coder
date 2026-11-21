@@ -50,6 +50,8 @@ export const COORDINATOR_DIRECT_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.AskUser,
 	ToolNames.Consult,
 	ToolNames.Finish,
+	// Attached only to a session that starts with `context.memory.surfaces.lessons: agent` (DESIGN 4.4, Q2).
+	ToolNames.MemoryNote,
 ]);
 
 export function coordinatorToolPlacement(name: string): ToolPlacement {
@@ -96,6 +98,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Finish]: "direct",
 	[ToolNames.Decide]: "direct",
 	[ToolNames.Consult]: "direct",
+	[ToolNames.MemoryNote]: "direct",
 	[ToolNames.Vision]: "gateway",
 	[ToolNames.WebRead]: "gateway",
 	[ToolNames.WebFetch]: "gateway",

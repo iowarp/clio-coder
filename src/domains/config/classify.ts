@@ -91,6 +91,9 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	// Reminders read it at each decision point; a running session's `# Memory` section stays as it was compiled, so a
 	// new session (or a resumed one recompiling its prompt) is the first to carry a changed section.
 	"context.memory.surfaces.delivery",
+	// Rules capture, the side pass and memory_note's refusal read it at each call; whether memory_note is attached at
+	// all is fixed when the session's tools are registered, so turning `agent` on reaches the tool after a restart.
+	"context.memory.surfaces.lessons",
 	// The memory middleware and route read these at each trigger and each call; the next turn observes a change.
 	"context.memory.surfaces.correct",
 	"context.memory.surfaces.bank",

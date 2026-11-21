@@ -127,6 +127,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"label",
 	"labels",
 	"layout",
+	"lessons",
 	"library",
 	"lifecycle",
 	"limits",

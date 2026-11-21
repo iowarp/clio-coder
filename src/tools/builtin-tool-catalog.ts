@@ -224,6 +224,16 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			followUpHint: "Narrow the query or lower limit.",
 		},
 	},
+	[ToolNames.MemoryNote]: {
+		objective:
+			"Keep an unverified note for later sessions in this repository, bound to a command or read from this session.",
+		uiLabel: "Note",
+		resultSizePolicy: {
+			kind: "bounded",
+			maxBytes: 4_096,
+			followUpHint: "The result names the note's id; memory_recall shows it.",
+		},
+	},
 	// MUTATE: write-class, sequential, file-mutation queue.
 	[ToolNames.Write]: {
 		objective: "Create a file, or replace all of an existing file.",

@@ -16,3 +16,4 @@ each clause to evidence in your diff or a check you ran; a clause without
 evidence is unfinished: finish it or record it with limitation.
 {report} A problem with CLIO Coder itself is saved with `report` action "draft" and
 named in the final answer; nothing is filed.
+{memory_note} `memory_note` is for what a later session in this repository would need and could not learn from the code.

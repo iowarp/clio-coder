@@ -1,9 +1,10 @@
 import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import type { MemoryDeliveryMode } from "../../core/defaults.js";
+import type { MemoryDeliveryMode, MemoryLessonsMode } from "../../core/defaults.js";
 import type { FoldPlannerView } from "../context/fold/pressure.js";
 import { foldProjection } from "../context/fold/pressure.js";
+import type { CommandSegment } from "./command-evidence.js";
 import type { MemoryCommitScope, SuccessfulMemoryContextCommit } from "./commit-state.js";
 import type { RetentionStatus } from "./completion-retention.js";
 import {
@@ -36,7 +37,8 @@ import type {
 } from "./intervention.js";
 import { createMemoryInterventionRegistration } from "./intervention.js";
 import { type HistoryFiling, type HistoryLessons, MemoryLessonFeedback } from "./lesson-feedback.js";
-import { createKeptLessonSource, type KeptLesson, MemoryDeliveryGate } from "./lesson-projection.js";
+import { createKeptLessonSource, type KeptLesson, MemoryDeliveryGate, projectKeptLesson } from "./lesson-projection.js";
+import { fileFixNote, type MemoryNoteArgs, type MemoryNoteWritten, writeAgentNote } from "./notes.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationEvent, observationTracing, traceObservation } from "./observation-events.js";
 import {
@@ -57,9 +59,11 @@ import {
 	reflectionRequest,
 	sourceCoverageDigest,
 } from "./observations.js";
+import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { memorySectionBlocks } from "./prompt-section.js";
 import { readDemotedMemoryIds } from "./recall-use.js";
 import { memoryRouteJson } from "./secret-text.js";
+import { loadMemoryRecordsSync } from "./store.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import {
@@ -67,6 +71,7 @@ import {
 	TaskMemoryEndpointBusyError,
 	TaskMemoryEndpointPreemptedError,
 } from "./task-memory-policy.js";
+import type { MemoryRepositoryIdentity } from "./types.js";
 
 export interface MemoryRuntimeInfrastructure {
 	stateDir(): string;
@@ -82,7 +87,7 @@ export interface MemoryRuntimeInfrastructure {
 	closedLessonSource?(sessionId: string): { scope: MemoryCommitScope; source: CompletedLessonSource } | null;
 	settings(): {
 		enabled: boolean;
-		surfaces: { observe: "off" | "on"; delivery?: MemoryDeliveryMode };
+		surfaces: { observe: "off" | "on"; delivery?: MemoryDeliveryMode; lessons?: MemoryLessonsMode };
 		maxOutputTokens: number;
 		timeoutMs: number;
 	};
@@ -138,6 +143,8 @@ export type MemoryInterventionInfrastructure = Omit<
 	| "onKnowledgeReview"
 	| "onKeptLessonsRetired"
 	| "onScopeEnd"
+	| "onFixPair"
+	| "getFixNotes"
 >;
 
 /** Retention markers read per discovery step, and closed ledgers rebuilt per step. */
@@ -299,6 +306,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		diagnostic: (line) => this.#infrastructure?.diagnostic?.(line),
 		event: (name, facts) => this.#event(name, facts),
 	});
+	/** Note writes started so far, so a caller waiting on lesson writes waits on these too. */
+	#noteWrites: Promise<void> = Promise.resolve();
+	/** Fix notes this session may be shown: those in the store when it first asked, never one a peer wrote since. */
+	#notesBaseline: { session: string | undefined; ids: Set<string> } | null = null;
 	/** The lessons this session may be reminded of: those it could see when it began, plus operator approvals since. */
 	#deliveryBaseline: { session: string | undefined; revisions: Set<string> } | null = null;
 
@@ -347,6 +358,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	async whenLessonsSettled(): Promise<void> {
 		await this.#feedback.whenSettled();
 		await this.delivery.whenSettled();
+		await this.#noteWrites;
 	}
 
 	/**
@@ -383,12 +395,94 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		return this.#deliveryBaseline.revisions;
 	}
 
+	/**
+	 * Unpromoted fix notes earlier sessions of this repository wrote, for the `_variant` reminder only (DESIGN 4.4):
+	 * undecided, uncontradicted, not demoted, not this session's own, and in the store when this session first asked,
+	 * since a claim another running session writes reaches its successor, not this session.
+	 */
+	fixNotes(): readonly KeptLesson[] {
+		const infra = this.#infrastructure;
+		if (!infra?.settings().enabled || !infra.dataDir) return [];
+		try {
+			const root = infra.cwd?.() ?? process.cwd();
+			const repository = canonicalMemoryRepositoryIdentity(root);
+			if (repository === null) return [];
+			const session = infra.currentSession?.()?.id;
+			const demoted = this.delivery.demoted();
+			const notes = loadMemoryRecordsSync(infra.dataDir()).filter(
+				(record) =>
+					!record.approved &&
+					record.rejectedAt === undefined &&
+					(record.regressions?.length ?? 0) === 0 &&
+					record.scope === "repo" &&
+					sameRepository(record.repository, repository) &&
+					record.claim?.kind === "fix" &&
+					record.provenance?.sourceSessionId !== session &&
+					!demoted.has(record.id),
+			);
+			if (this.#notesBaseline === null || this.#notesBaseline.session !== session)
+				this.#notesBaseline = { session, ids: new Set(notes.map((record) => record.id)) };
+			const baseline = this.#notesBaseline.ids;
+			return notes.filter((record) => baseline.has(record.id)).map(projectKeptLesson);
+		} catch {
+			return []; /* An unreadable store surfaces nothing; the session continues without it. */
+		}
+	}
+
+	/** Rules capture's pair, filed as a fix note under this session (DESIGN 4.4). Best effort, never awaited by a turn. */
+	#fileFixNote(pair: { failed: CommandSegment; fixed: CommandSegment }): void {
+		const infra = this.#infrastructure;
+		const session = infra?.currentSession?.();
+		const dataDir = infra?.dataDir?.();
+		if (!infra || !session || !dataDir || infra.sessionFlowRestricted?.(session.id)) return;
+		this.#noteWrites = this.#noteWrites.then(async () => {
+			try {
+				await fileFixNote(dataDir, { sessionId: session.id, cwd: session.cwd, ...pair });
+			} catch (error) {
+				infra.diagnostic?.(`fix note not filed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		});
+	}
+
+	/**
+	 * The `memory_note` tool's ports, or nothing when this session starts without `lessons: agent` (or with memory
+	 * off): the tool is attached only then, so the session's tool set stays fixed and a session without it pays no
+	 * schema bytes (DESIGN 7, Q2). An attached tool refuses once either setting changes.
+	 */
+	noteTool(): { memoryNote?: { enabled(): boolean; write(args: MemoryNoteArgs): Promise<MemoryNoteWritten> } } {
+		const agent = () => {
+			const settings = this.#infrastructure?.settings();
+			return settings?.enabled === true && settings.surfaces.lessons === "agent";
+		};
+		if (!agent() || !this.#registration) return {};
+		return { memoryNote: { enabled: agent, write: (args) => this.#writeNote(args) } };
+	}
+
+	async #writeNote(args: MemoryNoteArgs): Promise<MemoryNoteWritten> {
+		const infra = this.#infrastructure;
+		const session = infra?.currentSession?.();
+		const dataDir = infra?.dataDir?.();
+		if (!infra || !session || !dataDir || !this.#registration) throw new Error("no session to note for");
+		// A restricted session's content carries no label once stored, and reaches every later session.
+		if (infra.sessionFlowRestricted?.(session.id)) throw new Error("this session's information flow keeps notes out");
+		const evidence = this.#registration.noteEvidence(args);
+		if (evidence !== null && "refused" in evidence) throw new Error(evidence.refused);
+		const written = writeAgentNote(dataDir, { sessionId: session.id, cwd: session.cwd, args, evidence });
+		this.#noteWrites = this.#noteWrites.then(
+			() => written.then(() => undefined),
+			() => undefined,
+		);
+		return written;
+	}
+
 	createIntervention(deps: MemoryInterventionInfrastructure): MemoryInterventionRegistration {
 		if (this.#registration) throw new Error("memory intervention already bound");
 		const original = createMemoryInterventionRegistration({
 			...deps,
 			getKeptLessons: () => this.deliverableLessons(),
 			getDelivery: () => this.delivery.mode(),
+			getFixNotes: () => this.fixNotes(),
+			onFixPair: (pair) => this.#fileFixNote(pair),
 			// Only a job actually in flight holds the boundary step back. Pending observation
 			// work runs only when idle, so waiting on it starved every mid-turn step.
 			deferBoundaryPolicy: () => this.#controller !== null,
@@ -947,8 +1041,12 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	} | null {
 		const infra = this.#infrastructure;
 		if (!infra?.settings().enabled || !infra.lessonSource || this.#disposed) return null;
+		// Completion retention is the side author's (DESIGN 4.4): off unless `lessons: side`, and for the live session
+		// armed only by a fix pair it saw. A closed session's retention was armed when it ran.
+		if (infra.settings().surfaces.lessons !== "side") return null;
 		const current = this.#registration?.captureMemoryAuthority()?.scope ?? null;
-		const currentSource = current && !orphanOnly ? infra.lessonSource() : null;
+		const armed = (this.#registration?.fixPairCount() ?? 0) > 0;
+		const currentSource = current && !orphanOnly && armed ? infra.lessonSource() : null;
 		if (current && currentSource) {
 			this.#lastRetention = { scope: current, source: currentSource };
 			const existing = readRetention(retentionPath(infra.stateDir(), current, currentSource));
@@ -1080,6 +1178,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			if (this.#retention.phase !== "extracting")
 				this.#retention = { ...EMPTY_RETENTION, phase: "pending", reason: "memory-in-flight" };
 			this.#event("lesson-extraction-deferred", { reason: "memory-in-flight" });
+			return this.#retention;
+		}
+		if (this.#infrastructure.settings().surfaces.lessons !== "side") {
+			this.#retention = { ...EMPTY_RETENTION, phase: "skipped", reason: "lessons-not-side" };
+			this.#event("lesson-extraction-skipped", { reason: "lessons-not-side" });
 			return this.#retention;
 		}
 		const work = this.#retentionWork(orphanOnly);
@@ -1455,6 +1558,13 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			typeof sessionId === "string" ? sessionId : this.#registration?.captureMemoryAuthority()?.scope.sessionId,
 		);
 	}
+}
+
+function sameRepository(
+	record: MemoryRepositoryIdentity | undefined,
+	active: MemoryRepositoryIdentity,
+): record is MemoryRepositoryIdentity {
+	return record !== undefined && record.kind === active.kind && record.key === active.key;
 }
 
 /** Retention reached a decision that another attempt would not change. */

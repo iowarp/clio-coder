@@ -60,6 +60,12 @@ export interface MemoryRecordProvenance {
 	redaction?: MemoryPromotionRedaction;
 }
 
+/**
+ * The evidence id of a note the main agent wrote through `memory_note` with neither a command nor a read to bind: it
+ * names the authoring session, is found by `memory_recall` only, and no gate promotes it without the operator.
+ */
+export const AGENT_NOTE_EVIDENCE_PREFIX = "agent-note:";
+
 export const MEMORY_OBSERVATION_KINDS = ["delivered", "held", "contradicted"] as const;
 export type MemoryObservationKind = (typeof MEMORY_OBSERVATION_KINDS)[number];
 /**
