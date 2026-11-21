@@ -14,6 +14,7 @@ import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-fingerprint.js";
+import { observationEvent } from "../../src/domains/memory/observation-events.js";
 import { recordFiredRules } from "../../src/domains/middleware/fired-record.js";
 import { openCallJournalHealth, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { grantTelemetryConsent } from "../../src/domains/telemetry/consent.js";
@@ -234,7 +235,7 @@ it("the live session's writer stays open while idle, and an unchanged reopen rec
 	}
 });
 
-it("facts a fresh session's first turn emits before it binds are filed under it on bind (CLI-P47)", async () => {
+it("facts a fresh session's first turn emits before it binds are filed under it on bind (CLI-P47, FX-45)", async () => {
 	const env = await isolateClioEnv("clio-coder-pre-bind-");
 	const bus = createTelemetryHub();
 	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
@@ -252,6 +253,8 @@ it("facts a fresh session's first turn emits before it binds are filed under it 
 			},
 			"sync",
 		);
+		// MD5's session-start delivery check decides before the bind too.
+		observationEvent("lesson-withheld", { id: "lesson-one", reason: "unverified", by: "guardian" });
 		bus.emit("session.created", { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
 		await extension.stop?.();
 		const records = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))).records.map(
@@ -260,6 +263,10 @@ it("facts a fresh session's first turn emits before it binds are filed under it 
 		const fired = records.find((record) => record.k === "middleware.fired");
 		strictEqual(fired?.ctx.sessionId, origin.id, "the first turn's turn_start firing reaches its session");
 		strictEqual(fired?.ctx.turnId, "turn-one");
+		ok(
+			records.some((record) => record.k === "memory.observation_recorded" && record.ctx.sessionId === origin.id),
+			"a delivery-gate decision before the bind is the session's",
+		);
 	} finally {
 		env.restore();
 	}
