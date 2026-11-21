@@ -7,17 +7,22 @@ export interface SessionWorkspace {
 	workspaceId: string;
 }
 
-function workspaceSessionPath(stateDir: string, sessionId: string): string {
-	return join(stateDir, "extension-workspaces", `${encodeURIComponent(sessionId)}.json`);
+/** One `<encoded session id>.json` per session that opened an extension workspace. */
+export function sessionWorkspacesDir(stateDir: string): string {
+	return join(stateDir, "extension-workspaces");
+}
+
+export function sessionWorkspaceFile(stateDir: string, sessionId: string): string {
+	return join(sessionWorkspacesDir(stateDir), `${encodeURIComponent(sessionId)}.json`);
 }
 
 export function writeSessionWorkspace(stateDir: string, sessionId: string, active: SessionWorkspace | null): void {
-	safeResourceWrite(workspaceSessionPath(stateDir, sessionId), `${JSON.stringify(active)}\n`, { mode: 0o600 });
+	safeResourceWrite(sessionWorkspaceFile(stateDir, sessionId), `${JSON.stringify(active)}\n`, { mode: 0o600 });
 }
 
 export function readSessionWorkspace(stateDir: string, sessionId: string): SessionWorkspace | null {
 	try {
-		const value: unknown = JSON.parse(readFileSync(workspaceSessionPath(stateDir, sessionId), "utf8"));
+		const value: unknown = JSON.parse(readFileSync(sessionWorkspaceFile(stateDir, sessionId), "utf8"));
 		if (
 			value !== null &&
 			typeof value === "object" &&

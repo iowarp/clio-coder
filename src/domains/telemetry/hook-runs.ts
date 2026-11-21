@@ -25,8 +25,10 @@ export function workspaceHookRuns(stateDir: string, cwdHash: string, now = Date.
 	const fold = (journal: JournalSource): void => {
 		for (const record of journal.records) {
 			if (record.k !== "hook.ran") continue;
-			summary.count += 1;
-			summary.outcomes[record.data.outcome] = (summary.outcomes[record.data.outcome] ?? 0) + 1;
+			// One record stands for every effect-free run of a hook in its turn (C-33).
+			const runs = record.data.runs ?? 1;
+			summary.count += runs;
+			summary.outcomes[record.data.outcome] = (summary.outcomes[record.data.outcome] ?? 0) + runs;
 			if (!summary.mostRecent || record.t > summary.mostRecent.at)
 				summary.mostRecent = { at: record.t, hookId: record.data.hookId, outcome: record.data.outcome };
 		}

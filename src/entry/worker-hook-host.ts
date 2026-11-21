@@ -50,6 +50,8 @@ export function startWorkerHookHost(options: WorkerHookHostOptions): WorkerHookH
 		chat: { isStreaming: () => false, turnPreparation: () => ({ phase: "idle", since: 0 }), onEvent: () => () => {} },
 		sessionId: () => null,
 		targetId: () => "",
+		// Workers never prune: another process's main session host owns the state of sessions it did not see (C-35).
+		pruneOrphanedSessionState: false,
 		notify: options.notify,
 		...(options.sandboxUnixSockets ? { sandboxUnixSockets: options.sandboxUnixSockets } : {}),
 	});
@@ -60,6 +62,8 @@ export function startWorkerHookHost(options: WorkerHookHostOptions): WorkerHookH
 			// A run that ends before startup settles would otherwise report its runtimes' staging as a failed reload.
 			await host.ready.catch(() => undefined);
 			await host.dispose();
+			// No main turn ends here, so the effect-free hook runs of the workers it served are written now.
+			reload.flushHookReceipts();
 		},
 	};
 }
