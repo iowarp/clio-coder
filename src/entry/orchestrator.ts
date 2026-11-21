@@ -1146,6 +1146,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const loopGuard = createLoopGuardRegistration({
 		safety,
 		bus,
+		readResultMaxBytes: () => (effectiveSettingsForDispatch?.() ?? resolvedSettings).context.toolResultMaxBytes,
 		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
 		sameCallBlockLimit: INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
 		turnToolCallBudget: () => readOrchTurnToolCallBudget(),
@@ -1241,6 +1242,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		() => telemetry?.acquireTelemetrySession,
 		() => session?.current(),
+		() => telemetry,
 	);
 	// Lesson gate decisions reach the operator through the transcript notice
 	// path once the chat loop has bound it; before that, a diagnostic line.
@@ -1311,6 +1313,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				windowSteps: memory.trajectorySteps,
 				maxTokens: memory.maxOutputTokens,
 				timeoutMs: memory.timeoutMs,
+				surfaces: memory.surfaces,
 			};
 		},
 		...createBackgroundMemoryRouting(

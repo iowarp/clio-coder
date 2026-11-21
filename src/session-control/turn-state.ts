@@ -149,11 +149,12 @@ export class ContinuationState {
 		return this.#stop;
 	}
 
-	/** Prompt acceptance: a fresh operator prompt resets the caps its own continuations do not. */
+	/** Prompt acceptance: a fresh operator prompt resets the caps its own continuations, middleware or yolo, do not (FX-41). */
 	beginPrompt(kind: { requestContinuation: boolean; yoloContinuation: boolean }): void {
 		this.#inRun = false;
 		this.#stop = null;
-		if (!kind.yoloContinuation) this.#yoloContinuations = 0;
+		if (kind.yoloContinuation) return;
+		this.#yoloContinuations = 0;
 		if (!kind.requestContinuation) {
 			this.#nudgeSpent = false;
 			this.#verificationNudgeSpent = false;
@@ -331,7 +332,10 @@ export interface ChatTurnState {
 	turnCalledWork: boolean;
 	/** The one pinned `finish` round an unattended turn gets is spent; a continuation of that prompt keeps it. */
 	finishRoundSpent: boolean;
-	/** This user turn's one refusal of an attended `finish` with no reply text is spent (FX-40). */
+	/**
+	 * This user turn's one refusal of an attended `finish` with no reply text is spent (FX-40); a yolo continuation of
+	 * the prompt keeps it, and an operator message handed into the run resets it.
+	 */
 	finishReplyRefused: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;

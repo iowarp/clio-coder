@@ -3609,13 +3609,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnCollectedDetachedBatch = false;
 				state.turnCompletion = null;
 				state.turnSealedCompletion = null;
-				if (options.requestContinuation !== true) {
+				// The finish round and the bare-finish refusal are once per operator prompt (fleet M5, FX-40, FX-41): a yolo
+				// continuation of the prompt keeps them; a handed-over operator message resets the refusal (turn-persistence).
+				if (options.requestContinuation !== true && options.yoloContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
-					if (options.yoloContinuation !== true && options.machineTurn === undefined)
-						headlessObservation?.reset(options.hostRun?.runId);
+					if (options.machineTurn === undefined) headlessObservation?.reset(options.hostRun?.runId);
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
@@ -4342,6 +4343,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
+					// A turn that ended without its turn_end hook (a throw or an abort before any reply) ended here, while this
+					// submit still owns the stream and its lease: a resubmit below can take ownership and return before its turn_start.
+					if (promptStarted && submitOwner === owner) outcomeCollector.endTurn();
 					state.streaming = false;
 					// A run that ended without reaching its tool boundary has nothing left to stop.
 					boundaryStop = null;
@@ -4584,8 +4588,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 			} finally {
-				await turnLease?.release();
+				// Settlements land before the lease release flushes, and possibly seals, the session's journal.
 				middleware.releaseTurnHolds(turnHolds);
+				await turnLease?.release();
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
@@ -4911,6 +4916,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queues.reset({ keepOperator: sessionId !== null && sessionId === queueSessionId });
 			queueSessionId = sessionId;
 			middleware.clearPendingReminders();
+			// The turn the reset cut off never reaches its turn_end hook: what its requests carried settles with it now.
+			outcomeCollector.closeSession();
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			state.lastRunSnapshot = null;

@@ -147,7 +147,7 @@ function isDirectory(path: string): boolean {
  * statDataFile, except that a directory passes when it is a Zarr store or an
  * ADIOS2 BP directory: both formats are directories of files, not one file.
  */
-function statDataPath(path: string): { size: number } | DataRefusal {
+export function statDataPath(path: string): { size: number } | DataRefusal {
 	if (isDirectory(path)) {
 		if (directoryFormat(path) !== null) return { size: 0 };
 		return refusal(

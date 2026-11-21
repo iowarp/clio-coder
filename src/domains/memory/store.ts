@@ -95,14 +95,19 @@ function memoryInvalidRecordsPath(dataDir: string): string {
 }
 
 export async function loadMemoryRecords(dataDir: string): Promise<MemoryRecord[]> {
+	return (await loadMemoryStore(dataDir)).records;
+}
+
+/** The valid records and the ones set aside as invalid; a read never writes, so those stay put until a store write. */
+export async function loadMemoryStore(dataDir: string): Promise<ParsedMemoryStore> {
 	let raw: string;
 	try {
 		raw = await readFile(memoryStorePath(dataDir), "utf8");
 	} catch (error) {
-		if (isErrorWithCode(error) && error.code === "ENOENT") return [];
+		if (isErrorWithCode(error) && error.code === "ENOENT") return { records: [], invalid: [] };
 		throw error;
 	}
-	return parseAndValidate(raw, memoryStorePath(dataDir)).records;
+	return parseAndValidate(raw, memoryStorePath(dataDir));
 }
 
 /**

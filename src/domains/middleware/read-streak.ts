@@ -34,6 +34,10 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCa
  * standalone serial note are `inject_reminder` effects: the main session
  * delivers one at the tool-batch boundary as a host-framed user message,
  * the channel the weakest models answer.
+ *
+ * A writer worker (X3) has no turn_start report, so it passes its surface,
+ * and it has its own host channel: the second step goes there once, in place
+ * of the second and last notes.
  */
 
 export const READ_STREAK_REGISTRATION_ID = "nudge.read-streak";
@@ -180,14 +184,20 @@ type CallEffect = "read" | "progress" | "other";
 export function createReadStreakRegistration(deps: {
 	classifiers: ReadStreakClassifiers;
 	workspaceRoot?: () => string;
-}): MiddlewareHookRegistration {
+	/** What a run that reports no turn_start can do; absent reads as a writer that can plan and ask. */
+	surface?: TurnSurface;
+	/** A host channel of the run's own: it takes the second step, once per streak, and no ladder note follows it. */
+	secondStep?: (count: number) => void;
+	/** Called whenever the streak starts over, so a host holding the second step can drop it. */
+	onReset?: () => void;
+}): MiddlewareHookRegistration & { resetStreak(): void } {
 	const state: StreakState = {
 		sessionId: undefined,
 		reads: 0,
 		serial: 0,
 		serialNoted: false,
 		folded: false,
-		surface: WRITER,
+		surface: deps.surface ?? WRITER,
 		chain: null,
 	};
 	const reset = (): void => {
@@ -195,6 +205,7 @@ export function createReadStreakRegistration(deps: {
 		state.serial = 0;
 		state.serialNoted = false;
 		state.folded = false;
+		deps.onReset?.();
 	};
 	const followSession = (sessionId: string | undefined): void => {
 		if (sessionId === undefined || sessionId === state.sessionId) return;
@@ -236,6 +247,13 @@ export function createReadStreakRegistration(deps: {
 		if (batch === 1) state.serial += 1;
 		else if (batch !== null && batch > 1) state.serial = 0;
 		const surface = state.surface;
+		if (deps.secondStep !== undefined && surface.canWrite && state.reads >= SECOND_NOTE) {
+			if (state.reads === SECOND_NOTE) {
+				context?.evidence?.(STREAK_EVIDENCE);
+				deps.secondStep(state.reads);
+			}
+			return NONE;
+		}
 		const serialRun = state.serial >= SERIAL_ROUNDS;
 		let message: string | null = null;
 		if (surface.canWrite) {
@@ -264,6 +282,8 @@ export function createReadStreakRegistration(deps: {
 
 	return {
 		id: READ_STREAK_REGISTRATION_ID,
+		// A run with no turn_start report (a worker) starts the streak over here when its operator steers it.
+		resetStreak: reset,
 		description: "ask for a decision after a long run of read-only calls with no edit, plan or question",
 		hooks: ["turn_start", "before_tool", "after_tool", "on_compaction"],
 		evidence: STREAK_EVIDENCE,

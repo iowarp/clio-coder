@@ -2744,6 +2744,7 @@ export const MemoryStepDecidedSchema = Type.Object(
 			"quota_window",
 			"quota_retry",
 			"time_budget",
+			"side_share",
 			"client_error",
 			"information_flow_blocked",
 			"no_client",
