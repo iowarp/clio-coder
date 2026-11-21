@@ -327,6 +327,8 @@ test("fleet events --follow stops when the process running the fleet is gone", {
 			id: rootId,
 			fleet: "f",
 			planHash: "a".repeat(64),
+			planIdentityHash: "a".repeat(64),
+			cwd: "/workspace/project",
 			stepIds: ["s"],
 			planSteps: [],
 			vars: {},

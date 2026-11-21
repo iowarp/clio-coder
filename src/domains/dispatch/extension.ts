@@ -427,6 +427,7 @@ import {
 	hostVerificationSandbox,
 	runHostVerification,
 } from "./host-verification.js";
+import { architectPlanOutsideWriteRoots } from "./intent-compatibility.js";
 import { renderDispatchIntentRequirements, renderWithheldNotice } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
@@ -1478,6 +1479,7 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"worker_output_cap_exhausted",
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
 	"worker_no_work",
@@ -1500,6 +1502,7 @@ function hasDurableFinalOutput(output: RunResultOutput | undefined): boolean {
 const LOOP_DEGENERATION_CODES: ReadonlySet<RunOutcomeCode> = new Set([
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 ]);
 
@@ -6520,6 +6523,8 @@ export function createDispatchBundle(
 						intent: req.intent ?? null,
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
+		const planOutside = architectPlanOutsideWriteRoots(req.agentId, spec.resultContract, req.intent);
+		if (planOutside !== null) throw new Error(planOutside);
 		return { spec, capabilityMismatch };
 	}
 

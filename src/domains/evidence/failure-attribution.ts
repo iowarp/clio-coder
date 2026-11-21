@@ -21,7 +21,8 @@ export function attributeEvidenceFailure(facts: EvidenceFailureFacts): EvidenceT
 	if (facts.outcomeCode === "worker_context_exhausted") return "context-overflow";
 	if (
 		facts.outcomeCode === "worker_tool_call_cap_exhausted" ||
-		facts.outcomeCode === "loop_guard_tools_disabled_exhausted"
+		facts.outcomeCode === "loop_guard_tools_disabled_exhausted" ||
+		facts.outcomeCode === "exploration_stalled"
 	) {
 		return "tool-loop";
 	}

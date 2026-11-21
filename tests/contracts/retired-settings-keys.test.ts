@@ -1,10 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { formatSettingsIssues, readSettings, validateSettings, validateSettingsFile } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import retiredSettings from "../../src/domains/lifecycle/migrations/2026-11-21-retired-settings.js";
@@ -115,12 +116,14 @@ test("with the read path gone, a retired key is an ordinary unknown key and an o
 		orchestrator: { target: "x" },
 		fleet: { speculativeDispatch: true },
 		interface: { exitSummary: "full", outputDetail: "minimal" },
+		context: { memory: { observations: { enabled: true } } },
 	});
 	deepStrictEqual(
 		issues.map((issue) => `${issue.path}: ${issue.message}`),
 		[
 			"orchestrator: unknown key",
 			"fleet.speculativeDispatch: unknown key",
+			"context.memory.observations: unknown key",
 			"interface.outputDetail: expected compact, standard, or detailed",
 			"interface.exitSummary: expected auto, brief, standard, report, or off",
 		],
@@ -184,6 +187,64 @@ test("the candidate check passes a home whose settings only the pending migratio
 	const refused = row();
 	strictEqual(refused?.ok, false, JSON.stringify(refused));
 	ok(/mystery: unknown key/u.test(refused?.detail ?? ""), refused?.detail);
+});
+
+// Old shapes are not migrated: `doctor` names what this build cannot read and `doctor --fix` removes it.
+test("doctor --fix removes a retired settings key, an older memory store's unreadable records and retired state", async (t) => {
+	const home = await isolateClioEnv("clio-retired-state-fix-");
+	t.after(() => home.restore());
+	const dirs = resolveClioDirs();
+	mkdirSync(dirs.config, { recursive: true });
+	const settings = join(dirs.config, "settings.yaml");
+	writeFileSync(settings, "version: 2\ncontext:\n  memory:\n    observations:\n      enabled: true\n");
+	const store = join(dirs.data, "memory", "records.json");
+	mkdirSync(dirname(store), { recursive: true });
+	const base = {
+		scope: "repo",
+		evidenceRefs: ["run:synthetic"],
+		appliesWhen: ["installing dependencies"],
+		avoidWhen: ["offline"],
+		confidence: 0.8,
+		createdAt: "2026-09-21T00:00:00.000Z",
+		repository: { kind: "canonical-path", key: "/work/demo" },
+	};
+	writeFileSync(
+		store,
+		JSON.stringify({
+			version: 1,
+			records: [
+				{ ...base, id: "mem-00000000000000c1", key: "kept", lesson: "Kept lesson.", approved: false },
+				{ ...base, id: "mem-old-1", key: "old", lesson: "Old lesson.", approved: false },
+			],
+		}),
+	);
+	const invalidAside = join(dirs.data, "memory", "records.invalid.json");
+	writeFileSync(invalidAside, "[]\n");
+	const conversions = join(dirs.state, "workspace-conversions.json");
+	mkdirSync(dirs.state, { recursive: true });
+	writeFileSync(conversions, JSON.stringify({ version: 1, workspaces: {} }));
+
+	const report = runDoctor();
+	strictEqual(report.find((row) => row.name === "settings.yaml retired keys")?.ok, false);
+	ok(
+		/would rewrite .*version 1.* keeping 1 records and dropping 1/u.test(
+			report.find((row) => row.name === "memory store")?.detail ?? "",
+		),
+	);
+	ok(existsSync(conversions) && existsSync(invalidAside), "a report writes nothing");
+
+	const fixed = runDoctor({ fix: true });
+	ok(
+		/removed context\.memory\.observations/u.test(
+			fixed.find((row) => row.name === "settings.yaml retired keys")?.detail ?? "",
+		),
+	);
+	deepStrictEqual(validateSettingsFile().issues, []);
+	const rewritten = JSON.parse(readFileSync(store, "utf8")) as { version: number; records: { id: string }[] };
+	deepStrictEqual([rewritten.version, rewritten.records.map((record) => record.id)], [2, ["mem-00000000000000c1"]]);
+	ok(!existsSync(invalidAside) && !existsSync(conversions));
+	const again = runDoctor();
+	ok(!again.some((row) => ["settings.yaml retired keys", "memory store", "retired state"].includes(row.name)));
 });
 
 test("the v1 migration drops the retired per-agent keys and records why", () => {

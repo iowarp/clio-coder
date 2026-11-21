@@ -23,12 +23,7 @@ import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
-import {
-	LEGACY_TASK_WORKTREE_KIND,
-	SAFE_TASK_RUN_ID,
-	TASK_WORKTREE_KIND,
-	TASK_WORKTREE_OWNER_SUFFIX,
-} from "../core/task-worktree-claim.js";
+import { SAFE_TASK_RUN_ID, TASK_WORKTREE_KIND, TASK_WORKTREE_OWNER_SUFFIX } from "../core/task-worktree-claim.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
 import { diskWorktreeParent } from "./worktree-root.js";
 
@@ -535,7 +530,6 @@ function recordOverlayOnClaim(worktree: TaskWorktree, files: ReadonlyArray<strin
 	assertOwnership(worktree);
 	const ownerPath = claimPathFor(worktree.root, worktree.runId);
 	const { overlay: _previous, ...marker } = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
-	if (marker.version !== 2) throw new Error("the task worktree claim predates overlays");
 	replaceMarker(ownerPath, files.length > 0 ? { ...marker, overlay: [...files] } : marker);
 }
 
@@ -1049,8 +1043,8 @@ function assertOwnership(worktree: TaskWorktree): void {
 		throw new Error(`task worktree ${worktree.runId} has an invalid ownership file`);
 	}
 	if (
-		(marker.version !== 1 && marker.version !== 2) ||
-		(marker.kind !== TASK_WORKTREE_KIND && marker.kind !== LEGACY_TASK_WORKTREE_KIND) ||
+		marker.version !== 2 ||
+		marker.kind !== TASK_WORKTREE_KIND ||
 		marker.root !== worktree.root ||
 		marker.runId !== worktree.runId ||
 		marker.branch !== worktree.branch ||
@@ -1734,14 +1728,12 @@ function replaceMarker(ownerPath: string, marker: Record<string, unknown>): void
 
 /**
  * Record that a run ended and kept its worktree on purpose, so restart
- * recovery does not read the claim as a crash. A claim written before recovery
- * existed carries no state and is left as it is.
+ * recovery does not read the claim as a crash.
  */
 export function settleTaskWorktree(worktree: TaskWorktree, accounted?: TaskWorktreePreview): void {
 	assertOwnership(worktree);
 	const ownerPath = claimPathFor(worktree.root, worktree.runId);
 	const marker = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
-	if (marker.version !== 2) return;
 	replaceMarker(ownerPath, {
 		...marker,
 		state: "settled" satisfies TaskWorktreeState,
@@ -1770,7 +1762,6 @@ export function recordTaskWorktreeAccounted(worktree: TaskWorktree, accounted: T
 	assertOwnership(worktree);
 	const ownerPath = claimPathFor(worktree.root, worktree.runId);
 	const marker = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
-	if (marker.version !== 2) return;
 	replaceMarker(ownerPath, { ...marker, ...accountedField(accounted) });
 }
 
@@ -1854,15 +1845,16 @@ function readTaskClaims(canonical: string, allowedParents: ReadonlyArray<string>
 		}
 		// The claim names where its working tree is. It is believed only when
 		// that is `<allowed parent>/<runId>`; recovery runs git and rm on it.
-		const path = typeof marker.path === "string" ? marker.path : join(parent, runId);
+		if (typeof marker.path !== "string") continue;
+		const path = marker.path;
 		const pathParent = allowedParents.find((allowed) => resolve(allowed) === resolve(dirname(path)));
 		if (pathParent === undefined || basename(path) !== runId) continue;
 		if (
-			(marker.version !== 1 && marker.version !== 2) ||
-			(marker.kind !== TASK_WORKTREE_KIND && marker.kind !== LEGACY_TASK_WORKTREE_KIND) ||
+			marker.version !== 2 ||
+			marker.kind !== TASK_WORKTREE_KIND ||
 			marker.root !== canonical ||
 			marker.runId !== runId ||
-			(marker.branch !== `clio-coder/task/${runId}` && marker.branch !== `clio/task/${runId}`) ||
+			marker.branch !== `clio-coder/task/${runId}` ||
 			typeof marker.base !== "string" ||
 			!/^[0-9a-f]{40,64}$/u.test(marker.base) ||
 			(existsSync(path) && !isCanonicalWorktreePathInside(pathParent, path))
@@ -1879,7 +1871,7 @@ function readTaskClaims(canonical: string, allowedParents: ReadonlyArray<string>
 			base: marker.base,
 			state,
 			createdAt: typeof marker.createdAt === "string" ? marker.createdAt : null,
-			owner: marker.version === 2 && validProcessLease(marker.owner) ? marker.owner : null,
+			owner: validProcessLease(marker.owner) ? marker.owner : null,
 		});
 	}
 	return claims;

@@ -9439,7 +9439,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_d6153c1f"
+															"$ref": "#/components/schemas/Union_7b98ebf8"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -20989,7 +20989,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_d6153c1f"
+															"$ref": "#/components/schemas/Union_7b98ebf8"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -25243,30 +25243,6 @@
 				},
 				"additionalProperties": false
 			},
-			"Enum_0581627f": {
-				"enum": [
-					"vram_capacity_fit_failure",
-					"worker_tool_call_cap_exhausted",
-					"worker_context_exhausted",
-					"worker_turn_timeout",
-					"worker_output_cap_exhausted",
-					"loop_guard_tools_disabled_exhausted",
-					"result_contract_exhausted",
-					"result_contract_invalid",
-					"worker_final_output_missing",
-					"host_verification_rejected",
-					"worker_no_work",
-					"worker_partial_work",
-					"worker_mutation_blocked",
-					"merge_withheld",
-					"worker_removed_tests",
-					"information_flow_blocked",
-					"acp_auth_required",
-					"acp_model_unavailable",
-					"acp_thinking_unavailable",
-					"acp_transport_error"
-				]
-			},
 			"Enum_09fa48b8": {
 				"enum": ["create_new", "resume_other", "fork", "switch_branch", "close", "shutdown"]
 			},
@@ -25386,6 +25362,31 @@
 			},
 			"Enum_5f1647f2": {
 				"enum": ["never_sent", "sent_unsettled", "settled_no_usage", "settled"]
+			},
+			"Enum_65008f20": {
+				"enum": [
+					"vram_capacity_fit_failure",
+					"worker_tool_call_cap_exhausted",
+					"worker_context_exhausted",
+					"worker_turn_timeout",
+					"worker_output_cap_exhausted",
+					"loop_guard_tools_disabled_exhausted",
+					"exploration_stalled",
+					"result_contract_exhausted",
+					"result_contract_invalid",
+					"worker_final_output_missing",
+					"host_verification_rejected",
+					"worker_no_work",
+					"worker_partial_work",
+					"worker_mutation_blocked",
+					"merge_withheld",
+					"worker_removed_tests",
+					"information_flow_blocked",
+					"acp_auth_required",
+					"acp_model_unavailable",
+					"acp_thinking_unavailable",
+					"acp_transport_error"
+				]
 			},
 			"Enum_684094fe": {
 				"enum": [
@@ -27530,7 +27531,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_answerBudgetBytes_apiCalls_721001fb": {
+			"Object_agentId_answerBudgetBytes_apiCalls_6694e53c": {
 				"type": "object",
 				"required": [
 					"version",
@@ -27585,7 +27586,7 @@
 					"digest"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_8dda1d79"
+					"$ref": "#/components/schemas/Shape_7c5318fc"
 				},
 				"additionalProperties": false
 			},
@@ -32464,7 +32465,7 @@
 						"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 					},
 					"settled": {
-						"$ref": "#/components/schemas/Union_d6153c1f"
+						"$ref": "#/components/schemas/Union_7b98ebf8"
 					},
 					"seal": {
 						"$ref": "#/components/schemas/Union_4dc8870f"
@@ -34836,91 +34837,7 @@
 					]
 				}
 			},
-			"Shape_80c709dd": {
-				"verdict": {
-					"enum": ["hot", "partial", "cold", "small", "unknown"]
-				},
-				"expectedColdReasons": {
-					"$ref": "#/components/schemas/Array_500125b9"
-				},
-				"firstDivergentSection": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"rePrefilled": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"uncachedPrefill": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"breakUsd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				}
-			},
-			"Shape_80e91d79": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"kind": {
-					"type": "string"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"cancellable": {
-					"type": "boolean"
-				},
-				"startedAt": {
-					"type": "string"
-				},
-				"progress": {
-					"$ref": "#/components/schemas/Array_62d9e6ab"
-				},
-				"status": {
-					"$ref": "#/components/schemas/Union_68efcd2c"
-				}
-			},
-			"Shape_818a279d": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"restrictions": {
-					"$ref": "#/components/schemas/Array_2d43c8a3"
-				},
-				"advisory": {
-					"$ref": "#/components/schemas/Array_d853a408"
-				}
-			},
-			"Shape_8aaedd03": {
-				"fact": {
-					"$ref": "#/components/schemas/Union_ee0aba91"
-				},
-				"display": {
-					"type": "string"
-				},
-				"ref": {
-					"type": "string",
-					"pattern": "^(own|runs|session|lineage|run|repo|process|context):([A-Za-z0-9_-]{1,128})(?:\\/attempt:(att_[0-9a-f-]{36}))?#(calls|attempts|neverSent|sentUnsettled|settledNoUsage|settled|incomplete|input|output|cacheRead|cacheWrite|cacheWrite1h|reasoning|prompt|total|usd|apiCalls|unmeteredCalls|ttft|firstToken|modelTime|settle|admissionWait|requestBytes|websocketFailures|sseFallbacks|rePrefilled|uncachedPrefill|breakUsd|repairRounds|runs|harnessTime|networkTime|toolTime|bookkeepingRounds|roundTripTax|harnessShare|callShare|cacheShare|contextUsed|contextWindow|contextFree|contextReserve|contextShare|contextTokens|runRecords|toolCalls|toolErrors)(?:@(role|model|target|session|turn|run|cause|wait|cold|category|turns)=([^\\s#@/]{1,512}))?$",
-					"maxLength": 1024
-				}
-			},
-			"Shape_8be59c94": {
-				"ttft": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"modelTime": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"settle": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"admissionWait": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				}
-			},
-			"Shape_8dda1d79": {
+			"Shape_7c5318fc": {
 				"version": {
 					"type": "number",
 					"const": 1
@@ -34970,7 +34887,7 @@
 					"$ref": "#/components/schemas/Enum_7c26d95b"
 				},
 				"outcomeCode": {
-					"$ref": "#/components/schemas/Union_0a4ee279"
+					"$ref": "#/components/schemas/Union_6a2b4e12"
 				},
 				"exitCode": {
 					"anyOf": [
@@ -35137,6 +35054,90 @@
 				"digest": {
 					"type": "string",
 					"pattern": "^[0-9a-f]{64}$"
+				}
+			},
+			"Shape_80c709dd": {
+				"verdict": {
+					"enum": ["hot", "partial", "cold", "small", "unknown"]
+				},
+				"expectedColdReasons": {
+					"$ref": "#/components/schemas/Array_500125b9"
+				},
+				"firstDivergentSection": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"rePrefilled": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"uncachedPrefill": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"breakUsd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				}
+			},
+			"Shape_80e91d79": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"cancellable": {
+					"type": "boolean"
+				},
+				"startedAt": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/components/schemas/Array_62d9e6ab"
+				},
+				"status": {
+					"$ref": "#/components/schemas/Union_68efcd2c"
+				}
+			},
+			"Shape_818a279d": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"restrictions": {
+					"$ref": "#/components/schemas/Array_2d43c8a3"
+				},
+				"advisory": {
+					"$ref": "#/components/schemas/Array_d853a408"
+				}
+			},
+			"Shape_8aaedd03": {
+				"fact": {
+					"$ref": "#/components/schemas/Union_ee0aba91"
+				},
+				"display": {
+					"type": "string"
+				},
+				"ref": {
+					"type": "string",
+					"pattern": "^(own|runs|session|lineage|run|repo|process|context):([A-Za-z0-9_-]{1,128})(?:\\/attempt:(att_[0-9a-f-]{36}))?#(calls|attempts|neverSent|sentUnsettled|settledNoUsage|settled|incomplete|input|output|cacheRead|cacheWrite|cacheWrite1h|reasoning|prompt|total|usd|apiCalls|unmeteredCalls|ttft|firstToken|modelTime|settle|admissionWait|requestBytes|websocketFailures|sseFallbacks|rePrefilled|uncachedPrefill|breakUsd|repairRounds|runs|harnessTime|networkTime|toolTime|bookkeepingRounds|roundTripTax|harnessShare|callShare|cacheShare|contextUsed|contextWindow|contextFree|contextReserve|contextShare|contextTokens|runRecords|toolCalls|toolErrors)(?:@(role|model|target|session|turn|run|cause|wait|cold|category|turns)=([^\\s#@/]{1,512}))?$",
+					"maxLength": 1024
+				}
+			},
+			"Shape_8be59c94": {
+				"ttft": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"modelTime": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"settle": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"admissionWait": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
 			"Shape_906b0149": {
@@ -37950,16 +37951,6 @@
 					}
 				]
 			},
-			"Union_0a4ee279": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Enum_0581627f"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_0bf4f725": {
 				"anyOf": [
 					{
@@ -38874,6 +38865,16 @@
 					}
 				]
 			},
+			"Union_6a2b4e12": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_65008f20"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_6ab8d6d6": {
 				"anyOf": [
 					{
@@ -39003,6 +39004,16 @@
 					},
 					{
 						"$ref": "#/components/schemas/Object_display_names_a5a202ac"
+					}
+				]
+			},
+			"Union_7b98ebf8": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_6694e53c"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -39982,16 +39993,6 @@
 					}
 				]
 			},
-			"Union_d6153c1f": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_agentId_answerBudgetBytes_apiCalls_721001fb"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_d7ccdb8b": {
 				"anyOf": [
 					{
@@ -40677,7 +40678,7 @@
 												"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
 											},
 											"kind": {
-												"enum": ["calls", "minutes", "tokens", "judge"]
+												"enum": ["calls", "minutes", "tokens", "judge", "exploration"]
 											},
 											"limit": {
 												"type": "integer",
@@ -40702,7 +40703,14 @@
 												"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
 											},
 											"reason": {
-												"enum": ["autonomous-cap", "judge-streak", "shutdown", "left-yolo", "session-changed"]
+												"enum": [
+													"autonomous-cap",
+													"judge-streak",
+													"exploration_stalled",
+													"shutdown",
+													"left-yolo",
+													"session-changed"
+												]
 											}
 										},
 										"additionalProperties": false

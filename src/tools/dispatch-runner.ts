@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
@@ -580,6 +581,20 @@ function operatorUnavailableLine(receipt: RunResult): string | null {
 }
 
 /**
+ * Declared expected outputs absent on disk once the run settled. A worker whose contract puts its document elsewhere
+ * (an architect plan under .clio-coder/artifacts) names the path it wrote in its answer, and the caller moves the file
+ * where the task wanted it instead of searching for it (row 295).
+ */
+function unwrittenExpectedOutputsLine(receipt: RunResult): string | null {
+	const outputs = receipt.intent?.expectedOutputs ?? [];
+	const roots = [receipt.worktree?.path, receipt.reproducibility?.cwd].filter((root) => root !== undefined);
+	if (outputs.length === 0 || roots.length === 0) return null;
+	const missing = outputs.filter((output) => !roots.some((root) => existsSync(resolvePath(root, output))));
+	if (missing.length === 0) return null;
+	return `expected_outputs ${receipt.runId}: not written ${JSON.stringify(missing)}; its answer names what it wrote, so move or write these where the task needs them`;
+}
+
+/**
  * When the host feed recorded calls that errored or were refused, one line with its counts. A worker has reported a
  * malformed attempt the feed never saw and more denials than happened, and the parent repeated the worker's account
  * (bt-23).
@@ -836,6 +851,7 @@ export function formatDispatchOutput(
 					...routeWarningLines(run.receipt),
 					operatorUnavailableLine(run.receipt),
 					attemptFactsLine(run.receipt),
+					unwrittenExpectedOutputsLine(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),

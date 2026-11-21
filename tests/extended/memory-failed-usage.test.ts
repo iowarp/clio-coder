@@ -691,7 +691,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 					text: "An earlier test command failed.",
 					succeededCommands: new Set(),
 					observedReads: new Map(),
-					advance: { key: "earlier-session", cursor: { offset: 0, size: 0 }, seenCalls: [] },
+					advance: { key: "earlier-session", cursor: { offset: 0, size: 0, identity: "test-ledger" }, seenCalls: [] },
 				},
 				exhausted: true,
 			}),

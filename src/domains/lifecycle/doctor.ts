@@ -6,6 +6,7 @@ import {
 	existsSync,
 	readdirSync,
 	readFileSync,
+	rmSync,
 	type Stats,
 	statSync,
 } from "node:fs";
@@ -27,7 +28,13 @@ import {
 import { readClioVersion } from "../../core/package-root.js";
 import { relativePathEscapes } from "../../core/path-containment.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
-import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
+import {
+	type RetiredSettingsRemoval,
+	removeRetiredSettingsKeys,
+	repairSettingsCoercions,
+	retiredSettingsKeysPresent,
+	type SettingsRepairResult,
+} from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { CacheReportV1 } from "../../core/telemetry/dto.js";
 import { renderUpperBound, unreportedCacheReadWords } from "../../core/telemetry/render.js";
@@ -41,6 +48,7 @@ import {
 } from "../agents/harness-validate.js";
 import { shadowedPlaybooks } from "../agents/playbook.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
+import { inspectMemoryStoreRepair, type MemoryStoreRepair, repairMemoryStore } from "../memory/index.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
@@ -508,12 +516,72 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 	};
 }
 
+/** State files earlier builds wrote that this build never reads. */
+function retiredStateFiles(stateDir: string): string[] {
+	return [join(stateDir, "workspace-conversions.json")];
+}
+
+/** The memory store and retired state rows: what `--fix` removed, or what it would remove. */
+function retiredStateFindings(
+	fixed: boolean,
+	dirs: { data: string; state: string },
+	memoryRepair: MemoryStoreRepair | null,
+	removedState: ReadonlyArray<string>,
+): DoctorFinding[] {
+	const findings: DoctorFinding[] = [];
+	let memory = memoryRepair;
+	if (!fixed) {
+		try {
+			memory = inspectMemoryStoreRepair(dirs.data, dirs.state);
+		} catch (error) {
+			findings.push({
+				ok: false,
+				name: "memory store",
+				detail: `could not be read: ${error instanceof Error ? error.message : String(error)}`,
+			});
+		}
+	}
+	if (memory !== null) {
+		const parts = [
+			...(memory.fromVersion !== null
+				? [
+						`${fixed ? "rewrote" : "would rewrite"} ${memory.path} (version ${memory.fromVersion}) keeping ${memory.kept} records and dropping ${memory.dropped} this build cannot read`,
+					]
+				: []),
+			...(memory.removedFiles.length > 0
+				? [`${fixed ? "removed" : "would remove"} ${memory.removedFiles.join(", ")}`]
+				: []),
+		];
+		findings.push({
+			ok: true,
+			...(fixed ? {} : { level: "warn" as const }),
+			name: "memory store",
+			detail: `${parts.join("; ")}${fixed ? "" : " (run `clio-coder doctor --fix`)"}`,
+		});
+	}
+	const retired = fixed ? removedState : retiredStateFiles(dirs.state).filter((file) => existsSync(file));
+	if (retired.length > 0) {
+		findings.push({
+			ok: true,
+			...(fixed ? {} : { level: "warn" as const }),
+			name: "retired state",
+			detail: fixed
+				? `removed ${retired.join(", ")}`
+				: `${retired.join(", ")} is no longer read (run \`clio-coder doctor --fix\` to remove it)`,
+		});
+	}
+	return findings;
+}
+
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
 	let settingsRepair: SettingsRepairResult | null = null;
 	let settingsTightenedFrom: number | null = null;
 	let credentialsAclRemoved: string[] = [];
 	const rootsTightened: string[] = [];
+	let retiredSettings: RetiredSettingsRemoval | null = null;
+	let memoryRepair: MemoryStoreRepair | null = null;
+	const retiredStateRemoved: string[] = [];
 	if (options.fix) {
 		// A repair that throws used to take the whole report with it, so the one
 		// command that explains the damage printed nothing. Record it and carry on;
@@ -552,6 +620,15 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				if (aclFailure !== null) throw new Error(`could not make ${credentialsPath} owner-only: ${aclFailure}`);
 				if (before !== null && "output" in before)
 					credentialsAclRemoved = extraAclPrincipals(before.output, credentialsPath, currentWindowsAccount());
+			}
+			// Earlier builds' shapes are not migrated: what this build cannot read is removed.
+			retiredSettings = removeRetiredSettingsKeys();
+			const repairDirs = resolveClioDirs();
+			memoryRepair = repairMemoryStore(repairDirs.data, repairDirs.state);
+			for (const file of retiredStateFiles(repairDirs.state)) {
+				if (!existsSync(file)) continue;
+				rmSync(file, { force: true });
+				retiredStateRemoved.push(file);
 			}
 		} catch (error) {
 			repairFailure = error instanceof Error ? error.message : String(error);
@@ -683,6 +760,28 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				),
 			});
 		}
+		if (retiredSettings !== null && retiredSettings.removed.length > 0) {
+			findings.push({
+				ok: true,
+				name: "settings.yaml retired keys",
+				detail: `removed ${retiredSettings.removed.join(", ")}`,
+			});
+		} else if (retiredSettings !== null && retiredSettings.skipped.length > 0) {
+			findings.push({
+				ok: false,
+				name: "settings.yaml retired keys",
+				detail: `could not safely remove ${retiredSettings.skipped.join(", ")}; delete them by hand`,
+			});
+		} else if (!options.fix) {
+			const retiredKeys = retiredSettingsKeysPresent();
+			if (retiredKeys.length > 0) {
+				findings.push({
+					ok: false,
+					name: "settings.yaml retired keys",
+					detail: `${retiredKeys.join(", ")} no longer exist (run \`clio-coder doctor --fix\` to remove them)`,
+				});
+			}
+		}
 		if (settingsRepair !== null && settingsRepair.skipped.length > 0) {
 			findings.push({
 				ok: true,
@@ -775,6 +874,8 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 						// said only "missing", and `clio-coder doctor --fix` does write it.
 						"missing (run `clio-coder doctor --fix`)",
 	});
+
+	findings.push(...retiredStateFindings(options.fix === true, dirs, memoryRepair, retiredStateRemoved));
 
 	const migrationRead = readMigrationManifestResult(dirs.state);
 	const availableMigrations = listMigrations().map((migration) => migration.id);

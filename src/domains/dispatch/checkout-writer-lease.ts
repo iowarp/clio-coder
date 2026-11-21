@@ -25,18 +25,17 @@ import { writeRootsOverlap } from "./parallel-writers.js";
 export interface CheckoutWriterLeaseRecord {
 	version: 1;
 	checkout: string;
-	/** Host of the holder; absent in records written before hosts were recorded, which read as this host. */
-	host?: string;
+	/** Host of the holder. */
+	host: string;
 	pid: number;
 	processBirthToken: string;
 	acquiredAt: string;
 	/**
-	 * When the holder last proved it still runs, by its own clock, and how long that proof lasts. Absent in records
-	 * written before holders heartbeat; such a record is judged by its pid alone, and another host's is honored
-	 * indefinitely. The age that lapses it is read from the record file's modification time, never from this field.
+	 * When the holder last proved it still runs, by its own clock, and how long that proof lasts. The age that lapses
+	 * it is read from the record file's modification time, never from this field.
 	 */
-	heartbeatAt?: string;
-	heartbeatExpiresMs?: number;
+	heartbeatAt: string;
+	heartbeatExpiresMs: number;
 }
 
 /**
@@ -104,16 +103,16 @@ function validRecord(value: unknown): value is CheckoutWriterLeaseRecord {
 	return (
 		record.version === 1 &&
 		typeof record.checkout === "string" &&
-		(record.host === undefined || typeof record.host === "string") &&
+		typeof record.host === "string" &&
 		Number.isSafeInteger(record.pid) &&
 		(record.pid ?? 0) > 0 &&
 		typeof record.processBirthToken === "string" &&
 		typeof record.acquiredAt === "string" &&
 		Number.isFinite(Date.parse(record.acquiredAt)) &&
-		(record.heartbeatAt === undefined ||
-			(typeof record.heartbeatAt === "string" && Number.isFinite(Date.parse(record.heartbeatAt)))) &&
-		(record.heartbeatExpiresMs === undefined ||
-			(Number.isSafeInteger(record.heartbeatExpiresMs) && (record.heartbeatExpiresMs ?? 0) > 0))
+		typeof record.heartbeatAt === "string" &&
+		Number.isFinite(Date.parse(record.heartbeatAt)) &&
+		Number.isSafeInteger(record.heartbeatExpiresMs) &&
+		(record.heartbeatExpiresMs ?? 0) > 0
 	);
 }
 
@@ -147,16 +146,15 @@ function recordAgeMs(path: string): number {
 	}
 }
 
-/** True when the record carries a heartbeat that has lapsed; a record without one never reads as expired. */
+/** True when the record's heartbeat has lapsed. */
 function heartbeatExpired(record: CheckoutWriterLeaseRecord, path: string): boolean {
-	if (record.heartbeatAt === undefined || record.heartbeatExpiresMs === undefined) return false;
 	return recordAgeMs(path) > record.heartbeatExpiresMs;
 }
 
 function ownerAlive(record: CheckoutWriterLeaseRecord, path: string, probe: CheckoutWriterLeaseProbe): boolean {
 	// Another host's pid cannot be probed from here, so no local pid check judges it (#439): its holder stays live
-	// until its heartbeat lapses, and a record that carries none stays live.
-	if (record.host !== undefined && record.host !== (probe.host ?? hostname())) return !heartbeatExpired(record, path);
+	// until its heartbeat lapses.
+	if (record.host !== (probe.host ?? hostname())) return !heartbeatExpired(record, path);
 	if (probe.zombie?.(record.pid) === true) return false;
 	const current = probe.birthToken(record.pid);
 	// A different birth token is a different process on a reused pid.
@@ -185,7 +183,7 @@ function startHeartbeat(path: string, checkout: string, pid: number, token: stri
 			tryWithStateFileLockSync(path, () => {
 				const record = readRecord(path);
 				if (record?.checkout !== checkout || record.pid !== pid || record.processBirthToken !== token) return;
-				if (record.host !== undefined && record.host !== hostname()) return;
+				if (record.host !== hostname()) return;
 				atomicWrite(path, JSON.stringify({ ...record, heartbeatAt: new Date().toISOString() }, null, 2));
 			});
 		} catch {
@@ -290,7 +288,7 @@ export function acquireCheckoutWriterLease(input: {
 	withStateFileLockSync(path, () => {
 		const existing = readRecord(path);
 		if (existing !== null && ownerAlive(existing, path, input.probe ?? defaultProbe)) {
-			const where = existing.host !== undefined && existing.host !== hostname() ? ` on host ${existing.host}` : "";
+			const where = existing.host !== hostname() ? ` on host ${existing.host}` : "";
 			throw new Error(`checkout_writer_lease_held: checkout writer lease is held by pid ${existing.pid}${where}`);
 		}
 		const record: CheckoutWriterLeaseRecord = {

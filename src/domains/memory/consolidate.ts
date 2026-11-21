@@ -157,8 +157,7 @@ function survivorOrder(left: MemoryRecord, right: MemoryRecord): number {
 /**
  * Fold one record of the same claim into the survivor. The survivor's current wording and evidence stay current, so
  * verdicts already counted toward it still count; the other's wordings join as earlier revisions. Verdicts are joined
- * once per session, kind and revision, within the verdict window; deliveries are summed, a legacy record's
- * `delivered` observations counted with them.
+ * once per session, kind and revision, within the verdict window; deliveries are summed.
  */
 function foldInto(survivor: MemoryRecord, other: MemoryRecord): void {
 	const current = memoryRevision(survivor);
@@ -174,19 +173,15 @@ function foldInto(survivor: MemoryRecord, other: MemoryRecord): void {
 		survivor.revisions = [...earlier, ...(ownCurrent === undefined ? [] : [ownCurrent])].slice(-MEMORY_REVISIONS_MAX);
 	}
 
-	const delivered = (record: MemoryRecord): number =>
-		(record.deliveredCount ?? 0) + (record.observations ?? []).filter((item) => item.kind === "delivered").length;
-	const deliveries = delivered(survivor) + delivered(other);
+	const deliveries = (survivor.deliveredCount ?? 0) + (other.deliveredCount ?? 0);
 	const verdicts = new Map<string, MemoryObservation>();
 	for (const item of [...(survivor.observations ?? []), ...(other.observations ?? [])]) {
-		if (item.kind === "delivered") continue;
-		const key = JSON.stringify([item.sessionId, item.kind, item.revision ?? null]);
+		const key = JSON.stringify([item.sessionId, item.kind, item.revision]);
 		const seen = verdicts.get(key);
 		if (seen === undefined || item.at < seen.at) verdicts.set(key, { ...item });
 	}
 	const joined = boundedVerdicts([...verdicts.values()].sort((left, right) => left.at.localeCompare(right.at)));
-	// Read every delivery fact, the legacy `delivered` observations included, before the observations are replaced.
-	const lastDelivered = latest(survivor.lastDeliveredAt, other.lastDeliveredAt, ...deliveredAt(survivor, other));
+	const lastDelivered = latest(survivor.lastDeliveredAt, other.lastDeliveredAt);
 	if (joined.length > 0) survivor.observations = joined;
 	else Reflect.deleteProperty(survivor, "observations");
 	if (deliveries > 0) survivor.deliveredCount = deliveries;
@@ -214,12 +209,6 @@ function revisionHistory(record: MemoryRecord): MemoryRevision[] {
 			sessionId: revisionAuthor(record) ?? record.id,
 		},
 	];
-}
-
-function deliveredAt(...records: MemoryRecord[]): string[] {
-	return records.flatMap((record) =>
-		(record.observations ?? []).filter((item) => item.kind === "delivered").map((item) => item.at),
-	);
 }
 
 function latest(...values: Array<string | undefined>): string | undefined {

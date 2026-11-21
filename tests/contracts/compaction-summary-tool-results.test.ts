@@ -95,17 +95,57 @@ describe("split-turn checkpoint input keeps a whole read the summarizer can fit"
 		doesNotMatch(text, /more characters not shown here; the assistant read this result in full/);
 	});
 
-	it("caps a read at what fits a small window, above the floor, keeping its head and tail", async () => {
+	it("sends a code read that would be clipped on a small window as its signatures", async () => {
 		// Output room is half the 4000 window; the estimate gets a 20% margin.
 		const { text, tokens } = await summaryInput(4000);
 		ok(tokens <= (4000 - 2000) * 0.8, `${tokens} estimated tokens`);
-		match(text, /x \* 31 \+ 5/);
-		// CTX-5: the last helper sits past any head-only cap and still reaches the summarizer.
-		match(text, /x \* 40 \+ 30/);
-		const omitted = Number(
-			/\[\.\.\. (\d+) more characters not shown here; the assistant read this result in full\]/.exec(text)?.[1],
+		// CTX-17: every declaration survives, the first and the last, where a head-and-tail clip dropped those between.
+		match(
+			text,
+			/\[Signatures only: 30 function bodies omitted to fit the summary; the assistant read this result in full\]/,
 		);
-		ok(omitted > 0 && omitted < modC.length - 2000, `${omitted} characters omitted`);
+		for (const n of ["01", "15", "30"]) match(text, new RegExp(`export function mod_c_h${n}\\(x: number\\): number \\{`));
+		match(text, /\t\/\* 3 lines of body omitted \*\/\n\}/);
+		doesNotMatch(text, /x \* 31 \+ 5|more characters not shown here/);
+	});
+
+	// CTX-6: a read the earlier checkpoint kept live reaches the next summary through <previous-context>,
+	// which still cut every body at 2000 characters whatever the summarizer's window.
+	it("sends a prior checkpoint's retained read whole when it fits", async () => {
+		const resolved = faux.getModel("summary");
+		ok(resolved);
+		let text = "";
+		await compact({
+			entries: chain([
+				message("old", "user", { text: "Start the multiplier audit." }),
+				message("old-reply", "assistant", { text: "Started." }),
+				message("ask", "user", { text: "Read src/mod_c.ts in full." }),
+				...read("c", "mod_c", modC),
+				message("c-reply", "assistant", { text: "Read mod_c." }),
+				{
+					kind: "compactionSummary",
+					turnId: "checkpoint",
+					parentTurnId: null,
+					timestamp,
+					summary: syntheticCompactionSummary("Audit the multipliers"),
+					tokensBefore: 9000,
+					firstKeptTurnId: "ask",
+				},
+				message("ask-d", "user", { text: "Now read src/mod_d.ts in full." }),
+				...read("d", "mod_d", modD),
+				message("d-reply", "assistant", { text: "Read mod_d." }),
+				message("list", "user", { text: "List the h05/h15/h25 multipliers." }),
+			]),
+			model: { ...resolved, contextWindow: 200_000, maxTokens: 4096 },
+			keepRecentTokens: 100,
+			requireFit: true,
+			summarize: async ({ userText }) => {
+				text += userText;
+				return { text: syntheticCompactionSummary("List the multipliers") };
+			},
+		});
+		match(text, /<previous-context>[\s\S]*x \* 74 \+ 15[\s\S]*<\/previous-context>/);
+		doesNotMatch(text, /more characters not shown here/);
 	});
 
 	// bt3 RV-G: one oversized read was summarized before any model call saw it, under a marker

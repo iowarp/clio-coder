@@ -45,10 +45,10 @@ export interface CapacityLease {
 	leaseId: string;
 	assignmentId: string;
 	nodeId: string;
-	/** Canonical inference endpoint. Absent only on leases written before endpoint capacity existed. */
+	/** Canonical inference endpoint; absent when the lease names none. */
 	endpointKey?: string;
-	/** Owner host. Absent only on records written before the field existed; those are read as this host. */
-	host?: string;
+	/** Owner host. */
+	host: string;
 	ownerPid: number;
 	processBirthToken: string;
 	acquiredAt: string;
@@ -82,8 +82,8 @@ export interface LeaseOwnerProbe {
 	alive?(pid: number): boolean;
 }
 
-function onThisHost(host: string | undefined): boolean {
-	return (host ?? hostname()) === hostname();
+function onThisHost(host: string): boolean {
+	return host === hostname();
 }
 function isLoopbackEndpoint(endpointKey: string): boolean {
 	let host: string;
@@ -105,13 +105,13 @@ function isLoopbackEndpoint(endpointKey: string): boolean {
  * endpoint is the server on the machine that runs the worker: each host's own
  * for `local`, the node itself for a named node.
  */
-export function countsInGlobalCap(host: string | undefined): boolean {
+export function countsInGlobalCap(host: string): boolean {
 	return onThisHost(host);
 }
-export function countsOnThisNode(host: string | undefined, nodeId: string): boolean {
+export function countsOnThisNode(host: string, nodeId: string): boolean {
 	return nodeId !== LOCAL_NODE_ID || onThisHost(host);
 }
-export function countsOnThisEndpoint(host: string | undefined, nodeId: string, endpointKey: string): boolean {
+export function countsOnThisEndpoint(host: string, nodeId: string, endpointKey: string): boolean {
 	return nodeId !== LOCAL_NODE_ID || !isLoopbackEndpoint(endpointKey) || onThisHost(host);
 }
 function leaseOnEndpoint(lease: CapacityLease, endpointKey: string): boolean {
@@ -136,7 +136,7 @@ function valid(value: unknown): value is CapacityLease {
 		typeof lease.assignmentId === "string" &&
 		typeof lease.nodeId === "string" &&
 		(lease.endpointKey === undefined || typeof lease.endpointKey === "string") &&
-		(lease.host === undefined || typeof lease.host === "string") &&
+		typeof lease.host === "string" &&
 		Number.isInteger(lease.ownerPid) &&
 		typeof lease.processBirthToken === "string" &&
 		typeof lease.acquiredAt === "string" &&
@@ -318,8 +318,7 @@ function heldReservationUsage(
 		if (typeof record.status !== "string" || !RESERVATION_STATUSES.has(record.status) || !Array.isArray(record.members))
 			throw new Error("dispatch capacity store has invalid reservation records");
 		if (record.status !== "active") continue;
-		if (record.host !== undefined && typeof record.host !== "string")
-			throw new Error("dispatch capacity store has invalid reservation records");
+		if (typeof record.host !== "string") throw new Error("dispatch capacity store has invalid reservation records");
 		const host = record.host;
 		const byWave = new Map<number, number>();
 		const byNodeWave = new Map<string, Map<number, number>>();
@@ -774,8 +773,7 @@ export function createNodeLeaseUsageReader(options: {
  * Drop every lease whose owner is exactly `owner` ({host, pid, birth}). Leases
  * from another host are reclaimed by `reclaim` only after a long grace, so a
  * node that died with a lease held pins its slots until then; `clio-coder session terminate
- * --force` calls this once that node's session heartbeat is stale (#439). A
- * legacy lease without a host reads as this host, as `reclaim` reads it.
+ * --force` calls this once that node's session heartbeat is stale (#439).
  */
 export function releaseCapacityLeasesOwnedBy(owner: {
 	host: string;
@@ -787,10 +785,7 @@ export function releaseCapacityLeasesOwnedBy(owner: {
 		const file = readCapacityStateUnsafe();
 		const before = file.leases.length;
 		file.leases = file.leases.filter(
-			(lease) =>
-				(lease.host ?? hostname()) !== owner.host ||
-				lease.ownerPid !== owner.pid ||
-				lease.processBirthToken !== owner.birth,
+			(lease) => lease.host !== owner.host || lease.ownerPid !== owner.pid || lease.processBirthToken !== owner.birth,
 		);
 		const released = before - file.leases.length;
 		if (released > 0) writeCapacityStateUnsafe(file);
