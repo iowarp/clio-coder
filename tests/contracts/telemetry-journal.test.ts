@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
 	appendFile,
@@ -37,6 +38,7 @@ import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js"
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
+import { canonicalJson } from "../../src/domains/prompts/hash.js";
 
 const emptySum = sumFacts([]);
 
@@ -72,6 +74,7 @@ import { foldCallJournal, foldFacts } from "../../src/domains/telemetry/folds.js
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import {
 	readTelemetryObject,
+	readTelemetryObjectSync,
 	storeTelemetryObject,
 	telemetryCommitment,
 	telemetryPromptStructure,
@@ -1690,6 +1693,48 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 	} finally {
 		await parent.close();
 		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a structured run result is stored once, read back whole, and an older record holding both still reads (C-28)", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-result-"));
+	try {
+		const data = { findings: [{ claim: "The marker is on line 2." }], needsSplit: false, proposedSubtasks: [] };
+		const text = JSON.stringify(data);
+		const result = {
+			version: 1 as const,
+			output: {
+				state: "final" as const,
+				text,
+				bytes: Buffer.byteLength(text),
+				truncated: false,
+				structured: { version: 1 as const, kind: "scout-report", data },
+			},
+			failureMessage: null,
+			outcomeDetail: null,
+			worktree: null,
+			checkoutChanges: null,
+			hostVerification: null,
+		};
+		const ref = await storeTelemetryObject(directory, "run-result", result);
+		const stored = JSON.parse(await readFile(join(directory, "objects", `${ref.id}.json`), "utf8"));
+		strictEqual(stored.version, 2);
+		ok(!("text" in stored.output), "the answer is kept once, as structured data");
+		deepStrictEqual(await readTelemetryObject(directory, ref), { kind: "resolved", value: result });
+		deepStrictEqual(readTelemetryObjectSync(directory, ref), { kind: "resolved", value: result });
+		// A record written before C-28 holds the text beside its structured data and reads as it was written.
+		const legacyBytes = canonicalJson(result);
+		const legacy = {
+			label: "resolvable" as const,
+			function: "sha256" as const,
+			canonicalization: "json-sorted-v1" as const,
+			subject: "run-result" as const,
+			id: `obj_${createHash("sha256").update(legacyBytes, "utf8").digest("hex")}`,
+		};
+		await writeFile(join(directory, "objects", `${legacy.id}.json`), legacyBytes);
+		deepStrictEqual(await readTelemetryObject(directory, legacy), { kind: "resolved", value: result });
+	} finally {
+		await rm(directory, { recursive: true, force: true });
 	}
 });
 

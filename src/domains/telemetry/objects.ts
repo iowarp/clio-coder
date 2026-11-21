@@ -6,7 +6,7 @@ import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
-import type { ObjectRef } from "../../core/telemetry/schemas.js";
+import type { ObjectRef, RunResultObject } from "../../core/telemetry/schemas.js";
 import { EvidenceFindingsObjectSchema, ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { matchesTrace, traceValue } from "../../core/value-trace.js";
 import type { RedactionTally } from "../evidence/redact.js";
@@ -303,14 +303,40 @@ export function redactTelemetryValue<T>(value: T, tally: RedactionTally, secretM
 	}) as T;
 }
 
+/**
+ * A structured answer's `text` is its data as JSON, so storing both kept the answer twice (C-28). Version 2 of the
+ * stored `run-result` keeps the structured data alone; {@link readStoredRunResult} derives the text on every read.
+ * An output whose text is anything else keeps version 1 with both.
+ */
+function storedRunResult(value: RunResultObject): unknown {
+	const output = value.output;
+	if (output?.structured === undefined || output.text !== JSON.stringify(output.structured.data)) return value;
+	const { text: _derived, ...kept } = output;
+	return { ...value, version: 2, output: kept };
+}
+
+/**
+ * A stored `run-result` as readers use it: version 2 regains its derived `text` and reads as version 1; a version 1
+ * record, which holds both, reads as it was written.
+ */
+export function readStoredRunResult(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const record = value as { version?: unknown; output?: unknown };
+	if (record.version !== 2 || record.output === null || typeof record.output !== "object") return value;
+	const output = record.output as { text?: unknown; structured?: { data?: unknown } };
+	if (output.text !== undefined || output.structured === undefined) return value;
+	return { ...record, version: 1, output: { ...output, text: JSON.stringify(output.structured.data) } };
+}
+
 /** The redacted canonical bytes an object stores and the reference they hash to; no I/O. */
 function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRef; bytes: string } {
 	if (!storedSubjects.has(subject)) throw new Error("telemetry object subject is not enabled for capture");
 	const shape = contentSchemas[subject];
 	if (shape !== undefined && !Value.Check(shape, value))
 		throw new Error(`telemetry ${subject} object contains unsupported fields`);
+	const stored = subject === "run-result" ? storedRunResult(value as RunResultObject) : value;
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
-	const bytes = canonicalJson(redactTelemetryValue(value, createRedactionTally(), subject === "config"));
+	const bytes = canonicalJson(redactTelemetryValue(stored, createRedactionTally(), subject === "config"));
 	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
 	return { ref: reference(subject, bytes, "resolvable"), bytes };
 }
@@ -382,7 +408,7 @@ export async function readTelemetryObject(scopeDirectory: string, ref: ObjectRef
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
 	const value: unknown = JSON.parse(bytes);
 	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");
-	return { kind: "resolved", value };
+	return { kind: "resolved", value: ref.subject === "run-result" ? readStoredRunResult(value) : value };
 }
 
 /** Synchronous cold resume uses the same verified preimages as asynchronous surfaces (#434). */
@@ -407,8 +433,9 @@ export function readTelemetryObjectSync(scopeDirectory: string, ref: ObjectRef):
 		throw error;
 	}
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
-	const value: unknown = JSON.parse(bytes);
-	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");
+	const parsed: unknown = JSON.parse(bytes);
+	if (canonicalJson(parsed) !== bytes) throw new Error("telemetry object is not canonical JSON");
+	const value = ref.subject === "run-result" ? readStoredRunResult(parsed) : parsed;
 	const schema = contentSchemas[ref.subject as StoredSubject];
 	if (schema && !Value.Check(schema, value)) throw new Error("invalid telemetry object shape");
 	return { kind: "resolved", value };
