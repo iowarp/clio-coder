@@ -708,7 +708,8 @@ export interface ChatLoop {
 	toolLimits?(): TurnConstraints | undefined;
 	/** Effective creating/current task and skill ceiling for session-owned jobs (#411). */
 	jobConstraints?(): TurnConstraints | undefined;
-	steer(text: string): boolean;
+	/** `display.note` names who sent a steer that is not the operator's own, painted when the engine takes it. */
+	steer(text: string, display?: { text: string; note?: string }): boolean;
 	queueFollowUp(text: string, display?: { text: string; note?: string }, origin?: string): boolean;
 	/** The queued entries still in Clio's hands, in delivery order. */
 	queueEntries(): QueuedChatMessage[];
@@ -3164,7 +3165,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const api: ChatLoop = {
 		operatorMemory,
-		steer: (text) => queuedForTriage(queues.steer(text)),
+		steer: (text, display) => queuedForTriage(queues.steer(text, display)),
 		queueFollowUp: (text, display, origin) =>
 			queuedForTriage(queues.queueFollowUp(text, display, origin === undefined ? undefined : { origin })),
 		queueEntries: () => queues.entries(),

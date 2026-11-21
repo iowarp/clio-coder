@@ -1,4 +1,6 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
+import { lstatSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { test } from "node:test";
 import {
 	applyAttachEvent,
@@ -22,6 +24,8 @@ import {
 	parseAttachCommand,
 	parseAttachEvent,
 } from "../../src/domains/attach/protocol.js";
+import { attachSocketPath, connectAttachSocket, createUnixSocketTransport } from "../../src/domains/attach/socket.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const CARD: AttachApprovalView = {
 	requestId: "req-1",
@@ -125,6 +129,7 @@ test("only well-formed v1 commands parse; everything else is a structured refusa
 	equal(code(JSON.stringify({ v: 1, type: "say", text: "hi", steering: "interrupt" })), "malformed");
 	equal(code(JSON.stringify({ v: 1, type: "say", text: "a\u001b[2Jb" })), "malformed");
 	equal(code(JSON.stringify({ v: 1, type: "say", text: "x".repeat(9_000) })), "malformed");
+	equal(code(JSON.stringify({ v: 1, type: "say", text: "/attach off" })), "refused");
 	deepStrictEqual(parseAttachCommand(JSON.stringify({ v: 1, type: "hello", role: "pair", label: "ana <b>" })), {
 		ok: true,
 		value: { type: "hello", role: "pair", label: "anab" },
@@ -186,6 +191,41 @@ test("the host admits by role, routes answers and messages to the session, and a
 	ok(late.isClosed());
 });
 
+test("the transport is an owner-only Unix socket that carries the stream and is gone once closed", async (t) => {
+	if (process.platform === "win32") {
+		t.skip("attach uses a Unix domain socket");
+		return;
+	}
+	const scratch = await isolateClioEnv("att-");
+	t.after(() => scratch.restore());
+	const h = harness("observer");
+	const listener = await createUnixSocketTransport("s1").listen((connection) => h.host.connect(connection));
+	const path = attachSocketPath("s1");
+	equal(listener.address, path);
+	equal(lstatSync(path).mode & 0o777, 0o600);
+	equal(lstatSync(scratch.dir).isDirectory(), true);
+	const socket = connectAttachSocket("s1");
+	const lines: string[] = [];
+	const gotReplay = new Promise<void>((resolve) => {
+		createInterface({ input: socket }).on("line", (line) => {
+			lines.push(line);
+			if (parseAttachEvent(line)?.type === "presence") resolve();
+		});
+	});
+	socket.on("connect", () => socket.write(`${JSON.stringify({ v: 1, type: "hello", role: "pair" })}\n`));
+	await gotReplay;
+	deepStrictEqual(
+		lines.map((line) => parseAttachEvent(line)?.type),
+		["hello", "replay", "status", "approval.open", "presence"],
+	);
+	const closed = new Promise<void>((resolve) => socket.on("close", () => resolve()));
+	h.host.close("done");
+	listener.close();
+	await closed;
+	equal(lstatSync(path, { throwIfNoEntry: false }), undefined);
+	ok(h.notices.includes("info: attach c1 joined as observer (asked for pair)"));
+});
+
 test("the attached terminal folds the stream, renders cards and turns typed lines into allowed commands only", () => {
 	const view = createAttachClientView();
 	const events: AttachServerEvent[] = [
@@ -202,7 +242,10 @@ test("the attached terminal folds the stream, renders cards and turns typed line
 	deepStrictEqual(attachInputCommand("hello", view), { problem: "observer cannot message the session" });
 	applyAttachEvent(view, { v: 1, type: "role", role: "pair" });
 	deepStrictEqual(attachInputCommand(":approve", view), { command: { type: "approve", requestId: "req-1" } });
-	deepStrictEqual(attachInputCommand("/model x", view), { command: { type: "say", text: "/model x" } });
+	deepStrictEqual(attachInputCommand("/model x", view), {
+		problem: "slash commands stay with the host operator; send plain text",
+	});
+	deepStrictEqual(attachInputCommand("/tmp/x is full", view), { command: { type: "say", text: "/tmp/x is full" } });
 	deepStrictEqual(attachInputCommand(":quit", view), { quit: true });
 	applyAttachEvent(view, { v: 1, type: "approval.closed", requestId: "req-1", status: "granted" });
 	deepStrictEqual(attachInputCommand(":deny", view), { problem: "no card is open" });

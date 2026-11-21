@@ -139,6 +139,15 @@ function sanitizeLabel(value: string): string {
 	return value.replace(/[^A-Za-z0-9_.:@%-]/g, "").slice(0, 32);
 }
 
+/**
+ * Text that reads as a slash command (`/model x`, `/attach off`). A pair message is plain text for the model and is
+ * never parsed as a command, so text shaped like one is refused instead of reaching the model looking like one. A
+ * path such as `/tmp/x is full` is plain text.
+ */
+export function looksLikeSlashCommand(text: string): boolean {
+	return /^\s*\/[A-Za-z][\w:-]*(?:\s|$)/u.test(text);
+}
+
 /** Non-empty, bounded, and free of control characters other than newline and tab. */
 function validSayText(text: string): boolean {
 	if (text.trim().length === 0 || Buffer.byteLength(text, "utf8") > ATTACH_SAY_MAX_BYTES) return false;
@@ -186,6 +195,8 @@ export function parseAttachCommand(line: string): AttachParse<AttachCommand> {
 			if (!onlyKeys(value, ["text"])) return malformed("unknown field");
 			if (typeof value.text !== "string" || !validSayText(value.text))
 				return malformed(`text is non-empty plain text of at most ${ATTACH_SAY_MAX_BYTES} bytes`);
+			if (looksLikeSlashCommand(value.text))
+				return fail("refused", "slash commands stay with the host operator; a pair message is plain text");
 			return { ok: true, value: { type: "say", text: value.text } };
 		}
 		case "bye":

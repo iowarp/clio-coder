@@ -8,7 +8,14 @@
  * [id]`, `:quit`. With exactly one card open the id may be left out.
  */
 
-import type { AttachApprovalView, AttachBlock, AttachCommand, AttachRole, AttachServerEvent } from "./protocol.js";
+import {
+	type AttachApprovalView,
+	type AttachBlock,
+	type AttachCommand,
+	type AttachRole,
+	type AttachServerEvent,
+	looksLikeSlashCommand,
+} from "./protocol.js";
 
 export interface AttachClientView {
 	clientId: string | null;
@@ -139,6 +146,7 @@ export function attachInputCommand(line: string, view: AttachClientView): Attach
 	if (!text.startsWith(":")) {
 		if (view.role !== "pair")
 			return { problem: `${view.role ?? "a client not yet attached"} cannot message the session` };
+		if (looksLikeSlashCommand(text)) return { problem: "slash commands stay with the host operator; send plain text" };
 		return { command: { type: "say", text } };
 	}
 	const [verb = "", id, ...rest] = text.slice(1).trim().split(/\s+/u);

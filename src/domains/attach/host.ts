@@ -85,7 +85,8 @@ export interface AttachSessionPort {
 	pendingApprovals(): ReadonlyArray<AttachApprovalView>;
 	/** Answer one card by id. A card already answered, or never shown, is stale. */
 	resolveApproval(requestId: string, decision: "approve" | "deny", by: AttachActor): AttachApprovalOutcome;
-	say(text: string, by: AttachActor): AttachSayOutcome;
+	/** Settles once the session took the text or declined it; a fresh turn settles at admission. */
+	say(text: string, by: AttachActor): AttachSayOutcome | Promise<AttachSayOutcome>;
 }
 
 export interface AttachHostDeps {
@@ -102,6 +103,13 @@ export interface AttachHost {
 	presence(): AttachPresenceEntry[];
 	/** Drop every client with `reason`; the hub admits no one after this. */
 	close(reason: string): void;
+}
+
+/** What `/attach` asks of the terminal that hosts a session. */
+export interface AttachOperations {
+	/** Admit clients up to `ceiling`, opening the socket if it is closed; null stops admitting and closes it. */
+	admit(ceiling: AttachRole | null): Promise<{ level: "info" | "warn" | "error"; text: string }>;
+	status(): string;
 }
 
 interface Client {
@@ -181,10 +189,12 @@ export function createAttachHost(deps: AttachHostDeps): AttachHost {
 			drop(client, "not admitted");
 			return;
 		}
+		// Read before the client counts as attached: a port that publishes the blocks it has not sent yet does so to
+		// the clients already here, and this one gets them once, in its replay.
+		const transcript = deps.session.transcript();
 		client.asked = command.role;
 		client.role = role;
 		send(client, { v: 1, type: "hello", clientId: client.id, sessionId: deps.session.sessionId(), role });
-		const transcript = deps.session.transcript();
 		const tail = transcript.slice(-REPLAY_TAIL);
 		send(client, {
 			v: 1,
@@ -221,14 +231,23 @@ export function createAttachHost(deps: AttachHostDeps): AttachHost {
 	};
 
 	const say = (client: Client, actor: AttachActor, text: string): void => {
+		const settle = (outcome: AttachSayOutcome): void => {
+			if (outcome.status === "refused") {
+				error(client, "refused", outcome.detail, "say");
+				deps.notice("info", `${who(client)} message not taken: ${outcome.detail}`);
+				return;
+			}
+			send(client, { v: 1, type: "ok", command: "say", detail: outcome.via });
+			deps.notice("info", `${who(client)} said (${outcome.via}): ${oneLine(text)}`);
+		};
 		const outcome = deps.session.say(text, actor);
-		if (outcome.status === "refused") {
-			error(client, "refused", outcome.detail, "say");
-			deps.notice("info", `${who(client)} message not taken: ${outcome.detail}`);
+		if (!(outcome instanceof Promise)) {
+			settle(outcome);
 			return;
 		}
-		send(client, { v: 1, type: "ok", command: "say", detail: outcome.via });
-		deps.notice("info", `${who(client)} said (${outcome.via}): ${oneLine(text)}`);
+		outcome.then(settle, (thrown: unknown) =>
+			error(client, "internal", thrown instanceof Error ? thrown.message : String(thrown), "say"),
+		);
 	};
 
 	const receive = (client: Client, line: string): void => {
