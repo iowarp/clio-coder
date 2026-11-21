@@ -44,6 +44,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	worker_mutation_blocked: "change was blocked",
 	merge_withheld: "merge withheld",
 	worker_removed_tests: "removed tests",
+	assurance_compromised: "result not trusted",
 	information_flow_blocked: "route not allowed for this data",
 	acp_auth_required: "agent needs sign-in",
 	acp_model_unavailable: "agent does not offer that model",

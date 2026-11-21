@@ -17,12 +17,16 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
-import type { RunResultReproducibility } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResult, RunResultReproducibility } from "../../src/domains/dispatch/types.js";
+import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engine.js";
+import { dispatchStubContext } from "./dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
 
 /**
@@ -173,4 +177,60 @@ export function observedCheckEvents(
 		},
 		{ type: "clio_coder_tool_finish", payload: { tool: "bash", toolCallId, outcome: "ok", durationMs: 1 } },
 	];
+}
+
+/**
+ * Settle one builder dispatch whose stub worker read once and returns `report` as its mutation report, through the
+ * real settle path: host checks, grade and seal. `beforeExit` changes the tree while the worker is still running.
+ */
+export async function settleStubBuilder(input: {
+	cwd: string;
+	report: object;
+	resolvedVerification?: Parameters<DispatchContract["dispatch"]>[0]["resolvedVerification"];
+	beforeExit?: () => void;
+}): Promise<{ receipt: RunResult; run: RunEnvelope }> {
+	let finish!: (result: SpawnedWorkerResult) => void;
+	const done = new Promise<SpawnedWorkerResult>((resolve) => {
+		finish = resolve;
+	});
+	const worker: SpawnedWorker = {
+		pid: null,
+		promise: done,
+		heartbeatAt: { current: Date.now(), monotonic: 0 },
+		events: (async function* () {
+			await done;
+			yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
+			yield {
+				type: "message_end",
+				message: { role: "assistant", stopReason: "stop", content: JSON.stringify(input.report) },
+			};
+		})(),
+		abort() {
+			finish({ exitCode: null, signal: "SIGTERM" });
+		},
+	};
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker: () => worker });
+	await bundle.extension.start();
+	try {
+		const handle = await bundle.contract.dispatch({
+			agentId: "coder",
+			task: "Edit input.txt.",
+			executionRole: "builder",
+			requestOrigin: "internal",
+			resultContractOverride: { kind: "mutation-report" },
+			cwd: input.cwd,
+			...(input.resolvedVerification !== undefined ? { resolvedVerification: input.resolvedVerification } : {}),
+		});
+		input.beforeExit?.();
+		finish({ exitCode: 0, signal: null });
+		const receipt = await handle.finalPromise;
+		const run = bundle.contract.getRun(receipt.runId);
+		if (run === null) throw new Error(`run ${receipt.runId} left the ledger`);
+		return { receipt, run };
+	} finally {
+		finish({ exitCode: 0, signal: null });
+		await bundle.extension.stop?.();
+	}
 }

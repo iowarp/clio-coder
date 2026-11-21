@@ -1,10 +1,11 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { writeFrame } from "../../src/cli/modes/jsonl.js";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { createToolCallIdMinter } from "../../src/cli/modes/run-json-schema-v2.js";
+import { mapExitCode } from "../../src/cli/run.js";
 import {
 	completionExitCode,
 	noteAgentRunCompletion,
@@ -17,6 +18,7 @@ import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-groundi
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
 import { CONTEXT_OVERFLOW_STOP_NOTICE_KEY } from "../../src/session-control/chat-loop-messages.js";
 import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
+import { settleStubBuilder } from "../harness/dispatch.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -854,4 +856,59 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 	strictEqual(v2.code, 1, v2.stderr);
 	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
 	strictEqual(envelope.result?.text, "", v2.stdout);
+});
+
+test("run --agent coder whose own check failed: the envelope, its dispatch.runs and the exit code agree with the one grade (M9)", async (t) => {
+	const env = await isolateClioEnv("headless-agent-compromised-");
+	t.after(() => env.restore());
+	// Wave-42 m9-1: the worker's own validation failed and no host check ran.
+	const root = join(env.dir, "project");
+	mkdirSync(root, { recursive: true });
+	writeFileSync(join(root, "input.txt"), "changed\n");
+	const { receipt } = await settleStubBuilder({
+		cwd: root,
+		report: {
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: ["input.txt"],
+			validations: [{ name: "python3 extra.py", passed: false, evidence: "exit 1" }],
+		},
+	});
+	const cause = /^assurance compromised: the worker's own report lists a failing validation \(python3 extra\.py\)/u;
+	strictEqual(receipt.outcome, "failed");
+	strictEqual(receipt.outcomeCode, "assurance_compromised");
+	match(receipt.outcomeDetail ?? "", cause);
+	const exit = await mapExitCode(receipt);
+	strictEqual(exit, 1);
+	const stdout: string[] = [];
+	const write = process.stdout.write;
+	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		stdout.push(String(chunk));
+		for (const argument of rest) if (typeof argument === "function") argument();
+		return true;
+	}) as typeof process.stdout.write;
+	let code: number;
+	try {
+		code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
+			writeFrame({ type: "result", result: receipt } as never);
+			noteAgentRunCompletion(agentRunCompletion(receipt));
+			return exit;
+		});
+	} finally {
+		process.stdout.write = write;
+	}
+	strictEqual(code, 1);
+	const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}") as {
+		exitCode?: number;
+		outcome?: string;
+		causes?: Array<{ code?: string; exitCode?: number; message?: string }>;
+		dispatch?: { runs?: Array<{ outcome?: string; outcomeCode?: string; exitCode?: number; outcomeDetail?: string }> };
+	};
+	strictEqual(end.exitCode, 1);
+	strictEqual(end.outcome, "failed");
+	strictEqual(end.causes?.[0]?.code, "worker_failed");
+	match(end.causes?.[0]?.message ?? "", cause);
+	strictEqual(end.dispatch?.runs?.[0]?.outcome, "failed");
+	strictEqual(end.dispatch?.runs?.[0]?.outcomeCode, "assurance_compromised");
+	strictEqual(end.dispatch?.runs?.[0]?.exitCode, 1);
+	match(end.dispatch?.runs?.[0]?.outcomeDetail ?? "", cause);
 });

@@ -28,7 +28,7 @@ if (scenario.hang) setInterval(() => {}, 1000);
 else {
   const answer = JSON.stringify({
     completion: { state: "done", limitations: [], unverified: [] },
-    mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG"
+    mutatedPaths: [], validations: [], summary: "PONG"
   });
   for (const event of [
     { type: "thread.started", thread_id: "fixture-thread" },
@@ -176,7 +176,7 @@ import { join } from "node:path";
 let stdin = "";
 for await (const chunk of process.stdin) stdin += chunk;
 writeFileSync(join(process.cwd(), "seen.json"), JSON.stringify({ argv: process.argv.slice(2), stdin }));
-const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG" });
+const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [], summary: "PONG" });
 for (const event of [
   { type: "thread.started", thread_id: "peer-thread" },
   { type: "turn.started" },
@@ -311,7 +311,7 @@ for await (const chunk of process.stdin) stdin += chunk;
 writeFileSync(${JSON.stringify(seenPath)}, JSON.stringify({ agents: readFileSync("AGENTS.md", "utf8"), stdin }));
 writeFileSync("src/cart.ts", "export const cents = (value: number): number => Math.round(value);\\n");
 appendFileSync("AGENTS.md", "- An edit the task did not ask for.\\n");
-const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["src/cart.ts"], validations: [{ name: "fixture", passed: true, evidence: "edited" }], summary: "edited" });
+const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["src/cart.ts"], validations: [], summary: "edited" });
 for (const event of [
   { type: "text", sessionID: "session-1", part: { type: "text", text: answer } },
   { type: "step_finish", sessionID: "session-1", part: { type: "step-finish", cost: 0, tokens: { input: 3, output: 1 } } },
@@ -455,7 +455,7 @@ test("managed Pi CLI dispatch seals peer-estimated cost and session identity", {
 for await (const chunk of process.stdin) {}
 const answer = JSON.stringify({
   completion: { state: "done", limitations: [], unverified: [] },
-  mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG"
+  mutatedPaths: [], validations: [], summary: "PONG"
 });
 
 for (const event of [
@@ -531,7 +531,7 @@ if (process.argv[2] === "--version") {
 } else {
   for await (const chunk of process.stdin) {}
   writeFileSync(join(process.cwd(), "seen.json"), JSON.stringify(process.argv.slice(2)));
-  const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG" });
+  const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: [], validations: [], summary: "PONG" });
   for (const event of [
     { type: "session", id: "pi-session" },
     { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }], stopReason: "stop", usage: { input: 2, output: 1 } } },
@@ -617,7 +617,7 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 	const answer = JSON.stringify({
 		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [changed],
-		validations: [{ name: "fixture", passed: true, evidence: "file written" }],
+		validations: [],
 		summary: "edited",
 	});
 	for (const event of [
@@ -769,7 +769,7 @@ for await (const chunk of process.stdin) {}
 const sandboxAt = process.argv.indexOf("--sandbox");
 if (process.argv[sandboxAt + 1] !== "workspace-write") process.exit(7);
 writeFileSync(join(process.cwd(), "proof.txt"), "HELLO");
-const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["proof.txt"], validations: [{ name: "content", passed: true, evidence: "HELLO" }], summary: "Created proof.txt" });
+const answer = JSON.stringify({ completion: { state: "done", limitations: [], unverified: [] }, mutatedPaths: ["proof.txt"], validations: [], summary: "Created proof.txt" });
 for (const event of [
   { type: "thread.started", thread_id: "write-thread" },
   { type: "turn.started" },
