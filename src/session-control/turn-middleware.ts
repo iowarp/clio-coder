@@ -448,10 +448,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			deps.emitFooterNotice(
 				"warning",
 				failedChecks.length > 0
-					? `Clio changed files and ran ${failedChecks[0]}${more(failedChecks)} after the edit; ${failedChecks.length > 1 ? "they" : "it"} failed${hint}`
+					? `CLIO Coder changed files and ran ${failedChecks[0]}${more(failedChecks)} after the edit; ${failedChecks.length > 1 ? "they" : "it"} failed${hint}`
 					: ran.length > 0
-						? `Clio changed files and ran ${ran[0]}${more(ran)} afterwards, but no recognized check covered the change${hint}`
-						: `Clio changed files but ran no check on them afterwards${hint}`,
+						? `CLIO Coder changed files and ran ${ran[0]}${more(ran)} afterwards, but no recognized check covered the change${hint}`
+						: `CLIO Coder changed files but ran no check on them afterwards${hint}`,
 				"finish.unverified",
 			);
 			return false;

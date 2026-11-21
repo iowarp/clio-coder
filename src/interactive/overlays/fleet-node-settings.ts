@@ -25,7 +25,7 @@ function evidence(item: FleetNodeInspection): string {
 		`Declared labels: ${item.node.labels?.join(", ") || "none"}.`,
 		...(record
 			? [
-					`Project: ${record.project?.kind ?? "unknown"}. Remote Clio: ${record.remoteVersion ?? "unknown"}.`,
+					`Project: ${record.project?.kind ?? "unknown"}. Remote CLIO Coder: ${record.remoteVersion ?? "unknown"}.`,
 					`Observed resources: ${JSON.stringify(record.resources ?? "unknown")}.`,
 					...record.targets
 						.slice(0, 4)
@@ -257,7 +257,7 @@ export function fleetNodeSettingsSubmenu(
 					pickStep(
 						"Choose a peer endpoint",
 						choices,
-						"MagicDNS names and IP addresses are candidates. SSH access, Clio and project readiness are not checked. You can add a known LAN address instead.",
+						"MagicDNS names and IP addresses are candidates. SSH access, CLIO Coder and project readiness are not checked. You can add a known LAN address instead.",
 						(host) => add(host),
 					),
 				);

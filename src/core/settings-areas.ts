@@ -30,12 +30,13 @@ export const SETTINGS_AREAS = [
 	{
 		id: "context",
 		label: "Context and memory",
-		description: "How Clio keeps long conversations useful and whether a background model records task memory.",
+		description: "How CLIO Coder keeps long conversations useful and whether a background model records task memory.",
 	},
 	{
 		id: "safety",
 		label: "Safety and limits",
-		description: "What Clio may do without asking: autonomy, the safety judge, sandbox, approvals, review, and spending.",
+		description:
+			"What CLIO Coder may do without asking: autonomy, the safety judge, sandbox, approvals, review, and spending.",
 	},
 	{
 		id: "workspace",
@@ -72,7 +73,7 @@ export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly stri
 		"Limits & retries",
 		"Run history",
 		"Loops",
-		"Before Clio answers",
+		"Before CLIO Coder answers",
 	],
 	context: ["Compaction", "Context cleanup", "Proactive memory", "Semantic search"],
 	safety: ["Autonomy", "Safety judge", "Worker approvals", "Sandbox", "Review", "Spending & tool limits"],
@@ -262,7 +263,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	if (under(path, "integrations.git")) return place("workspace", "Git");
 	if (under(path, "integrations.projectResources")) return place("workspace", "Library");
 	if (under(path, "integrations.library")) return place("workspace", "Library");
-	if (under(path, "turnControl")) return place("workers", "Before Clio answers");
+	if (under(path, "turnControl")) return place("workers", "Before CLIO Coder answers");
 	if (under(path, "fleet.agentProfiles")) return place("workers", "Agent routes");
 	if (under(path, "fleet.default")) return place("workers", "Default worker");
 	if (under(path, "fleet.profiles")) return place("workers", "Profiles");

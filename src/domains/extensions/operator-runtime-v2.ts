@@ -156,7 +156,7 @@ function inactiveReason(entry: InstalledExtension): string | undefined {
 		return `project extension ${entry.id} is not approved for this workspace; clio-coder config trust extensions reviews it`;
 	if (!entry.valid)
 		return entry.diagnostics.find((diagnostic) => diagnostic.type === "error")?.message ?? "invalid package";
-	if (!entry.compatible) return "not compatible with this Clio version";
+	if (!entry.compatible) return "not compatible with this CLIO Coder version";
 	if (!entry.enabled) return "disabled";
 	return undefined;
 }
@@ -885,7 +885,7 @@ export class OperatorExtensionRuntimeV2 {
 		// operator typed at an idle prompt, so it waits for the generation instead.
 		while (this.reloading && this.reloadTask && !this.closed) await this.reloadTask;
 		if (this.closed) throw new Error("extension runtimes have shut down");
-		if (!this.options.isIdle()) throw new Error("Clio is busy; run it again once the current turn finishes");
+		if (!this.options.isIdle()) throw new Error("CLIO Coder is busy; run it again once the current turn finishes");
 		if (Buffer.byteLength(args) > RUNTIME_LIMITS.argumentBytes) throw new Error("extension arguments exceed 16 KiB");
 		const row = this.commands(promptNames).find((candidate) => candidate.invocation === invocation);
 		if (!row?.available) throw new Error(row?.reason ?? `/${invocation} is not an available extension command`);

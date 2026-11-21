@@ -77,7 +77,7 @@ local p = plugin.register({
     type = "hook",
     permissions = {"keymap"},
 })
-p:bind("alt+a", "Hide the music pane and return to Clio", function()
+p:bind("alt+a", "Hide the music pane and return to CLIO Coder", function()
     cliamp.fs.append(${JSON.stringify(tapPath)}, "tap\\n")
 end)
 `;

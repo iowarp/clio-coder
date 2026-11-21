@@ -430,9 +430,9 @@ function operatorSteps(change: Change): string {
 			...(target.auth?.apiKeyEnvVar ? [`--api-key-env ${target.auth.apiKeyEnvVar}`] : []),
 			...(target.gateway ? ["--gateway"] : []),
 		];
-		return `Operator steps: run \`clio-coder configure ${flags.join(" ")}\`, or open /settings in an interactive Clio session at autonomy default and ask Clio to apply this proposal there. A key is stored by the operator with \`clio-coder auth login ${target.id}\`.`;
+		return `Operator steps: run \`clio-coder configure ${flags.join(" ")}\`, or open /settings in an interactive CLIO Coder session at autonomy default and ask CLIO Coder to apply this proposal there. A key is stored by the operator with \`clio-coder auth login ${target.id}\`.`;
 	}
-	return `Operator steps: open /settings in an interactive Clio session and set ${change.path}, or ask Clio there at autonomy default to apply this proposal, or edit it with \`clio-coder configure --edit\`.`;
+	return `Operator steps: open /settings in an interactive CLIO Coder session and set ${change.path}, or ask CLIO Coder there at autonomy default to apply this proposal, or edit it with \`clio-coder configure --edit\`.`;
 }
 
 function recordSettingsChange(proposal: Proposal, sessionId: string | undefined): void {
@@ -454,14 +454,14 @@ function savedSettingEffect(path: string): string {
 	if (path.startsWith("targets."))
 		return "New sessions and dispatches see the target; switch a running chat with /model or /settings models.";
 	if (isRoutingPath(path))
-		return "This session keeps its current routing. Exit and start a new Clio session to use the saved routing.";
+		return "This session keeps its current routing. Exit and start a new CLIO Coder session to use the saved routing.";
 	switch (settingsChangeKind(path)) {
 		case "hotReload":
 			return "The running session picks this up automatically after the settings watcher reads the save.";
 		case "nextTurn":
 			return "After the settings watcher reads the save, this applies to the next request or dispatch; running workers keep their current settings.";
 		case "restartRequired":
-			return "Exit and start a new Clio session to apply this setting.";
+			return "Exit and start a new CLIO Coder session to apply this setting.";
 	}
 }
 

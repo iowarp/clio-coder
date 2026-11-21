@@ -658,7 +658,7 @@ function runSkillsScope(
 					{ name, kind: "untrusted" },
 				);
 			return skillRefusal(
-				`context: skill "${name}" is discovered in ${unavailable.source}/${unavailable.scope}, not imported into Clio. Use interop adopt or library import explicitly; the trust setting alone does not activate it. Do not retry this load.`,
+				`context: skill "${name}" is discovered in ${unavailable.source}/${unavailable.scope}, not imported into CLIO Coder. Use interop adopt or library import explicitly; the trust setting alone does not activate it. Do not retry this load.`,
 				{ name, kind: "not-imported", source: unavailable.source, scope: unavailable.scope },
 			);
 		}

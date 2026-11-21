@@ -36,7 +36,7 @@ function fakeMux(available = true) {
 			server: null,
 			self: { workspaceId: null, tabId: null, paneId: "self" },
 			candidates: [],
-			reason: "HERDR_ENV is not 1, so Clio is not running inside a pane host",
+			reason: "HERDR_ENV is not 1, so CLIO Coder is not running inside a pane host",
 			refused: false,
 		}),
 		list: () => records,
@@ -119,7 +119,7 @@ describe("panes tool", () => {
 		const f = fixture();
 		match(
 			output(await f.call({ action: "list" })),
-			/^panes mode=guest available; notifications=\S+\ndocks: files closed[^\n]*; workers closed; music closed[^\n]*\n- no Clio-owned panes$/,
+			/^panes mode=guest available; notifications=\S+\ndocks: files closed[^\n]*; workers closed; music closed[^\n]*\n- no CLIO Coder-owned panes$/,
 		);
 		strictEqual(output(await f.call({ action: "open", preset: "shell" })), "opened the shell pane (p1).");
 		strictEqual(
@@ -129,7 +129,7 @@ describe("panes tool", () => {
 		match(output(await f.call({ action: "list" })), /\n- p1 utility shell$/);
 		const closed = await f.call({ action: "close", target: "shell" });
 		strictEqual(output(closed), "closed 1 pane(s): shell.");
-		match(errorMessage(await f.call({ action: "close", target: "shell" })), /no Clio-owned pane matches 'shell'/);
+		match(errorMessage(await f.call({ action: "close", target: "shell" })), /no CLIO Coder-owned pane matches 'shell'/);
 		deepStrictEqual(f.calls, ["open:shell:/bin/bash -l:/workspace", "focus:p1", "close:p1"]);
 	});
 
@@ -299,7 +299,7 @@ function listeningPeer(
 	};
 }
 
-const ORIGIN = "machine prompt from Clio in pane w1:p1";
+const ORIGIN = "machine prompt from CLIO Coder in pane w1:p1";
 
 describe("peer prompt inbox", () => {
 	it("serializes delayed token publications through rotation and disposal", async () => {

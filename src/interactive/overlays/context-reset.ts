@@ -24,10 +24,10 @@ export interface OpenContextResetOverlayDeps {
 function previewLines(preview: ReturnType<typeof contextResetPreview>): string[] {
 	return [
 		preview.removes.length === 0
-			? "Clio has generated no project context here yet, so Preserve changes no file."
-			: `Both choices remove what Clio generated: ${preview.removes.join(", ")}.`,
+			? "CLIO Coder has generated no project context here yet, so Preserve changes no file."
+			: `Both choices remove what CLIO Coder generated: ${preview.removes.join(", ")}.`,
 		preview.handbook
-			? "Delete also removes CLIO-CODER.md, the handbook you or Clio wrote for this project."
+			? "Delete also removes CLIO-CODER.md, the handbook you or CLIO Coder wrote for this project."
 			: "There is no CLIO-CODER.md here, so Delete removes the same files as Preserve.",
 		`${preview.keeps.length > 0 ? `Kept: ${preview.keeps.join(", ")}. ` : ""}Nothing else in the project is touched.`,
 	];

@@ -147,7 +147,7 @@ export function yoloContainedMigrationNotice(
 	judgeEnabled: boolean,
 ): string {
 	const notes = yoloContainmentNotes(mode, availability, judgeEnabled);
-	return `Yolo now runs contained: ${notes.sandbox}; ${notes.judge}; nothing waits for you, and a call that would need you is refused back to Clio instead of asking. To keep the old unconfined yolo, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.`;
+	return `Yolo now runs contained: ${notes.sandbox}; ${notes.judge}; nothing waits for you, and a call that would need you is refused back to CLIO Coder instead of asking. To keep the old unconfined yolo, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.`;
 }
 
 export interface MainSandboxPolicyInput {
@@ -845,7 +845,7 @@ export function planMainSandboxSpawn(
 		} catch (error) {
 			return {
 				kind: "refused",
-				message: `sandbox: could not create Clio's directory ${dir} to keep it read-only (${error instanceof Error ? error.message : String(error)}); the command was not run`,
+				message: `sandbox: could not create CLIO Coder's directory ${dir} to keep it read-only (${error instanceof Error ? error.message : String(error)}); the command was not run`,
 			};
 		}
 	}
@@ -1144,7 +1144,7 @@ function displayWritableRoots(roots: ReadonlyArray<string>): string {
 export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy): string | null {
 	if (!WRITE_REFUSED.test(output)) return null;
 	if (policy.readOnly === true) {
-		return `sandbox: this run is read-only, so this command could write only to its scratch directory ${displayWritableRoots(policy.writableRoots)} and a private /tmp; the workspace and every other file outside Clio's home stay unchanged, and a read-only run has no unsandboxed commands.`;
+		return `sandbox: this run is read-only, so this command could write only to its scratch directory ${displayWritableRoots(policy.writableRoots)} and a private /tmp; the workspace and every other file outside CLIO Coder's home stay unchanged, and a read-only run has no unsandboxed commands.`;
 	}
 	const temp = writableTempDir(policy.writableRoots);
 	const cache =
@@ -1153,7 +1153,7 @@ export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy):
 			: temp === null
 				? ""
 				: ` A tool cache outside these roots, such as uv's ~/.cache/uv or a UV_CACHE_DIR set elsewhere, stays read-only because the tool later runs code from it outside the sandbox: point it at a new directory under ${temp} for this command (UV_CACHE_DIR=${path.join(temp, "uv-cache")}).`;
-	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden).${cache} If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request (Clio's own settings and credentials are never changed from a shell: propose settings with configure_clio and leave credentials to the operator); a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
+	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden).${cache} If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request (CLIO Coder's own settings and credentials are never changed from a shell: propose settings with configure_clio and leave credentials to the operator); a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 
 /** The run's own temp directory when it is a writable root, else /tmp when that is one, else null. */
@@ -1188,7 +1188,7 @@ export function mainSandboxLine(
 		const details = [
 			`default-autonomy shell commands run in the ${availability.backend} sandbox`,
 			`writable roots: ${displayWritableRoots(writableRoots)}`,
-			"package managers use Clio's sandbox cache (pnpm's store through PNPM_HOME and pnpm_config_store_dir unless the operator chose one) and read an empty NPM_CONFIG_USERCONFIG in place of a masked ~/.npmrc",
+			"package managers use CLIO Coder's sandbox cache (pnpm's store through PNPM_HOME and pnpm_config_store_dir unless the operator chose one) and read an empty NPM_CONFIG_USERCONFIG in place of a masked ~/.npmrc",
 		];
 		const masked =
 			secretFiles === undefined

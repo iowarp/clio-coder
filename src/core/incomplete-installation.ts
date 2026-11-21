@@ -70,9 +70,9 @@ export function incompleteInstallationAdvice(err: unknown, options: IncompleteIn
 	if (!found) return null;
 	const { message, outputDir } = found;
 	if (found.kind === "build_replaced")
-		return `${message}\nThis running Clio loaded a build that has since been replaced. Finish active work and restart the process that reported this error. For a background GUI server, run clio-coder gui background restart --if-idle from a separate terminal, then reload the app. For a private or foreground GUI server, stop it and relaunch the original GUI command. Rebuilding does not update modules already loaded by a running process. Run clio-coder doctor to identify other stale processes.`;
+		return `${message}\nThis running CLIO Coder loaded a build that has since been replaced. Finish active work and restart the process that reported this error. For a background GUI server, run clio-coder gui background restart --if-idle from a separate terminal, then reload the app. For a private or foreground GUI server, stop it and relaunch the original GUI command. Rebuilding does not update modules already loaded by a running process. Run clio-coder doctor to identify other stale processes.`;
 	if (found.kind === "checkout_incomplete")
-		return `${message}\nThis checkout build is incomplete. Run: pnpm --dir ${shellQuote(dirname(outputDir))} run build. Then restart Clio. If doctor still starts, clio-coder doctor --fix performs the rebuild.`;
+		return `${message}\nThis checkout build is incomplete. Run: pnpm --dir ${shellQuote(dirname(outputDir))} run build. Then restart CLIO Coder. If doctor still starts, clio-coder doctor --fix performs the rebuild.`;
 	return [
 		`${message}`,
 		"",
@@ -99,9 +99,9 @@ export function incompleteInstallationAcpAdvice(
 	if (!found) return null;
 	const message =
 		found.kind === "build_replaced"
-			? "this Clio agent loaded a build that has since been replaced; restart the agent from your editor to load the new build"
+			? "this CLIO Coder agent loaded a build that has since been replaced; restart the agent from your editor to load the new build"
 			: found.kind === "checkout_incomplete"
-				? "this Clio checkout build is incomplete; run pnpm run build in the checkout, then restart the agent from your editor"
+				? "this CLIO Coder checkout build is incomplete; run pnpm run build in the checkout, then restart the agent from your editor"
 				: "this CLIO Coder installation is incomplete; reinstall @iowarp/clio-coder, then restart the agent from your editor";
 	return { reason: found.kind, message };
 }

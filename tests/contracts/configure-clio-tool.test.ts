@@ -66,7 +66,7 @@ test("configure_clio previews an exact change, applies it once and logs the save
 	strictEqual(tool.confirmationFor?.({ action: "apply", proposalId })?.ruleId, "clio-settings");
 	const applied = await tool.run({ action: "apply", proposalId }, { sessionId: "s-1" });
 	strictEqual(applied.kind, "ok");
-	match(applied.kind === "ok" ? applied.output : "", /Exit and start a new Clio session/);
+	match(applied.kind === "ok" ? applied.output : "", /Exit and start a new CLIO Coder session/);
 	strictEqual(readSettings().chat.thinkingLevel, "high");
 	strictEqual((await tool.run({ action: "apply", proposalId })).kind, "error");
 	const log = readFileSync(join(clioStateDir(), "settings-changes.jsonl"), "utf8").trim().split("\n");
@@ -145,7 +145,7 @@ test("configure_clio reports effect timing for live fleet settings and restart s
 	const tool = createConfigureClioTool(attended);
 	for (const [path, value, expected] of [
 		["fleet.limits.toolCallsPerRun", "7", /next request or dispatch/],
-		["fleet.concurrency", "3", /Exit and start a new Clio session/],
+		["fleet.concurrency", "3", /Exit and start a new CLIO Coder session/],
 	] as const) {
 		const preview = await tool.run({ action: "preview", path, value });
 		const proposalId = /proposalId="([^"]+)"/.exec(preview.kind === "ok" ? preview.output : "")?.[1];

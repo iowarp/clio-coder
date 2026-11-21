@@ -105,8 +105,8 @@ describe("contracts/extension Clio compatibility", () => {
 		strictEqual(result.extension, undefined);
 		strictEqual(result.diagnostics.length, 1);
 		const message = result.diagnostics[0]?.message ?? "";
-		match(message, /extension future-only requires Clio '>999999\.0\.0'/u);
-		match(message, new RegExp(`running Clio version is '${getVersionInfo().clio.replaceAll(".", "\\.")}'`, "u"));
+		match(message, /extension future-only requires CLIO Coder '>999999\.0\.0'/u);
+		match(message, new RegExp(`running CLIO Coder version is '${getVersionInfo().clio.replaceAll(".", "\\.")}'`, "u"));
 		strictEqual(existsSync(path.join(project, ".clio-coder")), false);
 	});
 
@@ -138,7 +138,7 @@ describe("contracts/extension Clio compatibility", () => {
 		strictEqual(loaded.length, 1);
 		strictEqual(loaded[0]?.compatible, false);
 		strictEqual(loaded[0]?.effective, false);
-		match(loaded[0]?.diagnostics[0]?.message ?? "", /future-load.*>999999\.0\.0.*running Clio version/u);
+		match(loaded[0]?.diagnostics[0]?.message ?? "", /future-load.*>999999\.0\.0.*running CLIO Coder version/u);
 		strictEqual(loaded[0]?.loadable, false);
 	});
 

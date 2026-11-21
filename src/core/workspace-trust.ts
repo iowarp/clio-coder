@@ -285,10 +285,10 @@ function writeRecord(record: WorkspaceTrustRecord): void {
 
 function writeSurfaceApproval(workspaceRoot: string, surface: ProjectTrustSurface, approval: SurfaceApproval): void {
 	const root = surfaceRoot(workspaceRoot, surface);
-	if (configRootRemoved()) throw new Error("Clio config was removed; trust was not recorded");
+	if (configRootRemoved()) throw new Error("CLIO Coder config was removed; trust was not recorded");
 	clioConfigDir();
 	withStateFileLockSync(recordPath(root), () => {
-		if (configRootRemoved()) throw new Error("Clio config was removed; trust was not recorded");
+		if (configRootRemoved()) throw new Error("CLIO Coder config was removed; trust was not recorded");
 		const record: WorkspaceTrustRecord = readRecord(root) ?? { workspaceRoot: root, surfaces: {} };
 		record.surfaces[surface] = approval;
 		writeRecord(record);

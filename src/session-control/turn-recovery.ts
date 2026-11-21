@@ -434,7 +434,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			const refusedLocally = overflow.message.startsWith(LOCAL_CONTEXT_OVERFLOW_PREFIX);
 			deps.emitNotice(
 				refusedLocally
-					? "[CLIO Coder] Clio refused this request before sending it: it would leave too little of the context window for a reply; compacting and retrying once."
+					? "[CLIO Coder] CLIO Coder refused this request before sending it: it would leave too little of the context window for a reply; compacting and retrying once."
 					: windowUnknown
 						? "[CLIO Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
 						: "[CLIO Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
@@ -673,8 +673,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					state.continuation.recordStop({
 						cause: "wait_past_budget",
 						reason: pastWaitLimit
-							? `the provider asked to wait ${chainProviderWaits + 1} times, past the ${PROVIDER_WAIT_LIMIT} waits Clio sits out on one request`
-							: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} Clio waits on one request`,
+							? `the provider asked to wait ${chainProviderWaits + 1} times, past the ${PROVIDER_WAIT_LIMIT} waits CLIO Coder sits out on one request`
+							: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} CLIO Coder waits on one request`,
 						retryAfterMs: statedMs,
 					});
 					return true;

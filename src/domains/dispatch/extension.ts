@@ -123,7 +123,7 @@ import {
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
 import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../../engine/acp/transport.js";
-import { engineRetryDelayMs } from "../../engine/ai.js";
+import { engineRetryDelayMs, useMainCacheLaneStore } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import { attestedToolSchemaSignature, INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
@@ -340,7 +340,12 @@ import type { WorktreeBootRecovery } from "./boot-recovery.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFromEnvelope } from "./budget-envelope.js";
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
-import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
+import {
+	capacityLeaseUsage,
+	capacityLeaseUsageAsync,
+	createNodeLeaseUsageReader,
+	mainCacheLaneStore,
+} from "./capacity-lease.js";
 import type {
 	AbortReason,
 	DispatchAdmissionObserver,
@@ -474,7 +479,12 @@ import {
 import { type PeerInstructions, peerInstructionsStaleMessage, resolvePeerInstructions } from "./peer-instructions.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import { claimCacheLane, claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
+import {
+	claimSharedPrefix,
+	claimWorkerCacheLane,
+	startAfterPrefixHold,
+	waitForPrefixLeader,
+} from "./prefix-stagger.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -2701,32 +2711,32 @@ function supportsRequiredCapabilities(
 
 function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	if (runtimeKind === "sdk" && runtimeId === "claude-sdk") {
-		return ["Claude Agent SDK executes Claude Code tools; Clio mediates canUseTool decisions and records denials"];
+		return ["Claude Agent SDK executes Claude Code tools; CLIO Coder mediates canUseTool decisions and records denials"];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "claude-code") {
 		return [
-			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
+			"Claude CLI subprocess executes Claude Code tools; CLIO Coder constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "codex-cli") {
 		return [
-			"Codex CLI executes its own tools; Clio selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
-			"Codex CLI login and model configuration belong to the installed codex command; Clio only observes its JSONL run stream",
+			"Codex CLI executes its own tools; CLIO Coder selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
+			"Codex CLI login and model configuration belong to the installed codex command; CLIO Coder only observes its JSONL run stream",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "opencode-cli") {
 		return [
-			"OpenCode CLI owns its tools and permissions; Clio observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
+			"OpenCode CLI owns its tools and permissions; CLIO Coder observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "pi-cli") {
 		return [
-			"Pi CLI owns its tools; Clio can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
+			"Pi CLI owns its tools; CLIO Coder can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
 		];
 	}
 	if (runtimeKind === "subprocess" && runtimeId === "antigravity-code") {
 		return [
-			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; Clio observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
+			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; CLIO Coder observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
 			"Antigravity resumes a conversation only when the caller supplies its id explicitly",
 			"Antigravity runs are one-shot and never retried automatically",
 		];
@@ -3170,7 +3180,7 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	if (!writeRoots || writeRoots.length === 0) return;
 	if (runtimeEnforcement(runtime).scopeEnforcement) return;
 	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
+		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without CLIO Coder per-tool mediation. Dispatch to a native or claude-sdk worker.`,
 	);
 }
 
@@ -3437,7 +3447,7 @@ function assertResponseSchemaEnforceable(
 
 function acpRuntimeLimitations(): string[] {
 	return [
-		"external ACP agent executes its own unknown tool surface; Clio mediates permission requests and records decisions",
+		"external ACP agent executes its own unknown tool surface; CLIO Coder mediates permission requests and records decisions",
 	];
 }
 
@@ -4378,6 +4388,8 @@ export function createDispatchBundle(
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const scheduling: SchedulingContract = maybeScheduling;
 	const prompts: PromptsContract = maybePrompts;
+	// Main sessions claim their cache lanes in the admission store beside the workers' leases (M-11).
+	useMainCacheLaneStore(mainCacheLaneStore);
 	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
 	/** The judge-withheld notice is a process fact, so it is raised once, not on every dispatch. */
@@ -5409,7 +5421,7 @@ export function createDispatchBundle(
 			return {
 				scheduled: false,
 				settlementDetail:
-					"automatic retry suppressed because this external agent loop is one-shot and Clio cannot prove replay is side-effect-free",
+					"automatic retry suppressed because this external agent loop is one-shot and CLIO Coder cannot prove replay is side-effect-free",
 			};
 		}
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
@@ -7020,7 +7032,7 @@ export function createDispatchBundle(
 		assertWorkerContextRequest(req, false);
 		if (req.storeTags !== undefined && req.storeTags.length > 0) {
 			throw new Error(
-				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no Clio store tool. Dispatch to a native worker.",
+				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no CLIO Coder store tool. Dispatch to a native worker.",
 			);
 		}
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
@@ -7031,7 +7043,7 @@ export function createDispatchBundle(
 		// so no ACP peer can keep a read-only run from changing user files.
 		if (req.readOnly === true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so Clio cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
+				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so CLIO Coder cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
 			);
 		}
 		// Operator decision Q6: agent-managed governance approves every call the
@@ -7039,7 +7051,7 @@ export function createDispatchBundle(
 		// operator's explicit trust.
 		if (toolGovernance === "agent-managed" && configured.trustedUnmediated !== true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so Clio cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', so CLIO Coder cannot mediate its tool calls and it is refused write-capable work; choose clio-coder-policy or deny-all governance, or set trustedUnmediated: true on integrations.externalAgents.entries '${agentId}' to accept the agent's own authority`,
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
@@ -8611,7 +8623,7 @@ export function createDispatchBundle(
 				: null;
 			if (claudeLaunch && lifecycle.authProfile && !launchCredential) {
 				throw new Error(
-					"Clio's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
+					"CLIO Coder's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
 				);
 			}
 			const launchAuthProfile = claudeLaunch
@@ -8940,11 +8952,13 @@ export function createDispatchBundle(
 						reportDispatchDiagnostic(`write peer instructions in task worktree ${req.taskWorktree.runId}`, error);
 					}
 				}
-				// Each live worker of one head takes its own provider session id; the lane frees when this worker ends (FL-17).
+				// Each live worker of one head takes its own provider session id on its capacity lease, so every process on this
+				// state dir sees it; the lane frees with the lease (FL-17, M-11).
 				// The head is the system prompt and tool surface alone: the prompt signature also covers each run's task.
 				const lane =
 					lifecycle.runtimeKind === "http" && lifecycle.systemPrompt.length > 0
-						? claimCacheLane(
+						? claimWorkerCacheLane(
+								capacityLease.leaseId,
 								sha256(
 									JSON.stringify([
 										lifecycle.target.target.id,

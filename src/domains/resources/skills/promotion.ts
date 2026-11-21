@@ -151,7 +151,7 @@ export function assertPromotionInstallSource(entry: MarketplaceSkill): void {
 	if (isOwnMarketplaceSource(entry)) return;
 	throw new Error(
 		`skill promotion: refusing to install "${entry.name}" from ${entry.sourceUrl}; ` +
-			"promotion installs only from Clio's own marketplace (local catalog or " +
+			"promotion installs only from CLIO Coder's own marketplace (local catalog or " +
 			`${OWN_MARKETPLACE_URL_PREFIX}). Install manually with clio-coder library install if intended.`,
 	);
 }

@@ -465,7 +465,7 @@ function serverPolicyRefusalResult(
 		classification: { actionClass: trustClass, reasons: [refusal.message] },
 		rejection: {
 			short: reason,
-			detail: `The server's own policy refused ${tool.name} (${refusal.code}). Clio admitted the call; approving it again in Clio does not change the server's answer.`,
+			detail: `The server's own policy refused ${tool.name} (${refusal.code}). CLIO Coder admitted the call; approving it again in CLIO Coder does not change the server's answer.`,
 			hints: ["Report the refusal and what would allow it; do not substitute another tool or target for the refused one."],
 		},
 	};

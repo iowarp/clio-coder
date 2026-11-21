@@ -30,7 +30,7 @@ function buildShort(ctx: RejectionContext): string {
 }
 
 function buildDetail(ctx: RejectionContext): string {
-	const lines: string[] = [`Clio refused to run ${ctx.tool}.`];
+	const lines: string[] = [`CLIO Coder refused to run ${ctx.tool}.`];
 	for (const reason of ctx.reasons) {
 		lines.push(`- ${reason}`);
 	}

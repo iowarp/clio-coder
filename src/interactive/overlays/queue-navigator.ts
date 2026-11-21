@@ -157,7 +157,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			const removedLast = this.lastSeen.length > 0 && this.lastSeen.every((id) => this.removed.has(id));
 			return emptyState(
 				theme,
-				removedLast ? "You removed the last queued message." : "Clio took the rest of the queue at its slot.",
+				removedLast ? "You removed the last queued message." : "CLIO Coder took the rest of the queue at its slot.",
 				safeWidth,
 				{ remedy: "Nothing is queued now. Esc closes this view; Enter during a run queues another message." },
 			);
@@ -179,7 +179,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 				: wrapTextWithAnsi(
 						theme.fg(
 							"warning",
-							`${GLYPH.warn} Message ${this.taken.position} went to Clio at its slot while you were on it. The next key only selects; press it again to act.`,
+							`${GLYPH.warn} Message ${this.taken.position} went to CLIO Coder at its slot while you were on it. The next key only selects; press it again to act.`,
 						),
 						safeWidth,
 					);
@@ -212,8 +212,8 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 				this.deps.isHeld?.() === true
 					? "held"
 					: slot === "steer"
-						? "steer, Clio reads it at its next step"
-						: "later, Clio reads it when the turn ends";
+						? "steer, CLIO Coder reads it at its next step"
+						: "later, CLIO Coder reads it when the turn ends";
 			const waiting = `waiting ${formatQueueAge(now - selected.enqueuedAt)}`;
 			const label = `Message ${this.selected + 1}`;
 			// A narrow rule cut the sentence mid-clause with no mark; it then takes its own wrapped row under the rule.

@@ -393,7 +393,7 @@ function unknownModelDiagnostic(
 		return diagnostic(
 			"warning",
 			"model-catalog-unreadable",
-			`target '${target.id}' returned no model list, so Clio could not check whether '${wireModelId}' is served there; requests will send the id as-is. Re-read the catalog with: clio-coder targets --probe`,
+			`target '${target.id}' returned no model list, so CLIO Coder could not check whether '${wireModelId}' is served there; requests will send the id as-is. Re-read the catalog with: clio-coder targets --probe`,
 		);
 	}
 	return diagnostic(
@@ -451,7 +451,7 @@ export function resolveRuntimeTarget(
 				diagnostic(
 					"error",
 					"runtime-target-unsupported",
-					`target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); Clio cannot drive this runtime as a target`,
+					`target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); CLIO Coder cannot drive this runtime as a target`,
 				),
 			],
 		};
@@ -933,7 +933,7 @@ export function resolveContextWindowDetails(
 	}
 	const provenanceNotice =
 		effective === 0
-			? "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+			? "This model's context window is unknown, so CLIO Coder compacts at its token budget instead. clio-coder configure can set the window."
 			: null;
 	const servingLimit: ResolvedNumericField = {
 		value: effective > 0 ? effective : null,

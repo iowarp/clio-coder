@@ -326,7 +326,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		// Host entries join only while the composer has the keyboard; a built-in suffix always wins.
 		const taken = new Set(builtins.map((entry) => entry.key).filter(Boolean));
 		const extra = (deps.extraLeaderTargets?.() ?? []).map(
-			(entry): LeaderTarget => (taken.has(entry.key) ? { ...entry, disabledReason: "key taken by Clio" } : entry),
+			(entry): LeaderTarget => (taken.has(entry.key) ? { ...entry, disabledReason: "key taken by CLIO Coder" } : entry),
 		);
 		return [...builtins, ...extra];
 	};

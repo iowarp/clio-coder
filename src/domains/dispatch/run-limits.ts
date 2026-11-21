@@ -109,7 +109,7 @@ const WALL_CLAUSE = /the run stops at its (\d+) ms wall clock/;
 export function planCardLimits(input: PlanCardLimitsInput): string {
 	const tools =
 		input.budget.enforcement.classification === "external-one-shot"
-			? "one launch whose tool calls Clio cannot count, so no tool ceiling applies"
+			? "one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies"
 			: budgetLimitWords(input.budget);
 	const wall = `the run stops at its ${input.wallMs} ms wall clock`;
 	if (input.priced) {
