@@ -60,7 +60,7 @@ test("image result shaping preserves valid images and bounds combined payload", 
 
 test("browser screenshot survives scratch cleanup only on vision routes", async () => {
 	const { chmodSync, existsSync, readFileSync } = await import("node:fs");
-	const { runFrontendCheck } = await import("../../src/tools/verify/frontend.js");
+	const { verifyTool } = await import("../../src/tools/verify/index.js");
 	const dir = mkdtempSync(join(tmpdir(), "clio-coder-image-browser-"));
 	const previousCwd = process.cwd(),
 		previousPath = process.env.PATH;
@@ -75,8 +75,9 @@ test("browser screenshot survives scratch cleanup only on vision routes", async 
 		process.chdir(dir);
 		process.env.PATH = dir;
 		for (const supportsImages of [true, false]) {
-			const result = await runFrontendCheck(
-				{ path: "page.html", browser: "required" },
+			// Through verify itself: the route's image capability must reach the frontend check.
+			const result = await verifyTool.run(
+				{ check: "frontend", path: "page.html", browser: "required" },
 				{ supportsImages, toolResultMaxBytes: 8192 },
 			);
 			strictEqual(result.kind, "ok");
