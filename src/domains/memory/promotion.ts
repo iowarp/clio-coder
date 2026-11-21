@@ -9,7 +9,7 @@ import {
 	COMMAND_EVIDENCE_REF_PREFIX,
 	type CommandSegment,
 	commandSegment,
-	legacyCommandHash,
+	commandTextHash,
 	parseSourceEvidenceRef,
 	segmentKeyRef,
 } from "./command-evidence.js";
@@ -191,13 +191,16 @@ export function memoryRecordFromPromotion(
  * command claim on the quoted span whose evidence identity it names; without one, a single `source:` ref is a
  * source claim. A `command-claimed:` ref grants nothing and claims nothing. More than one candidate, or a command
  * whose words the store could not hold, is no claim. A quoted span is read against the repository root, as
- * evidence identity reads a receipt, so `cd <root> && pnpm test` claims `pnpm test`; a ref written before segment
- * keys names its span by the text hash.
+ * evidence identity reads a receipt, so `cd <root> && pnpm test` claims `pnpm test`; a ref for a command with no
+ * evidence identity of its own (`cd <root> && pnpm test` read without the root) names its span by the text hash.
  *
- * New records store the claim they were built with. A record written before claim identity has none stored and is
- * read through this function on every use (`recordClaim`); its derived claim is never written back.
+ * A record stores the claim it was built with; this runs when it is built, and once in the memory store upgrade.
  */
-function claimFromEvidence(lesson: string, evidenceRefs: ReadonlyArray<string>, root?: string): MemoryClaim | null {
+export function claimFromEvidence(
+	lesson: string,
+	evidenceRefs: ReadonlyArray<string>,
+	root?: string,
+): MemoryClaim | null {
 	const hashes = new Set(
 		evidenceRefs
 			.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX))
@@ -212,7 +215,7 @@ function claimFromEvidence(lesson: string, evidenceRefs: ReadonlyArray<string>, 
 			if (segment === null) continue;
 			const named = segmentKeyRef(hash)
 				? segment.key === hash || commandSegment(span)?.key === hash
-				: legacyCommandHash(span) === hash;
+				: commandTextHash(span) === hash;
 			if (named) return commandClaimOf(segment);
 		}
 		return null;
@@ -239,9 +242,9 @@ function commandClaimOf(segment: CommandSegment): MemoryClaim | null {
 	return command === null ? null : { kind: "command", command };
 }
 
-/** The claim a record makes: the one it stores, or, for a record written before claim identity, its refs' claim. */
+/** The claim a record makes: the one it stores, or none. */
 export function recordClaim(record: MemoryRecord): MemoryClaim | null {
-	return record.claim ?? claimFromEvidence(record.lesson, record.evidenceRefs, record.repository?.key);
+	return record.claim ?? null;
 }
 
 /**

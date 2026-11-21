@@ -81,7 +81,7 @@ function home(records: MemoryRecord[] | string) {
 	mkdirSync(join(dataDir, "memory"), { recursive: true });
 	writeFileSync(
 		memoryStorePath(dataDir),
-		typeof records === "string" ? records : JSON.stringify({ version: 1, records }),
+		typeof records === "string" ? records : JSON.stringify({ version: 2, records }),
 	);
 	return { root, dataDir, stateDir };
 }
@@ -143,7 +143,7 @@ test("an unreadable store leaves no marker and the next boot finishes the work",
 		strictEqual(existsSync(join(h.stateDir, "memory", "flow-sweep-v1.json")), false);
 		writeFileSync(
 			memoryStorePath(h.dataDir),
-			JSON.stringify({ version: 1, records: [record("after-label", { source: "labeled" })] }),
+			JSON.stringify({ version: 2, records: [record("after-label", { source: "labeled" })] }),
 		);
 		deepStrictEqual(named(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports)), ["after-label"]);
 		strictEqual(existsSync(join(h.stateDir, "memory", "flow-sweep-v1.json")), true);
@@ -205,15 +205,13 @@ test("memory consolidate merges one claim's records, demotes dead evidence by ru
 		{
 			...kept,
 			...guardian,
-			// A legacy delivery, recorded as an observation before the counters existed.
-			observations: [
-				{ at: AFTER, sessionId: "s2", kind: "held", revision: "0".repeat(16) },
-				{ at: DELIVERED_AT, sessionId: "s1", kind: "delivered" },
-			],
+			observations: [{ at: AFTER, sessionId: "s2", kind: "held", revision: "0".repeat(16) }],
+			deliveredCount: 1,
+			lastDeliveredAt: DELIVERED_AT,
 		},
 		{
 			...note("a2", "Use `./scripts/check.sh --fast` to check quickly.", command("./scripts/check.sh --fast"), AFTER),
-			observations: [{ at: AFTER, sessionId: "s3", kind: "held" }],
+			observations: [{ at: AFTER, sessionId: "s3", kind: "held", revision: "0".repeat(16) }],
 			deliveredCount: 2,
 			lastDeliveredAt: AFTER,
 		},
@@ -264,8 +262,8 @@ test("memory consolidate merges one claim's records, demotes dead evidence by ru
 			"the other wording is kept as a revision",
 		);
 		deepStrictEqual(survivor?.observations?.map((item) => item.sessionId).sort(), ["s2", "s3"]);
-		strictEqual(survivor?.deliveredCount, 3, "the legacy delivery is counted with the other's two");
-		strictEqual(survivor?.lastDeliveredAt, DELIVERED_AT, "the legacy delivery's time survives the merge");
+		strictEqual(survivor?.deliveredCount, 3, "the survivor's delivery is counted with the other's two");
+		strictEqual(survivor?.lastDeliveredAt, DELIVERED_AT, "the earlier delivery's time survives the merge");
 		ok(after.has("mem-b100000000000000"), "a distinct claim on the same subject survives");
 		for (const id of ["mem-c100000000000000", "mem-d100000000000000"]) {
 			strictEqual(after.get(id)?.approved, false, `${id} is demoted on dead evidence`);

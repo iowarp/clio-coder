@@ -370,6 +370,7 @@ targets:
 			OLD_TELEMETRY_MIGRATION_ID,
 			"2026-11-02-approvals-to-config",
 			"2026-11-07-remove-copilot-consent",
+			"2026-11-21-memory-store-v2",
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -409,7 +410,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-memory-store-v2"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");

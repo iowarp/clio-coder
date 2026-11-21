@@ -270,10 +270,24 @@ function spanDigest(text: string): string {
 	return createHash("sha256").update(compact(text)).digest("hex");
 }
 
-/** A pinned hash is the full digest, or the 16-character prefix a ref written before the full hash carries. */
-function spanMatches(text: string, spanHash: string): boolean {
-	const digest = spanDigest(text);
-	return spanHash.length === 64 ? digest === spanHash : digest.startsWith(spanHash);
+/**
+ * The full digest a short pinned hash stood for, recovered the way delivery finds a span: from a run of the lesson's
+ * own words, then from whole-line windows of the file. Null unless exactly one digest has that prefix. Only the memory
+ * store upgrade asks, for `source:` refs written before refs carried the full hash.
+ */
+export function recoverSpanDigest(lesson: string, prefix: string, content: string | null): string | null {
+	const found = new Set<string>();
+	const words = compact(lesson).split(" ");
+	for (let start = 0; start < words.length; start++)
+		for (let end = start; end < Math.min(words.length, start + SPAN_WINDOW_WORDS); end++)
+			for (const candidate of spanCandidates(words.slice(start, end + 1).join(" "))) {
+				const digest = spanDigest(candidate);
+				if (digest.startsWith(prefix)) found.add(digest);
+			}
+	if (found.size === 0 && content !== null)
+		for (const digest of lineWindowDigests(content)) if (digest.startsWith(prefix)) found.add(digest);
+	const [only] = found;
+	return found.size === 1 && only !== undefined ? only : null;
 }
 
 /** Outer delimiters a lesson's prose may wrap a quoted span in, each with its closer. */
@@ -322,16 +336,11 @@ function spanState(record: MemoryRecord, source: SourceEvidence, file: SourceFil
 	for (let start = 0; start < words.length; start++)
 		for (let end = start; end < Math.min(words.length, start + SPAN_WINDOW_WORDS); end++) {
 			for (const candidate of spanCandidates(words.slice(start, end + 1).join(" ")))
-				if (spanMatches(candidate, source.spanHash))
+				if (spanDigest(candidate) === source.spanHash)
 					return holdsTokens(compact(file.content), compact(candidate)) ? "held" : "gone";
 		}
 	file.windows ??= lineWindowDigests(file.content);
-	const pinned = source.spanHash.length === 64 ? source.spanHash : null;
-	if (
-		pinned !== null ? file.windows.has(pinned) : [...file.windows].some((digest) => digest.startsWith(source.spanHash))
-	)
-		return "held";
-	return "unknown";
+	return file.windows.has(source.spanHash) ? "held" : "unknown";
 }
 
 /** The digest of every run of up to `SPAN_WINDOW_LINES` whole lines, computed once per file per session. */

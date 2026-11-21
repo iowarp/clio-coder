@@ -6,7 +6,6 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import {
 	AGENT_NOTE_EVIDENCE_PREFIX,
-	MEMORY_LEGACY_VERSION,
 	MEMORY_VERSION,
 	type MemoryRecord,
 	type MemoryStatus,
@@ -135,11 +134,8 @@ function readParsedStoreSync(dataDir: string): ParsedMemoryStore {
 /**
  * The envelope must be valid; a record that is not is set aside rather than
  * failing every read, and moves to `records.invalid.json` on the next write.
- * A store a newer build wrote is never touched. A store written before claim
- * identity (`MEMORY_LEGACY_VERSION`) is the legacy reader's: its records are
- * read as they are, with no claim, no revision on their verdicts and their
- * deliveries still as `delivered` observations, and nothing is rewritten on
- * load. A record changes shape only when a mutation touches it.
+ * A store a newer build wrote is never touched, and neither is a version-1 store: the memory store upgrade migration
+ * rewrites that one, and until it has run the store reads as an error naming `clio-coder upgrade`.
  */
 function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	const parsed = parseJson(raw, source);
@@ -151,8 +147,10 @@ function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	if (typeof envelope.version === "number" && envelope.version > MEMORY_VERSION) {
 		throw new Error(`memory store version ${envelope.version} is newer than this build supports (${MEMORY_VERSION})`);
 	}
-	if (envelope.version !== MEMORY_VERSION && envelope.version !== MEMORY_LEGACY_VERSION)
-		throw new Error(`memory store invalid: $.version: expected ${MEMORY_LEGACY_VERSION} or ${MEMORY_VERSION}`);
+	if (envelope.version === 1)
+		throw new Error("memory store version 1 is from before claim identity; run `clio-coder upgrade` to rewrite it");
+	if (envelope.version !== MEMORY_VERSION)
+		throw new Error(`memory store invalid: $.version: expected ${MEMORY_VERSION}`);
 	if (extra.length > 0) throw new Error(`memory store invalid: $.${extra[0]}: unexpected field`);
 	if (!Array.isArray(envelope.records)) throw new Error("memory store invalid: $.records: expected array");
 	const records: MemoryRecord[] = [];
@@ -171,7 +169,7 @@ function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	return { records: sortMemoryRecords(records), invalid };
 }
 
-function quarantineInvalidRecordsUnlocked(dataDir: string, invalid: ReadonlyArray<InvalidMemoryRecord>): void {
+export function quarantineInvalidRecordsUnlocked(dataDir: string, invalid: ReadonlyArray<InvalidMemoryRecord>): void {
 	const path = memoryInvalidRecordsPath(dataDir);
 	let existing: unknown[] = [];
 	try {
@@ -193,31 +191,11 @@ function writeMemoryRecordsUnlocked(
 	storedIds: ReadonlySet<string>,
 ): string {
 	const sorted = sortMemoryRecords(evictForRoom(records, storedIds));
-	const store: MemoryStoreFile = {
-		version: sorted.some(needsCurrentVersion) ? MEMORY_VERSION : MEMORY_LEGACY_VERSION,
-		records: sorted,
-	};
+	const store: MemoryStoreFile = { version: MEMORY_VERSION, records: sorted };
 	const path = memoryStorePath(dataDir);
 	safeResourceWrite(path, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 	return path;
 }
-
-/**
- * Whether a record carries a field a build before claim identity rejects. Such a build would set the record aside
- * as invalid and move it out of the store on its next write; the newer envelope version makes it refuse the store
- * instead of touching it.
- */
-function needsCurrentVersion(record: MemoryRecord): boolean {
-	return (
-		record.claim !== undefined ||
-		record.revisions !== undefined ||
-		record.deliveredCount !== undefined ||
-		record.lastDeliveredAt !== undefined ||
-		(record.observations ?? []).some((item) => Object.keys(item).some((key) => !LEGACY_OBSERVATION_FIELDS.has(key)))
-	);
-}
-
-const LEGACY_OBSERVATION_FIELDS: ReadonlySet<string> = new Set(["at", "sessionId", "kind"]);
 
 /**
  * At the cap, make room from notes nobody decided on: first those with no

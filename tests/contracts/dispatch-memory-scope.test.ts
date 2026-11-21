@@ -35,7 +35,7 @@ test("a worker dispatched into another checkout carries that checkout's memory, 
 	writeFileSync(
 		memoryStorePath(root),
 		JSON.stringify({
-			version: 1,
+			version: 2,
 			records: [
 				repoRecord("mem-00000000000000b1", host, "HOST-ONLY lesson about the host checkout."),
 				repoRecord("mem-00000000000000b2", other, "OTHER-ONLY lesson about the other checkout."),

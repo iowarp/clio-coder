@@ -20,6 +20,7 @@ export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-10-31-remove-old-telemetry",
 	"2026-11-02-approvals-to-config",
 	"2026-11-07-remove-copilot-consent",
+	"2026-11-21-memory-store-v2",
 ]);
 
 /**

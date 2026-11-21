@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { BackgroundStepDecision, BackgroundStepFacts } from "../../src/domains/memory/background-budget.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
-import { commandEvidenceRef, commandSegment, legacyCommandHash } from "../../src/domains/memory/command-evidence.js";
+import {
+	commandEvidenceRef,
+	commandSegment,
+	commandTextHash,
+	sourceEvidenceRef,
+} from "../../src/domains/memory/command-evidence.js";
 import {
 	type ClaimReceipt,
 	claimDemonstration,
@@ -22,12 +27,14 @@ import {
 } from "../../src/domains/memory/operations.js";
 import {
 	claimCommand,
+	claimFromEvidence,
 	claimPathRefusal,
 	memoryClaimKey,
 	proposeMemoryPromotion,
 } from "../../src/domains/memory/promotion.js";
 import { selectMemoryForPrompt } from "../../src/domains/memory/prompt-section.js";
 import { insertMemoryRecordIfAbsent, loadMemoryRecords } from "../../src/domains/memory/store.js";
+import { upgradeMemoryStore } from "../../src/domains/memory/store-upgrade.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { proposeInjectedTaskMemory } from "../../src/domains/memory/task-bank-promotion.js";
 import { loadTaskBankSnapshot, saveTaskBankSnapshot } from "../../src/domains/memory/task-bank-store.js";
@@ -285,14 +292,19 @@ describe("memory guardian gate", () => {
 			createdAt: "2026-10-01T00:00:00.000Z",
 			approved: true,
 			repository: { kind: "canonical-path", key: repo },
+			claim: { kind: "command", command: pattern(out) },
 		};
 		ok(checkoutDeliveryCheck(repo)(bound)?.includes("outside its repository checkout"));
 		// Delivery judges what the record binds, never where its reader keeps scratch: a declared scratch parameter under
-		// another session's scratch root is delivered, a global lesson may name a machine-wide tool, and a legacy record
+		// another session's scratch root is delivered, a global lesson may name a machine-wide tool, and a record
 		// keyed by a subdirectory reads its own repository's paths as its own.
 		const deliver = checkoutDeliveryCheck(repo);
 		const elsewhere = "node fixture.mjs --out /srv/other-scratch/out.txt";
-		const lesson = (command: string) => ({ lesson: `Run \`${command}\`.`, evidenceRefs: [commandEvidenceRef(command)] });
+		const lesson = (command: string) => ({
+			lesson: `Run \`${command}\`.`,
+			evidenceRefs: [commandEvidenceRef(command)],
+			claim: { kind: "command" as const, command: pattern(command) },
+		});
 		const scratchParameter = { kind: "command" as const, command: pattern(elsewhere, 3) };
 		strictEqual(deliver({ ...bound, id: "mem-00000000000000b2", ...lesson(elsewhere), claim: scratchParameter }), null);
 		const tool = "node /opt/tools/lint.mjs";
@@ -315,8 +327,10 @@ describe("memory guardian gate", () => {
 		const checkoutParameter = { kind: "command" as const, command: pattern(intoCheckout, 3) };
 		ok(deliver({ ...bound, id: "mem-00000000000000b6", ...lesson(intoCheckout), claim: checkoutParameter }) !== null);
 
-		// The legacy reader: a store written before claims is read as it is, and its first mutation keeps the count.
+		// The store reads one shape. A version-1 store is refused by name until the upgrade migration rewrites it once.
 		const legacyDir = scratch();
+		const portRef = sourceEvidenceRef("README.md", "the port is 8080");
+		const shortRef = (ref: string) => ref.slice(0, ref.indexOf("#") + 17);
 		const legacy: MemoryRecord = {
 			id: "mem-00000000000000a1",
 			scope: "repo",
@@ -329,25 +343,85 @@ describe("memory guardian gate", () => {
 			createdAt: "2026-10-01T00:00:00.000Z",
 			approved: false,
 			repository: { kind: "canonical-path", key: repo },
-			observations: ["2026-10-02", "2026-10-03", "2026-10-04"].map((day, index) => ({
-				at: `${day}T00:00:00.000Z`,
-				sessionId: `l${index}`,
-				kind: "delivered",
-			})),
 		};
+		const legacyStore = [
+			{
+				...legacy,
+				evidenceRefs: [`command:${commandTextHash(VALIDATE)}`],
+				observations: [
+					...["2026-10-02", "2026-10-03", "2026-10-04"].map((day, index) => ({
+						at: `${day}T00:00:00.000Z`,
+						sessionId: `l${index}`,
+						kind: "delivered",
+					})),
+					{ at: "2026-10-05T00:00:00.000Z", sessionId: "l5", kind: "held" },
+				],
+			},
+			{
+				...legacy,
+				id: "mem-00000000000000a2",
+				key: "port",
+				lesson: "README.md says the port is 8080.",
+				evidenceRefs: [shortRef(portRef)],
+			},
+			{
+				...legacy,
+				id: "mem-00000000000000a3",
+				key: "gone",
+				lesson: "Port noted.",
+				evidenceRefs: [shortRef(portRef), "session:s1"],
+			},
+			{ ...legacy, id: "mem-00000000000000a4", key: "only", lesson: "Port noted.", evidenceRefs: [shortRef(portRef)] },
+		];
 		const legacyPath = join(legacyDir, "memory", "records.json");
 		mkdirSync(join(legacyDir, "memory"), { recursive: true });
-		const legacyText = `${JSON.stringify({ version: 1, records: [legacy] }, null, 2)}\n`;
+		const legacyText = `${JSON.stringify({ version: 1, records: legacyStore }, null, 2)}\n`;
 		writeFileSync(legacyPath, legacyText);
-		deepStrictEqual(await loadMemoryRecords(legacyDir), [legacy]);
-		strictEqual(readFileSync(legacyPath, "utf8"), legacyText, "nothing is rewritten on load");
+		await rejects(loadMemoryRecords(legacyDir), /version 1 .*clio-coder upgrade/u);
+		const report = await upgradeMemoryStore(legacyDir);
+		strictEqual(readFileSync(`${legacyPath}.memory-v2.bak`, "utf8"), legacyText);
+		for (const line of [
+			"Rewrote the store from version 1 to 2.",
+			"Rewrote 1 command evidence ref from a text hash to evidence identity.",
+			"Rewrote 1 source ref from a 16-character span hash to the full digest.",
+			"Removed source refs whose quoted span could no longer be recovered",
+			"Moved 3 delivered observations into the delivery counters.",
+			"Removed 1 verdict that named no claim revision; no gate counted them.",
+		])
+			ok(
+				report.changed.some((entry) => entry.startsWith(line)),
+				`${line} missing from:\n${report.changed.join("\n")}`,
+			);
+		ok(report.changed.some((entry) => entry.includes("mem-00000000000000a3, mem-00000000000000a4.")));
+		ok(report.attention[0]?.startsWith("1 memory record the current shape refuses moved to records.invalid.json"));
+		const quarantined = JSON.parse(readFileSync(join(legacyDir, "memory", "records.invalid.json"), "utf8"));
+		deepStrictEqual(
+			quarantined.map((item: { record: { id: string } }) => item.record.id),
+			["mem-00000000000000a4"],
+		);
+		const upgraded = await loadMemoryRecords(legacyDir);
+		const byId = new Map(upgraded.map((item) => [item.id, item]));
+		const upgradedLegacy = byId.get(legacy.id);
+		deepStrictEqual(upgradedLegacy?.evidenceRefs, [commandEvidenceRef(VALIDATE)]);
+		strictEqual(upgradedLegacy?.claim?.kind, "command", "the claim its refs made is stored");
+		strictEqual(upgradedLegacy?.deliveredCount, 3);
+		strictEqual(upgradedLegacy?.lastDeliveredAt, "2026-10-04T00:00:00.000Z");
+		strictEqual(upgradedLegacy?.observations, undefined);
+		deepStrictEqual(byId.get("mem-00000000000000a2")?.evidenceRefs, [portRef]);
+		deepStrictEqual(byId.get("mem-00000000000000a2")?.claim, {
+			kind: "source",
+			path: "README.md",
+			spanHash: portRef.slice(-64),
+		});
+		deepStrictEqual(byId.get("mem-00000000000000a3")?.evidenceRefs, ["session:s1"]);
+		deepStrictEqual(await upgradeMemoryStore(legacyDir), { changed: [], attention: [] }, "a second run finds nothing");
 		await recordMemoryObservations(legacyDir, [{ memoryId: legacy.id, sessionId: "l9", kind: "held" }]);
 		const migrated = JSON.parse(readFileSync(legacyPath, "utf8"));
 		strictEqual(migrated.version, 2);
-		strictEqual(migrated.records[0].deliveredCount, 3);
-		strictEqual(migrated.records[0].lastDeliveredAt, "2026-10-04T00:00:00.000Z");
 		deepStrictEqual(
-			migrated.records[0].observations.map((item: { kind: string }) => item.kind),
+			migrated.records
+				.find((item: { id: string }) => item.id === legacy.id)
+				.observations.map((item: { kind: string }) => item.kind),
 			["held"],
 		);
 
@@ -373,7 +447,7 @@ describe("memory guardian gate", () => {
 		mkdirSync(join(fullDir, "memory"), { recursive: true });
 		writeFileSync(
 			join(fullDir, "memory", "records.json"),
-			JSON.stringify({ version: 1, records: [...decided, ...notes] }),
+			JSON.stringify({ version: 2, records: [...decided, ...notes] }),
 		);
 		await insertMemoryRecordIfAbsent(fullDir, note(999, {}));
 		const kept = new Set((await loadMemoryRecords(fullDir)).map((item) => item.id));
@@ -441,13 +515,22 @@ describe("memory guardian gate", () => {
 		strictEqual(run2.created, false);
 		strictEqual(run2.record?.id, run1.record?.id);
 
-		// `cd <root> && <command>` is the same claim as `<command>`, as evidence identity says.
-		const quoted = (command: string, ref: string): MemoryRecord =>
-			note(990, { lesson: `Run \`${command}\`.`, evidenceRefs: [ref], repository: { kind: "canonical-path", key: repo } });
+		// `cd <root> && <command>` is the same claim as `<command>`, as evidence identity says: the claim built from a text-hash
+		// ref of the chain names the command it runs.
+		const quoted = (command: string, ref: string): MemoryRecord => {
+			const lesson = `Run \`${command}\`.`;
+			const claim = claimFromEvidence(lesson, [ref], repo);
+			return note(990, {
+				lesson,
+				evidenceRefs: [ref],
+				repository: { kind: "canonical-path", key: repo },
+				...(claim !== null ? { claim } : {}),
+			});
+		};
 		const chained = `cd ${repo} && ${run("check")}`;
 		const plainKey = memoryClaimKey(quoted(run("check"), commandEvidenceRef(run("check"))));
 		ok(plainKey);
-		strictEqual(memoryClaimKey(quoted(chained, `command:${legacyCommandHash(chained)}`)), plainKey);
+		strictEqual(memoryClaimKey(quoted(chained, commandEvidenceRef(chained))), plainKey);
 
 		// Procedural entries and handoff snapshots wait for the operator however many sessions hold them.
 		const repository = canonicalMemoryRepositoryIdentity(repo);
