@@ -208,8 +208,8 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 			}
 
 			// Admission already confirmed these hosts for this call.
-			const newHosts = browserOutwardHosts(args);
-			if (newHosts.length > 0) grantBrowserHosts(newHosts);
+			const newHosts = browserOutwardHosts(args, options?.sessionId);
+			if (newHosts.length > 0) grantBrowserHosts(options?.sessionId, newHosts);
 			let started: Awaited<ReturnType<BrowserSessions["worker"]>>;
 			try {
 				started = await sessions.worker({
@@ -217,7 +217,7 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 					component,
 					sandbox: options?.shellSandbox,
 					workspace: deps.getWorkspaceRoot(),
-					grantedHosts: browserGrantedHosts(),
+					grantedHosts: browserGrantedHosts(options?.sessionId),
 				});
 			} catch (error) {
 				return {
@@ -247,7 +247,7 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 								url: url as string,
 								...(page ? { page } : {}),
 								...(viewport ? { viewport } : {}),
-								grantHosts: browserGrantedHosts(),
+								grantHosts: browserGrantedHosts(options?.sessionId),
 							},
 							call,
 						);

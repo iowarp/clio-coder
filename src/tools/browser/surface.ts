@@ -8,7 +8,7 @@ import {
 } from "../../domains/lifecycle/browser-component.js";
 import { StringEnum } from "../../engine/ai.js";
 import type { ToolSurface } from "../lazy-tool.js";
-import type { ToolConfirmation } from "../registry.js";
+import type { ToolConfirmation, ToolConfirmationContext } from "../registry.js";
 
 /**
  * The browser tool's immutable surface: schema, argument normalizer, the bash projection admission judges, and the
@@ -21,15 +21,24 @@ export type BrowserOp = (typeof BROWSER_OPS)[number];
 export const BROWSER_PROVISION_RULE_ID = "browser-provision";
 export const BROWSER_OUTWARD_HOST_RULE_ID = "browser-outward-host";
 
-/** Hosts outside loopback an operator admitted for this process's browser sessions. */
-const grantedHosts = new Set<string>();
+/**
+ * Hosts outside loopback the operator admitted, held for one session: a call from any other session id (after /new,
+ * a fork, a resume or a switch) drops them, so a grant never outlives the conversation that asked for it.
+ */
+let grants: { sessionId: string | undefined; hosts: Set<string> } = { sessionId: undefined, hosts: new Set() };
 
-export function browserGrantedHosts(): string[] {
-	return [...grantedHosts];
+function grantsFor(sessionId: string | undefined): Set<string> {
+	if (grants.sessionId !== sessionId) grants = { sessionId, hosts: new Set() };
+	return grants.hosts;
 }
 
-export function grantBrowserHosts(hosts: ReadonlyArray<string>): void {
-	for (const host of hosts) grantedHosts.add(host.toLowerCase());
+export function browserGrantedHosts(sessionId: string | undefined): string[] {
+	return [...grantsFor(sessionId)];
+}
+
+export function grantBrowserHosts(sessionId: string | undefined, hosts: ReadonlyArray<string>): void {
+	const granted = grantsFor(sessionId);
+	for (const host of hosts) granted.add(host.toLowerCase());
 }
 
 export function isLoopbackHost(host: string): boolean {
@@ -48,9 +57,10 @@ function hostOf(raw: string): string | null {
 	}
 }
 
-/** Hosts outside loopback this call would open the session to and that no earlier call was granted. */
-export function browserOutwardHosts(args: Record<string, unknown>): string[] {
+/** Hosts outside loopback this call would open the session to and that no earlier call in the session was granted. */
+export function browserOutwardHosts(args: Record<string, unknown>, sessionId: string | undefined): string[] {
 	if (args.op !== "open") return [];
+	const granted = grantsFor(sessionId);
 	const candidates = [
 		...(typeof args.url === "string" ? [args.url] : []),
 		...(Array.isArray(args.allow_hosts) ? args.allow_hosts.filter((h): h is string => typeof h === "string") : []),
@@ -58,7 +68,7 @@ export function browserOutwardHosts(args: Record<string, unknown>): string[] {
 	const hosts = new Set<string>();
 	for (const candidate of candidates) {
 		const host = candidate.includes("://") ? hostOf(candidate) : candidate.trim().toLowerCase();
-		if (host && !isLoopbackHost(host) && !grantedHosts.has(host)) hosts.add(host);
+		if (host && !isLoopbackHost(host) && !granted.has(host)) hosts.add(host);
 	}
 	return [...hosts];
 }
@@ -129,10 +139,13 @@ function componentMissing(): boolean {
 	return !componentSeen;
 }
 
-function browserConfirmation(args: Record<string, unknown>): ToolConfirmation | undefined {
+function browserConfirmation(
+	args: Record<string, unknown>,
+	context: ToolConfirmationContext = {},
+): ToolConfirmation | undefined {
 	const a = prepareBrowserArguments(args);
 	if (a.op === "close") return undefined;
-	const outward = browserOutwardHosts(a);
+	const outward = browserOutwardHosts(a, context.sessionId);
 	const provision = componentMissing();
 	if (!provision && outward.length === 0) return undefined;
 	const reasons = [
@@ -143,7 +156,7 @@ function browserConfirmation(args: Record<string, unknown>): ToolConfirmation | 
 			: []),
 		...(outward.length > 0
 			? [
-					`The page may reach ${outward.join(", ")} beyond loopback for the rest of this session; page content from there is untrusted.`,
+					`The page may reach ${outward.join(", ")} beyond loopback for the rest of this session (not after /new, a fork, a resume or a session switch); page content from there is untrusted.`,
 				]
 			: []),
 	];

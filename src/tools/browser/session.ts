@@ -253,6 +253,12 @@ export class BrowserSessions {
 
 	/** The running worker for this call's session, started (or restarted under a new sandbox policy) when needed. */
 	async worker(call: BrowserSessionCall): Promise<{ worker: BrowserWorker; restarted: boolean }> {
+		// One conversation owns the browser: a call from another session ends the others' workers with their grants.
+		for (const [sessionId, other] of [...this.workers]) {
+			if (sessionId === call.sessionId) continue;
+			this.workers.delete(sessionId);
+			await other.close();
+		}
 		const key = workerKey(call.sandbox, call.workspace);
 		const existing = this.workers.get(call.sessionId);
 		let restarted = false;

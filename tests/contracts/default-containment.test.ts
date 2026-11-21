@@ -22,7 +22,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { PLAYWRIGHT_CORE_VERSION } from "../../src/domains/lifecycle/browser-component.js";
 import { componentInstallDir } from "../../src/domains/lifecycle/components.js";
-import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
+import type { ActionClass, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
@@ -46,7 +46,7 @@ import {
 } from "../../src/domains/workspace-snapshots/store.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
-import { browserToolSurface } from "../../src/tools/browser/surface.js";
+import { browserOutwardHosts, browserToolSurface, grantBrowserHosts } from "../../src/tools/browser/surface.js";
 import { editTool } from "../../src/tools/edit.js";
 import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
 import { createRunScriptTool } from "../../src/tools/run-script.js";
@@ -191,6 +191,53 @@ test("every browser op is contained at default like bash; a host beyond loopback
 		{ op: "run", sandboxed: true },
 		{ op: "look", sandboxed: true },
 	]);
+});
+
+test("a browser host granted beyond loopback lasts for its session: another session, or a switch back, asks again", async (t) => {
+	const home = await isolateClioEnv("clio-contained-browser-grant-");
+	t.after(() => home.restore());
+	const pkg = join(componentInstallDir("browser", PLAYWRIGHT_CORE_VERSION), "node_modules", "playwright-core");
+	mkdirSync(pkg, { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "playwright-core", main: "index.js" }));
+	writeFileSync(join(pkg, "index.js"), "");
+	mkdirSync(join(pkg, "..", "..", "browsers", "chromium_headless_shell-1"), { recursive: true });
+	const { registry } = defaultSession(
+		workspace("clio-contained-browser-grant-"),
+		{ sandbox: true, snapshots: false },
+		{ operatorAttends: () => true },
+	);
+	// The body's own first step: grant the hosts admission just confirmed.
+	registry.register({
+		...browserToolSurface,
+		run: async (args, options) => {
+			grantBrowserHosts(options?.sessionId, browserOutwardHosts(args, options?.sessionId));
+			return { kind: "ok", output: "" };
+		},
+	});
+	const cards: Array<{ requestId: string; actionClass: ActionClass }> = [];
+	registry.onPermissionRequired((_call, decision, meta) =>
+		cards.push({ requestId: meta.requestId, actionClass: decision.classification.actionClass }),
+	);
+	const openIn = async (sessionId: string) => {
+		const before = cards.length;
+		const pending = registry.invoke(
+			{ tool: ToolNames.Browser, args: { op: "open", url: "https://docs.example.org/guide" } },
+			{ sessionId },
+		);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const card = cards.length > before ? cards.at(-1) : undefined;
+		if (card) await registry.resumeParkedCalls({ ...card, requestedBy: "contract-operator" });
+		return { sessionId, asked: card !== undefined, kind: (await pending).kind };
+	};
+	deepStrictEqual(
+		[await openIn("A"), await openIn("A"), await openIn("B"), await openIn("A")],
+		[
+			{ sessionId: "A", asked: true, kind: "ok" },
+			{ sessionId: "A", asked: false, kind: "ok" },
+			{ sessionId: "B", asked: true, kind: "ok" },
+			{ sessionId: "A", asked: true, kind: "ok" },
+		],
+	);
 });
 
 // ob-yolo Q7: a recognized command with unsandboxed: true ran unconfined at default with no review.
