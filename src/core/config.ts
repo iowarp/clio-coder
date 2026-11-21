@@ -46,7 +46,7 @@ import { readSettingsDocument } from "./settings-document.js";
 import type { SettingsFieldName } from "./settings-fields.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
-import { clioConfigDir, resolveClioDirs } from "./xdg.js";
+import { clioConfigDir, clioConfigPath, resolveClioDirs } from "./xdg.js";
 import { renderYamlPreservingLayout } from "./yaml-preserve.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
@@ -77,6 +77,11 @@ export function reportSettingsWarnings(settings: Readonly<ClioSettings>): void {
 
 export function settingsPath(): string {
 	return join(clioConfigDir(), "settings.yaml");
+}
+
+/** The settings file without creating the config root, for a reader: read-only `doctor` must leave a fresh home empty. */
+export function settingsReadPath(): string {
+	return join(clioConfigPath(), "settings.yaml");
 }
 
 /**

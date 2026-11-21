@@ -143,6 +143,11 @@ function launchReceipts() {
 
 const PROBES = new Set(["version", "--version", "-v", "help", "--help", "-h"]);
 
+/** Doctor without --fix promises to leave the home as it found it, so it launches as a probe. */
+function probe(args) {
+	return PROBES.has(args[0]) || (args[0] === "doctor" && !args.includes("--fix"));
+}
+
 function inside(root, file) {
 	if (typeof file !== "string" || !path.isAbsolute(file)) return false;
 	const rel = path.relative(root, file);
@@ -686,9 +691,10 @@ async function main() {
 		}
 		const removing = path.join(root, ".install-lock", "uninstall");
 		if (fs.existsSync(removing)) throw new Error("Uninstall is in progress; retry after it exits");
-		// A version or help answer is a read-only probe (fleet preflight runs one on a remote node):
-		// it writes no receipt, so it never creates the state root. Every other launch keeps one.
-		let receipt = PROBES.has(args[0]) ? null : path.join(launchReceipts(), `${process.pid}.json`);
+		// A version or help answer, or a read-only doctor, is a probe (fleet preflight runs one on a remote
+		// node): it writes no receipt, so it never creates the state root. Every other launch keeps one;
+		// prune still sees a probe in the process table.
+		let receipt = probe(args) ? null : path.join(launchReceipts(), `${process.pid}.json`);
 		// Publish before importing, then recheck activation. A launcher paused across upgrades
 		// must follow the new manifest rather than importing a prefix collection just removed.
 		for (;;) {
