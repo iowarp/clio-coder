@@ -139,6 +139,8 @@ export interface TaskMemoryRoute {
 export interface TaskMemoryModelClient {
 	/** Absent on clients that do not know their route. Telemetry only; the policy never reads it. */
 	readonly route?: TaskMemoryRoute;
+	/** `context.memory.thinkingLevel`, the level the client's calls ask for; telemetry only, on call.started (FX-49). */
+	readonly thinkingLevel?: string;
 	complete(input: TaskMemoryModelRequest): Promise<TaskMemoryModelResponse>;
 }
 

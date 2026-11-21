@@ -89,7 +89,7 @@ const MEMORY_ROUTE = { targetId: "model-id", modelId: "model-id" } as const sati
 const fact = (value: FieldProjection) => ({ ...keep("kind", "source", "method", "reason"), value }) as const;
 // A tool choice is a mode or a tool's name: `tool` keeps the modes with the built-in tools.
 const CALL = {
-	...keep("objects", "attempt", "roundKind", "purpose", "responseFormat"),
+	...keep("objects", "attempt", "roundKind", "purpose", "responseFormat", "thinkingLevel"),
 	callId: "id",
 	attemptId: "id",
 	toolChoice: "tool",
@@ -132,6 +132,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"call.settled": {
 		...CALL,
 		...keep("disposition", "usage", "pricing", "stages", "transport", "interruptedEstimate", "billing"),
+		// A provider's own spelling of the effort, an open token set: readable when it is token-shaped.
+		wireEffort: "token",
 		responseId: "id",
 		cache: {
 			...keep(

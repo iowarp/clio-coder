@@ -61,7 +61,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 	return {
 		identity: () => settledIdentity,
 		startAttempt(
-			request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>,
+			request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "thinkingLevel">>,
 		): { callId: string; attemptId: string } | undefined {
 			if (!options || !owner) return;
 			const previousAttempt = call?.attemptId;

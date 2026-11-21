@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { createAssistantMessageEventStream, type StreamOptions } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import {
 	observedToolCallOrigin,
@@ -25,6 +26,8 @@ import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { observePayloadBytes } from "../../src/engine/payload-bytes.js";
+import type { EngineModel } from "../../src/engine/types.js";
 import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { sideQuestionUsage } from "../../src/session-control/side-question.js";
 
@@ -40,6 +43,7 @@ const header: SegmentHeader = {
 };
 const clock = { t: "2026-10-30T12:00:00.000Z", mono: 10 };
 const record = makeTelemetryRecord("session.opened", {}, context, clock);
+const MODEL = { api: "openai-responses", provider: "openai", id: "model" } as EngineModel;
 
 test("telemetry keeps existing ids, mints namespaced UUIDv7 ids, and isolates concurrent call context", async () => {
 	const ids = [newCallId(), newAttemptId(), newRecordId()];
@@ -136,6 +140,50 @@ test("an abandoned attempt settles once, as never sent before its send stage and
 		deepStrictEqual(observed.lastResponse?.(), { status: 200, headers: { "x-codex-primary-used-percent": "40" } });
 		const answered = observed.abandon("internal");
 		ok(answered?.stages.firstByte !== undefined && !JSON.stringify(answered).includes("x-codex"));
+	} finally {
+		release();
+	}
+});
+
+test("a call journals the thinking level it asked for and the effort its payload sent (FX-49)", async () => {
+	const records: PendingTelemetry[] = [];
+	const release = registerTelemetrySink("effort-session", { enqueue: (record) => Boolean(records.push(record)) });
+	try {
+		const ctx = { sessionId: "effort-session", agent: { role: "main" as const, id: "effort-session" } };
+		const target = {
+			targetId: "target",
+			runtimeId: "runtime",
+			api: "openai-responses",
+			requestedModel: "model",
+			reportedModel: { kind: "unknown", reason: "not-observed" } as const,
+		};
+		const call = beginCall({ target, roundKind: "normal", toolChoice: "auto", thinkingLevel: "off" }, ctx);
+		const sent = async (payload: unknown): Promise<Record<string, unknown>> => {
+			const message = { role: "assistant", content: [], stopReason: "stop", usage: { input: 5, output: 1 } };
+			const stream = observePayloadBytes(MODEL, {} as StreamOptions, (options) => {
+				const source = createAssistantMessageEventStream();
+				void (async () => {
+					await options?.onPayload?.(payload, MODEL);
+					source.push({ type: "done", reason: "stop", message } as never);
+					source.end();
+				})();
+				return source;
+			});
+			for await (const _event of stream);
+			return message as unknown as Record<string, unknown>;
+		};
+		// The level is asked for off, and the payload still carries an effort: the journal shows both.
+		const low = await sent({ model: "model", reasoning: { effort: "low", summary: "auto" } });
+		const facts = call.settle(callSettlementFromMessage(low, "none"));
+		strictEqual(facts?.wireEffort, "low");
+		strictEqual(facts?.thinkingLevel, "off");
+		const omitted = await sent({ model: "model", max_tokens: 10 });
+		strictEqual(callSettlementFromMessage(omitted, "none").wireEffort, "omitted");
+		strictEqual(callSettlementFromMessage({ stopReason: "stop" }, "none").wireEffort, undefined, "no payload, no fact");
+		const started = records.find((record) => record.kind === "call.started");
+		const settled = records.find((record) => record.kind === "call.settled");
+		strictEqual((started?.data as { thinkingLevel?: string }).thinkingLevel, "off");
+		ok(validPayload("call.started", started?.data) && validPayload("call.settled", settled?.data));
 	} finally {
 		release();
 	}

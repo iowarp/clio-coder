@@ -43,6 +43,7 @@ import type {
 } from "@github/copilot-sdk";
 import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
+import { stampWireEffort } from "../../core/telemetry/call-effort.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
 import type { AgentMessage } from "../types.js";
 import {
@@ -1294,6 +1295,8 @@ async function runStep(
 	const tools = getCurrentTools(context.messages);
 	const systemHash = hash(systemPrompt);
 	const reasoningEffort = reasoningEffortFor(model, options as SimpleStreamOptions | undefined);
+	// The effort this step runs under, which a reused conversation does not resend (FX-49).
+	stampWireEffort(step.message, reasoningEffort);
 	// An omitted effort on a reasoning model leaves the runtime's default, which may think: not off.
 	step.thinkingOff = !model.reasoning || reasoningEffort === "none";
 	const contextTier = copilotContextTierFor(model);

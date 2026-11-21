@@ -13,7 +13,8 @@ import type { EffectivePricing } from "../domains/providers/catalog.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import { hasAssistantGenerationDelta } from "./generation-delta.js";
 
-type Request = Pick<CallStarted, "roundKind" | "toolChoice"> & Partial<Pick<CallStarted, "responseFormat">>;
+type Request = Pick<CallStarted, "roundKind" | "toolChoice"> &
+	Partial<Pick<CallStarted, "responseFormat" | "thinkingLevel">>;
 
 /** Capture each wire attempt before retry wrappers suppress its terminal event (#434). */
 export function createWorkerCallTelemetry(

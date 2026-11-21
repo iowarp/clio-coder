@@ -1,11 +1,13 @@
 import type { Api, AssistantMessage, AssistantMessageEventStream, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { stampWireEffort, wireEffortOf } from "../core/telemetry/call-effort.js";
 
 /**
  * Under transport option B Pi serializes and sends the request, so the payload it hands its provider is the request
  * Clio can see. Its size is taken once the call settles, off the send path, and rides the terminal message the way
  * the Codex transport observation does, so stream wrappers that copy the message keep it (#434). So does the prompt
- * cache key the body was sent under (Codex and Responses `prompt_cache_key`), which only the payload states.
+ * cache key the body was sent under (Codex and Responses `prompt_cache_key`), which only the payload states. The
+ * reasoning effort the request carried rides it too, for `call.settled` (FX-49).
  */
 export function observePayloadBytes<T extends StreamOptions>(
 	model: Model<Api>,
@@ -15,18 +17,24 @@ export function observePayloadBytes<T extends StreamOptions>(
 	onSettled?: (serialized: string | undefined) => void,
 ): AssistantMessageEventStream {
 	let payload: unknown;
+	// The last effort any request of this call named: a Copilot step names it on its session request, not its send.
+	let effort: string | undefined;
+	let requested = false;
 	const onPayload = options?.onPayload;
 	const source = invoke({
 		...options,
 		onPayload: async (body: unknown, payloadModel: Model<Api>) => {
 			const replacement = await onPayload?.(body, payloadModel);
 			payload = replacement === undefined ? body : replacement;
+			requested = true;
+			effort = wireEffortOf(payload) ?? effort;
 			return replacement;
 		},
 	} as T);
 	let handedOver = false;
 	const remember = (message: AssistantMessage): void => {
 		let serialized: string | undefined;
+		if (requested) stampWireEffort(message, effort);
 		const cacheKey =
 			payload !== null && typeof payload === "object"
 				? (payload as { prompt_cache_key?: unknown }).prompt_cache_key

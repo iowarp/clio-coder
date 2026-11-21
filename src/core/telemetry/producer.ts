@@ -1,3 +1,4 @@
+import type { RequestedThinkingLevel } from "./call-effort.js";
 import { captureAdmits, STANDARD_CAPTURE } from "./capture.js";
 import type { TelemetryContext } from "./context.js";
 import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
@@ -28,7 +29,8 @@ export type PendingTelemetry<K extends JournalEventName = JournalEventName> = K 
 
 /** Erased engine callback; raw provider messages cross only into the host's fact adapter (#434). */
 export interface CallMessageObserver {
-	startAttempt(): void;
+	/** Opens the next attempt; `thinkingLevel` is the level the request asks for, journaled on its call.started (FX-49). */
+	startAttempt(request?: { thinkingLevel?: RequestedThinkingLevel }): void;
 	settle(message: unknown): void;
 	withContext<T>(work: () => T): T;
 }
@@ -329,7 +331,9 @@ export interface TelemetryCall {
 	 */
 	abandon(cause: FailureCause): CallSettled | undefined;
 	/** One successor per settled attempt. A live attempt cannot silently disappear (#434). */
-	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat">>): TelemetryCall | null;
+	nextAttempt(
+		request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat" | "thinkingLevel">>,
+	): TelemetryCall | null;
 }
 
 /** Also how a host settles an attempt whose process died before settling it (#434). */
@@ -369,7 +373,7 @@ export function abandonedSettlement(sent: boolean, cause: FailureCause): Settlem
  */
 function unsentByStages(data: Settlement): Settlement {
 	const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
-	const { interruptedEstimate: _spent, ...unsent } = data;
+	const { interruptedEstimate: _spent, wireEffort: _effort, ...unsent } = data;
 	return {
 		...unsent,
 		disposition: "never_sent",
@@ -403,7 +407,7 @@ export function beginCall(
 	const callId = newCallId();
 	const attempt = (
 		number: number,
-		request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat">>,
+		request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat" | "thinkingLevel">>,
 	): TelemetryCall => {
 		const attemptId = newAttemptId();
 		const scope = ctx ? { ...ctx, callId, attemptId } : undefined;

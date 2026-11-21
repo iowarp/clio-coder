@@ -3,6 +3,7 @@ import { trackCallFetch } from "../core/call-failure.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
 import type { SurfaceId } from "../core/side-surfaces.js";
+import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import type { AdmissionHold, CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
@@ -418,7 +419,7 @@ async function runRound(
 	binding: SchemaBinding | null,
 	scope: CallScope,
 ): Promise<SideQuestionResult> {
-	scope.startAttempt();
+	scope.startAttempt(requestedThinking(input.thinkingLevel));
 	const tracking = trackCallFetch();
 	let observed = false;
 	let terminalError: unknown;

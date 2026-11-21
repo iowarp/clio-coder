@@ -1,4 +1,5 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
+import { wireEffortFact } from "../../core/telemetry/call-effort.js";
 import type { FailureCause, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
@@ -322,6 +323,7 @@ export function callSettlementFromMessage(
 			verdict: "unknown",
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
+		...(neverSent ? {} : wireEffortFact(raw)),
 		...copilotBilling(raw.copilotBilling),
 		...(interruptedEstimate ? { interruptedEstimate } : {}),
 	};
