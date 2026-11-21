@@ -89,6 +89,7 @@ import {
 	resultContractResponseSchema,
 	resultContractShape,
 	type StructuredHelperResult,
+	unobservedExplorerReportReason,
 	validateResultContract,
 	validateStructuredHelperResult,
 } from "../domains/agents/result-contract.js";
@@ -1181,6 +1182,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		(toolExecutionsStarted === 0 || resultContractEvidenceShortfall(reason));
 	const evidenceRepairInstruction = (reason: string, resubmit: string): string =>
 		`${reason} No evidence backs this result yet. First read the inputs the assignment names with the admitted read tools (${readToolsAdmitted.join(", ")}); only read-class calls run during this repair. Then ${resubmit}, citing only lines you read.`;
+	/**
+	 * An explorer report that arrives before any tool ran, while the run could still read, is refused here so the
+	 * read-first repair runs; past the repair cap the run fails as the dispatch obligation would have failed it (M-31).
+	 */
+	const unobservedReportReason = (): string | null =>
+		input.resultContract !== undefined &&
+		readToolsAdmitted.length > 0 &&
+		refusalReportRound === null &&
+		(handoffFromOpenWork || (!synthesisToolLock && !helperTerminalPhase))
+			? unobservedExplorerReportReason(input.resultContract.kind, toolExecutionsStarted)
+			: null;
 	let acceptedHelperResult: StructuredHelperResult | null = null;
 	let helperTerminalPhase = false;
 	let helperExposedThisRound = false;
@@ -1230,6 +1242,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			helperSemanticFailure = mutationResult && validateStructuredHelperResult(validationInput).structured !== null;
 			return checked.validation.reason ?? "invalid helper result";
 		}
+		const unobserved = unobservedReportReason();
+		if (unobserved !== null) return unobserved;
 		acceptedHelperResult = checked.structured;
 		emit({ type: "clio_coder_helper_result", payload: checked.structured });
 		return null;
@@ -1656,10 +1670,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				// Native additions hide the helper until handoff without rewriting the
 				// initial schemas. Older Anthropic models declare it early; the host
 				// still rejects premature submission during the work phase (#423).
+				// A locked round that cannot name the helper keeps it declared when the work phase declared it: the
+				// Copilot SDK keeps a locked round's tools, so dropping it alone changed the session's tool set and missed
+				// the cached prefix (M-31). An API that can name it already exposes it here, so only such rounds change.
+				const helperDeclaredInWork = helperToolAvailable && !mutationResult && !codexToolChanges;
 				const currentContext = {
 					...resolvedContext,
 					tools: (resolvedContext.tools ?? []).filter(
-						(tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL || helperExposedThisRound || helperDeclaredFromStart,
+						(tool) =>
+							tool.name !== INTERNAL_HELPER_RESULT_TOOL ||
+							helperExposedThisRound ||
+							helperDeclaredFromStart ||
+							helperDeclaredInWork,
 					),
 				};
 				const helperOnRequest = helperExposedThisRound || helperDeclaredFromStart;
@@ -2479,7 +2501,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				zeroToolRepairQueued && toolExecutionsStarted === 0
 					? null
 					: (zeroToolViolation ??
-						terminalContractViolation(contract, event.message, contractCwd, groundingRanges(), runEffects.snapshot()));
+						terminalContractViolation(contract, event.message, contractCwd, groundingRanges(), runEffects.snapshot()) ??
+						(mutationResult ? null : unobservedReportReason()));
 			const formatFailure =
 				mutationResult &&
 				violation !== null &&
