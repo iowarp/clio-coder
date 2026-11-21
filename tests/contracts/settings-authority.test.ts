@@ -94,15 +94,40 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"cat > y.ts <<'EOF'\nevent.key\nEOF",
 	])
 		strictEqual(engine.evaluate(bash(command)).kind, "allow", command);
-	// XR-43: a quoted commit message is not a file operand; real readers and unquoted substitutions still are.
+	// XR-43: a quoted commit message is not a file operand; real readers and unquoted substitutions still are. C-22 (row
+	// 287): a quoted body `cat` or `tee` copies into a file is content too, when the parsed call runs nothing that could
+	// read the copy as code; the file it writes stays judged.
 	const commitMessage = "git add src/x.ts && git commit -q -F - <<'EOF'\nMention credentials.yaml\nEOF\n";
-	for (const command of [commitMessage, "true <<-'EOF'\n\tcredentials.yaml\n\tEOF\n"]) {
+	for (const command of [
+		commitMessage,
+		"true <<-'EOF'\n\tcredentials.yaml\n\tEOF\n",
+		"cat > notes.yaml <<'EOF'\nsecrets:\n  - credentials.yaml,\nEOF",
+		"cat >> report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF",
+		"tee report.md > /dev/null <<'EOF'\nsee nope.key\nEOF",
+	]) {
 		strictEqual(engine.evaluate(bash(command), "default", OPERATOR_DEFAULT).kind, "allow", command);
 	}
 	for (const command of [
 		`${commitMessage}cat credentials.yaml`,
 		"bash <<'EOF'\ncat credentials.yaml\nEOF",
 		"git commit -F - <<EOF\n$(cat credentials.yaml)\nEOF",
+		"cat > notes.md <<EOF\n$(cat credentials.yaml)\nEOF",
+		"cat >> report.md <<'EOF'\ncat credentials.yaml\nEOF\nbash report.md",
+		"cat >> report.md <<'EOF'\ncat credentials.yaml\nEOF\nnpm test",
+		"cat <<'EOF' | sh\ncat credentials.yaml\nEOF",
+		"cat credentials.yaml > out.txt <<'EOF'\nx\nEOF",
+		"P=PA; export \"${P}TH=/tmp/evil\"\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
+		"cat <<$'EOF' > /dev/null\nhello\n$EOF\ncat credentials.yaml\nEOF",
+		"cat 3>notes.md 1>&3 <<'EOF'\ncredentials.yaml\nEOF",
+		// Neon round: a locale-quoted command name bash may translate to any program.
+		"$\"cat\" <<'EOF'\nrm -rf protected.txt; cat .env\nEOF",
+		// A step that opens the names a copied body holds.
+		"cat <<'EOF' > f && head -c 4 f | wc --files0-from=-\n.env\nEOF",
+		"cat <<'EOF' > f && head -c 4 f > f2 && wc --files0-from=f2\n.env\nEOF",
+		// A `--file=-` that is another option's value, and a commit that reads its stdin as pathspecs.
+		"git commit -v -m --file=- --pathspec-from-file=- <<'EOF'\n.env\nEOF",
+		"git commit -m -F- --pathspec-from-file=- <<'EOF'\n.env\nEOF",
+		"git commit --author=-F- --pathspec-from-file=- <<'EOF'\n.env\nEOF",
 		"wc -c < nope.key",
 		"if head nope.key; then :; fi",
 		"od -c *.key",
