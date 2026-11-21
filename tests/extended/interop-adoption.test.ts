@@ -246,7 +246,7 @@ describe("interop discovery and adoption", () => {
 		strictEqual(plan.entries[0]?.outcomes?.[0]?.status, "converted");
 		deepStrictEqual(applyInteropAdoption(plan, true).installed, ["example"]);
 		const record = readPluginInstallRecord("example", { cwd, scope: "user" });
-		strictEqual(record?.trust, "foreign");
+		strictEqual(record?.trust, "trusted", "a plugin from the operator's own home installs trusted");
 		deepStrictEqual(record?.origin, {
 			kind: "interop",
 			host: "claude-code",
@@ -337,7 +337,7 @@ describe("interop discovery and adoption", () => {
 		strictEqual(readFileSync(source, "utf8"), skill);
 		const installed = listInstalledPlugins(cwd, { all: true })[0];
 		ok(installed);
-		strictEqual(installed.trust, "foreign");
+		strictEqual(installed.trust, "trusted", "a skill from the operator's own home installs trusted");
 		ok(installed.provenance?.contentDigest);
 		const record = readPluginInstallRecord(installed.id, { scope: "user", cwd });
 		deepStrictEqual(record?.origin, { kind: "interop", host: "claude-code", source });
@@ -347,7 +347,7 @@ describe("interop discovery and adoption", () => {
 			(item) => item.source === `plugin:${installed.id}` || item.filePath.startsWith(installed.rootPath),
 		);
 		ok(loaded);
-		strictEqual(loaded.trusted, false);
+		strictEqual(loaded.trusted, true, "the adopted skill is visible to the model without a trust setting");
 	});
 
 	it("skips a skill already installed in Clio's native skill root", () => {

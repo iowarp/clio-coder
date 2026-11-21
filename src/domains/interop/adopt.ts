@@ -317,7 +317,7 @@ function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdo
 			host,
 			source: item.path,
 			sourceScope: item.scope,
-			untrusted: true,
+			untrusted: adoptedPackageTrust(item) === "foreign",
 			...(value.format ? { format: value.format } : {}),
 		},
 	};
@@ -392,12 +392,15 @@ function unportedReason(item: InteropInventoryItem): string {
 }
 
 /**
- * The trust an adopted package installs with. Foreign until the operator
- * enables integrations.projectResources.trustProjectImports, which gates
- * every foreign import at both scopes.
+ * The trust an adopted package installs with. Content read from the
+ * operator's own home (~/.claude, ~/.codex and their peers) is theirs, and
+ * the reviewed plan is the consent, so it works at once. A repository's
+ * agent directories are someone else's writing: those stay foreign behind
+ * integrations.projectResources.trustProjectImports, whatever scope they
+ * are adopted into. The install record keeps the interop origin either way.
  */
-function adoptedPackageTrust(): "foreign" {
-	return "foreign";
+function adoptedPackageTrust(item: InteropInventoryItem): "trusted" | "foreign" {
+	return item.scope === "user" ? "trusted" : "foreign";
 }
 
 export function planInteropAdoption(input: {
@@ -601,7 +604,14 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			...(entry.unsupported ?? []).map((feature) => `  UNSUPPORTED ${feature}`),
 			...(entry.omitted ?? []).map((file) => `  SKIP ${file}: executable, host-specific, or non-text data.`),
 		]),
-		"Adopted skills, prompts, agents and plugins stay inactive until integrations.projectResources.trustProjectImports is on.",
+		...(plan.entries.some(
+			(entry) =>
+				entry.action === "install" && entry.item.scope === "project" && adoptedPackageTrust(entry.item) === "foreign",
+		)
+			? [
+					"Packages adopted from a project directory stay inactive until integrations.projectResources.trustProjectImports is on; packages from your own home are trusted.",
+				]
+			: []),
 		"Host files are never changed. Approval applies only to the displayed content.",
 	].join("\n");
 }
@@ -664,7 +674,7 @@ export function applyInteropAdoption(
 			const installed = installInteropPackage({
 				sourcePath: staging,
 				kind: entry.item.kind as Exclude<AdoptionKind, "mcp">,
-				trust: adoptedPackageTrust(),
+				trust: adoptedPackageTrust(entry.item),
 				cwd: plan.cwd,
 				scope: plan.scope,
 				expectedId: entry.id,
