@@ -29,9 +29,10 @@ function SettingsPageFrame({
 	after?: ReactNode;
 }) {
 	const selection = useWorkspaceSelection(client);
-	const { id } = selection;
+	// The selection's id is "" while no workspace is open; that is the user layer alone, never an empty workspace id.
+	const id = selection.id || null;
 	// With no workspace the page is the user layer alone; a workspace adds its project rows.
-	const controlsScope = selection.workspaces.isPending || selection.missing ? undefined : (id ?? null);
+	const controlsScope = selection.workspaces.isPending || selection.missing ? undefined : id;
 	return (
 		<section className="general settings-page">
 			<div className="panel-heading">
@@ -41,7 +42,7 @@ function SettingsPageFrame({
 				</div>
 			</div>
 			<WorkspacePicker selection={selection} purpose="settings" />
-			{before?.(id ?? null)}
+			{before?.(id)}
 			{controlsScope !== undefined ? (
 				<SettingsControlsView
 					key={`${controlsScope ?? "user"}:${scope}`}
