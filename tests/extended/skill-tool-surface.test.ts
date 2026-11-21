@@ -15,6 +15,7 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../../src/core/skill-activation.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { registerLibraryPackage } from "../../src/domains/resources/library.js";
@@ -54,6 +55,7 @@ const roots: string[] = [];
 function admissionRuntime(overrides: Partial<InteractiveSlashRuntimeDeps>) {
 	const submitted: Parameters<InteractiveSlashRuntimeDeps["chat"]["submit"]>[] = [];
 	const runtime = createInteractiveSlashRuntime({
+		bus: createTelemetryHub(),
 		io: { stdout() {}, stderr() {} },
 		chatPanel: { appendReplayBlock() {}, appendUser() {} },
 		requestRender() {},
@@ -498,6 +500,7 @@ describe("skill tool surface lifetime", () => {
 			const cleared: Array<ReadonlyArray<string>> = [];
 			const errors: string[] = [];
 			const runtime = createInteractiveSlashRuntime({
+				bus: createTelemetryHub(),
 				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
 				chatPanel: { appendReplayBlock() {}, appendUser() {} },
 				requestRender() {},
@@ -692,6 +695,7 @@ describe("skill tool surface lifetime", () => {
 			const painted: string[] = [];
 			const errors: string[] = [];
 			const runtime = createInteractiveSlashRuntime({
+				bus: createTelemetryHub(),
 				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
 				getCwd: () => root,
 				chatPanel: {
@@ -784,6 +788,7 @@ describe("skill tool surface lifetime", () => {
 		let submitted = 0;
 		const refused: unknown[] = [];
 		const runtime = createInteractiveSlashRuntime({
+			bus: createTelemetryHub(),
 			io: { stdout() {}, stderr() {} },
 			getCwd: () => root,
 			chatPanel: { appendReplayBlock() {}, appendUser() {} },
