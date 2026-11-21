@@ -38,7 +38,7 @@ function endpointUrl(value: string): string {
 	if (!["http:", "https:"].includes(url.protocol) || !url.hostname)
 		throw new Error("Use an http:// or https:// endpoint URL.");
 	if (url.username || url.password)
-		throw new Error("Enter the endpoint without credentials; Clio asks for a key when needed.");
+		throw new Error("Enter the endpoint without credentials; CLIO Coder asks for a key when needed.");
 	return url.toString().replace(/\/$/u, "");
 }
 
@@ -130,7 +130,7 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 	for (;;) {
 		prompts.clearScreen();
 		presenter.header("Quick Connect", "configure");
-		presenter.note("Connect one model to power Clio. Change other settings whenever you need them.");
+		presenter.note("Connect one model to power CLIO Coder. Change other settings whenever you need them.");
 		if (notice) {
 			presenter.warn(notice);
 			notice = "";
@@ -207,7 +207,7 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 			}
 			if (step === "model") {
 				presenter.note(`Connected: ${url} (${connection.runtime.displayName})`);
-				model = await prompts.choose("Choose the model for Clio", connection.models, model, true);
+				model = await prompts.choose("Choose the model for CLIO Coder", connection.models, model, true);
 				if (!connection.models.includes(model)) {
 					notice = "Choose a model from the endpoint's live list.";
 					continue;
@@ -288,9 +288,9 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 			}
 			updateSettings(apply);
 			presenter.done(`Connected: ${descriptor.id} / ${model}`);
-			presenter.commandAdvice("Start Clio:", "clio-coder");
+			presenter.commandAdvice("Start CLIO Coder:", "clio-coder");
 			presenter.note(
-				'You can start working immediately. Ask Clio "What can you do without asking me?" or open /settings whenever you want to adjust the defaults.',
+				'You can start working immediately. Ask CLIO Coder "What can you do without asking me?" or open /settings whenever you want to adjust the defaults.',
 			);
 			return "connected";
 		} catch (error) {

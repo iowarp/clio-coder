@@ -21,7 +21,7 @@ import { printOk } from "./shared.js";
 
 /** What a peer can and cannot see, in the words the operator decides with. */
 const PEER_TRUST_NOTE =
-	"A peer gets only the task text you give it, none of Clio's project context. Clio answers its permission requests under your policy, but cannot see every tool the peer runs on its own.";
+	"A peer gets only the task text you give it, none of CLIO Coder's project context. CLIO Coder answers its permission requests under your policy, but cannot see every tool the peer runs on its own.";
 
 function describe(proposal: InteropProposal): string {
 	const lines = [
@@ -110,7 +110,7 @@ async function reviewInteropAgents(io: InteropReviewIo): Promise<InteropReviewOu
 		const rail = io.rail ?? railPrefix(presenter.isPlain());
 		for (const reason of unoffered) presenter.note(reason);
 		presenter.note(
-			`Clio found ${proposals.length === 1 ? "one coding agent" : `${proposals.length} coding agents`} it can delegate to. ${PEER_TRUST_NOTE}${proposals.some((proposal) => proposal.needsNetworkInstall) ? " Adapters that run through npx are fetched the first time you delegate." : ""}`,
+			`CLIO Coder found ${proposals.length === 1 ? "one coding agent" : `${proposals.length} coding agents`} it can delegate to. ${PEER_TRUST_NOTE}${proposals.some((proposal) => proposal.needsNetworkInstall) ? " Adapters that run through npx are fetched the first time you delegate." : ""}`,
 		);
 		const result = await promptMultiSelect<InteropAgentId>({
 			heading: ["", chalk.bold("Delegate to any of these?")],
@@ -154,7 +154,7 @@ async function reviewInteropAgents(io: InteropReviewIo): Promise<InteropReviewOu
 	}
 	if (declined.length > 0) {
 		declineInteropAgents(declined, report);
-		const line = `Declined ${declined.join(", ")}; Clio stays quiet about them until their version or path changes.`;
+		const line = `Declined ${declined.join(", ")}; CLIO Coder stays quiet about them until their version or path changes.`;
 		if (io.presenter) io.presenter.note(line);
 		else output.write(`${line}\n`);
 	}

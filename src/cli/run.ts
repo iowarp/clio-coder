@@ -1150,7 +1150,8 @@ async function runDispatch(
 			else if (schemaCheck !== undefined && structuredVerdict !== null && !structuredVerdict.ok)
 				process.stderr.write(`${schemaCheck.finish.schemaMismatchMessage(structuredVerdict.errors)}\n`);
 			else process.stdout.write(formatDispatchHumanOutput(answer, receipt));
-			if (recording) process.stderr.write(`Recording manifest (relative to Clio state): ${recording.manifestPath}\n`);
+			if (recording)
+				process.stderr.write(`Recording manifest (relative to CLIO Coder state): ${recording.manifestPath}\n`);
 		}
 
 		process.off("SIGINT", onSignal);

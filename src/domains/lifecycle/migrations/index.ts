@@ -33,8 +33,6 @@ import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
-import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
-import settingsV2 from "./2026-09-01-settings-v2.js";
 import playbooksAndPackages from "./2026-10-06-playbooks-and-packages.js";
 import acpAdapters from "./2026-10-07-acp-adapters.js";
 import claudeSubscription from "./2026-10-07-claude-subscription.js";
@@ -88,23 +86,20 @@ export interface MigrationManifestRead {
 
 const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 
-// Settings v2 owns the complete v1 rewrite, including the already-retired pane
-// keys, and must run before any later migration reaches the strict v2 reader.
-// `retirePanesKnobs` remains registered for homes that already recorded the v2
-// migration independently and for manifest continuity; it is a no-op on v2.
+// The settings v1 to v2 rewrite (`2026-09-01-settings-v2`) and the v1 pane-key
+// cleanup (`2026-09-01-retire-panes-knobs`) were retired with the version-1
+// settings reader: a version-1 settings.yaml is no longer read or converted.
 //
 // The naming migration (`2026-09-01-clio-coder-naming`) and the runtime-id
 // migrations (`2026-08-18-lmstudio-runtime-id`, `2026-09-18-ollama-runtime-id`)
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
 //
-// `retiredSettings` sits right after the v2 rewrite: the strict reader stopped
-// tolerating retired keys, so it must run before any migration that reads
-// settings through `readSettings`.
+// `retiredSettings` runs first: the strict reader does not tolerate retired
+// keys, so it must run before any migration that reads settings through
+// `readSettings`.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
-	settingsV2,
 	retiredSettings,
-	retirePanesKnobs,
 	playbooksAndPackages,
 	acpAdapters,
 	claudeSubscription,

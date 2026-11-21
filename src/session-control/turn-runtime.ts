@@ -769,8 +769,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Preflight and the wire budget share the session's effective settings,
 		// including overrides that never reach the saved providers snapshot.
 		setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
-		if (!options?.silent)
-			context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new TurnAdmissionError(
 				`[CLIO Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
@@ -1801,17 +1799,19 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					handoffChanged ||
 					continued ||
 					requirementChanged;
+				// Retracting or installing only replaces or appends messages, so the install's publications read the history the
+				// guard's last publication checked: the guard runs it in that settled stretch (SC-6).
+				let restored = false as boolean;
 				const update = await context
-					.postToolContinuationGuard(localRuntime, signal, contextChanged)
+					.postToolContinuationGuard(localRuntime, signal, contextChanged, () => {
+						if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return;
+						restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
+					})
 					.catch((error: unknown) => {
 						// Clio's guard, not the route, ended the turn (CLI-3).
 						if (error instanceof Error && error.name === OVERSIZED_RESULT_STOP) guardStopCause = "oversized_tool_result";
 						throw error;
 					});
-				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
-				// Retracting or installing only replaces or appends messages, so the install's second publication reads the
-				// history its first one checked (SC-6).
-				const restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// A tool hook changed a pinned block, or the guard's compaction dropped one: it rides the next request.
 				const pinned = context.appendPinnedContext(localRuntime);
@@ -2186,7 +2186,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						terminal.stopReason === "aborted" && state.activeInterruptReason === null
 							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
-					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
+					if (harnessStop !== null)
+						Object.assign(message, {
+							errorMessage: harnessStop,
+							harnessStopped: true,
+							// The repetition guard stopped the generation; the operator did not cancel it (f-repeat).
+							...(state.repetitionAbortReason !== null ? { clioCoderAbortReason: "repetition" } : {}),
+						});
 					// An interrupt (the operator's cancel, triage, autonomy) is no route failure either, so it names no route.
 					else if (harnessCause === undefined || harnessCause === "route_moved")
 						Object.assign(message, {

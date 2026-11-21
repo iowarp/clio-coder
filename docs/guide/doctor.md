@@ -54,7 +54,7 @@
 | `credentials` | `!!` if `credentials.yaml` missing, unreadable, or mode != `0600` on POSIX; on Windows `WARN` names any ACL principal beyond the owner, SYSTEM and Administrators, and `--fix` makes the file owner-only. |
 | `state metadata` | `!!` if `home.json` missing/unreadable/older version (`dev` build skips stamp check), or if a newer CLIO Coder wrote the home (lists newer version, `PATH` binaries, `CLIO_CODER_ALLOW_OLDER=1` override for headless/ACP). |
 | `state dir mode`, `data dir mode` | `WARN` if group/other bits set on POSIX (`--fix` tightens when ownership verifies -> `tightened to 700`; otherwise `chmod 700` it yourself when not CLIO Coder's alone). |
-| `lifecycle migrations` | Status of `migrations.json`: `2026-09-01-settings-v2` and `2026-09-01-retire-panes-knobs` auto-satisfy if `settings.yaml` already matches; pending migrations emit `WARN` naming the post-install command; `!!` on corrupt/oversized manifest (restore or review before `upgrade`). |
+| `lifecycle migrations` | Status of `migrations.json`: `2026-11-21-retired-settings` auto-satisfies if `settings.yaml` already validates; pending migrations emit `WARN` naming the post-install command; `!!` on corrupt/oversized manifest (restore or review before `upgrade`). |
 | `installation files`, `running <surface> <pid>` | Release builds/checkouts verify outputs (`!!` remedies: `pnpm --dir <checkout> run build` for source, which `--fix` runs, or `clio-coder upgrade` for packages); stale live processes emit `WARN`. |
 | `GUI background`, `GUI running version` | Shown when `state/gui/background` exists; `WARN` on broken/foreign service/launchers (`--fix` repairs) or stale running GUI version. |
 | `session store` | Readable session ledger count; `!!` on unreadable ledgers/dirs. |

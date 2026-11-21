@@ -88,7 +88,6 @@ it("keeps a model maximum separate from an unknown serving window", () => {
 	strictEqual(details.servingLimit.kind, "unknown");
 	strictEqual(details.effectiveContextWindow, 0);
 	strictEqual(details.contextWindowSource, "unknown");
-	strictEqual(details.warning, null);
 });
 
 it("does not promote descriptor defaults into resolved serving limits", () => {

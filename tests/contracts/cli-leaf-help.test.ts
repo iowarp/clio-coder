@@ -88,7 +88,11 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 		equal(manifest.stdout.trimEnd().split("\n").length, 1, "help --json printed more than one line");
 		const doc = JSON.parse(manifest.stdout) as {
 			version: number;
-			leaves: Array<{ path: string[]; flags: Array<{ name: string; value: unknown; persistence?: string }> }>;
+			leaves: Array<{
+				path: string[];
+				flags: Array<{ name: string; value: unknown; persistence?: string; conflicts?: string[] }>;
+				positionals: Array<{ name: string; required: boolean; variadic: boolean }>;
+			}>;
 		};
 		equal(doc.version, 1);
 		const paths = new Set(doc.leaves.map((leaf) => leaf.path.join(" ")));
@@ -113,6 +117,19 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 			.find((leaf) => leaf.path.join(" ") === "auth login")
 			?.flags.find((f) => f.name === "--method");
 		deepEqual(method?.value, ["browser", "device"], "help --json: auth login --method");
+		// c-r-help-enum: a parenthesized group's flags share the value after it and conflict with each other; a
+		// positional in a top-level alternation is optional; a capitals metavariable with digits is a value.
+		const leaf = (path: string) => doc.leaves.find((entry) => entry.path.join(" ") === path);
+		const flagRows = (path: string) =>
+			Object.fromEntries((leaf(path)?.flags ?? []).map((f) => [f.name, { value: f.value, conflicts: f.conflicts }]));
+		const workingSet = flagRows("context working-set");
+		deepEqual(workingSet["--session"], { value: ["id", "path"], conflicts: ["--verify"] });
+		deepEqual(workingSet["--verify"], { value: ["id", "path"], conflicts: ["--session"] });
+		deepEqual(leaf("context working-set")?.positionals, []);
+		deepEqual(flagRows("context replay")["--sessions"], { value: "string", conflicts: ["--synthetic"] });
+		deepEqual(leaf("telemetry cost")?.positionals, [{ name: "session", required: false, variadic: false }]);
+		deepEqual(leaf("telemetry runs")?.positionals, [{ name: "session", required: false, variadic: false }]);
+		equal(flagRows("config trust")["--hash"]?.value, "string");
 		for (const name of ["run-result", "run-events", "task", "help", "fleet-result"]) {
 			const schema = await cli(["schema", name]);
 			equal(schema.status, 0, schema.stderr);

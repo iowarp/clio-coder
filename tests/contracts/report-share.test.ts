@@ -253,7 +253,7 @@ test("telemetry share --send seals to the maintainers, posts the pointer discuss
 		out = "";
 		strictEqual(await share([...send, "--yes"]), 0);
 		const aging = /shared (shr_[0-9a-f]{16})/u.exec(out)?.[1] ?? "";
-		ok(pointer.includes("once it is 180 days old, Clio Coder deletes it the next time the sender runs"), pointer);
+		ok(pointer.includes("once it is 180 days old, CLIO Coder deletes it the next time the sender runs"), pointer);
 		clock = new Date(Date.now() + 181 * 86_400_000);
 		strictEqual(await share(["--session", "ses_send", "--out", join(root, "local.tar.gz")]), 0);
 		ok(readShareReceipts(stateDir)[aging]?.deletedAt !== null);
@@ -461,7 +461,7 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 			fetched.join("\n"),
 		);
 		ok(!fetched.some((call) => call.includes("data/flywheel/backlog.csv")), fetched.join("\n"));
-		ok(out.indexOf("Usage, Clio Coder (7 days to 2026-11-09)") < out.indexOf("bash times out"), out);
+		ok(out.indexOf("Usage, CLIO Coder (7 days to 2026-11-09)") < out.indexOf("bash times out"), out);
 		match(out, /npm downloads +841 \(\+11\.1%\)/u);
 		match(out, /GitHub +219 \(-24\.0%\) views, 2112 \(\+122\.6%\) clones/u);
 		match(out, /latest release +v0\.7\.0 \(2026-11-09\), 75% of release downloads \(7d\)/u);
@@ -522,7 +522,7 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 		perProduct = true;
 		access = false;
 		strictEqual(await flywheel(), 1);
-		ok(err.includes("private to the Clio maintainers"), err);
+		ok(err.includes("private to the CLIO Coder maintainers"), err);
 
 		strictEqual(await flywheel("--pull", "nope"), 2);
 		strictEqual(await flywheel("--pull", "all", "--key", join(root, "missing.pem")), 1);
