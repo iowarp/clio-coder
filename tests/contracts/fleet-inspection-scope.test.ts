@@ -208,9 +208,8 @@ test("fleet status answers from its leaf with and without ledger rows (CLI-P11)"
 		// A running row with a budget envelope: the leaf folds its journal and prints the envelope lines.
 		const budget = resolveToolBudgetEnvelope({
 			recipeId: "scout",
-			policy: { toolCalls: 18, readReserve: 4, synthesis: true },
+			policy: { toolCalls: 18, synthesis: true },
 			hardCap: 150,
-			hasReadTool: true,
 			retry: false,
 			revision: false,
 		});

@@ -332,7 +332,7 @@ describe("dispatch schema composition", () => {
 			task: "check",
 			context: { mode: "fork" },
 			intent: { relevant_paths: ["package.json"], verification: [{ check: "test" }] },
-			budget: { toolCalls: 3, readReserve: 1 },
+			budget: { toolCalls: 3 },
 		};
 		assert.equal(Value.Check(wire, task), true);
 		assert.equal(Value.Check(wire, { tasks: [task] }), true);

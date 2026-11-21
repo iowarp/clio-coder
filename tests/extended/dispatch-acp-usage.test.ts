@@ -116,7 +116,7 @@ for (const scenario of [
 		try {
 			const run = await bundle.contract.dispatch({
 				agentId: "usage-fixture",
-				budget: { toolCalls: 1000, readReserve: 10 },
+				budget: { toolCalls: 1000 },
 				task: "Inspect the fixture input.",
 				executionRole: "researcher",
 				requestOrigin: "internal",

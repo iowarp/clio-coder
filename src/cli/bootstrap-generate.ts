@@ -461,7 +461,7 @@ async function generateBootstrapWithModel(
 			assignmentDeadlineAt,
 			synthesisAt,
 			thinkingLevel,
-			budget: { toolCalls, readReserve: Math.min(3, toolCalls - 1) },
+			budget: { toolCalls },
 			noSkills: true,
 			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
 			...(route ? { target: route.target } : {}),

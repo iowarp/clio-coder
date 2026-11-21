@@ -192,7 +192,7 @@ for (const scenario of scenarios) {
 					allowedTools: scenario.toolsSupported === false ? [] : ["write"],
 					writeRoots: [env.dir],
 					...(scenario.synthesisDuringWrite ? { synthesisAt: Date.now() + 60_000 } : {}),
-					budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+					budget: { mode: "advisory", toolCalls: 18, synthesis: true, hardCap: 150 },
 					product: "orientation",
 					noSkills: true,
 					cwd: env.dir,

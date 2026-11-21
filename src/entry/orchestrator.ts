@@ -3071,7 +3071,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			}
 		});
-		const acpWorkerRuns = followWorkerRuns(bus);
+		const acpWorkerRuns = followWorkerRuns(bus, undefined, (id) => agents?.getSpec(id)?.traits ?? []);
 		const acpHostToolEvents = createHostToolEvents();
 		// A client that answers no interviews gets each tool interview cancelled
 		// with reason headless, the way a run without an operator does.

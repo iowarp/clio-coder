@@ -418,9 +418,9 @@ entries:
       argued, assumed, refuted, unknown), so an argued proof is never reported
       as a machine-checked one. Ships a read-only verifier agent that answers a
       verifier-report, a /hoare:review prompt and a build-review playbook."
-    version: 0.2.0
+    version: 0.2.1
     sourceUrl: plugins/hoare
-    sha256: 7ea2792aebce60f4815a34118efe203ccb6c8bf7ed2ac5d19e3191333a9a2d8d
+    sha256: 054b1f3b922bd23af6c986b65f8aa5e3c1826be531041c70d79da332b60230a3
     provides:
       - kind: agent
         name: hoare-mechanized-verifier
@@ -582,9 +582,9 @@ entries:
     name: materio
     description: "Materio: materials research interviews, supplied-corpus synthesis,
       lab feasibility, task execution and verified paper handoff."
-    version: 0.2.2
+    version: 0.2.3
     sourceUrl: plugins/materio
-    sha256: 0487bd8d3a5a6d2cc53039e58d1205736d7f5030ecbf5357a91b3cd7ef705b4c
+    sha256: 8cdeac4278fbf45da732d6f5d8a5ddfd6425b4d24807f6c631dcb218245c1943
     provides:
       - kind: agent
         name: materio-lab-definer

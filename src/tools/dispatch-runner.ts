@@ -835,6 +835,7 @@ export function formatDispatchOutput(
 	maxOutputBytes: number,
 	board: string | null = null,
 	form: DispatchResultForm = "compact",
+	agentTraits?: DispatchContract["agentTraits"],
 ): string {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const recovered = runs.filter((run) => (run.failedAttempts?.length ?? 0) > 0);
@@ -904,7 +905,7 @@ export function formatDispatchOutput(
 		const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
 		// Evidence confidence comes from the run's settled facts, the same ones its run.settled records.
 		const trustStatus = finishedRunTrustStatus(view, PRODUCER_INTEGRITY);
-		const labels = runEvidenceLabels(view, PRODUCER_INTEGRITY);
+		const labels = runEvidenceLabels(view, PRODUCER_INTEGRITY, agentTraits);
 		const evidenceSuffix = ` ${(form === "compact" ? compactEvidenceLabels(labels) : labels).join(" ")}`;
 		const routingSuffix =
 			form === "full" && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
@@ -2419,7 +2420,14 @@ async function reviewGateResult(
 	form: DispatchResultForm,
 ): Promise<ToolResult> {
 	const outcome = { ...gated, runs: await withNotRetried(deps, gated.runs) };
-	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes, null, form);
+	const body = formatDispatchOutput(
+		"review",
+		outcome.runs,
+		maxOutputBytes,
+		null,
+		form,
+		deps.dispatch.agentTraits?.bind(deps.dispatch),
+	);
 	const details: ToolResultDetails = {
 		...dispatchDetails(deps, "review", outcome.runs),
 		gate: {
@@ -2454,7 +2462,14 @@ function competeResult(
 	maxOutputBytes: number,
 	form: DispatchResultForm,
 ): ToolResult {
-	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes, null, form);
+	const body = formatDispatchOutput(
+		"compete",
+		outcome.runs,
+		maxOutputBytes,
+		null,
+		form,
+		deps.dispatch.agentTraits?.bind(deps.dispatch),
+	);
 	const details: ToolResultDetails = {
 		...dispatchDetails(deps, "compete", outcome.runs),
 		compete: {
@@ -2720,7 +2735,7 @@ async function runCouncil(
 						? {
 								task: voteTask,
 								resultContractOverride: councilBallotContract(base.task),
-								...councilVoterPersona(member.agent ?? base.agentId),
+								...councilVoterPersona(deps.getAgentSpecs().find((spec) => spec.id === (member.agent ?? base.agentId))),
 							}
 						: {}),
 					target: member.target,
@@ -3299,7 +3314,14 @@ export async function runDispatchTool(
 						return { value: completed, integrityValid: true };
 					},
 				});
-				const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes, null, resultForm);
+				const output = formatDispatchOutput(
+					"fleet",
+					outcome.runs,
+					maxOutputBytes,
+					null,
+					resultForm,
+					deps.dispatch.agentTraits?.bind(deps.dispatch),
+				);
 				const details = {
 					...dispatchDetails(deps, "fleet", outcome.runs),
 					executionPlanHash: executable.hash,
@@ -3411,7 +3433,10 @@ export async function runDispatchTool(
 				board = batch.board;
 			}
 			runs = await withNotRetried(deps, runs);
-			const output = [externalFailures, formatDispatchOutput(mode, runs, maxOutputBytes, board, resultForm)]
+			const output = [
+				externalFailures,
+				formatDispatchOutput(mode, runs, maxOutputBytes, board, resultForm, deps.dispatch.agentTraits?.bind(deps.dispatch)),
+			]
 				.filter(Boolean)
 				.join("\n\n");
 			const details = {
@@ -3428,7 +3453,14 @@ export async function runDispatchTool(
 			if (err instanceof PipelineHaltError) {
 				const haltMessage = `dispatch: ${err.message}`;
 				const haltRuns = await withNotRetried(deps, err.runs);
-				const output = formatDispatchOutput("pipeline", haltRuns, maxOutputBytes, null, resultForm);
+				const output = formatDispatchOutput(
+					"pipeline",
+					haltRuns,
+					maxOutputBytes,
+					null,
+					resultForm,
+					deps.dispatch.agentTraits?.bind(deps.dispatch),
+				);
 				return {
 					kind: "error",
 					message: `${haltMessage}\n\n${output}`,

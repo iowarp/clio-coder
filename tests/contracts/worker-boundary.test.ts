@@ -78,7 +78,7 @@ function recipe() {
 			capabilityClass: "verification",
 			latencyClass: "fast",
 			projectContextTier: "bounded",
-			budget: { toolCalls: 8, readReserve: 2, synthesis: true },
+			budget: { toolCalls: 8, synthesis: true },
 			resultContract: { kind: "verifier-report" },
 			tags: ["review"],
 		},

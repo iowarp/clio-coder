@@ -199,9 +199,8 @@ for (const width of widths) {
 			"Read only 研究 notes.txt and report the first line and line count. Do not edit files or run commands. ".repeat(3);
 		row.budget = resolveToolBudgetEnvelope({
 			recipeId: "debugger",
-			policy: { toolCalls: 24, readReserve: 4, synthesis: true },
+			policy: { toolCalls: 24, synthesis: true },
 			hardCap: 150,
-			hasReadTool: true,
 			retry: false,
 			revision: false,
 		});

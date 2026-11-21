@@ -126,7 +126,7 @@ describe("worker synthesis lock", () => {
 		guard.evaluate(call);
 		const locked = guard.evaluate(call);
 		ok(JSON.stringify(locked).includes("required result format"));
-		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 30, readReserve: 2 }), false);
+		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 30 }), false);
 		ok(
 			guard
 				.evaluate({ ...call, toolArgs: { path: "b.ts" }, metadata: { callFingerprint: "new-read" } })
@@ -140,7 +140,7 @@ describe("worker synthesis lock", () => {
 			toolCallCap: 150,
 			toolCallSoftLimit: 18,
 		});
-		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 30, readReserve: 2 }), true);
+		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 30 }), true);
 	});
 
 	it("does not reopen a hard-cap lock for a contract revision", () => {
@@ -159,7 +159,7 @@ describe("worker synthesis lock", () => {
 				metadata: { callFingerprint: `edit-${i}` },
 			});
 		}
-		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 3, readReserve: 0 }), false);
+		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 3 }), false);
 	});
 
 	it("strips the tool surface on a locked round and keeps it under Anthropic's tool_choice", async () => {

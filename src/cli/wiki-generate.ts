@@ -533,7 +533,7 @@ async function runWikiDispatch(input: {
 			denyTools: repair
 				? ALL_TOOL_NAMES.filter((tool) => tool !== ToolNames.Read && tool !== ToolNames.Grep && tool !== ToolNames.Edit)
 				: [ToolNames.Git],
-			...(repair ? { budget: { toolCalls: 10, readReserve: 4 } } : {}),
+			...(repair ? { budget: { toolCalls: 10 } } : {}),
 			// Containment: the worker safety seam blocks any write-class tool call
 			// whose target escapes the staging dir.
 			writeRoots:

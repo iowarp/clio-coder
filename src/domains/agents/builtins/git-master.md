@@ -12,8 +12,9 @@ capabilityClass: workspace-edit
 permissions: {git: worktree}
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 40, readReserve: 5, synthesis: true}
+budget: {toolCalls: 40, synthesis: true}
 resultContract: {kind: mutation-report}
+handbook: [git, write]
 tags: [git, commit, worktree, merge, pr, history]
 ---
 

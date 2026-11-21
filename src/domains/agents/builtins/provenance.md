@@ -11,7 +11,7 @@ category: operations
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: none
-budget: {toolCalls: 16, readReserve: 4, synthesis: true}
+budget: {toolCalls: 16, synthesis: true}
 resultContract: {kind: provenance-report}
 tags: [runs, evidence, telemetry]
 ---

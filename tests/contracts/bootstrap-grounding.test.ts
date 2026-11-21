@@ -1557,7 +1557,7 @@ it("shapes a generated handbook so a 6000-character coder compile reaches its Te
 	const compiled = compileHandbook(handbook, "CLIO-CODER.md");
 	ok(compiled);
 	const worker = selectWorkerHandbook([compiled], {
-		audience: workerHandbookAudience("coder", null),
+		audience: workerHandbookAudience(undefined, null),
 		cwd,
 		workingPaths: ["README.md"],
 		maxChars: 6000,

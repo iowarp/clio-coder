@@ -41,6 +41,7 @@ import type {
 	DispatchStartedPayload,
 	RunAbortedPayload,
 } from "../core/telemetry/live-events.js";
+import type { AgentTrait } from "../domains/agents/spec.js";
 import type {
 	RunPresentedResultContract,
 	RunResultContract,
@@ -100,9 +101,18 @@ export function isHelperRun(run: { agentAudience?: DispatchStartedPayload["agent
 	return run.agentAudience === "shadow" || run.agentAudience === "internal";
 }
 
-/** These internal runs report through the context rail; their full task is a prompt payload. */
-export function isContextOperationRun(run: { agentId: string; requestOrigin?: string | undefined }): boolean {
-	return run.requestOrigin === "internal" && (run.agentId === "context-bootstrap" || run.agentId === "wiki-writer");
+/** A run's recipe traits by agent id; empty when the recipe is unknown. */
+export type AgentTraitLookup = (agentId: string) => ReadonlyArray<AgentTrait>;
+
+/**
+ * Internal runs of a `context-generator` recipe report through the context rail; their full task is a prompt
+ * payload.
+ */
+export function isContextOperationRun(
+	run: { agentId: string; requestOrigin?: string | undefined },
+	agentTraits: AgentTraitLookup | undefined,
+): boolean {
+	return run.requestOrigin === "internal" && agentTraits?.(run.agentId).includes("context-generator") === true;
 }
 
 export interface WorkerEntryState {
@@ -179,6 +189,8 @@ export interface WorkerStreamOptions {
 	 * truth; the bus payload is only the fallback for when it cannot be read.
 	 */
 	readResult?: WorkerRunResultReader;
+	/** Recipe traits, which mark the context-generator runs this stream leaves to the context rail. */
+	agentTraits?: AgentTraitLookup;
 }
 
 export interface WorkerStream {
@@ -337,7 +349,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 
 	return {
 		started(payload): WorkerStreamChange | null {
-			if (isContextOperationRun(payload)) return null;
+			if (isContextOperationRun(payload, options.agentTraits)) return null;
 			const runId = nonEmptyString(payload.runId);
 			const sharedId = nonEmptyString(payload.assignmentId) ?? runId;
 			if (runId === undefined || sharedId === undefined) return null;

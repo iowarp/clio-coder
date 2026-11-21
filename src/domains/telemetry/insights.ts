@@ -152,6 +152,8 @@ export interface InsightSignals {
 	workerRuns: number;
 	/** Agent ids of the settled worker runs, sorted. */
 	workerAgents: string[];
+	/** Result-contract kinds the settled worker runs delivered, sorted. */
+	workerContracts: string[];
 	/** Autonomy modes the session ran under, sorted. */
 	autonomyModes: string[];
 	/** Summed span of each turn, first to last record, in ms. */
@@ -195,6 +197,7 @@ export function sessionSignals(
 		operatorMessages: 0,
 		workerRuns: 0,
 		workerAgents: [],
+		workerContracts: [],
 		autonomyModes: [],
 		activeMs: 0,
 		facetsMissing: false,
@@ -203,6 +206,7 @@ export function sessionSignals(
 	const skills = new Set<string>();
 	const modes = new Set<string>();
 	const agents: string[] = [];
+	const contracts = new Set<string>();
 	const turns = new Map<string, { from: number; to: number }>();
 	const tool = (record: TelemetryRecord<"tool.settled">): void => {
 		const data = record.data;
@@ -265,13 +269,17 @@ export function sessionSignals(
 	for (const run of runs)
 		for (const record of insightRecords(run)) {
 			if (record.k === "tool.settled") tool(record);
-			else if (record.k === "run.settled") agents.push(record.data.agentId);
-			else if (record.k === "approval.resolved" && record.data.decidedBy !== undefined)
+			else if (record.k === "run.settled") {
+				agents.push(record.data.agentId);
+				const kind = /^agent-result-contract:([^:]+):/u.exec(record.data.quality?.resultContract?.sourceId ?? "")?.[1];
+				if (kind !== undefined) contracts.add(kind);
+			} else if (record.k === "approval.resolved" && record.data.decidedBy !== undefined)
 				if (OPERATOR_DECIDERS.has(record.data.decidedBy)) signals.operatorDecided += 1;
 		}
 	// The caller passes every run journal the session references, readable or not, so each is one delegation.
 	signals.workerRuns = runs.length;
 	signals.workerAgents = [...new Set(agents)].sort();
+	signals.workerContracts = [...contracts].sort();
 	signals.skills = [...skills].sort();
 	signals.autonomyModes = [...modes].sort();
 	for (const span of turns.values()) signals.activeMs += span.to - span.from;
@@ -299,7 +307,10 @@ export function classifySession(signals: InsightSignals): InsightCategory {
 	const notebooks = writes.ipynb ?? 0;
 	const scienceChecks = Math.max((checks.reproduce ?? 0) + (checks["numeric-compare"] ?? 0), signals.verifiedChecks);
 	const web = (tools.web_fetch ?? 0) + (tools.web_read ?? 0);
-	const researcher = signals.workerAgents.some((agent) => agent === "researcher" || agent === "world-knowledge");
+	// A research recipe is one whose result is a research or world-knowledge report, whatever its id.
+	const researcher = signals.workerContracts.some(
+		(kind) => kind === "research-report" || kind === "world-knowledge-report",
+	);
 	const skillScores = new Map<InsightCategory, number>();
 	let researchSkill = false;
 	for (const skill of signals.skills) {

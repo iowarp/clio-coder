@@ -224,7 +224,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 
 test("a task naming a source file in any common language is not steered away from code_nav", () => {
 	const tools = [ToolNames.CodeNav, ToolNames.Read, ToolNames.Grep];
-	const steered = (task: string) => codeNavTaskSteering({ task, agentId: "worker", tools });
+	const steered = (task: string) => codeNavTaskSteering({ task, orientation: false, tools });
 	for (const file of ["App.kt", "build.kts", "View.swift", "index.php", "Program.cs", "Main.scala", "deploy.sh"])
 		equal(steered(`Fix the bug in ${file}.`), false, file);
 	equal(steered("Update the README badge and the .css colors."), true);
@@ -264,7 +264,7 @@ require("node:readline").createInterface({input: process.stdin}).on("line", (lin
 			contextSeed: seed,
 			executionRole: "researcher" as const,
 			requestOrigin: "internal" as const,
-			budget: { toolCalls: 1000, readReserve: 10 },
+			budget: { toolCalls: 1000 },
 		};
 		const run = await bundle.contract.dispatch(request);
 		const receipt = await run.finalPromise;

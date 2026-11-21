@@ -152,7 +152,6 @@ const CouncilMemberSchema = Type.Object(
 const DispatchBudgetPhaseSchema = Type.Object(
 	{
 		toolCalls: Type.Integer({ minimum: 1 }),
-		readReserve: Type.Integer({ minimum: 0 }),
 	},
 	{ additionalProperties: false },
 );
@@ -162,10 +161,6 @@ const DispatchBudgetSchema = Type.Object(
 		toolCalls: Type.Integer({
 			minimum: 1,
 			description: "Planning estimate; native workers stop at a hard tool-call ceiling.",
-		}),
-		readReserve: Type.Integer({
-			minimum: 0,
-			description: "Read tail; native scout, provenance and context-bootstrap runs only.",
 		}),
 		retryRevision: Type.Optional(DispatchBudgetPhaseSchema),
 	},

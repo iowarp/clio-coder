@@ -9,7 +9,7 @@ category: research
 capabilityClass: workspace-edit
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 96, readReserve: 8, synthesis: true}
+budget: {toolCalls: 96, synthesis: true}
 resultContract: {kind: mutation-report}
 tags: [materio, materials-science]
 ---

@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "hoare",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Hoare-logic correctness review: states pre- and postconditions, loop invariants and variants for named functions, derives the verification conditions with language-specific hazard obligations for C/C++, Python and Fortran, and discharges each by a declared prover check or a written argument. Every obligation carries an honest status (mechanized, modeled, argued, assumed, refuted, unknown), so an argued proof is never reported as a machine-checked one. Ships a read-only verifier agent that answers a verifier-report, a /hoare:review prompt and a build-review playbook.",
 	"license": "Apache-2.0",
 	"author": {

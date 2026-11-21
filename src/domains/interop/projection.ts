@@ -304,7 +304,7 @@ export function projectAgent(input: {
 		capabilityClass: "read-only",
 		latencyClass: "balanced",
 		projectContextTier: "bounded",
-		budget: { toolCalls: 24, readReserve: 4, synthesis: true },
+		budget: { toolCalls: 24, synthesis: true },
 		resultContract: { kind: "text-report" },
 		tags: ["interop"],
 	};

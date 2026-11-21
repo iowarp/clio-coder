@@ -92,7 +92,7 @@ async function runAgentsValidate(args: ReadonlyArray<string>): Promise<number> {
 function renderLine(spec: AgentSpec): void {
 	const shape = `${spec.audience}/${spec.category}/${spec.capabilityClass}/${spec.latencyClass}`;
 	const skills = spec.skills.length > 0 ? ` skills=${spec.skills.join(",")}` : "";
-	const maximum = spec.budget.maximum ? `..${spec.budget.maximum.toolCalls}/${spec.budget.maximum.readReserve}` : "";
-	const budget = `${spec.budget.toolCalls}/${spec.budget.readReserve}${maximum}/${spec.budget.synthesis ? "synthesize" : "stop"}`;
+	const maximum = spec.budget.maximum ? `..${spec.budget.maximum.toolCalls}` : "";
+	const budget = `${spec.budget.toolCalls}${maximum}/${spec.budget.synthesis ? "synthesize" : "stop"}`;
 	process.stdout.write(`${spec.id.padEnd(20)} ${shape.padEnd(48)} ${spec.description}${skills} budget=${budget}\n`);
 }

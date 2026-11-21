@@ -249,7 +249,7 @@ category: research
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 10, readReserve: 0, synthesis: true}
+budget: {toolCalls: 10, synthesis: true}
 resultContract: {kind: artifact-report}
 tags: [fixture]
 ---

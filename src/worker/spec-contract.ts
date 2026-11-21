@@ -123,7 +123,6 @@ export interface WorkerProtectedArtifactState {
 /** Concrete dispatch-time planning estimates, or a legacy enforced budget. */
 export interface WorkerBudgetPhase {
 	toolCalls: number;
-	readReserve: number;
 }
 
 export interface WorkerBudget {
@@ -131,8 +130,6 @@ export interface WorkerBudget {
 	mode?: "advisory" | "enforced";
 	/** Estimated tool calls; a phase boundary only in enforced mode. */
 	toolCalls: number;
-	/** Suggested read allowance; reserved calls only in enforced mode. */
-	readReserve: number;
 	/** Legacy enforced-mode phase behavior; advisory mode never forces synthesis. */
 	synthesis: boolean;
 	/** Legacy enforced-mode attempt ceiling; advisory-mode planning baseline. */
@@ -832,7 +829,7 @@ function validateFlowRestrictions(value: unknown): void {
 
 function validateWorkerBudget(value: unknown): void {
 	const budget = readRecord(value, "WorkerSpec.budget");
-	const expected = ["ceiling", "mode", "hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
+	const expected = ["ceiling", "mode", "hardCap", "revision", "synthesis", "toolCalls"];
 	const actual = Object.keys(budget).sort();
 	if (
 		actual.some((key) => !expected.includes(key)) ||
@@ -842,10 +839,10 @@ function validateWorkerBudget(value: unknown): void {
 	}
 	if (budget.mode !== undefined && budget.mode !== "advisory" && budget.mode !== "enforced")
 		throw new Error("WorkerSpec.budget.mode must be advisory or enforced");
-	for (const required of ["hardCap", "readReserve", "synthesis", "toolCalls"] as const) {
+	for (const required of ["hardCap", "synthesis", "toolCalls"] as const) {
 		if (!Object.hasOwn(budget, required)) throw new Error(`WorkerSpec.budget.${required} is required`);
 	}
-	for (const key of ["toolCalls", "readReserve", "hardCap"] as const) {
+	for (const key of ["toolCalls", "hardCap"] as const) {
 		const value = budget[key];
 		if (typeof value !== "number" || !Number.isSafeInteger(value)) {
 			throw new Error(`WorkerSpec.budget.${key} must be a safe integer`);
@@ -855,9 +852,6 @@ function validateWorkerBudget(value: unknown): void {
 	if ((budget.hardCap as number) <= 0) throw new Error("WorkerSpec.budget.hardCap must be greater than zero");
 	if (budget.mode !== "advisory" && (budget.toolCalls as number) > (budget.hardCap as number)) {
 		throw new Error("WorkerSpec.budget.toolCalls must not exceed WorkerSpec.budget.hardCap");
-	}
-	if ((budget.readReserve as number) < 0 || (budget.readReserve as number) >= (budget.toolCalls as number)) {
-		throw new Error("WorkerSpec.budget.readReserve must be an integer in [0, toolCalls)");
 	}
 	if (typeof budget.synthesis !== "boolean") throw new Error("WorkerSpec.budget.synthesis must be a boolean");
 	if (budget.ceiling !== undefined) {
@@ -873,28 +867,17 @@ function validateWorkerBudget(value: unknown): void {
 	if (budget.revision !== undefined) {
 		const revision = readRecord(budget.revision, "WorkerSpec.budget.revision");
 		const revisionKeys = Object.keys(revision).sort();
-		if (revisionKeys.length !== 2 || revisionKeys[0] !== "readReserve" || revisionKeys[1] !== "toolCalls") {
-			throw new Error("WorkerSpec.budget.revision must contain exactly: readReserve, toolCalls");
+		if (revisionKeys.length !== 1 || revisionKeys[0] !== "toolCalls") {
+			throw new Error("WorkerSpec.budget.revision must contain exactly: toolCalls");
 		}
-		for (const key of ["toolCalls", "readReserve"] as const) {
-			if (typeof revision[key] !== "number" || !Number.isSafeInteger(revision[key])) {
-				throw new Error(`WorkerSpec.budget.revision.${key} must be a safe integer`);
-			}
+		if (typeof revision.toolCalls !== "number" || !Number.isSafeInteger(revision.toolCalls)) {
+			throw new Error("WorkerSpec.budget.revision.toolCalls must be a safe integer");
 		}
-		if ((revision.toolCalls as number) < (budget.toolCalls as number)) {
-			throw new Error("WorkerSpec.budget.revision.toolCalls must not be smaller than WorkerSpec.budget.toolCalls");
-		}
-		if (
-			(revision.toolCalls as number) === (budget.toolCalls as number) &&
-			(revision.readReserve as number) <= (budget.readReserve as number)
-		) {
-			throw new Error("WorkerSpec.budget.revision must increase toolCalls or readReserve");
+		if ((revision.toolCalls as number) <= (budget.toolCalls as number)) {
+			throw new Error("WorkerSpec.budget.revision must increase toolCalls");
 		}
 		if (budget.mode !== "advisory" && (revision.toolCalls as number) > (budget.hardCap as number)) {
 			throw new Error("WorkerSpec.budget.revision.toolCalls must not exceed WorkerSpec.budget.hardCap");
-		}
-		if ((revision.readReserve as number) < 0 || (revision.readReserve as number) >= (revision.toolCalls as number)) {
-			throw new Error("WorkerSpec.budget.revision.readReserve must be an integer in [0, toolCalls)");
 		}
 	}
 }

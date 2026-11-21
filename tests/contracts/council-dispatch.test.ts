@@ -82,7 +82,8 @@ test("council members run as their roster agent, else the council agent", async 
 				throw new Error("stub workers");
 			},
 		} as unknown as DispatchContract,
-		getAgentSpecs: () => [{ id: "architect" }, { id: "researcher" }, { id: "scout" }] as never,
+		getAgentSpecs: () =>
+			[{ id: "architect" }, { id: "researcher" }, { id: "scout", resultContract: { kind: "scout-report" } }] as never,
 		getWorkerRosters: () => settings.settings.fleet.rosters,
 		getAutonomy: () => "yolo",
 	});
@@ -142,7 +143,7 @@ test("a member deadline aborts only the slow member and names the deadline", asy
 				releases.get(runId)?.(new Error("aborted"));
 			},
 		} as unknown as DispatchContract,
-		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAgentSpecs: () => [{ id: "scout", resultContract: { kind: "scout-report" } }] as never,
 		getAutonomy: () => "yolo",
 	});
 	await tool.run(
@@ -249,7 +250,7 @@ test("a poll seat votes under the bounded voter prompt and no ballot example car
 			abort() {},
 			getRun: () => undefined,
 		} as unknown as DispatchContract,
-		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAgentSpecs: () => [{ id: "scout", resultContract: { kind: "scout-report" } }] as never,
 		getAutonomy: () => "yolo",
 	});
 	const built = buildPollDispatchArgs({ participants: 2, question: "Tabs or spaces?" }, { target: "mini" });
@@ -401,7 +402,7 @@ test("a seat whose target is down sits as a failed seat while the live seats del
 			abort() {},
 			getRun: () => undefined,
 		} as unknown as DispatchContract,
-		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAgentSpecs: () => [{ id: "scout", resultContract: { kind: "scout-report" } }] as never,
 		getAutonomy: () => "yolo",
 	});
 	const members = (labels: string[]) =>
@@ -501,7 +502,7 @@ test("a judge council admits round 2 and the judge when host text names an endpo
 			abort() {},
 			getRun: () => undefined,
 		} as unknown as DispatchContract,
-		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAgentSpecs: () => [{ id: "scout", resultContract: { kind: "scout-report" } }] as never,
 		getAutonomy: () => "yolo",
 	});
 	const args = {

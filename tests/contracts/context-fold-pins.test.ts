@@ -182,7 +182,7 @@ describe("adapter capture", () => {
 					// A window the three reads outgrow, so the last send runs a guard commit.
 					modelCapabilities: { contextWindow: 16_000, maxTokens: 512, tools: true },
 					allowedTools: ["read"],
-					budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+					budget: { mode: "advisory", toolCalls: 18, synthesis: true, hardCap: 150 },
 					noSkills: true,
 					cwd: process.cwd(),
 					telemetryContext,

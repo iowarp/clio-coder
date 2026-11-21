@@ -199,10 +199,13 @@ import { nodeResultContractFilesystem } from "../agents/result-contract-filesyst
 import {
 	type AgentAudience,
 	type AgentCapabilityClass,
+	type AgentHandbookAudience,
 	type AgentProjectContextTier,
 	type AgentSpec,
+	agentHasTrait,
 	agentSpecFingerprint,
 	assertAgentSpecPolicy,
+	isReadOnlyExplorer,
 	isUserVisibleAgent,
 	normalizeAgentSpec,
 	resolveAgentToolCompatibility,
@@ -1675,13 +1678,16 @@ const EXTERNAL_READ_APPROVAL_REQUIRED =
 	"external_read_approval_required: Outside Scout reads require approval bound to this run and canonical root.";
 
 /**
- * An outside read root admits only a read-only Scout whose cwd is that canonical root. The approval itself is
- * bound to a run id minted after the plan, so preview checks the shape and run checks the binding as well.
+ * An outside read root admits only a read-only explorer recipe run read-only with that canonical root as its cwd.
+ * The approval itself is bound to a run id minted after the plan, so preview checks the shape and run checks the
+ * binding as well.
  */
-function externalReadShapeAdmissible(req: DispatchRequest): boolean {
+function externalReadShapeAdmissible(req: DispatchRequest, spec: AgentSpec | null): boolean {
 	return (
 		req.externalReadRoot === undefined ||
-		(req.agentId === "scout" && req.readOnly === true && canonicalizeExistingPath(req.cwd ?? "") === req.externalReadRoot)
+		(isReadOnlyExplorer(spec) &&
+			req.readOnly === true &&
+			canonicalizeExistingPath(req.cwd ?? "") === req.externalReadRoot)
 	);
 }
 
@@ -2146,8 +2152,10 @@ export interface WorkerDynamicContext {
 	wallClockMs?: number;
 	/** Selects the handbook audience with the capability class; never tier policy. */
 	capabilityClass?: AgentCapabilityClass | null;
-	/** Recipe id, which names the handbook audience for built-in roles. */
+	/** Recipe id the worker runs as. */
 	agentId?: string | null;
+	/** Handbook sections the recipe declares (`handbook` frontmatter); absent derives them from the class. */
+	handbook?: ReadonlyArray<AgentHandbookAudience> | null;
 	/** The dispatch path scope; activates handbook rules scoped to those paths. */
 	workingContextPaths?: ReadonlyArray<string>;
 	/** Resolves absolute working paths against the run's directory. */
@@ -2285,7 +2293,7 @@ export function buildDynamicPromptMessages(
 				: authored
 					? handbooks.length > 0 && handbooks.length === compiled.length
 						? selectWorkerHandbook(handbooks, {
-								audience: workerHandbookAudience(dynamicContext.agentId ?? req.agentId, dynamicContext.capabilityClass),
+								audience: workerHandbookAudience(dynamicContext.handbook, dynamicContext.capabilityClass),
 								cwd: dynamicContext.cwd ?? req.cwd ?? process.cwd(),
 								workingPaths: dynamicContext.workingContextPaths ?? [],
 								maxChars: WORKER_HANDBOOK_MAX_CHARS,
@@ -3276,13 +3284,14 @@ function assertPostRuntimeToolCompatibility(
 	envelope: WorkerEnvelope,
 	target: ResolvedTarget,
 ): void {
-	// The shipped coder may use a named subprocess peer. Its native Clio tool
-	// requirements cannot be matched to the peer's opaque tool loop. Keep custom
-	// recipes on the normal compatibility gate, since their declared required
-	// tools are hard promises we cannot silently waive. The receipt records the
-	// coder's external tool boundary as unavailable telemetry and approximated
-	// authority; write roots and protected artifacts keep their separate gates.
-	if (target.runtime.kind === "subprocess" && spec.source === "builtin" && spec.id === "coder") return;
+	// A recipe declaring `peer-tool-loop` (the shipped coder) may use a named
+	// subprocess peer. Its native Clio tool requirements cannot be matched to the
+	// peer's opaque tool loop. Every other recipe stays on the normal compatibility
+	// gate, since its declared required tools are hard promises we cannot silently
+	// waive. The receipt records the external tool boundary as unavailable
+	// telemetry and approximated authority; write roots and protected artifacts
+	// keep their separate gates.
+	if (target.runtime.kind === "subprocess" && agentHasTrait(spec, "peer-tool-loop")) return;
 	const compatibility = resolveAgentToolCompatibility(spec, envelopeToolNames(envelope), {
 		mediatesDispatch: WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH,
 		waived: waivedRequirements(envelope),
@@ -3325,7 +3334,6 @@ function resolveEffectiveWorkerBudget(input: {
 	const hardCap = workerToolCallHardCap(input.settings);
 	const declared = input.declared ?? {
 		toolCalls: hardCap,
-		readReserve: Math.min(5, Math.max(0, hardCap - 1)),
 		synthesis: true,
 	};
 	return resolveToolBudgetEnvelope({
@@ -3333,14 +3341,9 @@ function resolveEffectiveWorkerBudget(input: {
 		policy: declared,
 		...(input.req.budget === undefined ? {} : { request: input.req.budget }),
 		hardCap,
-		hasReadTool: input.allowedTools.includes(ToolNames.Read),
 		retry: (input.req.lineage?.attempt ?? 0) > 0,
 		revision: input.req.gate?.role === "builder" && input.req.gate.cycle > 1 && input.req.gate.verdict === "revise",
 		enforcement: budgetEnforcementForRuntime(input.runtime),
-		nativeReadOnlyResearch:
-			input.readOnly &&
-			(input.recipeId === "scout" || input.recipeId === "provenance" || input.recipeId === "context-bootstrap") &&
-			declared.synthesis,
 	});
 }
 
@@ -6465,7 +6468,7 @@ export function createDispatchBundle(
 		// repository-wide read scope. That expected inventory is retained in the
 		// receipt, but warning on it obscures their actual stage progress.
 		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
-		const contextGenerator = req.agentId === "context-bootstrap" || req.agentId === "wiki-writer";
+		const contextGenerator = agentHasTrait(agents.getSpec(req.agentId), "context-generator");
 		if (replacementDiagnostic !== null && internalOrigin && !contextGenerator) {
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
 		}
@@ -6833,7 +6836,7 @@ export function createDispatchBundle(
 						declared: target.runtime.repositoryInstructions,
 						cwd,
 						handbookSources: projectPrompt?.handbookSources ?? [],
-						audience: workerHandbookAudience(recipe.id, spec.capabilityClass),
+						audience: workerHandbookAudience(spec.handbook, spec.capabilityClass),
 						workingPaths: pathScope.workingContextPaths,
 						maxChars: WORKER_HANDBOOK_MAX_CHARS,
 						clioNames: clioOnlyNames(agents.listSpecs().map((entry) => entry.id)),
@@ -6859,6 +6862,7 @@ export function createDispatchBundle(
 			...(req.runWallMs !== undefined ? { wallClockMs: req.runWallMs } : {}),
 			capabilityClass: spec.capabilityClass,
 			agentId: recipe.id,
+			...(spec.handbook !== undefined ? { handbook: spec.handbook } : {}),
 			workingContextPaths: pathScope.workingContextPaths,
 			cwd,
 			projectContextTier: tier,
@@ -7313,10 +7317,9 @@ export function createDispatchBundle(
 		const estimate = workerToolCallHardCap(settings);
 		const budgetEnvelope = resolveToolBudgetEnvelope({
 			recipeId: req.agentId,
-			policy: { toolCalls: estimate, readReserve: 0, synthesis: true },
+			policy: { toolCalls: estimate, synthesis: true },
 			...(req.budget === undefined ? {} : { request: req.budget }),
 			hardCap: estimate,
-			hasReadTool: false,
 			retry: (req.lineage?.attempt ?? 0) > 0,
 			revision: false,
 			enforcement: "external-one-shot",
@@ -8344,7 +8347,7 @@ export function createDispatchBundle(
 		if (req.externalReadRoot !== undefined) {
 			const approval = req.externalReadApproval;
 			if (
-				!externalReadShapeAdmissible(req) ||
+				!externalReadShapeAdmissible(req, agents.getSpec(req.agentId)) ||
 				approval === undefined ||
 				approval.root !== req.externalReadRoot ||
 				approval.runId !== req.runIdHint
@@ -11860,7 +11863,8 @@ export function createDispatchBundle(
 	): DispatchPlanTaskResolution {
 		const routed: DispatchRequest = { ...req, agentId: resolution.agentId };
 		const checkedAtRun: string[] = [];
-		if (!externalReadShapeAdmissible(routed)) throw new Error(EXTERNAL_READ_APPROVAL_REQUIRED);
+		if (!externalReadShapeAdmissible(routed, agents.getSpec(routed.agentId)))
+			throw new Error(EXTERNAL_READ_APPROVAL_REQUIRED);
 		if (routed.externalReadRoot !== undefined)
 			checkedAtRun.push(`outside read root ${routed.externalReadRoot}: approval is asked at run`);
 		const tags = routed.storeTags ?? [];
@@ -12920,6 +12924,7 @@ export function createDispatchBundle(
 	};
 	const contract: DispatchContract = {
 		awaitStartupRecovery,
+		agentTraits: (agentId) => agents.getSpec(agentId)?.traits ?? [],
 		warmRouteHistory() {
 			if (routeHistoryWarmTimer !== null || draining || stopPromise !== null) return;
 			// After boot's own burst, so the first keystrokes do not contend with it.

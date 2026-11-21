@@ -96,10 +96,9 @@ for (const agent of ["scout", "coder"] as const) {
 		strictEqual(specs.find((spec) => spec.id === "coder")?.capabilityClass, "workspace-edit");
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec, options) => {
-				const scout = spec.agentId === "scout";
-				strictEqual(spec.budget.mode, scout ? "enforced" : "advisory");
-				// The 1000 requested is held at the operator's cap (M6).
-				strictEqual(spec.budget.toolCalls, scout ? 36 : settings.fleet.limits.toolCallsPerRun);
+				// Every recipe is advisory; the 1000 requested is held at the operator's cap (M6, M12).
+				strictEqual(spec.budget.mode, "advisory");
+				strictEqual(spec.budget.toolCalls, settings.fleet.limits.toolCallsPerRun);
 				const cwd = options?.cwd;
 				ok(cwd);
 				const judge = spec.agentId === "verifier";
@@ -218,7 +217,7 @@ for (const agent of ["scout", "coder"] as const) {
 				task: writer ? "Update the fixture files and project profile." : "Inspect tracked.txt and explain its contents.",
 				...(writer ? {} : { intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] } }),
 				mode: "compete",
-				budget: { toolCalls: 1000, readReserve: 10 },
+				budget: { toolCalls: 1000 },
 				candidates: 2,
 				cwd: root,
 			};

@@ -2137,7 +2137,7 @@ test("a locked Copilot worker round keeps the session's reasoning effort and too
 					reasoningLevels: ["low", "medium", "high"],
 				},
 				allowedTools: ["read"],
-				budget: { mode: "enforced", toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 150 },
+				budget: { mode: "enforced", toolCalls: 1, synthesis: true, hardCap: 150 },
 				noSkills: true,
 				cwd: process.cwd(),
 				onPermission: "deny",

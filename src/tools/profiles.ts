@@ -99,16 +99,18 @@ export const CODE_NAV_TASK_STEERING = "This task names no source path; prefer `r
 /**
  * Whether a worker's task message should steer it away from `code_nav`. A worker's tools never vary with its task, so
  * workers of one recipe share a cached prefix; the steering is a sentence at the end of the task message, after
- * everything cacheable. It applies to a worker that has `code_nav`, `read` and `grep`, is neither `scout` nor on the
- * council read-only profile, and whose task names no source path or navigation work.
+ * everything cacheable. It applies to a worker that has `code_nav`, `read` and `grep`, is neither a read-only
+ * orientation run (whose product is navigation, as a scout's is) nor on the council read-only profile, and whose task
+ * names no source path or navigation work.
  */
 export function codeNavTaskSteering(input: {
 	task: string;
-	agentId: string;
+	/** A read-only run whose recipe declares `product: orientation`. */
+	orientation: boolean;
 	toolProfile?: ToolProfileName;
 	tools: ReadonlyArray<ToolName>;
 }): boolean {
-	if (input.agentId === "scout" || input.toolProfile === "council-read-only") return false;
+	if (input.orientation || input.toolProfile === "council-read-only") return false;
 	if (![ToolNames.CodeNav, ToolNames.Read, ToolNames.Grep].every((tool) => input.tools.includes(tool))) return false;
 	return !NAVIGATION_TASK.test(input.task);
 }

@@ -12,36 +12,29 @@
 				"version": 1,
 				"enforcement": {
 					"classification": "native-per-tool",
-					"perTool": "enforced",
-					"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+					"perTool": "advisory",
+					"clioControls": ["tool-observation", "cancellation"]
 				},
 				"policy": {
 					"recipeId": "scout",
 					"default": {
 						"toolCalls": 18,
-						"readReserve": 4,
 						"synthesis": true
 					},
 					"maximum": {
-						"toolCalls": 18,
-						"readReserve": 4
+						"toolCalls": 18
 					},
 					"exact": true
 				},
 				"request": null,
 				"effective": {
-					"mode": "enforced",
-					"toolCalls": 36,
-					"readReserve": 4,
+					"mode": "advisory",
+					"toolCalls": 18,
 					"synthesis": true,
-					"hardCap": 300
+					"hardCap": 300,
+					"ceiling": 300
 				},
-				"reasons": [
-					{
-						"code": "read-only-research-synthesis",
-						"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-					}
-				]
+				"reasons": []
 			},
 			"answerBudgetBytes": 12000,
 			"targetId": "default",
@@ -767,36 +760,29 @@
 				"version": 1,
 				"enforcement": {
 					"classification": "native-per-tool",
-					"perTool": "enforced",
-					"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+					"perTool": "advisory",
+					"clioControls": ["tool-observation", "cancellation"]
 				},
 				"policy": {
 					"recipeId": "scout",
 					"default": {
 						"toolCalls": 18,
-						"readReserve": 4,
 						"synthesis": true
 					},
 					"maximum": {
-						"toolCalls": 18,
-						"readReserve": 4
+						"toolCalls": 18
 					},
 					"exact": true
 				},
 				"request": null,
 				"effective": {
-					"mode": "enforced",
-					"toolCalls": 36,
-					"readReserve": 4,
+					"mode": "advisory",
+					"toolCalls": 18,
 					"synthesis": true,
-					"hardCap": 300
+					"hardCap": 300,
+					"ceiling": 300
 				},
-				"reasons": [
-					{
-						"code": "read-only-research-synthesis",
-						"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-					}
-				]
+				"reasons": []
 			},
 			"targetId": "default",
 			"wireModelId": "gpt-4o",
@@ -1003,36 +989,29 @@
 						"version": 1,
 						"enforcement": {
 							"classification": "native-per-tool",
-							"perTool": "enforced",
-							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+							"perTool": "advisory",
+							"clioControls": ["tool-observation", "cancellation"]
 						},
 						"policy": {
 							"recipeId": "scout",
 							"default": {
 								"toolCalls": 18,
-								"readReserve": 4,
 								"synthesis": true
 							},
 							"maximum": {
-								"toolCalls": 18,
-								"readReserve": 4
+								"toolCalls": 18
 							},
 							"exact": true
 						},
 						"request": null,
 						"effective": {
-							"mode": "enforced",
-							"toolCalls": 36,
-							"readReserve": 4,
+							"mode": "advisory",
+							"toolCalls": 18,
 							"synthesis": true,
-							"hardCap": 300
+							"hardCap": 300,
+							"ceiling": 300
 						},
-						"reasons": [
-							{
-								"code": "read-only-research-synthesis",
-								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-							}
-						]
+						"reasons": []
 					}
 				}
 			},
@@ -1054,36 +1033,29 @@
 						"version": 1,
 						"enforcement": {
 							"classification": "native-per-tool",
-							"perTool": "enforced",
-							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+							"perTool": "advisory",
+							"clioControls": ["tool-observation", "cancellation"]
 						},
 						"policy": {
 							"recipeId": "scout",
 							"default": {
 								"toolCalls": 18,
-								"readReserve": 4,
 								"synthesis": true
 							},
 							"maximum": {
-								"toolCalls": 18,
-								"readReserve": 4
+								"toolCalls": 18
 							},
 							"exact": true
 						},
 						"request": null,
 						"effective": {
-							"mode": "enforced",
-							"toolCalls": 36,
-							"readReserve": 4,
+							"mode": "advisory",
+							"toolCalls": 18,
 							"synthesis": true,
-							"hardCap": 300
+							"hardCap": 300,
+							"ceiling": 300
 						},
-						"reasons": [
-							{
-								"code": "read-only-research-synthesis",
-								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-							}
-						]
+						"reasons": []
 					},
 					"assignmentId": "<run>",
 					"attempt": 0
@@ -1436,36 +1408,29 @@
 				"version": 1,
 				"enforcement": {
 					"classification": "native-per-tool",
-					"perTool": "enforced",
-					"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+					"perTool": "advisory",
+					"clioControls": ["tool-observation", "cancellation"]
 				},
 				"policy": {
 					"recipeId": "scout",
 					"default": {
 						"toolCalls": 18,
-						"readReserve": 4,
 						"synthesis": true
 					},
 					"maximum": {
-						"toolCalls": 18,
-						"readReserve": 4
+						"toolCalls": 18
 					},
 					"exact": true
 				},
 				"request": null,
 				"effective": {
-					"mode": "enforced",
-					"toolCalls": 36,
-					"readReserve": 4,
+					"mode": "advisory",
+					"toolCalls": 18,
 					"synthesis": true,
-					"hardCap": 300
+					"hardCap": 300,
+					"ceiling": 300
 				},
-				"reasons": [
-					{
-						"code": "read-only-research-synthesis",
-						"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-					}
-				]
+				"reasons": []
 			},
 			"targetId": "default",
 			"wireModelId": "gpt-4o",
@@ -1670,36 +1635,29 @@
 						"version": 1,
 						"enforcement": {
 							"classification": "native-per-tool",
-							"perTool": "enforced",
-							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+							"perTool": "advisory",
+							"clioControls": ["tool-observation", "cancellation"]
 						},
 						"policy": {
 							"recipeId": "scout",
 							"default": {
 								"toolCalls": 18,
-								"readReserve": 4,
 								"synthesis": true
 							},
 							"maximum": {
-								"toolCalls": 18,
-								"readReserve": 4
+								"toolCalls": 18
 							},
 							"exact": true
 						},
 						"request": null,
 						"effective": {
-							"mode": "enforced",
-							"toolCalls": 36,
-							"readReserve": 4,
+							"mode": "advisory",
+							"toolCalls": 18,
 							"synthesis": true,
-							"hardCap": 300
+							"hardCap": 300,
+							"ceiling": 300
 						},
-						"reasons": [
-							{
-								"code": "read-only-research-synthesis",
-								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-							}
-						]
+						"reasons": []
 					}
 				}
 			},
@@ -1721,36 +1679,29 @@
 						"version": 1,
 						"enforcement": {
 							"classification": "native-per-tool",
-							"perTool": "enforced",
-							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+							"perTool": "advisory",
+							"clioControls": ["tool-observation", "cancellation"]
 						},
 						"policy": {
 							"recipeId": "scout",
 							"default": {
 								"toolCalls": 18,
-								"readReserve": 4,
 								"synthesis": true
 							},
 							"maximum": {
-								"toolCalls": 18,
-								"readReserve": 4
+								"toolCalls": 18
 							},
 							"exact": true
 						},
 						"request": null,
 						"effective": {
-							"mode": "enforced",
-							"toolCalls": 36,
-							"readReserve": 4,
+							"mode": "advisory",
+							"toolCalls": 18,
 							"synthesis": true,
-							"hardCap": 300
+							"hardCap": 300,
+							"ceiling": 300
 						},
-						"reasons": [
-							{
-								"code": "read-only-research-synthesis",
-								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
-							}
-						]
+						"reasons": []
 					},
 					"assignmentId": "<run>",
 					"attempt": 0
@@ -2062,12 +2013,10 @@
 					"recipeId": "golden-peer",
 					"default": {
 						"toolCalls": 300,
-						"readReserve": 0,
 						"synthesis": true
 					},
 					"maximum": {
-						"toolCalls": 300,
-						"readReserve": 0
+						"toolCalls": 300
 					},
 					"exact": true
 				},
@@ -2075,7 +2024,6 @@
 				"effective": {
 					"mode": "advisory",
 					"toolCalls": 300,
-					"readReserve": 0,
 					"synthesis": true,
 					"hardCap": 300
 				},
@@ -2842,12 +2790,10 @@
 					"recipeId": "golden-peer",
 					"default": {
 						"toolCalls": 300,
-						"readReserve": 0,
 						"synthesis": true
 					},
 					"maximum": {
-						"toolCalls": 300,
-						"readReserve": 0
+						"toolCalls": 300
 					},
 					"exact": true
 				},
@@ -2855,7 +2801,6 @@
 				"effective": {
 					"mode": "advisory",
 					"toolCalls": 300,
-					"readReserve": 0,
 					"synthesis": true,
 					"hardCap": 300
 				},
@@ -2911,12 +2856,10 @@
 							"recipeId": "golden-peer",
 							"default": {
 								"toolCalls": 300,
-								"readReserve": 0,
 								"synthesis": true
 							},
 							"maximum": {
-								"toolCalls": 300,
-								"readReserve": 0
+								"toolCalls": 300
 							},
 							"exact": true
 						},
@@ -2924,7 +2867,6 @@
 						"effective": {
 							"mode": "advisory",
 							"toolCalls": 300,
-							"readReserve": 0,
 							"synthesis": true,
 							"hardCap": 300
 						},
@@ -3431,12 +3373,10 @@
 					"recipeId": "golden-peer",
 					"default": {
 						"toolCalls": 300,
-						"readReserve": 0,
 						"synthesis": true
 					},
 					"maximum": {
-						"toolCalls": 300,
-						"readReserve": 0
+						"toolCalls": 300
 					},
 					"exact": true
 				},
@@ -3444,7 +3384,6 @@
 				"effective": {
 					"mode": "advisory",
 					"toolCalls": 300,
-					"readReserve": 0,
 					"synthesis": true,
 					"hardCap": 300
 				},
@@ -3496,12 +3435,10 @@
 							"recipeId": "golden-peer",
 							"default": {
 								"toolCalls": 300,
-								"readReserve": 0,
 								"synthesis": true
 							},
 							"maximum": {
-								"toolCalls": 300,
-								"readReserve": 0
+								"toolCalls": 300
 							},
 							"exact": true
 						},
@@ -3509,7 +3446,6 @@
 						"effective": {
 							"mode": "advisory",
 							"toolCalls": 300,
-							"readReserve": 0,
 							"synthesis": true,
 							"hardCap": 300
 						},

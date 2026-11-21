@@ -11,8 +11,10 @@ category: implement
 capabilityClass: workspace-edit
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 40, readReserve: 6, synthesis: true}
+budget: {toolCalls: 40, synthesis: true}
 resultContract: {kind: artifact-report}
+handbook: [docs, write]
+traits: [context-generator]
 product: orientation
 tags: [docs, wiki]
 ---

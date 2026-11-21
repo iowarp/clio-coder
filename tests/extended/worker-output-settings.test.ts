@@ -79,7 +79,7 @@ for (const scenario of scenarios) {
 					thinkingLevel: scenario.level,
 					modelCapabilities: { contextWindow: 131072, maxTokens: 131072, tools: true },
 					allowedTools: [],
-					budget: { mode: "advisory", toolCalls: 40, readReserve: 0, synthesis: true, hardCap: 60 },
+					budget: { mode: "advisory", toolCalls: 40, synthesis: true, hardCap: 60 },
 					product: "orientation",
 					noSkills: true,
 					cwd: workspace,

@@ -27,9 +27,8 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const base = {
 	recipeId: "fixture",
-	policy: { toolCalls: 2, readReserve: 1, synthesis: false },
+	policy: { toolCalls: 2, synthesis: false },
 	hardCap: 3,
-	hasReadTool: true,
 	retry: false,
 	revision: false,
 };
@@ -38,7 +37,7 @@ it("main overrides recipe recommendations and baseline, with truthful immutable 
 	const envelope = resolveToolBudgetEnvelope({
 		...base,
 		hardCap: 300,
-		request: { toolCalls: 100, readReserve: 10, retryRevision: { toolCalls: 200, readReserve: 20 } },
+		request: { toolCalls: 100, retryRevision: { toolCalls: 200 } },
 	});
 	equal(envelope.effective.mode, "advisory");
 	equal(envelope.effective.toolCalls, 100);
@@ -51,30 +50,30 @@ it("main overrides recipe recommendations and baseline, with truthful immutable 
 		() =>
 			resolveToolBudgetEnvelope({
 				...base,
-				request: { toolCalls: 10, readReserve: 0, retryRevision: { toolCalls: 9, readReserve: 0 } },
+				request: { toolCalls: 10, retryRevision: { toolCalls: 9 } },
 			}),
 		/ceiling-below-request/u,
 	);
-	const legacy = {
+	// An enforced envelope (the retired name-keyed research budget, M12) no longer reads.
+	const enforced = {
 		...resolveToolBudgetEnvelope(base),
 		enforcement: {
 			classification: "native-per-tool",
 			perTool: "enforced",
 			clioControls: ["tool-calls", "read-reserve", "synthesis", "attempt-cap"],
 		},
-		effective: { toolCalls: 2, readReserve: 1, synthesis: false, hardCap: 3 },
+		effective: { toolCalls: 2, synthesis: false, hardCap: 3 },
 	};
-	deepStrictEqual(cloneRunToolBudgetEnvelope(legacy), legacy);
+	equal(cloneRunToolBudgetEnvelope(enforced), undefined);
 });
 
 for (const synthesis of [false, true]) {
-	it(`native advisory work crosses reserve, phase and baseline without lockout (synthesis=${synthesis})`, () => {
+	it(`native advisory work crosses phase and baseline without lockout (synthesis=${synthesis})`, () => {
 		let boundaries = 0;
 		const guard = createLoopGuardRegistration({
 			safety: createWorkerSafety(),
 			toolCallCap: 3,
 			toolCallSoftLimit: 2,
-			toolCallSoftReadReserve: 1,
 			toolBudgetAdvisory: true,
 			turnSynthesisLockout: synthesis,
 			onSynthesisLockout: () => boundaries++,
@@ -115,7 +114,7 @@ for (const synthesis of [false, true]) {
 		let boundaries = 0;
 		let hardCaps = 0;
 		const gate = createClaudeWorkerBudgetGate(
-			{ toolCalls: 10, readReserve: 4, synthesis, hardCap: 120, mode: "advisory", ceiling: 10 },
+			{ toolCalls: 10, synthesis, hardCap: 120, mode: "advisory", ceiling: 10 },
 			() => boundaries++,
 			() => hardCaps++,
 			["edit"],
@@ -219,7 +218,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 		task: "Inspect fixture.",
 		executionRole: "researcher" as const,
 		requestOrigin: "internal" as const,
-		budget: { toolCalls: 1000, readReserve: 10 },
+		budget: { toolCalls: 1000 },
 	};
 	it("denies paid dispatch above session spend and still honors an explicit routing cost bound", async () => {
 		let starts = 0;
@@ -375,17 +374,17 @@ describe("dispatch advisory admission and explicit authority", () => {
 		}
 	});
 	it("gives an advisory worker a hard ceiling at the recipe maximum and refuses one on an enforced budget", async () => {
-		const policy = { toolCalls: 20, readReserve: 2, synthesis: false, maximum: { toolCalls: 40, readReserve: 4 } };
+		const policy = { toolCalls: 20, synthesis: false, maximum: { toolCalls: 40 } };
 		const advisory = { ...base, policy, hardCap: 150 };
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope(advisory)).ceiling, 40);
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...advisory, hardCap: 30 })).ceiling, 30);
-		const admitted = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 50, readReserve: 2 } });
+		const admitted = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 50 } });
 		equal(workerBudgetFromEnvelope(admitted).ceiling, 50);
-		const noMaximum = { ...base, policy: { toolCalls: 50, readReserve: 5, synthesis: false }, hardCap: 400 };
+		const noMaximum = { ...base, policy: { toolCalls: 50, synthesis: false }, hardCap: 400 };
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope(noMaximum)).ceiling, 400);
 		// The operator's cap holds against the recipe's own estimate and a request alike (M6).
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...noMaximum, hardCap: 30 })).ceiling, 30);
-		const raised = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 1000, readReserve: 2 } });
+		const raised = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 1000 } });
 		equal(workerBudgetFromEnvelope(raised).ceiling, 150);
 		ok(raised.reasons.some((reason) => reason.code === "global-cap-clamp"));
 		deepStrictEqual(cloneRunToolBudgetEnvelope(JSON.parse(JSON.stringify(raised))), raised);
@@ -395,7 +394,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 				resolveToolBudgetEnvelope({
 					...advisory,
 					hardCap,
-					request: { toolCalls: 50, readReserve: 2, retryRevision: { toolCalls: 200, readReserve: 2 } },
+					request: { toolCalls: 50, retryRevision: { toolCalls: 200 } },
 				}),
 			);
 		equal(
@@ -407,7 +406,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 			!resolveToolBudgetEnvelope({
 				...advisory,
 				hardCap: 50,
-				request: { toolCalls: 50, readReserve: 2, retryRevision: { toolCalls: 200, readReserve: 2 } },
+				request: { toolCalls: 50, retryRevision: { toolCalls: 200 } },
 			}).reasons.some((reason) => reason.code === "revision-growth-authorized"),
 		);
 
@@ -426,7 +425,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 					task: "Edit fixture.",
 					executionRole: "builder",
 					requestOrigin: "internal",
-					budget: { toolCalls: 1000, readReserve: 0 },
+					budget: { toolCalls: 1000 },
 				}),
 				/fixture launch/u,
 			);

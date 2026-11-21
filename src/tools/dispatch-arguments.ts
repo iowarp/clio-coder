@@ -6,7 +6,7 @@ import { validateTagName } from "../core/store-paths.js";
 import { forbidsFileWrites } from "../core/write-prohibition.js";
 import { dispatchJobRecipe, dispatchJobWrites } from "../domains/agents/dispatch-jobs.js";
 import { parseResultSummaryMaxBytes } from "../domains/agents/result-contract.js";
-import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
+import type { AgentAutomationAuthority, AgentSpec } from "../domains/agents/spec.js";
 import { classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
@@ -35,13 +35,16 @@ import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 export const COUNCIL_DEFAULT_AGENT_ID = "scout";
 
 /**
- * The persona a vote member runs under. A seat on the council default recipe
- * votes under the coordinator's bounded voter prompt rather than the scout's
- * findings persona, whose terminal shape contradicts the ballot (FL-23); a
- * seat on any other recipe keeps that recipe's body.
+ * The persona a vote member runs under. A seat on a recipe whose result is a
+ * scout report (the council default recipe) votes under the coordinator's
+ * bounded voter prompt rather than its findings persona, whose terminal shape
+ * contradicts the ballot (FL-23); a seat on any other recipe keeps that
+ * recipe's body.
  */
-export function councilVoterPersona(agentId: string): { systemPrompt?: string } {
-	return agentId === COUNCIL_DEFAULT_AGENT_ID ? { systemPrompt: COUNCIL_VOTER_PROMPT } : {};
+export function councilVoterPersona(spec: Pick<AgentSpec, "resultContract"> | null | undefined): {
+	systemPrompt?: string;
+} {
+	return spec?.resultContract?.kind === "scout-report" ? { systemPrompt: COUNCIL_VOTER_PROMPT } : {};
 }
 
 /** Last-resort baseline when the job's recipe is not installed. */

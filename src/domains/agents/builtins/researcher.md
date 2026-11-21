@@ -11,7 +11,7 @@ category: research
 capabilityClass: read-only
 latencyClass: deep
 projectContextTier: none
-budget: {toolCalls: 24, readReserve: 4, synthesis: true}
+budget: {toolCalls: 24, synthesis: true}
 resultContract: {kind: research-report}
 tags: [docs, external-context, sources, arxiv, papers]
 ---

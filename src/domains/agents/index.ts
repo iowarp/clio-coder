@@ -98,15 +98,19 @@ export {
 export type {
 	AgentCapabilityClass,
 	AgentCategory,
+	AgentHandbookAudience,
 	AgentLatencyClass,
 	AgentSpec,
 	AgentToolCompatibility,
 	AgentToolRequirements,
+	AgentTrait,
 } from "./spec.js";
 export {
 	AGENT_CATEGORY_PURPOSE,
+	agentHasTrait,
 	agentSpecPolicyErrors,
 	assertAgentSpecPolicy,
+	isReadOnlyExplorer,
 	normalizeAgentSpec,
 	resolveAgentToolCompatibility,
 } from "./spec.js";

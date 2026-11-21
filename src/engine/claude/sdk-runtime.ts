@@ -477,14 +477,6 @@ export function createClaudeWorkerBudgetGate(
 					: `worker agent budget reached (${budget.toolCalls}); synthesis is disabled`,
 			};
 		}
-		const reserveStart = budget.toolCalls - budget.readReserve;
-		if (budget.readReserve > 0 && admitted >= reserveStart && !reserveAdmits) {
-			const admittedNames = deliveryTools.length > 0 ? `read and ${deliveryTools.join("/")} are` : "only read is";
-			return {
-				kind: "deny",
-				reason: `worker read reserve: ${budget.toolCalls - admitted} admitted calls remain and ${admittedNames} allowed`,
-			};
-		}
 		return { kind: "allow" };
 	};
 	return {

@@ -11,6 +11,7 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { readWorkerRunResultFacts } from "./worker-run-results.js";
 import {
+	type AgentTraitLookup,
 	createWorkerStream,
 	type WorkerEntryState,
 	type WorkerRunResultReader,
@@ -29,8 +30,9 @@ export interface WorkerRunLedger {
 export function followWorkerRuns(
 	bus: TelemetryHub,
 	readResult: WorkerRunResultReader = readWorkerRunResultFacts,
+	agentTraits?: AgentTraitLookup,
 ): WorkerRunLedger {
-	const stream = createWorkerStream({ readResult });
+	const stream = createWorkerStream({ readResult, ...(agentTraits !== undefined ? { agentTraits } : {}) });
 	const states = new Map<string, WorkerEntryState>();
 	const keep = (change: WorkerStreamChange | null): void => {
 		if (change === null) return;

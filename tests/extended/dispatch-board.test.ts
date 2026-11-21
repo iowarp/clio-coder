@@ -101,9 +101,8 @@ const IDENTITY: DispatchEnqueuedPayload = {
 	runtimeKind: "http",
 	budget: resolveToolBudgetEnvelope({
 		recipeId: "coder",
-		policy: { toolCalls: 12, readReserve: 3, synthesis: true },
+		policy: { toolCalls: 12, synthesis: true },
 		hardCap: 20,
-		hasReadTool: true,
 		retry: false,
 		revision: false,
 	}),

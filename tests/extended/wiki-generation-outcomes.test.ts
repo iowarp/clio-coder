@@ -218,7 +218,7 @@ describe("wiki generation outcomes", () => {
 							return;
 						}
 						if (spec.agentId === "wiki-repair") {
-							assert.deepEqual(spec.budget, { toolCalls: 10, readReserve: 4 });
+							assert.deepEqual(spec.budget, { toolCalls: 10 });
 							assert.deepEqual(spec.writeRoots, [path]);
 							assert.equal(spec.denyTools?.includes("write"), true);
 							assert.equal(spec.denyTools?.includes("code_nav"), true);

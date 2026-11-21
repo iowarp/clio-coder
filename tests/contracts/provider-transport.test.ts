@@ -334,7 +334,7 @@ describe("provider transport boundary", () => {
 			runtime: antigravityCodeRuntime,
 			wireModelId: "gemini-3.8-flash-high",
 			allowedTools: [],
-			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
+			budget: { toolCalls: 18, synthesis: true, hardCap: 50 },
 			readOnly: true as const,
 		};
 		const args = buildAgyArgs(base);

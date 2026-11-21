@@ -37,13 +37,13 @@ const skill = (over: Partial<Resource>): Resource => ({
 	...over,
 });
 
-test("an agent card leads with capability, context tier, tool-call budget and read reserve, in that order", () => {
+test("an agent card leads with capability, context tier, tool-call budget, in that order", () => {
 	const card = agentCard(
 		agent({
 			capabilityClass: "artifact-write",
 			projectContextTier: "bounded",
 			resultContract: { kind: "architect-plan", path: ".clio-coder/artifacts/PLAN.md" },
-			budget: { toolCalls: 32, readReserve: 5, synthesis: true, maximum: { toolCalls: 150, readReserve: 16 } },
+			budget: { toolCalls: 32, synthesis: true, maximum: { toolCalls: 150 } },
 		}),
 	);
 	assert.deepEqual(
@@ -52,7 +52,6 @@ test("an agent card leads with capability, context tier, tool-call budget and re
 			["Capability", "Artifact write"],
 			["Project context", "Bounded"],
 			["Tool-call budget", "32–150"],
-			["Read reserve", "5–16"],
 		],
 	);
 	assert.deepEqual(card.skills, ["sprint-plan"]);
@@ -65,14 +64,13 @@ test("a budget with no higher ceiling is a bare number, and an undeclared one is
 	assert.equal(budgetRange(8, 8), "8");
 	assert.equal(budgetRange(1200, 15000), "1,200–15,000");
 	assert.equal(budgetRange(null, 9), null);
-	const bare = agentCard(agent({ budget: { toolCalls: 1, readReserve: 0, synthesis: false } }));
+	const bare = agentCard(agent({ budget: { toolCalls: 1, synthesis: false } }));
 	assert.deepEqual(
 		bare.facts.map((fact) => [fact.value, fact.absent ?? false]),
 		[
 			["Not declared", true],
 			["Not declared", true],
 			["1", false],
-			["0", false],
 		],
 	);
 	assert.deepEqual(bare.footer, ["No result contract declared", "Stops at boundary"]);
