@@ -2288,6 +2288,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 								"lessons",
 								"correct",
 								"bank",
+								"history",
 							]);
 							if ("observe" in memory.surfaces) {
 								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
@@ -2321,6 +2322,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 									"model",
 								] as const);
 								if (parsed !== undefined) settings.context.memory.surfaces[key] = parsed;
+							}
+							if ("history" in memory.surfaces) {
+								const parsed = expectEnum(issues, "context.memory.surfaces.history", memory.surfaces.history, [
+									"off",
+									"on",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces.history = parsed;
 							}
 						}
 					}

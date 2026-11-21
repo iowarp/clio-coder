@@ -492,6 +492,7 @@ const MENU_ROWS = new Set([
 	"context.memory.surfaces.correct",
 	"context.memory.surfaces.bank",
 	"context.memory.sideShare",
+	"context.memory.surfaces.history",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -557,6 +558,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"context.memory.surfaces.lessons": ["agent", "rules", "side", "off"],
 	"context.memory.surfaces.correct": ["rules", "model"],
 	"context.memory.surfaces.bank": ["rules", "model"],
+	"context.memory.surfaces.history": ["off", "on"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -674,6 +676,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.sideShare": [
 		"Memory side share",
 		"After three automatic memory calls, a session skips more while its memory output tokens (and premium units, where the route reports them) exceed this share of its main output. Calls you ask for, such as remember, are never skipped. 0 turns the governor off.",
+	],
+	"context.memory.surfaces.history": [
+		"History mining",
+		"Let the memory model read the repository's earlier sessions while this one is idle and file the lessons it finds. Off by default; clio-coder memory consolidate tidies the store without a model call either way.",
 	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",
