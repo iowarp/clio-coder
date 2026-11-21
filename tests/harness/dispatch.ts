@@ -181,14 +181,19 @@ export function observedCheckEvents(
 
 /**
  * Settle one builder dispatch whose stub worker read once and returns `report` as its mutation report, through the
- * real settle path: host checks, grade and seal. `beforeExit` changes the tree while the worker is still running.
+ * real settle path: host checks, grade and seal. `beforeExit` changes the tree while the worker is still running;
+ * `events` replaces the one read with the tool finishes the worker yields before its report.
  */
 export async function settleStubBuilder(input: {
 	cwd: string;
 	report: object;
 	resolvedVerification?: Parameters<DispatchContract["dispatch"]>[0]["resolvedVerification"];
 	beforeExit?: () => void;
+	events?: ReadonlyArray<Record<string, unknown>>;
 }): Promise<{ receipt: RunResult; run: RunEnvelope }> {
+	const calls = input.events ?? [
+		{ type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } },
+	];
 	let finish!: (result: SpawnedWorkerResult) => void;
 	const done = new Promise<SpawnedWorkerResult>((resolve) => {
 		finish = resolve;
@@ -199,7 +204,7 @@ export async function settleStubBuilder(input: {
 		heartbeatAt: { current: Date.now(), monotonic: 0 },
 		events: (async function* () {
 			await done;
-			yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
+			yield* calls;
 			yield {
 				type: "message_end",
 				message: { role: "assistant", stopReason: "stop", content: JSON.stringify(input.report) },

@@ -10418,12 +10418,18 @@ export function createDispatchBundle(
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
 				const activity = summarizeToolActivity(toolStats, classifyTool);
+				// A limitation the run recorded is a typed declaration whether or not the finish contract kept its words: an
+				// assessment of a run that changed nothing carries no evidence, and an empty list is not "none recorded".
+				const limitationSummaries =
+					finishContract?.assessment.evidence
+						.filter((item) => item.kind === "limitation")
+						.map((item) => item.summary.trim())
+						.filter((summary) => summary.length > 0) ?? [];
 				const recordedLimitations =
 					(toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0
-						? (finishContract?.assessment.evidence
-								.filter((item) => item.kind === "limitation")
-								.map((item) => item.summary.trim())
-								.filter((summary) => summary.length > 0) ?? ["a limitation was recorded"])
+						? limitationSummaries.length > 0
+							? limitationSummaries
+							: ["a limitation was recorded"]
 						: [];
 				gradeFacts.handback = {
 					finalOutput: hasDurableFinalOutput(capturedOutput),
