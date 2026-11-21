@@ -42,6 +42,7 @@ import { hashJudgedInputs, judgedInputDrift, runProvenanceProbes } from "../../t
 import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import {
+	collectedNoTests,
 	JUDGED_CHECK_MAX_OUTPUT_BYTES,
 	judgedFileSha256,
 	judgeNumericTexts,
@@ -1198,6 +1199,13 @@ async function spawnResolvedCheck(
 	}
 	const { outcome, judgement } = chosen as NonNullable<typeof chosen>;
 	const artifactPath = outcome.record.artifactPaths[0];
+	// A command check whose pytest or unittest run collected no test judged nothing: sealed as not run, never a failure
+	// the task is rejected for (CLI-P51).
+	const noTests =
+		outcome.launched &&
+		judgement.report === undefined &&
+		(resolvedCheck.kind === undefined || resolvedCheck.kind === "command") &&
+		collectedNoTests(outcome.record.argv, judgement.exitCode);
 	if (judgement.report?.kind === "numeric-compare") {
 		if (numeric?.inputs !== undefined || numeric?.provenance !== undefined) {
 			judgement.report.provenance = { inputs: inputsBefore, probes };
@@ -1210,16 +1218,21 @@ async function spawnResolvedCheck(
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
 		cwd: outcome.record.cwd,
-		exitCode: judgement.exitCode,
+		exitCode: noTests ? 0 : judgement.exitCode,
 		durationMs,
 		memo: false,
 		...(outcome.launched ? {} : { notRun: "spawn-failed" as const }),
-		outputTail: judgement.outputTail ?? outputTail(outcome.report.outputExcerpt),
+		...(noTests ? { notRun: "no-tests" as const } : {}),
+		outputTail: noTests
+			? outputTail(
+					`not run: no tests collected (exit ${judgement.exitCode})\n${judgement.outputTail ?? outcome.report.outputExcerpt}`,
+				)
+			: (judgement.outputTail ?? outputTail(outcome.report.outputExcerpt)),
 		...(artifactPath !== undefined ? { artifactPath } : {}),
 		...(judgement.report !== undefined ? { report: judgement.report } : {}),
 		...(tree !== undefined ? { tree } : {}),
 	};
-	if (check.exitCode === 0 && key !== null && checkDedupeKey(resolvedCheck) === judgmentKey) {
+	if (check.exitCode === 0 && !noTests && key !== null && checkDedupeKey(resolvedCheck) === judgmentKey) {
 		try {
 			storeMemoEntry(input.stateDir, { key, runId: input.runId, check });
 		} catch (error) {
@@ -1368,7 +1381,9 @@ export async function runHostVerification(input: {
 		if (brokenPaths.length > 0) return { status: "rejected", reason: brokenPaths.join("; "), checks: results };
 		// A compete candidate's check that never started for a host cause (spawn failure, refusal, no configuration,
 		// shutdown) judged nothing: it is not run, never a rejection (M10a).
-		const judged = results.filter((check) => check.notRun === undefined || check.notRun === "nothing-changed");
+		const judged = results.filter(
+			(check) => check.notRun === undefined || check.notRun === "nothing-changed" || check.notRun === "no-tests",
+		);
 		if (judged.length < results.length && judged.every((check) => check.exitCode === 0)) {
 			return { status: "skipped", reason: "check_not_started", checks: results };
 		}

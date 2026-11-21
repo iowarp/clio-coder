@@ -1,6 +1,15 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -195,6 +204,31 @@ describe("host verification judgment identity", () => {
 			strictEqual(runCount(scratch), 2);
 		});
 	}
+
+	it("seals a unittest run that collected no test as not run, never a rejection or a reusable pass (CLI-P51)", async () => {
+		const scratch = makeScratch();
+		const python = join(scratch.project, "python3");
+		writeFileSync(
+			python,
+			`#!/bin/sh\necho ran >> ${JSON.stringify(scratch.log)}\necho 'Ran 0 tests in 0.000s'\necho 'NO TESTS RAN'\nexit 5\n`,
+		);
+		chmodSync(python, 0o755);
+		const check: ResolvedCheck = {
+			check: "python-unittest",
+			argv: [python, "-m", "unittest", "discover", "-s", "."],
+			cwd: scratch.project,
+			timeoutMs: 30_000,
+		};
+		for (const runId of ["first", "second"]) {
+			const host = await verify(scratch, runId, check);
+			strictEqual(host?.status, "verified", runId);
+			strictEqual(host?.checks[0]?.notRun, "no-tests");
+			strictEqual(host?.checks[0]?.exitCode, 0);
+			strictEqual(host?.checks[0]?.memo, false, "a run that judged nothing is never reused as a pass");
+			match(host?.checks[0]?.outputTail ?? "", /not run: no tests collected \(exit 5\)/u);
+		}
+		strictEqual(runCount(scratch), 2);
+	});
 
 	for (const kind of ["numeric-compare", "perf-budget"] as const) {
 		it(`does not reuse an exit-only pass for a ${kind} judgment`, async () => {

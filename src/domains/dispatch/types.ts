@@ -934,9 +934,11 @@ export interface RunHostVerificationCheck {
 	 * precondition), `unconfigured` (a sealed check without its parameters), or `spawn-failed` (no process could be
 	 * created). `nothing-changed` is a lint or format check skipped because the task changed no file under it; its
 	 * exit code is 0 but it judged nothing. `shutdown` is a `run --verify` check a deadline or signal stopped before it
-	 * finished, whose result was discarded. Absent when it started, and on receipts sealed before the field existed.
+	 * finished, whose result was discarded. `no-tests` is a pytest or unittest run that exited 5 because it collected
+	 * no test (CLI-P51): it judged nothing, so like `nothing-changed` it is sealed with exit code 0 and its output tail
+	 * keeps the runner's own exit. Absent when it started, and on receipts sealed before the field existed.
 	 */
-	notRun?: "refused" | "unconfigured" | "spawn-failed" | "nothing-changed" | "shutdown";
+	notRun?: "refused" | "unconfigured" | "spawn-failed" | "nothing-changed" | "shutdown" | "no-tests";
 	outputTail: string;
 	artifactPath?: string;
 	/** Structured verdict of a numeric-compare or perf-budget check; absent for a command check. Covered by the receipt digest through `hostVerification`. */

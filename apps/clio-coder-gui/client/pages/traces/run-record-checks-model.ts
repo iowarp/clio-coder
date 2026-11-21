@@ -180,6 +180,7 @@ const NOT_RUN_REASONS: Record<string, string> = {
 	"spawn-failed": "its process could not start",
 	"nothing-changed": "nothing changed under it",
 	shutdown: "a shutdown stopped it before it finished",
+	"no-tests": "its runner collected no tests",
 };
 
 function hostChecks(value: Sealed["hostVerification"]): CheckRow {

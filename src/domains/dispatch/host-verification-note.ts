@@ -6,6 +6,7 @@ export function hostCheckNotRunNote(notRun: NonNullable<RunHostVerificationCheck
 	if (notRun === "unconfigured") return "the check is not configured";
 	if (notRun === "nothing-changed") return "nothing changed under it";
 	if (notRun === "shutdown") return "a shutdown stopped it before it finished";
+	if (notRun === "no-tests") return "its runner collected no tests";
 	return "its process could not start";
 }
 

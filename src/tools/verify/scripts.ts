@@ -352,6 +352,27 @@ export function unavailableCheck(check: ToolchainCheck): ToolResult {
 	);
 }
 
+/** The exit status pytest (`NO_TESTS_COLLECTED`) and unittest (`NO TESTS RAN`, Python 3.12+) give a run that collected no test. */
+const NO_TESTS_COLLECTED_EXIT = 5;
+
+/** Whether an argv runs pytest or unittest: `python -m pytest|unittest`, or a `pytest` executable, bare or after `uv run`. */
+function pythonTestRunnerArgv(argv: ReadonlyArray<string>): boolean {
+	return argv.some(
+		(arg, index) =>
+			(argv[index - 1] === "-m" && (arg === "pytest" || arg === "unittest")) ||
+			(/(?:^|\/)py\.?test$/u.test(arg) && (index === 0 || argv[index - 1] === "run")),
+	);
+}
+
+/**
+ * A pytest or unittest run that exited 5 collected no test, so it judged nothing: a script-style test file with
+ * module-level asserts is not a test case either runner collects (CLI-P51). Host verification seals the same exit as
+ * not run.
+ */
+export function collectedNoTests(argv: ReadonlyArray<string>, exitCode: number | null): boolean {
+	return exitCode === NO_TESTS_COLLECTED_EXIT && pythonTestRunnerArgv(argv);
+}
+
 /** Startup diagnostics only: a test assertion mentioning permissions is still a failed test. */
 function classifyUnavailable(result: ToolResult, check: string, command: ReadonlyArray<string>): ToolResult {
 	if (
@@ -361,6 +382,18 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 		(Array.isArray(result.details?.completedRuns) && result.details.completedRuns.length > 0)
 	)
 		return result;
+	if (
+		collectedNoTests(command, typeof result.details?.exitCode === "number" ? result.details.exitCode : null) &&
+		!result.details?.timedOut &&
+		!result.details?.aborted &&
+		!result.details?.outputCapped
+	) {
+		return {
+			...result,
+			message: `verify: unavailable '${check}': no tests collected (${command.join(" ")} exited with code ${NO_TESTS_COLLECTED_EXIT}), so it judged nothing. Rerunning this entry cannot help; run the project's own test command instead (a script-style test file runs as its own script), or report the limitation and stop.`,
+			details: { ...result.details, check, noTestsCollected: true, judgement: judgement("unavailable", "not-run") },
+		};
+	}
 	const message = result.message;
 	const diagnostic = message
 		.replace(

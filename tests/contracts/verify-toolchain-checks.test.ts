@@ -42,10 +42,11 @@ function admission(root: string, args: Record<string, unknown>, level: "yolo" | 
 }
 
 const PYPROJECT = '[project]\nname = "demo"\nversion = "0.1.0"\ndependencies = ["pydantic>=2"]\n';
+const TEST_CASE = "import unittest\n\nclass ATest(unittest.TestCase):\n\tdef test_a(self):\n\t\tpass\n";
 
 describe("verify in repositories without package.json", () => {
 	it("derives a uv-launched unittest check from pyproject.toml, uv.lock and a tests directory", () => {
-		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": "" });
+		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": TEST_CASE });
 		deepStrictEqual(commandOf(root, "python-unittest"), [
 			"uv",
 			"run",
@@ -60,15 +61,54 @@ describe("verify in repositories without package.json", () => {
 	});
 
 	it("derives a unittest check for test modules beside the code in a flat project", () => {
-		const root = workspace({ "calc.py": "", "test_calc.py": "" });
+		const root = workspace({ "calc.py": "", "test_calc.py": TEST_CASE });
 		deepStrictEqual(commandOf(root, "python-unittest")?.slice(-5), ["-m", "unittest", "discover", "-s", "."]);
+	});
+
+	it("derives no unittest check from a script-style test file that defines no TestCase (CLI-P51)", () => {
+		const root = workspace({
+			"ops.py": "def add(a, b):\n\treturn a + b\n",
+			"test_ops.py": "from ops import add\nassert add(1, 2) == 3\nprint('ok')\n",
+		});
+		strictEqual(commandOf(root, "python-unittest"), undefined);
+	});
+
+	it("reports a unittest run that collected no test as unavailable, never a failed check (CLI-P51)", async () => {
+		const root = workspace({
+			"tests/test_a.py": TEST_CASE,
+			"bin/python3": "#!/bin/sh\necho 'Ran 0 tests in 0.000s'\necho 'NO TESTS RAN'\nexit 5\n",
+		});
+		chmodSync(join(root, "bin/python3"), 0o755);
+		const previousPath = process.env.PATH;
+		const previousVenv = process.env.VIRTUAL_ENV;
+		process.chdir(root);
+		try {
+			process.env.PATH = join(root, "bin");
+			delete process.env.VIRTUAL_ENV;
+			const result = await verifyTool.run({ check: "python-unittest" });
+			strictEqual(result.kind, "error");
+			strictEqual(result.details?.exitCode, 5);
+			strictEqual(result.details?.noTestsCollected, true);
+			deepStrictEqual(result.details?.judgement, {
+				execution: "unavailable",
+				validation: "not-run",
+				scientificValidity: "not established by this check",
+			});
+			strictEqual(result.details?.unresolved, true, "a run that collected no test judged nothing");
+			match(textOf(result), /no tests collected/u);
+		} finally {
+			if (previousPath === undefined) delete process.env.PATH;
+			else process.env.PATH = previousPath;
+			if (previousVenv === undefined) delete process.env.VIRTUAL_ENV;
+			else process.env.VIRTUAL_ENV = previousVenv;
+		}
 	});
 
 	it("follows pytest when the project declares it as a dependency", () => {
 		const root = workspace({
 			"pyproject.toml": `${PYPROJECT}\n[dependency-groups]\ndev = ["pytest>=8"]\n`,
 			"uv.lock": "version = 1\n",
-			"tests/test_a.py": "",
+			"tests/test_a.py": TEST_CASE,
 		});
 		deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "python", "-m", "pytest"]);
 		strictEqual(commandOf(root, "python-unittest"), undefined);
@@ -155,7 +195,7 @@ describe("verify in repositories without package.json", () => {
 	});
 
 	it("never runs an undeclared check string", async () => {
-		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
+		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": TEST_CASE });
 		process.chdir(root);
 		const marker = join(root, "ran");
 		const refused = await verifyTool.run({ check: `touch ${marker}` });
@@ -178,7 +218,7 @@ describe("verify in repositories without package.json", () => {
 
 describe("verify admission under headless autonomy", () => {
 	it("refuses an unprovisioned uv check without weakening bare uv admission", () => {
-		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": "" });
+		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": TEST_CASE });
 		strictEqual(admission(root, { check: "python-unittest" }, "yolo"), "allow");
 		strictEqual(admission(root, { check: "python-unittest" }, "default"), "allow");
 		const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({
@@ -199,7 +239,7 @@ describe("verify admission under headless autonomy", () => {
 	});
 
 	it("does not turn a listing or an undeclared id into a permission ask", () => {
-		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
+		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": TEST_CASE });
 		strictEqual(admission(root, { check: "" }, "yolo"), "allow");
 		strictEqual(admission(root, {}, "default"), "allow");
 		strictEqual(admission(root, { check: "" }, "default"), "allow");
@@ -213,14 +253,14 @@ describe("verify admission under headless autonomy", () => {
 			"pyproject.toml": `${PYPROJECT}\n[dependency-groups]\ndev = ["pytest>=8"]\n`,
 			"uv.lock": "version = 1\n",
 			".venv/pyvenv.cfg": "",
-			"tests/test_a.py": "",
+			"tests/test_a.py": TEST_CASE,
 		});
 		deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "--no-sync", "python", "-m", "pytest"]);
 		strictEqual(admission(root, { check: "python-pytest", args: ["tests/test_a.py", "-q"] }, "default"), "allow");
 	});
 
 	it("scans model-supplied arguments with the resolved command", () => {
-		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
+		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": TEST_CASE });
 		const engine = createSafetyPolicyEngine({ cwd: root });
 		const hidden = engine.evaluate({ tool: "verify", args: { check: "python-unittest", args: ["$(touch x)"] } });
 		strictEqual(hidden.kind, "ask");
@@ -276,7 +316,7 @@ describe("verify admission under headless autonomy", () => {
 	it("ignores a model cwd that the derived runner does not execute in", () => {
 		const root = workspace({
 			"pyproject.toml": PYPROJECT,
-			"tests/test_a.py": "",
+			"tests/test_a.py": TEST_CASE,
 			".env": "SECRET=value\n",
 			"other/keep": "",
 		});

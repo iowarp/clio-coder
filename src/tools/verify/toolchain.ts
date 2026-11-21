@@ -319,14 +319,33 @@ function declaresPytestDependency(document: NonNullable<ReturnType<typeof parseT
 }
 
 /**
+ * Whether a `.py` file directly in `directory` defines a `unittest.TestCase` subclass. A script-style test file
+ * (module-level asserts run as `python3 test_ops.py`) gives unittest nothing to collect, so deriving the check there
+ * only ever reports `NO TESTS RAN` (CLI-P51).
+ */
+function definesTestCase(workspaceRoot: string, directory: string, names: ReadonlyArray<string>): boolean {
+	return names
+		.filter((name) => name.endsWith(".py"))
+		.slice(0, 200)
+		.some((name) => {
+			const text = regularFileText(path.join(workspaceRoot, directory, name), workspaceRoot);
+			return typeof text === "string" && /^\s*class\s+\w+\s*\([^)]*TestCase\b/mu.test(text);
+		});
+}
+
+/**
  * The first conventional test directory holding `test*.py` or `*_test.py`
- * modules, then the root: a flat project keeps `test_calc.py` beside
+ * modules and a `unittest.TestCase` subclass, then the root: a flat project keeps `test_calc.py` beside
  * `calc.py`, and verify found no check there while `python3 -m unittest` passed.
  */
 function unittestStartDirectory(workspaceRoot: string): string | null {
 	for (const directory of ["tests", "test", "."]) {
 		try {
-			if (readdirSync(path.join(workspaceRoot, directory)).some((name) => /^test.*\.py$|_test\.py$/u.test(name))) {
+			const names = readdirSync(path.join(workspaceRoot, directory));
+			if (
+				names.some((name) => /^test.*\.py$|_test\.py$/u.test(name)) &&
+				definesTestCase(workspaceRoot, directory, names)
+			) {
 				return directory;
 			}
 		} catch {

@@ -1166,7 +1166,7 @@ export const RunEvidenceSchema = Type.Object(
 											exitCode: Type.Integer(),
 											/** Set when the check never started, so `exitCode` reports no run; absent when it started and on older receipts. */
 											notRun: Type.Optional(
-												vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed", "shutdown"]),
+												vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed", "shutdown", "no-tests"]),
 											),
 											durationMs: nonNegative,
 											memo: Type.Boolean(),
