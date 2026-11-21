@@ -1,5 +1,5 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -114,6 +114,30 @@ test("a rate-limited read is held for its Retry-After when that outlasts the fai
 	now += 540_000;
 	await cache.resolve(provider);
 	strictEqual(fetches, 2);
+});
+
+test("a fresh process serves the shared reading and honors the shared endpoint hold; a corrupt file means poll (C-19)", async () => {
+	const sharedStatePath = join(mkdtempSync(join(tmpdir(), "clio-coder-quota-shared-")), "quota-cache.json");
+	const now = 1_000_000;
+	const good = fakeProvider("shared-good", { credential: true });
+	const limited = fakeProvider("shared-limited", { credential: true, status: "error" });
+	const sibling = fakeProvider("shared-sibling", { credential: true });
+	const endpoint = "https://usage.example/shared";
+	const first = createQuotaCache({ now: () => now, sharedStatePath });
+	await first.resolve(good.provider);
+	await first.resolve({ ...limited.provider, endpoint });
+
+	// Another process: a new cache over the same file, inside the TTL and the failure hold.
+	const second = createQuotaCache({ now: () => now, sharedStatePath });
+	strictEqual((await second.resolve(good.provider)).status, "ok");
+	strictEqual((await second.resolve({ ...sibling.provider, endpoint })).status, "error");
+	strictEqual(good.fetches(), 1, "a fresh process must not re-poll a fresh shared reading");
+	strictEqual(sibling.fetches(), 0, "the shared endpoint hold covers an adapter this process never polled");
+
+	writeFileSync(sharedStatePath, "{not json");
+	const third = createQuotaCache({ now: () => now, sharedStatePath });
+	strictEqual((await third.resolve(good.provider)).status, "ok");
+	strictEqual(good.fetches(), 2, "a corrupt shared file reads as empty, which means poll");
 });
 
 test("an unchanged failed poll is journaled once, while each successful poll still marks freshness", () => {
