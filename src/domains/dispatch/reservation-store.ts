@@ -76,9 +76,9 @@ export interface DispatchReservationRecord {
 	ownerId: string;
 	/** Process that owns execution; startup cleanup preserves live sibling processes. */
 	ownerPid: number;
-	/** Owner host. Absent only on records written before the field existed; those are read as this host. */
-	host?: string;
-	/** Owner birth token. Absent only on records written before the field existed. */
+	/** Owner host. */
+	host: string;
+	/** Owner birth token; absent where the platform has no birth-token source. */
 	processBirthToken?: string;
 	topology: ReservationTopology;
 	status: ReservationStatus;
@@ -138,7 +138,7 @@ function validRecord(value: unknown): value is DispatchReservationRecord {
 		typeof record.ownerPid === "number" &&
 		Number.isInteger(record.ownerPid) &&
 		record.ownerPid > 0 &&
-		(record.host === undefined || typeof record.host === "string") &&
+		typeof record.host === "string" &&
 		(record.processBirthToken === undefined || typeof record.processBirthToken === "string") &&
 		(record.topology === "parallel" ||
 			record.topology === "detached" ||
@@ -586,7 +586,7 @@ export function rollbackUnconsumedDispatchReservation(
 /** True or false for an owner on this host, null for one on another host. */
 function reservationOwnerAlive(record: DispatchReservationRecord): boolean | null {
 	return processIdentityAlive({
-		host: record.host ?? hostname(),
+		host: record.host,
 		pid: record.ownerPid,
 		birthToken: record.processBirthToken ?? null,
 	});
@@ -630,7 +630,7 @@ function expireRecords(
  * Expire every active reservation owned by exactly `owner`. Another host's
  * plan is never reclaimed early by the sweep, so `clio-coder session terminate
  * --force` calls this, as it calls `releaseCapacityLeasesOwnedBy`, once that
- * owner's session is known dead. A legacy record without a host reads as this host.
+ * owner's session is known dead.
  */
 export function expireDispatchReservationsOwnedBy(owner: { host: string; pid: number; birth: string | null }): number {
 	return withStateFileLockSync(capacityStateLockPath(), () => {
@@ -641,7 +641,7 @@ export function expireDispatchReservationsOwnedBy(owner: { host: string; pid: nu
 		for (const record of records) {
 			if (
 				record.status !== "active" ||
-				(record.host ?? hostname()) !== owner.host ||
+				record.host !== owner.host ||
 				record.ownerPid !== owner.pid ||
 				record.processBirthToken !== owner.birth
 			)

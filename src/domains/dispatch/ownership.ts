@@ -8,9 +8,9 @@
  * the owner's agent ledger), and could cancel or continue runs it never made.
  *
  * A run or batch stamped with a session id belongs to that session alone. A
- * row with no session id was written before runs carried one, or by a process
- * with no session (`clio-coder fleet`), and belongs to whatever session runs in
- * the project it was dispatched from.
+ * row with no session id was written by a process with no session
+ * (`clio-coder fleet`) and belongs to whatever session runs in the project it
+ * was dispatched from.
  *
  * Two strengths of check, for two kinds of use:
  *   owns  acting on a row: nudging, collecting, cancelling, continuing,
