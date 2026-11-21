@@ -24,22 +24,41 @@ CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-
 - `clio-coder run --json` and `--json-events` are removed and exit 2. Use `--output-format json` for one result document or `--output-format stream-json` for the event stream that ends with the `run_end` envelope.
 - `clio-coder playbook validate` exits 2 for an invalid playbook, in text and `--json`, matching `fleet run`. Check for 2 where a script checked for 1.
 - `clio-coder fleet verify` prints a text verdict by default. Pass `--json` for the document.
-- The commands `context-init`, `context-index`, `context-clear`, `fleet inspect` and `evidence build` are removed and exit 2, even with `--help`. Use `context init`, `context index`, `context reset`, `fleet status --json` or `telemetry inspect --run <runId> --json`, and `evidence inspect <runId>`.
-- `/loop list` and `/loop cancel` are removed. Use `/loop` and `/loop stop <id> --now`.
+- Five commands and two `/loop` verbs are removed and exit 2 or are refused. [Removed](#removed) lists each with its replacement.
 - `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh`, `report sweep` and `telemetry share sweep`.
 - Reviewing earlier sessions for memory is off by default. Set `context.memory.surfaces.history: on` to turn it on.
 - The printed answer of a headless run is every reply of the final user turn, joined, without the commentary written beside tool calls. Text stdout, `-o` and `result.text` all carry that one answer.
 
+### Removed
+
+- `clio-coder context-init`: use `clio-coder context init`.
+- `clio-coder context-index`: use `clio-coder context index`.
+- `clio-coder context-clear`: use `clio-coder context reset`.
+- `clio-coder fleet inspect`: use `clio-coder fleet status --json [--all]` or `clio-coder telemetry inspect --run <runId> --json`.
+- `clio-coder evidence build`: every run is assessed when it settles, so use `clio-coder evidence inspect <runId>`.
+- `clio-coder run --json` and `--json-events`: use `--output-format json` or `--output-format stream-json`.
+- `/loop list` and `/loop cancel`: use `/loop` and `/loop stop <id> --now`.
+
+A removed command exits 2 with a pointer to its replacement, even with `--help`.
+
 ### Deprecated
 
-These spellings print one `clio-coder: deprecated:` line on stderr and are removed in 0.9.0.
+Each spelling below still runs, prints one `clio-coder: deprecated:` line on stderr, and is removed in 0.9.0.
 
-- `run --session <id>`: use `run --resume <id>`.
-- `--acp`, `ext`, `export`, `import`: use `acp`, `extensions`, `share export`, `share import`.
-- `fleet run --json`, `fleet drain`, `fleet resume`: use `fleet run --output-format stream-json`, `fleet admission drain`, `fleet admission open`.
-- `targets add`, `targets fleet|workers`, `targets worker`: use `configure`, `targets profile list`, `targets profile`.
-- `reset --force`, `uninstall --force`, `tools status --reset-profile`, `verifiers --cwd`: use `--yes`, `tools reset-profile <id>`, `verifiers --check-cwd`.
-- `semantic inbox-add|list|remove|preview` and top-level `components`, `evolve`, `flywheel`: use `semantic inbox <verb>` and `dev components|evolve|flywheel`.
+- `run --session <id>`: use `run --resume <id>`. Removed in 0.9.0.
+- `--acp`: use `acp`. Removed in 0.9.0.
+- `ext`: use `extensions`. Removed in 0.9.0.
+- `export` and `import`: use `share export` and `share import`. Removed in 0.9.0.
+- `fleet run --json`: use `fleet run --output-format stream-json`. Removed in 0.9.0.
+- `fleet drain` and `fleet resume`: use `fleet admission drain` and `fleet admission open`. Removed in 0.9.0.
+- `targets add`: use `configure`. Removed in 0.9.0.
+- `targets fleet` and `targets workers`: use `targets profile list`. Removed in 0.9.0.
+- `targets worker <args>`: use `targets profile <args>`. Removed in 0.9.0.
+- `reset --force` and `uninstall --force`: use `--yes`. Removed in 0.9.0.
+- `tools status --reset-profile`: use `tools reset-profile <id>`. Removed in 0.9.0.
+- `verifiers --cwd`: use `verifiers --check-cwd`. Removed in 0.9.0.
+- `semantic inbox-add`, `inbox-list`, `inbox-remove` and `inbox-preview`: use `semantic inbox add|list|remove|preview`. Removed in 0.9.0.
+- `components`, `evolve` and `flywheel`: use `dev components`, `dev evolve` and `dev flywheel`. Removed in 0.9.0.
 
 ### Added
 
