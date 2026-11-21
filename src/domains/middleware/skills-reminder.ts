@@ -50,6 +50,11 @@ export interface SkillsReminderDeps {
 	modelMayActivateSkills?(): boolean;
 	/** The workspace whose project store tags a store hint names; the process cwd by default. */
 	cwd?(): string;
+	/**
+	 * Skills already loaded this session by any route (an operator's /skill, a carried surface, a model load), so the
+	 * list never offers a skill whose instructions are already in context (CLI-P56).
+	 */
+	loadedSkillNames?(): Iterable<string>;
 }
 
 const STORE_TAGS_NAMED = 5;
@@ -323,7 +328,10 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 					return NO_EFFECTS;
 				const window = [...new Set([...recentTools].reverse())];
 				const query = window.length > 0 ? `${task}\n${window.join(" ")}` : task;
-				const matches = suppressed ? [] : (deps.rankSkills?.(query) ?? []).filter((match) => !loadedSkills.has(match.id));
+				const sessionLoaded = new Set(deps.loadedSkillNames?.() ?? []);
+				const matches = suppressed
+					? []
+					: (deps.rankSkills?.(query) ?? []).filter((match) => !loadedSkills.has(match.id) && !sessionLoaded.has(match.id));
 				const capabilities = turnAllowsTool(constraints, "gateway")
 					? (deps.rankCapabilities?.(task) ?? [])
 							.filter((match) => turnAllowsTool(constraints, match.id) && capabilityWorthNaming(match, task))

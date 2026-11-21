@@ -1634,6 +1634,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					return spec ? surfaceSpecPlacement(spec, null) : "direct";
 				},
 				countModelVisibleSkills: getReadySkillCount,
+				loadedSkillNames: () => (session?.current()?.skillActivations ?? []).map((activation) => activation.name),
 				rankCapabilities: rankReminderCapabilities,
 				rankSkills: rankReminderSkills,
 				// The snapshot is verified per epoch and a revocation takes effect on the

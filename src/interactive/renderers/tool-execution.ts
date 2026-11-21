@@ -575,8 +575,6 @@ function refusalFact(refusal: SkillLoadRefusal): string {
 			return toolMeta("not declared for this run");
 		case "not-requested":
 			return toolMeta("not requested this turn");
-		case "already-loaded":
-			return toolMeta("already loaded");
 		default:
 			return toolMeta("unknown skill");
 	}
@@ -1349,6 +1347,11 @@ function sublineParts(
 	// A refused skill load reads as plainly as a load: what did not load, why,
 	// and the move that changes it.
 	const refusal = skillRefusalOf(finished);
+	// A skill already loaded is a no-op, not a failure (CLI-P56): the row says so without an error glyph.
+	if (refusal !== null && refusal.kind === "already-loaded") {
+		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${toolMeta("already loaded")}`;
+		return { lead, tail: "" };
+	}
 	if (refusal !== null) {
 		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}`;
 		return { lead, tail: statusGlyph(status, meta) };
