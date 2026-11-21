@@ -143,5 +143,7 @@ export const RUN_HASH_SUBJECTS = [
 	"settings",
 	"skill-file",
 	"package-provenance",
+	/** A gate decider's evidence packet as its provenance seals it (M10). */
+	"evidence-packet",
 ] as const;
 export type RunHashSubject = (typeof RUN_HASH_SUBJECTS)[number];

@@ -1,4 +1,5 @@
 import { type WithheldCapability, withheldLines } from "./envelope.js";
+import { EVIDENCE_PACKET_GUIDE, type EvidencePacket } from "./evidence-packet.js";
 import type { DispatchIntent } from "./intent.js";
 
 /** Render intent fields that describe required results rather than observed facts. */
@@ -46,19 +47,28 @@ export function renderWithheldNotice(
 	return lines.join("\n");
 }
 
-/** Build the reviewer assignment from the same requirements the builder received. */
+/**
+ * Build the reviewer assignment from the same requirements the builder received, with the builder's evidence packet
+ * (M10). A plan preview has no builder run yet, so it names the packet the run will carry.
+ */
 export function renderDispatchReviewerTask(
 	originalTask: string,
 	builderRunId: string,
 	cycle: number,
 	intent: DispatchIntent | undefined,
+	packet?: EvidencePacket,
 ): string {
 	const requirements = renderDispatchIntentRequirements(intent);
+	const subject = packet?.subjects[0];
 	return [
 		`Review the work of builder run ${builderRunId} (review cycle ${cycle}).`,
 		"The builder's final answer is provided as input data; verify it against the workspace, do not trust it blindly.",
 		"Original task the builder was given:",
 		originalTask,
 		...(requirements === null ? [] : [requirements]),
+		EVIDENCE_PACKET_GUIDE,
+		...(packet === undefined || subject === undefined
+			? ["The builder's evidence packet (its handback, measured diff and host checks) is attached when the review runs."]
+			: [`Packet ids: ${packet.ids.join(", ")}`, JSON.stringify(subject)]),
 	].join("\n\n");
 }

@@ -35,6 +35,8 @@ export interface GradeContract {
 	contractKind: string | null;
 	/** False for a CLI subprocess and for ACP delegation: Clio did not see their tool lane, so zero counts say nothing. */
 	toolLaneObserved: boolean;
+	/** A gate decider's evidence packet ids (M10), what its verdict may cite; absent for a gate given no packet. */
+	packet?: ReadonlyArray<string>;
 }
 
 /**
@@ -92,8 +94,16 @@ export interface WorkFacts {
 	completion: CompletionDeclaration | null;
 	/** Passing checks the report claims with no matching execution on the final tree. */
 	ungroundedChecks: ReadonlyArray<string>;
-	/** A reviewer's verdict as its review-verdict report gives it; null for any other run or an unparsed one. */
-	reviewVerdict: "pass" | "fail" | null;
+	/** A gate decider's verdict as its verdict contract parses it; null for any other run or an unparsed one. */
+	gateVerdict: GateVerdictFacts | null;
+}
+
+/** What the grader reads of a reviewer's or judge's verdict (M10): no prose, only its typed fields. */
+export interface GateVerdictFacts {
+	/** A reviewer's pass or fail; null for a judge, whose winner the gate validates. */
+	verdict: "pass" | "fail" | null;
+	/** Each check's name and the evidence packet ids it cites, in report order. */
+	checks: ReadonlyArray<{ name: string; cites: ReadonlyArray<string> }>;
 }
 
 export interface GradeVerdict {
@@ -253,27 +263,56 @@ function checkObligation(facts: WorkFacts, contract: GradeContract): RuleCheck {
 				qualityGate: true,
 				qualityFail: true,
 			};
-		case "cited-evidence": {
-			// A judge ranks the evidence the host put in its task; zero reads is a legitimate way to meet it (4.9).
-			if (contract.role !== "reviewer" || facts.reviewVerdict !== "pass") return PASS;
-			if (!contract.toolLaneObserved || facts.activity === null) return UNKNOWN;
-			const unearned =
-				facts.activity.observations === 0
-					? "no tool call succeeded"
-					: facts.ungroundedChecks.length > 0
-						? `its report claims checks it never ran (${facts.ungroundedChecks.join(", ")})`
-						: null;
-			if (unearned === null) return PASS;
-			return {
-				status: "fail",
-				code: "obligation_unmet",
-				detail: `obligation cited-evidence unmet: the reviewer passed the work without inspecting it: ${unearned}`,
-				retry: true,
-				qualityGate: true,
-				qualityFail: true,
-			};
-		}
+		case "cited-evidence":
+			return checkCitedEvidence(facts, contract);
 	}
+}
+
+function citedEvidenceUnmet(detail: string): RuleCheck {
+	return {
+		status: "fail",
+		code: "obligation_unmet",
+		detail: `obligation cited-evidence unmet: ${detail}`,
+		retry: true,
+		qualityGate: true,
+		qualityFail: true,
+	};
+}
+
+/**
+ * A gate's obligation (DESIGN 4.8): every reason cites an item of its evidence packet or an observation it made, and a
+ * reviewer's pass cites at least one item about its subject. A verdict that cites none of its packet, or cites an id the
+ * packet does not hold, is unmet, and the gate it decides is exhausted. A gate given no packet (a playbook loop's check
+ * step) still owes a pass that rests on something it observed. A judge may make zero reads (4.9).
+ */
+function checkCitedEvidence(facts: WorkFacts, contract: GradeContract): RuleCheck {
+	const verdict = facts.gateVerdict;
+	const packet = contract.packet;
+	if (packet === undefined) {
+		if (contract.role !== "reviewer" || verdict?.verdict !== "pass") return PASS;
+		if (!contract.toolLaneObserved || facts.activity === null) return UNKNOWN;
+		if (facts.activity.observations === 0)
+			return citedEvidenceUnmet("the reviewer passed the work without inspecting it: no tool call succeeded");
+	} else {
+		// An unparsed verdict is the result contract's failure, judged before this rule.
+		if (verdict === null) return PASS;
+		const known = new Set(packet);
+		const cited = verdict.checks.flatMap((check) => check.cites);
+		const unknown = [...new Set(cited.filter((id) => !known.has(id)))];
+		if (unknown.length > 0)
+			return citedEvidenceUnmet(`the verdict cites ids its evidence packet does not hold (${unknown.join(", ")})`);
+		if (cited.length === 0) return citedEvidenceUnmet("the verdict cites no item of its evidence packet");
+		const uncited = verdict.checks.filter((check) => check.cites.length === 0).map((check) => check.name);
+		if (uncited.length > 0 && contract.toolLaneObserved && facts.activity !== null && facts.activity.observations === 0)
+			return citedEvidenceUnmet(
+				`${plural(uncited.length, "check", "checks")} ${uncited.join(", ")} ${plural(uncited.length, "cites", "cite")} no packet item and the gate observed nothing itself`,
+			);
+	}
+	if (contract.role === "reviewer" && verdict?.verdict === "pass" && facts.ungroundedChecks.length > 0)
+		return citedEvidenceUnmet(
+			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${facts.ungroundedChecks.join(", ")})`,
+		);
+	return PASS;
 }
 
 const anyRun = (): boolean => true;

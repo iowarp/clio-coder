@@ -25,6 +25,7 @@ import { relativePathEscapes } from "../core/path-containment.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { SAFE_TASK_RUN_ID, TASK_WORKTREE_KIND, TASK_WORKTREE_OWNER_SUFFIX } from "../core/task-worktree-claim.js";
 import { dropHostTerminalEnv, TOOL_SESSION_SPAWN } from "../core/tool-env-controls.js";
+import type { MeasuredDiff } from "../domains/dispatch/evidence-packet.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
 import { diskWorktreeParent } from "./worktree-root.js";
 
@@ -142,6 +143,7 @@ export const COMMIT_IDENTITY = "clio-coder-task";
 
 interface GitOptions {
 	env?: NodeJS.ProcessEnv;
+	maxBuffer?: number;
 }
 
 function gitBytes(root: string, args: string[], options: GitOptions = {}): Buffer {
@@ -609,6 +611,77 @@ export function worktreeBranchDiffStat(root: string, branch: string): string {
 		return git(root, ["diff", "--shortstat", `HEAD...${branch}`]) || "no changes";
 	} catch {
 		return "diff unavailable";
+	}
+}
+
+/** Git output a packet diff may read before the packet cuts it to its byte budget. */
+const PACKET_DIFF_READ_BYTES = 8 * 1024 * 1024;
+const UNTRACKED_FILE_READ_BYTES = 256 * 1024;
+
+/** A candidate branch's change against HEAD, as the judge's evidence packet carries it (M10); null when git cannot say. */
+export function worktreeBranchDiff(root: string, branch: string): MeasuredDiff | null {
+	try {
+		const range = `HEAD...${branch}`;
+		return {
+			stat: git(root, ["diff", "--shortstat", range]) || "no changes",
+			patch: gitBytes(root, ["diff", "--no-color", "--no-ext-diff", range], {
+				maxBuffer: PACKET_DIFF_READ_BYTES,
+			}).toString("utf8"),
+			scope: "branch",
+		};
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * A builder's change in its checkout against HEAD, as a reviewer's evidence packet carries it (M10): the paths the
+ * host recorded it changing when that record is closed, else the whole working tree. A new untracked file is shown as
+ * an added file. Null when git cannot say.
+ */
+export function checkoutDiff(cwd: string, paths: ReadonlyArray<string> | null): MeasuredDiff | null {
+	try {
+		const canonical = realpathSync(cwd);
+		const inside =
+			paths
+				?.map((path) => resolve(canonical, path))
+				.filter((path) => {
+					const rel = relative(canonical, path);
+					return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+				}) ?? null;
+		const scope = inside === null ? "working-tree" : "attributed-paths";
+		if (inside !== null && inside.length === 0) return { stat: "no changes", patch: "", scope };
+		const spec = inside === null ? [] : ["--", ...inside];
+		const tracked = gitBytes(canonical, ["diff", "--no-color", "--no-ext-diff", "HEAD", ...spec], {
+			maxBuffer: PACKET_DIFF_READ_BYTES,
+		}).toString("utf8");
+		const untracked = git(canonical, ["ls-files", "--others", "--exclude-standard", "-z", ...spec])
+			.split("\0")
+			.filter((path) => path.length > 0);
+		const added = untracked.map((path) => {
+			let body: string;
+			try {
+				const bytes = readFileSync(resolve(canonical, path));
+				body =
+					bytes.includes(0) || bytes.byteLength > UNTRACKED_FILE_READ_BYTES
+						? `Binary or large file (${bytes.byteLength} bytes) not shown\n`
+						: `${bytes
+								.toString("utf8")
+								.split("\n")
+								.map((line) => `+${line}`)
+								.join("\n")}\n`;
+			} catch {
+				body = "unreadable\n";
+			}
+			return `diff --git a/${path} b/${path}\nnew untracked file\n--- /dev/null\n+++ b/${path}\n${body}`;
+		});
+		const trackedStat = git(canonical, ["diff", "--shortstat", "HEAD", ...spec]);
+		const stat = [trackedStat, untracked.length > 0 ? `${untracked.length} untracked file(s) added` : ""]
+			.filter((part) => part.length > 0)
+			.join(", ");
+		return { stat: stat || "no changes", patch: `${tracked}${added.join("")}`, scope };
+	} catch {
+		return null;
 	}
 }
 

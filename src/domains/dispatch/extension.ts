@@ -189,7 +189,6 @@ import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	isHoareResultContract,
 	mutationReportFailures,
-	parseVerifierResult,
 	type ResultContract,
 	resultContractAuthorship,
 	validateRecipeResult,
@@ -405,6 +404,7 @@ import {
 } from "./fleet-change-return.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
+import { gateVerdictFactsOf } from "./gate-decisions.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { type GradeContract, type GradeFacts, type GradeVerdict, grade, type RunVerdict } from "./grading.js";
 import {
@@ -8137,7 +8137,7 @@ export function createDispatchBundle(
 						writeRootRequest: null,
 						completion: null,
 						ungroundedChecks: [],
-						reviewVerdict: null,
+						gateVerdict: null,
 					},
 				};
 				let graded = grade(gradeContract, gradeFacts);
@@ -10310,6 +10310,7 @@ export function createDispatchBundle(
 					obligation: resolveObligation(lifecycle.runRole, appliedResultContract?.kind ?? null, req.intent?.readRoots ?? []),
 					contractKind: appliedResultContract?.kind ?? null,
 					toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
+					...(req.gate?.packet !== undefined ? { packet: req.gate.packet.ids } : {}),
 				};
 				const gradeFacts: GradeFacts = {
 					termination: { outcome, detail: terminationDetail },
@@ -10427,8 +10428,7 @@ export function createDispatchBundle(
 					// A claim is unmet evidence only when no checking call ran at all; a name that matched no command lowers quality.
 					ungroundedChecks:
 						validationGrounding !== null && invalidatesQuality(validationGrounding) ? validationGrounding.ungrounded : [],
-					reviewVerdict:
-						appliedResultContract?.kind === "review-verdict" ? (parseVerifierResult(finalText)?.verdict ?? null) : null,
+					gateVerdict: gateVerdictFactsOf(appliedResultContract, finalText),
 				};
 				applyGrade(grade(gradeContract, gradeFacts));
 				let sealedResultContractFact: RunResultContractFact | null =

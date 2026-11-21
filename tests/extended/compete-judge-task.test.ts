@@ -109,19 +109,20 @@ it("lists each candidate's host check results as hostChecks, and adds nothing wh
 		records(task).map((record) => record.hostChecks),
 		[
 			[
-				{ check: "test", status: "verified" },
-				{ check: "lint", status: "not_implicated" },
+				{ id: "s1.check.test", check: "test", status: "verified" },
+				{ id: "s1.check.lint", check: "lint", status: "not_implicated" },
 			],
 			[
-				{ check: "test", status: "rejected" },
-				{ check: "lint", status: "not_run", reason: "its process could not start" },
+				{ id: "s2.check.test", check: "test", status: "rejected" },
+				{ id: "s2.check.lint", check: "lint", status: "not_run", reason: "its process could not start" },
 			],
 		],
 	);
-	match(task, /hostChecks lists the host's own run of each declared check/);
+	match(task, /hostChecks is the host's own run of each declared check/);
+	match(task, /Packet ids: s1\.handback, s1\.diff, s1\.check\.test, s1\.check\.lint, s2\.handback/);
 	const plain = renderCompeteJudgeTask("Fix it", candidates, [], [verified, rejected]);
 	ok(records(plain).every((record) => !("hostChecks" in record)));
-	ok(!plain.includes("hostChecks"));
+	match(plain, /Packet ids: s1\.handback, s1\.diff, s2\.handback, s2\.diff\n/);
 });
 
 it("orders candidates and stances by group hash while each record keeps its own ordinal", () => {
@@ -228,7 +229,7 @@ it("reports absent results, absent outputs, and partial answers truthfully", () 
 		},
 	};
 	const data = records(renderCompeteJudgeTask("Compare answers", candidates, [], [absent, partial]));
-	deepStrictEqual(data[0].output, { status: "missing captured output" });
+	deepStrictEqual(data[0].output, { id: "s1.handback", status: "missing captured output" });
 	strictEqual(data[0].resultPath, null);
 	strictEqual(data[1].output.status, "partial");
 	strictEqual(data[1].output.text, "unfinished");

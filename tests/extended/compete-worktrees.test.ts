@@ -184,7 +184,10 @@ for (const agent of ["scout", "coder"] as const) {
 								stopReason: "stop",
 								content: JSON.stringify(
 									judge
-										? { winner: 1, checks: [{ name: "grounded", passed: true, evidence: "tracked.txt:1" }] }
+										? {
+												winner: 1,
+												checks: [{ name: "grounded", passed: true, evidence: "tracked.txt:1", cites: ["s1.handback"] }],
+											}
 										: writer
 											? {
 													completion: { state: "done", limitations: [], unverified: [] },
@@ -348,7 +351,12 @@ for (const agent of ["scout", "coder"] as const) {
 					writer ? ".clio-coder/profile.yaml\n.gitignore\nnew.txt\ntracked.txt" : ".gitignore\ntracked.txt",
 				);
 			}
-			ok(!judgeTask.includes("hostChecks"));
+			ok(
+				judgeTask
+					.split("\n\n")
+					.filter((line) => line.startsWith('{"candidate":'))
+					.every((line) => !("hostChecks" in JSON.parse(line))),
+			);
 		} finally {
 			await bundle.extension.stop?.();
 			process.chdir(previousCwd);
@@ -357,8 +365,12 @@ for (const agent of ["scout", "coder"] as const) {
 	});
 }
 
-for (const pick of [1, 2]) {
-	it(`compete runs each candidate's declared check in its own worktree, and a judge pick of candidate ${pick} ${pick === 1 ? "wins verified" : "cannot win rejected"} (M10a)`, {
+for (const { pick, cites } of [
+	{ pick: 1, cites: true },
+	{ pick: 2, cites: true },
+	{ pick: 1, cites: false },
+]) {
+	it(`compete runs each candidate's declared check in its own worktree, and a judge pick of candidate ${pick} ${!cites ? "citing no packet id is exhausted (M10)" : pick === 1 ? "wins verified" : "cannot win rejected"} (M10a)`, {
 		timeout: 30_000,
 	}, async () => {
 		const env = await isolateClioEnv("clio-coder-compete-checks-");
@@ -426,7 +438,17 @@ for (const pick of [1, 2]) {
 								stopReason: "stop",
 								content: JSON.stringify(
 									judge
-										? { winner: pick, checks: [{ name: "hostChecks", passed: true, evidence: "candidate hostChecks" }] }
+										? {
+												winner: pick,
+												checks: [
+													{
+														name: "hostChecks",
+														passed: true,
+														evidence: "candidate hostChecks",
+														...(cites ? { cites: [`s${pick}.check.unit`, `s${pick}.diff`] } : {}),
+													},
+												],
+											}
 										: {
 												completion: { state: "done", limitations: [], unverified: [] },
 												mutatedPaths: ["value.txt"],
@@ -475,18 +497,44 @@ for (const pick of [1, 2]) {
 			}
 			strictEqual(candidates[0]?.settled.hostVerification?.status, "verified");
 			strictEqual(candidates[1]?.settled.outcomeCode, "host_verification_rejected");
+			const records = judgeTask
+				.split("\n\n")
+				.filter((line) => line.startsWith('{"candidate":'))
+				.map((line) => JSON.parse(line))
+				.sort((a, b) => a.candidate - b.candidate);
 			deepStrictEqual(
-				judgeTask
-					.split("\n\n")
-					.filter((line) => line.startsWith('{"candidate":'))
-					.map((line) => JSON.parse(line))
-					.sort((a, b) => a.candidate - b.candidate)
-					.map((record) => record.hostChecks),
-				[[{ check: "unit", status: "verified" }], [{ check: "unit", status: "rejected" }]],
+				records.map((record) => record.hostChecks),
+				[
+					[{ id: "s1.check.unit", check: "unit", status: "verified" }],
+					[{ id: "s2.check.unit", check: "unit", status: "rejected" }],
+				],
 			);
+			// M10: the judge's packet carries each candidate's handback, measured diff and checks under ids it seals.
+			deepStrictEqual(
+				records.map((record) => [record.output.id, record.diff.id, record.diff.scope]),
+				[
+					["s1.handback", "s1.diff", "branch"],
+					["s2.handback", "s2.diff", "branch"],
+				],
+			);
+			ok(records[0]?.diff.patch.includes("+fixed"), records[0]?.diff.patch);
+			const judgeRun = bundle.contract.listRuns().find((run) => run.gate?.role === "judge");
+			deepStrictEqual(judgeRun?.gate?.packet?.ids, [
+				"s1.handback",
+				"s1.diff",
+				"s1.check.unit",
+				"s2.handback",
+				"s2.diff",
+				"s2.check.unit",
+			]);
 			const decision = readGateDecisionArtifacts().find(({ artifact }) => artifact.topology === "compete")?.artifact;
-			strictEqual(decision?.outcome, pick === 1 ? "winner" : "no-winner", JSON.stringify(result).slice(0, 3000));
-			if (pick === 1) strictEqual(decision?.winner?.index, 1);
+			strictEqual(
+				decision?.outcome,
+				!cites ? "exhausted" : pick === 1 ? "winner" : "no-winner",
+				JSON.stringify(result).slice(0, 3000),
+			);
+			if (!cites) match(decision?.detail ?? "", /obligation cited-evidence unmet: the verdict cites no item/u);
+			if (cites && pick === 1) strictEqual(decision?.winner?.index, 1);
 		} finally {
 			await bundle.extension.stop?.();
 			process.chdir(previousCwd);

@@ -527,6 +527,23 @@ export interface VerifierCheck {
 	passed: boolean;
 	evidence: string;
 	obligation?: HoareObligation;
+	/** A gate verdict's references to its evidence packet's ids (M10); only review-verdict and judge-verdict carry them. */
+	cites?: string[];
+}
+
+/**
+ * A gate check's `cites`: the evidence packet ids it rests on. Undefined when absent, null when malformed; the
+ * grader's cited-evidence rule, not this shape check, holds the ids to the packet.
+ */
+export function parseGateCites(value: unknown): string[] | null | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value) || value.length > 64) return null;
+	const cites: string[] = [];
+	for (const entry of value) {
+		if (typeof entry !== "string" || entry.trim().length === 0 || entry.length > 256) return null;
+		cites.push(entry.trim());
+	}
+	return cites;
 }
 
 /** Parsed `verifier-report` payload, for callers that need the verdict itself. */
@@ -1460,7 +1477,12 @@ function validateVerifier(
 			return failure(contract, "fail", `Verifier field "checks[${index}]" must be an object`);
 		}
 		const check = raw as Record<string, unknown>;
-		const legal = assurance === undefined ? ["name", "passed", "evidence"] : ["name", "passed", "evidence", "obligation"];
+		const legal =
+			assurance !== undefined
+				? ["name", "passed", "evidence", "obligation"]
+				: contract.kind === "review-verdict"
+					? ["name", "passed", "evidence", "cites"]
+					: ["name", "passed", "evidence"];
 		const checkUnknown = Object.keys(check).filter((key) => !legal.includes(key));
 		if (checkUnknown.length > 0) {
 			return failure(
@@ -1478,6 +1500,13 @@ function validateVerifier(
 		if (!string(check.evidence)) {
 			return failure(contract, "fail", `Verifier field "checks[${index}].evidence" must be a non-empty string`);
 		}
+		const cites = parseGateCites(check.cites);
+		if (cites === null)
+			return failure(
+				contract,
+				"fail",
+				`Review verdict field "checks[${index}].cites" must be an array of evidence packet ids (non-empty strings)`,
+			);
 		let obligation: HoareObligation | undefined;
 		if (assurance !== undefined) {
 			if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(check.name) || names.has(check.name))
@@ -1503,6 +1532,7 @@ function validateVerifier(
 			passed: check.passed,
 			evidence: check.evidence,
 			...(obligation ? { obligation } : {}),
+			...(cites !== undefined ? { cites } : {}),
 		});
 	}
 	if ((value.verdict === "pass") !== checks.every((check) => check.passed)) {
@@ -1532,6 +1562,12 @@ function validateVerifier(
  */
 export function parseVerifierResult(output: string | null): VerifierResult | null {
 	const validation = validateVerifier({ kind: "verifier-report" }, output);
+	return validation.verifier ?? null;
+}
+
+/** Parse a reviewer gate's answer under its `review-verdict` contract, whose checks may cite packet ids (M10). */
+export function parseReviewVerdict(output: string | null): VerifierResult | null {
+	const validation = validateVerifier({ kind: "review-verdict" }, output);
 	return validation.verifier ?? null;
 }
 
@@ -2125,12 +2161,26 @@ function validateJudgeVerdict(
 	const winner = value.winner;
 	if (typeof winner !== "number" || !Number.isSafeInteger(winner) || winner < 1 || winner > contract.candidates)
 		return failure(contract, "unmeasured", `Judge verdict winner must be an integer 1..${contract.candidates}`);
-	const checks = parseChecks(value.checks);
-	if (checks === null || checks.length === 0)
+	const checks = Array.isArray(value.checks) ? value.checks : null;
+	if (
+		checks === null ||
+		checks.length === 0 ||
+		checks.some((entry) => {
+			if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return true;
+			const check = entry as Record<string, unknown>;
+			return (
+				!hasOnlyKeys(check, ["name", "passed", "evidence", "cites"]) ||
+				!string(check.name) ||
+				typeof check.passed !== "boolean" ||
+				!string(check.evidence) ||
+				parseGateCites(check.cites) === null
+			);
+		})
+	)
 		return failure(
 			contract,
 			"unmeasured",
-			'Judge verdict "checks" must be a non-empty array of {name, passed, evidence}',
+			'Judge verdict "checks" must be a non-empty array of {name, passed, evidence, cites}; cites lists evidence packet ids',
 		);
 	return success(contract, "unmeasured", value);
 }

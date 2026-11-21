@@ -81,6 +81,7 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 		path: /^gate\.subjects\[\]\.digest$/u,
 		declaration: resolvable("run-settlement", "artifact-digest", "run-journals"),
 	},
+	{ path: /^gate\.packet\.digest$/u, declaration: commitment("evidence-packet", "json-insertion-order") },
 	{
 		path: /^quality\.typedValidations\[\]\.validatorDigest$/u,
 		declaration: commitment("validation-result", "json-sorted-v1"),
