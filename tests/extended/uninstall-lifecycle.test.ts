@@ -317,9 +317,12 @@ describe("contracts/uninstall-lifecycle", () => {
 				"--inactive already keeps the homes",
 			);
 
-			const holder = join(root, ".active");
-			mkdirSync(holder);
-			writeFileSync(join(holder, "1.json"), JSON.stringify({ pid: 1 }), "utf8");
+			const holder = join(temp.stateDir, "launches");
+			mkdirSync(holder, { recursive: true });
+			writeFileSync(join(holder, "other.json"), JSON.stringify({ pid: 1, root: join(temp.root, "elsewhere") }), "utf8");
+			const other = await runInHome(temp, () => runUninstallCommand(["--inactive", "--dry-run"]));
+			strictEqual(other.code, 0, other.stdout);
+			writeFileSync(join(holder, "1.json"), JSON.stringify({ pid: 1, root }), "utf8");
 			const held = await runInHome(temp, () => runUninstallCommand(["--inactive", "--yes"]));
 			strictEqual(held.code, 1, held.stdout);
 			match(held.stdout, /pid 1 \(launched from it\) holds /u);

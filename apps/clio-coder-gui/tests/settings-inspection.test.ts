@@ -23,7 +23,7 @@ test("settings: canonical layer origins, complete leaves, real credential store 
 		const before = await readFile(credentialFile, "utf8");
 		assert.ok(before.includes("fixture-stored-credential-72bda09"));
 		const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), Workspace);
-		const response = await h.request(`/api/workspaces/${workspace.id}/settings`);
+		const response = await h.request(`/api/settings?workspace=${workspace.id}`);
 		assert.equal(response.status, 200);
 		const report = await json(response, SettingsReport);
 		const rows = new Map(report.rows.map((row) => [row.key, row]));
@@ -74,8 +74,8 @@ test("settings: canonical layer origins, complete leaves, real credential store 
 			originalFiles,
 			"Inspection must not change configuration or hooks",
 		);
-		for (const suffix of ["settings", "config-graph"])
-			assert.equal((await h.post(`/api/workspaces/${workspace.id}/${suffix}`)).status, 405);
+		for (const path of [`/api/settings?workspace=${workspace.id}`, `/api/workspaces/${workspace.id}/config-graph`])
+			assert.equal((await h.post(path)).status, 405);
 	} finally {
 		await h.close();
 	}

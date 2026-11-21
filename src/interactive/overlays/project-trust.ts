@@ -39,7 +39,7 @@ export function openProjectTrustOverlay(
 		markerId: "project-trust",
 		title: "Project configuration",
 		unit: "rows",
-		status: () => `This repository has its own Clio configuration. It applies only after you trust it.`,
+		status: () => `This repository has its own CLIO Coder configuration. It applies only after you trust it.`,
 		items: [
 			...surfaces,
 			{ id: TRUST, label: "Trust all and restart", group: "Decide", searchGroup: false },

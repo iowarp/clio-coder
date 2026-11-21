@@ -217,6 +217,10 @@ function splitReservationWaves(
 	if (topology === "council") return tasks.map((task) => ({ ...task }));
 	const limitOf = (limit: number | undefined): number =>
 		limit === undefined || !Number.isFinite(limit) ? Number.POSITIVE_INFINITY : Math.max(1, limit);
+	// The main turn's own request holds its endpoint slot until the dispatch call returns, so a wave wider than the
+	// slots left to workers would wait on itself and never admit. A wave of one still meets the foreground refusal.
+	const endpointLimitOf = (endpoint: ReservationCapacitySnapshot["endpoints"][string] | undefined): number =>
+		endpoint === undefined ? Number.POSITIVE_INFINITY : limitOf(endpoint.limit - (endpoint.foregroundStreams ?? 0));
 	const out: ReservationPlanTask[] = [];
 	let next = 0;
 	for (const wave of [...new Set(tasks.map((task) => task.wave))].sort((a, b) => a - b)) {
@@ -225,7 +229,7 @@ function splitReservationWaves(
 			const nodeFull = (counts.nodes.get(task.nodeId) ?? 0) >= limitOf(capacity.nodes[task.nodeId]?.limit);
 			const endpointFull =
 				task.endpointKey !== undefined &&
-				(counts.endpoints.get(task.endpointKey) ?? 0) >= limitOf(capacity.endpoints[task.endpointKey]?.limit);
+				(counts.endpoints.get(task.endpointKey) ?? 0) >= endpointLimitOf(capacity.endpoints[task.endpointKey]);
 			if (counts.global > 0 && (counts.global >= limitOf(capacity.global.limit) || nodeFull || endpointFull)) {
 				next += 1;
 				counts = { global: 0, nodes: new Map(), endpoints: new Map() };

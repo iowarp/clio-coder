@@ -11,6 +11,8 @@ import {
 	type VerifierRevision,
 } from "../tools/verify/authoring.js";
 import {
+	BROWSER_CHECK_ASSERTIONS,
+	type BrowserCheckAssertion,
 	DECLARED_CHECK_KINDS,
 	type DeclaredCheckKind,
 	loadProjectVerifierCatalog,
@@ -43,7 +45,7 @@ Fields:
   --check-cwd <path>      repository-relative directory the check runs in (default .)
   --timeout-ms <number>   bounded timeout in milliseconds (default 120000)
   --tags <a,b>            comma-separated catalog tags
-  --kind <kind>           command (default), numeric-compare, perf-budget, or reproduce
+  --kind <kind>           command (default), numeric-compare, perf-budget, reproduce, or browser
   --reference <path>      numeric-compare: repository-relative reference JSON of string -> number | number[];
                           reproduce: reference metrics JSON in the command's own output format
   --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?,"combine"?:all|any,"nonFinite"?:fail|match,"keys"?:{<key>:{bounds,"combine"?}}}, at least one numeric bound;
@@ -57,6 +59,10 @@ Fields:
   --seed <NAME>=<value>   reproduce: environment variable set for every run
   --units <json>          reproduce: {"metric": "units"} each metric must report beside its value
   --shapes <json>         reproduce: {"metric": [dims]} nested-array shape each metric must have
+  --url <url>             browser: loopback page to load once --command (the dev server) answers
+  --ready <url>           browser: loopback URL that answers once the server is up (default --url)
+  --steps <path>          browser: repository-relative step module run against the page
+  --assert <a,b>          browser: console, exceptions, requests, axe (default console,exceptions,requests)
 
 baseline runs a perf-budget check once and records its wall time at the check's
 baseline path; a failing or timed-out command records nothing.
@@ -92,6 +98,10 @@ const VALUE_OPTIONS = new Set([
 	"--seed",
 	"--units",
 	"--shapes",
+	"--url",
+	"--ready",
+	"--steps",
+	"--assert",
 ]);
 
 interface ParsedAuthoringArgs {
@@ -178,9 +188,13 @@ function tags(value: string | undefined): string[] {
 				.filter((tag) => tag.length > 0);
 }
 
-type KindFields = Pick<Extract<VerifierRevision, { kind: "add" }>["check"], "kind" | "numeric" | "perf" | "reproduce">;
+type KindFields = Pick<
+	Extract<VerifierRevision, { kind: "add" }>["check"],
+	"kind" | "numeric" | "perf" | "reproduce" | "browser"
+>;
 
 const REPRODUCE_OPTIONS = ["--input", "--compare", "--environment", "--seed", "--units", "--shapes"] as const;
+const BROWSER_OPTIONS = ["--url", "--ready", "--steps", "--assert"] as const;
 
 /** SHA-256 of a repository file, read in chunks so a large data file is never held whole. */
 function pinnedDigest(relative: string): string | Error {
@@ -293,6 +307,37 @@ function kindFieldsFromArgs(parsed: ParsedAuthoringArgs): KindFields | Error {
 	const budgetRelative = oneValue(parsed, "--budget-relative");
 	const baseline = oneValue(parsed, "--baseline");
 	const reproduceOptions = REPRODUCE_OPTIONS.filter((option) => oneValue(parsed, option) !== undefined);
+	const browserOptions = BROWSER_OPTIONS.filter((option) => oneValue(parsed, option) !== undefined);
+	if (kind === "browser") {
+		const stray = [
+			...reproduceOptions,
+			...(["--reference", "--tolerance", "--budget-ms", "--budget-relative", "--baseline"] as const).filter(
+				(option) => oneValue(parsed, option) !== undefined,
+			),
+		];
+		if (stray.length > 0) return new Error(`${stray.join(", ")} do not belong to --kind browser`);
+		const url = oneValue(parsed, "--url");
+		if (url === undefined) return new Error("--url is required for --kind browser");
+		const ready = oneValue(parsed, "--ready");
+		const steps = oneValue(parsed, "--steps");
+		const assert = oneValue(parsed, "--assert");
+		const assertions = assert === undefined ? undefined : tags(assert);
+		if (
+			assertions !== undefined &&
+			!assertions.every((a) => (BROWSER_CHECK_ASSERTIONS as ReadonlyArray<string>).includes(a))
+		)
+			return new Error(`--assert takes ${BROWSER_CHECK_ASSERTIONS.join(", ")}`);
+		return {
+			kind,
+			browser: {
+				url,
+				...(ready !== undefined ? { ready } : {}),
+				...(steps !== undefined ? { steps } : {}),
+				...(assertions !== undefined ? { assert: assertions as BrowserCheckAssertion[] } : {}),
+			},
+		};
+	}
+	if (browserOptions.length > 0) return new Error(`${browserOptions.join(", ")} belong to --kind browser`);
 	if (kind === "reproduce") {
 		if (budgetMs !== undefined || budgetRelative !== undefined || baseline !== undefined) {
 			return new Error("--budget-ms, --budget-relative, and --baseline belong to --kind perf-budget");
@@ -433,6 +478,7 @@ function editRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 		if (kindFields.numeric !== undefined) changes.numeric = kindFields.numeric;
 		if (kindFields.perf !== undefined) changes.perf = kindFields.perf;
 		if (kindFields.reproduce !== undefined) changes.reproduce = kindFields.reproduce;
+		if (kindFields.browser !== undefined) changes.browser = kindFields.browser;
 	}
 	if (Object.keys(changes).length === 0) return new Error("edit requires at least one changed field");
 	return { kind: "edit", id, changes };

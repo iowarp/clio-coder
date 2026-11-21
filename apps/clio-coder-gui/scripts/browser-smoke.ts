@@ -903,7 +903,7 @@ try {
 		await step("models and connections", async () => {
 			// Adding a connection is the guided setup's job; it opens from Models and closes back there.
 			await navigate("Models");
-			const controlsPath = "**/api/workspaces/*/settings/controls";
+			const controlsPath = "**/api/settings/controls?*";
 			await page.route(controlsPath, async (route) => {
 				const response = await route.fetch();
 				const report = (await response.json()) as SettingsControls;
@@ -934,7 +934,7 @@ try {
 				.locator("main")
 				.getByRole("link", { name: /^Add a connection/ })
 				.click();
-			await page.getByRole("heading", { name: "Where does your model come from?", exact: true }).waitFor();
+			await page.getByRole("heading", { name: "What do you have?", exact: true }).waitFor();
 			await check("targets-onboarding");
 			if (width === 1600 || width === 390)
 				await page.screenshot({ path: join(output, `targets-onboarding-${width}.png`), fullPage: true });

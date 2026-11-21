@@ -7,6 +7,7 @@ import {
 	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
 	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
 } from "../../src/engine/acp/types.js";
+import { HOST_STATUS_NOTICE_KEY, THINKING_CLAMP_NOTICE_KEY } from "../../src/session-control/chat-loop-messages.js";
 import { CONTEXT_STATUS_NOTICE_KEY } from "../../src/session-control/compaction-lines.js";
 import { fakeTransport, stdioPeer } from "../harness/acp-fake-transport.js";
 
@@ -308,7 +309,7 @@ it("keeps compaction failure lines in the reply, where context status does not g
 				type: "notice",
 				surface: "transcript",
 				level: "info",
-				text: "Clio compacted 36.2K → 28.6K tokens",
+				text: "CLIO Coder compacted 36.2K → 28.6K tokens",
 				key: CONTEXT_STATUS_NOTICE_KEY,
 			});
 		},
@@ -386,26 +387,37 @@ it("settles a call the output limit cut off as not run, not failed, on the wire 
 	);
 });
 
-it("projects transcript notices for plain ACP clients while keeping footer state and context status off the reply", async () => {
+it("projects transcript notices for plain ACP clients while keeping footer state, context status, the thinking clamp and host status off the reply", async () => {
 	const status = [
 		"[context engine] working set: nothing evictable, the 1 turn is inside the protected window; llm_summary runs instead",
 		"compaction would not reduce context; checkpoint discarded (usage recorded)",
-		"Clio compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
+		"CLIO Coder compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
 		// ACP-3: the producer's tag routes the line, so a reworded one still stays off the reply.
 		"Context trimmed: 3 tool results now read by ref",
 	];
 	// The same lead without the tag is ordinary transcript text; wording no longer decides the route.
-	const untagged = "Clio compacted nothing; this line came from an extension";
+	const untagged = "CLIO Coder compacted nothing; this line came from an extension";
+	// M-28: the route's thinking clamp is host information, not the model's words.
+	const clamp = "low was ignored because thinking is unsupported";
+	// Row 338: host status lines (route facts, project instructions) are host information too; a host warning is not.
+	const hostStatus = [
+		"Project instructions: all 42 lines loaded",
+		"[CLIO Coder] This model's context window is unknown, so CLIO Coder compacts at its token budget instead. clio-coder configure can set the window.",
+	];
+	const hostWarning = "[CLIO Coder] auto-compaction failed; this turn goes on without it.";
 	const peer = stdioPeer();
 	const served = serveClioAcpAgent({
 		transport: peer.transport,
 		chat: scriptedChat(
 			({ emit }) => {
 				emit({ type: "notice", surface: "footer", level: "info", text: "cold cache" });
-				emit({ type: "notice", surface: "transcript", level: "info", text: "project instructions: all 42 lines loaded" });
+				for (const text of hostStatus)
+					emit({ type: "notice", surface: "transcript", level: "info", text, key: HOST_STATUS_NOTICE_KEY });
+				emit({ type: "notice", surface: "transcript", level: "warning", text: hostWarning, key: HOST_STATUS_NOTICE_KEY });
 				for (const text of status)
 					emit({ type: "notice", surface: "transcript", level: "info", text, key: CONTEXT_STATUS_NOTICE_KEY });
 				emit({ type: "notice", surface: "transcript", level: "info", text: untagged });
+				emit({ type: "notice", surface: "transcript", level: "info", text: clamp, key: THINKING_CLAMP_NOTICE_KEY });
 				emit({ type: "text_delta", delta: "Done." });
 			},
 			() => {},
@@ -424,13 +436,13 @@ it("projects transcript notices for plain ACP clients while keeping footer state
 	const texts = updates
 		.filter((update) => update.sessionUpdate === "agent_message_chunk")
 		.map((update) => (update.content as { text: string }).text);
-	deepStrictEqual(texts, ["project instructions: all 42 lines loaded\n", `${untagged}\n`, "Done."]);
+	deepStrictEqual(texts, [`${hostWarning}\n`, `${untagged}\n`, "Done."]);
 	// bt-47: context engine status crosses as session metadata, the startup notices' channel.
 	const notices = updates
 		.filter((update) => update.sessionUpdate === "session_info_update")
 		.map((update) => (update._meta as Record<string, unknown>)["clio-coder/notice"]);
 	deepStrictEqual(
 		notices,
-		status.map((text) => ({ level: "info", text })),
+		[...hostStatus, ...status, clamp].map((text) => ({ level: "info", text })),
 	);
 });

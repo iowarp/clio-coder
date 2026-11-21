@@ -1,3 +1,5 @@
+import { unsetKeyVariableSentence } from "../../core/project-target-urls.js";
+
 /**
  * One answer to "can this home chat, and if not, what is the one missing thing?".
  *
@@ -24,8 +26,11 @@ export type Missing =
 	 * runtime read would steer the operator's real key there.
 	 */
 	| { kind: "credential"; target: string; provider: string; projectUrl?: string }
-	/** The target names the environment variable its key comes from, and it is not set. */
-	| { kind: "env"; target: string; variable: string }
+	/**
+	 * The target names the environment variable its key comes from, and it is not set. `projectFile` is the project
+	 * settings file that declares the target, when a caller that read the layers knows it.
+	 */
+	| { kind: "env"; target: string; variable: string; projectFile?: string }
 	| { kind: "unreachable"; target: string; url: string; detail: string }
 	/** With `model` the endpoint does not offer it; without one the target has no chat model at all. */
 	| { kind: "model"; target: string; model?: string }
@@ -147,14 +152,14 @@ export function describeMissing(
 		case "credential": {
 			if (missing.projectUrl !== undefined)
 				return {
-					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so Clio sends it none of your keys. To use it, define ${missing.target} in your user settings with its own key variable (auth.apiKeyEnvVar).`,
+					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so CLIO Coder sends it none of your keys. To use it, define ${missing.target} in your user settings with its own key variable (auth.apiKeyEnvVar).`,
 				};
 			const command = `clio-coder auth login ${missing.provider}`;
 			const sentence = `${missing.provider} has no key or sign-in stored. Run: ${command}`;
 			return { sentence: options.inSession ? `${sentence} (or press Enter on /config)` : sentence, command };
 		}
 		case "env":
-			return { sentence: `${missing.target} reads its key from ${missing.variable}, which is not set in this shell.` };
+			return { sentence: unsetKeyVariableSentence(missing.target, missing.variable, missing.projectFile) };
 		case "unreachable":
 			return {
 				sentence: `${missing.target} at ${missing.url} did not answer (${missing.detail}). Start the server, or change the address with /config.`,

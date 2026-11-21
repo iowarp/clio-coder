@@ -52,6 +52,8 @@ export interface GradeFacts {
 	changeReturnFailure?: string | null;
 	/** The worker runtime's own typed outcome code and its reason. */
 	workerCode: { code: RunOutcomeCode | null; detail?: string };
+	/** The host's account of a wall-clock handback (whether a report came back), set with `worker_run_timeout`. */
+	wallHandback?: string;
 	/** The high-rigor finish gate engaged on an unvalidated mutation. */
 	finishGateEngaged: boolean;
 	/** Writes the run attempted when policy refused every one of them; null when any landed. */
@@ -378,14 +380,21 @@ const RULES: ReadonlyArray<GradeRule> = [
 			if (code === null) return PASS;
 			// An operator's cancel is the outcome; the loop's missing answer is its consequence, not its cause.
 			if (state.outcome === "canceled" && code === "worker_final_output_missing") return PASS;
-			// DESIGN 4.5 (fleet M8): a run its wall clock moved to handback seals timed_out with the report it wrote.
-			if (code === "worker_run_timeout" && (state.outcome === "succeeded" || state.outcome === "failed"))
+			// DESIGN 4.5 (fleet M8): a run its wall clock moved to handback seals timed_out, and the host's account of
+			// the handback, not the worker's line, says whether a report came back.
+			if (
+				code === "worker_run_timeout" &&
+				(state.outcome === "succeeded" || state.outcome === "failed" || state.outcome === "timed_out")
+			) {
+				const handback =
+					facts.wallHandback ?? facts.workerCode.detail ?? "worker_run_timeout: the run reached its wall clock";
 				return {
 					status: "fail",
 					code,
 					outcome: "timed_out",
-					detail: facts.workerCode.detail ?? "worker_run_timeout: the run reached its wall clock",
+					detail: state.outcome === "timed_out" ? joined(handback, state.detail) : handback,
 				};
+			}
 			const succeeded = state.outcome === "succeeded";
 			const outcome = succeeded ? "failed" : state.outcome;
 			return {

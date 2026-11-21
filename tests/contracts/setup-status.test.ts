@@ -159,7 +159,7 @@ test("a chat route at an address a project chose says to define it in user setti
 	noteProjectTargets([{ id: "lab-gateway", url }]);
 	// A key in the shell does not change it: Clio sends none to an address a project chose.
 	process.env.OPENAI_API_KEY = "sk-test";
-	const sentence = `lab-gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`;
+	const sentence = `lab-gateway points at ${url}, an address this project chose, so CLIO Coder sends it none of your keys. To use it, define lab-gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`;
 	const missing = firstMissing(readSettings());
 	assert.ok(missing);
 	assert.deepEqual(describeMissing(missing), { sentence });
@@ -194,7 +194,7 @@ test("a project-chosen address never gets a well-known key variable suggested fo
 		assert.ok(!sentence.includes(variable), `names ${variable}: ${sentence}`);
 	assert.equal(
 		sentence,
-		`gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`,
+		`gateway points at ${url}, an address this project chose, so CLIO Coder sends it none of your keys. To use it, define gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`,
 	);
 	assert.equal(readSetupStatus().message, sentence, "the desktop app says the terminal's sentence");
 });

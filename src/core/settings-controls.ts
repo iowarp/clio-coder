@@ -131,17 +131,17 @@ export const SETTINGS_LABELS_BY_ID = {
 } as const;
 
 export const SETTINGS_DESCRIPTIONS_BY_ID = {
-	"safety.autonomy": "How freely Clio acts; the safety net always applies.",
+	"safety.autonomy": "How freely CLIO Coder acts; the safety net always applies.",
 	"fleet.permissions.mode":
 		"Choose whether the safety judge reviews a worker's blocked tool, or the worker skips it, stops, or asks you to approve it.",
-	"fleet.permissions.escalation.timeoutMs": "How long Clio waits for your answer when a worker asks permission.",
+	"fleet.permissions.escalation.timeoutMs": "How long CLIO Coder waits for your answer when a worker asks permission.",
 	"fleet.permissions.escalation.fallback": "What the worker does if you do not answer in time.",
 	"integrations.externalAgents.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	"integrations.projectResources.trustProjectImports": "Allow explicitly imported foreign skills and prompts to run.",
 	"integrations.git.commitAttribution":
-		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
+		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through CLIO Coder.",
 	"integrations.git.commitAuthor":
-		"Who authors commits Clio makes on its own: dispatched workers and their landing, headless runs, and scheduled jobs.",
+		"Who authors commits CLIO Coder makes on its own: dispatched workers and their landing, headless runs, and scheduled jobs.",
 	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
 	"chat.thinkingLevel": "How much reasoning the chat model uses before answering.",
 	"chat.target": "Connection that answers in chat.",
@@ -150,17 +150,17 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 		"Connection for task memory. With no memory connection or model set, memory uses the chat route.",
 	"context.memory.model":
 		"Dedicated task-memory model. With no memory connection or model set, memory uses the chat route.",
-	"context.memory.enabled": "Allow Clio to update task memory as work progresses.",
+	"context.memory.enabled": "Allow CLIO Coder to update task memory as work progresses.",
 	"context.memory.cadenceToolCalls": "Maximum number of tool uses between memory updates.",
-	"context.memory.trajectorySteps": "How many recent steps Clio considers when updating memory.",
+	"context.memory.trajectorySteps": "How many recent steps CLIO Coder considers when updating memory.",
 	"context.memory.maxOutputTokens": "Maximum length of one memory reminder, in tokens.",
-	"context.memory.timeoutMs": "How long Clio waits for a memory model response.",
+	"context.memory.timeoutMs": "How long CLIO Coder waits for a memory model response.",
 	"chat.prewarm": "Send the next turn's known prefix ahead of time so a local server has already prefilled it.",
 	"fleet.default.target": "Default connection for delegated fleet work.",
 	"fleet.default.model": "Default fleet model override; unset uses the connection default.",
 	"fleet.default.thinkingLevel": "Reasoning budget for dispatched workers.",
 	"fleet.profiles": "Saved connection, model, and reasoning choices for workers. Enter adds one.",
-	"fleet.agentProfiles": "Choose which saved profile each Clio agent uses. Enter adds one.",
+	"fleet.agentProfiles": "Choose which saved profile each CLIO Coder agent uses. Enter adds one.",
 	"fleet.retry.maxRetries": "Automatic retries for a retryable worker outcome.",
 	"fleet.staggerSharedPrefix":
 		"On by default; workers that share a prompt prefix start after the leader streams (at most 15 s), so they reuse its cache.",
@@ -170,13 +170,13 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"fleet.adaptiveRouting.postures": "Priorities that automatic model selection may use for workers.",
 	"fleet.adaptiveRouting.agentRoles": "Specific agents allowed to use automatic model selection.",
 	"interface.panes.notifications": "Choose which worker updates show a pane notification.",
-	"interface.panes.layout": "Choose which companion panes open when Clio starts.",
+	"interface.panes.layout": "Choose which companion panes open when CLIO Coder starts.",
 	"interface.panes.workers.ratio": "Share of the width the workers dock takes, at most half.",
 	"fleet.history.journal": "Save worker activity so you can inspect finished runs later.",
 	"interface.panes.files.enabled":
 		"Whether `/files`, its key, and `/panes open files` may open the files pane or the one-shot pick.",
 	"interface.panes.files.mode": "Keep the files pane beside the conversation, or close it after one selection.",
-	"interface.panes.files.profile": "Use Clio's theme or your own file manager settings.",
+	"interface.panes.files.profile": "Use CLIO Coder's theme or your own file manager settings.",
 	"interface.panes.files.followCwd": "Keep an open files pane on the same folder as the conversation.",
 	"interface.panes.files.ratio": "Share of the height the files dock takes, at most half.",
 	"chat.modelPicker.cycleSet": "Models the quick-switch key cycles through.",
@@ -186,21 +186,21 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"chat.maxOutputTokens": "Output tokens requested per turn, applied to every target.",
 	"context.toolResultMaxBytes": "Maximum bytes returned from one tool result before the full text spills to scratch.",
 	"fleet.concurrency": "Maximum number of workers running at the same time.",
-	"safety.limits.chatToolCallsPerTurn": "Maximum tool uses Clio may make during one chat turn.",
+	"safety.limits.chatToolCallsPerTurn": "Maximum tool uses CLIO Coder may make during one chat turn.",
 	"fleet.limits.toolCallsPerRun": "Maximum tool uses one worker may make during its run.",
 	"fleet.history.maxRuns": "How many finished worker runs remain in local history.",
 	"safety.limits.readBytesPerCall": "Maximum text one file read may return to the model.",
-	"safety.limits.observationBytesPerTurn": "Combined tool output Clio may read during one turn.",
+	"safety.limits.observationBytesPerTurn": "Combined tool output CLIO Coder may read during one turn.",
 	"fleet.limits.internalRunTimeoutMs": "Maximum time for one internal worker run.",
 	"context.compaction.auto": "Summarize older context automatically before the conversation fills up.",
-	"context.compaction.threshold": "How full the model's context can get before Clio summarizes older content.",
-	"context.compaction.provider": "Use native Codex checkpoints when supported; off keeps portable Clio summaries.",
+	"context.compaction.threshold": "How full the model's context can get before CLIO Coder summarizes older content.",
+	"context.compaction.provider": "Use native Codex checkpoints when supported; off keeps portable CLIO Coder summaries.",
 	"context.compaction.maxTokens":
 		"Input token ceiling used to trigger context cleanup independently of the model's window.",
 	"context.workingSet.enabled": "Free space by setting aside stale tool output before summarizing the conversation.",
-	"context.workingSet.policy": "Choose how Clio finds old tool output to set aside.",
+	"context.workingSet.policy": "Choose how CLIO Coder finds old tool output to set aside.",
 	"context.workingSet.profile": "Keep extra outputs that matter for the current kind of work.",
-	"context.workingSet.target": "How full the context should be after Clio clears old output.",
+	"context.workingSet.target": "How full the context should be after CLIO Coder clears old output.",
 	"context.workingSet.protectLastTurns": "Keep tool output from this many recent user turns.",
 	"context.workingSet.protectLastSteps": "Keep tool output from this many recent assistant steps.",
 	"context.workingSet.minEvictableTokens":
@@ -210,8 +210,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"chat.retry.maxRetries": "Retry attempts after the initial failure.",
 	"chat.retry.baseDelayMs": "Initial retry delay in milliseconds.",
 	"chat.retry.maxDelayMs": "Maximum retry delay in milliseconds.",
-	"chat.retry.streamStallMs": "How long Clio waits when a model stops sending text mid-answer.",
-	"chat.retry.firstTokenStallMs": "How long Clio waits for a model to start its answer.",
+	"chat.retry.streamStallMs": "How long CLIO Coder waits when a model stops sending text mid-answer.",
+	"chat.retry.firstTokenStallMs": "How long CLIO Coder waits for a model to start its answer.",
 	"interface.terminalProgress": "Show running-task progress in terminals that support tab or taskbar badges.",
 	"interface.outputDetail": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	"interface.mode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
@@ -219,19 +219,19 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"interface.smoothStreaming": "Presentation-only pacing for streamed assistant text and thinking.",
 	"interface.desktopNotifications":
 		"Content-free desktop notification when a turn ends, a detached batch settles, or an approval parks.",
-	"safety.review.enabled": "After Clio changes files, ask a read-only reviewer to check the work.",
+	"safety.review.enabled": "After CLIO Coder changes files, ask a read-only reviewer to check the work.",
 	"safety.review.target": "Connection used for the review. Leave blank to use the chat connection.",
 	"safety.review.cadenceToolCalls":
 		"Also review during a long turn after this many tool uses; leave blank for an end-of-turn review only.",
 	"integrations.runtimePlugins":
-		"Additional runtime plugin packages loaded when Clio starts. Install and enable only packages you trust.",
+		"Additional runtime plugin packages loaded when CLIO Coder starts. Install and enable only packages you trust.",
 	"context.compaction.model": "Model used to summarize older conversation. Leave blank to use the chat model.",
 	"context.compaction.systemPrompt":
-		"Optional file with custom summarizing instructions. Leave blank for Clio's built-in instructions.",
+		"Optional file with custom summarizing instructions. Leave blank for CLIO Coder's built-in instructions.",
 	"integrations.externalAgents.defaults.connectTimeoutMs": "How long to wait for a delegated agent to connect.",
 	"integrations.externalAgents.defaults.turnTimeoutMs": "How long a single delegated turn may run.",
 	"integrations.externalAgents.defaults.permissionTimeoutMs":
-		"How long Clio waits for your answer to an external agent's permission request.",
+		"How long CLIO Coder waits for your answer to an external agent's permission request.",
 	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
 	"interface.keybindings": "Custom key overrides layered on the defaults.",
 	"integrations.externalAgents.entries": "Other coding agents you can call through /run.",
@@ -245,7 +245,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"safety.autonomy":
-		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo shows no approval cards: it keeps default's sandbox and safety judge, and a call that would need your approval is refused back to Clio instead. Both modes still ask you questions. Unconfined yolo (safety.yoloConfinement, accepted once) skips approvals and the sandbox; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Yolo's first activation asks you to accept it once, and it is refused as root outside a container.",
+		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo shows no approval cards: it keeps default's sandbox and safety judge, and a call that would need your approval is refused back to CLIO Coder instead. Both modes still ask you questions. Unconfined yolo (safety.yoloConfinement, accepted once) skips approvals and the sandbox; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Yolo's first activation asks you to accept it once, and it is refused as root outside a container.",
 	"chat.maxOutputTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -255,62 +255,62 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"context.compaction.maxTokens":
 		"Whole number of at least 1 · default: 400000 tokens. A lower ceiling limits input cost by triggering cleanup sooner, even when the model has a larger context window.",
 	"context.workingSet.enabled":
-		"Old tool output is set aside without changing chat history. When off, Clio waits until it needs to summarize the conversation.",
+		"Old tool output is set aside without changing chat history. When off, CLIO Coder waits until it needs to summarize the conversation.",
 	"context.workingSet.policy":
 		"Current structure also protects output the model returned to twice. Classic structure uses the older selection rule. Age only clears the oldest eligible output first.",
 	"context.workingSet.profile":
 		"Data analysis keeps recent numeric command output. Web design keeps recently read stylesheets and components. Default adds no special protection.",
 	"context.workingSet.target":
-		"Choose a percentage below the summarize threshold. Clio keeps clearing eligible output until context use falls to this level.",
+		"Choose a percentage below the summarize threshold. CLIO Coder keeps clearing eligible output until context use falls to this level.",
 	"context.workingSet.protectLastTurns": "Counted in user turns. Whole number of at least 1 · default: 6.",
 	"context.workingSet.protectLastSteps":
 		"Counted in assistant steps inside the turn window, so a long agentic turn stays evictable. Whole number of at least 1 · default: 8.",
 	"context.workingSet.minEvictableTokens":
 		"Smaller outputs stay in context because replacing them saves little space. Choose 0 to allow every size.",
 	"context.workingSet.rearmFraction":
-		"Clio waits for context use to grow by this percentage after clearing output. Choose 0 to allow another cleanup immediately.",
+		"CLIO Coder waits for context use to grow by this percentage after clearing output. Choose 0 to allow another cleanup immediately.",
 	"safety.limits.chatToolCallsPerTurn":
-		"Clio stops using tools and summarizes the turn when it reaches this limit. Whole number of at least 1.",
+		"CLIO Coder stops using tools and summarizes the turn when it reaches this limit. Whole number of at least 1.",
 	"fleet.limits.toolCallsPerRun":
 		"Only tools that actually ran count. A worker's own smaller limit still applies. Whole number of at least 1.",
 	"fleet.history.maxRuns":
 		"When history fills, the oldest run and its event log are removed. Whole number of at least 1.",
 	"safety.limits.readBytesPerCall":
-		"Enter a number of bytes. Clio reads at least 1 KB even if you choose a smaller value.",
+		"Enter a number of bytes. CLIO Coder reads at least 1 KB even if you choose a smaller value.",
 	"safety.limits.observationBytesPerTurn":
 		"Shared by every tool in the turn. At the default, the pool grows with the model's context window above 128K tokens, up to 1 MB. Any other value applies exactly. Enter a whole number of bytes, at least 1.",
 	"fleet.limits.internalRunTimeoutMs":
 		"Ends an internal worker run that never finishes, including the wiki writer and first project Scout. Enter at least 1 millisecond.",
 	"chat.retry.streamStallMs":
-		"The timer resets whenever text arrives. If it expires, Clio can retry according to the retry settings above.",
+		"The timer resets whenever text arrives. If it expires, CLIO Coder can retry according to the retry settings above.",
 	"chat.retry.firstTokenStallMs":
 		"Time allowed before the first text arrives from a local or self-hosted endpoint, which may need to load a model first. Hosted services use the mid-stream wait. Choose 0 to wait indefinitely on every route.",
 	"integrations.library.catalog":
 		"Absolute path, or blank for the catalog in your config directory. The catalog is the index `clio-coder library` reads; installed resources land in the usual skill and resource roots either way. Default: blank.",
 	"integrations.library.remote":
-		"Enter a Git remote URL, or leave blank to keep the library local. Confirm the remote and turn on syncing before Clio uses it.",
+		"Enter a Git remote URL, or leave blank to keep the library local. Confirm the remote and turn on syncing before CLIO Coder uses it.",
 	"integrations.library.confirmedRemote":
-		"Clio records this after you confirm the library remote. It must match the selected remote before syncing is allowed.",
+		"CLIO Coder records this after you confirm the library remote. It must match the selected remote before syncing is allowed.",
 	"integrations.library.sync":
 		"When off, library sync and push stop before contacting the remote, even if one is configured.",
 	"fleet.concurrency":
 		"Automatic chooses a limit from available CPU and memory, up to eight workers. Choose a number to set a fixed limit.",
 	"integrations.projectResources.trustProjectImports":
-		"Applies to foreign packages explicitly imported into Clio, at user or project scope. Loose skills/prompts in other agents' folders stay discovery-only; this setting never imports them.",
+		"Applies to foreign packages explicitly imported into CLIO Coder, at user or project scope. Loose skills/prompts in other agents' folders stay discovery-only; this setting never imports them.",
 	"integrations.git.commitAttribution":
-		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
+		"Role trailers are added only when CLIO Coder has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"integrations.git.commitAuthor":
 		"Automatic makes CLIO Coder the author of autonomous commits, with you as committer and a Co-authored-by trailer naming you. Interactive sessions always keep you as the author. Needs commit credit on and a configured user.name and user.email; an author you or the command chose always wins.",
 	"fleet.permissions.mode":
-		"Safety judge reviews the call against your own messages while Clio runs at default; it runs on an allow and is denied on a block or when the judge gives no verdict. Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
+		"Safety judge reviews the call against your own messages while CLIO Coder runs at default; it runs on an allow and is denied on a block or when the judge gives no verdict. Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
 	"fleet.permissions.escalation.timeoutMs":
 		"Used only when workers ask you. A key on the card holds it for up to 15 minutes. In sessions with nobody available to answer, the fallback applies. Enter at least 1 millisecond.",
 	"fleet.permissions.escalation.fallback":
 		"Deny the tool lets the worker continue without it. Stop the worker ends the run.",
 	"fleet.retry.routeCooldownMs":
-		"After repeated failures, Clio waits before trying the same connection and model again. A successful run clears the wait. Choose 0 to disable it.",
+		"After repeated failures, CLIO Coder waits before trying the same connection and model again. A successful run clears the wait. Choose 0 to disable it.",
 	"fleet.adaptiveRouting.roles":
-		"Automatic model selection only takes effect when both the worker role and its priority are enabled. Otherwise Clio records its suggestion without using it. Choose researcher, verifier, reviewer, or judge.",
+		"Automatic model selection only takes effect when both the worker role and its priority are enabled. Otherwise CLIO Coder records its suggestion without using it. Choose researcher, verifier, reviewer, or judge.",
 	"fleet.adaptiveRouting.postures":
 		"Choose which priorities may select a model automatically: quality, balanced, speed, or lower cost. Manually chosen models stay fixed.",
 	"fleet.adaptiveRouting.agentRoles":
@@ -320,10 +320,10 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"fleet.agentProfiles":
 		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"integrations.externalAgents.defaults.toolGovernance":
-		"Clio permissions check external agent tools. Agent permissions let that agent decide. Deny all tools blocks every tool request.",
+		"CLIO Coder permissions check external agent tools. Agent permissions let that agent decide. Deny all tools blocks every tool request.",
 	"chat.modelPicker.cycleSet":
 		"Choose connections or specific models. The model switch shortcut cycles through this list.",
-	"integrations.runtimePlugins": "Comma-separated package names, loaded at startup. Restart Clio after changing.",
+	"integrations.runtimePlugins": "Comma-separated package names, loaded at startup. Restart CLIO Coder after changing.",
 	"interface.desktopNotifications":
 		"Supported terminals show a brief desktop alert. Alerts never include your prompt, file paths, or model output.",
 	"safety.review.enabled":
@@ -346,7 +346,7 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 	"fleet.permissions.mode": {
 		deny: "the worker skips the blocked tool and continues",
 		fail: "the worker stops and reports that permission was needed",
-		escalate: "Clio asks you; if you do not answer in time, it uses the fallback choice below",
+		escalate: "CLIO Coder asks you; if you do not answer in time, it uses the fallback choice below",
 		judge:
 			"the safety judge reviews the call against your own messages at autonomy default; a block or no verdict denies it, and with the judge off the call is denied",
 	},
@@ -368,7 +368,7 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		"age-horizon": "choose the oldest eligible output first",
 	},
 	"context.workingSet.profile": {
-		default: "keep only Clio's essential context",
+		default: "keep only CLIO Coder's essential context",
 		"data-analysis": "also keep three recent command outputs with numbers",
 		"web-design": "also keep recently read stylesheets and components",
 	},
@@ -377,7 +377,7 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		false: "refuse every library network operation",
 	},
 	"integrations.externalAgents.defaults.toolGovernance": {
-		"clio-coder-policy": "Clio's safety policy gates the delegated agent's tools",
+		"clio-coder-policy": "CLIO Coder's safety policy gates the delegated agent's tools",
 		"agent-managed": "the external agent governs its own tools",
 		"deny-all": "block every tool the delegated agent requests",
 	},
@@ -394,12 +394,12 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		false: "keep imported foreign skills and prompts inactive",
 	},
 	"integrations.git.commitAttribution": {
-		enabled: "add only the Clio role trailers justified by trusted evidence",
+		enabled: "add only the CLIO Coder role trailers justified by trusted evidence",
 		disabled: "leave every subsequent commit message byte-for-byte unchanged",
 	},
 	"integrations.git.commitAuthor": {
-		auto: "Clio authors autonomous commits and credits you as co-author",
-		human: "you author every commit; Clio is credited only by trailers",
+		auto: "CLIO Coder authors autonomous commits and credits you as co-author",
+		human: "you author every commit; CLIO Coder is credited only by trailers",
 	},
 	"interface.terminalProgress": {
 		true: "show progress in a supported terminal tab or taskbar",
@@ -583,7 +583,7 @@ const OPTIONAL_STRINGS = new Set([
 const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.compaction.provider": [
 		"Provider compaction",
-		"Use private native checkpoints on compatible Codex routes. Off uses portable Clio summaries; switching routes generates a portable summary from the retained history.",
+		"Use private native checkpoints on compatible Codex routes. Off uses portable CLIO Coder summaries; switching routes generates a portable summary from the retained history.",
 	],
 	"safety.limits.workerResponseSeconds": [
 		"Worker response time",
@@ -619,7 +619,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"context.semantic.enabled": [
 		"Semantic search",
-		"Make the optional project search index available to Clio after pinning a qualified embedding route.",
+		"Make the optional project search index available to CLIO Coder after pinning a qualified embedding route.",
 	],
 	"context.semantic.target": ["Embedding connection", "Target id of the qualified embedding route."],
 	"context.semantic.model": ["Embedding model", "Exact model id served by the embedding target."],
@@ -651,7 +651,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"context.memory.surfaces.lessons": [
 		"Note authorship",
-		"Who writes notes for later sessions: agent (the main agent gets memory_note in sessions that start with it, and Clio binds its command or read as evidence), rules (Clio files a failed command and the option change that fixed it), side (adds the memory model's lesson pass, only after such a fix), or off. Agent by default as a policy choice, not a measured win.",
+		"Who writes notes for later sessions: agent (the main agent gets memory_note in sessions that start with it, and CLIO Coder binds its command or read as evidence), rules (CLIO Coder files a failed command and the option change that fixed it), side (adds the memory model's lesson pass, only after such a fix), or off. Agent by default as a policy choice, not a measured win.",
 	],
 	"context.memory.surfaces.correct": [
 		"Correction tier",
@@ -682,8 +682,8 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"What /music on plays: a stream URL or a station name looked up in Radio Browser.",
 	],
 	"integrations.music.agentControl": [
-		"Clio controls music",
-		"Give Clio a music tool to start, stop or skip the station on its own. When it is off the tool is not registered and costs no prompt bytes.",
+		"CLIO Coder controls music",
+		"Give CLIO Coder a music tool to start, stop or skip the station on its own. When it is off the tool is not registered and costs no prompt bytes.",
 	],
 	"interface.exitSummary": [
 		"Session summary on exit",
@@ -699,11 +699,11 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.snapshots": [
 		"Workspace snapshots",
-		"Before Clio first changes files in a turn, and before every destructive command, save the Git work tree as a private snapshot so /rewind can restore the files. Ignored files and untracked files over 16 MiB are left out. Your index, HEAD and branches are never touched. Off takes no snapshots.",
+		"Before CLIO Coder first changes files in a turn, and before every destructive command, save the Git work tree as a private snapshot so /rewind can restore the files. Ignored files and untracked files over 16 MiB are left out. Your index, HEAD and branches are never touched. Off takes no snapshots.",
 	],
 	"safety.unattendedAfterSeconds": [
 		"Unattended timeout",
-		"Seconds a permission card or ask_user question waits for you before Clio resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option unless that option leaves the workspace, and the session summary counts both. Any key on the card or question holds it. 0 waits forever, except that a yolo question waits 300 s at most, and after one lapses with no key pressed since, later questions wait at most 30 s. User settings only.",
+		"Seconds a permission card or ask_user question waits for you before CLIO Coder resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option unless that option leaves the workspace, and the session summary counts both. Any key on the card or question holds it. 0 waits forever, except that a yolo question waits 300 s at most, and after one lapses with no key pressed since, later questions wait at most 30 s. User settings only.",
 	],
 	"safety.yoloAccepted": [
 		"Yolo accepted",
@@ -719,7 +719,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.judge.enabled": [
 		"Safety judge",
-		"At autonomy default, a model reviews each call that would need your approval against your own messages, then runs it or refuses it back to Clio with a reason. It asks you when it cannot decide, and after 3 refusals in a row or 20 in a session. User settings only.",
+		"At autonomy default, a model reviews each call that would need your approval against your own messages, then runs it or refuses it back to CLIO Coder with a reason. It asks you when it cannot decide, and after 3 refusals in a row or 20 in a session. User settings only.",
 	],
 	"safety.judge.target": [
 		"Safety judge connection",
@@ -759,7 +759,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"fleet.keepPeerInstructionFiles": [
 		"Peers that keep their own instruction files",
-		"Runtime ids (codex-cli, pi-cli, opencode-cli) of delegated harnesses that read their own repository instruction files unchanged, with the rules Clio compiled for the run beside them. Others read the compiled rules in place of their files; claude-code always reads its own beside them.",
+		"Runtime ids (codex-cli, pi-cli, opencode-cli) of delegated harnesses that read their own repository instruction files unchanged, with the rules CLIO Coder compiled for the run beside them. Others read the compiled rules in place of their files; claude-code always reads its own beside them.",
 	],
 	"safety.scratchRoots": [
 		"Scratch roots",
@@ -787,7 +787,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"fleet.default.node": [
 		"Default worker location",
-		"Where workers run unless their profile says otherwise. Enter local or a configured remote machine name; clear to let Clio choose.",
+		"Where workers run unless their profile says otherwise. Enter local or a configured remote machine name; clear to let CLIO Coder choose.",
 	],
 	"fleet.profiles": [
 		"Worker profiles",
@@ -835,7 +835,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.content": [
 		"Research: capture content",
-		"In research mode, also keep content in the session's telemetry objects with secrets removed: the text of each distinct system prompt Clio compiles, the body of each provider request (only its first 1 MiB when larger), and the prompts, replies and facts of background memory and compaction steps. Takes effect only in a workspace you consented for with clio-coder telemetry consent.",
+		"In research mode, also keep content in the session's telemetry objects with secrets removed: the text of each distinct system prompt CLIO Coder compiles, the body of each provider request (only its first 1 MiB when larger), and the prompts, replies and facts of background memory and compaction steps. Takes effect only in a workspace you consented for with clio-coder telemetry consent.",
 	],
 	"telemetry.research.deltas": [
 		"Research: token timing",
@@ -855,11 +855,11 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"report.offers": [
 		"Suggest reports",
-		"When Clio itself fails, such as an internal error or a crash, it may suggest /report: at most once a session and once a week, and never again for a problem you declined. Off never suggests. Nothing is sent without your keypress.",
+		"When CLIO Coder itself fails, such as an internal error or a crash, it may suggest /report: at most once a session and once a week, and never again for a problem you declined. Off never suggests. Nothing is sent without your keypress.",
 	],
 	"turnControl.workflows": [
-		"Before Clio answers",
-		"Choose whether Clio collects finished background runs before answering.",
+		"Before CLIO Coder answers",
+		"Choose whether CLIO Coder collects finished background runs before answering.",
 	],
 	"fleet.rosters": [
 		"Fleet rosters",
@@ -891,7 +891,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",
-		"Consecutive route failures before Clio temporarily stops sending work to that route. A healthy request clears the failure count.",
+		"Consecutive route failures before CLIO Coder temporarily stops sending work to that route. A healthy request clears the failure count.",
 	],
 };
 
@@ -931,7 +931,7 @@ export const SETTING_CONTROLS: readonly SettingControl[] = (() => {
 					extra?.[1] ??
 					(id
 						? SETTINGS_DESCRIPTIONS_BY_ID[id]
-						: `Configure ${path}. Changes are validated against Clio's settings schema.`),
+						: `Configure ${path}. Changes are validated against CLIO Coder's settings schema.`),
 				help: id ? SETTINGS_HELP_BY_ID[id] : undefined,
 				choices: CHOICES[path],
 				kind,

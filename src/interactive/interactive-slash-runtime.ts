@@ -345,6 +345,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
 	const resources = deps.resources;
 	const userTasks = deps.userTasks;
+	// The last rejected settings reload, for /doctor: the footer notice can be
+	// clamped or dismissed, and doctor re-reads the file, which says nothing
+	// about the settings this session is still running on (M-25). One
+	// subscription for the runtime's life, which is the session's.
+	let settingsReloadFailure: string | null = null;
+	deps.bus.subscribe("config.reload_failed", (payload) => {
+		settingsReloadFailure = typeof payload?.message === "string" ? payload.message : null;
+	});
 
 	const oracleBriefingSources = (): Omit<OracleDigestSources, "question"> => {
 		const sessionId = deps.chat.getSessionId();
@@ -631,6 +639,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				workspaceRoot: cwd(),
 				deep: deep ? { providers: deps.providers, ...(autonomy ? { autonomy } : {}) } : false,
 			});
+			if (settingsReloadFailure !== null)
+				findings.unshift({
+					ok: false,
+					name: "settings reload",
+					detail: `last reload rejected; this session keeps its last good settings. ${settingsReloadFailure}`,
+				});
 			return doctorNotice(findings);
 		},
 		...(deps.startUpgrade ? { startUpgrade: deps.startUpgrade } : {}),
@@ -934,7 +948,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					// A handoff note is assistant-authored prose that routinely carries
 					// fenced code, so this is reachable content, not a hypothetical.
 					const fence = "`".repeat(Math.max(3, longestBacktickRun(lines) + 1));
-					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", `${fence}text`];
+					const header = [
+						`# CLIO Coder session ${sessionId}`,
+						"",
+						`Exported ${exportedAt.toISOString()}`,
+						"",
+						`${fence}text`,
+					];
 					body = `${[...header, ...lines, fence, ""].join("\n")}`;
 				} else {
 					body = await renderSessionHtmlAsync({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines });

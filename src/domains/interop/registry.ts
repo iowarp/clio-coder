@@ -13,6 +13,7 @@ const INVENTORIES: Partial<Record<InteropAgentId, InteropInventoryLayout>> = {
 		userDeclarations: [{ path: ".claude.json", kind: "mcp", key: "mcpServers" }],
 		projectDeclarations: [{ path: ".mcp.json", kind: "mcp", key: "mcpServers" }],
 		userRoot: ".claude",
+		userInstructions: ["CLAUDE.md"],
 		homeEnv: "CLAUDE_CONFIG_DIR",
 		projectRoots: [".claude"],
 		roots: [...MARKDOWN_ROOTS, { path: "output-styles", kind: "output-style", extensions: [".md"] }],
@@ -32,6 +33,7 @@ const INVENTORIES: Partial<Record<InteropAgentId, InteropInventoryLayout>> = {
 		settingsRegistry: "codex",
 		cacheMarketplace: true,
 		userRoot: ".codex",
+		userInstructions: ["AGENTS.md"],
 		homeEnv: "CODEX_HOME",
 		projectRoots: [".codex", ".agents"],
 		roots: [

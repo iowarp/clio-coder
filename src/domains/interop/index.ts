@@ -9,7 +9,9 @@ export const InteropDomainModule: DomainModule<"interop"> = {
 
 export type { AdoptionKind, InteropAdoptionEntry, InteropAdoptionPlan, PreparedAdoption } from "./adopt.js";
 export {
+	ADOPTION_KINDS,
 	applyInteropAdoption,
+	isAdoptableKind,
 	planInteropAdoption,
 	prepareForeignPackage,
 	preparePortablePackage,

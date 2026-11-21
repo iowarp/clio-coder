@@ -10669,10 +10669,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/settings": {
+		"/api/settings": {
 			"get": {
-				"operationId": "workspaceSettings",
-				"summary": "Effective settings and each leaf's origin layer",
+				"operationId": "settingsReport",
+				"summary": "Effective settings and each leaf's origin layer; without a workspace, the user layer alone",
 				"security": [
 					{
 						"bearer": []
@@ -10680,9 +10680,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -10727,10 +10727,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/settings/controls": {
+		"/api/settings/controls": {
 			"get": {
 				"operationId": "settingsControls",
-				"summary": "The engine's setting controls with the app's write policy, timing and origin",
+				"summary": "The engine's setting controls with the app's write policy, timing and origin; without a workspace, the user layer alone",
 				"security": [
 					{
 						"bearer": []
@@ -10738,9 +10738,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -10959,9 +10959,9 @@
 				],
 				"parameters": [
 					{
-						"name": "id",
-						"in": "path",
-						"required": true,
+						"name": "workspace",
+						"in": "query",
+						"required": false,
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -18404,7 +18404,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -19351,6 +19351,50 @@
 											},
 											"lastActivityAt": {
 												"type": "string"
+											},
+											"liveElsewhere": {
+												"type": "object",
+												"required": ["surface", "since", "host", "pid", "stale", "canTakeOver"],
+												"properties": {
+													"surface": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "terminal"
+															},
+															{
+																"type": "string",
+																"const": "headless"
+															},
+															{
+																"type": "string",
+																"const": "app"
+															},
+															{
+																"type": "string",
+																"const": "process"
+															}
+														]
+													},
+													"since": {
+														"type": "string"
+													},
+													"host": {
+														"type": "string",
+														"maxLength": 255
+													},
+													"pid": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"stale": {
+														"type": "boolean"
+													},
+													"canTakeOver": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
 											}
 										},
 										"additionalProperties": false
@@ -19441,7 +19485,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -19536,7 +19580,198 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions/{sessionId}/transcript": {
+			"get": {
+				"operationId": "storedTranscript",
+				"summary": "A saved session's history as Markdown, read from its ledger without starting an engine",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "sessionId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["markdown", "turns", "truncated"],
+									"properties": {
+										"markdown": {
+											"type": "string",
+											"maxLength": 1048576
+										},
+										"turns": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions/{sessionId}/take-over": {
+			"post": {
+				"operationId": "takeOverSession",
+				"summary": "End the other process holding a saved session (clio-coder session terminate) so this app can resume it",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "sessionId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["released", "message"],
+									"properties": {
+										"released": {
+											"type": "boolean"
+										},
+										"message": {
+											"type": "string",
+											"maxLength": 2048
+										}
+									},
+									"additionalProperties": false
 								}
 							}
 						},
@@ -19586,7 +19821,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 									}
 								}
 							}
@@ -19904,6 +20139,71 @@
 				}
 			}
 		},
+		"/api/sessions/{id}/presence": {
+			"get": {
+				"operationId": "sessionPresence",
+				"summary": "Whether this server holds the session, so a page can ask before reading a snapshot it may not have",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["open"],
+									"properties": {
+										"open": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/sessions/{id}/turns": {
 			"post": {
 				"operationId": "turn",
@@ -19964,24 +20264,7 @@
 											"required": ["mimeType", "data"],
 											"properties": {
 												"mimeType": {
-													"anyOf": [
-														{
-															"type": "string",
-															"const": "image/png"
-														},
-														{
-															"type": "string",
-															"const": "image/jpeg"
-														},
-														{
-															"type": "string",
-															"const": "image/gif"
-														},
-														{
-															"type": "string",
-															"const": "image/webp"
-														}
-													]
+													"$ref": "#/components/schemas/Union_0887f58f"
 												},
 												"data": {
 													"type": "string",
@@ -20127,7 +20410,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_ca3d01fc"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76d1073b"
 								}
 							}
 						},
@@ -24431,12 +24714,6 @@
 			}
 		},
 		"schemas": {
-			"Array_029d694f": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_admission_durationMs_id_14614bbc"
-				}
-			},
 			"Array_0608acf6": {
 				"type": "array",
 				"items": {
@@ -24527,6 +24804,12 @@
 					"maxLength": 256
 				},
 				"maxItems": 200
+			},
+			"Array_3b4103d1": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_admission_agent_attempt_2f1e5c74"
+				}
 			},
 			"Array_44597d65": {
 				"type": "array",
@@ -24805,11 +25088,25 @@
 					"$ref": "#/components/schemas/Object_passed_sourceId_validatorDigest_d555b71d"
 				}
 			},
+			"Array_b103590f": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_data_mimeType_30aaac04"
+				},
+				"maxItems": 4
+			},
 			"Array_b41770ba": {
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_key_label_resetsAt_0c3b4eb1"
 				}
+			},
+			"Array_c4986126": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_name_path_ab196e53"
+				},
+				"maxItems": 4
 			},
 			"Array_c52271ac": {
 				"type": "array",
@@ -24935,16 +25232,16 @@
 				},
 				"maxItems": 32
 			},
-			"Array_e865bf53": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_admission_agent_attempt_4aa89f10"
-				}
-			},
 			"Array_ea04312e": {
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_origin_path_present_1faa671d"
+				}
+			},
+			"Array_ec251890": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_admission_durationMs_id_f3588fe7"
 				}
 			},
 			"Array_f176b569": {
@@ -25237,7 +25534,7 @@
 						"additionalProperties": false
 					},
 					"calls": {
-						"$ref": "#/components/schemas/Array_e865bf53"
+						"$ref": "#/components/schemas/Array_3b4103d1"
 					},
 					"matched": {
 						"type": "integer",
@@ -26088,7 +26385,7 @@
 										"minimum": 1
 									},
 									"item": {
-										"$ref": "#/components/schemas/Object_admission_durationMs_id_14614bbc"
+										"$ref": "#/components/schemas/Object_admission_durationMs_id_f3588fe7"
 									}
 								},
 								"additionalProperties": false
@@ -27481,7 +27778,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_agent_attempt_4aa89f10": {
+			"Object_admission_agent_attempt_2f1e5c74": {
 				"type": "object",
 				"required": [
 					"callId",
@@ -27508,7 +27805,7 @@
 					"responseId"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_f384a28b"
+					"$ref": "#/components/schemas/Shape_946d5c61"
 				},
 				"additionalProperties": false
 			},
@@ -27520,11 +27817,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_durationMs_id_14614bbc": {
+			"Object_admission_durationMs_id_f3588fe7": {
 				"type": "object",
 				"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_6d801be1"
+					"$ref": "#/components/schemas/Shape_cad93800"
 				},
 				"additionalProperties": false
 			},
@@ -29973,7 +30270,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_ca3d01fc": {
+			"Object_config_contextWork_fleet_76d1073b": {
 				"type": "object",
 				"required": [
 					"id",
@@ -29990,7 +30287,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_9c33d84c"
+					"$ref": "#/components/schemas/Shape_0b89ddbb"
 				},
 				"additionalProperties": false
 			},
@@ -30107,7 +30404,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_connectionReused_continuation_kind_13d8e1ff": {
+			"Object_connectionReused_continuation_kind_91a81497": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -30115,13 +30412,14 @@
 					"requestBytes",
 					"sessionPinnedToSse",
 					"connectionReused",
+					"session",
 					"websocketFailures",
 					"sseFallbacks",
 					"pinReason",
 					"recovery"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_bb2f2b8c"
+					"$ref": "#/components/schemas/Shape_a6048dde"
 				},
 				"additionalProperties": false
 			},
@@ -30287,6 +30585,21 @@
 						"patternProperties": {
 							"^.*$": {}
 						}
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_data_mimeType_30aaac04": {
+				"type": "object",
+				"required": ["mimeType", "data"],
+				"properties": {
+					"mimeType": {
+						"$ref": "#/components/schemas/Union_0887f58f"
+					},
+					"data": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 1048576
 					}
 				},
 				"additionalProperties": false
@@ -31750,6 +32063,21 @@
 					"outputTokensPerSecond": {
 						"type": "number",
 						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_name_path_ab196e53": {
+				"type": "object",
+				"required": ["path", "name"],
+				"properties": {
+					"path": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 1024
 					}
 				},
 				"additionalProperties": false
@@ -33454,6 +33782,66 @@
 					"$ref": "#/components/schemas/Object_measured_missing_p50_14460945"
 				}
 			},
+			"Shape_0b89ddbb": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_ec251890"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_fb7031ee"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_ae8338fe"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_c9ef4f17"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_0e685edd": {
 				"path": {
 					"type": "string"
@@ -34672,69 +35060,6 @@
 					"$ref": "#/components/schemas/Union_5e8ad8cd"
 				}
 			},
-			"Shape_6d801be1": {
-				"id": {
-					"type": "string"
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"sequence": {
-					"type": "integer"
-				},
-				"kind": {
-					"$ref": "#/components/schemas/Union_c22e678b"
-				},
-				"text": {
-					"type": "string"
-				},
-				"status": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"title": {
-					"type": "string"
-				},
-				"toolKind": {
-					"type": "string"
-				},
-				"toolCallId": {
-					"type": "string"
-				},
-				"locations": {
-					"$ref": "#/components/schemas/Array_752b64bf"
-				},
-				"rawInput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"rawOutput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"partialOutput": {
-					"type": "string",
-					"maxLength": 32768
-				},
-				"durationMs": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"admission": {
-					"type": "string",
-					"maxLength": 128
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
 			"Shape_6fd9e1cd": {
 				"usd": {
 					"$ref": "#/components/schemas/Union_5d603e2a"
@@ -35288,6 +35613,87 @@
 					"$ref": "#/components/schemas/Union_afe90f89"
 				}
 			},
+			"Shape_946d5c61": {
+				"callId": {
+					"type": "string",
+					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attemptId": {
+					"type": "string",
+					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"agent": {
+					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
+				},
+				"owner": {
+					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"settledAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"target": {
+					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
+				},
+				"roundKind": {
+					"$ref": "#/components/schemas/Enum_413aacec"
+				},
+				"toolChoice": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"disposition": {
+					"$ref": "#/components/schemas/Union_f0839e51"
+				},
+				"stop": {
+					"$ref": "#/components/schemas/Union_4c094c81"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Union_178a3139"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"pricedBy": {
+					"enum": ["provider", "target-rates", "catalog", "free", "none"]
+				},
+				"stages": {
+					"$ref": "#/components/schemas/Union_00c11dd5"
+				},
+				"timing": {
+					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
+				},
+				"admission": {
+					"$ref": "#/components/schemas/Union_6872feba"
+				},
+				"transport": {
+					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_91a81497"
+				},
+				"cache": {
+					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
+				},
+				"quota": {
+					"$ref": "#/components/schemas/Union_96fc0259"
+				},
+				"responseId": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
 			"Shape_951c810f": {
 				"session": {
 					"$ref": "#/components/schemas/Object_calls_tokens_usd_0c039ba0"
@@ -35303,66 +35709,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_warning_a8b9b759"
-				}
-			},
-			"Shape_9c33d84c": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_029d694f"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_fb7031ee"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_ae8338fe"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_c9ef4f17"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_9c58459b": {
@@ -35515,6 +35861,38 @@
 				},
 				"replayMismatch": {
 					"$ref": "#/components/schemas/Object_breaks_firstDivergentSection_rePrefilled_6557f020"
+				}
+			},
+			"Shape_a6048dde": {
+				"kind": {
+					"$ref": "#/components/schemas/Enum_b62c7c0e"
+				},
+				"continuation": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"requestBytes": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"sessionPinnedToSse": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"connectionReused": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"session": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"websocketFailures": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"sseFallbacks": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"pinReason": {
+					"$ref": "#/components/schemas/Union_44f42e8b"
+				},
+				"recovery": {
+					"$ref": "#/components/schemas/Union_ad4812cb"
 				}
 			},
 			"Shape_a6426440": {
@@ -35889,35 +36267,6 @@
 				},
 				"finishedAt": {
 					"type": "string"
-				}
-			},
-			"Shape_bb2f2b8c": {
-				"kind": {
-					"$ref": "#/components/schemas/Enum_b62c7c0e"
-				},
-				"continuation": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"requestBytes": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"sessionPinnedToSse": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"connectionReused": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"websocketFailures": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"sseFallbacks": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"pinReason": {
-					"$ref": "#/components/schemas/Union_44f42e8b"
-				},
-				"recovery": {
-					"$ref": "#/components/schemas/Union_ad4812cb"
 				}
 			},
 			"Shape_bdc005cf": {
@@ -36427,6 +36776,75 @@
 					"$ref": "#/components/schemas/Object_data_kind_version_faaa767e"
 				}
 			},
+			"Shape_cad93800": {
+				"id": {
+					"type": "string"
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"sequence": {
+					"type": "integer"
+				},
+				"kind": {
+					"$ref": "#/components/schemas/Union_c22e678b"
+				},
+				"text": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"title": {
+					"type": "string"
+				},
+				"toolKind": {
+					"type": "string"
+				},
+				"toolCallId": {
+					"type": "string"
+				},
+				"locations": {
+					"$ref": "#/components/schemas/Array_752b64bf"
+				},
+				"rawInput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"rawOutput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"partialOutput": {
+					"type": "string",
+					"maxLength": 32768
+				},
+				"durationMs": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"admission": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"images": {
+					"$ref": "#/components/schemas/Array_b103590f"
+				},
+				"imageLinks": {
+					"$ref": "#/components/schemas/Array_c4986126"
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
+				}
+			},
 			"Shape_cb204b5f": {
 				"autonomy": {
 					"$ref": "#/components/schemas/Union_19fa529e"
@@ -36839,87 +37257,6 @@
 				"objects": {
 					"type": "integer",
 					"minimum": 0
-				}
-			},
-			"Shape_f384a28b": {
-				"callId": {
-					"type": "string",
-					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attemptId": {
-					"type": "string",
-					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"agent": {
-					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
-				},
-				"owner": {
-					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"settledAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"target": {
-					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
-				},
-				"roundKind": {
-					"$ref": "#/components/schemas/Enum_413aacec"
-				},
-				"toolChoice": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"disposition": {
-					"$ref": "#/components/schemas/Union_f0839e51"
-				},
-				"stop": {
-					"$ref": "#/components/schemas/Union_4c094c81"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Union_178a3139"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"pricedBy": {
-					"enum": ["provider", "target-rates", "catalog", "free", "none"]
-				},
-				"stages": {
-					"$ref": "#/components/schemas/Union_00c11dd5"
-				},
-				"timing": {
-					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
-				},
-				"admission": {
-					"$ref": "#/components/schemas/Union_6872feba"
-				},
-				"transport": {
-					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_13d8e1ff"
-				},
-				"cache": {
-					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
-				},
-				"quota": {
-					"$ref": "#/components/schemas/Union_96fc0259"
-				},
-				"responseId": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
 				}
 			},
 			"Shape_f7ed5f9c": {
@@ -37556,7 +37893,8 @@
 													"require_tool",
 													"lock_tools",
 													"notify_operator",
-													"rewrite_tool_input"
+													"rewrite_tool_input",
+													"request_approval"
 												]
 											}
 										},
@@ -38025,6 +38363,26 @@
 					{
 						"type": "string",
 						"const": "remove"
+					}
+				]
+			},
+			"Union_0887f58f": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "image/png"
+					},
+					{
+						"type": "string",
+						"const": "image/jpeg"
+					},
+					{
+						"type": "string",
+						"const": "image/gif"
+					},
+					{
+						"type": "string",
+						"const": "image/webp"
 					}
 				]
 			},
@@ -40653,7 +41011,7 @@
 						]
 					},
 					"lastCalls": {
-						"$ref": "#/components/schemas/Array_e865bf53"
+						"$ref": "#/components/schemas/Array_3b4103d1"
 					},
 					"workerStops": {
 						"type": "array",

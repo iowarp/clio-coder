@@ -8,6 +8,8 @@ import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import { loadValidationContract, VALIDATION_CONTRACT_MARKDOWN_PATH } from "../../domains/safety/validation-contract.js";
 import type { ToolResult } from "../registry.js";
 import {
+	BROWSER_CATALOG_FIELDS,
+	type DeclaredBrowserCheck,
 	type DeclaredCheck,
 	type DeclaredCheckKind,
 	type DeclaredNumericCompare,
@@ -51,6 +53,7 @@ export interface AuthoringCheck {
 	numeric?: DeclaredNumericCompare;
 	perf?: DeclaredPerfBudget;
 	reproduce?: DeclaredReproduce;
+	browser?: DeclaredBrowserCheck;
 	provenance: VerifierProvenance;
 	state: "active" | "existing" | "proposed" | "manual";
 	/** The id this check has in the on-disk catalog, so a rename still edits its node in place. */
@@ -115,7 +118,7 @@ export type VerifierRevision =
 			changes: Partial<
 				Pick<
 					AuthoringCheck,
-					"description" | "command" | "cwd" | "timeoutMs" | "tags" | "kind" | "numeric" | "perf" | "reproduce"
+					"description" | "command" | "cwd" | "timeoutMs" | "tags" | "kind" | "numeric" | "perf" | "reproduce" | "browser"
 				>
 			>;
 	  }
@@ -193,6 +196,7 @@ function cloneCheck(check: AuthoringCheck): AuthoringCheck {
 		...(check.numeric !== undefined ? { numeric: structuredClone(check.numeric) } : {}),
 		...(check.perf !== undefined ? { perf: structuredClone(check.perf) } : {}),
 		...(check.reproduce !== undefined ? { reproduce: structuredClone(check.reproduce) } : {}),
+		...(check.browser !== undefined ? { browser: structuredClone(check.browser) } : {}),
 		provenance: { ...check.provenance },
 	};
 }
@@ -200,9 +204,9 @@ function cloneCheck(check: AuthoringCheck): AuthoringCheck {
 /** The kind fields of a declared or authored check, absent for a plain command check. */
 function kindFields(
 	check:
-		| Pick<DeclaredCheck, "kind" | "numeric" | "perf" | "reproduce">
-		| Pick<AuthoringCheck, "kind" | "numeric" | "perf" | "reproduce">,
-): Pick<AuthoringCheck, "kind" | "numeric" | "perf" | "reproduce"> {
+		| Pick<DeclaredCheck, "kind" | "numeric" | "perf" | "reproduce" | "browser">
+		| Pick<AuthoringCheck, "kind" | "numeric" | "perf" | "reproduce" | "browser">,
+): Pick<AuthoringCheck, "kind" | "numeric" | "perf" | "reproduce" | "browser"> {
 	const kind = check.kind ?? "command";
 	if (kind === "command") return {};
 	return {
@@ -210,6 +214,7 @@ function kindFields(
 		...(check.numeric !== undefined ? { numeric: structuredClone(check.numeric) } : {}),
 		...(check.perf !== undefined ? { perf: structuredClone(check.perf) } : {}),
 		...(check.reproduce !== undefined ? { reproduce: structuredClone(check.reproduce) } : {}),
+		...(check.browser !== undefined ? { browser: structuredClone(check.browser) } : {}),
 	};
 }
 
@@ -567,6 +572,12 @@ function catalogEntry(check: AuthoringCheck): Record<string, unknown> {
 		if (check.perf.tolerance !== undefined) entry.tolerance = { ...check.perf.tolerance };
 	}
 	if (check.reproduce !== undefined) Object.assign(entry, reproduceCatalogFields(check.reproduce));
+	if (check.browser !== undefined) {
+		entry.url = check.browser.url;
+		if (check.browser.ready !== undefined) entry.ready = check.browser.ready;
+		if (check.browser.steps !== undefined) entry.steps = check.browser.steps;
+		if (check.browser.assert !== undefined) entry.assert = [...check.browser.assert];
+	}
 	return entry;
 }
 
@@ -612,6 +623,7 @@ function serializeVerifierDraft(draft: VerifierDraft): string {
 			"baseline",
 			"provenance",
 			...REPRODUCE_CATALOG_FIELDS,
+			...BROWSER_CATALOG_FIELDS,
 		]) {
 			if (Object.hasOwn(current, field) && !Object.hasOwn(entry, field)) {
 				node.delete(field);
@@ -751,11 +763,13 @@ function reviseVerifierDraft(draft: VerifierDraft, revisions: ReadonlyArray<Veri
 				...(revision.changes.numeric !== undefined ? { numeric: revision.changes.numeric } : {}),
 				...(revision.changes.perf !== undefined ? { perf: revision.changes.perf } : {}),
 				...(revision.changes.reproduce !== undefined ? { reproduce: revision.changes.reproduce } : {}),
+				...(revision.changes.browser !== undefined ? { browser: revision.changes.browser } : {}),
 			});
 			delete check.kind;
 			delete check.numeric;
 			delete check.perf;
 			delete check.reproduce;
+			delete check.browser;
 			Object.assign(check, next);
 		}
 		diagnostics.push(`Edited check '${revision.id}' without changing its deterministic ID.`);

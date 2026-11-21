@@ -83,7 +83,7 @@ export function usageEstimatedCalls(quantity: UsageQuantity | null | undefined):
 /** `Clio estimated usage for 3 calls`, or null when no figure was estimated. Pairs with `usageLineFigure`. */
 export function usageEstimates(calls: number, data = "usage"): string | null {
 	if (calls <= 0) return null;
-	return `Clio estimated ${data} for ${count(calls)} ${calls === 1 ? "call" : "calls"}`;
+	return `CLIO Coder estimated ${data} for ${count(calls)} ${calls === 1 ? "call" : "calls"}`;
 }
 
 /** A figure that says nothing a reader can use: unmeasured, or a lower bound of zero. */

@@ -52,6 +52,12 @@ function fixture(t: { after(fn: () => void): void }) {
 	};
 	const save = (value: unknown) => writeFileSync(join(root, "install.json"), JSON.stringify(value));
 	save(record);
+	const receipts = join(root, "home/state/launches");
+	const receipt = (name: string, value: unknown) => {
+		mkdirSync(receipts, { recursive: true });
+		writeFileSync(join(receipts, name), typeof value === "string" ? value : JSON.stringify(value));
+		return join(receipts, name);
+	};
 	const run = (action: string, ...args: string[]) =>
 		spawnSync(process.execPath, [helper, action, root, ...args], {
 			encoding: "utf8",
@@ -64,7 +70,7 @@ function fixture(t: { after(fn: () => void): void }) {
 				XDG_DATA_HOME: join(root, "home/data"),
 			},
 		});
-	return { root, prefix, record, save, run };
+	return { root, prefix, record, save, run, receipts, receipt };
 }
 
 test("macOS process parsing stays bounded for padded commands with Unicode line separators", () => {
@@ -95,7 +101,7 @@ test("truncated and malformed install records give actionable errors without par
 		const result = f.run("launch");
 		assert.equal(result.status, 1);
 		assert.match(result.stderr, /Incomplete installer manifest/);
-		assert.equal(existsSync(join(f.root, ".active")), false);
+		assert.equal(existsSync(f.receipts), false);
 	}
 	writeFileSync(join(f.root, "install.json"), "{");
 	assert.match(f.run("launch").stderr, /Invalid installer manifest JSON/);
@@ -109,8 +115,7 @@ test("retention preserves current, rollback and live receipts while collecting o
 		running = f.prefix("0.5.8"),
 		refused = f.prefix("0.6.2-rc.1");
 	writeFileSync(join(refused, ".clio-coder-refused-candidate"), "");
-	mkdirSync(join(f.root, ".active"));
-	writeFileSync(join(f.root, ".active/live.json"), JSON.stringify({ pid: process.pid, current: running }));
+	f.receipt("live.json", { pid: process.pid, root: f.root, current: running });
 	const result = f.run("prune");
 	assert.equal(result.status, 0, result.stderr);
 	assert.equal(existsSync(f.record.current), true);
@@ -145,8 +150,7 @@ test("a proven keep set removes every unused version, runtime and helper at once
 	mkdirSync(join(f.root, "bin"));
 	writeFileSync(f.record.launcher, `#!/bin/sh\nexec '${launcherNode}/bin/node' '${named}' launch '${f.root}' "$@"\n`);
 	f.save({ ...f.record, node: join(currentNode, "bin/node") });
-	mkdirSync(join(f.root, ".active"));
-	writeFileSync(join(f.root, ".active/dead.json"), JSON.stringify({ pid: 99999999, host: hostname(), current: unused }));
+	const dead = f.receipt("dead.json", { pid: 99999999, host: hostname(), root: f.root, current: unused });
 	const holder = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", join(held, suffix)], { stdio: "ignore" });
 	t.after(() => holder.kill());
 	await new Promise((resolve) => setTimeout(resolve, 200));
@@ -169,8 +173,7 @@ test("a proven keep set removes every unused version, runtime and helper at once
 		result.stdout,
 		/removed 2 unused versions, 1 runtime, 1 launcher helper \(.+\); kept .*0\.6\.1 \(current\)/,
 	);
-	for (const gone of [duplicate, unused, oldNode, stale, join(f.root, ".active/dead.json")])
-		assert.equal(existsSync(gone), false, gone);
+	for (const gone of [duplicate, unused, oldNode, stale, dead]) assert.equal(existsSync(gone), false, gone);
 	for (const kept of [f.record.current, f.record.previous, held, currentNode, launcherNode, named])
 		assert.equal(existsSync(kept), true, kept);
 	assert.equal(existsSync(join(f.root, ".install-lock")), false);
@@ -431,8 +434,7 @@ test("one tracking phrase names a pin, its origin and how to release it, or what
 test("malformed liveness receipts withdraw the proof", { skip: process.platform !== "linux" }, (t) => {
 	const f = fixture(t),
 		unused = f.prefix("0.5.9");
-	mkdirSync(join(f.root, ".active"));
-	writeFileSync(join(f.root, ".active/broken.json"), "{");
+	f.receipt("broken.json", "{");
 	const result = f.run("prune", "--json");
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(JSON.parse(result.stdout).reason, /unreadable launch receipt/);
@@ -493,4 +495,41 @@ test("rollback keeps the capable desktop manager and cleanup while launching the
 	assert.equal(cleanup.status, 0, cleanup.stderr);
 	assert.equal(cleanup.stdout.trim(), manager);
 	assert.equal(f.run("launch", "--version").stdout.trim(), active);
+	assert.equal(existsSync(join(f.root, ".active")), false, "receipts never land in the install root");
+	// A contained shell mounts the state root read-only; the launch still runs without a receipt.
+	if (process.platform !== "win32" && process.getuid?.() !== 0) {
+		mkdirSync(f.receipts, { recursive: true });
+		chmodSync(f.receipts, 0o555);
+		try {
+			const readOnly = f.run("launch", "doctor");
+			assert.equal(readOnly.status, 0, readOnly.stderr);
+			assert.equal(readOnly.stdout.trim(), active);
+			assert.deepEqual(readdirSync(f.receipts), []);
+		} finally {
+			chmodSync(f.receipts, 0o755);
+		}
+	}
+});
+
+test("version and help probes create no state root while a real run keeps its receipt", (t) => {
+	const f = fixture(t);
+	mkdirSync(join(f.record.current, suffix, "dist/cli"), { recursive: true });
+	writeFileSync(
+		join(f.record.current, suffix, "dist/cli/index.js"),
+		`if (process.argv[2] === "doctor") console.log(require("node:fs").readdirSync(${JSON.stringify(f.receipts)}).length);`,
+	);
+	mkdirSync(join(f.root, "runtime"));
+	copyFileSync(process.execPath, f.record.node);
+	mkdirSync(join(f.root, "bin"));
+	writeFileSync(f.record.launcher, "owned launcher");
+	const state = join(f.root, "home/state");
+	for (const probe of ["version", "--version", "-v", "help", "--help", "-h"]) {
+		const result = f.run("launch", probe, "--build");
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(existsSync(state), false, `${probe} created the state root`);
+	}
+	const real = f.run("launch", "doctor");
+	assert.equal(real.status, 0, real.stderr);
+	assert.equal(real.stdout.trim(), "1", "a real run is covered by its receipt while it runs");
+	assert.deepEqual(readdirSync(f.receipts), [], "the receipt goes when the launch exits");
 });

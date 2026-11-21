@@ -249,3 +249,53 @@ it("forwards a finished run's token facts with their wording, never an unknown r
 	peer.transport.close();
 	strictEqual(await served, 0);
 });
+
+it("sends a runtime notice as session info once per key, with its level (M-32)", async () => {
+	const { bus, peer, served, sessionId } = await openSession([]);
+	const notice = (targetId: string, message: string) =>
+		bus.emit("runtime.notice_raised", {
+			kind: "degraded",
+			level: "warning",
+			targetId,
+			runtimeId: "llamacpp",
+			model: "m",
+			message,
+		} as never);
+	notice("local", "'m' on 'local' is running far below GPU speed.");
+	notice("local", "'m' on 'local' is still slow.");
+	notice("other", "'m' on 'other' is running far below GPU speed.");
+	bus.emit("runtime.notice_raised", { kind: "degraded", level: "warning" } as never);
+	const updates = peer.notifications
+		.filter((entry) => entry.method === "session/update")
+		.map((entry) => entry.params as { sessionId: string; update: Record<string, unknown> });
+	deepStrictEqual(updates, [
+		{
+			sessionId,
+			update: {
+				sessionUpdate: "session_info_update",
+				_meta: {
+					"clio-coder/notice": {
+						level: "warning",
+						text: "'m' on 'local' is running far below GPU speed.",
+						key: "runtime-notice:degraded:local",
+					},
+				},
+			},
+		},
+		{
+			sessionId,
+			update: {
+				sessionUpdate: "session_info_update",
+				_meta: {
+					"clio-coder/notice": {
+						level: "warning",
+						text: "'m' on 'other' is running far below GPU speed.",
+						key: "runtime-notice:degraded:other",
+					},
+				},
+			},
+		},
+	]);
+	peer.transport.close();
+	strictEqual(await served, 0);
+});

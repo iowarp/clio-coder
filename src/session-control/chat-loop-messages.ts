@@ -334,17 +334,30 @@ export type TurnEnding =
 	| { kind: "quiet"; toolsRan: number }
 	| { kind: "call_not_run"; toolsRan: number; writtenTools: ReadonlyArray<string> };
 
+/**
+ * The notice key of the line saying the requested thinking level cannot apply as-is on this route. It is host
+ * information about the route, not reply text, so a protocol surface routes it off the reply by this tag.
+ */
+export const THINKING_CLAMP_NOTICE_KEY = "runtime.thinking-clamp";
+
+/**
+ * The notice key of an informational host status line: what the route, the model's residency, the loaded skill
+ * surface, the image sidecar or the prompt's project instructions are doing. It reports, asks nothing of the operator
+ * and names no failure, so a protocol surface routes it off the reply by this tag.
+ */
+export const HOST_STATUS_NOTICE_KEY = "host.status";
+
 /** The notice key the status surface reads as the one re-prompt for a written-out tool call starting. */
 export const TOOL_MARKUP_REPROMPT_NOTICE_KEY = "turn.tool-markup-reprompt";
 export const TOOL_MARKUP_REPROMPT_NOTICE =
-	"[CLIO Coder] The model wrote its tool call as text, so it did not run. Clio asked it to make the call properly.";
+	"[CLIO Coder] The model wrote its tool call as text, so it did not run. CLIO Coder asked it to make the call properly.";
 export const TOOL_MARKUP_REPROMPT =
 	"<system-reminder>Your last reply wrote a tool call as text, so it did not run and nothing happened. Calls written as text never run. If the work still needs a tool, make the call through the tool interface now. Otherwise answer in plain prose and say plainly what was not done.</system-reminder>";
 
 /** The notice key for the re-prompt after a reply that held neither an answer nor a tool call. */
 export const EMPTY_ANSWER_REPROMPT_NOTICE_KEY = "turn.empty-answer-reprompt";
 export const EMPTY_ANSWER_REPROMPT_NOTICE =
-	"[CLIO Coder] The model ended its reply with no answer and no tool call. Clio asked it to continue.";
+	"[CLIO Coder] The model ended its reply with no answer and no tool call. CLIO Coder asked it to continue.";
 export const EMPTY_ANSWER_REPROMPT =
 	"<system-reminder>Your last reply was empty: it held no answer and no tool call, so nothing happened and the operator saw nothing. Act now: if the work still needs a tool, make the call through the tool interface; otherwise write your answer in plain prose and say plainly what was not done.</system-reminder>";
 

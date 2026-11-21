@@ -177,6 +177,7 @@ import {
 	detectTerminalFailureFromState,
 	explainInterruptedAssistant,
 	extractText,
+	HOST_STATUS_NOTICE_KEY,
 	isOperatorCancelReason,
 	isThinkingOnlyLengthStop,
 	nameMissingCredentialRemedy,
@@ -437,6 +438,8 @@ export type ToolApprovalStateEvent =
 			 * grant or the judge's allow, and its body runs from here.
 			 */
 			state: "judging" | "resumed";
+			/** On `resumed`: who allowed it when that was not the operator at this terminal, as `attach c2 (apr)`. */
+			grantedBy?: string;
 	  };
 
 export type ChatLoopEvent = (
@@ -1475,7 +1478,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						? `[CLIO Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
 						: `[CLIO Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
 				"info",
-				undefined,
+				HOST_STATUS_NOTICE_KEY,
 				change !== null && change.state !== "cleared" ? change : loaded,
 			);
 		}
@@ -1483,11 +1486,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			emitNotice(
 				`[CLIO Coder] Skill tool surface cleared: ${previous}. The full tool surface is back.`,
 				"info",
-				undefined,
+				HOST_STATUS_NOTICE_KEY,
 				change,
 			);
 		} else if (change?.state === "replaced" && activated.length === 0) {
-			emitNotice(`[CLIO Coder] Skill tool surface replaced: ${previous} by ${current}.`, "info", undefined, change);
+			emitNotice(
+				`[CLIO Coder] Skill tool surface replaced: ${previous} by ${current}.`,
+				"info",
+				HOST_STATUS_NOTICE_KEY,
+				change,
+			);
 		}
 	};
 
@@ -2513,6 +2521,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			api.getSessionId() === sessionId &&
 			!state.streaming &&
 			!turnActive;
+		if (!current()) return;
+		// M-26: the probe a submit awaits restores the session's thinking level and served window, so the budget priced
+		// here, the pre-warm and the send compile one prompt. It joins the probe the resume starts, never a second one.
+		await turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
 		if (!current()) return;
 		let runtime: AgentRuntime | null;
 		try {
@@ -3575,7 +3587,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const sidecar = deps.visionSidecar;
 						const controller = owner;
 						pendingVisionSidecar = controller;
-						emitNotice(`[CLIO Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
+						emitNotice(
+							`[CLIO Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`,
+							"info",
+							HOST_STATUS_NOTICE_KEY,
+						);
 						try {
 							const question = operatorText.trim() || "Describe the attached image and any visible text.";
 							markPreparationStep("images");
@@ -3583,7 +3599,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							if (controller.signal.aborted || !admissionCurrent()) return;
 							sidecarObservation = visionObservationText(analysis);
 							text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
-							emitNotice(`[CLIO Coder] Image processed with ${analysis.model}.`);
+							emitNotice(`[CLIO Coder] Image processed with ${analysis.model}.`, "info", HOST_STATUS_NOTICE_KEY);
 						} catch (err) {
 							if (controller.signal.aborted) {
 								emitAdmissionNotice("[CLIO Coder] Image processing cancelled.", "vision-sidecar-cancelled", "info");

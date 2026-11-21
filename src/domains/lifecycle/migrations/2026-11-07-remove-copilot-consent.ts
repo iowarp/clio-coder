@@ -17,7 +17,7 @@ const migration: Migration = {
 		const stat = lstatSync(path, { throwIfNoEntry: false });
 		if (stat === undefined) return report;
 		if (!stat.isFile()) {
-			report.attention.push(`${path} is not a regular file, so it was left in place; Clio no longer reads it.`);
+			report.attention.push(`${path} is not a regular file, so it was left in place; CLIO Coder no longer reads it.`);
 			return report;
 		}
 		try {
@@ -25,7 +25,7 @@ const migration: Migration = {
 		} catch (error) {
 			// The file is inert, so a failed removal is reported and never stops the upgrade.
 			report.attention.push(
-				`${path} could not be removed (${error instanceof Error ? error.message : String(error)}); Clio no longer reads it, so it can be deleted by hand.`,
+				`${path} could not be removed (${error instanceof Error ? error.message : String(error)}); CLIO Coder no longer reads it, so it can be deleted by hand.`,
 			);
 			return report;
 		}

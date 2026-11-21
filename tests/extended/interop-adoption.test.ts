@@ -1,13 +1,22 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { applyInteropAdoption, planInteropAdoption } from "../../src/domains/interop/adopt.js";
+import { clioConfigDir } from "../../src/core/xdg.js";
+import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
+import { loadMcpServerConfig } from "../../src/domains/gateway/mcp/index.js";
+import {
+	applyInteropAdoption,
+	planInteropAdoption,
+	renderInteropAdoptionPlan,
+} from "../../src/domains/interop/adopt.js";
 import { detectInteropAgents } from "../../src/domains/interop/detect.js";
 import { discoverInteropInventory } from "../../src/domains/interop/inventory.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
 import type { InteropAgentId, InteropInventory } from "../../src/domains/interop/types.js";
+import { loadUserHooks } from "../../src/domains/middleware/hooks.js";
+import { readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import {
 	clearPluginSnapshots,
 	disablePlugin,
@@ -240,7 +249,7 @@ describe("interop discovery and adoption", () => {
 		strictEqual(plan.entries[0]?.outcomes?.[0]?.status, "converted");
 		deepStrictEqual(applyInteropAdoption(plan, true).installed, ["example"]);
 		const record = readPluginInstallRecord("example", { cwd, scope: "user" });
-		strictEqual(record?.trust, "foreign");
+		strictEqual(record?.trust, "trusted", "a plugin from the operator's own home installs trusted");
 		deepStrictEqual(record?.origin, {
 			kind: "interop",
 			host: "claude-code",
@@ -279,6 +288,93 @@ describe("interop discovery and adoption", () => {
 		strictEqual(plan.entries.length, 2);
 		ok(plan.entries.every((entry) => entry.action === "skip"));
 	});
+	it("maps stdio MCP servers and user instructions into Clio config and names what it does not migrate", () => {
+		file(
+			".claude.json",
+			JSON.stringify({
+				mcpServers: {
+					Files: { type: "stdio", command: "node", args: ["srv.js"], env: { TOKEN: "never-show-this" } },
+					remote: { type: "http", url: "https://example.invalid/mcp" },
+					expand: { command: "node", env: { KEY: ["$", "{HOME}"].join("") } },
+				},
+			}),
+		);
+		file(
+			".claude/settings.json",
+			JSON.stringify({
+				hooks: {
+					PreToolUse: [
+						{ matcher: "Bash", hooks: [{ type: "command", command: "guard.sh", timeout: 3 }] },
+						{ matcher: "Edit.*", hooks: [{ type: "command", command: "never-ported" }] },
+					],
+					Notification: [{ hooks: [{ type: "command", command: "notify" }] }],
+				},
+			}),
+		);
+		file(".claude/CLAUDE.md", "Prefer small diffs.\n");
+		file(".codex/config.toml", '[mcp_servers.docs]\ncommand = "uvx"\nargs = ["docs-mcp"]\n');
+		const plan = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
+		const entry = (kind: string, name: string) =>
+			plan.entries.find((item) => item.item.kind === kind && item.item.name === name);
+		strictEqual(entry("mcp", "Files")?.action, "install");
+		strictEqual(entry("mcp", "Files")?.id, "files");
+		ok(entry("mcp", "remote")?.reason.includes("stdio servers only"));
+		ok(entry("mcp", "expand")?.reason.includes("expands environment variables"));
+		const pre = entry("hook", "PreToolUse");
+		strictEqual(pre?.action, "install", pre?.reason);
+		ok(pre?.unsupported?.some((note) => note.includes("is a pattern")));
+		ok(entry("hook", "Notification")?.reason.includes("no hook point for Notification"));
+		strictEqual(entry("instructions", "CLAUDE.md")?.action, "install");
+		ok(renderInteropAdoptionPlan(plan).includes("  | Prefer small diffs."));
+		ok(!renderInteropAdoptionPlan(plan).includes("never-show-this"));
+		deepStrictEqual(applyInteropAdoption(plan, true), {
+			installed: ["mcp:files", "instructions:CLAUDE.md", "hook:PreToolUse"],
+			diagnostics: [],
+		});
+		const context = renderPromptContext(cwd).text;
+		ok(
+			context.includes("<user-context") && context.includes("Prefer small diffs."),
+			"the user handbook reaches the prompt",
+		);
+		const codex = planInteropAdoption({ host: "codex", inventory: inventory("codex"), cwd });
+		deepStrictEqual(applyInteropAdoption(codex, true).installed, ["mcp:docs"]);
+		const configFile = path.join(clioConfigDir(), "mcp.yaml");
+		strictEqual(statSync(configFile).mode & 0o777, 0o600);
+		const loaded = loadMcpServerConfig({ cwd });
+		deepStrictEqual(
+			loaded.servers.map((server) => [server.id, server.command, server.args, server.env]),
+			[
+				["files", "node", ["srv.js"], { TOKEN: "never-show-this" }],
+				["docs", "uvx", ["docs-mcp"], {}],
+			],
+		);
+		const again = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
+		ok(again.entries.find((item) => item.item.name === "Files")?.reason.startsWith("Already declared"));
+		ok(again.entries.find((item) => item.item.name === "CLAUDE.md")?.reason.startsWith("Already adopted"));
+		const handbook = readFileSync(path.join(clioConfigDir(), "CLIO-CODER.md"), "utf8");
+		ok(handbook.includes("Prefer small diffs.") && handbook.includes("<!-- clio-coder:end claude-code CLAUDE.md -->"));
+		const hooks = loadUserHooks(readHookSources({ cwd }).batches, { workspaceRoot: cwd });
+		deepStrictEqual(
+			hooks.hooks.map((hook) => [hook.id, hook.source.origin, hook.on, hook.tools, hook.spec]),
+			[
+				[
+					"claude-code-pre-tool-use-0-0",
+					"user",
+					"before_tool",
+					["bash"],
+					{
+						kind: "command",
+						argv: ["/bin/sh", "-c", "guard.sh"],
+						cwd,
+						timeoutMs: 3000,
+						as: "none",
+						eventName: "PreToolUse",
+						dialect: "claude-code",
+					},
+				],
+			],
+		);
+	});
 	it("requires approval, keeps origins and pins, skips duplicates and does not change the source", () => {
 		const source = file(".claude/skills/example/SKILL.md", skill);
 		const plan = planInteropAdoption({ host: "claude-code", inventory: inventory("claude-code"), cwd });
@@ -291,7 +387,7 @@ describe("interop discovery and adoption", () => {
 		strictEqual(readFileSync(source, "utf8"), skill);
 		const installed = listInstalledPlugins(cwd, { all: true })[0];
 		ok(installed);
-		strictEqual(installed.trust, "foreign");
+		strictEqual(installed.trust, "trusted", "a skill from the operator's own home installs trusted");
 		ok(installed.provenance?.contentDigest);
 		const record = readPluginInstallRecord(installed.id, { scope: "user", cwd });
 		deepStrictEqual(record?.origin, { kind: "interop", host: "claude-code", source });
@@ -301,7 +397,7 @@ describe("interop discovery and adoption", () => {
 			(item) => item.source === `plugin:${installed.id}` || item.filePath.startsWith(installed.rootPath),
 		);
 		ok(loaded);
-		strictEqual(loaded.trusted, false);
+		strictEqual(loaded.trusted, true, "the adopted skill is visible to the model without a trust setting");
 	});
 
 	it("skips a skill already installed in Clio's native skill root", () => {
@@ -461,7 +557,7 @@ describe("interop discovery and adoption", () => {
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
 		// The Claude copy keeps the retired fleets layout; Clio does not adopt it and points to the canonical WTF-P install.
 		strictEqual(plan.entries[0]?.action, "skip");
-		ok(plan.entries[0]?.reason.includes("built for an older Clio"), plan.entries[0]?.reason);
+		ok(plan.entries[0]?.reason.includes("built for an older CLIO Coder"), plan.entries[0]?.reason);
 		ok(plan.entries[0]?.reason.includes("wtf-p install clio"), plan.entries[0]?.reason);
 		deepStrictEqual(applyInteropAdoption(plan, true).installed, []);
 		strictEqual(listInstalledPlugins(cwd, { all: true }).length, 0);

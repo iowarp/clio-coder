@@ -222,15 +222,19 @@ function tryAcquire(lockPath: string, note?: string, foreignExpiresMs?: number):
 
 /** The acquisition budget ran out while another holder kept the lock. Callers that refuse on it can tell it from a failure. */
 export class StateFileLockTimeoutError extends Error {
-	constructor(message: string) {
+	/** The acquisition budget that ran out. */
+	readonly timeoutMs: number;
+	constructor(message: string, timeoutMs: number) {
 		super(message);
 		this.name = "StateFileLockTimeoutError";
+		this.timeoutMs = timeoutMs;
 	}
 }
 
 function timeoutError(lockPath: string, timeoutMs: number): Error {
 	return new StateFileLockTimeoutError(
 		`timed out after ${timeoutMs}ms waiting for ${lockPath} (owner pid=${readLockOwner(lockPath)?.pid ?? "?"}); delete it if no other clio-coder process is running`,
+		timeoutMs,
 	);
 }
 

@@ -48,6 +48,7 @@ export const RUNTIME_NOTICE_KINDS = [
 	"degraded",
 	"route-fallback",
 	"memory-flow-blocked",
+	"cache-lane-fallback",
 ] as const;
 
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
@@ -65,7 +66,8 @@ export type RuntimeNoticeKind = (typeof RUNTIME_NOTICE_KINDS)[number];
  * src/engine/apis/degraded-inference.ts), which is how a silent spill to CPU
  * becomes visible while it is happening. `route-fallback` reports a background
  * step, such as a memory step, served by the chat target because its own
- * route was unavailable.
+ * route was unavailable. `cache-lane-fallback` reports a main conversation routed on this process's own prompt cache
+ * lane because the cross-process lane store could not take its claim (src/engine/apis/cache-family.ts).
  */
 export interface RuntimeNoticePayload {
 	kind: RuntimeNoticeKind;
@@ -522,16 +524,18 @@ export interface ConfigSessionChangePayload extends ConfigChangePayload {
  * change is rejected at runtime and the previous good snapshot stays active.
  * Emitted on transitions only, like {@link ContextWarningPayload}: `message`
  * carries one already-formatted operator line while the failure stands, and
- * `null` once a later reload succeeds and the prior failure clears.
+ * `null` once a later reload succeeds and the prior failure clears. A failure
+ * also carries `headline` (the failing key first, for a clamped footer), the
+ * settings `file` and the failing `keys`.
  *
  * The message is pre-formatted by `formatSettingsFailure` (core/config.ts)
  * because the config domain must not import TUI code and the renderer must
  * not learn the settings schema. One line, no stack, no error dump: this
  * event exists so nothing writes an inspected Error over the live frame.
  */
-export interface ConfigReloadFailedPayload {
-	message: string | null;
-}
+export type ConfigReloadFailedPayload =
+	| { message: string; headline: string; file: string; keys: string[] }
+	| { message: null };
 
 // ---------------------------------------------------------------------------
 // Safety and permissions

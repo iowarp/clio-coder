@@ -108,7 +108,7 @@ function choosePresentation(input: MergeCardInput): DecisionPresentation {
 const CONFIRM_PRESENTATION = mergeCardPresentation(
 	"Discard task branch?",
 	"Delete removes the task branch and its worktree. Back returns to the merge choice.",
-	"Reversible: no. The deleted branch is not recoverable from Clio.",
+	"Reversible: no. The deleted branch is not recoverable from CLIO Coder.",
 );
 
 function offersMerge(input: MergeCardInput): boolean {

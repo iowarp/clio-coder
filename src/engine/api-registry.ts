@@ -28,6 +28,7 @@ import { telemetryContext } from "../core/telemetry/context.js";
 import { telemetryCallInContext } from "../core/telemetry/producer.js";
 import { withAnthropicDiagnostics } from "./apis/anthropic-diagnostics.js";
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
+import { withMainCacheRouting } from "./apis/cache-family.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
 import { withCodexTurnState } from "./apis/codex-turn-state.js";
@@ -131,7 +132,7 @@ function resolved(api: Api): EngineRegisteredApiProvider {
 function refuseRetiredCopilotProvider(model: Model<Api>): void {
 	if (model.provider === "github-copilot") {
 		throw new Error(
-			"Clio does not stream through Pi's github-copilot provider; use a target on the copilot-sdk runtime.",
+			"CLIO Coder does not stream through Pi's github-copilot provider; use a target on the copilot-sdk runtime.",
 		);
 	}
 }
@@ -222,9 +223,11 @@ export function engineMainStreamSimple(
 function scopedEngineStreamSimple(
 	model: Model<Api>,
 	context: Context,
-	options: SimpleStreamOptions | undefined,
+	requested: SimpleStreamOptions | undefined,
 	scope: ProviderCallScope,
 ): AssistantMessageEventStream {
+	// The session's own turns route to the cache of their pinned head; workers and side calls bring their own id (M-11).
+	const options = scope === "main" ? withMainCacheRouting(model, context, requested) : requested;
 	// A call whose attempt context this request runs in is timed here: side calls through their call scope and main
 	// attempts through turn-runtime. Main and worker attempts also mark their own stages; each keeps its first (#434).
 	const call = telemetryCallInContext();

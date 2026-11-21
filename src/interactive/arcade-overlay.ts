@@ -3,6 +3,7 @@
  * it draws over the terminal, owns the keys while open, and leaves nothing
  * behind when closed: no timer, no session entry, no telemetry.
  */
+import { isArcadeTrigger, mayBecomeArcadeTrigger } from "../domains/session/easter-eggs.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey } from "../engine/tui.js";
 import {
@@ -16,6 +17,42 @@ import {
 import { ARCADE_PALETTE } from "./theme/arcade-palette.js";
 
 const TICK_MS = 140;
+
+/** Said when the game steps aside for a card, and again when its phrase is typed at that card. */
+export const ARCADE_PAUSED_NOTICE = "Ms. Clio paused: answer CLIO Coder, then type the phrase to play on";
+
+function isTypedText(data: string): boolean {
+	return data.length > 0 && [...data].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127);
+}
+
+/**
+ * A card's key screen for a paused game: while `active` holds, keys that spell the phrase are held back, so the card
+ * never acts on them (its `n` is a key of its own, and Enter records). A key that leaves the phrase lets the held
+ * ones through ahead of it, in order; Enter on the whole phrase drops them and calls `onPhrase` instead.
+ */
+export function createArcadePhraseScreen(options: {
+	active: () => boolean;
+	onPhrase: () => void;
+}): (data: string) => readonly string[] {
+	let held: string[] = [];
+	return (data) => {
+		const typed = held.join("");
+		if (options.active()) {
+			if (held.length > 0 && matchesKey(data, "enter") && isArcadeTrigger(typed)) {
+				held = [];
+				options.onPhrase();
+				return [];
+			}
+			if (isTypedText(data) && mayBecomeArcadeTrigger(typed + data)) {
+				held.push(data);
+				return [];
+			}
+		}
+		const passed = [...held, data];
+		held = [];
+		return passed;
+	};
+}
 const { bg: BG, wall: WALL, teal: TEAL, orange: ORANGE, ghost: GHOST, bold: BOLD, reset: RESET } = ARCADE_PALETTE;
 
 /** Columns and rows the maze needs: two columns a cell, plus a title and a key line. */

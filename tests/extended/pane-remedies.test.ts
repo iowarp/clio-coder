@@ -14,7 +14,7 @@ describe("contracts/pane refusal remedies", () => {
 		const outside = await detectMux({ enabled: "auto", env: {} });
 		strictEqual(outside.detection.mode, "none");
 		strictEqual(outside.detection.refused, false);
-		strictEqual(outside.detection.reason, "HERDR_ENV is not 1, so Clio is not running inside a pane host");
+		strictEqual(outside.detection.reason, "HERDR_ENV is not 1, so CLIO Coder is not running inside a pane host");
 		strictEqual(outside.client, null);
 	});
 

@@ -2255,6 +2255,7 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 			requestBytes: q("requestBytes"),
 			sessionPinnedToSse: textFact(settled?.transport.sessionPinnedToSse ?? unobserved),
 			connectionReused: textFact(settled?.transport.connectionReused ?? unobserved),
+			session: textFact(settled?.transport.session ?? unobserved),
 			websocketFailures: q("websocketFailures"),
 			sseFallbacks: q("sseFallbacks"),
 			pinReason: settled?.transport.pinReason ?? null,

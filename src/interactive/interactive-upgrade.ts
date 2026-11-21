@@ -1,6 +1,7 @@
 import { resolveClioDirs } from "../core/xdg.js";
 import { inspectInstallation } from "../domains/lifecycle/install-method.js";
 import { describeTracking } from "../domains/lifecycle/install-plan.js";
+import { APPLY_MIGRATIONS_COMMAND } from "../domains/lifecycle/migrations/registry-ids.js";
 import {
 	type DeferredUpgrade,
 	planSelfUpgrade,
@@ -88,7 +89,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				if (plan.status === "manual") {
 					const postInstall =
 						plan.installation.kind === "pnpm" || plan.installation.kind === "bun"
-							? "\nThen run: clio-coder upgrade --post-install"
+							? `\nThen run: ${APPLY_MIGRATIONS_COMMAND}`
 							: "";
 					const lead =
 						plan.installation.kind === "source"
@@ -99,7 +100,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					// One transcript row per line: a row holds a single line, and the source
 					// install's command is three, so one row joins `cd` and `git` into one.
 					for (const line of plan.command.split("\n")) deps.record?.("info", line);
-					if (postInstall) deps.record?.("info", "clio-coder upgrade --post-install");
+					if (postInstall) deps.record?.("info", APPLY_MIGRATIONS_COMMAND);
 					return;
 				}
 				if (plan.status === "pinned") {
@@ -112,7 +113,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				if (plan.status === "unavailable") {
 					deps.notify(
 						"warning",
-						"Clio could not reach the release registry. Nothing changed; /upgrade can be retried later.",
+						"CLIO Coder could not reach the release registry. Nothing changed; /upgrade can be retried later.",
 						"lifecycle:upgrade-unavailable",
 					);
 					return;
@@ -187,7 +188,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 							`Upgrade CLIO Coder ${plan.current} → ${plan.available}? ` +
 							replacement +
 							"Settings, credentials, memory, evidence, and session history stay in their current directories. " +
-							"After replacement Clio runs pending lifecycle checks, then asks you to restart.",
+							"After replacement CLIO Coder runs pending lifecycle checks, then asks you to restart.",
 						options: [
 							{ label: UPGRADE_NOW, description: "Replace the package and run migrations plus doctor checks." },
 							{ label: NOT_NOW, description: "Keep working; leave the quiet footer reminder in place." },

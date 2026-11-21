@@ -44,7 +44,7 @@ import {
 } from "./config.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 import { clioProjectRoot } from "./project-root.js";
-import { noteProjectTargets } from "./project-target-urls.js";
+import { isProjectKeyVariableName, noteProjectTargets } from "./project-target-urls.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import type { SettingsDocumentRead } from "./settings-document.js";
 import { readSettingsDocument } from "./settings-document.js";
@@ -223,6 +223,11 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
 	if (!isRecord(value)) return value;
 	const out: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(value)) {
+		if (key === "auth" && /^targets\[\d+\]$/u.test(path) && isRecord(child)) {
+			const kept = projectTargetKeyName(child, origin, `${path}.auth`, issues);
+			if (kept !== undefined) out[key] = kept;
+			continue;
+		}
 		if (CREDENTIAL_KEYS.has(key.toLowerCase())) {
 			issues.push({
 				origin,
@@ -234,6 +239,35 @@ function stripCredentials(value: unknown, origin: SettingsOrigin, path: string, 
 		out[key] = stripCredentials(child, origin, path ? `${path}.${key}` : key, issues);
 	}
 	return out;
+}
+
+/**
+ * A project target may name the variable that holds its key (`auth.apiKeyEnvVar`), never a key: the name is what
+ * the trust card shows ("sends $NAME to <url>"), and auth resolution sends that variable alone to the project's
+ * URL. Every other auth key, and a value that is not a variable name, is dropped.
+ */
+function projectTargetKeyName(
+	auth: Record<string, unknown>,
+	origin: SettingsOrigin,
+	path: string,
+	issues: SettingsLayerIssue[],
+): { apiKeyEnvVar: string } | undefined {
+	let kept: { apiKeyEnvVar: string } | undefined;
+	for (const [key, child] of Object.entries(auth)) {
+		if (key === "apiKeyEnvVar" && typeof child === "string" && isProjectKeyVariableName(child)) {
+			kept = { apiKeyEnvVar: child };
+			continue;
+		}
+		issues.push({
+			origin,
+			path: `${path}.${key}`,
+			message:
+				key === "apiKeyEnvVar"
+					? "a project target's auth.apiKeyEnvVar must be an environment variable name; key ignored"
+					: "credentials are not allowed in project settings; key ignored",
+		});
+	}
+	return kept;
 }
 
 /** The operator's own level, which a project layer may tighten but never loosen. */
@@ -761,11 +795,22 @@ interface PreparedLayers {
 	local: RawLayer;
 }
 
+/** No project: the user layer stands alone, as for a surface with no workspace open. */
+const NO_PROJECT_LAYERS: PreparedLayers = {
+	projectFile: "",
+	localFile: "",
+	projectRaw: { origin: "project", path: "", blob: undefined },
+	localRaw: { origin: "project.local", path: "", blob: undefined },
+	project: { origin: "project", path: "", blob: undefined },
+	local: { origin: "project.local", path: "", blob: undefined },
+};
+
 function prepareProjectLayers(
-	cwd: string,
+	cwd: string | null,
 	issues: SettingsLayerIssue[],
 	userBlob: Record<string, unknown> | undefined,
 ): PreparedLayers {
+	if (cwd === null) return NO_PROJECT_LAYERS;
 	const operatorLevel = userAutonomy(userBlob);
 	const root = clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml");
 	const projectFile = join(root, ".clio-coder", "settings.yaml");
@@ -932,9 +977,10 @@ function validateLayerStack(
  * Read and layer settings for `cwd`, returning the validated effective settings
  * plus per-leaf source attribution. Never throws: validation issues and layer
  * problems are returned, and the effective settings always validate (invalid
- * merges fall back to the schema defaults for the offending keys).
+ * merges fall back to the schema defaults for the offending keys). A null `cwd`
+ * reads the user layer alone, with no project lookup and no project layers.
  */
-export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
+export function readLayeredSettings(cwd: string | null, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
 	const issues: SettingsLayerIssue[] = [];
 	const userFile = options.userPath ?? settingsPath();
 	const user = readRawLayer("user", userFile, issues);
@@ -957,8 +1003,16 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 		layers: [
 			{ origin: "built-in", path: "(defaults)", present: true },
 			{ origin: "user", path: userFile, present: user.blob !== undefined },
-			{ origin: "project", path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
-			{ origin: "project.local", path: prepared.localFile, present: prepared.localRaw.blob !== undefined },
+			...(cwd === null
+				? []
+				: [
+						{ origin: "project" as const, path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
+						{
+							origin: "project.local" as const,
+							path: prepared.localFile,
+							present: prepared.localRaw.blob !== undefined,
+						},
+					]),
 		],
 		[STRICT_USER_ISSUES]: strictUserIssues,
 	} as InternalLayeredSettings;
@@ -990,9 +1044,9 @@ export function readStrictLayeredSettings(cwd: string, options: ReadLayeredSetti
  * user layer. The candidate user document is re-layered with the same project
  * files before it is written. This preserves references to project-only
  * targets while refusing a mutation that a higher-precedence project leaf
- * would silently override.
+ * would silently override. A null `cwd` re-layers with no project at all.
  */
-export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
+export function updateLayeredSettings(cwd: string | null, mutate: SettingsMutator): ClioSettings {
 	let committed: ClioSettings | null = null;
 	updateSavedSettingsDocument((saved) => {
 		const userValidation = validateSettings(saved);

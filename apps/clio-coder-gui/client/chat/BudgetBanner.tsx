@@ -4,6 +4,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import type { BudgetBlock } from "../../contracts/session-telemetry.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
+import { settingsScopeInput } from "../pages/settings-control-model.js";
 import { budgetBannerView } from "./budget-model.js";
 import { ConversationBanner } from "./SessionStates.js";
 
@@ -43,9 +44,9 @@ function BudgetStop({
 	const queries = useQueryClient();
 	const raise = useMutation({
 		mutationFn: (body: { path: string; value: string }) =>
-			client.call(routes.writeSetting, { params: { id: workspaceId }, query: {}, body }),
+			client.call(routes.writeSetting, { ...settingsScopeInput(workspaceId), body }),
 		onSuccess: () => {
-			for (const stale of ["settings-controls", "workspace-settings", "config-graph"])
+			for (const stale of ["settings-controls", "settings-report", "config-graph"])
 				void queries.invalidateQueries({ queryKey: [stale] });
 		},
 	});

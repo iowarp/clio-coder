@@ -139,6 +139,14 @@ export function sentence(text: string): string {
  */
 export type SettingsScopeId = "models" | "safety" | "context" | "advanced";
 
+/**
+ * The request scope of every settings read and write: the named workspace's layers, or with none open the
+ * user layer alone, which is what each write changes either way.
+ */
+export function settingsScopeInput(workspaceId: string | null) {
+	return { params: {}, query: workspaceId ? { workspace: workspaceId } : {}, body: {} };
+}
+
 /** The Models page: every control of the shared Models area, plus the default model delegated work uses. */
 const MODEL_GROUPS: ReadonlySet<string> = new Set(["workers/Default worker"]);
 const keyOf = (control: Pick<SettingControl, "section" | "group">) => `${control.section}/${control.group}`;

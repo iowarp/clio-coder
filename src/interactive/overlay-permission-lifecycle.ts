@@ -137,6 +137,14 @@ export interface OverlayPermissionLifecycleDeps {
 	unattendedTimers?: UnattendedTimers;
 }
 
+/** Who answered a card from somewhere other than this terminal's keys: the journal's id and the row's words for it. */
+export interface ApprovalAnswerer {
+	/** `approval.resolved.decidedBy`, such as `attach:c2`. */
+	decidedBy: string;
+	/** How the call's row names them, as their host notice does: `attach c2 (apr)`. */
+	name: string;
+}
+
 export interface OverlayPermissionLifecycle {
 	confirm(): void;
 	/** Whether the card on screen offers its sandbox escape's session option (M-7). */
@@ -162,10 +170,11 @@ export interface OverlayPermissionLifecycle {
 	/** The card on screen now, main or worker, or null. */
 	cardOnScreen(): ApprovalRequestView | null;
 	/**
-	 * Answer the card on screen when it is `requestId`, as Enter or Escape would, recording `decidedBy` as who
-	 * decided. False, and nothing changes, when that request is not the card on screen.
+	 * Answer the card on screen when it is `requestId`, as Enter or Escape would, recording `by.decidedBy` on the
+	 * journal and naming `by.name` on the call's row. False, and nothing changes, when that request is not the card on
+	 * screen.
 	 */
-	answerOnScreen(requestId: string, decision: "approve" | "deny", decidedBy: string): boolean;
+	answerOnScreen(requestId: string, decision: "approve" | "deny", by: ApprovalAnswerer): boolean;
 	/** Called with the card's view each time a card takes the screen. */
 	onCardShown(listener: (view: ApprovalRequestView) => void): () => void;
 	onPermissionOverlayClosed(): void;
@@ -318,7 +327,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let pendingWorker: WorkerEscalationEntry | null = null;
 	let pendingWorkerView: ApprovalRequestView | null = null;
 	/** Who answered the card on screen when it was not the operator at this terminal. */
-	let answeredBy: string | null = null;
+	let answeredBy: ApprovalAnswerer | null = null;
 	const cardListeners = new Set<(view: ApprovalRequestView) => void>();
 	const cardShown = (view: ApprovalRequestView): void => {
 		for (const listener of cardListeners) {
@@ -401,7 +410,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		);
 		deps.appendNotice(
 			"warn",
-			`No answer within ${entry.seconds} s: Clio denied ${entry.tool}, which did not run, and the turn continued.`,
+			`No answer within ${entry.seconds} s: CLIO Coder denied ${entry.tool}, which did not run, and the turn continued.`,
 		);
 	};
 	const expireUnattended = (requestId: string): void => {
@@ -745,7 +754,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		const forSession = confirmedForSession;
 		const wasDenied = denied;
 		const wasTimedOut = timedOut;
-		const decidedBy = answeredBy ?? "operator";
+		const answerer = answeredBy;
+		const decidedBy = answerer?.decidedBy ?? "operator";
 		answeredBy = null;
 		confirmed = false;
 		confirmedForSession = false;
@@ -812,6 +822,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 								type: "tool_approval_state",
 								toolCallId: permission.meta.toolCallId,
 								state: "resumed",
+								...(answerer !== null ? { grantedBy: answerer.name } : {}),
 							});
 					},
 				},
@@ -822,7 +833,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			// here printed the same guidance twice in one payload.
 			const cancellationReason = stopping
 				? "User stopped the turn at this call's approval card. It did not run, and the turn is over."
-				: "User denied this call at the permission prompt. It will not run; no approval is pending.";
+				: `${answerer?.name ?? "User"} denied this call at the permission prompt. It will not run; no approval is pending.`;
 			void resolvePermission(
 				{ bus: deps.bus, ...(deps.toolRegistry ? { registry: deps.toolRegistry } : {}) },
 				{

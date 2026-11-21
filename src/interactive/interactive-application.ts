@@ -69,7 +69,12 @@ import { runParkedInterview } from "../tools/extension-interview.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
-import { type ArcadeSession, openArcadeOverlay } from "./arcade-overlay.js";
+import {
+	ARCADE_PAUSED_NOTICE,
+	type ArcadeSession,
+	createArcadePhraseScreen,
+	openArcadeOverlay,
+} from "./arcade-overlay.js";
 import { createAttachController } from "./attach-host.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
@@ -97,6 +102,7 @@ import { actionKeyLabel, formatKeyLabel } from "./keybinding-manager.js";
 import { releaseRegularDock, returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
+import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
@@ -1330,6 +1336,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let arcade: ArcadeSession | null = null;
 	const arcadeNeedsOperator = (): boolean =>
 		overlayLifecycle?.getState() === "permission-confirm" || dockTop(tui)?.frame.dockAwaitingInput?.() === true;
+	const noticeArcadePaused = (): void => {
+		notifications.add({ level: "info", key: "arcade:paused", text: ARCADE_PAUSED_NOTICE, ttlMs: 6_000 });
+	};
 	const openArcadeEgg = (text: string): boolean => {
 		if (!isArcadeTrigger(text) || arcade?.isOpen()) return false;
 		if (arcade?.isPaused()) {
@@ -1337,21 +1346,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				notifications.add({
 					level: "info",
 					key: "arcade:paused",
-					text: "Ms. Clio waits until Clio's question is answered",
+					text: "Ms. Clio waits until CLIO Coder's question is answered",
 					ttlMs: 4_000,
 				});
 			return true;
 		}
-		arcade = openArcadeOverlay(tui, {
-			needsOperator: arcadeNeedsOperator,
-			onPause: () =>
-				notifications.add({
-					level: "info",
-					key: "arcade:paused",
-					text: "Ms. Clio paused: Clio needs you · type the phrase again to play on",
-					ttlMs: 6_000,
-				}),
-		});
+		arcade = openArcadeOverlay(tui, { needsOperator: arcadeNeedsOperator, onPause: noticeArcadePaused });
 		return true;
 	};
 
@@ -1748,6 +1748,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let reportOffers: import("../domains/report/extension.js").ReportOfferWatcher | null = null;
 	let lastOperatorInputAt = Date.now();
 	overlayLifecycle = createOverlayLifecycle({
+		// While the game is paused for a card, its phrase is held back from the card.
+		openAskUserOverlay: (host, card) =>
+			openAskUserOverlay(host, {
+				...card,
+				screenKeys: createArcadePhraseScreen({ active: () => arcade?.isPaused() === true, onPhrase: noticeArcadePaused }),
+			}),
 		lastOperatorInputAt: () => lastOperatorInputAt,
 		dismissNotification: (key) => notifications.dismiss(key),
 		takeReportOffer: () => {
@@ -2253,7 +2259,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			if (agent === null) return false;
 			notify(
 				"info",
-				`Steer to ${agent} not sent. ${editor.getText().length > 0 ? "Your text stays as a draft; Enter now sends it to Clio." : ""}`.trim(),
+				`Steer to ${agent} not sent. ${editor.getText().length > 0 ? "Your text stays as a draft; Enter now sends it to CLIO Coder." : ""}`.trim(),
 				"steer:cancelled",
 			);
 			tui.requestRender();
@@ -2261,7 +2267,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		explainThinkingUnavailable: () => notify("info", "Thinking is not adjustable on this model", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
-			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
+			notify("info", "CLIO Coder transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
 		keybindings,
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
@@ -2276,7 +2282,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				void suspendTerminalAsync(suspendProcessUntilContinued, tui instanceof TuiAltScreen).then(
 					(suspended) => {
 						if (!suspended) {
-							notify("info", "Ctrl+Z needs Clio started from an interactive shell with job control", "keyboard:suspend");
+							notify("info", "Ctrl+Z needs CLIO Coder started from an interactive shell with job control", "keyboard:suspend");
 						}
 					},
 					(err: unknown) => {
@@ -2582,7 +2588,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	}
 
 	const unregisterReportReview = deps.registerReportReviewOpener?.((draftId) => {
-		notifications.add({ level: "info", text: `Clio drafted a report; /report send ${draftId} reviews it` });
+		notifications.add({ level: "info", text: `CLIO Coder drafted a report; /report send ${draftId} reviews it` });
 		tui.requestRender();
 	});
 	if (unregisterReportReview) getTerminationCoordinator().onDrain(unregisterReportReview);
@@ -2734,7 +2740,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					if (!first) return;
 					appendNotice(
 						"info",
-						`${live.length === 1 ? "Another Clio session is" : `${live.length} other Clio sessions are`} open in this folder. This terminal keeps its own conversation, and ${live.length === 1 ? "both" : "all of them"} work on the same files.`,
+						`${live.length === 1 ? "Another CLIO Coder session is" : `${live.length} other CLIO Coder sessions are`} open in this folder. This terminal keeps its own conversation, and ${live.length === 1 ? "both" : "all of them"} work on the same files.`,
 						busNoticeSink,
 					);
 				})

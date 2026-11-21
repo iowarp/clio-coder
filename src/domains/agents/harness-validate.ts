@@ -237,9 +237,9 @@ const IGNORE_REASONS: Record<string, (id: string, source: string) => string> = {
 	"reserved-agent-id": (id) =>
 		`'${id}' is a reserved agent id (worker, delegate and auto are owned by dispatch); the recipe is ignored, so rename the file`,
 	"reserved-builtin": (id, source) =>
-		`'${id}' is the id of a recipe Clio ships; a ${source} recipe with a builtin id is ignored, not applied, so rename the file to a new id`,
+		`'${id}' is the id of a recipe CLIO Coder ships; a ${source} recipe with a builtin id is ignored, not applied, so rename the file to a new id`,
 	"reserved-shadow": (id) =>
-		`'${id}' names a shadow builtin reserved for Clio's internal orchestration; a user recipe cannot replace it, so rename the file`,
+		`'${id}' names a shadow builtin reserved for CLIO Coder's internal orchestration; a user recipe cannot replace it, so rename the file`,
 };
 
 /** The non-empty strings in a frontmatter list, whatever else the list holds. */
@@ -303,7 +303,7 @@ function recipeIssues(file: HarnessRecipeFile, input: HarnessInput): HarnessIssu
 		if (isMcpToolName(tool) || isHarnessExtensionToolName(tool)) continue;
 		push(
 			"tools",
-			`names tool '${tool}', which Clio does not have${suggestion(tool, builtinNames)}; builtin tools are ${listOf(builtinNames, 40)}, and an MCP tool is named mcp_<server>__<tool>`,
+			`names tool '${tool}', which CLIO Coder does not have${suggestion(tool, builtinNames)}; builtin tools are ${listOf(builtinNames, 40)}, and an MCP tool is named mcp_<server>__<tool>`,
 		);
 	}
 	if (recipe !== null) {

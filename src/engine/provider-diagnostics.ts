@@ -64,8 +64,13 @@ export function instrumentProviderCall<T extends StreamOptions>(
 		clioCoderPinnedPrefix?: PinnedPromptPrefix;
 	};
 	if (clioCoderPinnedPrefix !== undefined) {
-		// Clio's compiler metadata never reaches Pi or a provider option surface (#423).
-		effective = providerOptions as T;
+		// Clio's compiler metadata never reaches Pi or a provider option surface (#423). Clio's own Copilot adapter
+		// builds the session's system message itself, so a main call hands it the boundary (row 335).
+		effective = (
+			scope === "main" && model.api === "copilot-sdk"
+				? { ...providerOptions, clioCopilotPinnedPrefix: clioCoderPinnedPrefix }
+				: providerOptions
+		) as T;
 		const longRetention = effective?.cacheRetention === "long";
 		// Only the main thread splits; workers, side calls and any other API keep the request Pi built.
 		const split =

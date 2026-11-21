@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type ClioSettings, readSettings } from "../core/config.js";
+import { readSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { proxyEnvSummary } from "../core/proxy-env.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
@@ -13,6 +13,7 @@ import {
 import { discoverSecretMasks } from "../core/sandbox/secret-files.js";
 import type { SandboxMode, UnixSocketMode } from "../core/sandbox/types.js";
 import { unixSocketHostState } from "../core/sandbox/unix-sockets.js";
+import { type LayeredSettings, readLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import {
 	type DoctorFinding,
@@ -283,7 +284,7 @@ async function deepFindings(
 		// nothing, and on an untouched home there are no settings to read.
 		let targetCount = 0;
 		try {
-			targetCount = readSettings().targets.length;
+			targetCount = readLayeredSettings(process.cwd()).settings.targets.length;
 		} catch {
 			// The settings row already reports an unreadable document.
 		}
@@ -331,12 +332,14 @@ export function chatReadinessFinding(untouched: boolean, connectionRows: Readonl
 	// No settings to read, and reading them through the ensuring accessors
 	// would create the home doctor promised to leave alone.
 	if (untouched) return warn(`cannot run yet: no model target is configured; ${SETUP_COMMAND}`);
-	let settings: ClioSettings;
+	let layered: LayeredSettings;
 	try {
-		settings = readSettings();
+		// The chat route a session here runs: a trusted project's route and targets count, an untrusted one's do not.
+		layered = readLayeredSettings(process.cwd());
 	} catch {
 		return warn("cannot run until settings.yaml loads; the settings.yaml row says why");
 	}
+	const settings = layered.settings;
 	const verdict = classifyDefaultTarget(settings);
 	if (verdict.kind === "no-target") return warn(`cannot run yet: no model target is configured; ${SETUP_COMMAND}`);
 	if (verdict.kind === "ineligible-runtime") {
@@ -348,7 +351,15 @@ export function chatReadinessFinding(untouched: boolean, connectionRows: Readonl
 	const route = `target '${targetId}', model '${model}'`;
 	if (verdict.kind === "missing-credential") {
 		const missing = firstMissing(settings) ?? { kind: "credential", target: targetId, provider: verdict.store };
-		return warn(`${route}; ${describeMissing(missing).sentence}`);
+		// A key variable a project target names is fixed in the shell or in that project file, never by configure.
+		const targetsOrigin = settingsSourceFor(layered.sources, "targets");
+		const projectFile =
+			missing.kind === "env" && (targetsOrigin === "project" || targetsOrigin === "project.local")
+				? layered.layers.find((layer) => layer.origin === targetsOrigin)?.path
+				: undefined;
+		return warn(
+			`${route}; ${describeMissing(missing.kind === "env" && projectFile !== undefined ? { ...missing, projectFile } : missing).sentence}`,
+		);
 	}
 	const failing = connectionRows.filter(
 		(row) =>
