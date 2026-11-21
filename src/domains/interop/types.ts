@@ -24,8 +24,6 @@ export interface InteropAcpRecipe {
 	npmPackage?: string;
 	/** Executable that package installs, looked up on PATH before falling back to npx. */
 	npmPackageBin?: string;
-	/** The entry's `postSettleMs`: how long a session stays open after its prompt for background work the peer reports. */
-	postSettleMs?: number;
 }
 
 /** A directory of rule files: the file-name endings it holds and how many subdirectory levels are read. */

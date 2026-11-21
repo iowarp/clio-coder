@@ -1130,7 +1130,6 @@ function validateExternalAgent(
 		"connectTimeoutMs",
 		"turnTimeoutMs",
 		"stallTimeoutMs",
-		"postSettleMs",
 		"toolGovernance",
 		"trustedUnmediated",
 		"projectContext",
@@ -1172,13 +1171,6 @@ function validateExternalAgent(
 	if ("stallTimeoutMs" in value) {
 		const parsed = expectInteger(issues, `${path}.stallTimeoutMs`, value.stallTimeoutMs);
 		if (parsed !== undefined) agent.stallTimeoutMs = parsed;
-	}
-	if ("postSettleMs" in value) {
-		const parsed = expectInteger(issues, `${path}.postSettleMs`, value.postSettleMs, {
-			min: 0,
-			max: MAX_TIMER_DELAY_MS,
-		});
-		if (parsed !== undefined) agent.postSettleMs = parsed;
 	}
 	if ("toolGovernance" in value) {
 		const parsed = expectEnum(

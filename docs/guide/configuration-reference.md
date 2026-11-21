@@ -179,7 +179,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `interface.panes.files.ratio` | `0.3` | Number from 0.05 to 0.5. Share of the height the files dock takes. | hot reload |
 | `interface.keybindings` | `{}` | Map of action id to a key string or a list of key strings. | hot reload |
 | `integrations.projectResources.trustProjectImports` | `false` | Boolean. Admit explicitly imported foreign skills and prompts at either scope; loose compatibility roots stay discovery-only. User settings only: a project layer value is ignored with a layer issue. | next turn |
-| `integrations.externalAgents.entries` | `[]` | List of ACP peers: `id`, `command`, `args`, `cwd?`, `env?`, `connectTimeoutMs?`, `turnTimeoutMs?`, `stallTimeoutMs?`, `postSettleMs?` (keep the session open after the prompt returns while the peer reports background work; absent or 0 is off; the built-in Antigravity recipe sets 120000), `toolGovernance?`, `trustedUnmediated?`, `projectContext?` (`none` or `bounded`). | next turn |
+| `integrations.externalAgents.entries` | `[]` | List of ACP peers: `id`, `command`, `args`, `cwd?`, `env?`, `connectTimeoutMs?`, `turnTimeoutMs?`, `stallTimeoutMs?`, `toolGovernance?`, `trustedUnmediated?`, `projectContext?` (`none` or `bounded`). | next turn |
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | Integer at least 1. | next turn |
 | `integrations.externalAgents.defaults.turnTimeoutMs` | `0` | Integer at least 0. `0` sets no elapsed deadline. | next turn |
 | `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | Integer at least 1. Bounds CLIO Coder's own ACP server permission requests. | next turn |

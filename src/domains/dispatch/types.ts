@@ -639,7 +639,7 @@ export interface RunResultDelegation {
 	/** Peer updates a `session/load` replayed as history and Clio kept out of this run's events. */
 	replayedUpdates?: number;
 	/** The window the peer session stayed open after its prompt returned, for background work that outlived it. */
-	postSettle?: { waitedMs: number; updates: number; ended: "quiet" | "idle" | "bound" | "aborted" };
+	postSettle?: { waitedMs: number; updates: number; ended: "idle" | "cap" | "aborted" };
 	/** The earlier run this one continued; `freshReason` says why it opened a new session instead of that one. */
 	continuedFrom?: { runId: string; acpSessionId: string; freshReason?: string };
 	/** The peer marked this run's session unable to take another turn. */

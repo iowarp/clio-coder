@@ -179,7 +179,6 @@ export const SETTINGS_FIELD_NAMES = [
 	"permissions",
 	"policy",
 	"port",
-	"postSettleMs",
 	"postures",
 	"prewarm",
 	"pricing",

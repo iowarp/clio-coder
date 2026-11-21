@@ -342,11 +342,13 @@ function reopenPeer(request) {
 	} else reply({});
 }
 
-// post-settle: a prompt that answers while its command still runs; the command ends and the peer reports on it after.
-// argv[3] "complete" ends it 300 ms later, "hang" never does.
+// post-settle: a prompt that answers while the peer still reports work in progress, which it settles 300 ms later.
+// argv[3] "complete" leaves a v1 tool call in progress, "state" reports v2 running state with background work and then
+// idle, "done" settles its call before it answers, and "hang" never settles.
 function postSettlePeer(request) {
 	if (request.id === undefined) return;
 	const sessionId = "settle-session";
+	const scenario = process.argv[3];
 	const update = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
 	const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
 	if (request.method === "initialize")
@@ -354,12 +356,17 @@ function postSettlePeer(request) {
 	else if (request.method === "session/new") reply({ sessionId });
 	else if (request.method === "session/prompt") {
 		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "started the build." } });
-		update({ sessionUpdate: "tool_call", toolCallId: "bg-1", kind: "execute", status: "in_progress", title: "make" });
+		if (scenario === "state")
+			update({ sessionUpdate: "state_update", state: "running", background: [{ type: "terminal", terminalId: "t1" }] });
+		else
+			update({ sessionUpdate: "tool_call", toolCallId: "bg-1", kind: "execute", status: "in_progress", title: "make" });
+		if (scenario === "done") update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", status: "completed" });
 		reply({ stopReason: "end_turn" });
-		if (process.argv[3] === "complete")
+		if (scenario === "complete" || scenario === "state")
 			void setTimeout(300).then(() => {
-				update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", status: "completed" });
 				update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: " background done" } });
+				if (scenario === "state") update({ sessionUpdate: "state_update", state: "idle", background: [] });
+				else update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", status: "completed" });
 			});
 	} else reply({});
 }

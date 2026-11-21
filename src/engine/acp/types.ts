@@ -465,7 +465,7 @@ export type AcpDelegationFailureCode =
 export interface AcpPostSettle {
 	waitedMs: number;
 	updates: number;
-	ended: "quiet" | "idle" | "bound" | "aborted";
+	ended: "idle" | "cap" | "aborted";
 }
 
 export interface AcpDelegationResult {

@@ -821,16 +821,16 @@ test("ACP adapter reopens an earlier session by session/resume over session/load
 	}
 });
 
-test("ACP adapter keeps a session open after its prompt for background work within postSettleMs, and not when it is off", async () => {
+test("ACP adapter keeps a session open after its prompt exactly while the peer reports work in progress", async () => {
 	const cwd = process.cwd();
 	const peer = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
-	const settle = async (scenario: "complete" | "hang", postSettleMs: number) => {
+	const settle = async (scenario: "complete" | "state" | "done" | "hang") => {
 		const run = startAcpDelegationRun({
-			agent: { id: "settle-fixture", command: process.execPath, args: [peer, "post-settle", scenario], postSettleMs },
+			agent: { id: "settle-fixture", command: process.execPath, args: [peer, "post-settle", scenario] },
 			task: "build it",
 			cwd,
 			safety: createWorkerSafety({ cwd }),
-			postSettleQuietMs: 50,
+			postSettleCapMs: 1_000,
 		});
 		const result = await run.promise;
 		const events: Array<{ type: string; message?: { content: Array<{ type: string; text?: string }> } }> = [];
@@ -839,24 +839,32 @@ test("ACP adapter keeps a session open after its prompt for background work with
 		const text = end?.message?.content.find((part) => part.type === "text")?.text ?? "";
 		return { result, text, events };
 	};
-	const held = await settle("complete", 60_000);
+	// A v1 tool call left in progress holds the session until it settles.
+	const held = await settle("complete");
 	strictEqual(held.result.exitCode, 0, held.result.failureMessage);
 	strictEqual(held.text, "started the build. background done");
-	strictEqual(held.result.delegation.postSettle?.ended, "quiet");
+	strictEqual(held.result.delegation.postSettle?.ended, "idle");
 	strictEqual(held.result.delegation.postSettle?.updates, 2);
 	ok(
 		held.events.some((event) => event.type === "tool_execution_end"),
 		"the background call settled inside the run",
 	);
 
-	const off = await settle("complete", 0);
-	strictEqual(off.result.delegation.postSettle, undefined);
-	strictEqual(off.text, "started the build.");
+	// A v2 running state with background work holds it until the peer reports idle with nothing in the background.
+	const state = await settle("state");
+	strictEqual(state.text, "started the build. background done");
+	strictEqual(state.result.delegation.postSettle?.ended, "idle");
 
-	const bounded = await settle("hang", 200);
-	strictEqual(bounded.result.exitCode, 0, bounded.result.failureMessage);
-	strictEqual(bounded.result.delegation.postSettle?.ended, "bound");
-	strictEqual(bounded.text, "started the build.");
+	// Nothing in progress when the prompt answers: no window.
+	const done = await settle("done");
+	strictEqual(done.result.delegation.postSettle, undefined);
+	strictEqual(done.text, "started the build.");
+
+	// Work the peer never settles stops at the safety cap.
+	const capped = await settle("hang");
+	strictEqual(capped.result.exitCode, 0, capped.result.failureMessage);
+	strictEqual(capped.result.delegation.postSettle?.ended, "cap");
+	strictEqual(capped.text, "started the build.");
 });
 
 test("ACP adapter fails a prompt response missing stopReason", async () => {
