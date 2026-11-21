@@ -39,7 +39,7 @@ import { evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js
 import type { GrantRecord } from "../../src/domains/dispatch/grant-broker.js";
 import { compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
-import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
+import { type ClassifierCall, resolveScratchDeleteOperands } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import {
 	admissionAutonomy,
@@ -549,6 +549,11 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		const decision = engine.evaluate(bash(command), "default", contained);
 		strictEqual(`${decision.kind}/${decision.reasonCode}`, "ask/damage-control:delete-outside-workspace", command);
 	}
+	// Neon finding 2: bash translates a `$"..."` locale string through TEXTDOMAIN, so it never names a scratch path.
+	mkdirSync(join(temp, "safe"), { recursive: true });
+	const textDomain = `TEXTDOMAINDIR=${temp}/mo\nTEXTDOMAIN=x\n`;
+	const localeDelete = `${textDomain}rm -rf $"${temp}/safe"`;
+	strictEqual(resolveScratchDeleteOperands(localeDelete).command, localeDelete);
 	// Row 261 final (r261c): the floor gaps the second review found, each red at the bounce-1 head.
 	symlinkSync(".git", join(cwd, "gitlink261"));
 	t.after(() => rmSync(join(cwd, "gitlink261"), { force: true }));
@@ -766,6 +771,9 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'TM\\\nPDIR=/etc\nrm -rf "$TMPDIR/x"',
 		`cd "$TMPDIR" && python3 -c 'import os; os.symlink("/etc", "link")' && rm -rf link/*`,
 		'B=$TMPDIR/base; node -e 1; rm -rf "$B/"',
+		// Neon round: a locale string bash translates through TEXTDOMAIN names no fixed cd landing or mktemp.
+		`${textDomain}cd $"${temp}/safe" && rm -rf foo`,
+		`${textDomain}D=$($"mktemp" -d "$TMPDIR/a.XXX") && rm -rf "$D"`,
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);

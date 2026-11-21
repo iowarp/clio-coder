@@ -1350,6 +1350,8 @@ describe("safety gate boundary", () => {
 			`cat <<$'EOF' > /dev/null\nhello\n$EOF\n${gone}\nEOF`,
 			`cat 3>.git/config 1>&3 <<'EOF'\n${gone}\nEOF\ngit status`,
 			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
+			// Neon round: a locale-quoted command name bash may translate to any program.
+			`$"cat" <<'EOF'\n${gone}; cat .env\nEOF`,
 		])
 			strictEqual(reason(command) !== null, true, command);
 	});

@@ -529,7 +529,8 @@ function hasStableTempDirReferences(command: string): boolean {
 	if (command.includes("\\\n") || quotedTempDirRebinding(command)) return false;
 	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
-	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
+	// A `$'...'` escape or a `$"..."` locale string (translated through TEXTDOMAIN at run time) can spell TMPDIR.
+	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$['"]/u.test(command);
 }
 
 function expandTempDirReferences(command: string): string {
@@ -570,7 +571,7 @@ function expandTempDirReferences(command: string): string {
  * (readonly) or reads for its own behaviour; an assignment to one never proves the value a later reference sees.
  */
 const SCRATCH_SPECIAL =
-	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TIMEFORMAT|TMOUT|TMPDIR|UID|_|LD_\w*|DYLD_\w*|GCONV_PATH|GLIBC_TUNABLES|LOCPATH|NLSPATH|MALLOC_\w*|HOSTALIASES|POSIXLY_CORRECT)$/u;
+	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LANGUAGE|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TEXTDOMAIN|TEXTDOMAINDIR|TIMEFORMAT|TMOUT|TMPDIR|UID|_|LD_\w*|DYLD_\w*|GCONV_PATH|GLIBC_TUNABLES|LOCPATH|NLSPATH|MALLOC_\w*|HOSTALIASES|POSIXLY_CORRECT)$/u;
 const SCRATCH_DELETES: ReadonlySet<string> = new Set(["rm", "rmdir", "unlink"]);
 /** Options of a delete that leave where it deletes alone. */
 const SCRATCH_DELETE_OPTION =

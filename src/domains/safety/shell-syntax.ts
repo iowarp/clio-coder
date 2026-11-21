@@ -451,9 +451,11 @@ class Parser {
 			return;
 		}
 		if (next === '"' && !quoted) {
-			// A locale string reads as a double-quoted one.
+			// A locale string is translated through the message catalog TEXTDOMAIN and TEXTDOMAINDIR name, so its text
+			// never fixes the word: read it to find its end, and keep only that it is opaque.
 			this.pos += 2;
-			this.readDoubleQuoted(parts, literal);
+			this.readDoubleQuoted([], () => {});
+			parts.push({ kind: "opaque", quoted: true });
 			return;
 		}
 		const name = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(this.src.slice(this.pos + 1))?.[0];

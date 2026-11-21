@@ -119,6 +119,8 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"P=PA; export \"${P}TH=/tmp/evil\"\ngit commit -F - <<'EOF'\ncat credentials.yaml >&2\nEOF",
 		"cat <<$'EOF' > /dev/null\nhello\n$EOF\ncat credentials.yaml\nEOF",
 		"cat 3>notes.md 1>&3 <<'EOF'\ncredentials.yaml\nEOF",
+		// Neon round: a locale-quoted command name bash may translate to any program.
+		"$\"cat\" <<'EOF'\nrm -rf protected.txt; cat .env\nEOF",
 		"wc -c < nope.key",
 		"if head nope.key; then :; fi",
 		"od -c *.key",
