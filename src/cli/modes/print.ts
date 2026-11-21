@@ -19,6 +19,7 @@ import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import { runCapStopCode, type TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
+import { WORKER_OUTPUT_MAX_BYTES } from "../../domains/dispatch/event-pump.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import { type RunCallUsage, runUsageFromCalls } from "../../domains/dispatch/run-call-usage.js";
 import {
@@ -43,6 +44,7 @@ import type {
 	RunOutcome,
 	RunResultCostCap,
 	RunResultDraft,
+	RunResultOutput,
 	RunResultSafetySummary,
 	RunStatus,
 	SafetyBlockedAttempt,
@@ -93,6 +95,7 @@ import { type CompletionDeclaration, completionOfToolResult, sealCompletion } fr
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
+import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
 import { sealedFactsNotVerified } from "../run-output.js";
@@ -907,6 +910,13 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	for (const stat of stats.values()) count += stat.count;
 	return count;
 }
+/** The answer as a result object holds it: final, within the bound a worker's output seals under. */
+function boundedAnswer(text: string): RunResultOutput {
+	const bytes = Buffer.byteLength(text, "utf8");
+	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, "\n[output truncated]");
+	return { state: "final", text: bounded, bytes, truncated: bounded !== text };
+}
+
 /**
  * The finish contract decision the run's own turns recorded last: the main loop journals it in the session, not the run
  * scope, so the run's assessment reads it from there (C-11). A worker's decision carries its own run id and is left
@@ -953,6 +963,8 @@ async function recordHeadlessMainAgentRun(input: {
 	stoppedChecks?: ReadonlyArray<{ id: string; command: string }>;
 	/** Passing dispatch run records still standing at the end, as the observed line names them (bt-verify7a). */
 	dispatchRuns?: ReadonlyArray<string>;
+	/** The run's printed answer, already redacted as stdout carries it; empty when the turn ended without one. */
+	answer?: string;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -1080,6 +1092,8 @@ async function recordHeadlessMainAgentRun(input: {
 		terminalReason: mainAgentTerminalReason(outcome).terminalReason,
 		sessionId,
 		...(input.calls ? { callIds: input.calls.callIds } : {}),
+		// The answer seals in the result object as a worker's does, under the same bound (C-12).
+		...(input.answer !== undefined && input.answer.length > 0 ? { output: boundedAnswer(input.answer) } : {}),
 	};
 	try {
 		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal. The
@@ -1292,6 +1306,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				acceptance,
 				stoppedChecks,
 				dispatchRuns,
+				answer: redactFinalUrlCredentials(
+					printedAnswer(result),
+					result.sawTerminatingToolResult || !result.outputExhausted,
+				),
 			});
 		})().catch((error: unknown) => {
 			process.stderr.write(

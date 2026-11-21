@@ -16,6 +16,7 @@ import {
 
 import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
 import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
@@ -397,6 +398,9 @@ describe("headless no-op contract through the built binary", () => {
 		// C-11: the seal cites the finish contract decision the run's session recorded at its end.
 		const evidence = await inspectRunEvidence(stateDir, envelope.id);
 		strictEqual(evidence.trust.completionEvidence.state, "incomplete", JSON.stringify(evidence.trust));
+		// C-12: the main run's result object holds its answer, as a worker's does.
+		const result = readVerifiedRun(stateDir, envelope.id)?.result;
+		match(result?.state === "resolved" ? (result.value.output?.text ?? "") : "", /^done/);
 	});
 
 	test("one blocked call and one successful write is not a no-op under --fail-on-noop", async () => {
