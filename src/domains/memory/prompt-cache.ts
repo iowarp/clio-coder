@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { runnableChecksAtRoot } from "../../tools/verify/resolve.js";
+import { detectValidationCommand } from "../safety/protected-artifacts.js";
+import { identityArgv, shellCommandText } from "./command-evidence.js";
 import type { MemoryPromptSelection } from "./contract.js";
 import { deliveryOpens, type MemoryDeliveryGate, sectionCarries } from "./lesson-projection.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
@@ -10,7 +13,7 @@ import {
 } from "./prompt-section.js";
 import { MEMORY_RELEVANCE_VERSION } from "./relevance.js";
 import { readMemoryStoreSnapshot } from "./store.js";
-import type { MemoryScope } from "./types.js";
+import type { MemoryRecord, MemoryScope } from "./types.js";
 
 /**
  * Key-sorted entries, so two passes that scored the same records the same way
@@ -61,6 +64,68 @@ export type MemoryPromptReader = (request: MemoryPromptRequest) => string;
 /** Scopes the main agent's prompt draws from; other eligible scopes reach it only through memory_recall. */
 export const MEMORY_MAIN_PROMPT_SCOPES: ReadonlyArray<MemoryScope> = ["global", "repo", "runtime"];
 
+/**
+ * CLI-P53: whether an approved repository lesson's claim is a check, decided by the workspace, never the turn's words:
+ * a command the validation detector classifies as one, or exactly the argv of a check verify runs here (declared or
+ * derived, runnable). The repository's checks are read at most once per selection; any fault reads as no.
+ */
+function checkLessonTest(root: string): (record: MemoryRecord) => boolean {
+	let runnable: ReadonlyArray<readonly string[]> | undefined;
+	const runnableArgv = (): ReadonlyArray<readonly string[]> => {
+		if (runnable === undefined) {
+			try {
+				const found = runnableChecksAtRoot(root, undefined);
+				runnable = found.ok ? found.checks.map((check) => identityArgv(check.command)) : [];
+			} catch {
+				runnable = [];
+			}
+		}
+		return runnable;
+	};
+	return (record) => {
+		const claim = record.claim;
+		if (claim?.kind !== "command" || claim.command.argv.length === 0) return false;
+		const { assignments, argv } = claim.command;
+		try {
+			if (detectValidationCommand(shellCommandText([...assignments, ...argv])).kind === "validation") return true;
+		} catch {
+			return false;
+		}
+		return (
+			assignments.length === 0 &&
+			runnableArgv().some(
+				(command) => command.length === argv.length && command.every((word, index) => word === argv[index]),
+			)
+		);
+	};
+}
+
+/** Rows a selection journal carries; `dropped` counts the rest. */
+const SELECTION_JOURNAL_ROWS = 32;
+
+/**
+ * CLI-P53: the facts of one `memory-section-selected` journal row: every eligible record's decision and its reason,
+ * so whether a lesson reached a turn is read, not inferred from behaviour.
+ */
+export function memorySelectionFacts(selection: MemoryPromptSelection): Record<string, unknown> {
+	const rows = [
+		...selection.items.map((item) => ({
+			id: item.id,
+			decision: item.reason === "selected" ? "selected" : "withheld",
+			reason: item.reason === "selected" ? (item.eligibleBy ?? "selected") : item.reason,
+		})),
+		...(selection.withheld ?? []).map(({ id, reason }) => ({ id, decision: "withheld", reason })),
+	];
+	const ids = rows.filter((row) => row.decision === "selected").map((row) => row.id);
+	return {
+		turnId: selection.turnId,
+		count: ids.length,
+		ids,
+		selection: rows.slice(0, SELECTION_JOURNAL_ROWS),
+		...(rows.length > SELECTION_JOURNAL_ROWS ? { dropped: rows.length - SELECTION_JOURNAL_ROWS } : {}),
+	};
+}
+
 export function createMemoryPromptReader(options: MemoryPromptReaderOptions): MemoryPromptReader {
 	// Copy options now: mutable caller arrays must not silently change eligibility.
 	const selection = { ...options.selection, scopes: [...(options.selection?.scopes ?? MEMORY_MAIN_PROMPT_SCOPES)] };
@@ -74,7 +139,12 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 	};
 	const readStore = options.readStore ?? readMemoryStoreSnapshot;
 	let frame: { key: string; section: string } | null = null;
-	let selected: { key: string; section: string; items: MemoryPromptSelection["items"] } | null = null;
+	let selected: {
+		key: string;
+		section: string;
+		items: MemoryPromptSelection["items"];
+		withheld: NonNullable<MemoryPromptSelection["withheld"]>;
+	} | null = null;
 	const authorityOf = (request: MemoryPromptRequest) => {
 		const dataDir = options.getDataDir();
 		const activeRepository = canonicalMemoryRepositoryIdentity(request.cwd);
@@ -142,6 +212,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 				// check refuses. A refusal leaves the record out and the selection runs again without it.
 				const refused = new Set<string>();
 				const carried = snapshot.records.filter(sectionCarries);
+				const checkLesson = checkLessonTest(request.cwd);
 				const choose = () =>
 					inspectMemoryPromptSelection(
 						carried.filter((record) => !refused.has(record.id)),
@@ -149,7 +220,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 							...selection,
 							activeRepository,
 							activeRuntime: { kind: "runtime", key: request.runtimeId },
-							...(demoted === null ? {} : { relevance, gate: { demoted } }),
+							...(demoted === null ? {} : { relevance, gate: { demoted, checkLesson } }),
 						},
 					);
 				let built = choose();
@@ -163,10 +234,23 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 				const items = built.decisions.flatMap((decision, index) => {
 					const record = records.get(decision.id);
 					return record
-						? [{ id: record.id, text: record.lesson, scope: record.scope, rank: index + 1, reason: decision.reason }]
+						? [
+								{
+									id: record.id,
+									text: record.lesson,
+									scope: record.scope,
+									rank: index + 1,
+									reason: decision.reason,
+									...(decision.eligibleBy === undefined ? {} : { eligibleBy: decision.eligibleBy }),
+								},
+							]
 						: [];
 				});
-				selected = Object.freeze({ key, section, items });
+				const withheld = [
+					...built.gatedOut.map((id) => ({ id, reason: "not-relevant" as const })),
+					...[...refused].map((id) => ({ id, reason: "delivery-refused" as const })),
+				];
+				selected = Object.freeze({ key, section, items, withheld });
 			}
 			try {
 				options.onSelection?.({
@@ -179,6 +263,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 					section,
 					tokenBudget: selection.tokenBudget ?? MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
 					items: selected?.items ?? [],
+					withheld: selected?.withheld ?? [],
 				});
 			} catch {
 				/* Inspection cannot change which facts the prompt carries. */

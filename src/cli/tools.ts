@@ -29,8 +29,7 @@ Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
   clio-coder tools status <id> [--json]    one tool in detail
   clio-coder tools reset-profile <id> [--json]  regenerate a tool's CLIO Coder profile on next
-                                           open (yazi); status --reset-profile is the
-                                           deprecated spelling
+                                           open (yazi)
   clio-coder tools install claude-sdk      provision the separate Claude SDK component
   clio-coder tools install copilot-sdk     provision the separate GitHub Copilot SDK component
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
@@ -51,7 +50,6 @@ interface Parsed {
 	json: boolean;
 	force: boolean;
 	all: boolean;
-	resetProfile: boolean;
 	help: boolean;
 }
 
@@ -88,19 +86,15 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 
 	switch (parsed.command) {
 		case "list":
-			if (parsed.resetProfile) return invalidResetProfile("list", parsed.json);
 			return listTools(parsed.json);
 		case "status":
-			if (parsed.resetProfile)
-				process.stderr.write("clio-coder: deprecated: tools status --reset-profile; use tools reset-profile <id>\n");
-			return statusTool(parsed.positional[0], parsed.json, parsed.resetProfile);
+			return statusTool(parsed.positional[0], parsed.json);
 		case "reset-profile":
-			if (parsed.resetProfile || parsed.force) {
+			if (parsed.force) {
 				return usageFailure("reset-profile", "unknown_flag", "reset-profile takes only <id> and --json", parsed.json);
 			}
 			return resetProfile(parsed.positional, parsed.json);
 		case "install":
-			if (parsed.resetProfile) return invalidResetProfile("install", parsed.json);
 			if (parsed.positional[0] === "claude-sdk") {
 				if (parsed.force || parsed.positional.length !== 1) {
 					return usageFailure(
@@ -141,7 +135,6 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			}
 			return installOne(parsed.positional[0], parsed.force, parsed.json);
 		case "remove":
-			if (parsed.resetProfile) return invalidResetProfile("remove", parsed.json);
 			return parsed.all ? removeAll(parsed.positional[0], parsed.json) : removeOne(parsed.positional[0], parsed.json);
 		default:
 			return usageFailure(undefined, "unknown_command", `unknown command: ${parsed.command}`, parsed.json);
@@ -180,7 +173,7 @@ function resetProfile(positional: ReadonlyArray<string>, json: boolean): number 
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
-	const out: Parsed = { positional: [], json: false, force: false, all: false, resetProfile: false, help: false };
+	const out: Parsed = { positional: [], json: false, force: false, all: false, help: false };
 	for (const arg of argv) {
 		if (!out.command && !arg.startsWith("-")) {
 			out.command = arg;
@@ -196,9 +189,6 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 				break;
 			case "--all":
 				out.all = true;
-				break;
-			case "--reset-profile":
-				out.resetProfile = true;
 				break;
 			case "--help":
 			case "-h":
@@ -229,15 +219,6 @@ function listTools(json: boolean): number {
 	return 0;
 }
 
-function invalidResetProfile(command: string, json: boolean): number {
-	return usageFailure(
-		command,
-		"usage",
-		"--reset-profile is only valid with `tools status yazi`; use `tools reset-profile yazi`",
-		json,
-	);
-}
-
 /**
  * The one refusal an unknown id gets, from every verb.
  *
@@ -257,20 +238,16 @@ function unknownTool(command: string, id: string, json: boolean): number {
 	return 2;
 }
 
-function statusTool(id: string | undefined, json: boolean, resetProfile: boolean): number {
+function statusTool(id: string | undefined, json: boolean): number {
 	if (id === undefined) return usageFailure("status", "usage", "name a tool: tools status <id>", json);
 	const entry = findPinnedTool(id);
 	if (entry === null) {
 		return unknownTool("status", id, json);
 	}
-	if (resetProfile && id !== "yazi") return invalidResetProfile("status", json);
-	if (resetProfile) resetYaziProfile();
 	const status = toolStatus(entry);
 	const profile = id === "yazi" ? inspectCurrentYaziProfile() : null;
 	if (json) {
-		process.stdout.write(
-			`${JSON.stringify({ ...jsonShape(status), ...(profile ? { profile, profileReset: resetProfile } : {}) }, null, 2)}\n`,
-		);
+		process.stdout.write(`${JSON.stringify({ ...jsonShape(status), ...(profile ? { profile } : {}) }, null, 2)}\n`);
 		return 0;
 	}
 	const rejection = describeFloorRejection(status);
@@ -294,12 +271,7 @@ function statusTool(id: string | undefined, json: boolean, resetProfile: boolean
 					`  floor       rejected: ${rejection}`,
 					...(status.resolution.source === "none" && status.supported ? [`  remedy      ${installRemedy(entry.id)}`] : []),
 				]),
-		...(profile
-			? [
-					`  profile     ${describeYaziProfile(profile)}`,
-					...(resetProfile ? ["  profile reset; next open regenerates it"] : []),
-				]
-			: []),
+		...(profile ? [`  profile     ${describeYaziProfile(profile)}`] : []),
 	];
 	process.stdout.write(`${lines.join("\n")}\n`);
 	return 0;

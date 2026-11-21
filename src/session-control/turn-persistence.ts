@@ -328,6 +328,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				...(template !== undefined ? { template } : {}),
 			};
 			state.finishReplyRefused = false;
+			state.turnReplied = false;
 			if (!deps.session) return;
 			if (!deps.session.current()) {
 				const settings = deps.getSettings();

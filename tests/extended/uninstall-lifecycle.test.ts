@@ -58,11 +58,11 @@ async function asSourceCheckout<T>(temp: LifecycleHome, fn: () => Promise<T>): P
 }
 
 describe("contracts/uninstall-lifecycle", () => {
-	it("stops for an open session on any install method, even with --force", async () => {
+	it("stops for an open session on any install method, even with --yes", async () => {
 		const temp = home();
 		try {
 			writeLiveSession(temp, { host: "other-node", pid: 4242 });
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(code, 1);
 			match(stdout, /20261102-open-session \(tui, pid 4242 on other-node, \/work\/project\)/u);
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
@@ -90,7 +90,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			strictEqual(preview.code, 0);
 			match(preview.stdout, /Desktop launcher/);
 			ok(existsSync(entry));
-			const real = await runInHome(temp, () => runUninstallCommand(["--force", "--keep-config", "--keep-data"]));
+			const real = await runInHome(temp, () => runUninstallCommand(["--yes", "--keep-config", "--keep-data"]));
 			strictEqual(real.code, 0);
 			ok(!existsSync(entry));
 			ok(!existsSync(`${entry}.owner.json`));
@@ -162,9 +162,7 @@ describe("contracts/uninstall-lifecycle", () => {
 	it("honors --keep-config and --keep-data on the listing and on disk", async () => {
 		const temp = home();
 		try {
-			const { code, stdout } = await runInHome(temp, () =>
-				runUninstallCommand(["--force", "--keep-config", "--keep-data"]),
-			);
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--yes", "--keep-config", "--keep-data"]));
 			strictEqual(code, 0);
 
 			match(stdout, /– Config: .*\(kept by --keep-config\)/u);
@@ -190,7 +188,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			writeFileSync(foreign, "// another clio\n", "utf8");
 			symlinkSync(foreign, launcherPath(temp));
 
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(code, 0);
 
 			// Uninstall unlinks only a symlink into *this* installation. The
@@ -211,12 +209,12 @@ describe("contracts/uninstall-lifecycle", () => {
 		try {
 			const entry = join(resolvePackageRoot(), "dist", "cli", "index.js");
 			for (const temp of [kept, removed]) symlinkSync(entry, launcherPath(temp));
-			const keeping = await runInHome(kept, () => runUninstallCommand(["--force", "--keep-binary"]));
+			const keeping = await runInHome(kept, () => runUninstallCommand(["--yes", "--keep-binary"]));
 			strictEqual(keeping.code, 0);
 			match(keeping.stdout, /– Launcher: .*kept by --keep-binary/u);
 			strictEqual(lstatSync(launcherPath(kept)).isSymbolicLink(), true);
 
-			const removing = await runInHome(removed, () => runUninstallCommand(["--force"]));
+			const removing = await runInHome(removed, () => runUninstallCommand(["--yes"]));
 			strictEqual(removing.code, 0);
 			match(removing.stdout, /Removed launcher/u);
 			strictEqual(existsSync(launcherPath(removed)), false);
@@ -245,7 +243,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			process.chdir(repo);
 			process.env.PATH = `${fakeBin}:${savedPath ?? ""}`;
 			process.argv[1] = join(packageRoot, "dist", "cli", "index.js");
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(code, 0, stdout);
 			match(stdout, /Removed the npm package/u);
 			strictEqual(existsSync(temp.stateDir), false, `state came back: ${readdirSafe(temp.stateDir)}`);
@@ -275,7 +273,7 @@ describe("contracts/uninstall-lifecycle", () => {
 				);
 				writeFileSync(join(root, "operator-note.txt"), "not ours\n", "utf8");
 				const { code, stdout } = await runInHome(temp, () =>
-					runUninstallCommand(keep ? ["--force", "--keep-binary"] : ["--force"]),
+					runUninstallCommand(keep ? ["--yes", "--keep-binary"] : ["--yes"]),
 				);
 				strictEqual(code, 0);
 				if (keep) {
@@ -322,7 +320,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			const holder = join(root, ".active");
 			mkdirSync(holder);
 			writeFileSync(join(holder, "1.json"), JSON.stringify({ pid: 1 }), "utf8");
-			const held = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			const held = await runInHome(temp, () => runUninstallCommand(["--inactive", "--yes"]));
 			strictEqual(held.code, 1, held.stdout);
 			match(held.stdout, /pid 1 \(launched from it\) holds /u);
 			ok(existsSync(current));
@@ -336,7 +334,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			const background = join(temp.stateDir, "gui", "background");
 			mkdirSync(background, { recursive: true });
 			writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: join(current, "lib") }));
-			const stranded = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			const stranded = await runInHome(temp, () => runUninstallCommand(["--inactive", "--yes"]));
 			strictEqual(stranded.code, 1, stranded.stdout);
 			match(stranded.stdout, /clio-coder-gui-0123456789ab\.service starts it from\s+there/u);
 			match(stranded.stdout, /server\.json starts it from there/u);
@@ -351,7 +349,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			match(preview.stdout, /Its launcher: /u);
 			ok(existsSync(current));
 
-			const { code } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			const { code } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--yes"]));
 			strictEqual(code, 0);
 			ok(!existsSync(join(root, "versions")));
 			ok(!existsSync(join(root, "install.json")));
@@ -398,7 +396,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			strictEqual(preview.code, 0, preview.stdout);
 			match(preview.stdout, /Its launcher: .*clio-coder\.exe/u);
 
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--yes"]));
 			strictEqual(code, 0, stdout);
 			for (const file of owned) ok(!existsSync(file), file);
 		} finally {
@@ -420,7 +418,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			);
 			writeFileSync(exe, "MZ", "utf8");
 			writeFileSync(join(temp.binDir, "clio-coder.launch"), `node\n"x.cjs" launch "${root}-other"\n`, "utf8");
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--yes"]));
 			strictEqual(code, 0, stdout);
 			ok(existsSync(exe), "a launcher for another root stays");
 		} finally {
@@ -463,9 +461,7 @@ describe("contracts/uninstall-lifecycle", () => {
 				match(preview.stdout, /Shell config: ~\/\.bashrc .*lines 1;/u, "the operator's own line is only reported");
 				strictEqual(readFileSync(rc, "utf8"), own);
 
-				const real = await runInHome(temp, () =>
-					runUninstallCommand(keepBinary ? ["--force", "--keep-binary"] : ["--force"]),
-				);
+				const real = await runInHome(temp, () => runUninstallCommand(keepBinary ? ["--yes", "--keep-binary"] : ["--yes"]));
 				strictEqual(real.code, 0, real.stdout);
 				ok(methods.includes("server.stop"), "the host is asked to stop before its binary goes");
 				match(real.stdout, /Stopped the pane host at /u);
@@ -497,7 +493,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			const rc = join(temp.root, ".bashrc");
 			symlinkSync(target, rc);
 
-			const real = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const real = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(real.code, 0, real.stdout);
 			match(real.stdout, /Removed the PATH block from ~\/\.bashrc/u);
 			ok(lstatSync(rc).isSymbolicLink(), "the link stays a link");
@@ -522,7 +518,7 @@ describe("contracts/uninstall-lifecycle", () => {
 
 			const preview = await runInHome(temp, () => runUninstallCommand(["--dry-run"]));
 			match(preview.stdout, /PATH block: ~\/\.bashrc \(other programs in .* rely on it\)/u);
-			const real = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const real = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(real.code, 0, real.stdout);
 			strictEqual(readFileSync(rc, "utf8"), own);
 			match(real.stdout, /Kept, and why:\n(?:.*\n)*?.*PATH block: ~\/\.bashrc \(other programs in .* rely on it\)/u);
@@ -535,7 +531,7 @@ describe("contracts/uninstall-lifecycle", () => {
 		const temp = home();
 		try {
 			writeFileSync(launcherPath(temp), "#!/bin/sh\n", "utf8");
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(code, 0);
 			match(stdout, /– Launcher: .*not a symlink/u);
 			ok(existsSync(launcherPath(temp)));
@@ -575,7 +571,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			const previewed = await asSourceCheckout(preview, () =>
 				runInHome(preview, () => runUninstallCommand(["--dry-run"])),
 			);
-			const executed = await asSourceCheckout(real, () => runInHome(real, () => runUninstallCommand(["--force"])));
+			const executed = await asSourceCheckout(real, () => runInHome(real, () => runUninstallCommand(["--yes"])));
 
 			// The old dry run appended a twenty-line "Binary removal guidance"
 			// block that the real run never printed, so the preview was not the
@@ -590,7 +586,7 @@ describe("contracts/uninstall-lifecycle", () => {
 		}
 	});
 
-	it("refuses without a terminal and without --force, on stderr alone", async () => {
+	it("refuses without a terminal and without --yes, on stderr alone", async () => {
 		const temp = home();
 		const savedIsTty = process.stdin.isTTY;
 		process.stdin.isTTY = false;
@@ -609,7 +605,7 @@ describe("contracts/uninstall-lifecycle", () => {
 		const temp = home();
 		try {
 			temp.env.CLIO_CODER_DATA_DIR = temp.configDir;
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--yes"]));
 			strictEqual(code, 2);
 			strictEqual(stdout, "");
 			ok(existsSync(join(temp.configDir, "settings.yaml")));

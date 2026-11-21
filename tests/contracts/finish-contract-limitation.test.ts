@@ -19,10 +19,12 @@ import {
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { turnSettlementFromCalls } from "../../src/domains/telemetry/call-facts.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import {
 	bareFinishVerdict,
 	completionOfToolResult,
+	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
 	finishTool,
@@ -1101,6 +1103,25 @@ describe("the finish declaration (fleet design 4.3)", () => {
 			remaining: ["docs"],
 		});
 		strictEqual((await finishTool.run({ state: "finished" })).kind, "error");
+		// CLI-P49: the measured description, verbatim; no "alone" anywhere the model reads about finish. CLI-P50: the
+		// refusal repeats the reply rule, and each refusal is counted on its turn's turn.settled so the rate per model is
+		// readable (absent when none was refused).
+		strictEqual(
+			finishTool.description,
+			"Declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
+		);
+		ok(FINISH_WITHOUT_REPLY_REFUSAL.includes("Write your reply to the user as text first; then, in that same response"));
+		for (const text of [
+			FINISH_WITHOUT_REPLY_REFUSAL,
+			finishSiblingRefusal(
+				{ name: ToolNames.Finish, arguments: {} },
+				{ content: [{ type: "toolCall" }, { type: "toolCall" }] },
+			)?.reason ?? "",
+			builtin(finishTool, SOURCE).metadata?.resultSizePolicy?.followUpHint ?? "",
+		])
+			ok(text.length > 0 && !/\balone\b/u.test(text), text);
+		strictEqual(turnSettlementFromCalls("stop", [], 0, undefined, undefined, 2).bareFinishRefusals, 2);
+		ok(!("bareFinishRefusals" in turnSettlementFromCalls("stop", [], 0)));
 		const call = { name: ToolNames.Finish, arguments: { state: "done" } };
 		strictEqual(finishSiblingRefusal(call, { content: [{ type: "text" }, { type: "toolCall" }] }), undefined);
 		ok(finishSiblingRefusal(call, { content: [{ type: "toolCall" }, { type: "toolCall" }] })?.block);
@@ -1157,10 +1178,7 @@ describe("the finish declaration (fleet design 4.3)", () => {
 		const replied = { content: [{ type: "text", text: "pineapple" }, { type: "toolCall" }] };
 		strictEqual(bareFinishVerdict(finish, replied, attended), null);
 		strictEqual(bareFinishVerdict({ name: ToolNames.Read, arguments: {} }, bare, attended), null);
-		for (const unattended of [
-			{ headless: true, origin: "operator" },
-			...["job", "continuation"].map((origin) => ({ headless: false, origin })),
-		])
+		for (const unattended of ["job", "continuation"].map((origin) => ({ headless: false, origin })))
 			strictEqual(
 				bareFinishVerdict(finish, bare, { ...unattended, refusedThisTurn: false }),
 				null,
@@ -1169,7 +1187,25 @@ describe("the finish declaration (fleet design 4.3)", () => {
 		// CLI-P46: a chain a job or a headless run owns stays unattended (the attended roll is in continuation-last-tool-call).
 		const rolled = { headless: false, origin: "continuation", promptOrigin: "job", refusedThisTurn: false };
 		strictEqual(bareFinishVerdict(finish, bare, rolled), null);
-		strictEqual(bareFinishVerdict(finish, bare, { ...rolled, headless: true, promptOrigin: "operator" }), null);
+		// CLI-P49: a headless main run whose whole user turn wrote no text is refused once like an attended one, and the
+		// admitted second bare finish drops to partly_done with the missing reply limited and unverified. A turn that wrote
+		// its reply earlier (the pinned declaration round) declares bare.
+		const headless = { headless: true, origin: "operator", refusedThisTurn: false, repliedThisTurn: false };
+		strictEqual(bareFinishVerdict(finish, bare, headless), "refuse");
+		strictEqual(
+			bareFinishVerdict(finish, bare, { ...headless, origin: "continuation", promptOrigin: "operator" }),
+			"refuse",
+		);
+		strictEqual(bareFinishVerdict(finish, bare, { ...headless, refusedThisTurn: true }), "admit");
+		strictEqual(bareFinishVerdict(finish, bare, { ...headless, repliedThisTurn: true }), null);
+		strictEqual(bareFinishVerdict(finish, replied, headless), null);
+		deepStrictEqual(withoutReplyLimitation({ state: "done", limitations: [], unverified: [] }, true), {
+			state: "partly_done",
+			limitations: [
+				{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
+			],
+			unverified: ["no reply text: the run wrote no answer for the request"],
+		});
 	});
 
 	it("assesses a textless declared done over an unvalidated edit as partly_done (fleet design 4.3)", () => {

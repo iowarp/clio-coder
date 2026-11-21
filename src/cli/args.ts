@@ -64,7 +64,7 @@ export interface RunCliArgs {
 	skillPaths: string[];
 	maxContextTokens?: number;
 	steerChannel?: string;
-	/** `--resume <id|prefix|name>` (or the deprecated `--session`): resume this session and append the turn to it. */
+	/** `--resume <id|prefix|name>`: resume this session and append the turn to it. */
 	sessionId?: string;
 	/** Resume the most recent session for this workspace. */
 	continueSession: boolean;
@@ -140,7 +140,7 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  * | -------------------------------------------------------------- | ----- | ----- |
  * | --record, --agent-profile, --agent-runtime, --tool-profile, --require, --worktree | usage | ok |
  * | --turn-mode, --allow-tools, --deny-tools, --delegate-tools, --no-delegate | ok | usage |
- * | --resume, --session, --continue, --fork, --name                | ok    | usage |
+ * | --resume, --continue, --fork, --name                           | ok    | usage |
  * | --fail-on-noop, --verify, --answers                            | ok    | usage |
  * | --systemone                                                    | ok    | usage |
  * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
@@ -299,17 +299,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--worktree") {
 			parsed.worktree = true;
-			continue;
-		}
-		// Removed in 0.8.5 (maintainer ruling): an unknown option (C17 `unknown_flag`) that names its replacement. A
-		// `--json-events` value is taken with it so the refusal names the flag alone.
-		if (arg === "--json" || arg === "--json-events" || arg?.startsWith("--json-events=")) {
-			if (arg === "--json-events" && (argv[i + 1] === "full" || argv[i + 1] === "terminal")) i += 1;
-			parsed.diagnostics.push({
-				type: "error",
-				slug: "unknown_flag",
-				message: `unknown option: ${arg === "--json" ? arg : "--json-events"} (removed in 0.8.5; use --output-format json|stream-json)`,
-			});
 			continue;
 		}
 		// Read where it stands, before any other flag is judged, so a run whose other flags fail still frames that
@@ -494,13 +483,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			else if (n !== null) parsed.diagnostics.push({ type: "error", message: n.error });
 			continue;
 		}
-		if (arg === "--resume" || arg === "-r" || arg?.startsWith("--resume=") || arg === "--session") {
+		if (arg === "--resume" || arg === "-r" || arg?.startsWith("--resume=")) {
 			const value = arg.startsWith("--resume=") ? arg.slice("--resume=".length) : need(arg);
 			if (value === "") parsed.diagnostics.push({ type: "error", message: "--resume requires a session" });
 			else if (value !== null) parsed.sessionId = value;
-			// One release of the old spelling (SPEC D6): it still resumes, and says what replaces it.
-			if (arg === "--session")
-				parsed.diagnostics.push({ type: "warning", message: "--session is deprecated; use --resume <id|prefix|name>" });
 			continue;
 		}
 		if (arg === "--fork") {

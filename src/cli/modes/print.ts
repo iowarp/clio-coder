@@ -404,13 +404,13 @@ export function recordBlockedAttempt(
 /**
  * The run's one answer: what text mode prints, `-o` holds, `--output-schema` judges and the v2 envelope's `result.text`
  * carries (CLI-P43). A turn that ended quietly has none. An artifact's terminating result is the whole answer, so
- * chatter before it is not; `finish` closes the turn's replies, which stand, and its own result stands only for a
- * turn that wrote no reply.
+ * chatter before it is not; `finish` closes the turn's replies, which stand, and its own result (`completion declared:
+ * ...`) is never the answer (CLI-P49): a turn that wrote no reply has none, and its declaration carries that.
  */
 function printedAnswer(result: HeadlessMainAgentResult): string {
 	if (result.endedQuietly && !result.sawTerminatingToolResult) return "";
 	if (!result.sawTerminatingToolResult) return result.text;
-	if (result.terminatedByFinish && result.text.length > 0) return result.text;
+	if (result.terminatedByFinish) return result.text;
 	return result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
 }
 

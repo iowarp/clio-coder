@@ -175,7 +175,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"session.forked": { parentSessionId: "id", parentCwdHash: "id", parentTurnId: "id", parentTurnAt: "id" },
 	"session.closed": keep("reason"),
 	"journal.segment_closed": keep("reason"),
-	"turn.settled": keep("stopReason", "terminal"),
+	"turn.settled": keep("stopReason", "terminal", "bareFinishRefusals"),
 	"step_pipeline.settled": STEP_PIPELINE,
 	"run.settled": {
 		...keep(
@@ -726,6 +726,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			inputIds: "id",
 			offerIds: "id",
 			outcomes: { kind: "keep", ids: "id" },
+			turnId: "id",
+			selection: { id: "id", decision: "keep", reason: "keep" },
 			phase: "token",
 			by: "token",
 			filing: "token",

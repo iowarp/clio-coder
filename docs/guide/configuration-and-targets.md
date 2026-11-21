@@ -467,7 +467,7 @@ A target is a named connection to a model provider or server. It combines a runt
 
 In the TUI, open `/settings connections` (or `/settings targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. **Connect by URL** asks only for an endpoint URL, a key when the endpoint needs one, and a model from its live list; it saves the connection and makes that model the chat model. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
-Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
+Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 
 A target binds an id to a registered runtime, endpoint/auth, model defaults, and optional capability or runtime-specific settings. Example user settings:
 
@@ -498,10 +498,8 @@ for the Sophia and Metis URLs and model IDs.
 | --- | --- |
 | `clio-coder targets [--json] [--target <id>]` | List configured targets and status, or only one target. |
 | `clio-coder targets --probe` | Probe configured endpoints and refresh discovery. With `--target <id>` it probes only that target. |
-| `clio-coder targets add` | Run target setup. |
 | `clio-coder targets use <id>` | Without role flags, set chat and fleet to the target default or shared `--model`; preserve memory. With `--orchestrator-model`, `--background-model`, `--fleet-target` or `--fleet-model`, change only the named roles. `--model` supplies a fallback only for a selected role that needs one. See [command contracts](commands-and-modes.md#cli-commands). |
-| `clio-coder targets fleet [--json]` | Show the worker (fleet) routing: the fleet default and every profile. Alias `workers`. |
-| `clio-coder targets profile <subcommand>` | Use `list`, `set <name> <id> [--model] [--thinking]`, `remove <name> [--force]`, `rename`, `bind <agentId> <profileName>`, `unbind <agentId>`, or `bindings` for worker routes and agent bindings. Alias `worker`. |
+| `clio-coder targets profile <subcommand>` | Use `list`, `set <name> <id> [--model] [--thinking]`, `remove <name> [--force]`, `rename`, `bind <agentId> <profileName>`, `unbind <agentId>`, or `bindings` for worker routes and agent bindings. |
 | `clio-coder targets remove <id>`, `rename <old> <new>`, `convert <id> --runtime <runtimeId>` | Maintain target entries. `remove` also drops the key stored under the target's own key reference (`target:<id>`), because nothing can name that key once the target is gone, and the desktop app's stored copy of the key variable it names (`env:<VAR>`) once no remaining target names that variable. It keeps a runtime's own key and a key another target still reads, and its output line says which key it removed or kept. The GUI's Connections remove runs this command. Settings → Connections → Remove target in the terminal app does the same when the removal is saved globally; a removal for this session or this project leaves the key. |
 
 `targets --probe --reasoning` and `targets --probe --tools` (with optional `--tools-timeout <seconds>`) opt into generating qualification probes; they may load a local model. Use them only when that qualification is intended. Exact accepted flags and restrictions are printed by `clio-coder targets --help`.

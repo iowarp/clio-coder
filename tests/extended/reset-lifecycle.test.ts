@@ -48,7 +48,7 @@ describe("contracts/reset-lifecycle", () => {
 			const approval = join(temp.configDir, "workspace-trust", "abc.json");
 			mkdirSync(join(temp.configDir, "workspace-trust"));
 			writeFileSync(approval, "{}\n", "utf8");
-			const { code } = await runInHome(temp, () => runResetCommand(["--state", "--force"]));
+			const { code } = await runInHome(temp, () => runResetCommand(["--state", "--yes"]));
 			strictEqual(code, 0);
 			strictEqual(readFileSync(manifest, "utf8"), applied);
 			ok(existsSync(approval), "an approval is an operator decision, not state");
@@ -58,12 +58,12 @@ describe("contracts/reset-lifecycle", () => {
 		}
 	});
 
-	it("stops for an open session, even with --force, and keeps every root", async () => {
+	it("stops for an open session, even with --yes, and keeps every root", async () => {
 		const temp = home();
 		try {
 			writeLiveSession(temp, { host: hostname(), pid: process.pid });
 			for (const level of ["--state", "--data", "--all"]) {
-				const { code, stdout } = await runInHome(temp, () => runResetCommand([level, "--force"]));
+				const { code, stdout } = await runInHome(temp, () => runResetCommand([level, "--yes"]));
 				strictEqual(code, 1, level);
 				match(stdout, /20261102-open-session \(tui, pid \d+ on /u);
 				match(stdout, /clio-coder session terminate <id>/u);
@@ -73,7 +73,7 @@ describe("contracts/reset-lifecycle", () => {
 			const preview = await runInHome(temp, () => runResetCommand(["--state", "--dry-run"]));
 			strictEqual(preview.code, 0);
 			match(preview.stdout, /1 session is still open; the real run stops until they end/u);
-			strictEqual((await runInHome(temp, () => runResetCommand(["--cache", "--force"]))).code, 0);
+			strictEqual((await runInHome(temp, () => runResetCommand(["--cache", "--yes"]))).code, 0);
 		} finally {
 			temp.cleanup();
 		}
@@ -93,7 +93,7 @@ describe("contracts/reset-lifecycle", () => {
 				"utf8",
 			);
 			utimesSync(stale, old, old);
-			strictEqual((await runInHome(temp, () => runResetCommand(["--state", "--force"]))).code, 0);
+			strictEqual((await runInHome(temp, () => runResetCommand(["--state", "--yes"]))).code, 0);
 		} finally {
 			temp.cleanup();
 		}
@@ -161,7 +161,7 @@ describe("contracts/reset-lifecycle", () => {
 	it("refuses to guess what to reset, whatever else was asked", async () => {
 		const temp = home();
 		try {
-			for (const argv of [[], ["--dry-run"], ["--force"]]) {
+			for (const argv of [[], ["--dry-run"], ["--yes"]]) {
 				const { code, stdout } = await runInHome(temp, () => runResetCommand(argv));
 				strictEqual(code, 2, argv.join(" "));
 				strictEqual(stdout, "");
@@ -172,7 +172,7 @@ describe("contracts/reset-lifecycle", () => {
 		}
 	});
 
-	it("refuses without a terminal and without --force, on stderr alone", async () => {
+	it("refuses without a terminal and without --yes, on stderr alone", async () => {
 		const temp = home();
 		const savedIsTty = process.stdin.isTTY;
 		process.stdin.isTTY = false;
@@ -199,7 +199,7 @@ describe("contracts/reset-lifecycle", () => {
 			writeFileSync(join(temp.stateDir, "sessions", "kept", "meta.json"), "{}\n", "utf8");
 			writeFileSync(join(temp.stateDir, "home.json"), '{"version":"0.4.2-old"}\n', "utf8");
 			const settingsBefore = readFileSync(join(temp.configDir, "settings.yaml"), "utf8");
-			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state", "--force"]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state", "--yes"]));
 			strictEqual(code, 0);
 
 			match(stdout, /✓ Cleared State/u);
@@ -222,7 +222,7 @@ describe("contracts/reset-lifecycle", () => {
 	it("clears credentials for --auth without touching settings", async () => {
 		const temp = home();
 		try {
-			const { code } = await runInHome(temp, () => runResetCommand(["--auth", "--force"]));
+			const { code } = await runInHome(temp, () => runResetCommand(["--auth", "--yes"]));
 			strictEqual(code, 0);
 			// The bootstrap writes an empty store back, so the file exists and the
 			// secret does not. Asserting only on the file's absence would pass over
@@ -238,7 +238,7 @@ describe("contracts/reset-lifecycle", () => {
 	it("reports no work rather than a phantom result when the selected root is already gone", async () => {
 		const temp = createLifecycleHome("clio-coder-test-reset-empty-", { populate: false });
 		try {
-			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--cache", "--force"]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--cache", "--yes"]));
 			strictEqual(code, 0);
 			// removePath returns null both for a delete and for an absent path, so
 			// the old code announced "Reset cache" over a cache that never existed.
@@ -253,7 +253,7 @@ describe("contracts/reset-lifecycle", () => {
 		const temp = home();
 		try {
 			temp.env.CLIO_CODER_DATA_DIR = temp.configDir;
-			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--all", "--force"]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--all", "--yes"]));
 			strictEqual(code, 2);
 			strictEqual(stdout, "");
 			ok(existsSync(join(temp.configDir, "settings.yaml")));

@@ -58,7 +58,7 @@ A run that left its evidence obligation unmet is the one exception to "no automa
 
 ## `--help` and flag positioning
 
-Subcommand `--help` exits `0` with zero side effects or network probes, writing to `stdout`; `clio-coder run --help` does so under `--output-format json|stream-json` too ([run-help.ts](../../src/cli/run-help.ts)). `clio-coder --help` prints the grouped command page and `--help --all` appends every command path. `clio-coder help --json` prints the command manifest as one JSON document, and `clio-coder help run --topics` prints the long-form `run` notes ([help-command.ts](../../src/cli/help-command.ts)). A removed command exits `2` with a pointer to its replacement, even with `--help` ([deprecations.ts](../../src/cli/deprecations.ts)).
+Subcommand `--help` exits `0` with zero side effects or network probes, writing to `stdout`; `clio-coder run --help` does so under `--output-format json|stream-json` too ([run-help.ts](../../src/cli/run-help.ts)). `clio-coder --help` prints the grouped command page and `--help --all` appends every command path. `clio-coder help --json` prints the command manifest as one JSON document, and `clio-coder help run --topics` prints the long-form `run` notes ([help-command.ts](../../src/cli/help-command.ts)). A removed command or flag is an unknown one and exits `2`.
 
 ### Flag positioning
 

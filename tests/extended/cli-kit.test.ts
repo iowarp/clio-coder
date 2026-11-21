@@ -384,7 +384,7 @@ test("spec stubs cover every command handler and the kit stays off the domain gr
 		entry.indexOf("]);\n", entry.indexOf("const COMMAND_HANDLERS")),
 	);
 	const handlerKeys = [...table.matchAll(/^\t\[\n?\t*"([a-z-]+)",/gmu)].map((match) => match[1]);
-	equal(handlerKeys.length, 51);
+	equal(handlerKeys.length, 45);
 	deepStrictEqual(Object.keys(COMMAND_SPECS).sort(), [...handlerKeys].sort());
 	for (const [key, load] of Object.entries(COMMAND_SPECS)) {
 		const { spec } = await load();

@@ -360,7 +360,7 @@ writing nothing outside its own roots, so it is not offered (#273).
 With `interface.panes.files.profile: user`, nothing is themed and the engine runs on your own configuration.
 
 CLIO Coder's generated profile lives under the cache root at `yazi/profile` and
-never touches `~/.config/yazi`. `clio-coder tools status yazi --reset-profile`
+never touches `~/.config/yazi`. `clio-coder tools reset-profile yazi`
 deletes it; the next open rebuilds it.
 
 ## Troubleshooting
@@ -399,7 +399,7 @@ a file instead of the event stream. `/panes` shows `file pane: … lastLine=`
 and a `dropped` count of lines that carried another session's token.
 
 **`doctor` warns `files pane profile … (stale)`**: nothing to do; the next
-open regenerates it. `tools status yazi --reset-profile` forces it.
+open regenerates it. `tools reset-profile yazi` forces it.
 
 **A dock disappeared after a key press**: it was hidden, not closed. Look for the tab labelled `clio parked` in the CLIO Coder workspace, or press the dock's key again to show it. `/panes` marks a parked dock `hidden`, and the `panes` tool's `list` reports it as `hidden`.
 

@@ -31,8 +31,7 @@ Levels (name at least one; combinable except --all):
 Safety:
   --state, --data and --all stop while a session is still open.
   --yes, -y     skip the confirmation; without a terminal, reset needs it
-                (exit 2, confirmation_required). --force and -f are deprecated
-                spellings of --yes.
+                (exit 2, confirmation_required).
   --dry-run     print what would be reset without changing anything
   --json        emit machine-readable JSON output; a terminal run still asks,
                 on stderr
@@ -57,8 +56,6 @@ interface ParsedResetArgs {
 	settings: boolean;
 	all: boolean;
 	yes: boolean;
-	/** `--force` or `-f` spelled the confirmation skip; it still works and says it is deprecated. */
-	forceSpelling: string | null;
 	dryRun: boolean;
 	json: boolean;
 	help: boolean;
@@ -75,7 +72,6 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 		settings: false,
 		all: false,
 		yes: false,
-		forceSpelling: null,
 		dryRun: false,
 		json: false,
 		help: false,
@@ -103,11 +99,6 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 			case "--yes":
 			case "-y":
 				parsed.yes = true;
-				break;
-			case "--force":
-			case "-f":
-				parsed.yes = true;
-				parsed.forceSpelling = arg;
 				break;
 			case "--dry-run":
 				parsed.dryRun = true;
@@ -197,8 +188,6 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		process.stdout.write(HELP);
 		return 0;
 	}
-	if (args.forceSpelling !== null)
-		process.stderr.write(`clio-coder: deprecated: reset ${args.forceSpelling}; use --yes\n`);
 
 	// One sentence on stderr, and nothing on stdout but the --json failure
 	// document: a caller that piped this run is parsing stdout.

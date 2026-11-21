@@ -948,6 +948,11 @@ export const TurnSettledSchema = Type.Object(
 			},
 			closed,
 		),
+		/**
+		 * Attended finish calls this user turn refused because their response carried no reply text (FX-40, CLI-P50), so
+		 * the rate per model is readable from the journal. Absent when none was refused and in journals before CLI-P50.
+		 */
+		bareFinishRefusals: Type.Optional(Type.Integer({ minimum: 1 })),
 	},
 	closed,
 );
@@ -2849,6 +2854,7 @@ export const MemoryObservationRecordedSchema = Type.Object(
 			"lessons-retained",
 			"memory-recall-results",
 			"memory-reminders-submitted",
+			"memory-section-selected",
 			"memory-section-submitted",
 			"notes-rejected",
 			"offer-declined",
@@ -2900,6 +2906,28 @@ export const MemoryObservationRecordedSchema = Type.Object(
 				split: Type.Optional(Type.Boolean()),
 				ids: Type.Optional(Type.Array(ExistingId)),
 				retainedIds: Type.Optional(Type.Array(ExistingId)),
+				/** The turn a `memory-section-selected` decision prepared for; null for a prewarm read. */
+				turnId: Type.Optional(Type.Union([text, Type.Null()])),
+				/** Each eligible record's decision on `memory-section-selected`, bounded; `dropped` counts the rest. */
+				selection: Type.Optional(
+					Type.Array(
+						Type.Object(
+							{
+								id: ExistingId,
+								decision: vocabulary(["selected", "withheld"]),
+								reason: vocabulary([
+									"selected",
+									"check-command",
+									"token-budget",
+									"item-limit",
+									"not-relevant",
+									"delivery-refused",
+								]),
+							},
+							closed,
+						),
+					),
+				),
 
 				sourceTokens: Type.Optional(factSchema(count)),
 				noteTokens: Type.Optional(factSchema(count)),

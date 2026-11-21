@@ -10,9 +10,9 @@ import {
 } from "../domains/evolution/index.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio-coder evolve manifest init
-clio-coder evolve manifest validate <path>
-clio-coder evolve manifest summarize <path>
+const HELP = `clio-coder dev evolve manifest init
+clio-coder dev evolve manifest validate <path>
+clio-coder dev evolve manifest summarize <path>
 
 Create, validate, or summarize a CLIO Coder change manifest. validate and
 summarize resolve each non-empty evidenceRef (a run id) against the local run

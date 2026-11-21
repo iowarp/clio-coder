@@ -65,13 +65,6 @@ import { traceBoot } from "../core/boot-trace.js";
 import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
 import { installProxyFromEnv } from "../core/proxy-env.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
-import {
-	deprecatedSpelling,
-	deprecationNotice,
-	isDeprecatedPath,
-	TOMBSTONE_COMMANDS,
-	tombstoneFor,
-} from "./deprecations.js";
 
 const HELP = `CLIO Coder command line
 
@@ -120,32 +113,34 @@ Interactive options:
 Run 'clio-coder <command> --help' for one command, 'clio-coder --help --all' for every command path.
 `;
 
-/**
- * Commands that answer a question about the harness rather than about the
- * user's own work. Their top-level spellings still resolve through 0.8.x with
- * one deprecation notice (`deprecations.ts`) and are removed in 0.9.0.
- */
-const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
-	{ name: "components", summary: "list, snapshot, or diff harness components" },
-	{ name: "evolve", summary: "create, validate, or summarize change manifests" },
-	{ name: "flywheel", summary: "print the maintainers' ranked backlog from shared usage" },
+/** Commands that answer a question about the harness rather than about the user's own work; only `dev` reaches them. */
+const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string; run: (subArgs: string[]) => Promise<number> }> = [
+	{
+		name: "components",
+		summary: "list, snapshot, or diff harness components",
+		run: async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs),
+	},
+	{
+		name: "evolve",
+		summary: "create, validate, or summarize change manifests",
+		run: async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs),
+	},
+	{
+		name: "flywheel",
+		summary: "print the maintainers' ranked backlog from shared usage",
+		run: async (subArgs) => (await import("./flywheel.js")).runFlywheelCommand(subArgs),
+	},
 ];
-
-/** `dev share` and `dev gui` keep resolving in 0.8.x; both are top-level commands, so the listing leaves them out. */
-const UNLISTED_DEV_COMMANDS: ReadonlySet<string> = new Set(["share", "gui"]);
 
 const DEV_HELP = `CLIO Coder harness instruments and power-user surfaces
 
 Usage:
 ${DEV_COMMANDS.map((entry) => `  clio-coder dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}
-
-The spellings without the 'dev' prefix still work through 0.8.x with a
-deprecation notice on stderr, and are removed in 0.9.0.
 `;
 
 /**
  * `--help --all`: the root help, then every non-hidden command path, read from the light specs and the manifest
- * alone so it loads no command implementation. Deprecated spellings are left out (SPEC section 5).
+ * alone so it loads no command implementation.
  */
 async function fullHelpText(): Promise<string> {
 	const [{ COMMAND_SPECS }, { NESTED_LEAVES, TOP_LEVEL_USAGE }] = await Promise.all([
@@ -168,7 +163,7 @@ async function fullHelpText(): Promise<string> {
 		const entries = [{ path: name, summary: module.spec.summary, usage: TOP_LEVEL_USAGE[name] ?? name }];
 		for (const [path, leaf] of [...nested].sort(([a], [b]) => a.localeCompare(b))) {
 			const words = path.split(" ");
-			if (words[0] !== name || isDeprecatedPath(words)) continue;
+			if (words[0] !== name) continue;
 			entries.push({ path, summary: leaf.summary, usage: leaf.usage.length > 0 ? leaf.usage : path });
 		}
 		for (const entry of entries) {
@@ -354,16 +349,6 @@ async function main(argv: string[]): Promise<number> {
 		});
 	}
 
-	// A removed command answers every invocation, `--help` included, before any command's own help (C1).
-	const tombstone = tombstoneFor([subcommand, ...subArgs]);
-	if (tombstone !== undefined) {
-		process.stderr.write(`clio-coder ${tombstone.path.join(" ")}: ${tombstone.reason}\nuse: ${tombstone.pointer}\n`);
-		return 2;
-	}
-	// The global `--acp` reaches here rewritten to `acp`; the first of the two words in argv says which was typed.
-	const spelledAcpFlag = subcommand === "acp" && argv.find((arg) => arg === "acp" || arg === "--acp") === "--acp";
-	const deprecated = deprecatedSpelling(spelledAcpFlag ? ["--acp", ...subArgs] : [subcommand, ...subArgs]);
-	if (deprecated !== undefined) process.stderr.write(deprecationNotice(deprecated));
 	return dispatch(subcommand, subArgs, bootOptions);
 }
 
@@ -390,9 +375,6 @@ async function enableBootCompileCache(subArgs: ReadonlyArray<string> = []): Prom
  * graphs, while adding a command in one place cannot leave --api-key/--skill
  * free to swallow it as a value.
  */
-const extensionsCommand: CommandHandler = async (subArgs) =>
-	(await import("./extensions.js")).runExtensionsCommand(subArgs);
-
 const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"acp",
@@ -407,7 +389,6 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["targets", async (subArgs) => (await import("./targets.js")).runTargetsCommand(subArgs)],
 	["models", async (subArgs) => (await import("./models.js")).runModelsCommand(subArgs)],
 	["agents", async (subArgs) => (await import("./agents.js")).runAgentsCommand(subArgs)],
-	["components", async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs)],
 	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
 	["claims", async (subArgs) => (await import("./claims.js")).runClaimsCommand(subArgs)],
@@ -420,11 +401,9 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["report", async (subArgs) => (await import("./report.js")).runReport(subArgs)],
 	["session", async (subArgs) => (await import("./session.js")).runSessionCommand(subArgs)],
 	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
-	["evolve", async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs)],
-	["flywheel", async (subArgs) => (await import("./flywheel.js")).runFlywheelCommand(subArgs)],
 	[
 		"dev",
-		async (subArgs, bootOptions) => {
+		async (subArgs) => {
 			const devSubcommand = subArgs[0];
 			// `clio-coder dev` is what the top-level help tells the user to run for this
 			// listing, so printing the listing is the command succeeding, not a
@@ -433,16 +412,16 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 				process.stdout.write(DEV_HELP);
 				return 0;
 			}
-			if (!DEV_COMMANDS.some((entry) => entry.name === devSubcommand) && !UNLISTED_DEV_COMMANDS.has(devSubcommand)) {
+			const command = DEV_COMMANDS.find((entry) => entry.name === devSubcommand);
+			if (command === undefined) {
 				printError(`unknown dev command: ${devSubcommand}`);
 				process.stdout.write(DEV_HELP);
 				return 2;
 			}
-			return dispatch(devSubcommand, subArgs.slice(1), bootOptions);
+			return command.run(subArgs.slice(1));
 		},
 	],
-	["extensions", extensionsCommand],
-	["ext", extensionsCommand],
+	["extensions", async (subArgs) => (await import("./extensions.js")).runExtensionsCommand(subArgs)],
 	[
 		"fleet",
 		async (subArgs) => {
@@ -465,8 +444,6 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["gui", async (subArgs) => (await import("./gui.js")).runGuiCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
-	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],
-	["import", async (subArgs) => (await import("./share.js")).runImportCommand(subArgs)],
 	["context", async (subArgs) => (await import("./context.js")).runContextCommand(subArgs)],
 	[
 		"run",
@@ -524,10 +501,8 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	],
 ]);
 
-// Removed commands are not dispatchable, but remain command-shaped tombstones
-// so top-level value flags cannot consume them and accidentally boot another mode.
 function isCommandToken(token: string): boolean {
-	return COMMAND_HANDLERS.has(token) || TOMBSTONE_COMMANDS.has(token);
+	return COMMAND_HANDLERS.has(token);
 }
 
 /**

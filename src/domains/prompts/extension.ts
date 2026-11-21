@@ -853,7 +853,7 @@ function selfDevelopmentSkillFragments(
 	if (inputs.headless === true) {
 		const body = [
 			"# Self-development skills",
-			`For a task that changes this repository, load clio-coder-dev before the first edit and clio-coder-test before choosing checks: ${loadCall("clio-coder-dev")}, ${loadCall("clio-coder-test")}. Skip both for a question or a read-only task.`,
+			`For a task that changes this repository, load clio-coder-dev before the first edit and clio-coder-test before choosing checks: ${loadCall("clio-coder-dev")}, ${loadCall("clio-coder-test")}. Skip both for a question or a read-only task, and skip one already loaded this session: its instructions stay in context.`,
 		].join("\n");
 		return [
 			{
@@ -871,7 +871,7 @@ function selfDevelopmentSkillFragments(
 		"For a task that changes Clio's source, harness, prompts, or library, clio-coder-dev guides the editing step and clio-coder-test the validation step. Skip both for unrelated or self-contained questions.",
 		`These two skills are discoverable from this checkout's library/skills/meta when no installed package owns their names. Check ${listCall} for current readiness; disabled, damaged, or hidden skills stay unavailable.`,
 		activation
-			? `Load each one when its step arrives, without waiting for a separate skill request: ${loadCall("clio-coder-dev")} once you have read the code and are about to make the first edit, ${loadCall("clio-coder-test")} once the change is made and you are choosing how to validate it. Never load both up front or for a step the task does not reach; a loaded skill is resent on every later request. Reuse already loaded guidance; do not load every reference or the whole catalog.`
+			? `Load each one when its step arrives, without waiting for a separate skill request, unless it is already loaded this session (by you, by the operator's /skill, or by the host): ${loadCall("clio-coder-dev")} once you have read the code and are about to make the first edit, ${loadCall("clio-coder-test")} once the change is made and you are choosing how to validate it. A loaded skill stays in context and is never loaded again. Never load both up front or for a step the task does not reach; a loaded skill is resent on every later request. Do not load every reference or the whole catalog.`
 			: "Only the operator activates skills at this autonomy level. Suggest /skill clio-coder-dev or /skill clio-coder-test when relevant, then continue permitted work without waiting or bypassing the activation gate.",
 		"The brief or spec is the assignment; a plan or skill does not authorize publication.",
 	].join("\n");

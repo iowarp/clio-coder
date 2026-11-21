@@ -100,6 +100,8 @@ export function parseSemanticArgs(
 ): { request: SemanticCliRequest; json: boolean } {
 	const args = [...argv];
 	let command = args.shift() ?? "status";
+	// `inbox-<verb>` is the internal request name; the command line spells it `inbox <verb>`.
+	if (command.startsWith("inbox-")) throw new Error(`Unknown semantic command: ${command}`);
 	if (command === "inbox") command = `inbox-${args.shift() ?? "list"}`;
 	if (!Object.hasOwn(FLAGS, command)) throw new Error(`Unknown semantic command: ${command}`);
 	const allowed = FLAGS[command as SemanticCliRequest["command"]] ?? [];

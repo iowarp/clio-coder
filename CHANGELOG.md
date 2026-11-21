@@ -49,6 +49,7 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 | `tools status --reset-profile` | `tools reset-profile <id>` |
 | `verifiers --cwd` | `verifiers --check-cwd` |
 | `semantic inbox-add`, `inbox-list`, `inbox-remove`, `inbox-preview` | `semantic inbox add`, `list`, `remove`, `preview` |
+| `clio-coder dev share`, `clio-coder dev gui` | `clio-coder share`, `clio-coder gui` |
 | `/loop list`, `/loop cancel` | `/loop`, `/loop stop <id> --now` |
 
 **Changed behaviour**

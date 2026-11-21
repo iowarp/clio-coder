@@ -3031,7 +3031,6 @@ describe("transcript block grammar", () => {
 			[{ kind: "operator-only" }, "only you can load it: /skill tech-spec"],
 			[{ kind: "recipe-bound" }, "not declared for this run"],
 			[{ kind: "not-requested" }, "not requested this turn"],
-			[{ kind: "already-loaded" }, "already loaded"],
 			[{ kind: "unknown" }, "unknown skill"],
 		];
 		for (const [refusal, reason] of cases) {
@@ -3040,6 +3039,11 @@ describe("transcript block grammar", () => {
 				const rows = renderToolPreview(refused(refusal), 100, transcriptDetail(style));
 				deepStrictEqual(rows.map(stripTerminalSequences), [`§ skill tech-spec not loaded · ${reason} ✗`]);
 			}
+		}
+		// CLI-P56: a skill already in context is a no-op, so its row is neutral, never `not loaded · … ✗`.
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const rows = renderToolPreview(refused({ kind: "already-loaded" }), 100, transcriptDetail(style));
+			deepStrictEqual(rows.map(stripTerminalSequences), ["§ skill tech-spec already loaded"]);
 		}
 		const [row] = renderToolPreview(refused({ kind: "manual-only" }), 100, transcriptDetail("standard"));
 		ok(row?.includes(clioTheme().fg("accent", "/skill tech-spec")), "the move reads in the slash-command accent");

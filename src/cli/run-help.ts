@@ -46,7 +46,7 @@ Flags:
                             is validated once; a mismatch is exit 1 schema_mismatch
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --resume, -r <session>    append this turn to an existing session, by id, unique id prefix or name;
-                            exit 2 when another process holds it open (--session is a deprecated alias)
+                            exit 2 when another process holds it open
   --continue                append this turn to the most recent session for this cwd; after a yolo
                             autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
   --fork                    with --resume or --continue: branch a new session from that one's last committed

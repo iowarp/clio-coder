@@ -330,14 +330,14 @@ The source is `validateMutation` in `src/domains/agents/result-contract.ts`. `cl
 
 ---
 
-## Change manifests and `clio-coder evolve`
+## Change manifests and `clio-coder dev evolve`
 
-A change manifest is a typed JSON record of one proposed harness change, linked to the evidence that justifies it (`src/domains/evolution/`). The command is also reachable as `clio-coder dev evolve`.
+A change manifest is a typed JSON record of one proposed harness change, linked to the evidence that justifies it (`src/domains/evolution/`).
 
 ```bash
-clio-coder evolve manifest init
-clio-coder evolve manifest validate <path>
-clio-coder evolve manifest summarize <path>
+clio-coder dev evolve manifest init
+clio-coder dev evolve manifest validate <path>
+clio-coder dev evolve manifest summarize <path>
 ```
 
 `init` prints a template (`version: 1`, `iterationId: exploratory-1`, one change) to stdout and exits 0. `validate` and `summarize` load the JSON, resolve every non-empty `evidenceRef` against the run scopes on this host, and exit 1 on an invalid manifest, an unreadable file or invalid JSON. `summarize` prints the iteration, base SHA, change count, authority levels, components, files changed, predicted regressions and validation-step count. A usage error exits 2. When the run scopes cannot be listed, every non-empty ref fails as not found.

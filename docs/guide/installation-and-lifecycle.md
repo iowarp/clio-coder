@@ -1089,7 +1089,7 @@ Preview first, then remove:
 
 ```bash
 clio-coder uninstall --dry-run
-clio-coder uninstall --force
+clio-coder uninstall --yes
 hash -r
 ```
 
@@ -1173,7 +1173,7 @@ first, or pass `--keep-binary`. Neither the preview nor the real run deletes pro
 data. To wipe state selectively
 while keeping settings or credentials, use `clio-coder reset --state` instead of
 uninstalling. If the launcher is already gone but state remains, run the built
-CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
+CLI directly from the checkout: `node dist/cli/index.js uninstall --yes`.
 
 #### What uninstall will and will not remove
 

@@ -6,7 +6,7 @@
  *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet code-steps <rootId> [--json]  deterministic code steps of one fleet root
- *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
+ *   clio-coder fleet admission [status|drain|open] [--json]  read, close or reopen durable dispatch admission
  *   clio-coder fleet cancel <runId>             cancel one run from any terminal
  *
  * Playbooks are repo-owned policy (.clio-coder/playbooks/<name>.md); the fleet
@@ -182,8 +182,6 @@ interface FleetRunOptions {
 	name: string;
 	vars: ReturnType<typeof parsePlaybookVars>["vars"];
 	resumeId?: string;
-	/** The deprecated `--json` stream, kept byte for byte. */
-	legacyJson: boolean;
 	format: FleetOutputFormat;
 	/** `--output-format` was given, which opts the run into the exit codes of 6.5 (exit 141 on a closed reader). */
 	formatGiven: boolean;
@@ -206,7 +204,6 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 	// A positional scan, so an option value is never read as the playbook name
 	// (`--resume <runId> <name>` used to run a playbook named after the run id)
 	// and an unknown flag is refused instead of running the playbook anyway.
-	let legacyJson = false;
 	let detach = false;
 	let name: string | undefined;
 	const values = new Map<string, string>();
@@ -221,10 +218,6 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 	for (let index = 0; index < rest.length; index += 1) {
 		const arg = rest[index];
 		if (arg === undefined) continue;
-		if (arg === "--json") {
-			legacyJson = true;
-			continue;
-		}
 		if (arg === "--detach") {
 			detach = true;
 			continue;
@@ -247,8 +240,6 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 	if (format !== undefined && format !== "text" && format !== "json" && format !== "stream-json") {
 		return { error: `--output-format takes text, json or stream-json, got '${format}'` };
 	}
-	if (format !== undefined && legacyJson) return { error: "--json and --output-format cannot be combined" };
-	if (detach && legacyJson) return { error: "--detach and --json cannot be combined; use --output-format json" };
 	const detachedRootId = values.get(DETACHED_ROOT_FLAG);
 	if (detachedRootId !== undefined && (detach || !isFleetRootId(detachedRootId))) {
 		return { error: `${DETACHED_ROOT_FLAG} is internal to --detach` };
@@ -256,7 +247,6 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 	const options: FleetRunOptions = {
 		name,
 		vars,
-		legacyJson,
 		format: format ?? "text",
 		formatGiven: format !== undefined,
 		detach,
@@ -421,7 +411,6 @@ async function runFleetTracked(
 	track: FleetRunTrack,
 ): Promise<number> {
 	const { name, vars, resumeId } = options;
-	const json = options.legacyJson;
 	const structured = options.format !== "text";
 	const stream = options.format === "stream-json";
 	let playbook: Playbook;
@@ -775,49 +764,29 @@ async function runFleetTracked(
 						}
 						if (structured) return;
 						if (step.replayed === true && step.result !== undefined) {
-							if (json) {
-								reporter.stdout(
-									`${JSON.stringify({
-										stepId: step.stepId,
-										status: "replayed",
-										run: {
-											runId: step.result.terminalRunId,
-											digest: step.result.runDigest,
-										},
-									})}\n`,
-								);
-							} else {
-								reporter.stdout(
-									`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} run-digest=${step.result.runDigest}\n`,
-								);
-							}
+							reporter.stdout(
+								`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} run-digest=${step.result.runDigest}\n`,
+							);
 							return;
 						}
 						if (step.run !== undefined) {
-							if (json) reporter.stdout(`${JSON.stringify(step.run)}\n`);
-							else {
-								reporter.stdout(
-									`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderPricingSum(step.pricing)}\n`,
-								);
-							}
+							reporter.stdout(
+								`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderPricingSum(step.pricing)}\n`,
+							);
 							return;
 						}
 						if (step.codeStep !== undefined) {
-							if (json) {
-								reporter.stdout(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
-							} else {
-								reporter.stdout(
-									`step ${step.stepId} code:${step.commandId}: ${
-										step.succeeded ? "passed" : "failed"
-									} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
-								);
-							}
+							reporter.stdout(
+								`step ${step.stepId} code:${step.commandId}: ${
+									step.succeeded ? "passed" : "failed"
+								} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
+							);
 						}
 					},
 					onNotice(text, kind) {
 						// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
 						if (kind === "gate") {
-							if (!json && !structured) reporter.stdout(`${text}\n`);
+							if (!structured) reporter.stdout(`${text}\n`);
 						} else reporter.stderr(`${text}\n`);
 					},
 				});
@@ -866,49 +835,33 @@ async function runFleetTracked(
 	if (structured) {
 		return finishFleetRun(options, reporter, track, settledExitCode(outcome.cleanRun), shutdownSignal?.aborted === true);
 	}
-	if (json) {
+	reporter.stdout(
+		`fleet ${playbook.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderPricingSum(outcome.totalCost)}\n`,
+	);
+	for (const loop of outcome.result.loops) {
 		reporter.stdout(
-			`${JSON.stringify({
-				playbook: playbook.name,
-				rootId: fleetRootId,
-				planHash: plan.hash,
-				loops: outcome.result.loops,
-				revalidated: outcome.result.revalidated,
-				unneeded: outcome.result.unneeded,
-				skipped: outcome.result.skipped,
-				needsDecision: outcome.result.needsDecision,
-				writeBoundaries: outcome.result.writeBoundaries,
-			})}\n`,
+			`  loop ${loop.loopId}: ${loop.reason} after ${loop.attempts} verification(s) and ${loop.repairs} repair(s)\n`,
 		);
-	} else {
-		reporter.stdout(
-			`fleet ${playbook.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderPricingSum(outcome.totalCost)}\n`,
-		);
-		for (const loop of outcome.result.loops) {
-			reporter.stdout(
-				`  loop ${loop.loopId}: ${loop.reason} after ${loop.attempts} verification(s) and ${loop.repairs} repair(s)\n`,
-			);
-		}
-		if (outcome.result.revalidated.length > 0) {
-			reporter.stdout(
-				`  staleness: re-ran ${outcome.result.revalidated.join(
-					", ",
-				)} because a workspace step landed after the last green\n`,
-			);
-		}
-		for (const message of outcome.result.needsDecision) {
-			reporter.stdout(`  needs operator decision: ${message}\n`);
-		}
-		for (const boundary of outcome.result.writeBoundaries) {
-			if (!boundary.violated) continue;
-			reporter.stdout(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
-		}
-		// The root id printed at the top is the only identifier this command
-		// advertises, so say what it is good for rather than leaving an operator
-		// to guess that the viewer wants a per-step run id.
-		reporter.stdout(`  clio-coder fleet view ${fleetRootId}   step index with each step's run id\n`);
 	}
-	// Text and the deprecated --json print nothing more here; this still resolves the result the root persists.
+	if (outcome.result.revalidated.length > 0) {
+		reporter.stdout(
+			`  staleness: re-ran ${outcome.result.revalidated.join(
+				", ",
+			)} because a workspace step landed after the last green\n`,
+		);
+	}
+	for (const message of outcome.result.needsDecision) {
+		reporter.stdout(`  needs operator decision: ${message}\n`);
+	}
+	for (const boundary of outcome.result.writeBoundaries) {
+		if (!boundary.violated) continue;
+		reporter.stdout(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
+	}
+	// The root id printed at the top is the only identifier this command
+	// advertises, so say what it is good for rather than leaving an operator
+	// to guess that the viewer wants a per-step run id.
+	reporter.stdout(`  clio-coder fleet view ${fleetRootId}   step index with each step's run id\n`);
+	// Text prints nothing more here; this still resolves the result the root persists.
 	return finishFleetRun(options, reporter, track, settledExitCode(outcome.cleanRun), shutdownSignal?.aborted === true);
 }
 
@@ -1038,19 +991,6 @@ function runStatus(args: ReadonlyArray<string>): number {
 		}
 	}
 	writeStatusFooter(process.stdout, snapshot.retrying, snapshot.totals);
-	return 0;
-}
-
-function runAdmissionControl(command: "drain" | "resume", args: ReadonlyArray<string>): number {
-	const unknown = args.find((arg) => arg !== "--json");
-	if (unknown) return fail(`${command}: unknown flag: ${unknown}`);
-	ensureClioState();
-	const admission = admissionStatus(setCapacityDraining(command === "drain"));
-	if (args.includes("--json")) {
-		process.stdout.write(`${JSON.stringify({ admission }, null, 2)}\n`);
-		return 0;
-	}
-	writeAdmissionText(admission);
 	return 0;
 }
 
@@ -1242,11 +1182,6 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 		case "run": {
 			const options = parseFleetRunArgs(args.slice(1));
 			if ("error" in options) return fail(options.error);
-			if (options.legacyJson) {
-				process.stderr.write(
-					"clio-coder fleet run: --json is deprecated; use --output-format stream-json for step events or json for one result document\n",
-				);
-			}
 			if (options.detach) return runFleetDetached(args.slice(1), options);
 			if (options.cwd !== undefined) {
 				// Before workspace conversion and playbook lookup, which both read the working directory.
@@ -1267,13 +1202,6 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 		}
 		case "status":
 			return runStatus(args.slice(1));
-		case "inspect":
-			// The callerless host projection was removed at the maintainer's decision; the run board and the read model
-			// serve what it carried (#434 §11.3).
-			process.stderr.write(
-				"fleet inspect was removed: read the run board with `clio-coder fleet status --json [--all]` and one run's telemetry with `clio-coder telemetry inspect --run <runId> --json`\n",
-			);
-			return 2;
 		case "decisions":
 			return (await import("./fleet-decisions.js")).runFleetDecisions(args.slice(1));
 		case "verify":
@@ -1284,10 +1212,6 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return (await import("./fleet-events.js")).runFleetEvents(args.slice(1));
 		case "code-steps":
 			return (await import("./fleet-code-steps.js")).runFleetCodeSteps(args.slice(1));
-		case "drain":
-			return runAdmissionControl("drain", args.slice(1));
-		case "resume":
-			return runAdmissionControl("resume", args.slice(1));
 		case "admission":
 			return runAdmission(args.slice(1));
 		case "list":

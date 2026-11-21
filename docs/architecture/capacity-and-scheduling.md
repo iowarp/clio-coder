@@ -190,10 +190,10 @@ To prevent leaked leases when workers or orchestrators crash:
 
 The fleet can be drained for maintenance without terminating running jobs:
 
-- **Drain Command**: `clio-coder fleet drain [--json]` sets `draining` in `dispatch-admission.json`. `clio-coder fleet status` reports whether admission is open or draining and until when.
+- **Drain Command**: `clio-coder fleet admission drain [--json]` sets `draining` in `dispatch-admission.json`. `clio-coder fleet status` reports whether admission is open or draining and until when.
 - **Drain Invariant**: When draining is active, existing runs continue to completion, but all new dispatch admissions and new reservations are refused with a drain notice that names the requesting pid and time (`dispatch: admission denied: capacity is draining (requested by pid <pid> at <time>)`).
-- **Auto-Expiry**: To prevent an unmanaged lockup if a draining operator disconnects, the drain state automatically expires after `DEFAULT_CAPACITY_DRAIN_TTL_MS` (1 hour). Repeating `fleet drain` renews the expiry.
-- **Resume Command**: `clio-coder fleet resume [--json]` clears the drain state immediately.
+- **Auto-Expiry**: To prevent an unmanaged lockup if a draining operator disconnects, the drain state automatically expires after `DEFAULT_CAPACITY_DRAIN_TTL_MS` (1 hour). Repeating `fleet admission drain` renews the expiry.
+- **Resume Command**: `clio-coder fleet admission open [--json]` clears the drain state immediately.
 - **Process shutdown**: A shutting-down CLIO Coder process uses its own process-local drain flag, which cancels its queued requests. It never sets the durable drain, because that would deny admission in every sibling process.
 
 ---
