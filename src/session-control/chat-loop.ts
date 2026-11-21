@@ -1646,6 +1646,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stepTurnEnd: () => stepTurnEnd(),
 		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
+		queueHostMessage: (text, source, rule) => queues.queueHostMessage(text, source, rule),
+	});
+	// A reminder an after_tool rule emits for this session's call rides the next tool-batch boundary (X6).
+	const detachBoundaryReminders = deps.toolRegistry?.onToolBoundaryReminders?.((reminders, input) => {
+		if (input.sessionId === undefined || input.sessionId === deps.session?.current()?.id)
+			middleware.applyToolBoundaryReminders(reminders);
 	});
 
 	try {
@@ -2130,6 +2136,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queueHandOver: {
 			atFinishTurn: (final) => queues.handOverAtFinishTurn(final),
 			afterPrepareNextTurn: () => queues.handOverAfterPrepareNextTurn(),
+			takeHostMessages: () => queues.takeHostMessages(),
 		},
 		middlewareToolChoice,
 		persistence,
@@ -4974,6 +4981,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribeSynthesisLock?.();
 			unsubscribeToolBudgetLock?.();
 			detachOutcomeLedger?.();
+			detachBoundaryReminders?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			keepalive.dispose();

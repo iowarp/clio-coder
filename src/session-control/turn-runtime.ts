@@ -343,11 +343,14 @@ export interface TurnRuntimeDeps {
 	/**
 	 * Clio's steering queue hands operator messages to the engine only at a
 	 * slot: the top of `finishTurn`, before Pi's poll, and the end of
-	 * `prepareNextTurn`, before Pi's second poll.
+	 * `prepareNextTurn`, before Pi's second poll. Host messages (X6) never take
+	 * that path: `takeHostMessages` hands them to `prepareNextTurn`, which appends
+	 * them as host inserts in its context update.
 	 */
 	queueHandOver?: {
 		atFinishTurn(final: boolean): void;
 		afterPrepareNextTurn(): void;
+		takeHostMessages?(): ReadonlyArray<{ text: string; source: HostInsertSource; rule?: string }>;
 	};
 	/**
 	 * A stop deferred to the tool boundary lands here, after the round's tool
@@ -1753,6 +1756,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		handle.agent.prepareNextTurnWithContext = async (_completed, signal?: AbortSignal) => {
 			stallSuspendDepth += 1;
 			guardStopCause = null;
+			// Host messages queued during the tool batch (X6). Taken now, so a cancel, a throw or an early return below
+			// drops them unrecorded; they enter the ledger only where they enter the outgoing context.
+			const hostMessages = deps.queueHandOver?.takeHostMessages?.() ?? [];
 			try {
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
@@ -1784,6 +1790,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// A tool hook changed a pinned block, or the guard's compaction dropped one: it rides the next request.
 				const pinned = context.appendPinnedContext(localRuntime);
+				// Last, nearest the next request, and recorded as they are pushed, so a rebuild replays the order sent.
+				for (const host of hostMessages)
+					pushHostInsert(
+						host.source,
+						{ role: "user", content: host.text, timestamp: Date.now() },
+						host.rule !== undefined ? { rule: host.rule } : undefined,
+					);
+				const tail = pinned || hostMessages.length > 0;
 				// Preparation can be long (compaction). A message typed during it is
 				// handed over now so Pi's poll right after this hook takes it.
 				deps.queueHandOver?.afterPrepareNextTurn();
@@ -1791,8 +1805,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// already-accounted reminder through context, not message events that
 				// would manufacture a new operator turn and reset task authority.
 				const messages = { messages: [...localRuntime.agent.state.messages], tools: [...localRuntime.agent.state.tools] };
-				if (!restored && update !== undefined) return pinned ? { ...update, context: messages } : update;
-				return contextChanged || restored || pinned ? { context: messages } : undefined;
+				if (!restored && update !== undefined) return tail ? { ...update, context: messages } : update;
+				return contextChanged || restored || tail ? { context: messages } : undefined;
 			} finally {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
@@ -1900,8 +1914,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// a fresh per-turn tool count, the turn controller's collection, a
 		// turn_start marked as a continuation, and the buffered continuation
 		// reminders as model-only context.
-		const pushHostInsert = (source: HostInsertSource, message: AgentMessage): void => {
-			if (deps.hostInserts) deps.hostInserts.insert(localRuntime, source, [message]);
+		const pushHostInsert = (source: HostInsertSource, message: AgentMessage, options?: { rule: string }): void => {
+			if (deps.hostInserts) deps.hostInserts.insert(localRuntime, source, [message], options);
 			else localRuntime.agent.state.messages.push(message);
 		};
 		const deliverInRunContinuation = async (signal?: AbortSignal): Promise<boolean> => {
