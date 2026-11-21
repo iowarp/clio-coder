@@ -16,7 +16,7 @@ function issueRow(issue: ReturnType<typeof readLayeredSettings>["issues"][number
 	return { origin: issue.origin, path: issue.path, kind: issue.kind ?? "schema", message: GENERIC };
 }
 
-export function inspectSettings(cwd: string): SettingsReport {
+export function inspectSettings(cwd: string | null): SettingsReport {
 	const layered = readLayeredSettings(cwd);
 	return {
 		rows: projectSettingsRows(layered.settings, layered.sources),

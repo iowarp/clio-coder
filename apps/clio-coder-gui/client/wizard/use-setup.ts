@@ -13,7 +13,7 @@ import { type Client, emptyInput } from "../api/client.js";
 const AFTER_SAVE = [
 	"setup-status",
 	"settings-controls",
-	"workspace-settings",
+	"settings-report",
 	"config-graph",
 	"targets",
 	"routing",

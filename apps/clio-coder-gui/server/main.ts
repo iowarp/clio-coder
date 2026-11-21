@@ -220,8 +220,8 @@ export async function main(args = process.argv.slice(2)) {
 		await Promise.all([reads.close(), ops.close()]);
 		throw error;
 	}
-	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
+	const sessions = new SessionService(supervisor, workspaces, reads, cli);
 	const arena = new ArenaService(cli, workspaces, operations, env);
 	const research = new ResearchService(cli, workspaces, operations, env);
 	const settingsService = new SettingsService(reads, workspaces, ops, () => applyTurnCapacity());

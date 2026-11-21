@@ -909,15 +909,60 @@ test("ACP replay marks a persisted request without a terminal outcome as an erro
 			timestamp: "2026-09-25T12:00:02.000Z",
 			payload: { toolCallId: "read-1", toolName: "read", result: "notes", isError: false },
 		},
+		{
+			kind: "bashExecution",
+			turnId: "later-shell",
+			parentTurnId: "interrupted-result",
+			timestamp: "2026-09-25T12:00:03.000Z",
+			command: "ls",
+			output: "notes.txt",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		},
+		{
+			kind: "message",
+			role: "user",
+			turnId: "later-user",
+			parentTurnId: "later-shell",
+			timestamp: "2026-09-25T12:00:04.000Z",
+			payload: "Asked later",
+		},
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "later-assistant",
+			parentTurnId: "later-user",
+			timestamp: "2026-09-25T12:00:05.000Z",
+			payload: { stopReason: "stop", content: [{ type: "text", text: "Done" }] },
+		},
 	]);
 	try {
 		await peer.call("initialize", { protocolVersion: 1 });
 		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
-		strictEqual(peer.updates.length, 3);
-		for (const update of peer.updates) {
-			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+		const metas = peer.updates.map((update) => (update._meta as Record<string, unknown>)["clio-coder/replay"]);
+		const first = metas.filter((meta) => (meta as { turn?: number }).turn === 1);
+		const second = metas.filter((meta) => (meta as { turn?: number }).turn === 2);
+		ok(first.length >= 3 && second.length > 0, JSON.stringify(metas));
+		for (const meta of first) {
+			deepStrictEqual(meta, {
 				turn: 1,
 				stopReason: "error",
+				// The ledger's own times, so a reloaded request shows when it was asked rather than "not recorded". Its
+				// finish is its last own entry, not the later shell line or request.
+				startedAt: "2026-09-25T12:00:00.000Z",
+				finishedAt: "2026-09-25T12:00:02.000Z",
+			});
+		}
+		const finished = Date.parse((first[0] as { finishedAt: string }).finishedAt);
+		ok(finished < Date.parse("2026-09-25T12:00:03.000Z"));
+		ok(finished < Date.parse((second[0] as { startedAt: string }).startedAt));
+		for (const meta of second) {
+			deepStrictEqual(meta, {
+				turn: 2,
+				stopReason: "end_turn",
+				startedAt: "2026-09-25T12:00:04.000Z",
+				finishedAt: "2026-09-25T12:00:05.000Z",
 			});
 		}
 	} finally {
@@ -998,15 +1043,20 @@ test("ACP replay keeps a crashed middleware continuation from reading as Done", 
 		},
 	]);
 	try {
-		for (const [peer, stopReason] of [
-			[crashed, "error"],
-			[canceled, "cancelled"],
+		for (const [peer, stopReason, finishedAt] of [
+			[crashed, "error", "2026-09-25T12:00:00.000Z"],
+			[canceled, "cancelled", "2026-09-25T12:00:01.000Z"],
 		] as const) {
 			await peer.call("initialize", { protocolVersion: 1 });
 			await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
 			strictEqual(peer.updates.length, 2);
 			for (const update of peer.updates) {
-				deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason });
+				deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+					turn: 1,
+					stopReason,
+					startedAt: "2026-09-25T12:00:00.000Z",
+					finishedAt,
+				});
 			}
 		}
 	} finally {
@@ -1100,7 +1150,12 @@ test("ACP replay keeps a crash after an in-run continuation from reading as Done
 		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
 		strictEqual(peer.updates.length, 2);
 		for (const update of peer.updates) {
-			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason: "error" });
+			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+				turn: 1,
+				stopReason: "error",
+				startedAt: "2026-09-25T12:00:00.000Z",
+				finishedAt: "2026-09-25T12:00:02.000Z",
+			});
 		}
 	} finally {
 		await peer.stop();
@@ -1378,6 +1433,52 @@ test("ACP replay carries each turn's recorded model and route and each call's re
 				(params.update as Record<string, unknown>).status === "completed",
 		);
 		deepStrictEqual((terminal?._meta as Record<string, unknown>)["clio-coder/toolTiming"], { durationMs: 42 });
+	} finally {
+		await peer.stop();
+	}
+});
+
+test("ACP replay presents a gateway call under the live title, kind and locations (M-10)", async () => {
+	const args = { op: "call", capability: "ls", args: { path: "ws" } };
+	const message = (
+		role: "user" | "tool_call" | "tool_result",
+		turnId: string,
+		parentTurnId: string | null,
+		payload: unknown,
+	) => ({
+		kind: "message" as const,
+		role,
+		turnId,
+		parentTurnId,
+		timestamp: "2026-09-25T12:00:00.000Z",
+		payload,
+	});
+	const peer = fixture(
+		[
+			message("user", "ask", null, "List"),
+			message("tool_call", "call", "ask", { name: "gateway", toolCallId: "gw-1", args }),
+			message("tool_result", "result", "call", { toolCallId: "gw-1", toolName: "gateway", result: "a", isError: false }),
+		],
+		(emit) => {
+			emit({ type: "tool_execution_start", toolCallId: "gw-1", toolName: "gateway", args });
+			emit({ type: "tool_execution_end", toolCallId: "gw-1", toolName: "gateway", result: "a", isError: false });
+		},
+	);
+	const shown = (from: number) =>
+		peer.updates
+			.slice(from)
+			.map((params) => params.update as Record<string, unknown>)
+			.filter((update) => update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")
+			.map(({ sessionUpdate, title, kind, locations }) => ({ sessionUpdate, title, kind, locations }));
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const replayed = shown(0);
+		const from = peer.updates.length;
+		await peer.call("session/prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "List" }] });
+		const live = shown(from);
+		strictEqual(live[0]?.title, "ls");
+		deepStrictEqual(replayed, live);
 	} finally {
 		await peer.stop();
 	}
@@ -1840,7 +1941,12 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 		if (frame === undefined) throw new Error("unreachable");
 		strictEqual(loaded.updates.filter((candidate) => text(candidate) === "").length, 0);
 		strictEqual(text(frame), `${budgetAlertNotice(block)?.text}\n`);
-		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason: "error" });
+		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], {
+			turn: 1,
+			stopReason: "error",
+			startedAt: timestamp,
+			finishedAt: timestamp,
+		});
 		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "error" });
 		deepStrictEqual(budgetMeta(frame), {
 			version: 1,

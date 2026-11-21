@@ -19,6 +19,7 @@ import {
 	settingFamilies,
 	settingValue,
 } from "./config-map-model.js";
+import { settingsScopeInput } from "./settings-control-model.js";
 import { SettingsControlsView } from "./settings-controls.js";
 import { ConnectionSetup } from "./target-onboarding.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
@@ -35,11 +36,12 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 	const setFilter = (query: string) => setSearch(liveSearchWith("q", query), { replace: true });
 	const searchBox = useSearchDraft(filter, setFilter);
 	const settings = useQuery({
-		queryKey: ["workspace-settings", id],
+		queryKey: ["settings-report", id],
 		meta: { errorSurface: "inline" },
-		queryFn: () => client.call(routes.workspaceSettings, { ...emptyInput, params: { id } }),
-		// The map's first figure and its source counts are read from the same effective values.
-		enabled: !!id && view !== "settings",
+		queryFn: () => client.call(routes.settingsReport, settingsScopeInput(id ?? null)),
+		// The map's first figure and its source counts are read from the same effective values. With no
+		// workspace open, effective values are the user layer's alone; the map needs a project.
+		enabled: (view === "effective" && !selection.workspaces.isPending) || (view === "why" && !!id),
 	});
 	const graph = useQuery({
 		queryKey: ["config-graph", id],
@@ -56,13 +58,18 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 			<PanelHeading panel={panel} level={1} />
 			<WorkspacePicker selection={selection} purpose="settings" />
 			{view !== "settings" && <ConfigurationTabs id={id} active={view} />}
-			{!id && view === "settings" && <ConnectionSetup />}
-			{!id && view !== "settings" && !selection.workspaces.isPending && (
+			{!id && view === "settings" && !selection.workspaces.isPending && (
+				<>
+					<ConnectionSetup />
+					<SettingsControlsView key="user" client={client} workspaceId={null} />
+				</>
+			)}
+			{!id && view === "why" && !selection.workspaces.isPending && (
 				<PanelEmpty>{emptyState.unread("configuration of a workspace")}</PanelEmpty>
 			)}
 			{view === "settings" && id && <SettingsControlsView key={id} client={client} workspaceId={id} />}
 			{view === "effective" &&
-				id &&
+				!selection.workspaces.isPending &&
 				(settings.isPending ? (
 					<p>Reading effective settings…</p>
 				) : settings.error ? (
@@ -74,7 +81,12 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 					</div>
 				) : (
 					<>
-						<p>Effective values for this workspace. Sensitive values stay hidden.</p>
+						<p>
+							{id
+								? "Effective values for this workspace."
+								: "Effective values of your user settings. Open a workspace to include its project layers."}{" "}
+							Sensitive values stay hidden.
+						</p>
 						<ol className="settings-precedence" aria-label="Setting precedence, lowest to highest">
 							{Object.values(SETTING_SOURCE_LABELS).map((label) => (
 								<li key={label}>{label}</li>
@@ -123,7 +135,7 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 								workspaceId={id}
 								surface={reviewing}
 								onClose={() => setReviewing(null)}
-								onTrusted={() => void queries.invalidateQueries({ queryKey: ["workspace-settings", id] })}
+								onTrusted={() => void queries.invalidateQueries({ queryKey: ["settings-report", id] })}
 							/>
 						) : null}
 						<label className="settings-filter">
