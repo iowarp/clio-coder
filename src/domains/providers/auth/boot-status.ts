@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { projectChosenTargetUrl } from "../../../core/project-target-urls.js";
+import { projectChosenTargetUrl, projectTargetKeyVariable } from "../../../core/project-target-urls.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/env-api-keys.js";
 import type { TargetDescriptor } from "../types/target-descriptor.js";
@@ -57,7 +57,11 @@ export function bootAuthStatus(target: TargetDescriptor, runtime: RuntimeAuthMet
 	const providerId =
 		target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
 	if (!required) return { providerId, required: false, available: true };
-	if (projectChosenTargetUrl(target, true)) return { providerId, required: true, available: false };
+	const projectKey = runtime.auth === "oauth" ? null : projectTargetKeyVariable(target);
+	if (projectChosenTargetUrl(target, true)) {
+		// A trusted project's URL gets the variable it named on the trust card, and nothing else.
+		return { providerId, required: true, available: projectKey !== null && Boolean(process.env[projectKey]?.trim()) };
+	}
 	const explicitEnvVar = (runtime.auth === "oauth" ? undefined : target.auth?.apiKeyEnvVar) ?? runtime.credentialsEnvVar;
 	return {
 		providerId,
