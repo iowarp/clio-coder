@@ -21,7 +21,7 @@ import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { panesFindings, panesModeFinding } from "../../src/cli/doctor-panes.js";
-import { workspaceEligibility } from "../../src/cli/workspace-launch.js";
+import { workspaceEligibility, workspaceExitNotice } from "../../src/cli/workspace-launch.js";
 import { processBirthToken } from "../../src/core/process-identity.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
@@ -30,6 +30,7 @@ import {
 	writeWorkspaceConfig,
 } from "../../src/domains/mux/workspace/config.js";
 import {
+	captureFailureForLauncher,
 	clioHostSessionOf,
 	exitMarkerPath,
 	hostedInWorkspace,
@@ -1013,6 +1014,26 @@ describe("host identity and exit markers", () => {
 			markWorkspaceExit(env, exitCode);
 			deepStrictEqual(readWorkspaceExitResult(marker), { exitCode, summary: "session ended\n" });
 		}
+		// A pane that failed takes its stderr with it, so the marker carries the last lines and the launcher prints them.
+		const pane = { write: (_chunk: string | Uint8Array): boolean => true };
+		captureFailureForLauncher(pane);
+		pane.write("[clio-coder:domain] load failed: dispatch: dispatch admission store has an invalid active reservation\n");
+		pane.write("\u001b[31merror:\u001b[39m Domain 'dispatch' failed to load; the cause is printed above\n");
+		markWorkspaceExit(env, 1);
+		const failed = readWorkspaceExitResult(marker);
+		equal(
+			failed?.failure,
+			"[clio-coder:domain] load failed: dispatch: dispatch admission store has an invalid active reservation\nerror: Domain 'dispatch' failed to load; the cause is printed above",
+		);
+		equal(failed?.summary, "session ended\n");
+		match(
+			workspaceExitNotice(1, failed?.failure),
+			/exit code 1:\n {2}\[clio-coder:domain\] load failed: dispatch: .*\n {2}error: /u,
+		);
+		match(workspaceExitNotice(1, undefined), /exit code 1\. .*clio-coder --with-panes/u);
+		equal(workspaceExitNotice(143, undefined), "Clio workspace ended with exit code 143.\n");
+		markWorkspaceExit(env, 0);
+		equal(readWorkspaceExitResult(marker)?.failure, undefined);
 	});
 });
 
