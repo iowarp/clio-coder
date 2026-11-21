@@ -7,7 +7,8 @@
  * receipt all read the envelope this module produces, so no later stage narrows tools or re-derives read-only on its
  * own. Layers only subtract, in a fixed order, and each subtraction a caller could act on is a `withheld` entry:
  *
- *   1. role class ceiling (the run's position in the work graph, not its recipe)
+ *   1. role class ceiling (the run's position in the work graph, not its recipe); the row also adds the tools every
+ *      run in it holds, such as code_nav, which the later layers subtract like any other
  *   2. request (tool profile, deny list)
  *   3. runtime (what the selected runtime offers and mediates)
  *   4. host facts for the placement (network plane, shell, write confinement)
@@ -26,9 +27,10 @@ import {
 	type ToolName,
 	ToolNames,
 } from "../../core/tool-names.js";
+import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
 import { directSurfaceNames, withGatewayForCapabilities } from "../../tools/surface.js";
 import { type WorkerStaticHeadInput, workerEnvelopeDigest, workerStaticHead } from "../../worker/protocol.js";
-import { roleExcludes, roleRemedy, toolActionClass } from "../agents/role-class.js";
+import { roleExcludes, roleHeldTools, roleRemedy, toolActionClass } from "../agents/role-class.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import { toolEscapesWriteRoots } from "../safety/policy-engine.js";
 import type { WorkerMcpAttestation, WorkerPermitAllowance } from "../safety/worker-permit.js";
@@ -195,6 +197,8 @@ export interface EnvelopeInput {
 	recipeTools: ReadonlyArray<ToolName>;
 	/** The recipe's tools after the request's tool profile, as admission attested them. */
 	profiledTools: ReadonlyArray<ToolName>;
+	/** The request's tool profile, which narrows the role's held tools as it narrowed the recipe's. */
+	toolProfile?: ToolProfileName;
 	denied: ReadonlySet<string>;
 	/** True when the run coordinates on a ledger board. */
 	ledger: boolean;
@@ -255,7 +259,11 @@ export function resolveWorkerEnvelope(input: EnvelopeInput): WorkerEnvelope {
 		if (withheld.some((entry) => entry.capability === capability)) return;
 		withheld.push({ capability, reason, ...(remedy !== undefined ? { remedy } : {}) });
 	};
-	const profiled = new Set<string>(input.profiledTools);
+	const held = roleHeldTools(input.role, input.capabilityClass);
+	const offered = new Set<string>(input.recipeTools);
+	// A held tool the recipe never named is nothing the caller asked for: a profile or runtime without it says nothing.
+	const unasked = (tool: string): boolean => !offered.has(tool) && held.includes(tool as ToolName);
+	const profiled = new Set<string>([...input.profiledTools, ...applyToolProfile(held, input.toolProfile)]);
 	for (const tool of input.recipeTools) {
 		if (!profiled.has(tool)) take(tool, "tool-profile");
 	}
@@ -264,7 +272,7 @@ export function resolveWorkerEnvelope(input: EnvelopeInput): WorkerEnvelope {
 		rooted && (input.write.mode === "worktree" || (input.write.mode === "roots" && input.host.confinesWrites));
 	const unconfined = rooted && input.write.mode === "roots" && !commandsBounded;
 	const names: ToolName[] = [];
-	for (const tool of new Set(input.profiledTools)) {
+	for (const tool of profiled as Set<ToolName>) {
 		// Never a worker capability: no worker runtime mediates them, and a solo run has no board.
 		if (tool === ToolNames.AskUser || tool === ToolNames.Consult) continue;
 		if (tool === ToolNames.Ledger && !input.ledger) continue;
@@ -277,11 +285,13 @@ export function resolveWorkerEnvelope(input: EnvelopeInput): WorkerEnvelope {
 			continue;
 		}
 		if (!input.runtime.toolsSupported) {
+			if (unasked(tool)) continue;
 			take(tool, "runtime", "the route takes no tool calls; choose a model that does");
 			continue;
 		}
 		const harness = isHarnessExtensionToolName(tool);
 		if (isMcpToolName(tool) || harness ? !input.runtime.ownLoop : !input.runtime.offers(tool)) {
+			if (unasked(tool)) continue;
 			take(tool, "runtime", "the selected runtime runs its own tools; choose a native target");
 			continue;
 		}

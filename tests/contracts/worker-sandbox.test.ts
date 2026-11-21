@@ -34,27 +34,57 @@ function run(file: string, args: string[]): Promise<{ code: number | null; outpu
 	});
 }
 
+type EnvelopeInput = Parameters<typeof resolveWorkerEnvelope>[0];
+
+function envelopeOf(tools: ToolName[], overrides: Partial<EnvelopeInput> = {}) {
+	return resolveWorkerEnvelope({
+		role: "builder",
+		capabilityClass: "workspace-edit",
+		recipeTools: tools,
+		profiledTools: tools,
+		denied: new Set(),
+		ledger: false,
+		write: { mode: "none", roots: [] },
+		runtime: { toolsSupported: true, ownLoop: true, offers: () => true },
+		host: { networkStripped: false, shellStripped: false, confinesWrites: false, harnessTools: new Set() },
+		skills: { names: [], paths: [], disabled: false, contextAttached: () => false },
+		read: { roots: [], outside: [] },
+		sandbox: { backend: "bwrap", applies: true, networkSetting: false, networkOff: false },
+		approval: { autonomy: "default", asks: "deny" },
+		permitDigest: "",
+		...overrides,
+	});
+}
+
 test("a worker granted any network tool, web_read included, gets shell network (M6, envelope M7)", () => {
-	const network = (tools: ToolName[]) =>
-		resolveWorkerEnvelope({
-			role: "builder",
-			capabilityClass: "workspace-edit",
-			recipeTools: tools,
-			profiledTools: tools,
-			denied: new Set(),
-			ledger: false,
-			write: { mode: "none", roots: [] },
-			runtime: { toolsSupported: true, ownLoop: true, offers: () => true },
-			host: { networkStripped: false, shellStripped: false, confinesWrites: false, harnessTools: new Set() },
-			skills: { names: [], paths: [], disabled: false, contextAttached: () => false },
-			read: { roots: [], outside: [] },
-			sandbox: { backend: "bwrap", applies: true, networkSetting: false, networkOff: false },
-			approval: { autonomy: "default", asks: "deny" },
-			permitDigest: "",
-		}).network.shell;
+	const network = (tools: ToolName[]) => envelopeOf(tools).network.shell;
 	assert.equal(network([ToolNames.Bash]), false);
 	assert.equal(network([ToolNames.Bash, ToolNames.WebFetch]), true);
 	assert.equal(network([ToolNames.Bash, ToolNames.WebRead]), true);
+});
+
+test("every role holds code_nav whatever its recipe lists; a runtime without it withholds nothing unasked (PV-5)", () => {
+	const roles = [
+		["builder", "workspace-edit"],
+		["builder", "artifact-write"],
+		["explorer", "read-only"],
+		["checker", "verification"],
+		["reviewer", "verification"],
+		["judge", "read-only"],
+		["seat", "read-only"],
+	] as const;
+	for (const [role, capabilityClass] of roles) {
+		const envelope = envelopeOf([ToolNames.Read], { role, capabilityClass });
+		assert.ok(envelope.tools.direct.includes(ToolNames.CodeNav), `${role}/${capabilityClass}`);
+	}
+	const denied = envelopeOf([ToolNames.Read], { denied: new Set([ToolNames.CodeNav]) });
+	assert.ok(!denied.tools.direct.includes(ToolNames.CodeNav));
+	assert.deepEqual(denied.withheld, [{ capability: ToolNames.CodeNav, reason: "denied" }]);
+	const foreign = envelopeOf([ToolNames.Read], {
+		runtime: { toolsSupported: true, ownLoop: false, offers: (tool) => tool === ToolNames.Read },
+	});
+	assert.deepEqual(foreign.tools.direct, [ToolNames.Read]);
+	assert.deepEqual(foreign.withheld, []);
 });
 
 test("under bwrap a worker command writes only its writable root and cannot reach the network", async (t) => {
