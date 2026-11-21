@@ -1643,32 +1643,126 @@ describe("production compaction controls", () => {
 		doesNotMatch(tokenRow(operation) ?? "", /−\d+%/);
 	});
 
-	it("holds a 70-token automatic eviction on a copilot-sdk route, as an overflow one is held (XR-40 C-3)", async () => {
-		// 1drfv3bu1745: an automatic pass freed 70 of 161,489 tokens and the full reseed dropped cacheRead to 6,121.
+	/**
+	 * XR-40 C-3: an automatic working-set pass on a route. At a 200K window the ~36K history sits far under the
+	 * headroom limit, so only the full-reseed break-even (7/8 of the request) can hold an eviction there.
+	 */
+	function autoEvictionRoute(
+		api: "copilot-sdk" | null,
+		window: number,
+		after: (plan: { tokens: number; target: number; contextWindow: number }) => number,
+		autoCompact: boolean,
+	) {
 		const f = fixture();
 		f.settings.context.workingSet.enabled = true;
 		const oldest = f.entries()[0];
 		ok(oldest);
-		const { runtime, context, bus } = automaticContext(f, f.run, {
-			autoCompact: undefined,
-			planEviction: (_policy, plan) => ({
-				policyId: "structural-v2",
-				tokensBefore: plan.pressure.tokens,
-				tokensAfter: plan.pressure.tokens - 70,
-				items: [{ ref: { entry: oldest.turnId }, reason: "age_horizon", tokensFreed: 70, marker: "[evicted]" }],
-			}),
+		const notices: string[] = [];
+		let plans = 0;
+		const { state, runtime, context, bus } = automaticContext(f, f.run, {
+			...(autoCompact ? {} : { autoCompact: undefined }),
+			emitNotice: (text) => {
+				notices.push(text);
+			},
+			planEviction: (_policy, plan) => {
+				plans += 1;
+				const tokensAfter = after(plan.pressure);
+				return {
+					policyId: "structural-v2",
+					tokensBefore: plan.pressure.tokens,
+					tokensAfter,
+					items: [
+						{
+							ref: { entry: oldest.turnId },
+							reason: "age_horizon",
+							tokensFreed: plan.pressure.tokens - tokensAfter,
+							marker: "[evicted]",
+						},
+					],
+				};
+			},
 		});
-		runtime.agent.state.model = { ...runtime.agent.state.model, api: "copilot-sdk" };
+		runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow = window;
+		runtime.agent.state.model = {
+			...runtime.agent.state.model,
+			...(api !== null ? { api } : {}),
+			...(window > 0 ? { contextWindow: window } : {}),
+		};
 		const folds: ContextFoldPayload[] = [];
 		bus.subscribe("context.fold", (event) => {
 			folds.push(event);
 		});
-		await context.runAutoCompact(runtime, false);
-		strictEqual(f.entries().filter((entry) => entry.kind === "contextEviction").length, 0, "no eviction record");
-		deepStrictEqual(
-			folds.map((fold) => [fold.checkpoint, fold.stages[0]?.stage, fold.stages[0]?.outcome, fold.stages[0]?.reason]),
-			[["tool_batch", "working_set", "held", "no_gain"]],
+		const evictions = () => f.entries().filter((entry) => entry.kind === "contextEviction").length;
+		const stages = () =>
+			folds.map((fold) => fold.stages.filter(({ stage }) => stage === "working_set").map((s) => [s.outcome, s.reason]));
+		return { f, state, runtime, context, notices, folds, evictions, stages, plans: () => plans };
+	}
+
+	it("holds a 70-token automatic eviction on copilot-sdk on the reseed break-even, and commits it elsewhere (XR-40 C-3)", async () => {
+		// 1drfv3bu1745: an automatic pass freed 70 of 161,489 tokens and the full reseed dropped cacheRead to 6,121.
+		const copilot = autoEvictionRoute("copilot-sdk", 200_000, (plan) => plan.tokens - 70, true);
+		await copilot.context.runAutoCompact(copilot.runtime, false);
+		strictEqual(copilot.evictions(), 0, "no eviction record on the reseeding route");
+		deepStrictEqual(copilot.stages(), [[["held", "no_gain"]]]);
+		ok(
+			copilot.notices.includes(
+				"[context engine] working set: saving ~70 tokens would not yield enough relief; llm_summary runs instead",
+			),
+			copilot.notices.join("\n"),
 		);
+		const other = autoEvictionRoute(null, 200_000, (plan) => plan.tokens - 70, true);
+		await other.context.runAutoCompact(other.runtime, false);
+		strictEqual(other.evictions(), 1, "a route that does not reseed commits the same eviction");
+		deepStrictEqual(other.stages(), [[["committed", "evicted"]]]);
+		ok(!other.notices.some((text) => text.includes("would not yield")));
+	});
+
+	it("a held automatic eviction arms the rearm band: later batches do not re-plan until the context grows (XR-40 C-3)", async () => {
+		const route = autoEvictionRoute("copilot-sdk", 200_000, (plan) => plan.tokens - 70, false);
+		const { f, state, runtime, context } = route;
+		const batch = async (text: string) => {
+			const entry = appendEntry(f.state, {
+				kind: "message",
+				role: "assistant",
+				parentTurnId: state.lastTurnId,
+				payload: { text },
+			});
+			f.pinLeaf(entry.turnId);
+			state.lastTurnId = entry.turnId;
+			context.refreshAgentMessagesFromSession(runtime);
+			await context.runAutoCompact(runtime, false);
+		};
+		await context.runAutoCompact(runtime, false);
+		await batch("read one more file");
+		await batch("read another file");
+		strictEqual(route.plans(), 1, "the held plan is not planned again inside the band");
+		deepStrictEqual(route.stages().slice(1), [[["held", "rearm_band"]], [["held", "rearm_band"]]]);
+		// Past a tenth of the 200K window the checkpoint plans again.
+		await batch("y".repeat(90_000));
+		strictEqual(route.plans(), 2);
+		strictEqual(route.evictions(), 0);
+	});
+
+	it("gates an automatic copilot-sdk eviction only on a known window (XR-40 C-3)", async () => {
+		const route = autoEvictionRoute("copilot-sdk", 0, (plan) => Math.floor(plan.tokens / 2), false);
+		// An unknown window triggers on the compaction ceiling.
+		route.f.settings.context.compaction.maxTokens = 20_000;
+		await route.context.runAutoCompact(route.runtime, false);
+		strictEqual(route.evictions(), 1, "half the request evicted, as before the gate");
+		deepStrictEqual(route.stages(), [[["committed", "evicted"]]]);
+	});
+
+	it("bounds an automatic copilot-sdk selection by the yield limit, so the age rung stops below it (XR-40 C-3)", async () => {
+		// A stand-in age rung: it evicts down to the selection target and frees at least 70 tokens.
+		const route = autoEvictionRoute(
+			"copilot-sdk",
+			200_000,
+			(plan) => Math.min(plan.tokens - 70, Math.floor(plan.target * plan.contextWindow)),
+			false,
+		);
+		await route.context.runAutoCompact(route.runtime, false);
+		strictEqual(route.evictions(), 1, "the bounded selection clears the break-even");
+		deepStrictEqual(route.stages(), [[["committed", "evicted"]]]);
 	});
 
 	it("skips an automatic summary whose span prices below the summary room, but not /compact or overflow (bt-47 cf1j-d, ContextFold A1)", async () => {

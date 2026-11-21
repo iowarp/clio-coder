@@ -2414,12 +2414,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const entries = deps.readSessionEntries() ?? [];
 				const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
 				resolveWorkingSetPolicy(settings.context.workingSet.policy);
-				held = withinRearmBand({
-					projectedTokens: pressureEstimate.tokens,
-					contextWindow: economic.budgetWindow,
-					rearmFraction: settings.context.workingSet.rearmFraction,
-					lastEvictionTokensAfter: view.lastEvictionTokensAfter,
-				});
+				held =
+					withinRearmBand({
+						projectedTokens: pressureEstimate.tokens,
+						contextWindow: economic.budgetWindow,
+						rearmFraction: settings.context.workingSet.rearmFraction,
+						lastEvictionTokensAfter: view.lastEvictionTokensAfter,
+					}) ||
+					contextFold.autoEvictionHeld({
+						agentRuntime,
+						projectedTokens: pressureEstimate.tokens,
+						contextWindow: economic.budgetWindow,
+						rearmFraction: settings.context.workingSet.rearmFraction,
+					});
 			} catch {
 				// Safe to ignore here: the eviction stage repeats this read inside the
 				// operation and surfaces the same error with its activity.

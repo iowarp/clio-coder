@@ -3,7 +3,8 @@
  * rebuild every reduction ends on, and the one publication a summary checkpoint
  * or a step checkpoint runs after its entry is on the ledger. The turn context
  * owns the state these read and write and lends it through the port; this
- * module owns no state of its own.
+ * module keeps one record of its own, the automatic eviction it last held on a
+ * full-reseed route, which arms the rearm band a committed eviction would (C-3).
  */
 
 import type { ClioSettings } from "../core/config.js";
@@ -11,6 +12,7 @@ import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
 import { evictionPressure, overflowEvictionInputLimit } from "../domains/context/fold/pressure.js";
+import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
 import { buildEvictionFields } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -225,7 +227,22 @@ export interface ContextFold {
 	adoptLegacyAging(input: LegacyAdoptionInput): boolean;
 	/** The one publication for a checkpoint of either kind, keyed on the id the ledger confirmed. */
 	publishCheckpoint(input: CheckpointPublicationInput): Promise<CheckpointPublication>;
+	/**
+	 * An automatic eviction this fold held below the minimum yield arms the rearm band a committed one would: true
+	 * while the same session, user turn and newest reduction have grown by less than `rearmFraction` of the window.
+	 */
+	autoEvictionHeld(input: AutoEvictionHoldInput): boolean;
 }
+
+export interface AutoEvictionHoldInput {
+	agentRuntime: AgentRuntime;
+	projectedTokens: number;
+	contextWindow: number;
+	rearmFraction: number;
+}
+
+/** Copilot SDK sessions reseed the whole request when the history diverges, so any eviction costs the cache (XR-40). */
+const fullReseedRoute = (agentRuntime: AgentRuntime): boolean => agentRuntime.agent.state.model?.api === "copilot-sdk";
 
 /**
  * Why the working-set stage declined, said in the terms the operator can act
@@ -254,6 +271,29 @@ function evictionSkipMessage(
 
 export function createContextFold(port: ContextFoldPort): ContextFold {
 	const { deps, state } = port;
+	/** The automatic eviction last held below the minimum yield, and the ledger it was planned over. */
+	let autoHold: { key: string; tokens: number } | null = null;
+	/** What a held automatic eviction stands for: its session, its user turn and the newest reduction on the path. */
+	const autoHoldKey = (entries: ReadonlyArray<SessionEntry>): string => {
+		const path = activePath(entries, state.lastTurnId ?? undefined);
+		let reduction: string | null = null;
+		for (const entry of path)
+			if (entry.kind === "contextEviction" || entry.kind === "compactionSummary") reduction = entry.turnId;
+		return JSON.stringify([deps.session?.current()?.id ?? null, state.activeUserTurnId || null, reduction]);
+	};
+	const autoEvictionHeld = (input: AutoEvictionHoldInput): boolean => {
+		if (autoHold === null) return false;
+		if (!fullReseedRoute(input.agentRuntime) || autoHold.key !== autoHoldKey(deps.readSessionEntries?.() ?? [])) {
+			autoHold = null;
+			return false;
+		}
+		return withinRearmBand({
+			projectedTokens: input.projectedTokens,
+			contextWindow: input.contextWindow,
+			rearmFraction: input.rearmFraction,
+			lastEvictionTokensAfter: autoHold.tokens,
+		});
+	};
 
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
@@ -482,6 +522,8 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				: port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		let folded: FoldPlan;
 		let yieldLimit: number | undefined;
+		let autoGated = false;
+		let heldTokens = 0;
 		let visibleEntries: ReadonlyArray<SessionEntry> = [];
 		let policyId = workingSet.policy;
 		try {
@@ -489,12 +531,13 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const policy = structural ? resolveWorkingSetPolicy(workingSet.policy) : null;
 			if (policy !== null) policyId = policy.id;
 			const tokens = fitTokens();
-			const fullReseed = agentRuntime.agent.state.model?.api === "copilot-sdk";
-			// Row 144's minimum yield (XR-40) also gates an automatic working-set fold on a full-reseed route: there any
-			// eviction resends the whole request, and a few dozen tokens cost the provider cache (C-3). Other routes'
-			// automatic folds are unchanged.
-			const gated =
-				(requiredFit && !input.summaryFailed) || (fullReseed && trigger === "auto" && !requiredFit && structural);
+			const fullReseed = fullReseedRoute(agentRuntime);
+			// Row 144's minimum yield (XR-40) also gates an automatic working-set fold on a full-reseed route with a known
+			// window: there any eviction resends the whole request, and a few dozen tokens cost the provider cache (C-3).
+			// Other routes' automatic folds, and an unknown window, are unchanged.
+			autoGated = fullReseed && trigger === "auto" && !requiredFit && structural && estimate.contextWindow > 0;
+			heldTokens = tokens;
+			const gated = (requiredFit && !input.summaryFailed) || autoGated;
 			const reserve = requiredFit || gated ? resolveFitOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) : 0;
 			const fitShare = requiredFit ? Math.max(0, 1 - reserve / estimate.contextWindow) : 0;
 			if (gated) {
@@ -514,13 +557,17 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				triggerFraction: () => input.triggerFraction(estimate.tokens),
 				prefixTokens: estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens,
 			});
+			// The limit bounds the selection too, as on overflow, so the age rung does not stop above what the gate admits.
+			const yieldShare = yieldLimit === undefined ? 1 : Math.max(0, yieldLimit / compactionWindow);
 			const policyInput = selectionInput(entries, session, settings, {
 				tokens,
 				contextWindow: compactionWindow,
 				threshold: requiredFit ? Math.min(compactionThreshold, fitShare) : pressure.threshold,
 				target: requiredFit
-					? Math.min(workingSetTarget, fitShare, yieldLimit === undefined ? 1 : Math.max(0, yieldLimit / compactionWindow))
-					: pressure.target,
+					? Math.min(workingSetTarget, fitShare, yieldShare)
+					: autoGated
+						? Math.min(pressure.target, yieldShare)
+						: pressure.target,
 				...(requiredFit ? { forced: true } : {}),
 			});
 			visibleEntries = policyInput.entries;
@@ -552,6 +599,8 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			return { acted: false, committed: false, fit: false, skipNotice: structuralSkip() };
 		}
 		if (yieldLimit !== undefined && planned.tokensAfter > yieldLimit) {
+			// Until the context grows past the rearm band, the next automatic checkpoint holds before it plans (C-3).
+			if (autoGated) autoHold = { key: autoHoldKey(deps.readSessionEntries?.() ?? []), tokens: heldTokens };
 			if (superseded.outcome === "planned") decision.stage({ stage: "superseded", outcome: "held", reason: "no_gain" });
 			if (structural)
 				decision.stage({
@@ -713,5 +762,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		runEvictionStage,
 		adoptLegacyAging,
 		publishCheckpoint,
+		autoEvictionHeld,
 	};
 }
