@@ -909,18 +909,60 @@ test("ACP replay marks a persisted request without a terminal outcome as an erro
 			timestamp: "2026-09-25T12:00:02.000Z",
 			payload: { toolCallId: "read-1", toolName: "read", result: "notes", isError: false },
 		},
+		{
+			kind: "bashExecution",
+			turnId: "later-shell",
+			parentTurnId: "interrupted-result",
+			timestamp: "2026-09-25T12:00:03.000Z",
+			command: "ls",
+			output: "notes.txt",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		},
+		{
+			kind: "message",
+			role: "user",
+			turnId: "later-user",
+			parentTurnId: "later-shell",
+			timestamp: "2026-09-25T12:00:04.000Z",
+			payload: "Asked later",
+		},
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "later-assistant",
+			parentTurnId: "later-user",
+			timestamp: "2026-09-25T12:00:05.000Z",
+			payload: { stopReason: "stop", content: [{ type: "text", text: "Done" }] },
+		},
 	]);
 	try {
 		await peer.call("initialize", { protocolVersion: 1 });
 		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
-		strictEqual(peer.updates.length, 3);
-		for (const update of peer.updates) {
-			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+		const metas = peer.updates.map((update) => (update._meta as Record<string, unknown>)["clio-coder/replay"]);
+		const first = metas.filter((meta) => (meta as { turn?: number }).turn === 1);
+		const second = metas.filter((meta) => (meta as { turn?: number }).turn === 2);
+		ok(first.length >= 3 && second.length > 0, JSON.stringify(metas));
+		for (const meta of first) {
+			deepStrictEqual(meta, {
 				turn: 1,
 				stopReason: "error",
-				// The ledger's own times, so a reloaded request shows when it was asked rather than "not recorded".
+				// The ledger's own times, so a reloaded request shows when it was asked rather than "not recorded". Its
+				// finish is its last own entry, not the later shell line or request.
 				startedAt: "2026-09-25T12:00:00.000Z",
 				finishedAt: "2026-09-25T12:00:02.000Z",
+			});
+		}
+		const finished = Date.parse((first[0] as { finishedAt: string }).finishedAt);
+		ok(finished < Date.parse("2026-09-25T12:00:03.000Z"));
+		ok(finished < Date.parse((second[0] as { startedAt: string }).startedAt));
+		for (const meta of second) {
+			deepStrictEqual(meta, {
+				turn: 2,
+				stopReason: "end_turn",
+				startedAt: "2026-09-25T12:00:04.000Z",
+				finishedAt: "2026-09-25T12:00:05.000Z",
 			});
 		}
 	} finally {

@@ -2671,8 +2671,8 @@ function prepareAcpReplay(
 	const presented = new Map<string, ReturnType<typeof toolCallPresentation>>();
 	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
+		// Only an entry of the open turn moves its finish; a later request, shell line, run or compaction does not.
 		const stamp = Number.isFinite(Date.parse(entry.timestamp)) ? entry.timestamp : undefined;
-		if (current !== null && stamp !== undefined && entry.kind !== "modelChange") current.finishedAt = stamp;
 		if (entry.kind === "workerRun") {
 			runs.push({ runId: entry.runId, agentId: entry.agentId });
 			continue;
@@ -2717,13 +2717,17 @@ function prepareAcpReplay(
 			if (entry.customType === "turnOutcome" && current !== null) {
 				const outcome = payloadRecord(entry.data);
 				if (outcome?.version === 1 && outcome.turnId === current.userTurnId) {
+					if (stamp !== undefined) current.finishedAt = stamp;
 					if (typeof outcome.stopReason === "string") current.stopReason = mapAcpStopReason(outcome.stopReason);
 					if (payloadRecord(outcome.operator)?.canceled === true) current.stopReason = "cancelled";
 				}
 				continue;
 			}
 			if (entry.customType === IN_RUN_CONTINUATION_ENTRY) {
-				if (current !== null) current.stopReason = "error";
+				if (current !== null) {
+					current.stopReason = "error";
+					if (stamp !== undefined) current.finishedAt = stamp;
+				}
 				continue;
 			}
 			// A ceiling stop says why the turn after it waited or ended (#424).
@@ -2741,6 +2745,7 @@ function prepareAcpReplay(
 				if (current !== null) {
 					current.userTurnId = entry.turnId;
 					current.stopReason = "error";
+					if (stamp !== undefined) current.finishedAt = stamp;
 				}
 				continue;
 			}
@@ -2750,6 +2755,7 @@ function prepareAcpReplay(
 			if (current !== null && (payload?.queued === "steer" || payload?.queued === "follow-up")) {
 				current.userTurnId = entry.turnId;
 				current.stopReason = "error";
+				if (stamp !== undefined) current.finishedAt = stamp;
 				replayMessageChunks(current.frames, "user_message_chunk", replayTextBlocks(entry).text);
 				continue;
 			}
@@ -2768,6 +2774,7 @@ function prepareAcpReplay(
 			continue;
 		}
 		if (current === null) continue;
+		if (stamp !== undefined) current.finishedAt = stamp;
 		if (entry.role === "assistant") {
 			// The ledger keeps a cut-off call's error result; the reply before it names the calls that never ran.
 			for (const id of outputLimitCutOffToolCallIds(payload)) cutOffToolCalls.add(id);
