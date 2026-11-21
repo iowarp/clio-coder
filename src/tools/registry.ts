@@ -60,6 +60,14 @@ import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.
 import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
 import { type DenialLayer, repeatedDenialReason, type ToolDenial } from "../domains/safety/denial.js";
+import {
+	describeEscapeScope,
+	type EscapeScope,
+	type EscapeScopeLedger,
+	escapeScopeOptionConsequence,
+	escapeScopeOptionLabel,
+	scopedEscapeRoute,
+} from "../domains/safety/escape-scope.js";
 import type { GitHookDriftGuard, GitHookDriftReport } from "../domains/safety/hook-drift.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
@@ -485,6 +493,12 @@ export interface RegistryDeps {
 	 */
 	sessionCodeConsent?: Pick<SessionCodeConsent, "pending" | "grant">;
 	/**
+	 * The session's sandbox-escape scopes (M-7). Only the main session's registry passes it: an escape inside a
+	 * scope the operator approved for this session no longer asks, a parked escape carries the scope its
+	 * session option offers, and contained yolo offers it to the next ask_user question about the escape.
+	 */
+	escapeScopes?: EscapeScopeLedger;
+	/**
 	 * The safety judge. Only the main session's registry passes it: at autonomy
 	 * default a call that would park for the operator is first reviewed against
 	 * the operator's own messages, and runs, comes back refused, or parks as
@@ -562,6 +576,11 @@ export interface ApprovalCarry {
 export type ObservationPoolEvent = "refused" | "drained" | "delivered";
 
 export interface ToolInvokeOptions {
+	/**
+	 * Host-owned, ask_user only: the session-scope option the registry offers for the escape contained yolo just
+	 * refused (M-7). Never taken from model arguments.
+	 */
+	escapeScopeOffer?: { label: string; description: string; accept(): void };
 	/** An invocation the harness runner makes on its own decision; never derived from model arguments. */
 	origin?: "harness";
 	/** With `origin: "harness"`, the card whose rounds this is. */
@@ -872,6 +891,8 @@ export interface OneShotGrant {
 	 * authority is `main`; an operator rail stays parked under it.
 	 */
 	issuer?: ApprovalAuthority;
+	/** The operator picked the parked escape's session option: its `escapeScope` is granted for the session first (M-7). */
+	sessionScope?: true;
 	/**
 	 * Observes the one parked call a `requestId` grant selected: it started,
 	 * it finished, or it was not executed. A live grant reports execution
@@ -922,6 +943,11 @@ export interface PermissionRequiredMeta {
 	 * dispatch, never to the operator (CLI-P35).
 	 */
 	dispatchTask?: DispatchReadRootTask;
+	/**
+	 * The scope a session option offers for a parked sandbox escape (M-7), as the harness read it from the call.
+	 * A surface shows its label beside the one-call approval; picking it grants the scope before the call re-admits.
+	 */
+	escapeScope?: EscapeScope;
 }
 
 /** The dispatched task an external read-root approval serves. */
@@ -2108,6 +2134,39 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return refused;
 	};
 
+	/**
+	 * A sandbox escape contained yolo refused while its session option rides the next ask_user question (M-7):
+	 * the account says its repeat is refused only until the operator answers, which is when the registry forgets
+	 * refusals, and what the operator chooses to allow it. The denial object is amended in place, so the unattended
+	 * refusal stays one the registry remembers.
+	 */
+	const escapeAnswerable = <V extends RegistryVerdict>(verdict: V): V => {
+		if (verdict.kind !== "blocked" || verdict.denial === undefined) return verdict;
+		verdict.denial.untilOperatorAnswers = true;
+		verdict.denial.allowedBy = ESCAPE_SCOPE_ALLOWED_BY;
+		return verdict;
+	};
+
+	/**
+	 * Escape refusals already left out of the loop guard, by turn, mutation epoch and call identity (M-7). The first
+	 * refusal of a sandbox escape whose session option ask_user carries is the operator's decision still to come, not a
+	 * failed attempt: once they grant the scope, the reruns are the call's first runs. A later refusal of the same call
+	 * (a repeat before any answer, or after an answer that granted nothing) counts as usual, so repeats stay bounded.
+	 */
+	const uncountedEscapes = new Set<string>();
+	const firstEscapeRefusal = (call: ClassifierCall, options: ToolInvokeOptions | undefined): boolean => {
+		const turnId = options?.turnId;
+		if (turnId === undefined) return false;
+		const key = `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
+		if (uncountedEscapes.has(key)) return false;
+		uncountedEscapes.add(key);
+		if (uncountedEscapes.size > DENIED_CALL_MEMORY_LIMIT) {
+			const oldest = uncountedEscapes.values().next().value;
+			if (oldest !== undefined) uncountedEscapes.delete(oldest);
+		}
+		return true;
+	};
+
 	/** Registry verdict and audit row for a hard denial past the safety net. */
 	const deniedVerdict = (
 		call: ClassifierCall,
@@ -2419,6 +2478,24 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 
 	/** The status surfaces read a started call as running; until the judge admits it, nothing is running (B01). */
+	/**
+	 * An ask_user call while contained yolo holds an escape scope on offer (M-7): the host-owned option the tool adds
+	 * to a question about running outside the sandbox, which grants the scope only when the operator picks it.
+	 */
+	const withEscapeScopeOffer = (call: ClassifierCall, options: ToolInvokeOptions | undefined) => {
+		const ledger = deps.escapeScopes;
+		if (call.tool !== ToolNames.AskUser || deps.principal === "worker" || ledger === undefined) return options;
+		const scope = ledger.pendingOffer();
+		if (scope === null) return options;
+		return {
+			...(options ?? {}),
+			escapeScopeOffer: {
+				label: escapeScopeOptionLabel(scope),
+				description: escapeScopeOptionConsequence(scope),
+				accept: () => ledger.grant(scope, "ask-user"),
+			},
+		};
+	};
 	const notifyAdmissionReview = (options: ToolInvokeOptions | undefined, state: AdmissionReviewEvent["state"]): void => {
 		const toolCallId = options?.toolCallId;
 		if (toolCallId === undefined || toolCallId.length === 0) return;
@@ -2504,6 +2581,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		outcome: Extract<AdmitOutcome, { kind: "park" }>,
 		options: ToolInvokeOptions | undefined,
+		escapeScope?: EscapeScope,
 	): SafetyJudgeOutcome | Promise<SafetyJudgeOutcome> => {
 		const judge = deps.safetyJudge;
 		if (judge === undefined || (deps.principal ?? "main") !== "main") return SAFETY_JUDGE_SKIP;
@@ -2523,6 +2601,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(outcome.source !== undefined ? { source: outcome.source } : {}),
 				approvalAuthority: outcome.approvalAuthority,
 				...(outcome.planScale === true ? { dispatchPlan: true } : {}),
+				...(escapeScope !== undefined ? { escapeScope: describeEscapeScope(escapeScope) } : {}),
 				...(options?.origin === "harness" ? { harness: true } : {}),
 				...(deps.operatorAttends?.() === true && deps.unattendedAsks?.() !== true && permissionListeners.size > 0
 					? { operatorAttends: true }
@@ -2560,16 +2639,33 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 		}
 		if (outcome.kind === "execute") {
-			return runSpec(outcome.spec, admissionCall, outcome.decision, options);
+			return runSpec(outcome.spec, admissionCall, outcome.decision, withEscapeScopeOffer(admissionCall, options));
 		}
+		// A sandbox escape inside a scope the operator approved for this session (M-7) runs as an approved card does,
+		// or, when the route says so, goes to the judge with the grant as the operator's approval of the escape.
+		const mainAsk = deps.principal !== "worker";
+		const scopeGrant = mainAsk ? (deps.escapeScopes?.covering(admissionCall, outcome.decision) ?? null) : null;
+		const scopedSpec = scopeGrant === null ? undefined : tools.get(admissionCall.tool as ToolName);
+		const runScoped = (spec: ToolSpec): Promise<RegistryVerdict> => {
+			const allowed = escapeScopeAllowedDecision(outcome.decision);
+			recordRegistryDisposition(admissionCall, allowed, "allowed", { reasonCode: ESCAPE_SCOPE_ALLOW_REASON_CODE });
+			return runSpec(spec, admissionCall, allowed, options);
+		};
+		if (scopedSpec !== undefined && scopedEscapeRoute() === "run") return runScoped(scopedSpec);
+		// The scope a session option would offer for this escape: on the card, or to contained yolo's next ask_user.
+		const offeredScope = mainAsk ? (deps.escapeScopes?.scopeFor(admissionCall, outcome.decision) ?? null) : null;
 		// The safety judge reviews the ask before anyone is asked. An allow runs
 		// the call, a block refuses it back to the model, and anything else parks
 		// exactly as before, with the judge's reason on the card when it had one.
 		// The judge reads the admission facts, so a store put's replace marker is admission's, never the model's.
-		const pendingJudgement = judgeParkedCall(factCall, outcome, options);
+		const pendingJudgement = judgeParkedCall(factCall, outcome, options, scopeGrant?.scope);
 		const judged = pendingJudgement instanceof Promise ? await pendingJudgement : pendingJudgement;
+		if (scopedSpec !== undefined && judged.kind === "skip") return runScoped(scopedSpec);
 		const judgedSpec = tools.get(admissionCall.tool as ToolName);
 		const unattended = deps.principal !== "worker" && deps.unattendedAsks?.() === true;
+		// Contained yolo cannot raise the card, so the scope goes to the next ask_user question about the escape.
+		if (unattended && offeredScope !== null) deps.escapeScopes?.offer(offeredScope);
+		const scopeHint = unattended && offeredScope !== null ? escapeScopeAskHint(offeredScope) : null;
 		// Contained yolo publishes only what the operator's own words name: an
 		// outward call the judge allowed under any other rule is refused.
 		const outwardUnnamed =
@@ -2592,18 +2688,29 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const reasonCode = `${SAFETY_JUDGE_REASON_PREFIX}${judged.rule}`;
 			const blocked = blockDecision(
 				outcome.decision,
-				{ short: `${call.tool} blocked by the safety judge (rule ${judged.rule})`, detail: judged.refusal, hints: [] },
+				{
+					short: `${call.tool} blocked by the safety judge (rule ${judged.rule})`,
+					detail: scopeHint === null ? judged.refusal : `${judged.refusal}\n${scopeHint}`,
+					hints: [],
+				},
 				{ kind: "block", reasonCode },
 			);
 			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode });
 			if (unattended) observeUnattendedRefusal(admissionCall, outcome.decision, "judge-block", judged.rule);
 			const verdict = withDenial(
-				{ kind: "blocked", reason: judged.refusal, decision: blocked },
+				{
+					kind: "blocked",
+					reason: scopeHint === null ? judged.refusal : `${judged.refusal}\n${scopeHint}`,
+					decision: blocked,
+				},
 				"clio_policy",
-				judged.allowedBy,
+				scopeHint === null ? judged.allowedBy : ESCAPE_SCOPE_ALLOWED_BY,
 				reasonCode,
 			);
-			return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
+			if (scopeHint === null) return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
+			const answerable = escapeAnswerable(verdict);
+			if (firstEscapeRefusal(admissionCall, options)) return answerable;
+			return observeBlockedAttempt(admissionCall, answerable, options) ?? answerable;
 		}
 		const judgeGate = judged.kind === "park" ? { gateReason: judged.gateReason, gateBuild: judged.build } : {};
 		if (unattended) {
@@ -2615,19 +2722,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			else if (judged.kind === "park")
 				observeUnattendedRefusal(admissionCall, outcome.decision, "no-verdict", judged.cause);
 			else observeUnattendedRefusal(admissionCall, outcome.decision, "operator-only");
-			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
-			return (
+			const loopReason =
+				scopeHint !== null && firstEscapeRefusal(admissionCall, options)
+					? null
+					: observeRejectedAttempt(admissionCall, outcome.decision, options);
+			const refused =
 				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
 				parkDenial(
 					parkAnsweredBlockedVerdict(
 						outcome.decision,
 						admissionCall.tool,
-						loopReason ?? CONTAINED_YOLO_REASON,
+						loopReason ?? (scopeHint === null ? CONTAINED_YOLO_REASON : `${CONTAINED_YOLO_ESCAPE_REASON}\n${scopeHint}`),
 						judged.kind === "park" ? judged.gateReason : outwardUnnamed ? containedOutwardReason(judged.rule) : undefined,
 					),
 					CONTAINED_YOLO_REASON,
-				)
-			);
+				);
+			return scopeHint === null || loopReason !== null ? refused : escapeAnswerable(refused);
 		}
 		// A park settles only through a listener's answer, so with no listener
 		// the promise would never resolve. Refuse the call instead, fail closed.
@@ -2660,6 +2770,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 				...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 				...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
+				...(offeredScope !== null ? { escapeScope: offeredScope } : {}),
 				...judgeGate,
 			};
 			// A worker's host handoff decides whether an ask is delivered or refused locally (#434).
@@ -2989,6 +3100,18 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					) {
 						deps.sessionCodeConsent?.grant();
 					}
+					// The operator picked the parked escape's session option: the scope it showed is granted before
+					// re-admission, so this call and later ones inside it no longer ask (M-7).
+					if (
+						grant?.sessionScope === true &&
+						(grant.issuer ?? "operator") === "operator" &&
+						entry.meta.escapeScope !== undefined
+					) {
+						deps.escapeScopes?.grant(
+							entry.meta.escapeScope,
+							grant.requestedBy === "acp-client" ? "acp-client" : "approval-card",
+						);
+					}
 					// The operator allowed a git-hooks-changed ask: the files the card
 					// named join the baseline before re-admission, so a file changed
 					// after the card was drawn still asks.
@@ -3253,6 +3376,30 @@ const CONTAINED_YOLO_REASON =
 	"refused: contained yolo runs without the operator, and this call needs their decision. Do not retry it; continue with work that does not need it and name it in your report as left for the operator.";
 const CONTAINED_YOLO_ALLOWED_BY =
 	"only the operator can decide it, when they are back; contained yolo never waits for them.";
+/** Audit code of a sandbox escape that ran inside a scope the operator approved for the session (M-7). */
+const ESCAPE_SCOPE_ALLOW_REASON_CODE = "escape_scope_session";
+/** What allows a sandbox escape whose session option ask_user carries (M-7). */
+const ESCAPE_SCOPE_ALLOWED_BY =
+	"the operator chooses the session option Clio adds to an ask_user question that names running it outside the sandbox; then rerun the call.";
+/** Why contained yolo refused a sandbox escape that a session option could approve. */
+const CONTAINED_YOLO_ESCAPE_REASON =
+	"refused: contained yolo runs without waiting for the operator, and this call leaves the sandbox, which needs their decision.";
+
+/** How the agent can still get an escape approved: the option ask_user adds to a question about it. */
+function escapeScopeAskHint(scope: EscapeScope): string {
+	return `To run it, ask the operator with ask_user in one question that names running it outside the sandbox. Clio adds the option "${escapeScopeOptionLabel(scope)}" to that question; choosing it lets unsandboxed reruns of those same unchanged script files, from the same cwd with the same env, run this session without asking, so rerun the call after they choose it. Do not write that option yourself. Otherwise continue with work that does not need it and name it in your report as left for the operator.`;
+}
+
+/** The ask a granted escape scope answered, as the allow that runs it. */
+function escapeScopeAllowedDecision(ask: SafetyDecision): SafetyDecision {
+	return {
+		kind: "allow",
+		classification: ask.classification,
+		...(ask.policy !== undefined
+			? { policy: { ...ask.policy, kind: "allow" as const, reasonCode: ESCAPE_SCOPE_ALLOW_REASON_CODE } }
+			: {}),
+	};
+}
 /** Why contained yolo refused an outward call the judge allowed under a rule other than operator-named. */
 function containedOutwardReason(rule: string): string {
 	return `Clio's safety judge allowed this outward call under rule ${rule}, but contained yolo publishes only what an operator message explicitly names.`;

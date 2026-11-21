@@ -32,6 +32,7 @@ export {
 	buildSummary,
 	emptyRunTally,
 	foldMessageIntoRunTally,
+	isGenerationGuardAbort,
 } from "./summary.js";
 export {
 	resolveFooterVerb,

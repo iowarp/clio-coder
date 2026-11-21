@@ -134,7 +134,7 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 			const reason = assistantStopReason((message as { stopReason?: unknown }).stopReason);
 			if (reason && reason !== "stop") {
 				stopReason =
-					reason === "aborted" && recordAbortSource(message) === "tool_argument_generation" ? "generation_guard" : reason;
+					reason === "aborted" && isGenerationGuardAbort(recordAbortSource(message)) ? "generation_guard" : reason;
 			}
 		}
 	}
@@ -156,4 +156,9 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 
 function recordAbortSource(message: AgentMessage): unknown {
 	return (message as unknown as { clioCoderAbortReason?: unknown }).clioCoderAbortReason;
+}
+
+/** A Clio stream guard, not the operator, stopped the reply: the tool-argument bound or the repetition check. */
+export function isGenerationGuardAbort(source: unknown): boolean {
+	return source === "tool_argument_generation" || source === "repetition";
 }

@@ -23,8 +23,15 @@ export const PERMISSION_TERMS_KEY = "alt+t";
 /** Alt+S belongs to send-now; this chord is free in the default keybinding registry. */
 export const PERMISSION_STOP_KEY = "alt+x";
 
+/** Approves a parked sandbox escape for the rest of the session over the scope its card shows (M-7). */
+export const PERMISSION_SESSION_SCOPE_KEY = "alt+p";
+
 export const permissionKeyLabel = (
-	key: typeof MUTATION_PREVIEW_KEY | typeof PERMISSION_TERMS_KEY | typeof PERMISSION_STOP_KEY,
+	key:
+		| typeof MUTATION_PREVIEW_KEY
+		| typeof PERMISSION_TERMS_KEY
+		| typeof PERMISSION_STOP_KEY
+		| typeof PERMISSION_SESSION_SCOPE_KEY,
 	env?: Readonly<Record<string, string | undefined>>,
 ): string => localActionKeyLabel(key, env);
 

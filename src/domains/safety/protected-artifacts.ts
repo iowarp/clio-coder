@@ -388,6 +388,8 @@ export interface ShellCommandStep {
 	args: string[];
 	/** Targets of `>`-style redirects that replace the file's contents. `>>` is not listed. */
 	truncatingRedirects: string[];
+	/** `NAME=value` words before the command word (after an `env` too), as written; absent when none. */
+	assignments?: string[];
 }
 
 /**
@@ -423,10 +425,12 @@ export function shellCommandSteps(command: string, home?: string): ShellCommandS
 			continue;
 		}
 		const commandWord = argv[commandIndex] ?? "";
+		const assignments = argv.slice(0, commandIndex).filter(isEnvAssignment);
 		steps.push({
 			executable: basenameToken(argv[commandIndex]),
 			args: argv.slice(commandIndex + 1),
 			truncatingRedirects,
+			...(assignments.length > 0 ? { assignments } : {}),
 			...(isRelativeCommandPath(argv[commandIndex]) ? { relativePath: true as const } : {}),
 			...(commandWord.includes("/") ? { commandPath: commandWord } : {}),
 		});
@@ -4719,13 +4723,15 @@ function scanShellText(command: string, bodies: ReadonlyArray<HeredocBody> = [])
 		ansiCQuoted = false;
 		substitutions = [];
 	};
-	const appendBacktick = (open: number): number | null => {
+	const appendBacktick = (open: number, inDouble = false): number | null => {
 		const close = matchingBacktick(command, open);
 		if (close === null) return null;
 		wordStart ??= open;
 		current += command.slice(open, close + 1);
-		// ORCH-006: escaped ticks inside a backtick script become nested delimiters.
-		substitutions.push(command.slice(open + 1, close).replace(/\\`/gu, "`"));
+		// ORCH-006: escaped ticks inside a backtick script become nested delimiters; inside double quotes bash also
+		// drops the backslash before `"`, `$` and `\`, so `\"` is a quote in the script.
+		const script = command.slice(open + 1, close);
+		substitutions.push(inDouble ? script.replace(/\\([`"$\\])/gu, "$1") : script.replace(/\\`/gu, "`"));
 		return close;
 	};
 
@@ -4759,7 +4765,7 @@ function scanShellText(command: string, bodies: ReadonlyArray<HeredocBody> = [])
 				}
 			}
 			if (quote === '"' && char === "`") {
-				const close = appendBacktick(index);
+				const close = appendBacktick(index, true);
 				if (close !== null) {
 					index = close;
 					continue;

@@ -183,6 +183,8 @@ export function initializeClioHome(): InitReport {
 	if (!existsSync(credentialsPath)) {
 		withStateFileLockSync(credentialsPath, () => {
 			if (existsSync(credentialsPath)) return;
+			// On Windows the directory goes owner-only first, so the temp file never inherits a wider ACL.
+			applyOwnerOnlyAcl(configDir, {}, { directory: true });
 			safeResourceWrite(
 				credentialsPath,
 				"# Managed via `clio-coder auth`. Do not edit manually unless you know what you are doing.\n{}\n",

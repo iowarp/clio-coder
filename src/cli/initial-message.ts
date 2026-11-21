@@ -47,6 +47,11 @@ export async function readPipedStdin(): Promise<string | undefined> {
 	});
 }
 
+/** Piped content cannot open or close its own block: `<stdin` and `</stdin` (any case) become `<\stdin`, `<\/stdin`. */
+function neutralizeStdinFrames(text: string): string {
+	return text.replace(/<\s*(\/?)\s*(stdin)(?![\w-])/giu, (_, slash: string, tag: string) => `<\\${slash}${tag}`);
+}
+
 /**
  * The first run's user message (SPEC 6.2): argv text, then `@file` blocks, then piped stdin. Stdin that follows argv
  * text is framed as a `<stdin>` block, the shape `<file name>` attachments use, so every output format assembles the
@@ -58,7 +63,9 @@ export function buildInitialMessage(input: InitialMessageInput): InitialMessageR
 	if (first !== undefined) parts.push(first);
 	if (input.fileText) parts.push(input.fileText);
 	if (input.stdinContent !== undefined)
-		parts.push(first !== undefined ? `<stdin>\n${input.stdinContent}\n</stdin>` : input.stdinContent);
+		parts.push(
+			first !== undefined ? `<stdin>\n${neutralizeStdinFrames(input.stdinContent)}\n</stdin>` : input.stdinContent,
+		);
 
 	const result: InitialMessageResult = { remainingMessages: rest };
 	if (parts.length > 0) result.initialMessage = parts.join("\n\n");

@@ -3,6 +3,7 @@ import { decodePrintableKey, isKeyRelease, isKeyRepeat, matchesKey } from "../en
 import { backOutOneLayer } from "./escape-layers.js";
 import {
 	MUTATION_PREVIEW_KEY,
+	PERMISSION_SESSION_SCOPE_KEY,
 	PERMISSION_STOP_KEY,
 	PERMISSION_TERMS_KEY,
 	permissionEscapeLayers,
@@ -47,6 +48,9 @@ export type OverlayState =
 export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
 	confirmPermission: () => void;
+	/** Whether the card offers its sandbox escape's session option, and choosing it (M-7). */
+	canConfirmPermissionForSession?: () => boolean;
+	confirmPermissionForSession?: () => void;
 	stopTurnFromPermission: () => void;
 	/**
 	 * Whether the composer holds text. Enter must not allow a parked call while
@@ -180,6 +184,16 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		// Enter to the editor, which is the send path this guard exists to block.
 		if (deps.composerHasDraft?.() ?? false) deps.explainHeldDraft?.();
 		else if (!(deps.isPermissionSettling?.() ?? false)) deps.confirmPermission();
+		return true;
+	}
+	// The session option of a sandbox escape (M-7): held like Enter while a draft is in the composer.
+	if (
+		matchesKey(data, PERMISSION_SESSION_SCOPE_KEY) &&
+		!isKeyRelease(data) &&
+		(deps.canConfirmPermissionForSession?.() ?? false)
+	) {
+		if (deps.composerHasDraft?.() ?? false) deps.explainHeldDraft?.();
+		else if (!(deps.isPermissionSettling?.() ?? false)) deps.confirmPermissionForSession?.();
 		return true;
 	}
 	const edit = DRAFT_EDITS.find(([key]) => matchesKey(data, key));

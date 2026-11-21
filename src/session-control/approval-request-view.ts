@@ -94,4 +94,9 @@ export interface ApprovalRequestView {
 	 * must not read as if it let the call write outside the writable roots.
 	 */
 	sandboxed?: true;
+	/**
+	 * The session option of a sandbox escape (M-7): the label naming the scope it grants and what choosing it
+	 * does. Harness text read from the parked call, never the model's.
+	 */
+	escapeScope?: { label: string; consequence: string };
 }
