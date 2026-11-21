@@ -10296,6 +10296,8 @@ export function createDispatchBundle(
 					const handback = wallHandbackOutcomeDetail({
 						reported: hasDurableFinalOutput(outputCapture.snapshot()),
 						unfinishedTools: snapshotUnfinishedTools(inFlightTools),
+						hostStopped: activeRun.aborted && activeRun.abortCause === "timeout",
+						exitCode: result.exitCode ?? null,
 						signal: result.signal ?? null,
 					});
 					if (finalOutcome === "succeeded" || finalOutcome === "failed") {

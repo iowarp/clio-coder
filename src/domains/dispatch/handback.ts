@@ -31,14 +31,25 @@ export const WALL_HANDBACK_SHARE = 0.85;
  * What a run the wall clock moved to its handback round did next, as the host observed it (fleet M8). The worker's own
  * line is written at the handback, before any report exists, so the sealed detail says whether a report came: a tool
  * call still running at the handback can carry the run past its wall clock, where the host stops it with no answer.
+ * Only the host's own deadline abort (`hostStopped`) is a stop; a worker that crashed, was killed by something else or
+ * exited without a report is described by its exit.
  */
 export function wallHandbackOutcomeDetail(input: {
 	reported: boolean;
 	unfinishedTools: ReadonlyArray<{ tool: string; count: number }>;
+	hostStopped: boolean;
+	exitCode: number | null;
 	signal: string | null;
 }): string {
 	const share = `worker_run_timeout: the wall clock moved the run to its handback round at ${Math.round(WALL_HANDBACK_SHARE * 100)}%`;
 	if (input.reported) return `${share} and it handed back its report`;
+	if (!input.hostStopped) {
+		const exit = [
+			input.exitCode === null ? null : `exit code ${input.exitCode}`,
+			input.signal === null ? null : `signal ${input.signal}`,
+		].filter((part) => part !== null);
+		return `${share}, but it exited${exit.length === 0 ? "" : ` (${exit.join(", ")})`} before it wrote a report, so it handed back no report`;
+	}
 	const calls = input.unfinishedTools.reduce((sum, entry) => sum + entry.count, 0);
 	const running =
 		calls === 0
