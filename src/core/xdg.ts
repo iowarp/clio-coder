@@ -177,6 +177,8 @@ const CLIO_CACHE_ENTRIES: { names: ReadonlySet<string>; prefixes: ReadonlyArray<
 		"provider-target-checks",
 		"store",
 		"sandbox-cache",
+		"sandbox-cache-leases",
+		"sandbox-npmrc",
 		"v8-compile-cache",
 		"update-logs",
 	]),

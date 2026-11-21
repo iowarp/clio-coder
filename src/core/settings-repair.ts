@@ -109,3 +109,44 @@ export function repairSettingsCoercions(additional: SettingsScalarRepair[] = [])
 		return { rewritten: edits.map((edit) => edit.repair), skipped };
 	});
 }
+
+/**
+ * Keys a removed feature read. The loader refuses an unknown key, so a settings file that still carries one stops
+ * every start; `doctor --fix` deletes exactly these when the validator names them.
+ */
+const RETIRED_SETTINGS_PATHS: ReadonlyArray<string> = ["context.memory.observations"];
+
+export interface RetiredSettingsRemoval {
+	removed: string[];
+	/** Retired paths present in the file that could not be removed without new validation issues. */
+	skipped: string[];
+}
+
+/** The retired keys present in the settings file, read-only. */
+export function retiredSettingsKeysPresent(): string[] {
+	if (!existsSync(settingsPath())) return [];
+	const issues = new Set(validateSettingsFile().issues.map((issue) => issue.path));
+	return RETIRED_SETTINGS_PATHS.filter((path) => issues.has(path));
+}
+
+/** Delete retired keys under the settings lock; nothing is written unless the result validates with no new issue. */
+export function removeRetiredSettingsKeys(): RetiredSettingsRemoval {
+	const path = settingsPath();
+	if (!existsSync(path)) return { removed: [], skipped: [] };
+	return withSettingsLock(() => {
+		const validation = validateSettingsFile();
+		const known = new Set(validation.issues.map((issue) => issue.path));
+		const present = RETIRED_SETTINGS_PATHS.filter((retired) => known.has(retired));
+		if (present.length === 0) return { removed: [], skipped: [] };
+		const document = parseDocument(readFileSync(path, "utf8"));
+		for (const retired of present) document.deleteIn(retired.split("."));
+		const next = String(document);
+		const checked = validateSettings(parseYaml(next));
+		const remaining = new Set(checked.issues.map((issue) => issue.path));
+		if (present.some((retired) => remaining.has(retired)) || [...remaining].some((issue) => !known.has(issue))) {
+			return { removed: [], skipped: present };
+		}
+		safeResourceWrite(path, next, { encoding: "utf8", mode: SETTINGS_FILE_MODE });
+		return { removed: present, skipped: [] };
+	});
+}

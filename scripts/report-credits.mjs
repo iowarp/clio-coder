@@ -5,6 +5,7 @@
 //     prints { handles: ["@a", "@b"], issues: { "@a": [452] } }
 //   node scripts/report-credits.mjs --since ... --until ... --champions
 //     also rewrites CHAMPIONS.md (stable releases), honouring champions-removed.txt
+//   --until-rev <rev> ends the date range at a commit when the --until tag is not cut yet (pnpm run release)
 //
 // The handle comes from the author of the block, never from text in it, so a block cannot credit someone else.
 // No counts, ranks, dates or tiers appear in anything this writes.
@@ -18,7 +19,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const REPOSITORY = "iowarp/clio-coder";
 const BLOCK_TAG = "clio-coder-report";
 export const CHAMPIONS_HEADER =
-	"# Champions\n\nThank you to everyone who reported a problem and asked to be credited. Every report made Clio Coder better.\n\n";
+	"# Champions\n\nThank you to everyone who reported a problem and asked to be credited. Every report made CLIO Coder better.\n\n";
 
 /** The first report block's `credit:` value, or null without a block. */
 export function blockCredit(body) {
@@ -142,20 +143,17 @@ function fetchIssues() {
 	);
 }
 
-function main() {
-	const { values } = parseArgs({
-		options: {
-			since: { type: "string" },
-			until: { type: "string" },
-			fixture: { type: "string" },
-			maintainer: { type: "string", multiple: true },
-			champions: { type: "boolean" },
-		},
-	});
+/**
+ * The credits for a range, read-only: `values` takes the command's options (`since`, `until`, `until-rev`, `fixture`,
+ * `maintainer`). The release reads them here before qualification (RL-5).
+ */
+export function readCredits(values) {
 	const raw = values.fixture ? JSON.parse(readFileSync(values.fixture, "utf8")) : fetchIssues();
 	const issues = Array.isArray(raw) ? raw : (raw.issues ?? []);
 	const range =
-		values.since && values.until && !values.fixture ? { from: tagDate(values.since), to: tagDate(values.until) } : {};
+		values.since && values.until && !values.fixture
+			? { from: tagDate(values.since), to: tagDate(values["until-rev"] ?? values.until) }
+			: {};
 	const changelogPath = join(root, "CHANGELOG.md");
 	const cited =
 		values.since || values.until
@@ -165,16 +163,71 @@ function main() {
 					values.until,
 				)
 			: new Set();
-	const credits = collectCredits(issues, {
+	return collectCredits(issues, {
 		...range,
 		cited: values.fixture && !values.since ? new Set() : cited,
 		maintainers: new Set(values.maintainer ?? ["akougkas"]),
 	});
+}
+
+/**
+ * CHAMPIONS.md as these credits leave it, without writing: `changed` is false when the file would stay byte-identical,
+ * and when no file exists yet and nobody new is credited.
+ */
+export function championsUpdate(credits) {
+	const path = join(root, "CHAMPIONS.md");
+	const removedPath = join(root, "champions-removed.txt");
+	const removed = existsSync(removedPath) ? readFileSync(removedPath, "utf8").split(/\r?\n/u) : [];
+	const current = existsSync(path) ? readFileSync(path, "utf8") : null;
+	const next = championsFile(current ?? "", credits.handles, removed);
+	return { path, next, changed: next !== current && (current !== null || credits.handles.length > 0) };
+}
+
+/**
+ * What `pnpm run release` credits for `version`, read-only (RL-5): the range from the newest earlier release tag
+ * reachable from HEAD (a stable release counts from the last stable) to this version, ending at HEAD because its tag
+ * is not cut yet, and for a stable version CHAMPIONS.md as those credits leave it. `regenerate` is the command that
+ * writes that file.
+ */
+export function releaseCredits(version) {
+	const until = `v${version}`;
+	const stable = !version.includes("-");
+	let since;
+	try {
+		const describe = ["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--exclude", until];
+		if (stable) describe.push("--exclude", "v*-*");
+		since =
+			execFileSync("git", [...describe, "HEAD"], { cwd: root, encoding: "utf8", stdio: "pipe" }).trim() || undefined;
+	} catch {
+		// No earlier release tag: every changelog citation up to this version is in range.
+		since = undefined;
+	}
+	const range = { ...(since ? { since } : {}), until, "until-rev": "HEAD" };
+	const credits = readCredits(range);
+	return {
+		since,
+		until,
+		credits,
+		champions: stable ? championsUpdate(credits) : null,
+		regenerate: `node scripts/report-credits.mjs ${since ? `--since ${since} ` : ""}--until ${until} --until-rev HEAD --champions`,
+	};
+}
+
+function main() {
+	const { values } = parseArgs({
+		options: {
+			since: { type: "string" },
+			until: { type: "string" },
+			"until-rev": { type: "string" },
+			fixture: { type: "string" },
+			maintainer: { type: "string", multiple: true },
+			champions: { type: "boolean" },
+		},
+	});
+	const credits = readCredits(values);
 	if (values.champions) {
-		const path = join(root, "CHAMPIONS.md");
-		const removedPath = join(root, "champions-removed.txt");
-		const removed = existsSync(removedPath) ? readFileSync(removedPath, "utf8").split(/\r?\n/u) : [];
-		writeFileSync(path, championsFile(existsSync(path) ? readFileSync(path, "utf8") : "", credits.handles, removed));
+		const champions = championsUpdate(credits);
+		writeFileSync(champions.path, champions.next);
 	}
 	console.log(JSON.stringify(credits, null, 2));
 }

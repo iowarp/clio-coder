@@ -167,14 +167,17 @@ function lockIsAbandoned(lockPath: string, foreignExpiresMs?: number): boolean {
 	return ageMs !== null && ageMs > (owner === null ? STALE_LOCK_MS : (foreignExpiresMs ?? STALE_LOCK_MS));
 }
 
-/** Whether a lock's recorded owner is provably gone, the same test a stale takeover uses. */
-export function stateLockIsAbandoned(lockPath: string): boolean {
-	return lockIsAbandoned(lockPath);
+/**
+ * Whether a lock's recorded owner is provably gone, the same test a stale takeover uses. `foreignExpiresMs` is the
+ * option of the same name: only for a lock whose holders all refresh it asynchronously.
+ */
+export function stateLockIsAbandoned(lockPath: string, foreignExpiresMs?: number): boolean {
+	return lockIsAbandoned(lockPath, foreignExpiresMs);
 }
 
 /** Remove a lock whose owner is provably gone, under the same reclaim guard a waiter uses. */
-export function clearAbandonedStateLock(lockPath: string): void {
-	if (lockIsAbandoned(lockPath)) reclaimAbandonedLock(lockPath);
+export function clearAbandonedStateLock(lockPath: string, foreignExpiresMs?: number): void {
+	if (lockIsAbandoned(lockPath, foreignExpiresMs)) reclaimAbandonedLock(lockPath, foreignExpiresMs);
 }
 
 function removeLockFile(lockPath: string): void {

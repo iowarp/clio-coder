@@ -3,14 +3,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFile
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { canonicalProjectRoot, checkoutHead, repositoryRoot } from "../../core/project-root.js";
-import {
-	type MemoryMutationOptions,
-	memoryRoot,
-	mutateMemoryRecords,
-	pruneStaleMemoryRecords,
-	sortMemoryRecords,
-	updateMemoryRecord,
-} from "./store.js";
+import { memoryRoot, pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
 import type {
 	MemoryAgentIdentity,
 	MemoryClaim,
@@ -99,28 +92,6 @@ export async function rejectMemoryRecord(
 	now: Date = new Date(),
 ): Promise<MemoryRecord> {
 	return updateMemoryRecord(dataDir, memoryId, (record) => rejectRecord(record, now));
-}
-
-/** Reject several records under one store lock, skipping any already rejected. Returns the ids this call rejected. */
-export async function rejectMemoryRecords(
-	dataDir: string,
-	memoryIds: ReadonlySet<string>,
-	now: Date = new Date(),
-	options: MemoryMutationOptions = {},
-): Promise<string[]> {
-	return mutateMemoryRecords(
-		dataDir,
-		(records) => {
-			const rejected: string[] = [];
-			const next = records.map((record) => {
-				if (!memoryIds.has(record.id) || record.rejectedAt !== undefined) return record;
-				rejected.push(record.id);
-				return rejectRecord(record, now);
-			});
-			return rejected.length > 0 ? { records: next, result: rejected } : { result: rejected };
-		},
-		options,
-	);
 }
 
 export async function pruneStaleMemory(dataDir: string, now: Date = new Date()): Promise<MemoryRecord[]> {

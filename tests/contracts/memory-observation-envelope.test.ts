@@ -194,15 +194,13 @@ test("only an operator message grounds a constraint or decision; tool output sta
 	);
 });
 
-test("the observer prepares only near a portable fold, stops after two declined folds, and keeps its old switch", async () => {
+test("the observer prepares only near a portable fold, stops after two declined folds", async () => {
 	const memory = (raw: unknown) => {
 		const result = validateSettings({ version: 2, context: { memory: raw } });
 		deepStrictEqual(result.issues, []);
 		return result.settings.context.memory.surfaces.observe;
 	};
 	strictEqual(DEFAULT_SETTINGS.context.memory.surfaces.observe, "off", "the default stays off");
-	strictEqual(memory({ observations: { enabled: true } }), "on", "the old key still turns the surface on");
-	strictEqual(memory({ observations: { enabled: true }, surfaces: { observe: "off" } }), "off", "the new key wins");
 	strictEqual(memory({ surfaces: { observe: "on" } }), "on");
 
 	// The projection names the planner's path: live only when its live-prefix request is available.

@@ -291,11 +291,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					`resume run '${input.resume}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`,
 				);
 			} else if (planned.reason === "workspace") {
-				diagnostics.push(
-					planned.priorCwd === null
-						? `resume run '${input.resume}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
-						: `resume run '${input.resume}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
-				);
+				diagnostics.push(`resume run '${input.resume}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`);
 			} else if (planned.reason === "running") {
 				diagnostics.push(
 					`resume run '${input.resume}' is still running in process ${planned.pid}; wait for it to settle or cancel it first`,

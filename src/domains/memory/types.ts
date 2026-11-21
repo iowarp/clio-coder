@@ -1,10 +1,5 @@
-/** The store version this build writes once any record carries claim identity, revisions or delivery counters. */
+/** The store version, the only one this build reads or writes. */
 export const MEMORY_VERSION = 2;
-/**
- * Stores written before claim identity. They are read as they are, and a store whose records carry nothing newer is
- * written back at this version, so an older build keeps reading it until a record needs the newer shape.
- */
-export const MEMORY_LEGACY_VERSION = 1;
 
 export const MEMORY_SCOPES = ["global", "repo", "language", "runtime", "agent", "task-family", "hpc-domain"] as const;
 
@@ -66,8 +61,10 @@ export interface MemoryRecordProvenance {
  */
 export const AGENT_NOTE_EVIDENCE_PREFIX = "agent-note:";
 
-export const MEMORY_OBSERVATION_KINDS = ["delivered", "held", "contradicted"] as const;
-export type MemoryObservationKind = (typeof MEMORY_OBSERVATION_KINDS)[number];
+/** What a session reports: a delivery, counted, or a verdict, kept. */
+export type MemoryObservationKind = "delivered" | MemoryVerdictKind;
+export const MEMORY_VERDICT_KINDS = ["held", "contradicted"] as const;
+export type MemoryVerdictKind = (typeof MEMORY_VERDICT_KINDS)[number];
 /**
  * Verdicts a record keeps. The oldest fall off first, except the newest `contradicted`, which stays pinned; deliveries
  * are counted outside the window (`deliveredCount`), so they never push a verdict out.
@@ -75,16 +72,15 @@ export type MemoryObservationKind = (typeof MEMORY_OBSERVATION_KINDS)[number];
 export const MEMORY_OBSERVATIONS_MAX = 32;
 
 /**
- * What a session saw happen to a claim. `held` is a demonstration of it, `contradicted` a failure of it. A verdict
- * written since claim identity is scoped: the claim revision it judged, the checkout's branch and head, and whether
- * the session had been shown the note first. A `delivered` entry, or a verdict without a revision, comes from a
- * store written before; it is read as it is and judges no current revision.
+ * What a session saw happen to a claim. `held` is a demonstration of it, `contradicted` a failure of it. A verdict is
+ * scoped: the claim revision it judged, the checkout's branch and head, and whether the session had been shown the
+ * note first.
  */
 export interface MemoryObservation {
 	at: string;
 	sessionId: string;
-	kind: MemoryObservationKind;
-	revision?: string;
+	kind: MemoryVerdictKind;
+	revision: string;
 	branch?: string;
 	head?: string;
 	prompted?: boolean;
@@ -150,17 +146,17 @@ export interface MemoryRecord {
 	provenance?: MemoryRecordProvenance;
 	approval?: MemoryApproval;
 	observations?: MemoryObservation[];
-	/** Absent on records written before claim identity; their claim is read from their evidence refs. */
+	/** Absent when the record's evidence refs claim nothing. */
 	claim?: MemoryClaim;
 	/** Present once a second wording arrived. */
 	revisions?: MemoryRevision[];
-	/** Deliveries recorded since the counter existed; legacy `delivered` observations join it on the first mutation. */
+	/** How many times delivery loaded the record into a session. */
 	deliveredCount?: number;
 	lastDeliveredAt?: string;
 }
 
 export interface MemoryStoreFile {
-	version: typeof MEMORY_VERSION | typeof MEMORY_LEGACY_VERSION;
+	version: typeof MEMORY_VERSION;
 	records: MemoryRecord[];
 }
 

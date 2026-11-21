@@ -440,7 +440,7 @@ describe("claims lifecycle (#406)", () => {
 		}
 	});
 
-	it("item 1: a worktree's log from before folding is read through and never rewritten", async () => {
+	it("item 1: a worktree's own log from before folding is not read, and is left as it is", async () => {
 		const env = await isolateClioEnv("clio-claims-life-");
 		try {
 			const { repo, lane, head } = repoWithWorktree(env.dir);
@@ -450,9 +450,8 @@ describe("claims lifecycle (#406)", () => {
 			const bytes = readFileSync(legacyPath, "utf8");
 			await verify(lane, numericDetails(true, head), "c1");
 			const read = readClaims(repo);
-			assert.deepEqual(read.legacy, [legacyPath]);
-			assert.ok(read.records.some((claim) => claim.id === legacy.id));
-			assert.equal(read.records.length, 2);
+			assert.ok(!read.records.some((claim) => claim.id === legacy.id));
+			assert.equal(read.records.length, 1);
 			assert.equal(readFileSync(legacyPath, "utf8"), bytes);
 		} finally {
 			env.restore();

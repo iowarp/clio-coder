@@ -102,7 +102,6 @@ import { type RunCause, resolveRunExit, signalForExitCode } from "./modes/run-js
 import { playbookAgents, playbookPreflightDiagnostic } from "./playbook-preflight.js";
 import { parsePlaybookVars } from "./playbook-vars.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
-import { convertWorkspaceForCommand } from "./workspace-conversion.js";
 
 /** A busy or unjudgeable workspace lock refuses a run; it is not a usage error, so it exits 1 like the other refusals. */
 function fleetFailureExitCode(err: unknown): number {
@@ -600,14 +599,7 @@ async function runFleetTracked(
 				);
 			}
 			if (planned.reason === "workspace") {
-				return exitWith(
-					refuse(
-						planned.priorCwd === null
-							? `resume run '${resumeId}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
-							: `resume run '${resumeId}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
-					),
-					stopRun,
-				);
+				return exitWith(refuse(`resume run '${resumeId}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`), stopRun);
 			}
 			if (planned.reason === "running") {
 				return exitWith(
@@ -1193,7 +1185,6 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			}
 			const reporter = createFleetReporter();
 			try {
-				await convertWorkspaceForCommand();
 				return await runFleet(options, reporter);
 			} finally {
 				// Signal shutdown still writes notices after the run has sealed.

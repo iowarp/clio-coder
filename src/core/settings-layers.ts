@@ -466,6 +466,11 @@ const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }>
 		key: "sandboxUnixSockets",
 		message: "sandbox unix-socket access is set only in user settings; project value ignored",
 	},
+	// The cache is the home's, not a repository's, and a tiny cap would make every startup empty it.
+	{
+		key: "sandboxCacheMaxGiB",
+		message: "the sandbox cache cap is set only in user settings; project value ignored",
+	},
 	{
 		key: "unattendedAfterSeconds",
 		message: "the unattended timeout is set only in user settings; project value ignored",
