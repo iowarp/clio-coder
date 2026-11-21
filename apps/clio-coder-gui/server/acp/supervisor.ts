@@ -149,6 +149,13 @@ import {
 	sessionUpdateTelemetry,
 } from "./telemetry.js";
 
+/** A time a ledger recorded, as the replay carried it; anything that is not a readable instant is no time at all. */
+function recordedInstant(value: unknown): string | null {
+	if (typeof value !== "string" || value.length > 64) return null;
+	const ms = Date.parse(value);
+	return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
  * carries none. Only `{type:"content", content:{type:"text"}}` entries are
@@ -174,6 +181,8 @@ type Entry = {
 	turnId: string | null;
 	replay: number | null;
 	replayStopReason?: string;
+	/** When the replayed turn's newest ledger entry was written, from its frames' `clio-coder/replay`. */
+	replayFinishedAt?: string;
 	/** The replayed turn's recorded model and route, from its frames' `clio-coder/turn`. */
 	replayDetails?: Turn["details"];
 	closing: boolean;
@@ -869,13 +878,15 @@ export class Supervisor {
 		images = 0,
 		files = 0,
 		queued = false,
+		/** A replayed turn's start as its ledger recorded it; never the current clock. */
+		recordedAt: string | null = null,
 	) {
 		const turn: Turn = {
 			id,
 			prompt,
 			origin,
 			status: "running",
-			startedAt: origin === "live" && !queued ? new Date().toISOString() : null,
+			startedAt: origin === "live" ? (queued ? null : new Date().toISOString()) : recordedAt,
 			finishedAt: null,
 			stopReason: null,
 			usage: null,
@@ -1009,8 +1020,9 @@ export class Supervisor {
 		const reason = entry.replayStopReason ?? "end_turn";
 		const problem =
 			reason === "error" ? new AppProblem("upstream_acp", "The recorded turn ended with an error.").problem : null;
-		this.finish(entry, reason, null, problem, null, entry.replayDetails);
+		this.finish(entry, reason, null, problem, entry.replayFinishedAt ?? null, entry.replayDetails);
 		delete entry.replayStopReason;
+		delete entry.replayFinishedAt;
 		delete entry.replayDetails;
 	}
 	private failTurn(entry: Entry, problem: AppProblem) {
@@ -1132,7 +1144,10 @@ export class Supervisor {
 				["end_turn", "cancelled", "error", "refusal", "max_tokens", "max_turn_requests"].includes(replayMeta.stopReason)
 					? replayMeta.stopReason
 					: "end_turn";
-			this.begin(entry, "", "replay", `replay-${replay}`);
+			const startedAt = recordedInstant(replayMeta.startedAt);
+			const finishedAt = startedAt === null ? null : recordedInstant(replayMeta.finishedAt);
+			if (finishedAt !== null) entry.replayFinishedAt = finishedAt;
+			this.begin(entry, "", "replay", `replay-${replay}`, 0, 0, false, startedAt);
 		}
 		if (entry.replay !== null && meta[ACP_TURN_META_KEY] !== undefined) {
 			const details = Value.Clean(TurnDetails, { ...record(meta[ACP_TURN_META_KEY]) });

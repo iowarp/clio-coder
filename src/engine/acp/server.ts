@@ -2477,6 +2477,9 @@ interface AcpReplayTurn {
 	target?: string;
 	/** An assistant message of this turn sent text, so the next one opens on a blank line as live does. */
 	sentAssistantText?: boolean;
+	/** The ledger's time for the request that opened the turn, and for the turn's newest entry. */
+	startedAt?: string;
+	finishedAt?: string;
 }
 
 interface PreparedAcpReplay {
@@ -2593,6 +2596,8 @@ function prepareAcpReplay(
 	const presented = new Map<string, ReturnType<typeof toolCallPresentation>>();
 	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
+		const stamp = Number.isFinite(Date.parse(entry.timestamp)) ? entry.timestamp : undefined;
+		if (current !== null && stamp !== undefined && entry.kind !== "modelChange") current.finishedAt = stamp;
 		if (entry.kind === "workerRun") {
 			runs.push({ runId: entry.runId, agentId: entry.agentId });
 			continue;
@@ -2675,7 +2680,12 @@ function prepareAcpReplay(
 			}
 			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
 			// A crash can leave the request without a terminal assistant or turnOutcome.
-			current = { frames: [], userTurnId: entry.turnId, stopReason: "error" };
+			current = {
+				frames: [],
+				userTurnId: entry.turnId,
+				stopReason: "error",
+				...(stamp !== undefined ? { startedAt: stamp, finishedAt: stamp } : {}),
+			};
 			turns.push(current);
 			const operatorText =
 				typeof payload?.operatorText === "string" ? [payload.operatorText] : replayTextBlocks(entry).text;
@@ -2770,6 +2780,8 @@ function prepareAcpReplay(
 				[ACP_REPLAY_META_KEY]: {
 					turn: index + 1,
 					...(turn.stopReason !== undefined ? { stopReason: turn.stopReason } : {}),
+					...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
+					...(turn.startedAt !== undefined && turn.finishedAt !== undefined ? { finishedAt: turn.finishedAt } : {}),
 				},
 				...(turn.model !== undefined || turn.target !== undefined ? { [ACP_TURN_META_KEY]: route } : {}),
 				...frame.meta,

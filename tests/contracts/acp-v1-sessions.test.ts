@@ -918,6 +918,9 @@ test("ACP replay marks a persisted request without a terminal outcome as an erro
 			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
 				turn: 1,
 				stopReason: "error",
+				// The ledger's own times, so a reloaded request shows when it was asked rather than "not recorded".
+				startedAt: "2026-09-25T12:00:00.000Z",
+				finishedAt: "2026-09-25T12:00:02.000Z",
 			});
 		}
 	} finally {
@@ -998,15 +1001,20 @@ test("ACP replay keeps a crashed middleware continuation from reading as Done", 
 		},
 	]);
 	try {
-		for (const [peer, stopReason] of [
-			[crashed, "error"],
-			[canceled, "cancelled"],
+		for (const [peer, stopReason, finishedAt] of [
+			[crashed, "error", "2026-09-25T12:00:00.000Z"],
+			[canceled, "cancelled", "2026-09-25T12:00:01.000Z"],
 		] as const) {
 			await peer.call("initialize", { protocolVersion: 1 });
 			await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
 			strictEqual(peer.updates.length, 2);
 			for (const update of peer.updates) {
-				deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason });
+				deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+					turn: 1,
+					stopReason,
+					startedAt: "2026-09-25T12:00:00.000Z",
+					finishedAt,
+				});
 			}
 		}
 	} finally {
@@ -1100,7 +1108,12 @@ test("ACP replay keeps a crash after an in-run continuation from reading as Done
 		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
 		strictEqual(peer.updates.length, 2);
 		for (const update of peer.updates) {
-			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason: "error" });
+			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+				turn: 1,
+				stopReason: "error",
+				startedAt: "2026-09-25T12:00:00.000Z",
+				finishedAt: "2026-09-25T12:00:02.000Z",
+			});
 		}
 	} finally {
 		await peer.stop();
@@ -1886,7 +1899,12 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 		if (frame === undefined) throw new Error("unreachable");
 		strictEqual(loaded.updates.filter((candidate) => text(candidate) === "").length, 0);
 		strictEqual(text(frame), `${budgetAlertNotice(block)?.text}\n`);
-		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason: "error" });
+		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], {
+			turn: 1,
+			stopReason: "error",
+			startedAt: timestamp,
+			finishedAt: timestamp,
+		});
 		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "error" });
 		deepStrictEqual(budgetMeta(frame), {
 			version: 1,
