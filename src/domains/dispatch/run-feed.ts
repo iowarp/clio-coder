@@ -217,16 +217,17 @@ function writeRow(path: string, state: WriterState, body: RunEventJournalBody, a
 	state.bytes += Buffer.byteLength(line);
 }
 
-function writeBounded(path: string, state: WriterState, body: RunEventJournalBody, at: string): void {
+function writeBounded(path: string, state: WriterState, body: RunEventJournalBody, at: string): boolean {
 	if (body.kind === "event" && (state.dropping || state.bytes >= RUN_FEED_CAP_BYTES)) {
 		if (!state.dropping) {
 			state.dropping = true;
 			writeRow(path, state, { kind: "journal_truncated", reason: "per-run size cap", droppedFromSeq: state.seq + 1 }, at);
 		}
-		return;
+		return false;
 	}
 	writeRow(path, state, body, at);
 	if (body.kind === "terminal") state.closed = true;
+	return true;
 }
 
 /** Where the last word ending at or before `end` starts, or -1 when only whitespace is left. */
@@ -319,15 +320,20 @@ function carryAfter(body: RunEventJournalBody): "keep" | "release" | "hold" {
 
 /**
  * Append one display row to a run's feed. Best-effort: a feed that cannot be written loses the row, and the dispatch
- * never learns about it.
+ * never learns about it. Returns the seq of the row written for a body other than prose, which the run's journal
+ * projection carries so both stores number a row alike (C-29); undefined when no such row was written.
  */
-export function appendRunFeed(runId: string, body: RunEventJournalBody, at: string = new Date().toISOString()): void {
-	if (!isSafeRunId(runId) || stateRootRemoved()) return;
+export function appendRunFeed(
+	runId: string,
+	body: RunEventJournalBody,
+	at: string = new Date().toISOString(),
+): number | undefined {
+	if (!isSafeRunId(runId) || stateRootRemoved()) return undefined;
 	try {
 		const stateDir = clioStateDir();
 		const path = runFeedPath(runId, stateDir);
 		const state = writerFor(path);
-		if (state.closed) return;
+		if (state.closed) return undefined;
 		if (state.seq === 0 && state.bytes === 0) ensureRunDirectory(stateDir, runId);
 		if (body.kind === "event" && body.type === "text" && body.detail !== undefined) {
 			let detail = body.detail;
@@ -364,7 +370,7 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 				state.carryAt = at;
 				state.boundSecretName = openNameStart(state.carry) === 0 && namesSecret(state.carry);
 			}
-			return;
+			return undefined;
 		}
 		const carry = carryAfter(body);
 		if (carry !== "keep") {
@@ -376,9 +382,10 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 			state.headGuard = null;
 			state.boundSecretName = false;
 		}
-		writeBounded(path, state, body, at);
+		return writeBounded(path, state, body, at) ? state.seq : undefined;
 	} catch {
 		// Display state is best-effort; the run's telemetry journal still holds its structural feed.
+		return undefined;
 	}
 }
 

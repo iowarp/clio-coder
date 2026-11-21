@@ -36,7 +36,8 @@ export interface RunTelemetryJournal {
 	settle(settlement: RunSettlement): Promise<void>;
 	/** A channel failure the host saw, after exit included; a closed journal records nothing (#425). */
 	channel(data: EventPayload<"worker.channel_failed">): void;
-	feed(body: RunEventJournalBody, capBytes: number): void;
+	/** `feedSeq` is the row's seq in the run's feed.jsonl, which the journal record carries when it is newer (C-29). */
+	feed(body: RunEventJournalBody, capBytes: number, feedSeq?: number): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -385,14 +386,16 @@ async function openOwnedRunTelemetry(
 			if (journal.closed) return;
 			writer.enqueue({ kind: "worker.channel_failed", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
 		},
-		feed(body, capBytes) {
+		feed(body, capBytes, feedSeq) {
 			if (journal.closed || feedClosed) return;
 			const structural = structuralFeed(body);
 			if (structural === null) return;
+			// One row, one seq in both stores; a row the feed file did not write takes the journal's next (C-29).
+			const rowSeq = feedSeq !== undefined && feedSeq > seq ? feedSeq : seq + 1;
 			if (body.kind === "event" && (dropping || feedBytes >= capBytes)) {
 				if (!dropping) {
 					dropping = true;
-					journal.feed({ kind: "journal_truncated", reason: "per-run size cap", droppedFromSeq: seq + 1 }, capBytes);
+					journal.feed({ kind: "journal_truncated", reason: "per-run size cap", droppedFromSeq: rowSeq }, capBytes);
 				}
 				return;
 			}
@@ -403,9 +406,10 @@ async function openOwnedRunTelemetry(
 					(sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) * 6 : 16),
 					0,
 				);
+			seq = rowSeq;
 			writer.enqueue({
 				kind: "run.feed_appended",
-				data: { seq: ++seq, body: structural },
+				data: { seq, body: structural },
 				ctx: context,
 				wallMs: Date.now(),
 				mono: performance.now(),

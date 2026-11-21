@@ -41,6 +41,7 @@ import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/d
 const emptySum = sumFacts([]);
 
 import { defaultRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
+import { runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { observationTracing, traceObservation } from "../../src/domains/memory/observation-events.js";
 import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
@@ -448,6 +449,45 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		const before = await readFile(join(directory, run.runId, "journal.jsonl"));
 		display.open(run.runId, "late");
 		deepStrictEqual(await readFile(join(directory, run.runId, "journal.jsonl")), before);
+	} finally {
+		await journal.close();
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("run feed telemetry names every worker frame it keeps and carries feed.jsonl's seq (C-29)", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-"));
+	const runId = `feedseq${Date.now().toString(36)}`;
+	const run = { sessionId: null, runId, agent: { role: "worker" as const, id: runId } };
+	const journal = await openRunTelemetry(run, join(directory, runId));
+	try {
+		const display = defaultRunEventJournal();
+		const at = new Date().toISOString();
+		display.open(runId, "scout");
+		// feed.jsonl keeps a delta row the journal projection drops, so their counters part here.
+		display.append(runId, { at, type: "thinking_delta" });
+		for (const type of [
+			"clio_coder_helper_result",
+			"clio_coder_helper_result_rejected",
+			"clio_coder_write_record_downgraded",
+		])
+			display.append(runId, { at, type });
+		display.terminal(runId, "succeeded");
+		await journal.close();
+		const journaled = (await readCallJournal(join(directory, runId))).records.flatMap(({ record }) =>
+			record.k === "run.feed_appended"
+				? [[record.data.seq, record.data.body.kind === "event" ? record.data.body.type : record.data.body.kind]]
+				: [],
+		);
+		const rows = (await readFile(runFeedPath(runId), "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { seq: number; kind: string; type?: string })
+			.filter((row) => row.type !== "thinking_delta");
+		deepStrictEqual(
+			journaled,
+			rows.map((row) => [row.seq, row.type ?? row.kind]),
+		);
 	} finally {
 		await journal.close();
 		await rm(directory, { recursive: true, force: true });
