@@ -190,6 +190,27 @@ describe("compaction exact facts", () => {
 		match(result.summary, /exit=1, 57 passed/);
 	});
 
+	// CTX-12: the native call ran ahead of the automatic below-summary-room skip, so a pass with almost nothing new
+	// since the last checkpoint still paid for a native checkpoint of the whole ledger.
+	it("skips a native checkpoint an automatic pass gains nothing from", async () => {
+		let nativeCalls = 0;
+		const result = await compact({
+			entries: history(),
+			model: model(),
+			cwd,
+			automatic: true,
+			providerCheckpointSource: { sessionId: "s1", archive: join(cwd, "archive.jsonl") },
+			providerCompaction: async () => {
+				nativeCalls += 1;
+				throw new Error("native must not run");
+			},
+		});
+		strictEqual(nativeCalls, 0);
+		strictEqual(result.emptyReason, "below-summary-room");
+		strictEqual(result.noGain, true);
+		strictEqual(result.providerCheckpoint, undefined);
+	});
+
 	it("asks the summarizer to mark its own counts unverified on every route", () => {
 		for (const prompt of [
 			buildUserText("conversation"),

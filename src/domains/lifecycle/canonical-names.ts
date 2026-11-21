@@ -13,14 +13,13 @@
  * command that installs it with the operator's review.
  */
 
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { LifecycleContext } from "../../core/library-receipts.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { withStateFileLockSync } from "../../core/state-file-lock.js";
-import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
+import { clioConfigDir } from "../../core/xdg.js";
 import { capabilityEnvelope, envelopeDigest, extensionBaseDir, loadManifestFromRoot } from "../extensions/index.js";
 import { bundledPluginCatalog } from "../plugins/catalog.js";
 import { pluginBaseDir, pluginStatePath, withPluginScopeLock } from "../plugins/index.js";
@@ -39,7 +38,6 @@ export interface ConversionReport {
 /** Every package the conversion installs or replaces is attributed to the upgrade in the receipt store. */
 const UPGRADE: LifecycleContext = { actor: "upgrade" };
 const PLUGIN_NAMESPACE = "ai.iowarp.clio";
-const WORKSPACE_MARKER_LIMIT = 512;
 
 function emptyReport(): ConversionReport {
 	return { changed: [], attention: [] };
@@ -378,83 +376,6 @@ export function convertUserHome(): ConversionReport {
 	rewriteLibraryIndex(path.join(config, "library.yaml"), report);
 	convertPackages("user", process.cwd(), report);
 	return report;
-}
-
-interface WorkspaceMarkers {
-	version: 1;
-	workspaces: Record<string, string>;
-}
-
-function markerPath(): string {
-	return path.join(clioStateDir(), "workspace-conversions.json");
-}
-
-function readMarkers(): WorkspaceMarkers {
-	const parsed = readJson(markerPath());
-	return parsed && parsed.version === 1 && record(parsed.workspaces)
-		? { version: 1, workspaces: parsed.workspaces as Record<string, string> }
-		: { version: 1, workspaces: {} };
-}
-
-/**
- * A workspace's `.clio-coder/`, converted the first time Clio opens it: `fleets/`
- * becomes `playbooks/` and the project's install records and packages follow the
- * same rules as the user home. Returns null when there was nothing to convert or
- * the workspace was converted before.
- */
-export function convertWorkspaceOnce(workspace: string): ConversionReport | null {
-	let root: string;
-	try {
-		root = realpathSync(workspace);
-	} catch {
-		// A workspace that cannot be resolved has no layout to convert.
-		return null;
-	}
-	const project = path.join(root, ".clio-coder");
-	const legacy = existsSync(path.join(project, "fleets"));
-	const packages =
-		existsSync(path.join(project, "plugins", "state.json")) || existsSync(path.join(project, "extensions", "state.json"));
-	const index = existsSync(path.join(project, "library.yaml"));
-	if (!legacy && !packages && !index) return null;
-	if (readMarkers().workspaces[root] !== undefined) return null;
-	const report = emptyReport();
-	try {
-		mergeDirectory(path.join(project, "fleets"), path.join(project, "playbooks"), report);
-	} catch (error) {
-		report.attention.push(
-			`${shown(path.join(project, "fleets"))} could not be moved (${message(error)}); move its playbooks into ${shown(path.join(project, "playbooks"))} by hand.`,
-		);
-	}
-	rewriteLibraryIndex(path.join(project, "library.yaml"), report);
-	convertPackages("project", root, report);
-	try {
-		withStateFileLockSync(markerPath(), () => {
-			const markers = readMarkers();
-			markers.workspaces[root] = new Date().toISOString();
-			const kept = Object.entries(markers.workspaces).slice(-WORKSPACE_MARKER_LIMIT);
-			safeResourceWrite(
-				markerPath(),
-				`${JSON.stringify({ version: 1, workspaces: Object.fromEntries(kept) }, null, 2)}\n`,
-				{
-					encoding: "utf8",
-					mode: 0o600,
-				},
-			);
-		});
-	} catch (error) {
-		report.attention.push(
-			`The conversion of this workspace could not be recorded (${message(error)}), so Clio checks it again next time.`,
-		);
-	}
-	const relative = (line: string): string =>
-		line
-			.split(`${shown(root)}${path.sep}`)
-			.join("")
-			.split(`${root}${path.sep}`)
-			.join("");
-	report.changed = report.changed.map(relative);
-	report.attention = report.attention.map(relative);
-	return report.changed.length === 0 && report.attention.length === 0 ? null : report;
 }
 
 /**

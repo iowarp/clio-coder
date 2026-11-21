@@ -7,9 +7,9 @@
  */
 export const NO_NETWORK_TOOLS_ENV = "CLIO_CODER_DISABLE_RETRIEVE_TOOLS";
 
-/** Legacy spelling remains accepted for existing harnesses; neither is a sandbox. */
+/** Not a sandbox: it removes tools, nothing else. */
 export function networkToolsDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	return env[NO_NETWORK_TOOLS_ENV] === "1" || env.CLIO_CODER_NO_NETWORK_TOOLS === "1";
+	return env[NO_NETWORK_TOOLS_ENV] === "1";
 }
 
 /** Operator process opt-in; never accepted from model arguments or project settings. */

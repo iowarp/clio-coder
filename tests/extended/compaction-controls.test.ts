@@ -2130,6 +2130,7 @@ describe("production compaction controls", () => {
 	it("routes a configured dedicated summary model through the production callback", async () => {
 		const f = fixture(false, true, true);
 		f.settings.context.compaction.model = "summary-target/summary";
+		const pathLeaf = f.session.leafId(f.state.meta.id);
 		await f.run();
 		ok(f.calls.length > 0);
 		strictEqual(f.calls[0]?.model, "summary");
@@ -2147,6 +2148,9 @@ describe("production compaction controls", () => {
 		ok(persisted?.kind === "compactionSummary");
 		strictEqual(persisted.usage?.targetId, "summary-target");
 		strictEqual(persisted.usage?.modelId, "summary");
+		// CTX-12: the checkpoint follows the kept suffix on /tree instead of branching beside it.
+		ok(pathLeaf && persisted.firstKeptTurnId.length > 0 && persisted.firstKeptTurnId !== pathLeaf);
+		strictEqual(persisted.parentTurnId, pathLeaf);
 		const journalCalls = await f.journalCalls();
 		deepStrictEqual(persisted.callIds, [...new Set(journalCalls.map((row) => row.data.callId))]);
 		strictEqual(persisted.callIds?.length, f.calls.length);

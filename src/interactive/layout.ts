@@ -5,10 +5,11 @@ import { keptRows } from "./kept-rows.js";
 import { fitRails, railsFolded, railsRoom } from "./rails-budget.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
+import type { TranscriptViewport } from "./transcript-runs.js";
 
-/** A transcript that can hand over its settled prefix and live tail separately. */
+/** A transcript that can hand over its rows as pieces it promises never to mutate. */
 export interface TranscriptComponent extends Component {
-	renderRegions?(width: number): ChatPanelRegions;
+	renderRegions?(width: number, viewport?: TranscriptViewport): ChatPanelRegions;
 }
 
 export interface LayoutParts {
@@ -105,18 +106,39 @@ export interface FullscreenLayout {
 	transcript: ScrollView;
 }
 
-/** One document array, and the transcript prefix it already holds at a row. */
+/**
+ * Write a transcript's pieces into `out` from `row`, skipping each piece `held` names at the same row: the buffer
+ * still holds those rows. A piece new at a row it replaced skips the leading rows its producer vouches for. Returns
+ * the row after the last piece and what the buffer holds now, by the row each piece starts at.
+ */
+function writePieces(
+	pieces: readonly (readonly string[])[],
+	start: number,
+	held: ReadonlyMap<number, readonly string[]> | undefined,
+	write: (rows: readonly string[], from: number, at: number) => void,
+): { row: number; holds: Map<number, readonly string[]> } {
+	const holds = new Map<number, readonly string[]>();
+	let row = start;
+	for (const piece of pieces) {
+		const before = held?.get(row);
+		holds.set(row, piece);
+		if (before !== piece) write(piece, before === undefined ? 0 : keptRows(piece, before), row);
+		row += piece.length;
+	}
+	return { row, holds };
+}
+
+/** One document array, and the transcript pieces it holds by the row each starts at. */
 interface DocumentSlot {
 	rows: string[];
-	prefix: readonly string[] | null;
-	prefixAt: number;
+	holds: Map<number, readonly string[]>;
 }
 
 /**
  * Fullscreen's scrollable document. A composer-only frame returns the same
  * array, and a frame whose content changed returns a different one. The arrays
- * come from a small pool and each remembers which settled prefix it holds, so a
- * streamed token writes only the header and the tail instead of copying every
+ * come from a small pool and each remembers which transcript pieces it holds, so a
+ * streamed token writes only the header and the pieces that changed instead of copying every
  * historical row into a new array, which at 24,000 rows was garbage enough for
  * a 12 to 15 ms p99. The last two arrays returned stay intact, which is what a
  * reader of the previous frame relies on: the current layout until the next one
@@ -125,8 +147,9 @@ interface DocumentSlot {
 function transcriptDocument(
 	banner: Component,
 	chat: TranscriptComponent,
-	viewportRows: () => number = () => 0,
+	view: () => TranscriptScrollView | undefined,
 ): Component {
+	const viewportRows = (): number => view()?.viewportHeight ?? 0;
 	let source: unknown;
 	let anchored: { from: readonly string[]; rows: number; lines: string[] } | null = null;
 	let header: string[] = [];
@@ -134,7 +157,7 @@ function transcriptDocument(
 	// True while the document is the banner alone: the launchpad before the first turn.
 	let bannerOnly = true;
 	let renderedSkinEpoch = skinEpoch();
-	const pool: DocumentSlot[] = Array.from({ length: 3 }, () => ({ rows: [], prefix: null, prefixAt: -1 }));
+	const pool: DocumentSlot[] = Array.from({ length: 3 }, () => ({ rows: [], holds: new Map() }));
 	let turn = 0;
 	const compose = (slot: DocumentSlot, regions: ChatPanelRegions | undefined, whole: readonly string[]): string[] => {
 		const out = slot.rows;
@@ -143,21 +166,23 @@ function transcriptDocument(
 			for (const line of from) out[row++] = line;
 		};
 		write(header);
-		const tail = regions?.tail ?? [];
-		bannerOnly = whole.length + tail.length === 0;
+		bannerOnly = (regions?.rows ?? whole.length) === 0;
 		if (bannerOnly) {
-			slot.prefix = null;
+			slot.holds = new Map();
 		} else {
 			out[row++] = "";
-			// Only the panel promises an array it never mutates; any other chat is copied every time.
-			if (regions !== undefined && slot.prefix === whole && slot.prefixAt === row) {
-				row += whole.length;
+			if (regions !== undefined) {
+				// Only the panel promises arrays it never mutates; any other chat is copied every time. The slot last
+				// held a frame three frames back, so a piece rendered since is written whole.
+				const written = writePieces(regions.pieces, row, slot.holds, (rows, _kept, at) => {
+					for (let index = 0; index < rows.length; index += 1) out[at + index] = rows[index] as string;
+				});
+				row = written.row;
+				slot.holds = written.holds;
 			} else {
-				slot.prefix = regions === undefined ? null : whole;
-				slot.prefixAt = row;
+				slot.holds = new Map();
 				write(whole);
 			}
-			write(tail);
 			out[row++] = "";
 		}
 		out.length = row;
@@ -196,8 +221,10 @@ function transcriptDocument(
 				chat.invalidate();
 			}
 			const nextHeader = banner.render(width);
-			const regions = chat.renderRegions?.(width);
+			const regions = chat.renderRegions?.(width, view()?.transcriptViewport());
 			const nextSource = regions ?? chat.render(width);
+			const headerRows = header.length;
+			const fresh = nextSource !== source;
 			// Compare the small header by value: components may return fresh arrays
 			// or mutate their old array. Own the snapshot used for this comparison.
 			if (
@@ -208,7 +235,9 @@ function transcriptDocument(
 				source = nextSource;
 				header = nextHeader.slice();
 				turn = (turn + 1) % pool.length;
-				lines = compose(pool[turn] as DocumentSlot, regions, regions?.prefix ?? (nextSource as string[]));
+				lines = compose(pool[turn] as DocumentSlot, regions, regions === undefined ? (nextSource as string[]) : []);
+				// History re-laid out around the viewport: the rows it showed moved by the shift, and by the banner's change.
+				if (fresh && regions?.shift !== undefined) view()?.holdRows(regions.shift + header.length - headerRows);
 			}
 			return bottomAnchored(lines);
 		},
@@ -232,6 +261,25 @@ class TranscriptScrollView extends ScrollView {
 	private askedWidth: number | undefined;
 	private laidWidth: number | undefined;
 	private laidHeight = 0;
+	/** How far the document says the rows this view showed moved, for the layout about to happen. */
+	private heldShift: number | undefined;
+
+	/** Where this view sits over the transcript, which the document lays out first after a layout change. */
+	transcriptViewport(): TranscriptViewport | undefined {
+		if (this.viewportHeight === 0) return undefined;
+		// The document closes on one blank row after the transcript.
+		const fromEnd = this.isFollowingEnd ? 0 : this.laidHeight - this.scrollTop - this.viewportHeight - 1;
+		return { fromEnd: Math.max(0, fromEnd), rows: this.viewportHeight };
+	}
+
+	/** The document re-laid out its content around this view: the rows it showed moved by `shift`. */
+	holdRows(shift: number): void {
+		this.heldShift = shift;
+	}
+
+	dropHeldRows(): void {
+		this.heldShift = undefined;
+	}
 
 	override getContentWidth(width: number): number {
 		const contentWidth = this.scrollbar !== "hidden" && width > 1 ? width - 1 : width;
@@ -247,12 +295,16 @@ class TranscriptScrollView extends ScrollView {
 	 * A width change re-wraps every row above a scrolled-up reader, so the same
 	 * row index lands tens of paragraphs away. The top moves by the same share of
 	 * the content instead, which keeps the reader near their place and brings it
-	 * back when the width does. A view that follows the end keeps following.
+	 * back when the width does. A view that follows the end keeps following. A document that re-laid out its content
+	 * around the view says how far the rows it showed moved, and the view moves by exactly that instead.
 	 */
 	override updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void {
 		const before = this.viewportHeight;
 		const top = this.scrollTop;
+		const held = this.heldShift;
+		this.heldShift = undefined;
 		const reflowed =
+			held === undefined &&
 			this.laidWidth !== undefined &&
 			this.askedWidth !== this.laidWidth &&
 			!this.isFollowingEnd &&
@@ -262,6 +314,7 @@ class TranscriptScrollView extends ScrollView {
 		super.updateLayout(contentHeight, viewportHeight, requestRender);
 		this.laidWidth = this.askedWidth;
 		this.laidHeight = contentHeight;
+		if (held !== undefined && held !== 0 && !this.isFollowingEnd) this.scrollTo(top + held, { disableFollow: true });
 		if (reflowed) this.scrollTo(Math.round((top * contentHeight) / laidHeight), { disableFollow: true });
 		if (viewportHeight !== before && contentHeight <= Math.max(before, viewportHeight)) requestRender();
 	}
@@ -269,7 +322,7 @@ class TranscriptScrollView extends ScrollView {
 
 function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}): FullscreenLayout {
 	let transcript: TranscriptScrollView | undefined;
-	const document = transcriptDocument(parts.banner, parts.chat, () => transcript?.viewportHeight ?? 0);
+	const document = transcriptDocument(parts.banner, parts.chat, () => transcript);
 	const theme = clioTheme();
 	transcript = new TranscriptScrollView(document, {
 		follow: "end",
@@ -318,15 +371,12 @@ class RegularRoot implements Component {
 	 */
 	private readonly out: string[] = [];
 	/**
-	 * The transcript prefix the buffer already holds and the row it starts at.
-	 * While the panel hands back the same prefix at the same row, those rows are
-	 * still in place and a frame writes only what follows them.
+	 * The transcript pieces the buffer holds, by the row each starts at, with the width their rows were checked to fit
+	 * (`Infinity` once a row was cut to fit, so a wider frame writes it whole again). A piece the panel hands back at
+	 * the same row is still in place, and at that width or a wider one it still fits, so a frame writes only the pieces
+	 * that changed; a layout change that kept history as it was writes only the rows it re-laid out.
 	 */
-	private heldPrefix: readonly string[] | null = null;
-	private heldPrefixAt = -1;
-	/** The transcript tail the buffer holds after the prefix, and the row it starts at. */
-	private heldTail: readonly string[] | undefined;
-	private heldTailAt = -1;
+	private heldPieces: ReadonlyMap<number, { rows: readonly string[]; fitsAt: number }> | undefined;
 	private renderedSkinEpoch = skinEpoch();
 	/** The width the buffer's rows were measured against: at that width, a row already in place is known to fit. */
 	private heldWidth = -1;
@@ -362,13 +412,16 @@ class RegularRoot implements Component {
 		const sameWidth = width === this.heldWidth;
 		let firstChanged = sameWidth ? -1 : 0;
 		this.heldWidth = width;
+		let cut = false;
 		const put = (raw: string): void => {
 			if (sameWidth && out[row] === raw) {
 				row += 1;
 				return;
 			}
 			// The main-screen renderer throws on an overwide row; one component's bug clips instead.
-			const line = visibleWidth(raw) > width ? truncateToWidth(raw, width) : raw;
+			const overwide = visibleWidth(raw) > width;
+			if (overwide) cut = true;
+			const line = overwide ? truncateToWidth(raw, width) : raw;
 			if (out[row] !== line) {
 				if (firstChanged < 0) firstChanged = row;
 				out[row] = line;
@@ -380,29 +433,29 @@ class RegularRoot implements Component {
 		};
 		write(this.parts.banner.render(width));
 		const regions = this.parts.chat.renderRegions?.(width);
-		let tail: readonly string[] | undefined;
+		let holds: Map<number, { rows: readonly string[]; fitsAt: number }> | undefined;
 		if (regions !== undefined) {
-			if (regions.prefix.length + regions.tail.length > 0) {
+			if (regions.rows > 0) {
 				put("");
-				if (sameWidth && regions.prefix === this.heldPrefix && row === this.heldPrefixAt) {
-					row += regions.prefix.length;
-				} else {
-					this.heldPrefix = regions.prefix;
-					this.heldPrefixAt = row;
-					write(regions.prefix);
+				holds = new Map();
+				for (const piece of regions.pieces) {
+					const at = row;
+					const before = this.heldPieces?.get(at);
+					if (before?.rows === piece && (sameWidth || width >= before.fitsAt)) {
+						holds.set(at, before);
+						row += piece.length;
+						continue;
+					}
+					// A streaming reply's piece writes only the rows after those its panel vouches for, which are in place.
+					const kept = sameWidth && before !== undefined ? keptRows(piece, before.rows) : 0;
+					cut = kept > 0 && before?.fitsAt === Number.POSITIVE_INFINITY;
+					row += kept;
+					write(piece, kept);
+					holds.set(at, { rows: piece, fitsAt: cut ? Number.POSITIVE_INFINITY : width });
 				}
-				// The tail rows its panel vouches for are already in place, so a streaming reply writes only its end.
-				const kept = sameWidth && row === this.heldTailAt ? keptRows(regions.tail, this.heldTail) : 0;
-				tail = regions.tail;
-				this.heldTailAt = row;
-				row += kept;
-				write(regions.tail, kept);
 				put("");
-			} else {
-				this.heldPrefix = null;
 			}
 		} else {
-			this.heldPrefix = null;
 			const chat = this.parts.chat.render(width);
 			if (chat.length > 0) {
 				put("");
@@ -420,8 +473,7 @@ class RegularRoot implements Component {
 			write(editor);
 			write(footer);
 		}
-		this.heldTail = tail;
-		if (tail === undefined) this.heldTailAt = -1;
+		this.heldPieces = holds;
 		out.length = row;
 		this.keptRowCount = Math.min(firstChanged < 0 ? row : firstChanged, previousLength);
 		return out;
@@ -433,8 +485,7 @@ class RegularRoot implements Component {
 
 	invalidate(): void {
 		this.heldWidth = -1;
-		this.heldPrefix = null;
-		this.heldTail = undefined;
+		this.heldPieces = undefined;
 		this.parts.banner.invalidate();
 		this.parts.chat.invalidate();
 		this.parts.workspace?.invalidate();
@@ -491,6 +542,15 @@ export function preserveTranscriptScroll(view: ScrollView | undefined, width: nu
 		mutation();
 		return;
 	}
+	// This places the view itself; a shift the re-laid document reports would move it a second time.
+	try {
+		keepTextInView(view, width, mutation);
+	} finally {
+		if (view instanceof TranscriptScrollView) view.dropHeldRows();
+	}
+}
+
+function keepTextInView(view: ScrollView, width: number, mutation: () => void): void {
 	const top = view.scrollTop;
 	const before = view.render(width);
 	mutation();

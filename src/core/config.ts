@@ -2005,7 +2005,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					issues.unknownKeys("context.memory", memory, [
 						"enabled",
 						"sideShare",
-						"observations",
 						"surfaces",
 						"target",
 						"model",
@@ -2022,18 +2021,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("sideShare" in memory) {
 						const parsed = expectNumber(issues, "context.memory.sideShare", memory.sideShare, { min: 0 });
 						if (parsed !== undefined) settings.context.memory.sideShare = parsed;
-					}
-					if ("observations" in memory) {
-						if (!isPlainObject(memory.observations)) issues.add("context.memory.observations", "expected a map");
-						else {
-							issues.unknownKeys("context.memory.observations", memory.observations, ["enabled"]);
-							if ("enabled" in memory.observations) {
-								const parsed = expectBoolean(issues, "context.memory.observations.enabled", memory.observations.enabled);
-								// The switch moved to `surfaces.observe`. Files written before the move keep working: the old key
-								// sets the surface, and an explicit `surfaces.observe`, parsed below, wins over it.
-								if (parsed !== undefined) settings.context.memory.surfaces.observe = parsed ? "on" : "off";
-							}
-						}
 					}
 					if ("surfaces" in memory) {
 						if (!isPlainObject(memory.surfaces))
@@ -2224,6 +2211,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"scratchRoots",
 				"sandboxPassEnv",
 				"sandboxUnixSockets",
+				"sandboxCacheMaxGiB",
 				"snapshots",
 				"validationWrappers",
 				"unattendedAfterSeconds",
@@ -2281,6 +2269,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("sandboxUnixSockets" in safety) {
 				const parsed = expectEnum(issues, "safety.sandboxUnixSockets", safety.sandboxUnixSockets, UNIX_SOCKET_MODES);
 				if (parsed !== undefined) settings.safety.sandboxUnixSockets = parsed;
+			}
+			if ("sandboxCacheMaxGiB" in safety) {
+				const parsed = expectNumber(issues, "safety.sandboxCacheMaxGiB", safety.sandboxCacheMaxGiB, { min: 0 });
+				if (parsed !== undefined) settings.safety.sandboxCacheMaxGiB = parsed;
 			}
 			if ("yoloAccepted" in safety) {
 				const parsed = expectBoolean(issues, "safety.yoloAccepted", safety.yoloAccepted);

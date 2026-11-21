@@ -488,6 +488,7 @@ const MENU_ROWS = new Set([
 	"safety.sandbox",
 	"safety.sandboxNetwork",
 	"safety.scratchRoots",
+	"safety.sandboxCacheMaxGiB",
 	"safety.snapshots",
 	"safety.unattendedAfterSeconds",
 	"safety.yoloConfinement",
@@ -754,6 +755,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.scratchRoots": [
 		"Scratch roots",
 		"Absolute directories your sandboxed commands and file edits may write at autonomy default without asking, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",
+	],
+	"safety.sandboxCacheMaxGiB": [
+		"Sandbox cache cap (GiB)",
+		"Size the sandbox's own tool cache (npm, pnpm, pip, uv and Playwright downloads of your sandboxed commands) may reach. Once a day at startup, and on clio-coder doctor --fix, the least recently used tool folders are removed until it fits, never while a running session may use them. 0 is no cap. User settings only.",
 	],
 	"interface.demo": [
 		"Demo presentation and guidance",

@@ -1,9 +1,9 @@
 import { isAbsolute, resolve } from "node:path";
 import {
-	MEMORY_OBSERVATION_KINDS,
 	MEMORY_OBSERVATIONS_MAX,
 	MEMORY_REVISIONS_MAX,
 	MEMORY_SCOPES,
+	MEMORY_VERDICT_KINDS,
 	type MemoryAgentIdentity,
 	type MemoryApproval,
 	type MemoryClaim,
@@ -104,6 +104,11 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	if (evidenceRefs !== null && evidenceRefs.length === 0) {
 		issues.push({ path: `${path}.evidenceRefs`, message: "expected at least one evidence ref" });
 	}
+	evidenceRefs?.forEach((ref, index) => {
+		// The short span hash refs carried before the full digest; the memory store upgrade rewrote every one it could.
+		if (/^source:.+#[0-9a-f]{16}$/u.test(ref))
+			issues.push({ path: `${path}.evidenceRefs[${index}]`, message: "expected a 64-character source span hash" });
+	});
 	const appliesWhen = readStringArray(value, `${path}.appliesWhen`, issues);
 	const avoidWhen = readStringArray(value, `${path}.avoidWhen`, issues);
 	const confidence = readNumber(value, `${path}.confidence`, issues);
@@ -356,12 +361,12 @@ function readOptionalObservations(
 		const at = readIsoString(item, `${itemPath}.at`, issues);
 		const sessionId = readString(item, `${itemPath}.sessionId`, issues);
 		const kind = readString(item, `${itemPath}.kind`, issues);
-		const known = MEMORY_OBSERVATION_KINDS.find((candidate) => candidate === kind);
+		const known = MEMORY_VERDICT_KINDS.find((candidate) => candidate === kind);
 		if (kind !== null && known === undefined) {
-			issues.push({ path: `${itemPath}.kind`, message: "expected delivered, held, or contradicted" });
+			issues.push({ path: `${itemPath}.kind`, message: "expected held or contradicted" });
 		}
-		const revision = readOptionalSourceString(item, `${itemPath}.revision`, issues);
-		if (revision !== undefined && !REVISION_PATTERN.test(revision)) {
+		const revision = readString(item, `${itemPath}.revision`, issues);
+		if (revision !== null && !REVISION_PATTERN.test(revision)) {
 			issues.push({ path: `${itemPath}.revision`, message: "expected 16 lowercase hex characters" });
 		}
 		const branch = readOptionalSourceString(item, `${itemPath}.branch`, issues);
@@ -374,12 +379,12 @@ function readOptionalObservations(
 			if (typeof item.prompted === "boolean") prompted = item.prompted;
 			else issues.push({ path: `${itemPath}.prompted`, message: "expected boolean" });
 		}
-		if (at !== null && sessionId !== null && known !== undefined)
+		if (at !== null && sessionId !== null && known !== undefined && revision !== null && REVISION_PATTERN.test(revision))
 			observations.push({
 				at,
 				sessionId,
 				kind: known,
-				...(revision !== undefined ? { revision } : {}),
+				revision,
 				...(branch !== undefined ? { branch } : {}),
 				...(head !== undefined ? { head } : {}),
 				...(prompted !== undefined ? { prompted } : {}),

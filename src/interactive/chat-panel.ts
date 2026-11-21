@@ -115,6 +115,15 @@ import {
 import { modelNickname } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
+import {
+	type EntryRun,
+	EntryRuns,
+	entryRows,
+	joinRows,
+	type PlacedPiece,
+	type TranscriptViewport,
+	viewportWindow,
+} from "./transcript-runs.js";
 import { type TurnSpend, turnHoldsCalls, turnSpend, turnWorkersFact } from "./turn-spend.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the
@@ -262,19 +271,22 @@ export interface ChatPanelRenderMetrics {
 }
 
 /**
- * One transcript frame in two parts. `prefix` holds the rows of the settled
- * leading entries and stays the same array from frame to frame until another
- * entry settles or the layout changes; `tail` holds every row after it,
- * rendered for this frame. A caller that keeps its own row buffer copies the
- * prefix only when its identity changes. Neither array is mutated after it is
- * returned, and a frame with nothing new returns the same object.
+ * One transcript frame as row pieces in screen order: a run of settled entries, a live entry's leading gap, a live
+ * turn's settled head, its open rows. A piece the frame reused is the very array an earlier frame returned, so a caller
+ * that keeps its own row buffer skips a piece it already holds at the same row; a piece rendered for this frame is a
+ * new array, which may vouch through `keptRows` for the leading rows it shares with the piece an earlier frame put at
+ * that row. No piece is mutated after it is returned, and a frame with nothing new returns the same object.
  */
 export interface ChatPanelRegions {
-	prefix: readonly string[];
-	tail: readonly string[];
+	pieces: readonly (readonly string[])[];
+	/** The rows of every piece together. */
+	rows: number;
+	/**
+	 * Set on a frame that re-laid out history around the viewport it was given: how many rows the row at the
+	 * viewport's top moved by since the frame before. A view scrolled up moves by as much to keep showing it.
+	 */
+	shift?: number;
 }
-
-const NO_ROWS: readonly string[] = Object.freeze([]);
 
 type RowMemo = {
 	width: number;
@@ -617,7 +629,7 @@ type TranscriptEntry =
 	 * A block the caller renders itself. Most are settled the moment they are
 	 * appended, but a few (the operator's `!` bash row) keep mutating the state
 	 * their closure reads until the work behind them finishes. Such a block
-	 * declares `isLive`, which keeps it out of the frozen prefix and keeps the
+	 * declares `isLive`, which keeps it out of the entry runs and keeps the
 	 * panel's time-keyed tick running while it is unsettled.
 	 */
 	| {
@@ -679,8 +691,8 @@ export interface ChatPanel extends Component {
 	isThinkingExpanded(): boolean;
 	/** The newest layout of the reply's open text segment; null once it settles or before its first frame. */
 	liveTextRender(): LiveTextRender | null;
-	/** The frame `render` would return, split at the settled prefix. */
-	renderRegions(width: number): ChatPanelRegions;
+	/** The frame `render` would return, as the row pieces it is made of, laid out first around `viewport`. */
+	renderRegions(width: number, viewport?: TranscriptViewport): ChatPanelRegions;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -735,6 +747,13 @@ export interface ChatPanelOptions {
 	 * is rendered ahead.
 	 */
 	scheduleIdle?: (step: () => boolean) => void;
+	/**
+	 * Re-lay out history viewport-first when the width, height budget or output style changes: the entries within a
+	 * screen of the viewport render in that frame, every other settled row keeps its old layout, and idle steps
+	 * through `scheduleIdle` re-lay out the rest, swapped in together, with the viewport kept on its row. Without it,
+	 * or without `scheduleIdle`, a layout change renders every entry in its frame.
+	 */
+	deferRelayout?: boolean;
 	/** Ask for a frame when the panel changes outside an event, as when an edit's diff finishes computing. */
 	requestRender?: () => void;
 	/**
@@ -3229,9 +3248,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		promptRecallReceipt = null;
 	};
 	let cachedWidth: number | undefined;
-	let cachedRegions: { prefix: readonly string[]; tail: string[] } = { prefix: NO_ROWS, tail: [] };
-	/** The pieces `cachedRegions.tail` was built from. */
-	let tailPieces: RowPiece[] = [];
+	let cachedRegions: ChatPanelRegions = { pieces: [], rows: 0 };
 	/** The last frame concatenated, built on first request; null until someone asks for it. */
 	let cachedLines: string[] | null = [];
 	let cachedDetail: TranscriptDetailPolicy | undefined;
@@ -3259,31 +3276,49 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * entries, which re-rendered everything past the cap on every dirty frame
 	 * (10 ms/frame at 800 entries). The ceiling bounds worst-case memory at
 	 * roughly 4096 rendered entries; past it, the excess only re-renders on
-	 * full-rebuild events (width or style change), which the frozen prefix
-	 * below makes rare rather than per-frame.
+	 * full-rebuild events (width or style change), which the entry runs
+	 * below make rare rather than per-frame.
 	 */
 	const MIN_ENTRY_RENDER_CACHE = 256;
 	const MAX_ENTRY_RENDER_CACHE = 4096;
 	const entryCacheCapacity = (): number =>
 		Math.max(MIN_ENTRY_RENDER_CACHE, Math.min(MAX_ENTRY_RENDER_CACHE, transcript.length));
 	/**
-	 * Regular-screen windowed-tail build: the lines of every settled
-	 * leading entry are baked into one frozen prefix, so a dirty frame re-renders
-	 * only the live tail and re-emits the prefix by reference. TuiMainScreen still
-	 * receives the full line array, deliberately: the renderer keeps every
-	 * line in `previousLines` and full-redraws (clearing scrollback) when the
-	 * head shrinks. Fullscreen mode instead gives the transcript its own pi-tui
-	 * ScrollView. The freeze is dropped whenever a frozen entry is invalidated or
-	 * the render key changes. A live turn right after the run can freeze its settled head as well (`head`): a
-	 * turn that streams thousands of messages then copies only its live rows per frame, and the head's rows again
-	 * only when a message settles. The head stays frozen while the turn renders against the very same head rows.
+	 * Per-entry row regions: every stretch of settled entries between two live ones is joined once into a run, which
+	 * a frame hands on by identity, so a dirty frame renders only the live entries and walks one step per run. A live
+	 * entry anywhere (a worker card still running near the top of a long session) ends a run without stopping the
+	 * runs behind it, and an invalidated entry gives up only its own rows. A live turn's settled head (#428) is its own
+	 * piece, the same array while the head stands, so a turn streaming thousands of messages hands on only its open
+	 * rows. Renderers still receive every row: the regular screen keeps all of them in `previousLines`, and the
+	 * fullscreen ScrollView lays out and searches the whole document; the pieces let both skip what they hold.
 	 */
-	let frozen: {
-		lines: readonly string[];
-		through: number;
+	const runs = new EntryRuns();
+	/** Where the last frame's pieces sit, so a re-layout can find the entries around the viewport. */
+	let frameLayout: readonly PlacedPiece[] = [];
+	/**
+	 * A viewport-first re-layout under way (`deferRelayout`): runs laid out at an earlier key stay on screen while
+	 * idle steps lay out each one again at `key`, into `replacements`; the frame after the last one swaps them all
+	 * in. A newer key starts over. `building` is the run part way through.
+	 */
+	let relayout: {
 		key: string;
-		head?: { entry: TranscriptEntry; rows: string[]; base: readonly string[] };
+		heightKey: string;
+		width: number;
+		terminalRows: number;
+		detail: TranscriptDetailPolicy;
+		replacements: Map<EntryRun, EntryRun>;
+		building: {
+			run: EntryRun;
+			next: number;
+			parts: (readonly string[])[];
+			starts: number[];
+			rows: number;
+			key: string;
+		} | null;
+		ready: boolean;
+		scheduled: boolean;
 	} | null = null;
+	const deferRelayout = options.deferRelayout === true && options.scheduleIdle !== undefined;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
 	const bareFences = options.bareCodeFences === true;
 	const copyMarks = options.copyMarks === true && !bareFences;
@@ -3323,10 +3358,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 	const invalidateEntryCache = (entry: TranscriptEntry): void => {
 		entryRenderCache.delete(entry);
-		if (frozen === null && prerender === null) return;
+		if (runs.list.length === 0 && prerender === null) return;
 		// From the end: what changes is nearly always the live tail, and this runs per streamed delta.
 		const index = transcript.lastIndexOf(entry);
-		if (frozen !== null && index < frozen.through) frozen = null;
+		if (index >= 0) runs.release(index);
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
 	/** Read one receipt's turn from the view; it stays live until the view holds all of the turn's spend. */
@@ -3389,7 +3424,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	/** Full drop of both render caches; used by the toggle paths that touch many entries. */
 	const clearRenderCaches = (): void => {
 		entryRenderCache.clear();
-		frozen = null;
+		runs.clear();
+		relayout = null;
 		if (prerender !== null) prerender.next = 0;
 	};
 	const syncSkin = (): void => {
@@ -3400,11 +3436,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 	/**
 	 * A mutation is about to land on the tail entry without an explicit
-	 * invalidation. If the freeze extends over the whole transcript, that tail
-	 * entry is frozen and the freeze must go.
+	 * invalidation. If a run covers that entry, the run gives up its rows.
 	 */
 	const unfreezeTail = (): void => {
-		if (frozen !== null && frozen.through >= transcript.length) frozen = null;
+		if (transcript.length > 0) runs.release(transcript.length - 1);
 	};
 
 	const now = (): number => options.now?.() ?? Date.now();
@@ -3572,7 +3607,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (tail.segments.some((segment) => segment.kind !== "text" || segment.text.trim().length > 0)) break;
 			transcript.pop();
 			entryRenderCache.delete(tail);
-			if (frozen !== null && frozen.through > transcript.length) frozen = null;
+			runs.truncate(transcript.length);
 		}
 	};
 
@@ -3731,9 +3766,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const insertEntryAt = (at: number, entry: TranscriptEntry): void => {
 		transcript.splice(at, 0, entry);
 		if (runStartIndex !== undefined && at <= runStartIndex) runStartIndex += 1;
-		// A frozen prefix is a run of indices. Inserting inside it renumbers
-		// every entry behind the cut, so the freeze has to go.
-		if (frozen !== null && at < frozen.through) frozen = null;
+		// Runs are stretches of indices: the ones behind the cut move up by one, and one it lands inside splits there.
+		runs.insert(at);
 		if (prerender !== null && at < prerender.next) prerender.next = at;
 		// The entry behind the new card has a new predecessor, which decides
 		// whether it stacks or opens a council group.
@@ -3794,7 +3828,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const last = transcript[transcript.length - 1];
 		if (last && last.role === "assistant") {
 			// Callers mutate the returned entry (pending, thinking, segments)
-			// without always invalidating; a fully-frozen transcript would keep
+			// without always invalidating; a run covering it would keep
 			// serving the settled render of this tail entry.
 			unfreezeTail();
 			return last;
@@ -4015,12 +4049,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			!entry.segments.some((segment) => segment.kind === "tool" && !segment.finished));
 
 	/**
-	 * One frame: every row the transcript shows, as the settled prefix the frame
-	 * reused and the rows it rendered after it. The prefix is the frozen array
-	 * itself, so a streamed token copies no settled row until a consumer asks
-	 * for the whole frame.
+	 * One frame: every row the transcript shows, as row pieces. Each run of settled entries is one piece, handed on
+	 * as the same array until an entry in it changes or the layout key does, so a streamed token renders and joins
+	 * only the live entries, wherever they sit.
 	 */
-	const renderFrame = (width: number): { prefix: readonly string[]; tail: string[] } => {
+	const renderFrame = (width: number, viewport?: TranscriptViewport): ChatPanelRegions => {
 		syncSkin();
 		refreshReceipts();
 		const startedAt = performance.now();
@@ -4061,72 +4094,132 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			});
 			return cachedRegions;
 		}
-		// Stable entries cache by width, height budget, and preset; a replay block and a prefix holding one by height too.
+		// Stable entries cache by width, height budget, and preset; a replay block and a run holding one by height too.
 		const baseKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}|${day}`;
 		const heightKey = `${baseKey}|${terminalRows}`;
 		const capacity = entryCacheCapacity();
-		if (frozen !== null && frozen.key !== baseKey && frozen.key !== heightKey) frozen = null;
-		// A frozen head's turn may have left the end of the run: popped, or pushed on by an inserted entry.
-		if (frozen?.head !== undefined && transcript[frozen.through] !== frozen.head.entry)
-			frozen = { lines: frozen.head.base, through: frozen.through, key: frozen.key };
-		let prefix = frozen === null ? NO_ROWS : frozen.lines;
-		let out: string[] = [];
-		// A row-by-row push of a long streaming reply showed in the frame time, so an entry larger than
-		// everything before it is copied natively (#428).
-		// What the tail was built from, so the frame can tell how much of it leads unchanged from the last one.
-		const pieces: RowPiece[] = [];
-		const appendRows = (rows: readonly string[]): void => {
-			pieces.push({ rows, start: 0, end: rows.length });
-			if (rows.length > 256 && rows.length > out.length) out = out.concat(rows);
-			else for (const line of rows) out.push(line);
+		const valid = (run: EntryRun): boolean => run.key === baseKey || run.key === heightKey;
+		// The one switch for a layout change: viewport-first while idle steps can catch the rest up, else every entry.
+		const deferring = deferRelayout && !unboundedToolBodies;
+		if (!deferring || (relayout !== null && relayout.key !== baseKey)) relayout = null;
+		// The entries a re-layout renders in this frame; outside them, a run laid out at an earlier key stays.
+		let freshFrom = 0;
+		let freshTo = 0;
+		let anchor: { entry: number; offset: number; top: number } | null = null;
+		const around = (): ReturnType<typeof viewportWindow> =>
+			viewportWindow(frameLayout, cachedRegions.rows, transcript.length, viewport ?? { fromEnd: 0, rows: terminalRows });
+		if (deferring && relayout === null && runs.list.some((run) => !valid(run))) {
+			const window = around();
+			anchor = window.anchor;
+			freshFrom = window.lo;
+			freshTo = window.hi;
+			runs.splitAt(freshFrom);
+			runs.splitAt(freshTo);
+			relayout = {
+				key: baseKey,
+				heightKey,
+				width,
+				terminalRows,
+				detail,
+				replacements: new Map(),
+				building: null,
+				ready: false,
+				scheduled: false,
+			};
+		} else if (relayout?.ready === true) {
+			// The swap: every row above the viewport takes its new layout at once.
+			anchor = around().anchor;
+		}
+		const pieces: (readonly string[])[] = [];
+		const layout: PlacedPiece[] = [];
+		let total = 0;
+		const emit = (rows: readonly string[], from: number, run?: EntryRun): void => {
+			if (rows.length === 0) return;
+			layout.push(
+				run === undefined ? { start: total, rows: rows.length, from } : { start: total, rows: rows.length, from, run },
+			);
+			pieces.push(rows);
+			total += rows.length;
 		};
-		const startIndex = frozen === null ? 0 : frozen.through;
-		// The freeze extends over the contiguous run of stable leading
-		// entries; it grows after the loop by the rows this frame rendered for
-		// the entries that joined it.
-		let freezeThrough = startIndex;
-		let freezeTailRows = 0;
-		let freezeOpen = true;
-		let freezeChanged = false;
-		// The live turn whose settled head ends the freeze, and the row of `out` its head ends at.
-		let freezeHead: { entry: TranscriptEntry; rows: string[]; end: number; kept: boolean } | undefined;
-		let freezeKey = frozen?.key ?? baseKey;
-		const split: LiveSplit = { head: undefined };
+		const nextRuns: EntryRun[] = [];
+		// The settled entries since the last live one, as the runs reused and the entries rendered that make them up.
+		let stretch: {
+			from: number;
+			parts: (readonly string[])[];
+			rows: number;
+			/** Per run reused or entry rendered, the row of the stretch it starts at. */
+			members: Array<{ at: number; run?: EntryRun }>;
+			key: string;
+		} | null = null;
+		const openStretch = (from: number): NonNullable<typeof stretch> => {
+			stretch ??= { from, parts: [], rows: 0, members: [], key: baseKey };
+			return stretch;
+		};
+		const closeStretch = (to: number): void => {
+			if (stretch === null) return;
+			const only = stretch.members.length === 1 ? stretch.members[0]?.run : undefined;
+			if (only !== undefined) {
+				// One run reused whole: the same array as the frame before.
+				nextRuns.push(only);
+				emit(only.rows, only.from, only);
+			} else {
+				const starts = stretch.members.flatMap((member) =>
+					member.run === undefined ? [member.at] : member.run.starts.map((start) => start + member.at),
+				);
+				const run: EntryRun = {
+					from: stretch.from,
+					to,
+					rows: joinRows(stretch.parts, stretch.rows),
+					starts,
+					key: stretch.key,
+				};
+				nextRuns.push(run);
+				emit(run.rows, run.from, run);
+			}
+			stretch = null;
+		};
 		let entriesRendered = 0;
 		segmentsWalked = 0;
-		// Only entries at or past `startIndex` can hold a running tool: the frozen
-		// prefix is by construction a run of stable entries, and stable means no
-		// unfinished tool segment.
+		// Entries inside a run are settled, so only the entries this frame walks can hold a running tool.
 		let sawRunningTool = false;
-		for (let i = startIndex; i < transcript.length; i += 1) {
-			const entry = transcript[i];
-			if (!entry) continue;
+		const held = runs.list;
+		let runAt = 0;
+		const reuse = (run: EntryRun): void => {
+			const into = openStretch(run.from);
+			into.members.push({ at: into.rows, run });
+			into.parts.push(run.rows);
+			into.rows += run.rows.length;
+			if (run.key === heightKey) into.key = heightKey;
+		};
+		for (let i = 0; i < transcript.length; ) {
+			while (runAt < held.length && (held[runAt] as EntryRun).to <= i) runAt += 1;
+			const run = held[runAt];
+			if (run !== undefined && run.from === i && valid(run)) {
+				reuse(run);
+				i = run.to;
+				continue;
+			}
+			if (run !== undefined && run.from === i && relayout !== null && (run.to <= freshFrom || run.from >= freshTo)) {
+				const replacement = relayout.ready ? relayout.replacements.get(run) : undefined;
+				if (replacement !== undefined && valid(replacement)) {
+					reuse(replacement);
+				} else {
+					// Laid out at an earlier key, away from the viewport: shown as it was until the idle steps catch up.
+					closeStretch(i);
+					nextRuns.push(run);
+					emit(run.rows, run.from, run);
+				}
+				i = run.to;
+				continue;
+			}
+			const entry = transcript[i] as TranscriptEntry;
 			if (!sawRunningTool && entryHasRunningTool(entry)) sawRunningTool = true;
 			// Cards of one council round, of one fan-out, and helper rows are a
 			// list, not a series of blocks, and so is every run of cards in
 			// Compact. Anything else keeps the blank line between entries.
 			const previous = i > 0 ? transcript[i - 1] : undefined;
 			const separated = i > 0 && !stacksUnder(entry, previous, detail);
-			// A frozen head holds the gap before its turn too.
-			let frozenHead = i === startIndex ? frozen?.head : undefined;
-			let gapped = false;
-			const pushGap = (): void => {
-				if (!separated) return;
-				out.push("");
-				pieces.push({ rows: GAP_ROW, start: 0, end: 1 });
-				gapped = true;
-			};
-			if (frozenHead === undefined) pushGap();
-			let entryStart = out.length;
-			// The head moved on, or another entry took its place: the freeze ends before this entry again.
-			const releaseHead = (base: readonly string[]): void => {
-				prefix = base;
-				frozenHead = undefined;
-				freezeChanged = true;
-				pushGap();
-				entryStart = out.length;
-			};
-			split.head = undefined;
+			const split: LiveSplit = { head: undefined };
 			const renders = entryRenderCache.get(entry);
 			const renderKey =
 				entry.role === "replayBlock"
@@ -4141,14 +4234,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// 1,400 of them turned a 0.7 ms warm Alt+O revisit into 45 ms.
 			// Worker mutations invalidate their own entry; only elapsed time needs a tick (#428).
 			const cacheable = i >= transcript.length - capacity && (entryIsStable(entry) || entry.role === "worker");
+			let rows: string[];
 			if (cacheable && cached !== undefined) {
-				if (frozenHead !== undefined) releaseHead(frozenHead.base);
-				// A spread here is slower than a loop for large arrays and blows the
-				// stack outright for a single entry that renders enough lines.
-				appendRows(cached);
+				rows = cached;
 			} else {
 				entriesRendered += 1;
-				const renderedEntry = renderEntryLines(
+				rows = renderEntryLines(
 					entry,
 					width,
 					nowMs,
@@ -4162,61 +4253,44 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					options.getStopRequestedAt?.() ?? null,
 					split,
 				);
-				if (frozenHead !== undefined && (frozenHead.entry !== entry || frozenHead.rows !== split.head)) {
-					releaseHead(frozenHead.base);
-				}
-				if (split.head !== undefined && frozenHead === undefined) appendRows(split.head);
-				if (split.head !== undefined && freezeOpen && i === freezeThrough) {
-					freezeHead = { entry, rows: split.head, end: out.length, kept: frozenHead !== undefined };
-				}
-				appendRows(renderedEntry);
-				if (cacheable) {
-					const byKey = renders ?? new Map<string, string[]>();
-					byKey.set(renderKey, renderedEntry);
-					if (byKey.size > RENDERS_PER_ENTRY) {
-						const oldestKey = byKey.keys().next().value;
-						if (oldestKey !== undefined) byKey.delete(oldestKey);
-					}
-					if (renders === undefined) entryRenderCache.set(entry, byKey);
-					while (entryRenderCache.size > capacity) {
-						const oldest = entryRenderCache.keys().next().value;
-						if (oldest === undefined) break;
-						entryRenderCache.delete(oldest);
-					}
-				}
+				if (cacheable) rememberRender(entry, renderKey, rows);
 			}
+			const head = split.head;
 			// An entry with nothing to show draws no gap either.
-			if (gapped && out.length === entryStart) {
-				out.pop();
-				pieces.splice(-2, 2);
-			}
-			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
-				freezeThrough = i + 1;
-				if (entry.role === "replayBlock") freezeKey = heightKey;
-				freezeTailRows = out.length;
+			const gap = separated && (rows.length > 0 || (head?.length ?? 0) > 0);
+			if (head === undefined && entryIsStable(entry)) {
+				const into = openStretch(i);
+				into.members.push({ at: into.rows });
+				if (gap) into.parts.push(GAP_ROW);
+				into.parts.push(rows);
+				into.rows += (gap ? 1 : 0) + rows.length;
+				if (entry.role === "replayBlock") into.key = heightKey;
 			} else {
-				freezeOpen = false;
+				closeStretch(i);
+				if (gap) emit(GAP_ROW, i);
+				// The settled head is the same array while it stands, so a caller holding it skips its rows (#428).
+				if (head !== undefined) emit(head, i);
+				emit(rows, i);
+			}
+			i += 1;
+		}
+		closeStretch(transcript.length);
+		runs.replace(nextRuns);
+		let shift: number | undefined;
+		if (anchor !== null) {
+			const span = entryRows(layout, anchor.entry);
+			if (span !== null) shift = span.start + Math.min(anchor.offset, Math.max(0, span.end - span.start - 1)) - anchor.top;
+		}
+		if (relayout !== null) {
+			if (!nextRuns.some((run) => !valid(run))) relayout = null;
+			else {
+				// A run that changed since its replacement was laid out is laid out again.
+				relayout.ready = false;
+				scheduleRelayout();
 			}
 		}
-		// The freeze only grows when an entry settles. An unchanged freeze keeps
-		// its array, which is what lets a root that holds the prefix skip it.
-		const headFreezes = freezeHead !== undefined && !freezeHead.kept;
-		if (freezeThrough > startIndex || freezeChanged || headFreezes) {
-			const base =
-				freezeTailRows === 0 ? prefix : prefix.concat(freezeTailRows === out.length ? out : out.slice(0, freezeTailRows));
-			frozen =
-				freezeHead !== undefined && headFreezes
-					? {
-							lines: prefix.concat(out.slice(0, freezeHead.end)),
-							through: freezeThrough,
-							key: freezeKey,
-							head: { entry: freezeHead.entry, rows: freezeHead.rows, base },
-						}
-					: { lines: base, through: freezeThrough, key: freezeKey };
-		}
-		if (cachedRegions.prefix === prefix) keepRows(out, cachedRegions.tail, keptPieceRows(pieces, tailPieces));
-		tailPieces = pieces;
-		cachedRegions = { prefix, tail: out };
+		frameLayout = layout;
+		cachedRegions = { pieces, rows: total, ...(shift !== undefined ? { shift } : {}) };
 		cachedLines = null;
 		cachedWidth = width;
 		cachedDetail = detail;
@@ -4233,6 +4307,90 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		});
 		schedulePrerender(width, terminalRows, detail.style);
 		return cachedRegions;
+	};
+
+	/** Keep `rows` as `entry`'s render at `key`, within the cache's bounds. */
+	const rememberRender = (entry: TranscriptEntry, key: string, rows: string[]): void => {
+		const renders = entryRenderCache.get(entry);
+		const byKey = renders ?? new Map<string, string[]>();
+		byKey.set(key, rows);
+		if (byKey.size > RENDERS_PER_ENTRY) {
+			const oldestKey = byKey.keys().next().value;
+			if (oldestKey !== undefined) byKey.delete(oldestKey);
+		}
+		if (renders === undefined) entryRenderCache.set(entry, byKey);
+		const capacity = entryCacheCapacity();
+		while (entryRenderCache.size > capacity) {
+			const oldest = entryRenderCache.keys().next().value;
+			if (oldest === undefined) break;
+			entryRenderCache.delete(oldest);
+		}
+	};
+
+	/**
+	 * One idle step of a viewport-first re-layout: lay the runs still showing an earlier key out again at the job's,
+	 * a few milliseconds at a time, and ask for the frame that swaps them in once every one has its replacement.
+	 */
+	const relayoutStep = (): boolean => {
+		syncSkin();
+		refreshReceipts();
+		const job = relayout;
+		if (job === null) return false;
+		const deadline = performance.now() + PRERENDER_STEP_MS;
+		const stale = (run: EntryRun): boolean => run.key !== job.key && run.key !== job.heightKey;
+		const capacity = entryCacheCapacity();
+		for (const run of runs.list) {
+			if (!stale(run) || job.replacements.has(run)) continue;
+			if (job.building?.run !== run) job.building = { run, next: run.from, parts: [], starts: [], rows: 0, key: job.key };
+			const building = job.building;
+			for (; building.next < run.to; building.next += 1) {
+				if (performance.now() >= deadline) return true;
+				const index = building.next;
+				const entry = transcript[index] as TranscriptEntry;
+				const previous = index > 0 ? transcript[index - 1] : undefined;
+				const key = entry.role === "replayBlock" ? job.heightKey : job.key;
+				let rows = entryRenderCache.get(entry)?.get(key);
+				if (rows === undefined) {
+					rows = renderEntryLines(
+						entry,
+						job.width,
+						now(),
+						unboundedToolBodies,
+						bareFences,
+						copyMarks,
+						job.detail,
+						job.terminalRows,
+						previous,
+						workerRenderOptions(entry),
+					);
+					if (index >= transcript.length - capacity) rememberRender(entry, key, rows);
+				}
+				const gap = index > 0 && rows.length > 0 && !stacksUnder(entry, previous, job.detail);
+				building.starts.push(building.rows);
+				if (gap) building.parts.push(GAP_ROW);
+				building.parts.push(rows);
+				building.rows += (gap ? 1 : 0) + rows.length;
+				if (entry.role === "replayBlock") building.key = job.heightKey;
+			}
+			job.replacements.set(run, {
+				from: run.from,
+				to: run.to,
+				rows: joinRows(building.parts, building.rows),
+				starts: building.starts,
+				key: building.key,
+			});
+			job.building = null;
+		}
+		job.ready = true;
+		job.scheduled = false;
+		dirty = true;
+		options.requestRender?.();
+		return false;
+	};
+	const scheduleRelayout = (): void => {
+		if (relayout === null || relayout.scheduled || options.scheduleIdle === undefined) return;
+		relayout.scheduled = true;
+		options.scheduleIdle(relayoutStep);
 	};
 
 	const prerenderStep = (): boolean => {
@@ -4316,7 +4474,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 */
 	const render = (width: number): string[] => {
 		const regions = renderFrame(width);
-		cachedLines ??= regions.prefix.length === 0 ? regions.tail : regions.prefix.concat(regions.tail);
+		cachedLines ??=
+			regions.pieces.length === 1 ? (regions.pieces[0] as string[]) : joinRows(regions.pieces, regions.rows);
 		return cachedLines;
 	};
 

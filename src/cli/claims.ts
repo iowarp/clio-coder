@@ -375,7 +375,6 @@ function readJsonSummary(
 		hypotheses: hypotheses.map((hypothesis) => hypothesisJson(hypothesis, view)),
 		disputes: read.disputes.map((dispute) => ({ ...dispute, status: "contested" })),
 		imports: read.imports.map((record) => ({ ...record, status: "inferred", label: importOriginLabel(record) })),
-		...(read.legacy.length > 0 ? { legacy: read.legacy } : {}),
 		...(view.evicted !== null ? { evicted: view.evicted } : {}),
 		skipped: {
 			unreadable: read.unreadable,
@@ -566,11 +565,6 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 			);
 			for (const record of imports) lines.push(...importLines(record));
 		}
-		if (read.legacy.length > 0)
-			lines.push(
-				"",
-				`also read: ${read.legacy.join(", ")} (linked worktree logs from before worktrees folded into this project)`,
-			);
 		if (view.evicted !== null)
 			lines.push(
 				`${view.evicted.claims} superseded claim${view.evicted.claims === 1 ? "" : "s"} evicted past the log's cap of ${CLAIMS_LOG_MAX_CLAIMS}, kept in ${view.evicted.path}`,

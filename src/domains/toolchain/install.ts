@@ -325,8 +325,7 @@ export function toolchainMirror(env: NodeJS.ProcessEnv = process.env): string | 
 
 /**
  * Where a pinned URL's asset may live on a mirror, in the order to try them:
- * `<mirror>/<id>/<version>/<name>` first, then the legacy flat `<mirror>/<name>`,
- * where `<name>` is the URL's last path segment. The namespace keeps tools whose
+ * `<mirror>/<id>/<version>/<name>`, where `<name>` is the URL's last path segment. The namespace keeps tools whose
  * assets share a name (every `LICENSE`) from colliding. A mirror that is a URL
  * stays a URL; anything else is a local directory and becomes a file path.
  */
@@ -335,10 +334,10 @@ export function mirroredSources(url: string, mirror: string, id: string, version
 	if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(mirror) && !mirror.startsWith("file:")) {
 		const base = mirror.replace(/\/+$/u, "");
 		const leaf = encodeURIComponent(name);
-		return [`${base}/${encodeURIComponent(id)}/${encodeURIComponent(version)}/${leaf}`, `${base}/${leaf}`];
+		return [`${base}/${encodeURIComponent(id)}/${encodeURIComponent(version)}/${leaf}`];
 	}
 	const dir = mirror.startsWith("file:") ? fileURLToPath(mirror) : mirror;
-	return [join(dir, id, version, name), join(dir, name)];
+	return [join(dir, id, version, name)];
 }
 
 type VerifiedFetch = { ok: true; bytes: Buffer } | { ok: false; mismatch: boolean; message: string };

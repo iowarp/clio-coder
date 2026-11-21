@@ -84,9 +84,7 @@ function trackRecord(record: MemoryRecord): string[] {
 	const held = sessions("held");
 	const source = record.provenance?.sourceSessionId;
 	const heldElsewhere = [...held].filter((sessionId) => sessionId !== source).length;
-	// A record written before the delivery counter still lists its deliveries as observations until it next changes.
-	const delivered =
-		(record.deliveredCount ?? 0) + (record.observations ?? []).filter((item) => item.kind === "delivered").length;
+	const delivered = record.deliveredCount ?? 0;
 	return [
 		`Delivered ${delivered} time${delivered === 1 ? "" : "s"}; held in ${heldElsewhere} later sessions${
 			source !== undefined && held.has(source) ? " and in the session it came from" : ""
@@ -100,7 +98,7 @@ function trackRecord(record: MemoryRecord): string[] {
 	];
 }
 
-/** The claim a record stores, as an operator reads it; a record written before claims were stored shows none. */
+/** The claim a record stores, as an operator reads it; a record whose evidence claims nothing shows none. */
 function claimLine(record: MemoryRecord): string[] {
 	const claim = record.claim;
 	if (claim === undefined) return [];

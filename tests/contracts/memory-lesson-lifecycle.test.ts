@@ -20,7 +20,6 @@ import {
 	commandEvidenceRef,
 	commandSegment,
 	commandSegments,
-	legacyCommandHash,
 	receiptVouches,
 	sourceEvidenceRef,
 } from "../../src/domains/memory/command-evidence.js";
@@ -37,7 +36,7 @@ import {
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
-import { memoryRevision } from "../../src/domains/memory/promotion.js";
+import { claimFromEvidence, memoryRevision } from "../../src/domains/memory/promotion.js";
 import {
 	demotedMemoryIds,
 	detectMemoryUse,
@@ -159,7 +158,7 @@ test("memory list --json prints each record's review fields, pending and approve
 	writeFileSync(
 		memoryStorePath(dataDir),
 		JSON.stringify({
-			version: 1,
+			version: 2,
 			records: [
 				{ ...base, id: "mem-00000000000000b1", key: "pending", lesson: "Pending lesson.", approved: false },
 				{ ...base, id: "mem-00000000000000b2", key: "approved", lesson: "Approved lesson.", approved: true },
@@ -967,6 +966,10 @@ test("evidence identity grounds and counts use only for the command that ran, se
 		mkdirSync(scratch);
 		symlinkSync(other, join(scratch, "link"));
 		ok(!receiptVouches(parametric, receipt(`${scratch}/link/store`), [scratch]), "a symlink out of the root does not");
+		const claimOf = (text: string, refs: string[]): Pick<MemoryRecord, "claim"> | Record<string, never> => {
+			const claim = claimFromEvidence(text, refs, root);
+			return claim === null ? {} : { claim };
+		};
 		const record = (id: string, text: string, refs: string[], patch: Partial<MemoryRecord> = {}): MemoryRecord => ({
 			id,
 			scope: "repo",
@@ -980,12 +983,11 @@ test("evidence identity grounds and counts use only for the command that ran, se
 			approved: false,
 			repository: { kind: "canonical-path", key: root },
 			provenance: { sourceKind: "task-bank-entry", sourceEntryKind: "knowledge" },
+			...claimOf(text, refs),
 			...patch,
 		});
-		// A rejection recorded before evidence identity carries the old text hash of `pnpm run check`.
-		const rejected = record("mem-00000000000000d2", `Run \`${PNPM}\` before a release.`, [
-			`command:${legacyCommandHash(PNPM)}`,
-		]);
+		// A rejection of `pnpm run check` holds a rewording that spells the same command another way.
+		const rejected = record("mem-00000000000000d2", `Run \`${PNPM}\` before a release.`, [commandEvidenceRef(PNPM)]);
 		rejected.rejectedAt = "2026-11-02T00:00:00.000Z";
 		const rewording = "Always run `corepack pnpm -s run check` before releasing.";
 		const rewordingRefs = [commandEvidenceRef("corepack pnpm -s run check")];
@@ -999,7 +1001,7 @@ test("evidence identity grounds and counts use only for the command that ran, se
 			})),
 		});
 		strictEqual(evaluateMemoryGate(reworded, []), "approve");
-		strictEqual(evaluateMemoryGate(reworded, [rejected]), "hold", "a pre-slice rejection holds a rewording");
+		strictEqual(evaluateMemoryGate(reworded, [rejected]), "hold", "a rejection holds a rewording");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 		rmSync(other, { recursive: true, force: true });

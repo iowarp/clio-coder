@@ -226,7 +226,6 @@ These schema keys are absent from `DEFAULT_SETTINGS` because an unset value sele
 | `fleet.default.node` | `local` or a `fleet.nodes[].id`. Accepted and displayed as Default worker location, but placement does not read it. Use `fleet.defaultNode` or `fleet.profiles.<name>.node` to select a node. | next turn |
 | `context.compaction.model` | Model pattern for a dedicated summarizer; unset uses the chat model. An explicit pattern must resolve uniquely or compaction fails visibly. | next turn |
 | `context.compaction.systemPrompt` | Path to a nonempty UTF-8 prompt file of at most 65,536 bytes, resolved relative to the session workspace at compaction time; unset uses the built-in instructions. | next turn |
-| `context.memory.observations.enabled` | Boolean. `true` turns `context.memory.surfaces.observe` on when that key is unset. | next turn |
 | `safety.review.target` | Target id for the reviewer; unset uses the chat target. An id that is not in `targets` is an error. | hot reload |
 | `safety.review.cadenceToolCalls` | Integer at least 1. Also review after this many tool calls inside a turn; unset reviews only at turn end. | hot reload |
 

@@ -87,7 +87,7 @@ function legacyWorktreeMarkerFinding(cwd: string): DoctorFinding {
 		}
 	} catch {
 		// An absent or partially unreadable project-local worktree root is not a
-		// repair target. Proven markers remain the lifecycle readers' authority.
+		// repair target.
 	}
 	return {
 		ok: true,
@@ -96,7 +96,7 @@ function legacyWorktreeMarkerFinding(cwd: string): DoctorFinding {
 		detail:
 			legacy === 0
 				? "active worktree markers use canonical identifiers"
-				: `${legacy} active legacy worktree markers retained for cleanup compatibility; no automatic rewrite`,
+				: `${legacy} active legacy worktree markers Clio no longer recognizes; remove their worktrees and branches by hand`,
 	};
 }
 
