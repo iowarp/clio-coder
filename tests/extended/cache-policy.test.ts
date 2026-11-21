@@ -418,6 +418,74 @@ test("a public Responses request asks for cache diagnostics against the previous
 	deepStrictEqual(bodies[2]?.prompt_cache_options, { ttl: "30m" });
 });
 
+test("a Codex turn sends back the backend's x-codex-turn-state on its later requests and never into the next turn (PV-2)", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "https://codex.invalid/backend-api" },
+		"gpt-6-luna",
+		null,
+	);
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${claims.toString("base64url")}.signature`;
+	const sent: Array<string | null> = [];
+	let issued = 0;
+	const fetch = async (_url: unknown, init?: RequestInit) => {
+		sent.push(new Headers(init?.headers).get("x-codex-turn-state"));
+		const response = {
+			id: `resp_${sent.length}`,
+			status: "completed",
+			output: [],
+			usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11, input_tokens_details: { cached_tokens: 0 } },
+		};
+		const events = [
+			{ type: "response.created", response: { ...response, status: "in_progress" } },
+			{ type: "response.completed", response },
+		];
+		return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+			status: 200,
+			headers: { "content-type": "text/event-stream", "x-codex-turn-state": `state-${++issued}` },
+		});
+	};
+	const send = async (messages: unknown[], sessionId = "turn-state-session") => {
+		const stream = streamSimple(
+			model,
+			{ systemPrompt: "# Identity", messages } as never,
+			{
+				apiKey,
+				sessionId,
+				transport: "sse",
+				fetch,
+			} as never,
+		);
+		await stream.result();
+	};
+	const task = { role: "user", content: "Task", timestamp: 1 };
+	const call = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call_1", name: "read", arguments: {} }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+		stopReason: "toolUse",
+		timestamp: 2,
+	};
+	const result = {
+		role: "toolResult",
+		toolCallId: "call_1",
+		toolName: "read",
+		content: [],
+		isError: false,
+		timestamp: 3,
+	};
+	await send([task]);
+	await send([task, call, result]);
+	await send([task, call, result, call, result]);
+	await send([task, call, result, { role: "user", content: "Next", timestamp: 4 }]);
+	await send([task], "another-session");
+	// The turn's first token holds for the turn; the next turn and another conversation start without one.
+	deepStrictEqual(sent, [null, "state-1", "state-1", null, null]);
+});
+
 test("native compaction on Codex sends the pinned prompt layer as its own item, as the turns do", async () => {
 	const model = openaiCodex.synthesizeModel(
 		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },

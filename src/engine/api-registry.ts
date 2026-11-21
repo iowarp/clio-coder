@@ -31,6 +31,7 @@ import { observeAnthropicResponse } from "./apis/anthropic-response.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
 import { observeCodexTransport } from "./apis/codex-transport.js";
+import { withCodexTurnState } from "./apis/codex-turn-state.js";
 import { observeResponsesCacheDiagnostics } from "./apis/openai-cache-diagnostics.js";
 import { withProviderCheckpoint } from "./apis/openai-compaction.js";
 import { observeResponsesModelId } from "./apis/responses-model-id.js";
@@ -174,7 +175,11 @@ export function engineStream(
 						withAnthropicDiagnostics(
 							model,
 							context,
-							withCodexConfiguration(model, withCodexPromptItems(model, diagnosed), context),
+							withCodexConfiguration(
+								model,
+								withCodexTurnState(model, context, withCodexPromptItems(model, diagnosed)),
+								context,
+							),
 						),
 						context,
 					),
@@ -245,7 +250,11 @@ function scopedEngineStreamSimple(
 						withAnthropicDiagnostics(
 							model,
 							context,
-							withCodexConfiguration(model, withCodexPromptItems(model, diagnosed), context),
+							withCodexConfiguration(
+								model,
+								withCodexTurnState(model, context, withCodexPromptItems(model, diagnosed)),
+								context,
+							),
 						),
 						context,
 					),
