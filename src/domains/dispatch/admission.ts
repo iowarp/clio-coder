@@ -15,13 +15,20 @@ import {
 	capacityStateLockPath,
 	describeEndpointCapacityHolders,
 	type EndpointCapacityHolders,
+	readCapacityStateUnsafe,
 	releaseCapacityLease,
 	releaseCapacityLeaseAsync,
 	renameCapacityLeaseAssignment,
 	renewCapacityLeasesUnsafe,
+	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
 import { LEASE_HEARTBEAT_MS } from "./lease-clock.js";
-import { refreshReservationsForLeasesUnsafe, transferDispatchReservationToLeaseUnsafe } from "./reservation-store.js";
+import {
+	ownsActiveReservations,
+	refreshOwnedReservationsUnsafe,
+	refreshReservationsForLeasesUnsafe,
+	transferDispatchReservationToLeaseUnsafe,
+} from "./reservation-store.js";
 
 /**
  * Dispatch admission gate. Given a worker's requested scope and the
@@ -547,13 +554,25 @@ export function createCapacityAdmissionController(options: {
 		const owned = [...leases.keys()].filter((leaseId) => !lost.has(leaseId));
 		if (owned.length === 0) {
 			renewalFault = null;
+			// A plan between members holds no lease here, and another host judges it by its expiry alone. A failed
+			// refresh is retried at the next tick, well inside the plan's TTL, so it refuses nothing.
+			if (ownsActiveReservations())
+				heartbeatRun = transact(() => {
+					const state = readCapacityStateUnsafe();
+					if (refreshOwnedReservationsUnsafe(state, now())) writeCapacityStateUnsafe(state);
+				})
+					.catch(() => {})
+					.finally(() => {
+						heartbeatRun = null;
+					});
 			return;
 		}
 		heartbeatRun = transact(() => {
 			const renewedAt = now();
-			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, renewedAt, undefined, (file, renewedLeases) =>
-				refreshReservationsForLeasesUnsafe(file, renewedLeases, renewedAt),
-			);
+			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, renewedAt, undefined, (file, renewedLeases) => {
+				refreshReservationsForLeasesUnsafe(file, renewedLeases, renewedAt);
+				refreshOwnedReservationsUnsafe(file, renewedAt);
+			});
 			// Applied under the lock: a lease released before this section is gone
 			// from both maps, and one released after it must not be resurrected.
 			for (const lease of renewed) if (leases.has(lease.leaseId)) leases.set(lease.leaseId, lease);

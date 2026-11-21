@@ -47,7 +47,11 @@ export function claimSharedPrefix(
  */
 export async function waitForPrefixLeader(
 	group: DispatchPrefixGroup,
-	options: { signal?: AbortSignal /** Monotonic; the hold is a span in this process. */; now?: () => number } = {},
+	options: {
+		signal?: AbortSignal;
+		/** Monotonic; the hold is a span in this process. */
+		now?: () => number;
+	} = {},
 ): Promise<PrefixHold> {
 	if (group.isReleased()) return null;
 	const now = options.now ?? (() => performance.now());

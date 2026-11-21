@@ -333,6 +333,7 @@ export function createDispatchReservation(input: {
 		};
 		replaceReservations(state, [record, ...records]);
 		writeCapacityStateUnsafe(state);
+		ownedPlans.add(record.ownerId);
 		return copyRecord(record);
 	});
 }
@@ -411,6 +412,42 @@ export function refreshReservationsForLeasesUnsafe(
 		changed ||= record.expiresAt !== before;
 	}
 	if (changed) state.reservations = records.map(copyRecord);
+}
+
+/** Plans this process created and has not seen settle; the admission heartbeat keeps their expiry current. */
+const ownedPlans = new Set<string>();
+
+/** True while this process owns a plan that may still be active, so its heartbeat has a plan to refresh. */
+export function ownsActiveReservations(): boolean {
+	return ownedPlans.size > 0;
+}
+
+/**
+ * Extend every active plan this process owns, under the caller's capacity lock, whether or not one of its members
+ * holds a lease now. A plan whose next member waits in the writer-set queue, or behind a long step between members,
+ * holds no running lease, and another host judges it by this expiry alone. Plans that are no longer active leave the
+ * owned set. True when `state` changed and the caller must write it.
+ */
+export function refreshOwnedReservationsUnsafe(state: CapacityStateFile, nowMs: number): boolean {
+	if (ownedPlans.size === 0) return false;
+	let records: DispatchReservationRecord[];
+	try {
+		records = parseReservations(state.reservations);
+	} catch {
+		return false; // a damaged plan store must not stop the heartbeat; admission reports it
+	}
+	const active = new Set<string>();
+	let changed = false;
+	for (const record of records) {
+		if (record.status !== "active" || !ownedPlans.has(record.ownerId)) continue;
+		active.add(record.ownerId);
+		const before = record.expiresAt;
+		refreshExpiry(record, nowMs);
+		changed ||= record.expiresAt !== before;
+	}
+	for (const ownerId of [...ownedPlans]) if (!active.has(ownerId)) ownedPlans.delete(ownerId);
+	if (changed) state.reservations = records.map(copyRecord);
+	return changed;
 }
 
 /**
@@ -529,6 +566,7 @@ export function releaseDispatchReservationMemberAsync(
 
 /** Settle every member after the scheduler has finished the reserved plan. */
 export function releaseDispatchReservation(ownerId: string, nowMs = Date.now()): DispatchReservationRecord | null {
+	ownedPlans.delete(ownerId);
 	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const records = readStore();
 		const record = records.find((entry) => entry.ownerId === ownerId);
@@ -548,6 +586,7 @@ export function releaseDispatchReservation(ownerId: string, nowMs = Date.now()):
 }
 
 export function rollbackDispatchReservation(ownerId: string, nowMs = Date.now()): DispatchReservationRecord | null {
+	ownedPlans.delete(ownerId);
 	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const records = readStore();
 		const record = records.find((entry) => entry.ownerId === ownerId);

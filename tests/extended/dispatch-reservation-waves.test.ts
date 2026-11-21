@@ -458,6 +458,31 @@ it("a running member's lease heartbeat keeps its plan current for hosts that can
 	}
 });
 
+it("the admission heartbeat keeps a plan current while none of its members holds a lease (M12)", async (t) => {
+	const reservation = reserve();
+	let clock = Date.now();
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const controller = createCapacityAdmissionController({ limits: () => limits, now: () => clock, heartbeatMs: 5 });
+	try {
+		// The next member waits longer than the plan's TTL with no lease, in the writer-set queue or behind a long step.
+		clock += 60 * 60_000;
+		t.mock.timers.tick(5);
+		await controller.stop();
+		strictEqual(
+			Date.parse(getDispatchReservation(reservation.ownerId)?.expiresAt ?? ""),
+			clock + DEFAULT_RESERVATION_TTL_MS,
+			"the heartbeat did not refresh the plan's expiry",
+		);
+		const state = readCapacityStateUnsafe();
+		state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+		writeCapacityStateUnsafe(state);
+		strictEqual(cleanupDispatchReservations({ nowMs: clock }), 0);
+	} finally {
+		await controller.stop();
+		releaseDispatchReservation(reservation.ownerId);
+	}
+});
+
 it("another host's lease and plan hold until their expiry plus the clock skew tolerance, then are reclaimed (M12)", () => {
 	const reservation = reserve();
 	const lease = acquireCapacityLease({

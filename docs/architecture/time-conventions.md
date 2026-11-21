@@ -29,10 +29,13 @@ filesystem fact, and it measures its own acquisition deadline with
 `performance.now()`, because that wait is a span inside the calling process.
 
 Dispatch leases follow one rule, set out in
-[lease-clock.ts](../../src/domains/dispatch/lease-clock.ts): capacity leases, main
-cache lanes, the capacity drain, reservations and the writer set persist ISO
-`acquiredAt`, `heartbeatAt` and `expiresAt` from the writer's wall clock, never a
-duration. Capacity leases and the writer set renew every `LEASE_HEARTBEAT_MS`
+[lease-clock.ts](../../src/domains/dispatch/lease-clock.ts): every instant they
+persist is a canonical ISO string from the writer's wall clock, never a
+duration. Capacity leases and the writer set store `acquiredAt`, `heartbeatAt`
+and `expiresAt`; main cache lanes `acquiredAt`, `expiresAt` and, once released,
+`releasedAt`; the capacity drain `requestedAt` and `expiresAt`; reservations
+`createdAt`, `expiresAt` and `settledAt`, with `consumedAt` and `releasedAt` on
+each member. Capacity leases and the writer set renew every `LEASE_HEARTBEAT_MS`
 (10 s) for `LEASE_TTL_MS` (30 s). A reader judges a record on its own wall clock:
 one its own host wrote lapses at `expiresAt`, one another host wrote only
 `LEASE_CLOCK_SKEW_MS` (60 s) later, so a reader whose clock runs ahead never takes
