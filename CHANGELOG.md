@@ -302,6 +302,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 ### Security
 
 - The safety floor reads shell scripts a command runs by path, through `exec` or by `source`. A script it cannot place or read sends the call to the safety judge, where one runs.
+- Deleting the workspace's own `.git` is refused at every autonomy level, yolo included, wherever a `cd` in the command lands.
 - Changes only the operator may make (project trust, settings, CLIO Coder's own state) are refused with a message that sends the model to the operator, and `config trust` is recognized in any program's arguments.
 - An `ask_user` answer approves a sandbox escape only when its question names leaving the sandbox.
 - MCP results, errors and refusals can no longer open or close a host reminder or middleware frame, and handoff blocks end with a delimiter the handed-off text cannot forge.
