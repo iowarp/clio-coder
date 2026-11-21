@@ -81,7 +81,7 @@ import {
 	foldRunJournal,
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
-import type { telemetryPromptStructure } from "./objects.js";
+import { readStoredRunResult, type telemetryPromptStructure } from "./objects.js";
 import { runSettledDigest } from "./run-digest.js";
 import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 import { verifyTelemetryScope } from "./seal.js";
@@ -3538,7 +3538,8 @@ function scopeObject<T>(
 	if (file === undefined || createHash("sha256").update(file.bytes).digest("hex") !== ref.id.slice("obj_".length))
 		return { state: "missing" };
 	try {
-		const value: unknown = JSON.parse(file.bytes.toString("utf8"));
+		const parsed: unknown = JSON.parse(file.bytes.toString("utf8"));
+		const value = ref.subject === "run-result" ? readStoredRunResult(parsed) : parsed;
 		return check(value) ? { state: "resolved", value } : { state: "missing" };
 	} catch {
 		// Bytes that hash to the id but do not parse were never a stored object.
@@ -4170,7 +4171,7 @@ export interface SideSurfacesFold {
 
 /**
  * One surface's firings and their settlements: a middleware rule by its registration id, or a host surface such as
- * `triage`. A rule that only reminds or notifies is count-only: it fires and never settles.
+ * `triage`. A rule none of whose firings settle is count-only: it fires and never settles.
  */
 export interface SurfaceLedgerRow {
 	surface: string;
@@ -4183,7 +4184,10 @@ export interface SurfaceLedgerRow {
 	outcomes: Partial<Record<SurfaceOutcome, number>>;
 	/** Settling firings with no settlement in these records: still open, or a session that never closed. */
 	unsettled: number;
-	/** Settling firings a worker drew under its run: no outcome ledger runs in a worker, so they never settle. */
+	/**
+	 * Settling firings a worker drew under its run and left unsettled: no outcome ledger runs in a worker, so only a
+	 * firing the run settles itself (`worker.thrash`, exploration design 3.4) ever settles there.
+	 */
 	unledgered: number;
 	/** Settlements beyond the first for one firing; any is a ledger defect, since each firing settles once. */
 	duplicates: number;
@@ -4208,10 +4212,7 @@ function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRo
 			target.fired += 1;
 			if (record.data.firingId === undefined) continue;
 			target.settling += 1;
-			const owner = telemetryOwner(record.ctx);
-			// A worker's firing is labelled, never counted as a session firing left open.
-			if (owner.startsWith("run:")) target.unledgered += 1;
-			else firings.set(`${owner}/${record.data.firingId}`, record.data.ruleId);
+			firings.set(`${telemetryOwner(record.ctx)}/${record.data.firingId}`, record.data.ruleId);
 		}
 	}
 	for (const record of records) {
@@ -4231,7 +4232,12 @@ function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRo
 		if (record.data.admittedIn !== null) target.admitted += 1;
 		target.outcomes[record.data.outcome] = (target.outcomes[record.data.outcome] ?? 0) + 1;
 	}
-	for (const [key, surface] of firings) if (!settled.has(key)) row(surface).unsettled += 1;
+	// A worker's open firing is labelled, never counted as a session firing left open.
+	for (const [key, surface] of firings) {
+		if (settled.has(key)) continue;
+		if (key.startsWith("run:")) row(surface).unledgered += 1;
+		else row(surface).unsettled += 1;
+	}
 	return [...rows.values()].sort((a, b) => a.surface.localeCompare(b.surface));
 }
 

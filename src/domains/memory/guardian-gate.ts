@@ -257,7 +257,7 @@ export function observeMemoryRecord(
 }
 
 /** The newest verdicts, at most `MEMORY_OBSERVATIONS_MAX`, with the newest contradiction pinned in. */
-function boundedVerdicts(verdicts: ReadonlyArray<MemoryObservation>): MemoryObservation[] {
+export function boundedVerdicts(verdicts: ReadonlyArray<MemoryObservation>): MemoryObservation[] {
 	if (verdicts.length <= MEMORY_OBSERVATIONS_MAX) return [...verdicts];
 	const pinned = [...verdicts].reverse().find((item) => item.kind === "contradicted");
 	const recent = verdicts.slice(-MEMORY_OBSERVATIONS_MAX);

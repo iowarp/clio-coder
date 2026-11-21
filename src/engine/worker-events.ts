@@ -178,6 +178,15 @@ export interface ClioHelperResultRejectedEvent {
 }
 
 /**
+ * The worker's own count of result-contract repair rounds it has started: 0 when the run begins, then each round as
+ * its request goes out. Only this loop can count them; run.settled records the last one it reported.
+ */
+export interface ClioResultContractRepairEvent {
+	type: "clio_coder_result_contract_repair";
+	payload: { started: number };
+}
+
+/**
  * A delegated harness was started with its repository instruction files after all, because its installed version
  * lacks the switch that skips them: the host records the run's rules as read beside those files.
  */
@@ -226,6 +235,7 @@ export type ClioWorkerEvent =
 	| ClioFlowRestrictionsEvent
 	| ClioHelperResultEvent
 	| ClioHelperResultRejectedEvent
+	| ClioResultContractRepairEvent
 	| ClioRepositoryInstructionsEvent
 	| ClioPeerQuestionEvent
 	| ClioPeerSteerFailedEvent;

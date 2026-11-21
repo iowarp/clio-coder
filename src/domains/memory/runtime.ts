@@ -83,7 +83,7 @@ export interface MemoryRuntimeInfrastructure {
 	closedLessonSource?(sessionId: string): { scope: MemoryCommitScope; source: CompletedLessonSource } | null;
 	settings(): {
 		enabled: boolean;
-		surfaces: { observe: "off" | "on"; delivery?: MemoryDeliveryMode };
+		surfaces: { observe: "off" | "on"; delivery?: MemoryDeliveryMode; history?: "off" | "on" };
 		maxOutputTokens: number;
 		timeoutMs: number;
 	};
@@ -121,7 +121,7 @@ export interface MemoryRuntimeInfrastructure {
 /** Composition supplies scheduling infrastructure; memory supplies its own lesson queries and filing. */
 export type MemoryGuardianInfrastructure = Omit<
 	MemoryGuardianDeps,
-	"observations" | "getKeptLessons" | "onHistoryLessons"
+	"observations" | "getKeptLessons" | "onHistoryLessons" | "historyMining"
 > &
 	Partial<Pick<MemoryGuardianDeps, "getKeptLessons" | "onHistoryLessons">>;
 
@@ -465,6 +465,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#guardian = createMemoryGuardian({
 			getKeptLessons: () => this.keptLessons(),
 			onHistoryLessons: (input) => this.#fileHistory(input),
+			// Read on every step: a settings change wakes the guardian, which then mines or parks.
+			historyMining: () => this.#infrastructure?.settings().surfaces.history === "on",
 			...deps,
 			observations: this,
 		});
