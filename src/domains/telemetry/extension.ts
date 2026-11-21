@@ -43,7 +43,7 @@ import { createProcessJournal } from "./process-journal.js";
 import { createTelemetryProjection } from "./projection.js";
 import { sweepTelemetryDaily } from "./retention.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
-import { createSessionJournals } from "./session-journals.js";
+import { createSessionJournals, holdUnboundTelemetry } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
 
 /**
@@ -135,6 +135,11 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 						if (kind === "session.closed") lease.requestSeal?.();
 						else lease.cancelSeal?.();
 					}
+					// The first session to open or resume takes what this process emitted before any bound (CLI-P47).
+					if (kind !== "session.closed") {
+						preBind?.release(lease.journaled ? lease.context : null);
+						preBind = undefined;
+					}
 				} finally {
 					await lease.release();
 				}
@@ -148,6 +153,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
 	// so stop() journals its close while the writers still accept records (#434).
 	let liveSession: TelemetrySessionOrigin | null = null;
+	/** Facts emitted before the first session binds, held for it (CLI-P47, FX-45). */
+	let preBind: ReturnType<typeof holdUnboundTelemetry> | undefined;
 	// Once stopping, no record reopens a writer that closeAll is shutting (#434).
 	let stopping = false;
 	/**
@@ -359,6 +366,11 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			} catch {
 				// Another bundle in this process already owns the process journal; one per process (#434).
 			}
+			try {
+				preBind ??= holdUnboundTelemetry();
+			} catch {
+				// Another bundle in this process already holds them; one hold per process (CLI-P47).
+			}
 			const settings = config();
 			if (settings) {
 				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const)
@@ -422,6 +434,9 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "shutdown" });
 			liveSession = null;
 			await Promise.all(pendingRecords);
+			// No session bound: what was held goes where it went before the hold, while the process journal is open.
+			preBind?.release(null);
+			preBind = undefined;
 			await journals.closeAll();
 			// A process that recorded nothing process-scoped never opened a journal, and closing it writes nothing.
 			await processJournal?.close(processExitStatus());

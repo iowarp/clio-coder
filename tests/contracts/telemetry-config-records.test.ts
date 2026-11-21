@@ -14,6 +14,7 @@ import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-fingerprint.js";
+import { recordFiredRules } from "../../src/domains/middleware/fired-record.js";
 import { openCallJournalHealth, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { grantTelemetryConsent } from "../../src/domains/telemetry/consent.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
@@ -229,6 +230,37 @@ it("the live session's writer stays open while idle, and an unchanged reopen rec
 	} finally {
 		mock.timers.reset();
 		await extension.stop?.();
+		env.restore();
+	}
+});
+
+it("facts a fresh session's first turn emits before it binds are filed under it on bind (CLI-P47)", async () => {
+	const env = await isolateClioEnv("clio-coder-pre-bind-");
+	const bus = createTelemetryHub();
+	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
+	const origin = { id: "prebind-session", cwdHash: "prebind-repo" };
+	try {
+		await extension.start();
+		// A fresh TUI's first submit runs turn_start before its session exists.
+		recordFiredRules(
+			{
+				hook: "turn_start",
+				input: { hook: "turn_start", turnId: "turn-one" },
+				effects: [],
+				ruleIds: ["observer.local-clock"],
+				fired: [{ ruleId: "observer.local-clock", effects: ["inject_reminder"] }],
+			},
+			"sync",
+		);
+		bus.emit("session.created", { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
+		await extension.stop?.();
+		const records = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))).records.map(
+			({ record }) => record,
+		);
+		const fired = records.find((record) => record.k === "middleware.fired");
+		strictEqual(fired?.ctx.sessionId, origin.id, "the first turn's turn_start firing reaches its session");
+		strictEqual(fired?.ctx.turnId, "turn-one");
+	} finally {
 		env.restore();
 	}
 });

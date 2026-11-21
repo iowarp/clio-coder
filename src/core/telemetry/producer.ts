@@ -103,6 +103,31 @@ export function processTelemetryContext(): TelemetryContext | undefined {
 	return processOwner?.context;
 }
 
+/**
+ * The session id facts emitted before any session binds are filed under while the telemetry domain holds them for
+ * that bind. A fresh TUI creates its session on the first submit, after that turn's turn_start gate ran (CLI-P47).
+ */
+export const UNBOUND_SESSION_ID = "unbound-session";
+
+/** The pending session's id while a hold waits for the first bind, else undefined (CLI-P47). */
+export function unboundTelemetrySession(): string | undefined {
+	return sinks.has(`session:${UNBOUND_SESSION_ID}`) ? UNBOUND_SESSION_ID : undefined;
+}
+
+/**
+ * File a record held before its owner existed under `ctx`, keeping when it was emitted. Without a session to file it
+ * under it goes where it would have gone unheld: the process journal, or nowhere for a session-only fact (CLI-P47).
+ */
+export function enqueueHeldTelemetry(record: PendingTelemetry, ctx: TelemetryContext | undefined): boolean {
+	const owner = ctx ?? (journalDefinition(record.kind).scope === "session" ? undefined : processOwner?.context);
+	const sink = owner ? sinkFor(owner) : undefined;
+	if (!owner || !sink) {
+		unownedRecords += 1;
+		return false;
+	}
+	return enqueueInto(sink, { ...record, ctx: owner } as PendingTelemetry);
+}
+
 /** A process context reaches only this process's own journal; any other owner resolves through its registered sink. */
 function sinkFor(ctx: TelemetryContext): TelemetrySink | undefined {
 	if ("processId" in ctx) {

@@ -32,6 +32,7 @@ import path from "node:path";
 import { recordPackageActivity } from "../core/package-activity.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import { unboundTelemetrySession } from "../core/telemetry/producer.js";
 import type { ToolName } from "../core/tool-names.js";
 import type {
 	ExtensionReloadCommitted,
@@ -159,9 +160,11 @@ export interface ExtensionReloadCoordinator {
 /** One hook execution as `hook.ran`; the session, run and turn ride the record's context, never its payload (#434). */
 function recordHookRan(receipt: HookReceipt, sessionId: string | undefined): void {
 	try {
+		// A fresh session's first turn runs its hooks before the session exists; their receipts wait for it (CLI-P47).
+		const owner = sessionId ?? (receipt.runId === undefined ? unboundTelemetrySession() : undefined);
 		const ctx = withToolTelemetryContext(
 			{
-				...(sessionId !== undefined ? { sessionId } : {}),
+				...(owner !== undefined ? { sessionId: owner } : {}),
 				...(receipt.runId !== undefined ? { runId: receipt.runId } : {}),
 				...(receipt.turnId !== undefined ? { turnId: receipt.turnId } : {}),
 			},

@@ -9,11 +9,13 @@ import { mainAgent } from "../../core/telemetry/context.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import type { PendingTelemetry } from "../../core/telemetry/producer.js";
+import { enqueueHeldTelemetry, registerTelemetrySink, UNBOUND_SESSION_ID } from "../../core/telemetry/producer.js";
 import type { CallStarted, ObjectRef } from "../../core/telemetry/schemas.js";
 import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
 import { type storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
-import { telemetrySessionDirectory } from "./paths.js";
+import { TELEMETRY_JOURNAL_FILE, telemetrySessionDirectory } from "./paths.js";
 
 export interface TelemetrySessionOrigin {
 	id: string;
@@ -91,6 +93,54 @@ interface Entry {
 export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 /** Sessions whose origin a writer set remembers for reopening; an ACP server hosts a few at most. */
 const KNOWN_ORIGINS = 256;
+/** Records a pre-bind hold keeps; past it they drop and the bound session's journal records the gap (CLI-P47). */
+const PRE_BIND_LIMIT = 1024;
+
+/**
+ * Hold facts emitted before the first session binds: a fresh TUI creates its session on the first submit, after that
+ * turn's turn_start hooks, middleware and MD5 delivery gate already ran (CLI-P47, FX-45). Bounded; `release` files
+ * every held fact under the session that bound, or where it would have gone without the hold when none did. The
+ * caller releases inside a lease on that session, so its writer is open to take them. Once released it holds nothing.
+ */
+export function holdUnboundTelemetry(): { release(context: TelemetryContext | null): void } {
+	const held: PendingTelemetry[] = [];
+	let dropped = 0;
+	let unregister: (() => void) | undefined = registerTelemetrySink(UNBOUND_SESSION_ID, {
+		enqueue(record) {
+			if (held.length >= PRE_BIND_LIMIT) {
+				dropped += 1;
+				return false;
+			}
+			held.push(record);
+			return true;
+		},
+		// What the bound session's mode admits is decided when the record is filed there.
+		admits: () => true,
+	});
+	return {
+		release(context) {
+			if (!unregister) return;
+			unregister();
+			unregister = undefined;
+			for (const record of held.splice(0)) {
+				const { sessionId: _pending, agent, ...ids } = record.ctx;
+				enqueueHeldTelemetry(
+					record,
+					context
+						? ({ ...ids, sessionId: context.sessionId, agent: { ...agent, id: context.agent.id } } as TelemetryContext)
+						: undefined,
+				);
+			}
+			if (dropped > 0 && context)
+				telemetryHub().emit(
+					"journal.gap",
+					{ sink: TELEMETRY_JOURNAL_FILE, reason: "writer-drop", count: dropped },
+					context,
+				);
+			dropped = 0;
+		},
+	};
+}
 
 /** The writer block's build, present only when the bundle recorded one (C-31). */
 function withBuildStamp(): { build?: NonNullable<SegmentHeader["writer"]["build"]> } {
