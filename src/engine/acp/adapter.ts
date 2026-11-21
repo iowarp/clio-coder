@@ -46,6 +46,11 @@ import type {
 	AcpUsageMeta,
 } from "./types.js";
 import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY, AcpUsageMetaSchema } from "./types.js";
+import {
+	ACP_UPSTREAM_V1,
+	AcpV1LoadSessionResponseSchema,
+	AcpV1ResumeSessionResponseSchema,
+} from "./upstream-schema.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
 
@@ -91,6 +96,11 @@ export interface AcpDelegationRunInput {
 	 * operator may answer. Absent, or null, answers the question cancelled. The signal aborts when the run ends.
 	 */
 	askPeerQuestion?: (question: AcpPeerQuestion, signal: AbortSignal) => Promise<string | null>;
+	/**
+	 * Reopen this earlier peer session instead of opening a new one: `session/resume` when the peer advertises it, else
+	 * `session/load` with its replayed history kept out of the run's events, else the run fails naming the peer.
+	 */
+	reopen?: { sessionId: string };
 }
 
 /** A fixed-choice question an ACP peer (agy `interaction_*`) asked, with the choices it takes back by `optionId`. */
@@ -188,6 +198,17 @@ function supportsSessionClose(init: AcpInitializeResponse | null): boolean {
 	// whose sessions predate the stable capability.
 	const meta = isRecord(caps._meta) ? caps._meta[ACP_SESSION_META_KEY] : undefined;
 	return isRecord(meta) && meta.close === true;
+}
+
+/**
+ * How a peer reopens an earlier session: `session/resume` restores it without replaying history, so it wins over
+ * `session/load`, which streams the whole history back first. Null when the peer advertises neither.
+ */
+function reopenMethod(init: AcpInitializeResponse | null): "session/resume" | "session/load" | null {
+	const caps = init?.agentCapabilities;
+	if (!isRecord(caps)) return null;
+	if (isRecord(caps.sessionCapabilities) && isRecord(caps.sessionCapabilities.resume)) return "session/resume";
+	return caps.loadSession === true ? "session/load" : null;
 }
 
 function flattenPrompt(input: AcpDelegationRunInput, systemPromptSent = false): string {
@@ -368,6 +389,9 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	})();
 	antigravity?.recordChild(transport.pid);
 	let sessionId: string | null = null;
+	let opened: "new" | "resume" | "load" = "new";
+	let replaying = false;
+	let replayedUpdates = 0;
 	let initialized: AcpInitializeResponse | null = null;
 	let aborted = false;
 	let finished = false;
@@ -477,6 +501,11 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 
 	const unregisters = [
 		transport.onNotification("session/update", (params) => {
+			// A session/load replays the session's history before it answers; that history is not this run's work.
+			if (replaying) {
+				replayedUpdates += 1;
+				return;
+			}
 			for (const event of mapper.mapUpdate(params)) emit(event);
 		}),
 		transport.onRequest("session/request_permission", (params) => {
@@ -587,6 +616,39 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		const requireActive = () => {
 			if (aborted) throw new Error("the delegation was cancelled before its prompt");
 		};
+		/** The earlier session reopened the way the peer allows, its answer held to the pinned upstream v1 schema. */
+		const reopenSession = async (earlier: string): Promise<unknown> => {
+			const method = reopenMethod(initialized);
+			if (method === null)
+				throw new AcpError(
+					"acp_session_unavailable",
+					`ACP peer cannot reopen session '${earlier}': it advertises neither session/resume nor session/load`,
+				);
+			opened = method === "session/resume" ? "resume" : "load";
+			// Named before the answer, so an abort while the peer reopens it cancels that session.
+			sessionId = earlier;
+			replaying = method === "session/load";
+			let answer: unknown;
+			try {
+				answer = await transport.request<unknown>(
+					method,
+					{ sessionId: earlier, cwd: input.cwd, mcpServers: [] },
+					connectTimeoutMs,
+				);
+			} catch (error) {
+				throw agy?.authFailure(error) ?? error;
+			} finally {
+				replaying = false;
+			}
+			const schema = method === "session/resume" ? AcpV1ResumeSessionResponseSchema : AcpV1LoadSessionResponseSchema;
+			const invalid = Value.Errors(schema, answer)[0];
+			if (invalid !== undefined)
+				throw new AcpError(
+					"acp_session_unavailable",
+					`ACP peer answered ${method} outside ACP v1 (${ACP_UPSTREAM_V1.tag}): ${invalid.instancePath || "/"} ${invalid.message}`,
+				);
+			return answer;
+		};
 		try {
 			emit({ type: "agent_start" } as AgentEvent);
 			requireActive();
@@ -615,12 +677,13 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				params: { cwd: input.cwd, mcpServers: [] },
 				systemPromptSent: false,
 			};
-			const session = await transport
-				.request<unknown>("session/new", sessionNew.params, connectTimeoutMs)
-				.catch((error: unknown) => {
-					throw agy?.authFailure(error) ?? error;
-				});
-			sessionId = sessionIdFrom(session);
+			const session =
+				input.reopen === undefined
+					? await transport.request<unknown>("session/new", sessionNew.params, connectTimeoutMs).catch((error: unknown) => {
+							throw agy?.authFailure(error) ?? error;
+						})
+					: await reopenSession(input.reopen.sessionId);
+			sessionId = input.reopen?.sessionId ?? sessionIdFrom(session);
 			requireActive();
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
 			const modeReset = agy?.defaultMode(sessionId, session) ?? null;
@@ -719,7 +782,13 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				"session/prompt",
 				{
 					sessionId,
-					prompt: [{ type: "text", text: flattenPrompt(input, sessionNew.systemPromptSent) }],
+					prompt: [
+						{
+							type: "text",
+							// A reopened session already holds the system prompt its first turn carried.
+							text: flattenPrompt(input, opened !== "new" || sessionNew.systemPromptSent),
+						},
+					],
 				},
 				promptTimeoutMs,
 			);
@@ -798,6 +867,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(usageLimit !== undefined ? { usageLimit } : {}),
 				delegation: {
 					acpSessionId: sessionId,
+					opened,
+					...(replayedUpdates > 0 ? { replayedUpdates } : {}),
 					...(sideband.nonResumable !== undefined ? { nonResumable: sideband.nonResumable } : {}),
 					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
@@ -828,6 +899,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(failureCode !== undefined ? { failureCode } : {}),
 				delegation: {
 					acpSessionId: sessionId,
+					opened,
+					...(replayedUpdates > 0 ? { replayedUpdates } : {}),
 					...(selectedModelId !== null ? { selectedModelId } : {}),
 					initialize: initialized,
 					toolCallsRequested: toolSnapshot.toolCallsRequested,

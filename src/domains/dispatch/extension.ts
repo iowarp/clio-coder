@@ -294,6 +294,7 @@ import { ceilChars } from "../session/context-accounting.js";
 import { forkParentSessionId } from "../session/fork-journal.js";
 import { telemetryBundlePath, telemetryJournalPath, telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
+import { resolveAcpContinuation } from "./acp-continuation.js";
 import {
 	approvedRouteObservation,
 	consumeActiveRouteApproval,
@@ -7125,6 +7126,16 @@ export function createDispatchBundle(
 		});
 		publishDispatchPathScope(req, lifecycle.pathScope);
 		req = withoutDelegationStandInModel(req, lifecycle.agentConfig.id);
+		// continue_run (Phase 3.2): judged before the run takes a slot, so a refusal costs nothing.
+		const continuation =
+			req.continueRunId === undefined
+				? null
+				: resolveAcpContinuation({
+						runId: req.continueRunId,
+						row: requireLedger().get(req.continueRunId),
+						agentId: req.agentId,
+						ownerSessionId: req.ownerSessionId ?? null,
+					});
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = req.model ?? lifecycle.agentConfig.id;
@@ -7309,6 +7320,7 @@ export function createDispatchBundle(
 				now,
 				monotonicNow,
 				askPeerQuestion,
+				...(continuation?.kind === "reopen" ? { reopen: { sessionId: continuation.acpSessionId } } : {}),
 			});
 		} catch (error) {
 			await closeRunJournal();
@@ -7800,6 +7812,18 @@ export function createDispatchBundle(
 						? { trustedUnmediated: true as const }
 						: {}),
 					toolCallLog: acp.toolCallLog(),
+					...(result.delegation.opened !== undefined ? { opened: result.delegation.opened } : {}),
+					...(result.delegation.replayedUpdates !== undefined ? { replayedUpdates: result.delegation.replayedUpdates } : {}),
+					...(continuation !== null
+						? {
+								continuedFrom: {
+									runId: continuation.fromRunId,
+									acpSessionId: continuation.acpSessionId,
+									...(continuation.kind === "fresh" ? { freshReason: continuation.reason } : {}),
+								},
+							}
+						: {}),
+					...(result.delegation.nonResumable !== undefined ? { nonResumable: result.delegation.nonResumable } : {}),
 				},
 				// The delegate's own ACP session id is recorded above as
 				// delegation.acpSessionId. This field names the Clio session that
@@ -7823,6 +7847,14 @@ export function createDispatchBundle(
 		(async (): Promise<RunResult> => {
 			try {
 				const result = await acp.promise;
+				// The peer session is what a later continue_run reopens, so the ledger row keeps it with the peer's verdict.
+				if (result.delegation.acpSessionId !== null)
+					ledgerRef.update(envelope.id, {
+						acpSession: {
+							sessionId: result.delegation.acpSessionId,
+							...(result.delegation.nonResumable !== undefined ? { nonResumable: result.delegation.nonResumable } : {}),
+						},
+					});
 				// The receipt reads meters the domain pump fills. Finalization
 				// always waits (bounded by the drain grace) for the pump to finish
 				// the source stream, whether or not an external consumer ever
@@ -8156,6 +8188,10 @@ export function createDispatchBundle(
 				.catch(() => {});
 			return handle;
 		};
+		if (req.continueRunId !== undefined && !req.delegationAgentId)
+			throw new Error(
+				`dispatch: continue_run continues an ACP delegation's peer session; '${req.agentId}' is not an ACP agent`,
+			);
 		if (req.delegationAgentId) {
 			assertAcpDelegationAdmissible(req, req.delegationAgentId, protectedArtifactState);
 			await rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);

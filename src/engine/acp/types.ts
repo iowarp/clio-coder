@@ -471,6 +471,10 @@ export interface AcpDelegationResult {
 	failureCode?: AcpDelegationFailureCode;
 	delegation: {
 		acpSessionId: string | null;
+		/** How the peer session opened: a new one, or an earlier one reopened by `session/resume` or `session/load`. */
+		opened?: "new" | "resume" | "load";
+		/** History updates a `session/load` replayed before it answered, kept out of the run's events. */
+		replayedUpdates?: number;
 		/** The peer session cannot take another turn; a later turn starts a fresh session. */
 		nonResumable?: { reason: string };
 		selectedModelId?: string;

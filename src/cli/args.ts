@@ -68,6 +68,8 @@ export interface RunCliArgs {
 	sessionId?: string;
 	/** Resume the most recent session for this workspace. */
 	continueSession: boolean;
+	/** `--agent <id> --continue <runId>`: the earlier ACP delegation whose peer session this dispatch continues. */
+	continueRunId?: string;
 	/** `--fork`: branch a new session from the resumed one, which is read and never written (SPEC L3). */
 	forkSession: boolean;
 	/** `--name <text>`: the session's name, set when the run's session is created, forked or resumed. */
@@ -141,6 +143,7 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  * | --record, --agent-profile, --agent-runtime, --tool-profile, --require, --worktree | usage | ok |
  * | --turn-mode, --allow-tools, --deny-tools, --delegate-tools, --no-delegate | ok | usage |
  * | --resume, --continue, --fork, --name                           | ok    | usage |
+ * | --continue <runId> (an ACP delegation run to continue)         | text  | ok    |
  * | --fail-on-noop, --verify, --answers                            | ok    | usage |
  * | --systemone                                                    | ok    | usage |
  * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
@@ -271,6 +274,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		messages: [],
 		diagnostics: [],
 	};
+	let continueOperand: { index: number; value: string } | null = null;
 
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
@@ -502,6 +506,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--continue") {
 			parsed.continueSession = true;
+			// With --agent, which may come later, the next word is the run to continue; in main mode it stays task text.
+			const operand = argv[i + 1];
+			if (operand !== undefined && !operand.startsWith("-") && !operand.startsWith("@"))
+				continueOperand = { index: parsed.messages.length, value: operand };
 			continue;
 		}
 		if (arg === "--answers") {
@@ -622,6 +630,19 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			if (arg.startsWith("@") && arg.length > 1) parsed.fileArgs.push(arg.slice(1));
 			else parsed.messages.push(arg);
 		}
+	}
+
+	// `--agent <id> --continue <runId>` continues that run's peer session instead of the main session.
+	if (parsed.agentId !== undefined && parsed.continueSession) {
+		parsed.continueSession = false;
+		if (continueOperand !== null && parsed.messages[continueOperand.index] === continueOperand.value) {
+			parsed.messages.splice(continueOperand.index, 1);
+			parsed.continueRunId = continueOperand.value;
+		} else
+			parsed.diagnostics.push({
+				type: "error",
+				message: "--continue with --agent needs the run to continue: --continue <runId>",
+			});
 	}
 
 	// SPEC 6.2: the envelope carries the task and its attachments, so argv may carry neither.

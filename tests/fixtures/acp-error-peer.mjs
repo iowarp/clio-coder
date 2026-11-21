@@ -308,8 +308,46 @@ function agy(request) {
 	}
 }
 
+// reopen-resume, reopen-load and reopen-none: a plain peer reopening an earlier session the way it advertises.
+const reopenKind = typeof mode === "string" && mode.startsWith("reopen-") ? mode.slice("reopen-".length) : null;
+function reopenPeer(request) {
+	if (request.id === undefined) return;
+	appendFileSync(process.argv[3], `${JSON.stringify(request)}\n`);
+	const sessionId = request.params?.sessionId ?? "fresh-session";
+	const update = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+	const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+	if (request.method === "initialize") {
+		const agentCapabilities =
+			reopenKind === "resume"
+				? { loadSession: true, sessionCapabilities: { resume: {} } }
+				: reopenKind === "load"
+					? { loadSession: true }
+					: {};
+		reply({ protocolVersion: 1, agentCapabilities, agentInfo: { name: "reopen-fixture", version: "1.0.0" } });
+	} else if (request.method === "session/load") {
+		// The history a load streams back before it answers.
+		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "earlier answer" } });
+		update({
+			sessionUpdate: "tool_call",
+			toolCallId: "old-1",
+			kind: "read",
+			status: "completed",
+			rawInput: { path: "a" },
+		});
+		reply({});
+	} else if (request.method === "session/new") reply({ sessionId: "fresh-session" });
+	else if (request.method === "session/prompt") {
+		update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `continued ${sessionId}` } });
+		reply({ stopReason: "end_turn" });
+	} else reply({});
+}
+
 for await (const line of createInterface({ input: process.stdin })) {
 	const request = JSON.parse(line);
+	if (reopenKind !== null) {
+		reopenPeer(request);
+		continue;
+	}
 	if (mode === "cancel-connect") appendFileSync(process.argv[3], `${request.method}\n`);
 	if (mode === "agy") {
 		agy(request);
