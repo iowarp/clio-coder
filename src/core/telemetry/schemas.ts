@@ -19,7 +19,15 @@ import {
 } from "./enums.js";
 import { EstimateMethod, FactSumSchema, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
-import { RUN_HASH_CANONICALIZATIONS, RUN_HASH_SUBJECTS } from "./run-vocabulary.js";
+import {
+	GRADE_LAYERS,
+	GRADE_RULE_IDS,
+	GRADE_RULE_STATUSES,
+	RUN_ASSURANCES,
+	RUN_HASH_CANONICALIZATIONS,
+	RUN_HASH_SUBJECTS,
+	RUN_OBLIGATIONS,
+} from "./run-vocabulary.js";
 import {
 	EVIDENCE_TAGS,
 	TRUST_ABSENCE_REASONS,
@@ -1286,6 +1294,32 @@ export const RunSettledSchema = Type.Object(
 		 * worker (M3). Absent in older journals, which read as a lone run's budget.
 		 */
 		answerBudgetBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
+		/**
+		 * The grader's verdict (fleet M9): the obligation the run owed, each rule's result in layer order with the code
+		 * a failing rule set, and the run's assurance. Absent in journals sealed before M9.
+		 */
+		verdict: Type.Optional(
+			Type.Object(
+				{
+					version: Type.Literal(1),
+					obligation: vocabulary(RUN_OBLIGATIONS),
+					rules: Type.Array(
+						Type.Object(
+							{
+								id: vocabulary(GRADE_RULE_IDS),
+								layer: vocabulary(GRADE_LAYERS),
+								status: vocabulary(GRADE_RULE_STATUSES),
+								code: Type.Optional(RunOutcomeCode),
+							},
+							closed,
+						),
+						{ maxItems: 32 },
+					),
+					assurance: vocabulary(RUN_ASSURANCES),
+				},
+				closed,
+			),
+		),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
 			Type.Object(

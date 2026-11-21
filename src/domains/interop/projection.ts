@@ -305,7 +305,7 @@ export function projectAgent(input: {
 		latencyClass: "balanced",
 		projectContextTier: "bounded",
 		budget: { toolCalls: 24, readReserve: 4, synthesis: true },
-		resultContract: { kind: "artifact-report" },
+		resultContract: { kind: "text-report" },
 		tags: ["interop"],
 	};
 	parseAgentRecipeSchema({

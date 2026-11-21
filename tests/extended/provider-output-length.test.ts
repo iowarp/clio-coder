@@ -16,6 +16,11 @@ import { startWorkerRun, type WorkerRunHandle } from "../../src/engine/worker-ru
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
+/** The typed artifact report a builder hands back (fleet design 4.3). */
+const ARTIFACT_REPORT = JSON.stringify({
+	summary: "Wrote page.md.",
+	completion: { state: "done", limitations: [], unverified: [] },
+});
 const modelId = "dynamo/qwen3.8-27b";
 const usage = {
 	prompt_tokens: 20965,
@@ -182,7 +187,7 @@ for (const abortRecovery of [false, true]) {
 				);
 			} else {
 				res.end(
-					`data: ${JSON.stringify({ model: modelId, choices: [{ index: 0, delta: { content: "Wrote page.md." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+					`data: ${JSON.stringify({ model: modelId, choices: [{ index: 0, delta: { content: ARTIFACT_REPORT }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
 				);
 			}
 		});
@@ -237,7 +242,7 @@ for (const abortRecovery of [false, true]) {
 				const final = result.messages.at(-1);
 				ok(final?.role === "assistant");
 				strictEqual(final.stopReason, "stop");
-				deepStrictEqual(final.content, [{ type: "text", text: "Wrote page.md." }]);
+				deepStrictEqual(final.content, [{ type: "text", text: ARTIFACT_REPORT }]);
 			}
 		} finally {
 			worker?.abort();

@@ -213,6 +213,7 @@ export function withResolvedPlanTaskPin(
 		agentSelection: _agentSelection,
 		routeApproval: _approval,
 		assignmentDeadlineAt: _deadline,
+		runWallMs: _wall,
 		executionRole: _executionRole,
 		...base
 	} = request;
@@ -768,6 +769,7 @@ const RESULT_CONTRACT_KINDS = new Set<ResultContract["kind"]>([
 	"oracle-report",
 	"external-delegation",
 	"artifact-report",
+	"text-report",
 	"context-handbook",
 	"delegation-plan",
 ]);

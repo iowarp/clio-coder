@@ -17,9 +17,9 @@ import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
 import { readFleetRun } from "../../src/domains/dispatch/state.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-/** Fleet workspace lock records left in the isolated state directory. */
+/** Writer set records left in the isolated state directory. */
 function fleetLockRecords(): string[] {
-	const dir = join(clioStateDir(), "fleet-locks");
+	const dir = join(clioStateDir(), "checkout-writer-leases");
 	return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".json")) : [];
 }
 

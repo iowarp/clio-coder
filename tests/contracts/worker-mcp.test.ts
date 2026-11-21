@@ -45,7 +45,7 @@ import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../../src/tools/gateway/index.js";
 import type { RegistryVerdict } from "../../src/tools/registry.js";
 import { parseWorkerSpec, type WorkerSpec } from "../../src/worker/spec-contract.js";
-import { makeDispatchBundle } from "../harness/dispatch.js";
+import { makeDispatchBundle, observedReadEvents } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -491,6 +491,8 @@ describe("native worker MCP capabilities", () => {
 				abort: () => {},
 				send: () => true,
 				events: (async function* () {
+					// A research report owes observed evidence, so the worker reads once first.
+					for (const event of observedReadEvents()) yield event;
 					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: report } };
 				})(),
 			}),

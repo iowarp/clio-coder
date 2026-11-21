@@ -1,6 +1,8 @@
 import { OBSERVED_COMMAND_PREFIX } from "../dispatch/run-findings.js";
 import {
+	adaptRunTrustStatus,
 	type CanonicalTrustStatus,
+	type RunTrustFacts,
 	TRUST_STATUS_AXES,
 	type TRUST_STATUS_STATES,
 	type TrustArtifactReference,
@@ -322,4 +324,24 @@ export function summarizeTrustStatus(status: CanonicalTrustStatus): TrustSummary
 		unknown: TRUST_STATUS_AXES.filter((axis) => isUnanswered(status, axis)),
 		refs: trustSummaryReferences(status),
 	};
+}
+
+/** The settled facts a run's assurance is read from: the validation evidence, nothing about its seal or context. */
+export type RunAssuranceFacts = Pick<
+	RunTrustFacts,
+	"verification" | "quality" | "validationGrounding" | "hostVerification"
+>;
+
+/**
+ * A run's assurance (DESIGN 4.8): the trust verdict of its own settled facts, as the process that settled it holds
+ * them. It is the one value the merge gate, the exit code and a parent's finish contract read. The seal is the
+ * producer's own and no review or context axis is in play, so it is compromised, grounded or unverified.
+ */
+export function runResultAssurance(facts: RunAssuranceFacts): TrustVerdict {
+	return trustVerdict(
+		adaptRunTrustStatus(
+			{ ...facts, contextProvenance: "not_applicable", hashes: [], runId: "assurance", digest: null },
+			{ state: "verified", by: "producer" },
+		),
+	);
 }

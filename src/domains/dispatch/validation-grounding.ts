@@ -43,7 +43,11 @@ import { typedValidationSummary } from "../safety/finish-contract.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 
 /** Contract kinds whose terminal payload carries a correctness claim to ground. */
-const GROUNDED_CONTRACT_KINDS: ReadonlySet<ResultContract["kind"]> = new Set(["verifier-report", "mutation-report"]);
+const GROUNDED_CONTRACT_KINDS: ReadonlySet<ResultContract["kind"]> = new Set([
+	"verifier-report",
+	"review-verdict",
+	"mutation-report",
+]);
 
 /** Claimed check names quoted back in one outcome detail before it is truncated. */
 const UNGROUNDED_NAME_LIMIT = 4;

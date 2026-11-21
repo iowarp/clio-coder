@@ -174,14 +174,18 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 // run ledger not found` on a healthy headless run under a fresh pinned state
 // directory. A run is now assessed by its journal owner before its seal (#434),
 // so this checks the sealed scope holds that assessment. It drives the shape without a model: the
-// main agent dispatches one worker that reads a file and whose terminal text
+// main agent dispatches one worker that reads a file and whose typed terminal report
 // satisfies its result contract, then ends the turn with the artifact tool.
 test("built headless artifact: a completed dispatch seals its assessment under a fresh pinned state dir", async () => {
 	const scratch = makeScratchHome("clio-coder-headless-artifact-dispatch-");
-	const fixture = await startOpenAICompatFixture("worker done: nothing to change\n", {
+	const report = JSON.stringify({
+		summary: "worker done: nothing to change",
+		completion: { state: "done", limitations: [], unverified: [] },
+	});
+	const fixture = await startOpenAICompatFixture(report, {
 		// The worker's own conversation has no dispatch tool. It reads once, since a
-		// worker that executes no tool seals worker_no_work, then gets the text
-		// reply, which the artifact-report contract accepts as-is.
+		// worker that executes no tool leaves its obligation unmet, then gets the
+		// typed artifact report with its completion (fleet design 4.3).
 		toolCall: (request) => {
 			if (!hasTool(request, "dispatch")) {
 				return hasToolExchange(request) ? null : { name: "read", arguments: { path: "notes.md" } };

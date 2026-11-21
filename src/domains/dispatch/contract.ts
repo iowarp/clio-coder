@@ -176,8 +176,13 @@ export interface DispatchRequest extends JobSpec {
 	 * strips the ledger tool from this run's admitted surface.
 	 */
 	ledger?: { id: string; sequence: number };
-	/** Explicit absolute root-assignment deadline, preserved through retries; absent for advisory estimates. */
+	/**
+	 * Absolute root-assignment deadline, preserved through retries. Every dispatched run gets one from its wall clock
+	 * (`fleet.limits.runTimeoutMs`, DESIGN 4.5), lowered by an explicit deadline or the call's timeout_ms.
+	 */
 	assignmentDeadlineAt?: number;
+	/** The run's wall clock in ms, stamped by dispatch beside `assignmentDeadlineAt`; never model-authored. */
+	runWallMs?: number;
 	/**
 	 * Tool call the caller was executing when it built this request. Stamped by
 	 * the dispatch tool from its own invocation id and republished on

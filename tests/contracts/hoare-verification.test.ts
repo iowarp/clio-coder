@@ -344,7 +344,7 @@ describe("Hoare contract honesty", () => {
 			decider: { runId: "review", digest: null },
 			correlation: { agent: false, target: false, modelFamily: false, runtime: true, node: true, independent: true },
 			output,
-			reviewer: { toolCalls: 1, ungrounded: [] },
+			reviewer: { obligationUnmet: false },
 		});
 		deepStrictEqual(JSON.parse(decision.findings ?? "null"), JSON.parse(output));
 		const rendered = presentWorkerContractAnswer(output, { kind: "verifier-report", conformance: "pass" }, true, true);

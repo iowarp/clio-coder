@@ -26,7 +26,12 @@ import {
 	readOrchTurnToolCallBudget,
 } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { reserveObservation } from "../../src/tools/observation.js";
+import {
+	commitObservationReservation,
+	releaseObservation,
+	reserveObservation,
+	runObservationPool,
+} from "../../src/tools/observation.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { type GuardCall, type GuardResult, loopSafety, runGuardScenario } from "../harness/loop-guard.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -892,3 +897,25 @@ test("read-streak decision gate: an unattended streak past every note refuses re
 function never(): never {
 	throw new Error("expected a halt");
 }
+
+test("a dispatched worker's observation pool is keyed by its run and sized from its work share (M8)", () => {
+	// 100K usable tokens at a 0.6 work share hold 240 KB; 50K tokens already held leave 40 KB for one result.
+	const pool = runObservationPool({ usableTokens: 100_000, workShare: 0.6, inputTokens: 50_000 });
+	deepStrictEqual(pool, { limitBytes: 240_000, resultCapBytes: 40_000 });
+	const options = (turnId: string) => ({ runId: "run-m8-pool", turnId, observationRunPool: pool });
+	const first = reserveObservation(Number.MAX_SAFE_INTEGER, options("turn-1"));
+	strictEqual(first.key, "run:run-m8-pool");
+	strictEqual(first.limitBytes, 240_000);
+	strictEqual(first.callCapBytes, 40_000);
+	commitObservationReservation(first);
+	// Another turn id of the same run charges the same pool: a worker's pool lives as long as its run.
+	const second = reserveObservation(Number.MAX_SAFE_INTEGER, options("turn-2"));
+	strictEqual(second.key, "run:run-m8-pool");
+	strictEqual(second.reservedBeforeBytes, 40_000);
+	releaseObservation(second);
+	releaseObservation(first);
+	// The main session keeps its per-turn pool.
+	strictEqual(reserveObservation(1024, { runId: "run-m8-pool", turnId: "turn-1" }).key, "no-session:turn-1");
+	// Nothing left in the share still lets one minimal slice run; the handback round takes over from there.
+	strictEqual(runObservationPool({ usableTokens: 1000, workShare: 0.5, inputTokens: 900 }).resultCapBytes, 1024);
+});

@@ -179,7 +179,12 @@ test("real worker preserves the length-limited thought through contract repair a
 		if (requests.length === 1) res.end(response({ reasoning_content: reasoning }, "length"));
 		else {
 			const retained = request.messages.some((m) => m.reasoning_content === reasoning);
-			res.end(response({ content: retained ? "The coefficient is 0.002." : "" }));
+			// The artifact report is typed JSON with its completion (fleet design 4.3).
+			const report = JSON.stringify({
+				summary: "The coefficient is 0.002.",
+				completion: { state: "done", limitations: [], unverified: [] },
+			});
+			res.end(response({ content: retained ? report : "" }));
 		}
 	});
 	try {

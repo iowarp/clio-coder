@@ -25,9 +25,11 @@ export interface AgentBudget extends AgentBudgetPhase {
 	synthesis: boolean;
 	/** Optional upper bound for invocation-level requests. Absence pins the default exactly. */
 	maximum?: AgentBudgetPhase;
+	/** Wall clock this recipe's runs take at most; it only lowers `fleet.limits.runTimeoutMs` (DESIGN 4.5). */
+	timeoutMs?: number;
 }
 
-const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis", "maximum"] as const;
+const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis", "maximum", "timeoutMs"] as const;
 
 function parseAgentBudgetPhase(value: unknown, prefix: string, relationTarget: string): AgentBudgetPhase {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -97,7 +99,15 @@ export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudge
 		}
 	}
 
-	return { ...phase, synthesis, ...(maximum === undefined ? {} : { maximum }) };
+	const timeoutMs = record.timeoutMs;
+	if (timeoutMs !== undefined && (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1))
+		throw new Error(`${prefix}.timeoutMs must be a safe integer of at least 1`);
+	return {
+		...phase,
+		synthesis,
+		...(maximum === undefined ? {} : { maximum }),
+		...(timeoutMs === undefined ? {} : { timeoutMs }),
+	};
 }
 
 export interface AgentToolAnyOfRequirement {

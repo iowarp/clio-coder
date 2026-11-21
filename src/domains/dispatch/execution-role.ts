@@ -193,25 +193,26 @@ export function councilJudgeAgentId(requested: string | undefined, seated: strin
 }
 
 /**
- * Whether a run's own recipe result contract is its postcondition.
- *
- * A gate decider answers the coordinator's question, not its recipe's. A judge
- * returns a winner, which no recipe contract can express, and a reviewer answers
- * whatever contract the gate asks for regardless of which agent was pinned into
- * the slot. The gate validates that answer and fails closed on a malformed one,
- * so also enforcing an inapplicable recipe postcondition would fail the run
- * before its verdict could be read.
- *
- * `synthesis` is the third decider and belongs here for the same reason.
- * {@link deriveExecutionRole} already resolves it to the `judge` role, and
- * `isBoundedGateRolePrompt` admits it only under the council judge prompt,
- * which asks for `{"verdict","text"}`. The default council judge is `oracle`
- * or `researcher`, whose recipes declare `oracle-report` and `research-report`,
- * so leaving the recipe postcondition on the slot sealed a contract failure on
- * every correct synthesis and burned the configured retries reproducing it.
+ * The contract a gate decider answers under (fleet design 4.8, M9). A gate decider answers the coordinator's
+ * question, not its recipe's, so its recipe's postcondition never applies; it gets the gate's own verdict contract
+ * instead, which makes V2 conformance and claim grounding apply to it as to any other run. A reviewer answers
+ * `review-verdict`; a compete judge `judge-verdict` with one winner among its subjects; a council synthesis
+ * `judge-verdict` with no candidates, its `{verdict, text}`. Undefined for every other run, including a council
+ * member, whose ballot arrives as the topology's override.
  */
-function appliesRecipeResultContract(gateRole: GateTopologyRole | undefined): boolean {
-	return gateRole !== "reviewer" && gateRole !== "judge" && gateRole !== "synthesis";
+function gateVerdictContract(gate: DispatchResultContractRequest["gate"]): ResultContract | undefined {
+	if (gate?.role === "reviewer") return { kind: "review-verdict" };
+	if (gate?.role === "judge") return { kind: "judge-verdict", candidates: Math.max(1, gate.subjects?.length ?? 1) };
+	if (gate?.role === "synthesis") return { kind: "judge-verdict" };
+	return undefined;
+}
+
+/**
+ * The contract a fleet step whose output a gate checks hands back. A builder's is its builder report, with the typed
+ * completion DESIGN 4.3 requires; any other role's output is prose, so it answers `text-report`.
+ */
+export function gateAuthorContractKind(role: ExecutionRole): "artifact-report" | "text-report" {
+	return role === "builder" ? "artifact-report" : "text-report";
 }
 
 /** A caller's summary allowance for one dispatch, with where it was set. */
@@ -228,7 +229,7 @@ export interface DispatchResultSummaryAllowance {
 /** The request fields the applied result contract is resolved from. */
 export interface DispatchResultContractRequest {
 	agentId: string;
-	gate?: { role?: GateTopologyRole } | undefined;
+	gate?: { role?: GateTopologyRole; subjects?: ReadonlyArray<unknown> } | undefined;
 	resultContractOverride?: ResultContract;
 	resultSummary?: DispatchResultSummaryAllowance;
 }
@@ -238,10 +239,11 @@ export interface DispatchResultContractRequest {
  * Every reader (the worker spec, the capture bound, the seal) calls this so
  * the worker repairs against exactly the contract the receipt will name.
  *
- * Precedence: a gate role that answers its topology has no recipe contract at
- * all; otherwise the coordinator's override, else the seated recipe's. A
+ * Precedence: a gate role that answers its topology gets that topology's verdict
+ * contract and never its recipe's; a council member gets only the topology's
+ * override; otherwise the coordinator's override, else the seated recipe's. A
  * caller's summary allowance then applies to a mutation report only. A
- * topology-owned override (ballot, plan, artifact) and a batch-level default
+ * topology-owned override (ballot, plan, gate author) and a batch-level default
  * inherited by a non-mutation step ignore it, because the allowance was never
  * about that step. An explicit per-task allowance on a recipe with no summary
  * field is a caller error and fails here, before any model boots.
@@ -250,7 +252,8 @@ export function dispatchResultContract(
 	req: DispatchResultContractRequest,
 	recipe: { resultContract: ResultContract } | null | undefined,
 ): ResultContract | undefined {
-	if (!appliesRecipeResultContract(req.gate?.role)) return undefined;
+	const gateContract = gateVerdictContract(req.gate);
+	if (gateContract !== undefined) return gateContract;
 	// A council member answers the council's question under a read-only
 	// profile, whatever recipe it is seated as, so a recipe contract that needs
 	// a write (an architect's plan file, a coder's mutation report) can never

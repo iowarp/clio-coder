@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import {
-	readScopedNoToolsReason,
+	executedCalls,
 	recordToolFinish,
 	summarizeToolActivity,
 	zeroSuccessfulToolNote,
@@ -732,7 +732,7 @@ describe("read windowed reader", () => {
 		for (const event of events.slice(1)) recordToolFinish(onlyWithheld, event);
 		const activity = summarizeToolActivity(onlyWithheld, () => "read");
 		deepStrictEqual([activity.calls, activity.succeeded, activity.withheld], [1, 0, 1]);
-		ok(readScopedNoToolsReason({ activity, obligation: "observed-evidence", toolLaneObserved: true }) !== null);
+		strictEqual(executedCalls(activity), 0);
 		strictEqual(
 			zeroSuccessfulToolNote(activity),
 			"completed without executing any tools (1 withheld by the observation budget)",

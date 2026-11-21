@@ -303,10 +303,22 @@ describe("dispatch capacity under auto", () => {
 			ok(preview);
 			const { endpoint: _endpoint, ...resolution } = preview;
 			const on = (nodeId: string, kind: "local" | "ssh") => ({ ...resolution, node: { id: nodeId, kind } });
+			// A plan wider than the node runs as waves (M8); only a council, whose roster runs at once, is refused.
+			const waved = reservations.prepare({
+				topology: "parallel",
+				tasks: [
+					{ memberId: "a", wave: 0, resolution: on("local", "local") },
+					{ memberId: "b", wave: 0, resolution: on("local", "local") },
+				],
+			});
+			deepStrictEqual(
+				waved.members.map((member) => member.wave),
+				[0, 1],
+			);
 			throws(
 				() =>
 					reservations.prepare({
-						topology: "parallel",
+						topology: "council",
 						tasks: [
 							{ memberId: "a", wave: 0, resolution: on("local", "local") },
 							{ memberId: "b", wave: 0, resolution: on("local", "local") },
