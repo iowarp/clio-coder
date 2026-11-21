@@ -578,6 +578,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			termination.notice(notice);
 			void termination.shutdown(143);
 		},
+		signalNotice: (explain) => getTerminationCoordinator().explainSignal(explain),
 	});
 	const capabilityGate = createCapabilityGate();
 	const bootStdout = (text: string): void => {
