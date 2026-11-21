@@ -7,6 +7,7 @@ import {
 	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
 	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
 } from "../../src/engine/acp/types.js";
+import { THINKING_CLAMP_NOTICE_KEY } from "../../src/session-control/chat-loop-messages.js";
 import { CONTEXT_STATUS_NOTICE_KEY } from "../../src/session-control/compaction-lines.js";
 import { fakeTransport, stdioPeer } from "../harness/acp-fake-transport.js";
 
@@ -386,7 +387,7 @@ it("settles a call the output limit cut off as not run, not failed, on the wire 
 	);
 });
 
-it("projects transcript notices for plain ACP clients while keeping footer state and context status off the reply", async () => {
+it("projects transcript notices for plain ACP clients while keeping footer state, context status and the thinking clamp off the reply", async () => {
 	const status = [
 		"[context engine] working set: nothing evictable, the 1 turn is inside the protected window; llm_summary runs instead",
 		"compaction would not reduce context; checkpoint discarded (usage recorded)",
@@ -396,6 +397,8 @@ it("projects transcript notices for plain ACP clients while keeping footer state
 	];
 	// The same lead without the tag is ordinary transcript text; wording no longer decides the route.
 	const untagged = "Clio compacted nothing; this line came from an extension";
+	// M-28: the route's thinking clamp is host information, not the model's words.
+	const clamp = "low was ignored because thinking is unsupported";
 	const peer = stdioPeer();
 	const served = serveClioAcpAgent({
 		transport: peer.transport,
@@ -406,6 +409,7 @@ it("projects transcript notices for plain ACP clients while keeping footer state
 				for (const text of status)
 					emit({ type: "notice", surface: "transcript", level: "info", text, key: CONTEXT_STATUS_NOTICE_KEY });
 				emit({ type: "notice", surface: "transcript", level: "info", text: untagged });
+				emit({ type: "notice", surface: "transcript", level: "info", text: clamp, key: THINKING_CLAMP_NOTICE_KEY });
 				emit({ type: "text_delta", delta: "Done." });
 			},
 			() => {},
@@ -431,6 +435,6 @@ it("projects transcript notices for plain ACP clients while keeping footer state
 		.map((update) => (update._meta as Record<string, unknown>)["clio-coder/notice"]);
 	deepStrictEqual(
 		notices,
-		status.map((text) => ({ level: "info", text })),
+		[...status, clamp].map((text) => ({ level: "info", text })),
 	);
 });

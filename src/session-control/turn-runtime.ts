@@ -121,6 +121,7 @@ import {
 	noteWrittenCalls,
 	rebaseToolMarkupReprompt,
 	sumRunUsage,
+	THINKING_CLAMP_NOTICE_KEY,
 	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
 	toolCallLabel,
@@ -755,7 +756,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const key = `${resolution.wireModelId}|${resolution.requestedThinkingLevel}`;
 		if (announcedThinkingNotices.has(key)) return;
 		announcedThinkingNotices.add(key);
-		deps.emitNotice(notice);
+		deps.emitNotice(notice, "info", THINKING_CLAMP_NOTICE_KEY);
 	};
 
 	// A target id/model names the selection, not its current URL, auth, pricing
