@@ -240,6 +240,8 @@ function dispatchRequestFromArgs(
 	if (target) request.target = target;
 	const model = stringArg(args, "model");
 	if (model) request.model = model;
+	const continueRun = stringArg(args, "continue_run");
+	if (continueRun) request.continueRunId = continueRun;
 	const node = stringArg(args, "node");
 	if (node) request.node = node;
 	// Admission stamps the resolved tuple later, so this is the one place an unpinned request is visible.
