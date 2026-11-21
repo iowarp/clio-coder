@@ -295,8 +295,8 @@ function isIdentityValue(item: SettingsCenterItem, value: string): boolean {
 		last === "model" ||
 		last === "target" ||
 		last === "defaultModel" ||
-		item.id.startsWith("workers.profiles") ||
-		item.id.startsWith("workers.agentBindings") ||
+		item.id.startsWith("fleet.profiles") ||
+		item.id.startsWith("fleet.agentProfiles") ||
 		item.configPath === "chat.modelPicker.cycleSet"
 	);
 }

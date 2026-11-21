@@ -123,11 +123,16 @@ export function paneHostFinding(status: ToolStatus, name = "external tool herdr"
 			ok: true,
 			name,
 			level: "ok",
-			detail: `pane host ${vendored.version} (Clio's pinned copy) at ${vendored.binaryPath}`,
+			detail: `pane host ${vendored.version} (CLIO Coder's pinned copy) at ${vendored.binaryPath}`,
 		};
 	}
 	if (!status.supported) {
-		return { ok: true, name, level: "info", detail: "no pinned pane host for this platform; Clio runs without panes" };
+		return {
+			ok: true,
+			name,
+			level: "info",
+			detail: "no pinned pane host for this platform; CLIO Coder runs without panes",
+		};
 	}
 	return {
 		ok: true,

@@ -381,7 +381,7 @@ class Parser {
 				if (next === "") fail();
 				this.pos += 2;
 				literal(/[$`"\\]/u.test(next) ? next : `\\${next}`, true);
-			} else if (char === "`") parts.push({ kind: "command", script: this.readBacktick(), quoted: true });
+			} else if (char === "`") parts.push({ kind: "command", script: this.readBacktick(true), quoted: true });
 			else if (char === "$") this.readDollar(parts, literal, true);
 			else {
 				literal(char, true);
@@ -390,7 +390,8 @@ class Parser {
 		}
 	}
 
-	private readBacktick(): string {
+	/** A backtick script; inside double quotes `\"` is a quote in it too, as bash reads it. */
+	private readBacktick(inDouble = false): string {
 		let script = "";
 		this.pos += 1;
 		for (;;) {
@@ -400,7 +401,7 @@ class Parser {
 				this.pos += 1;
 				return script;
 			}
-			if (char === "\\" && /[$`\\]/u.test(this.peek(1))) {
+			if (char === "\\" && (inDouble ? /[$`\\"]/u : /[$`\\]/u).test(this.peek(1))) {
 				script += this.peek(1);
 				this.pos += 2;
 				continue;
@@ -441,7 +442,8 @@ class Parser {
 			return;
 		}
 		if (next === "'" && !quoted) {
-			const close = this.src.indexOf("'", this.pos + 2);
+			// An ANSI-C string ends at the first quote no backslash escapes: `$'\''` is one quote character.
+			const close = ansiCClose(this.src, this.pos + 2);
 			if (close === -1) fail();
 			const text = this.src.slice(this.pos + 2, close);
 			this.pos = close + 1;
@@ -487,6 +489,12 @@ class Parser {
 				continue;
 			}
 			if (char === "#") fail();
+			if (char === "$" && this.src[index + 1] === "'") {
+				const close = ansiCClose(this.src, index + 2);
+				if (close === -1) fail();
+				index = close + 1;
+				continue;
+			}
 			if (char === "'") {
 				const close = this.src.indexOf("'", index + 1);
 				if (close === -1) fail();
@@ -494,10 +502,17 @@ class Parser {
 				continue;
 			}
 			if (char === '"') {
-				// A substitution nested in these quotes has its own quoting this count cannot follow.
+				// A substitution or an operator expansion nested in these quotes has its own quoting this count cannot
+				// follow; a plain `$NAME` or `${NAME}` holds no quote or bracket.
 				index += 1;
 				while (index < this.src.length && this.src[index] !== '"') {
-					if (this.src[index] === "$" || this.src[index] === "`") fail();
+					if (this.src[index] === "`") fail();
+					if (this.src[index] === "$") {
+						const plain = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})/u.exec(this.src.slice(index));
+						if (plain === null) fail();
+						index += plain[0].length;
+						continue;
+					}
 					index += this.src[index] === "\\" ? 2 : 1;
 				}
 				if (index >= this.src.length) fail();
@@ -521,6 +536,15 @@ class Parser {
 		}
 		return fail();
 	}
+}
+
+/** The offset of the quote that closes an ANSI-C string whose text starts at `from`, past backslash escapes; -1 when none. */
+function ansiCClose(src: string, from: number): number {
+	for (let index = from; index < src.length; index += 1) {
+		if (src[index] === "\\") index += 1;
+		else if (src[index] === "'") return index;
+	}
+	return -1;
 }
 
 /** The script a command string is, or null outside the grammar this module reads. */

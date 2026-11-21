@@ -384,6 +384,9 @@ const ROLE_PURPOSE: Partial<Record<AgentRole, SurfaceId>> = { btw: "btw", handof
 
 /** The shared round. See {@link OutOfTurnRoundInput}. */
 export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
+	// Setup's test request and `systemone check --live` run this round with no providers domain started, so the wires
+	// only Clio registers (copilot-sdk, ollama-native, its openai-completions) would be missing. Idempotent (CLI-12).
+	(await import("../engine/apis/index.js")).registerClioApiProviders();
 	const purpose =
 		input.purpose ?? input.telemetry?.purpose ?? (input.telemetry ? ROLE_PURPOSE[input.telemetry.role] : undefined);
 	const scope = await openCallScope(

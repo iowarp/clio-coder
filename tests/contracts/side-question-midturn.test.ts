@@ -248,3 +248,32 @@ test("a one-shot round names the model the provider reported and invents none", 
 		provider.unregister();
 	}
 });
+
+test("a one-shot round outside a session reaches Clio's own wire APIs (setup's test request on copilot-sdk, CLI-12)", async () => {
+	// Setup and `systemone check --live` run this round with no providers domain started; before the fix it threw
+	// 'No API provider registered for api: ...' for every wire only Clio registers (copilot-sdk, ollama-native).
+	const model = {
+		id: "m",
+		name: "m",
+		api: "ollama-native",
+		provider: "ollama",
+		baseUrl: "http://127.0.0.1:9",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 8192,
+		maxTokens: 64,
+	} as never;
+	const outcome = await runOutOfTurnRound({
+		model,
+		messages: [],
+		systemPrompt: "Reply with OK.",
+		userText: "ping",
+		thinkingLevel: "off",
+		signal: AbortSignal.timeout(10_000),
+	}).then(
+		() => "answered",
+		(error: unknown) => (error instanceof Error ? error.message : String(error)),
+	);
+	assert.doesNotMatch(outcome, /No API provider registered/);
+});

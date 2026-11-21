@@ -3024,6 +3024,25 @@ describe("production compaction controls", () => {
 		await run(crowded.livePrefix, { model: sized });
 		strictEqual(crowded.tails.length, 0);
 		strictEqual(portableCalls, 4);
+
+		// A live call that stalls fails the fold: the portable request would go to the same wedged route and spend a
+		// second stall window (f-r-summary-stall).
+		const stalledTails: string[] = [];
+		const stalled: LivePrefixSummary = {
+			model: { id: model.id, provider: model.provider },
+			inputCost: () => 1,
+			inputTokens: () => 1000,
+			stream: (tail) => {
+				stalledTails.push(tail);
+				return createAssistantMessageEventStream();
+			},
+		};
+		await rejects(
+			run(async () => stalled, { summaryStall: { streamMs: 40, firstTokenMs: 40 } }),
+			/compaction summary stream stalled/,
+		);
+		strictEqual(stalledTails.length, 1);
+		strictEqual(portableCalls, 4, "no portable request follows a stalled live call");
 	});
 });
 

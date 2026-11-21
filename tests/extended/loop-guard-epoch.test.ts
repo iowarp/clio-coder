@@ -188,6 +188,25 @@ describe("loop guard identical-call epoch", () => {
 		);
 	});
 
+	it("counts a leading cd into the call's own directory as the same repeat (XR-9)", () => {
+		const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
+		const turn = "xr9";
+		const bash = (command: string): MiddlewareHookInput => ({
+			hook: "before_tool",
+			turnId: turn,
+			toolName: ToolNames.Bash,
+			toolArgs: { command },
+			metadata: { callFingerprint: hashToolCall(ToolNames.Bash, { command }) },
+		});
+		strictEqual(guard.evaluate(bash("grep -rn needle src")).length, 0);
+		strictEqual(guard.evaluate(bash(`cd ${process.cwd()} && grep -rn needle src`)).length, 0);
+		const third = guard.evaluate(bash(`cd ${process.cwd()}; grep -rn needle src`));
+		ok(
+			third.some((effect) => effect.kind === "block_tool"),
+			JSON.stringify(third),
+		);
+	});
+
 	it("lets a check rerun after a successful edit: the repeat count restarts at the write", () => {
 		const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
 		const turn = "t2";

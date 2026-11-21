@@ -5,8 +5,10 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { zstdDecompressSync } from "node:zlib";
 import { Type } from "typebox";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import openaiCodex from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
 import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
@@ -231,4 +233,48 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		await journals.flush();
 		await rm(stateDir, { recursive: true, force: true });
 	}
+});
+
+test("a Codex warm writes the prefix with generate:false and no placeholder user message (OI-7)", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "https://codex.invalid/backend-api" },
+		"gpt-6-luna",
+		null,
+	);
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const bodies: Array<{ generate?: unknown; input: Array<{ role?: string }> }> = [];
+	const response = {
+		id: "resp_warm",
+		status: "completed",
+		output: [],
+		usage: { input_tokens: 4096, output_tokens: 0, total_tokens: 4096, input_tokens_details: { cached_tokens: 0 } },
+	};
+	const fetch = async (_url: unknown, init?: RequestInit) => {
+		// Pi zstd-compresses the Codex SSE body when the runtime can.
+		const body = init?.body;
+		const text =
+			new Headers(init?.headers).get("content-encoding") === "zstd"
+				? zstdDecompressSync(body as Uint8Array).toString("utf8")
+				: String(body);
+		bodies.push(JSON.parse(text));
+		const events = [
+			{ type: "response.created", response: { ...response, status: "in_progress" } },
+			{ type: "response.completed", response },
+		];
+		return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+	};
+	const result = await runPrewarmRound({
+		model,
+		state: { systemPrompt: "# Identity", messages: [], tools: [], thinkingLevel: "low" },
+		apiKey: `e30.${claims.toString("base64url")}.signature`,
+		streamFn: (currentModel, context, options) =>
+			streamSimple(currentModel, context, { ...options, transport: "sse", fetch } as never),
+	});
+	strictEqual(result.errorMessage, null);
+	strictEqual(bodies[0]?.generate, false);
+	ok(!bodies[0]?.input.some((item) => item.role === "user"), JSON.stringify(bodies[0]?.input));
+	strictEqual(result.usage?.input, 4096);
 });
