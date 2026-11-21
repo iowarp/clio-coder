@@ -1,3 +1,4 @@
+import { installBrowserComponent } from "../domains/lifecycle/browser-component.js";
 import { installClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { installCopilotSdk } from "../domains/lifecycle/copilot-sdk-install.js";
 import { describeYaziProfile, inspectCurrentYaziProfile, resetYaziProfile } from "../domains/mux/index.js";
@@ -32,6 +33,7 @@ Commands:
                                            open (yazi)
   clio-coder tools install claude-sdk      provision the separate Claude SDK component
   clio-coder tools install copilot-sdk     provision the separate GitHub Copilot SDK component
+  clio-coder tools install browser         provision the browser tool's playwright-core and headless shell
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
   clio-coder tools remove <id>|--all [--json]  delete every vendored version of a tool
 
@@ -127,6 +129,27 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 					const path = await installCopilotSdk();
 					if (parsed.json) process.stdout.write(`${JSON.stringify({ id: "copilot-sdk", path })}\n`);
 					else printOk(`Copilot SDK component available at ${path}`);
+					return 0;
+				} catch (error) {
+					printError(error instanceof Error ? error.message : String(error));
+					return 1;
+				}
+			}
+			if (parsed.positional[0] === "browser") {
+				if (parsed.force || parsed.positional.length !== 1) {
+					return usageFailure(
+						"install",
+						"usage",
+						"browser installation accepts no extra arguments or --force; pinned versions have separate locations.",
+						parsed.json,
+					);
+				}
+				try {
+					const component = await installBrowserComponent(
+						parsed.json ? {} : { onProgress: (message) => process.stderr.write(`  ${message}\n`) },
+					);
+					if (parsed.json) process.stdout.write(`${JSON.stringify({ id: "browser", path: component.prefix })}\n`);
+					else printOk(`Browser component available at ${component.prefix}`);
 					return 0;
 				} catch (error) {
 					printError(error instanceof Error ? error.message : String(error));
