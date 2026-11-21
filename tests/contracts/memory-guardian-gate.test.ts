@@ -14,6 +14,7 @@ import {
 	recordClaimSession,
 	recordMemoryObservations,
 } from "../../src/domains/memory/guardian-gate.js";
+import { checkoutDeliveryCheck } from "../../src/domains/memory/lesson-projection.js";
 import {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
@@ -270,6 +271,22 @@ describe("memory guardian gate", () => {
 		const out = `node fixture.mjs --out ${join(tmpdir(), "elsewhere", "out.txt")}`;
 		await rejects(session("s10", { kind: "command", command: pattern(out) }, []), /outside its repository/u);
 		strictEqual(claimPathRefusal({ kind: "command", command: pattern(out, 3) }, repo), null);
+		// CLI-P25: a stored lesson binding a path outside its checkout, written before the write-time rule, is refused at
+		// delivery too, so it reaches no session's prompt or reminder.
+		const bound: MemoryRecord = {
+			id: "mem-00000000000000b1",
+			scope: "repo",
+			key: "bound",
+			lesson: `Write the report with \`${out}\`.`,
+			evidenceRefs: [commandEvidenceRef(out)],
+			appliesWhen: [],
+			avoidWhen: [],
+			confidence: 0.6,
+			createdAt: "2026-10-01T00:00:00.000Z",
+			approved: true,
+			repository: { kind: "canonical-path", key: repo },
+		};
+		ok(checkoutDeliveryCheck(repo)(bound)?.includes("outside its repository checkout"));
 
 		// The legacy reader: a store written before claims is read as it is, and its first mutation keeps the count.
 		const legacyDir = scratch();
