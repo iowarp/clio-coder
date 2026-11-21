@@ -2177,7 +2177,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Effects and grounding come from the capability operations that
 		// settled: a gateway op=call as the capability it ran, a chain as each
 		// admitted child, once each. Provider replay keeps the wire records.
-		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+		// The result submission is this run's handoff, never a workspace call, so it opens no write record (C-14).
+		if (
+			(event.type === "tool_execution_start" || event.type === "tool_execution_end") &&
+			!(helperToolAvailable && event.toolName === INTERNAL_HELPER_RESULT_TOOL)
+		) {
 			recordToolExecutionEffects(runEffects, event);
 		}
 		if (event.type === "tool_execution_start") {
