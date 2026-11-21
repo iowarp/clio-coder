@@ -5,7 +5,7 @@
 // task list and a composer, not ten equally weighted destinations.
 
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
-import type { SessionSnapshot, SessionSummary } from "../../contracts/sessions.js";
+import type { LiveElsewhere, SessionSnapshot, SessionSummary } from "../../contracts/sessions.js";
 import { isAwaitingAnswer } from "../chat/permission-state.js";
 
 export type TaskState =
@@ -43,6 +43,8 @@ export interface TaskRow {
 	readonly state: TaskState;
 	/** ISO time of the latest activity, when one is known. */
 	readonly at: string | undefined;
+	/** A saved task another process holds open; opening it shows its history and a Take over choice. */
+	readonly liveElsewhere?: LiveElsewhere;
 }
 
 export const NEW_TASK_TITLE = "New task";
@@ -189,6 +191,7 @@ export function taskRows(
 					open: false,
 					state: "idle",
 					at: row.lastActivityAt ?? row.createdAt,
+					...(row.liveElsewhere ? { liveElsewhere: row.liveElsewhere } : {}),
 				}),
 			),
 	];

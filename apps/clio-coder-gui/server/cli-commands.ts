@@ -47,6 +47,7 @@ export const CliCommand = Type.Union([
 	Type.Object({ kind: Type.Literal("trust.approve"), surface: TrustSurface, hash: Sha256 }, closed),
 	Type.Object({ kind: Type.Literal("memory.list") }, closed),
 	Type.Object({ kind: Type.Literal("memory.decide"), id: MemoryId, decision: MemoryDecision }, closed),
+	Type.Object({ kind: Type.Literal("session.terminate"), id: Id, force: Type.Boolean() }, closed),
 ]);
 export type CliCommand = Static<typeof CliCommand>;
 /** The only admitted CLI argv. There is no generic command or extra-arguments escape hatch. */
@@ -187,5 +188,19 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 			return { argv: ["memory", "list", "--json"], output: "json" };
 		case "memory.decide":
 			return { argv: ["memory", input.decision, input.id], output: "exit" };
+		case "session.terminate":
+			// The holder ends itself and says who asked; --force only for a stale owner, which a request never reaches.
+			return {
+				argv: [
+					"session",
+					"terminate",
+					input.id,
+					...(input.force ? ["--force"] : []),
+					"--reason",
+					"taken over in the CLIO Coder desktop app",
+					"--json",
+				],
+				output: "json",
+			};
 	}
 }

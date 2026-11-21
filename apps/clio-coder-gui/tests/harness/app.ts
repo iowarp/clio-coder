@@ -89,8 +89,8 @@ export async function harness(
 		options.parkAfterMs,
 	);
 	await supervisor.reconcile();
-	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(cliEnv);
+	const sessions = new SessionService(supervisor, workspaces, reads, cli);
 	// Wired as the server wires it: a written turn limit is re-read from the user layer and applied.
 	const settingsService: SettingsService = new SettingsService(reads, workspaces, ops, () =>
 		realpath(join(home.path, "state"))

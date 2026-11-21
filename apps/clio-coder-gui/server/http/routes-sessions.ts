@@ -207,6 +207,12 @@ export function sessionRoutes(
 			return opened;
 		}),
 	);
+	register(app, hub, routes.storedTranscript, ({ params }) => sessions.transcript(params.id, params.sessionId));
+	register(app, hub, routes.takeOverSession, ({ params }, context) =>
+		commands.run(`session.take-over:${params.sessionId}`, idempotencyKey(context), params, () =>
+			sessions.takeOver(params.id, params.sessionId),
+		),
+	);
 	register(app, hub, routes.loadSession, ({ params, body }, context) =>
 		commands.run(`session.load:${params.id}`, idempotencyKey(context), body, async () => {
 			const loaded = await sessions.load(body.workspaceId, params.id);

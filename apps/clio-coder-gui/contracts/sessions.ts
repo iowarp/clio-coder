@@ -105,6 +105,40 @@ export const WorkspacePick = Type.Union([
 	),
 ]);
 export type WorkspacePick = Static<typeof WorkspacePick>;
+/**
+ * Another process holds this saved session open: a terminal, a headless run, or another app. The app reads its
+ * history but sends nothing into it until the operator takes it over (#439).
+ */
+export const LiveElsewhere = Type.Object(
+	{
+		surface: Type.Union([
+			Type.Literal("terminal"),
+			Type.Literal("headless"),
+			Type.Literal("app"),
+			Type.Literal("process"),
+		]),
+		since: string,
+		host: Type.String({ maxLength: 255 }),
+		pid: Type.Integer({ minimum: 1 }),
+		/** Its heartbeat is older than the stale bound, so only a forced release frees it. */
+		stale: Type.Boolean(),
+		/** A live record exists, which is what `session terminate` acts on. */
+		canTakeOver: Type.Boolean(),
+	},
+	closed,
+);
+export type LiveElsewhere = Static<typeof LiveElsewhere>;
+/** A saved session's history as Markdown, read from its ledger without starting an engine for it. */
+export const StoredTranscript = Type.Object(
+	{ markdown: Type.String({ maxLength: 1_048_576 }), turns: Type.Integer({ minimum: 0 }), truncated: Type.Boolean() },
+	closed,
+);
+export type StoredTranscript = Static<typeof StoredTranscript>;
+export const TakeOverResult = Type.Object(
+	{ released: Type.Boolean(), message: Type.String({ maxLength: 2048 }) },
+	closed,
+);
+export type TakeOverResult = Static<typeof TakeOverResult>;
 export const SessionSummary = Type.Object(
 	{
 		id: Id,
@@ -117,6 +151,7 @@ export const SessionSummary = Type.Object(
 		firstMessagePreview: Type.Optional(string),
 		messageCount: Type.Optional(Type.Integer()),
 		lastActivityAt: Type.Optional(string),
+		liveElsewhere: Type.Optional(LiveElsewhere),
 	},
 	closed,
 );

@@ -111,6 +111,8 @@ import {
 	PathCompletion,
 	SessionSnapshot,
 	SessionSummary,
+	StoredTranscript,
+	TakeOverResult,
 	Workspace,
 	WorkspacePick,
 } from "./sessions.js";
@@ -1094,6 +1096,21 @@ export const routes = {
 		response: SessionSnapshot,
 		summary: "Load a durable session and project its replay",
 		...runtimeRoutes.loadSession,
+	}),
+	storedTranscript: defineRoute({
+		...get,
+		params: Type.Object({ id: Id, sessionId: Id }, { additionalProperties: false }),
+		response: StoredTranscript,
+		summary: "A saved session's history as Markdown, read from its ledger without starting an engine",
+		...runtimeRoutes.storedTranscript,
+	}),
+	takeOverSession: defineRoute({
+		...post,
+		status: 200,
+		params: Type.Object({ id: Id, sessionId: Id }, { additionalProperties: false }),
+		response: TakeOverResult,
+		summary: "End the other process holding a saved session (clio-coder session terminate) so this app can resume it",
+		...runtimeRoutes.takeOverSession,
 	}),
 	sessions: defineRoute({
 		...get,

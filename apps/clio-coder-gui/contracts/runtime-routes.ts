@@ -147,6 +147,16 @@ export const routes = {
 	sessionHistory: { name: "sessionHistory", method: "GET", path: "/api/workspaces/:id/sessions" },
 	newSession: { name: "newSession", method: "POST", path: "/api/workspaces/:id/sessions" },
 	loadSession: { name: "loadSession", method: "POST", path: "/api/sessions/:id/load" },
+	storedTranscript: {
+		name: "storedTranscript",
+		method: "GET",
+		path: "/api/workspaces/:id/sessions/:sessionId/transcript",
+	},
+	takeOverSession: {
+		name: "takeOverSession",
+		method: "POST",
+		path: "/api/workspaces/:id/sessions/:sessionId/take-over",
+	},
 	sessions: { name: "sessions", method: "GET", path: "/api/sessions" },
 	sessionOverview: { name: "sessionOverview", method: "GET", path: "/api/sessions/overview" },
 	session: { name: "session", method: "GET", path: "/api/sessions/:id" },
