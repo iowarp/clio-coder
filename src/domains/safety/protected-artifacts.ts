@@ -4,6 +4,7 @@ import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-c
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { isSameOrDescendant } from "./path-policy.js";
+import { FILE_WRITER_COMMANDS, isRefusedValidationWrapper, validationWrapperProblem } from "./validation-wrappers.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -1913,7 +1914,13 @@ const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "pushd", "popd", "
 interface ShellStep {
 	tokens: ShellToken[];
 	argv: string[];
+	/** The command word: what the step runs as written, wrappers included, for every reader but a check's. */
 	index: number | null;
+	/**
+	 * The word a check reader judges: `index`, or past a transparent prefix or a declared wrapper when the command behind
+	 * it is a check (FX-44). It names the check only; what the step writes or deletes is read from `index`.
+	 */
+	check: number | null;
 	/** The separator joining this step to the next; `""` where two separators meet, null for the last step. */
 	joinedBy: string | null;
 	/** Subshells `(` opened right before this step, and closed `)` right after it. */
@@ -1932,9 +1939,10 @@ function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
 		if (previous !== undefined) previous.joinedBy = separator;
 		separator = null;
 		const argv = shellCommandArguments(current);
+		const index = commandTokenIndex(argv);
 		// A step that runs a check behind a transparent prefix or a declared wrapper is read as that check (FX-44).
-		const index = checkIndexThrough(argv, commandTokenIndex(argv), checkStepMatch);
-		steps.push({ tokens: current, argv, index, joinedBy: null, opens, closes: 0 });
+		const check = checkIndexThrough(argv, index, checkStepMatch);
+		steps.push({ tokens: current, argv, index, check, joinedBy: null, opens, closes: 0 });
 		opens = 0;
 		current = [];
 	};
@@ -1976,10 +1984,10 @@ export interface CommandStep {
 export function commandSteps(command: string): CommandStep[] {
 	return shellSteps(scanShellLike(command, true)).map((step) => {
 		let start = 0;
+		// Read through the same prefixes a check reader does, so `/usr/bin/timeout 300 npm test` is `npm test` (FX-44).
 		for (let past = -1; past !== start; ) {
 			past = start;
-			if (step.argv[start] === "time") start += step.argv[start + 1] === "-p" ? 2 : 1;
-			start = pastTransparentWrapper(step.argv, start);
+			start = pastIdentityPrefix(step.argv, start);
 		}
 		const literal = shellCommandWords(step.tokens).every((token) => {
 			if (token.substitutions?.length || token.hiddenContent || token.ansiCQuoted || token.homeRelative) return false;
@@ -1998,7 +2006,7 @@ export function commandSteps(command: string): CommandStep[] {
 }
 
 function isCheckStep(step: ShellStep): boolean {
-	return step.index !== null && checkStepMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1));
+	return step.check !== null && checkStepMatch(basenameToken(step.argv[step.check]), step.argv.slice(step.check + 1));
 }
 
 function checkStepMatch(executable: string, args: ReadonlyArray<string>): boolean {
@@ -2038,29 +2046,7 @@ const PACKAGE_WRITES: ReadonlySet<string> = new Set([
 ]);
 
 /** Commands whose run writes, moves, removes or re-permissions files whatever their operands. */
-const FILE_WRITERS: ReadonlySet<string> = new Set([
-	"cp",
-	"mv",
-	"rm",
-	"rmdir",
-	"mkdir",
-	"touch",
-	"ln",
-	"chmod",
-	"chown",
-	"chgrp",
-	"truncate",
-	"patch",
-	"dd",
-	"install",
-	"rsync",
-	"unzip",
-	"tar",
-	"shred",
-	"unlink",
-	"tee",
-	"wget",
-]);
+const FILE_WRITERS: ReadonlySet<string> = FILE_WRITER_COMMANDS;
 
 /** Toolchain subcommands that write the tree: dependency edits, generators and in-place formatters. */
 const TOOLCHAIN_WRITES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
@@ -2553,11 +2539,13 @@ export function checkCommandShape(
 		collectRedirectTargets(step.tokens, writes);
 		const check = isCheck(step, index);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		// The check's own words decide what it writes; the step's words, wrapper included, decide everything else (FX-44).
+		const checkArgv = step.check === null ? [] : step.argv.slice(step.check);
 		// A report, coverage directory or binary the check writes by its own options is judged as its logs are (SF-2).
-		if (check) writes.push(...checkReportTargets(argv, directory));
+		if (check) writes.push(...checkReportTargets(checkArgv, directory));
 		const readOnly =
 			step.index === null ||
-			(check && !checkWritesTree(argv) && !updatesGoldensByEnv(step.argv.slice(0, step.index))) ||
+			(check && !checkWritesTree(checkArgv) && !updatesGoldensByEnv(step.argv.slice(0, step.check ?? 0))) ||
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
 			(basenameToken(argv[0]) === "tee" && pathArgs(argv, 0).every(isOutput)) ||
 			readOnlyInspectionStep(argv, gitHelpersConfigured, stepGitCwd(step, gitCwd));
@@ -2599,7 +2587,9 @@ export function checkLogTargets(
 		const check = isCheckStep(step) || declaredSteps.has(index);
 		checked ||= check;
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
-		if (check) for (const target of checkReportTargets(argv, directory)) logs.add(target);
+		if (check)
+			for (const target of checkReportTargets(step.argv.slice(step.check ?? step.argv.length), directory))
+				logs.add(target);
 		if (checked && basenameToken(argv[0]) === "tee") for (const target of pathArgs(argv, 0)) logs.add(target);
 		if (step.joinedBy === "|") continue;
 		if (checked) {
@@ -2992,8 +2982,8 @@ function someCheckStep(
 		const executable = step.index === null ? "" : basenameToken(step.argv[step.index]);
 		const target = cdTarget(step.argv);
 		if (isCheckStep(step)) {
-			const prefix = step.argv.slice(0, step.index ?? 0);
-			if (test(step.argv.slice(step.index ?? 0), wrapperMovesDirectory(prefix) ? null : directory)) return true;
+			const prefix = step.argv.slice(0, step.check ?? 0);
+			if (test(step.argv.slice(step.check ?? 0), wrapperMovesDirectory(prefix) ? null : directory)) return true;
 		} else if (executable === "popd")
 			directory = step.argv.length > (step.index ?? 0) + 1 ? null : (pushed.pop() ?? null);
 		else if (target !== null) {
@@ -3015,12 +3005,24 @@ function someCheckStep(
  */
 function wrapperMovesDirectory(prefix: ReadonlyArray<string>): boolean {
 	let wrapper = "";
-	for (const word of prefix) {
+	for (let position = 0; position < prefix.length; position += 1) {
+		const word = prefix[position] ?? "";
 		const name = basenameToken(word);
-		if (name === "env" || name === "sudo" || name === "doas") wrapper = name;
-		else if (/^--(?:chdir|split-string)(?:=|$)/u.test(word)) return true;
-		else if (wrapper === "env" && /^-[a-zA-Z]*[CS]/u.test(word)) return true;
-		else if (wrapper === "sudo" && /^-[a-zA-Z]*D/u.test(word)) return true;
+		if (name === "env" || name === "sudo" || name === "doas") {
+			wrapper = name;
+			continue;
+		}
+		if (wrapper === "") continue;
+		if (/^--(?:chdir|split-string)(?:=|$)/u.test(word)) return true;
+		if (wrapper === "env" && /^-[a-zA-Z]*[CS]/u.test(word)) return true;
+		if (wrapper === "sudo" && /^-[a-zA-Z]*D/u.test(word)) return true;
+		if (word.startsWith("-")) {
+			if ((wrapper === "env" ? ENV_VALUE_OPTIONS : PRIVILEGE_VALUE_OPTIONS).has(word)) position += 1;
+			continue;
+		}
+		if (wrapper === "env" && isEnvAssignment(word)) continue;
+		// The wrapper's options end at the command it runs, so a later word's flags are that command's own.
+		wrapper = "";
 	}
 	return false;
 }
@@ -4644,9 +4646,12 @@ function commandTokenIndex(segment: ReadonlyArray<string>, start = 0): number | 
 			continue;
 		}
 		if (SHELL_WRAPPERS.has(token)) {
+			const wrapperIndex = index;
 			index += 1;
 			const valued = token === "sudo" || token === "doas" ? PRIVILEGE_VALUE_OPTIONS : undefined;
 			for (let option = segment[index]; option?.startsWith("-") === true; option = segment[index]) {
+				// `command -v` and `-V` only describe the names after them, so `command` itself is what runs.
+				if (token === "command" && /^-[a-zA-Z]*[vV]/u.test(option)) return wrapperIndex;
 				index += valued?.has(option) === true ? 2 : 1;
 				if (option === "--") break;
 			}
@@ -4741,31 +4746,42 @@ const TRANSPARENT_WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 	],
 ]);
 
+const NO_WRAPPERS = (): ReadonlyArray<string> => [];
+
 /**
  * `safety.validationWrappers` (FX-44): repository scripts that run a check with the words after them. The safety
- * domain sets the main session's list from live settings, and a worker sets its own at start.
+ * domain points it at the live settings, so a reader always sees the change a hot reload made, and resets it when it
+ * stops; a worker fixes its own list at start.
  */
-let validationWrappers: ReadonlyArray<string> = [];
+let validationWrappers: () => ReadonlyArray<string> = NO_WRAPPERS;
 
-export function setValidationWrappers(entries: ReadonlyArray<string>): void {
-	validationWrappers = entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+export function setValidationWrappers(source: ReadonlyArray<string> | (() => ReadonlyArray<string>)): void {
+	if (typeof source === "function") {
+		validationWrappers = source;
+		return;
+	}
+	const fixed = [...source];
+	validationWrappers = fixed.length === 0 ? NO_WRAPPERS : () => fixed;
 }
 
 /** The wrapper list in force, for a cache whose readings depend on it. */
 export function validationWrappersInForce(): ReadonlyArray<string> {
-	return validationWrappers;
+	return validationWrappers();
 }
 
-/** Commands that print their words and run none of them, so no list can make them a wrapper. */
-const NEVER_WRAPPERS: ReadonlySet<string> = new Set(["echo", "printf"]);
-
-/** Whether `word` names a declared wrapper: a bare entry by basename, an entry with a slash by that path or its tail. */
+/**
+ * Whether `word` names a declared wrapper: a bare entry by basename, an entry with a slash by that path or its tail.
+ * An entry or word the shared list refuses (a file writer, a shell, `echo`, `true`, `xargs`, `command`...) never
+ * matches, whatever the settings say.
+ */
 function isValidationWrapper(word: string): boolean {
-	if (validationWrappers.length === 0) return false;
+	const entries = validationWrappers();
+	if (entries.length === 0) return false;
 	const name = basenameToken(word);
-	if (name === "" || NEVER_WRAPPERS.has(name)) return false;
+	if (name === "" || isRefusedValidationWrapper(word)) return false;
 	const spelled = word.replace(/\\/gu, "/").replace(/^(?:\.\/)+/u, "");
-	return validationWrappers.some((entry) => {
+	return entries.some((entry) => {
+		if (validationWrapperProblem(entry) !== null) return false;
 		const wanted = entry.replace(/\\/gu, "/").replace(/^(?:\.\/)+/u, "");
 		if (!wanted.includes("/")) return wanted.toLowerCase() === name;
 		return spelled === wanted || (!wanted.startsWith("/") && spelled.endsWith(`/${wanted}`));
@@ -4788,30 +4804,60 @@ function pastCheckPrefix(segment: ReadonlyArray<string>, index: number): number 
 	const word = segment[index];
 	if (word === undefined) return index;
 	const name = basenameToken(word);
-	// The reserved word `time` stands before `index` when its first option was not `-p`.
-	const timeOptions = name === "time" ? index + 1 : segment[index - 1] === "time" && word.startsWith("-") ? index : -1;
-	if (timeOptions >= 0) {
-		let next = timeOptions;
-		for (let option = segment[next]; option?.startsWith("-") === true; option = segment[next]) {
-			if (option === "--") return next + 1;
-			if (TIME_VALUE_OPTIONS.has(option)) next += 2;
-			else if (TIME_FLAG_OPTIONS.has(option) || option.startsWith("--format=")) next += 1;
-			else return index;
-		}
-		return next;
-	}
+	// After the reserved word `time` (and the `-p` commandTokenIndex consumed with it) its options stand at `index`.
+	const afterTime =
+		word.startsWith("-") &&
+		(segment[index - 1] === "time" || (segment[index - 1] === "-p" && segment[index - 2] === "time"));
+	if (name === "time" || afterTime) return pastTimeOptions(segment, name === "time" ? index + 1 : index) ?? index;
 	if (name !== word && PATH_SPELLED_WRAPPERS.has(name)) {
 		const spelled = [...segment];
 		spelled[index] = name;
 		return commandTokenIndex(spelled, index) ?? index;
 	}
-	if (!isValidationWrapper(word)) return index;
+	return isValidationWrapper(word) ? pastWrapperOptions(segment, index) : index;
+}
+
+/** The index past GNU time's options from `start`, or null when one is not a reader-safe option (`-o FILE`). */
+function pastTimeOptions(segment: ReadonlyArray<string>, start: number): number | null {
+	let next = start;
+	for (let option = segment[next]; option?.startsWith("-") === true; option = segment[next]) {
+		if (option === "--") return next + 1;
+		if (TIME_VALUE_OPTIONS.has(option)) next += 2;
+		else if (TIME_FLAG_OPTIONS.has(option) || option.startsWith("--format=")) next += 1;
+		else return null;
+	}
+	return next;
+}
+
+/** The index past a declared wrapper at `index` and its leading options. */
+function pastWrapperOptions(segment: ReadonlyArray<string>, index: number): number {
 	let next = index + 1;
 	for (let option = segment[next]; option?.startsWith("-") === true; option = segment[next]) {
 		next += 1;
 		if (option === "--") break;
 	}
 	return next;
+}
+
+/**
+ * The index past one prefix a check's identity is read through (FX-44): `time` with its options, a transparent
+ * wrapper bare or spelled with a path, and a declared wrapper when a check stands behind it. Environment words stay
+ * part of the identity, so `env CI=1 npm test` and `CI=1 npm test` keep their own names (bt-27).
+ */
+function pastIdentityPrefix(argv: ReadonlyArray<string>, start: number): number {
+	const word = argv[start];
+	if (word === undefined) return start;
+	const name = basenameToken(word);
+	if (name === "time") return pastTimeOptions(argv, start + 1) ?? start;
+	if (name !== "env" && PATH_SPELLED_WRAPPERS.has(name)) {
+		const spelled = [...argv];
+		spelled[start] = name;
+		return pastTransparentWrapper(spelled, start);
+	}
+	if (name === "corepack") return pastTransparentWrapper(argv, start);
+	return isValidationWrapper(word) && checkIndexThrough(argv, start, checkStepMatch) !== start
+		? pastWrapperOptions(argv, start)
+		: start;
 }
 
 /** Prefixes looked through in one segment; deeper nesting is read as written. */

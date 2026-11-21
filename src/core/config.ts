@@ -18,6 +18,7 @@ import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS, YOLO_CONFINEMENTS } from "../domains/safety/autonomy.js";
 import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
+import { validationWrapperProblem } from "../domains/safety/validation-wrappers.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
@@ -2470,9 +2471,9 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const parsed = expectStringArray(issues, "safety.validationWrappers", safety.validationWrappers);
 				if (parsed !== undefined) {
 					settings.safety.validationWrappers = parsed.filter((entry) => {
-						const valid = entry.trim().length > 0 && entry === entry.trim();
-						if (!valid) issues.add("safety.validationWrappers", `${JSON.stringify(entry)}: not a script path or name`);
-						return valid;
+						const problem = validationWrapperProblem(entry);
+						if (problem !== null) issues.add("safety.validationWrappers", `${JSON.stringify(entry)}: ${problem}`);
+						return problem === null;
 					});
 				}
 			}

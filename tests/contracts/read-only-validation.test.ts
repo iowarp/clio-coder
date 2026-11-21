@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { it } from "node:test";
 import { mapExitCode } from "../../src/cli/run.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
 import {
 	parseVerifierResult,
 	resultContractShape,
@@ -22,6 +23,7 @@ import {
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { type CallVerdict, classifyCall, settleCheckCall } from "../../src/domains/safety/check-classifier.js";
+import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { extractCommandDeleteTargets, setValidationWrappers } from "../../src/domains/safety/protected-artifacts.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -1401,7 +1403,7 @@ it("a probe importing the workspace's module, `exit 0; npm test` and `cd pkg; np
 		deepStrictEqual(after(command), [], command);
 });
 
-it("wrapped and alternate spellings of a check read as that check, and a green after an edit settles the gate", () => {
+it("wrapped and alternate spellings of a check read as that check, and a green after an edit settles the gate", async () => {
 	const cwd = process.cwd();
 	const read = (command: string) => classifyCall("bash", { command }, { cwd, outputTarget: checkOutputReader(cwd) });
 	const gate = (command: string) => {
@@ -1489,7 +1491,7 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 	deepStrictEqual(extractCommandDeleteTargets("timeout 5 rm -rf build"), ["build"]);
 	// FX-44: a declared wrapper, by path tail or basename, is read through to the check it runs, and the whole command's
 	// exit is that check's; an undeclared script, a wrapper running no check, echo and printf stay unvalidated.
-	setValidationWrappers([".mine/bin/test-slot.sh", "ci.sh", "echo"]);
+	setValidationWrappers([".mine/bin/test-slot.sh", "ci.sh", "echo", "unlink"]);
 	try {
 		for (const command of [
 			"/repo/.mine/bin/test-slot.sh corepack pnpm -s run test:file tests/a.test.ts",
@@ -1507,12 +1509,32 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 			"ci.sh echo npm test",
 			"echo npm test",
 			"printf npm test",
+			// A declared entry the shared list refuses (a file writer, a shell, true, xargs) never stands for a check.
+			"unlink pytest",
 		])
 			strictEqual(gate(command), "engage/unvalidated_mutation", command);
 	} finally {
 		setValidationWrappers([]);
 	}
 	strictEqual(gate("./scripts/ci.sh npm test"), "engage/unvalidated_mutation");
+	// `command -v` only resolves the names after it, so it runs no check.
+	strictEqual(gate("command -v npm test"), "engage/unvalidated_mutation");
+	// The safety domain reads the list from live settings and leaves none behind when it stops.
+	const safety = createSafetyBundle({
+		bus: { subscribe: () => () => {}, emit: () => {} },
+		getContract: (name: string) =>
+			name === "config"
+				? { get: () => ({ safety: { validationWrappers: ["ci.sh"] } }), onChange: () => () => {} }
+				: undefined,
+	} as unknown as DomainContext);
+	try {
+		await safety.extension.start();
+		strictEqual(gate("ci.sh npm test"), "ok/validation_evidence");
+		await safety.extension.stop?.();
+		strictEqual(gate("ci.sh npm test"), "engage/unvalidated_mutation");
+	} finally {
+		setValidationWrappers([]);
+	}
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

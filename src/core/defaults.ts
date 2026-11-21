@@ -726,7 +726,8 @@ export interface SafetySettings {
 	 * a bare name matches the script's basename. The wrapper and its leading
 	 * options are skipped, so `scripts/test-slot.sh pnpm run test:file x`
 	 * counts as the check it runs; the whole command's exit still decides the
-	 * result. echo and printf are never wrappers.
+	 * result. A file writer, a shell, or a word that runs no check of its words
+	 * (echo, printf, true, xargs, command) is never a wrapper.
 	 */
 	validationWrappers: string[];
 	/**
