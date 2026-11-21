@@ -93,13 +93,75 @@ function stdoutTargets(command: ShellSimpleCommand): string[] | null {
 	return targets;
 }
 
+/** `git commit` flags that take no value and read nothing (`-p`, `-e` and `--interactive` read the terminal). */
+const COMMIT_FLAGS: ReadonlySet<string> = new Set([
+	"--all",
+	"--quiet",
+	"--verbose",
+	"--signoff",
+	"--no-signoff",
+	"--no-verify",
+	"--allow-empty",
+	"--allow-empty-message",
+	"--no-edit",
+	"--amend",
+	"--no-post-rewrite",
+	"--no-gpg-sign",
+	"--reset-author",
+	"--only",
+	"--include",
+	"--status",
+	"--no-status",
+]);
+const COMMIT_SHORT_FLAGS = /^[aqvsnoi]$/u;
+/** `git commit` options whose value is the next word or follows `=`; `--file` is the message source. */
+const COMMIT_VALUES: ReadonlySet<string> = new Set(["--file", "--author", "--date", "--cleanup", "--trailer"]);
+
+/**
+ * Whether `git commit` arguments (after `commit`) read standard input only as the message: one `-F`/`--file` whose
+ * value is `-`, every other option known and its value consumed, so `-m --file=-` or `--author=-F-` is a value, not
+ * a message source. Any other option (`--pathspec-from-file`, `-p`, an abbreviation) fails the reading.
+ */
+export function gitCommitReadsStdinAsMessage(args: ReadonlyArray<string>): boolean {
+	let files = 0;
+	let stdin = false;
+	const take = (option: string, value: string | undefined): boolean => {
+		if (value === undefined) return false;
+		if (option === "--file") {
+			files += 1;
+			stdin = value === "-";
+		}
+		return true;
+	};
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] as string;
+		if (arg === "--") break;
+		if (!arg.startsWith("-") || arg === "-") continue;
+		if (arg.startsWith("--")) {
+			const equals = arg.indexOf("=");
+			const option = equals === -1 ? arg : arg.slice(0, equals);
+			if (COMMIT_FLAGS.has(arg)) continue;
+			if (!COMMIT_VALUES.has(option)) return false;
+			if (equals === -1) index += 1;
+			if (!take(option, equals === -1 ? args[index] : arg.slice(equals + 1))) return false;
+			continue;
+		}
+		// A short cluster: flags, then at most one `F` whose value is the rest of the word or the next one.
+		for (let at = 1; at < arg.length; at += 1) {
+			const flag = arg[at] as string;
+			if (COMMIT_SHORT_FLAGS.test(flag)) continue;
+			if (flag !== "F") return false;
+			const attached = at + 1 < arg.length;
+			if (!attached) index += 1;
+			if (!take("--file", attached ? arg.slice(at + 1) : args[index])) return false;
+			break;
+		}
+	}
+	return files === 1 && stdin;
+}
+
 function readsAsMessage(args: ReadonlyArray<string>): boolean {
-	if (args[0] !== "commit") return false;
-	const options = args.indexOf("--") === -1 ? args : args.slice(0, args.indexOf("--"));
-	return options.some(
-		(arg, index) =>
-			arg === "--file=-" || arg === "-F-" || ((arg === "-F" || arg === "--file") && options[index + 1] === "-"),
-	);
+	return args[0] === "commit" && gitCommitReadsStdinAsMessage(args.slice(1));
 }
 
 interface DataReading {

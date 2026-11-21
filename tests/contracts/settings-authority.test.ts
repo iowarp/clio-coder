@@ -124,6 +124,10 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		// A step that opens the names a copied body holds.
 		"cat <<'EOF' > f && head -c 4 f | wc --files0-from=-\n.env\nEOF",
 		"cat <<'EOF' > f && head -c 4 f > f2 && wc --files0-from=f2\n.env\nEOF",
+		// A `--file=-` that is another option's value, and a commit that reads its stdin as pathspecs.
+		"git commit -v -m --file=- --pathspec-from-file=- <<'EOF'\n.env\nEOF",
+		"git commit -m -F- --pathspec-from-file=- <<'EOF'\n.env\nEOF",
+		"git commit --author=-F- --pathspec-from-file=- <<'EOF'\n.env\nEOF",
 		"wc -c < nope.key",
 		"if head nope.key; then :; fi",
 		"od -c *.key",
