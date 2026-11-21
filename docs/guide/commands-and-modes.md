@@ -200,7 +200,7 @@ session CLIO Coder is already inside. The pane contracts are in
 | `gui background restart [--if-idle]` | Load a newly installed version; `--if-idle` leaves the service alone while work or a conversation is open. |
 | `gui launcher install\|status\|uninstall` | Manage a desktop entry. |
 
-macOS and native Windows run the private server only, and Windows prints the link instead of opening it. The graphical application needs a build that includes it: without `dist/gui/server.js` the command exits 2. The application's pages, guided setup, settings and attended-session behavior are in the [GUI guide](gui.md).
+Background install uses a systemd user unit on Linux, a launchd agent on macOS and a logon task on native Windows. On native Windows `gui` prints the link instead of opening it unless `--open` is given. The graphical application needs a build that includes it: without `dist/gui/server.js` the command exits 2. The application's pages, guided setup, settings and attended-session behavior are in the [GUI guide](gui.md).
 
 ### Project trust
 
