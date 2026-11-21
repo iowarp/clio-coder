@@ -66,7 +66,12 @@ import {
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
 import { findLastEntry } from "../tree/active-path.js";
-import { type SerializeConversationOptions, serializeConversation, TOOL_RESULT_MAX_CHARS } from "./branch-summary.js";
+import {
+	codeReadSkeletons,
+	type SerializeConversationOptions,
+	serializeConversation,
+	TOOL_RESULT_MAX_CHARS,
+} from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
 import {
@@ -1858,6 +1863,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// The previous context (the prior checkpoint and the suffix it kept live) shares the slice's tool-result cap and is
 	// priced with it: at the fixed floor a read the model last saw whole reached the next summary as its head and tail
 	// alone (CTX-6). Message clipping stays on the slice.
+	// A code read that would be clipped goes in as its signatures instead (CTX-17); one that fits stays whole.
+	const skeletons = await codeReadSkeletons([...previousContextEntries, ...pre, ...turnPrefix], TOOL_RESULT_MAX_CHARS);
 	interface Serialized {
 		text: string;
 		previous: string;
@@ -1872,10 +1879,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		const previousSeen = seenBy(entries, previousEntries);
 		const render = (toolResultMaxChars?: number, messageMaxChars?: number): Serialized => {
 			const caps = toolResultMaxChars === undefined ? {} : { toolResultMaxChars };
-			const options = { ...seen, ...caps, ...(messageMaxChars === undefined ? {} : { messageMaxChars }) };
+			const options = { ...seen, skeletons, ...caps, ...(messageMaxChars === undefined ? {} : { messageMaxChars }) };
 			return {
 				text: serializeConversation(slice, options),
-				previous: previousEntries.length > 0 ? serializeConversation(previousEntries, { ...previousSeen, ...caps }) : "",
+				previous:
+					previousEntries.length > 0 ? serializeConversation(previousEntries, { ...previousSeen, skeletons, ...caps }) : "",
 				options,
 			};
 		};
