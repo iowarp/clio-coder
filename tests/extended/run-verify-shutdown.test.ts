@@ -169,4 +169,79 @@ describe("run --verify base comparison (CLI-4)", () => {
 		strictEqual(sealed?.status, "not_implicated");
 		strictEqual(sealed?.reason, "failures_present_on_base");
 	});
+
+	function redRepo(
+		prefix: string,
+		baseTest: string,
+		runTest: string,
+	): { repo: string; base: NonNullable<ReturnType<typeof verifyBaseOf>> } {
+		const repo = mkdtempSync(join(tmpdir(), prefix));
+		scratch.push(repo);
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-C", repo, "-c", "user.name=Fixture", "-c", "user.email=f@example.invalid", ...args], {
+				stdio: "pipe",
+			});
+		git("init", "-q");
+		writeFileSync(join(repo, "test.js"), baseTest);
+		git("add", "-A");
+		git("commit", "-qm", "red base");
+		const base = verifyBaseOf(repo);
+		ok(base);
+		writeFileSync(join(repo, "test.js"), runTest);
+		return { repo, base };
+	}
+
+	it("keeps a new failure printed early in long output implicated: the comparison reads the whole output, not its tail", {
+		skip: bwrap.available && bwrap.backend === "bwrap" ? false : "the isolated base replay needs bubblewrap",
+		timeout: 60_000,
+	}, async () => {
+		const shared = 'for (let i = 0; i < 300; i++) console.error("failure context line, the same on both trees");\n';
+		const { repo, base } = redRepo(
+			"clio-verify-early-",
+			`${shared}process.exit(1);\n`,
+			`console.error("NEW FAILURE: the widget now breaks");\n${shared}process.exit(1);\n`,
+		);
+		const previous = process.cwd();
+		process.chdir(repo);
+		const command = `${JSON.stringify(process.execPath)} test.js`;
+		const results = await runHeadlessVerifyChecks(
+			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 30_000, credited: () => new Set(), base },
+			fakeShutdown().hooks,
+		).finally(() => process.chdir(previous));
+		strictEqual(results[0]?.base?.status, "failed", JSON.stringify(results[0]?.base));
+		ok(results[0]?.base?.reason?.includes("NEW FAILURE"), JSON.stringify(results[0]?.base));
+		strictEqual(verifyChecksV2([command], results, "interrupted")[0]?.status, "failed");
+		strictEqual(acceptanceHostVerification(results, repo)?.status, "rejected");
+	});
+
+	it("a shutdown during the base replay kills it and seals the finished check without base (CLI-P8)", {
+		skip: bwrap.available && bwrap.backend === "bwrap" ? false : "the isolated base replay needs bubblewrap",
+		timeout: 60_000,
+	}, async () => {
+		const { repo, base } = redRepo(
+			"clio-verify-drain-",
+			"setTimeout(() => process.exit(1), 40000);\n",
+			'require("node:fs").writeFileSync("ran.marker", "1"); process.exit(1);\n',
+		);
+		const previous = process.cwd();
+		process.chdir(repo);
+		const shutdown = fakeShutdown();
+		const command = `${JSON.stringify(process.execPath)} test.js`;
+		const pending = runHeadlessVerifyChecks(
+			{ checks: [{ id: "run-acceptance", command }], timeoutMs: 50_000, credited: () => new Set(), base },
+			shutdown.hooks,
+		);
+		try {
+			await pidFrom(join(repo, "ran.marker"));
+			// Let the replay of the slow base start before the shutdown lands.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			await shutdown.drain();
+			const results = await pending;
+			strictEqual(results.length, 1);
+			strictEqual(results[0]?.passed, false);
+			strictEqual(results[0]?.base, undefined, JSON.stringify(results[0]));
+		} finally {
+			process.chdir(previous);
+		}
+	});
 });

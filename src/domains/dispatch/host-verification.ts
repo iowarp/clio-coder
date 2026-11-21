@@ -574,6 +574,8 @@ export async function compareHostVerificationBase(input: {
 	env?: NodeJS.ProcessEnv;
 	/** Reports the wait for the verification slot each base replay takes; see {@link withVerificationSlot}. */
 	slot?: VerificationSlotEvents;
+	/** Stops the base replay: a check not yet replayed stays not_compared, and the one in flight is killed. */
+	signal?: AbortSignal;
 }): Promise<void> {
 	const failures = input.verification?.checks.filter((check) => check.exitCode !== 0) ?? [];
 	if (failures.length === 0) return;
@@ -633,6 +635,7 @@ export async function compareHostVerificationBase(input: {
 		return;
 	}
 	for (const { check, declared } of candidates) {
+		if (input.signal?.aborted) break;
 		const relativeCwd = relative(worktree.path, declared.cwd);
 		if (
 			relativeCwd === ".." ||
@@ -742,6 +745,7 @@ export async function compareHostVerificationBase(input: {
 				timeoutMs: declared.timeoutMs,
 				killGraceMs: 0,
 				maxOutputBytes: CODE_STEP_CAPTURE_MAX_BYTES,
+				...(input.signal !== undefined ? { signal: input.signal } : {}),
 			});
 			// The preflight, not the check's exit code, decides whether the check could start on the base.
 			const startFailed =
