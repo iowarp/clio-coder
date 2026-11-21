@@ -67,6 +67,7 @@ import {
 } from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
 import { TelemetryQuota, TelemetryUpdate } from "../../contracts/telemetry.js";
+import { isTranscriptNoticeKey, TRANSCRIPT_NOTICE_KIND } from "../../contracts/transcript-notice.js";
 import { SessionUsage } from "../../contracts/usage.js";
 import type { AcpSafeSettingsPatch as SafeSettingsPatch } from "../../contracts/wire.js";
 import {
@@ -1157,6 +1158,27 @@ export class Supervisor {
 			if (content.type !== "text" || typeof content.text !== "string")
 				throw new FrameFault("non-text chunk", "ACP message is not a text chunk.");
 			if (kind === "agent_message_chunk" && meta[ACP_NOTICE_META_KEY] !== undefined) {
+				// A yolo continuation is part of the turn it continues, so it stands in that turn's transcript.
+				if (isTranscriptNoticeKey(record(meta[ACP_NOTICE_META_KEY]).key)) {
+					this.publish({
+						type: "turn.tool",
+						payload: {
+							resource: entry.id,
+							revision: this.revision(entry.id),
+							item: {
+								id: `${entry.turnId}:notice:${randomUUID()}`,
+								turnId: entry.turnId,
+								sequence: 0,
+								kind: "notice",
+								toolKind: TRANSCRIPT_NOTICE_KIND,
+								text: boundedText(content.text, 16384).trim(),
+								status: "completed",
+								origin,
+							},
+						},
+					});
+					return;
+				}
 				this.notice(entry, content.text);
 				// A ceiling stop also stands as state until the turn moves again, so the
 				// banner can offer the raise while the request is parked (#424).
