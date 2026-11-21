@@ -10,7 +10,12 @@ import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { PendingTelemetry } from "../../core/telemetry/producer.js";
-import { enqueueHeldTelemetry, registerTelemetrySink, UNBOUND_SESSION_ID } from "../../core/telemetry/producer.js";
+import {
+	enqueueHeldTelemetry,
+	processTelemetryContext,
+	registerTelemetrySink,
+	UNBOUND_SESSION_ID,
+} from "../../core/telemetry/producer.js";
 import type { CallStarted, ObjectRef } from "../../core/telemetry/schemas.js";
 import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
@@ -131,12 +136,10 @@ export function holdUnboundTelemetry(): { release(context: TelemetryContext | nu
 						: undefined,
 				);
 			}
-			if (dropped > 0 && context)
-				telemetryHub().emit(
-					"journal.gap",
-					{ sink: TELEMETRY_JOURNAL_FILE, reason: "writer-drop", count: dropped },
-					context,
-				);
+			// What the hold refused is a gap wherever its records went: the bound session, or the process (CLI-P47).
+			const owner = context ?? processTelemetryContext();
+			if (dropped > 0 && owner)
+				telemetryHub().emit("journal.gap", { sink: TELEMETRY_JOURNAL_FILE, reason: "writer-drop", count: dropped }, owner);
 			dropped = 0;
 		},
 	};

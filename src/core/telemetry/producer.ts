@@ -108,12 +108,11 @@ export function processTelemetryContext(): TelemetryContext | undefined {
  * that bind. A fresh TUI creates its session on the first submit, after that turn's turn_start gate ran (CLI-P47).
  */
 export const UNBOUND_SESSION_ID = "unbound-session";
-const UNBOUND_CONTEXT: TelemetryContext = Object.freeze({
-	sessionId: UNBOUND_SESSION_ID,
-	agent: Object.freeze({ role: "main" as const, id: UNBOUND_SESSION_ID }),
-});
 
-/** The pending session's id while a hold waits for the first bind, else undefined (CLI-P47). */
+/**
+ * The pending session's id while a hold waits for the first bind, else undefined. Only a seam whose fact belongs to
+ * the session about to open asks for it (CLI-P47, FX-45); an ownerless fact otherwise stays the process's.
+ */
 export function unboundTelemetrySession(): string | undefined {
 	return sinks.has(`session:${UNBOUND_SESSION_ID}`) ? UNBOUND_SESSION_ID : undefined;
 }
@@ -221,8 +220,6 @@ function enqueueTelemetry(
 			return false;
 		}
 	}
-	// A fact with no owner, emitted while the first session is still to bind, waits for that session (CLI-P47, FX-45).
-	if (!given && definition.scope !== "process" && unboundTelemetrySession() !== undefined) given = UNBOUND_CONTEXT;
 	// A session fact names its session at its seam; one emitted without a context is a gap, never the process's (#434).
 	const ctx = given ?? (definition.scope === "session" ? undefined : processOwner?.context);
 	const sink = given ? (definition.scope === "process" ? processOwner?.sink : sinkFor(given)) : processOwner?.sink;

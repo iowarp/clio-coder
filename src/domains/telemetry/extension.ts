@@ -125,6 +125,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 		origin: TelemetrySessionOrigin,
 		kind: K,
 		data: EventPayload<K>,
+		/** The pre-bind hold this fresh session alone receives, released inside its lease (CLI-P47). */
+		hold?: ReturnType<typeof holdUnboundTelemetry>,
 	): void => {
 		const write = journals
 			.acquire(origin, mainAgent(origin.id))
@@ -135,11 +137,8 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 						if (kind === "session.closed") lease.requestSeal?.();
 						else lease.cancelSeal?.();
 					}
-					// The first session to open or resume takes what this process emitted before any bound (CLI-P47).
-					if (kind !== "session.closed") {
-						preBind?.release(lease.journaled ? lease.context : null);
-						preBind = undefined;
-					}
+					// A session whose writer did not open cannot take them; they go where they went before the hold.
+					hold?.release(lease.journaled ? lease.context : null);
 				} finally {
 					await lease.release();
 				}
@@ -147,14 +146,26 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			.catch(() => {
 				// The writer reports its own failure; meta.json keeps endedAt for readers either way.
 			})
-			.finally(() => pendingRecords.delete(write));
+			.finally(() => {
+				// Released at most once: a lease that failed outright still ends the hold (CLI-P47).
+				hold?.release(null);
+				pendingRecords.delete(write);
+			});
 		pendingRecords.add(write);
 	};
 	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
 	// so stop() journals its close while the writers still accept records (#434).
 	let liveSession: TelemetrySessionOrigin | null = null;
-	/** Facts emitted before the first session binds, held for it (CLI-P47, FX-45). */
+	/**
+	 * Facts emitted before the first session binds, held for it (CLI-P47, FX-45). The first bind detaches it at once:
+	 * a session opened fresh receives it, a resumed or loaded session never does.
+	 */
 	let preBind: ReturnType<typeof holdUnboundTelemetry> | undefined;
+	const detachPreBind = (): ReturnType<typeof holdUnboundTelemetry> | undefined => {
+		const hold = preBind;
+		preBind = undefined;
+		return hold;
+	};
 	// Once stopping, no record reopens a writer that closeAll is shutting (#434).
 	let stopping = false;
 	/**
@@ -403,12 +414,14 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 				context.bus.subscribe("session.created", ({ sessionId, cwdHash }) => {
 					liveSession = { id: sessionId, cwdHash };
 					journals.keepOpen(sessionId);
-					recordLifecycle(liveSession, "session.opened", {});
+					recordLifecycle(liveSession, "session.opened", {}, detachPreBind());
 					// The session that becomes current binds here for every creator. A TUI creates it lazily on the first
 					// submit, long after boot bound nothing, and /new, fork and ACP session/new create the same way.
 					resetSession(sessionId);
 				}),
 				context.bus.subscribe("session.reattached", ({ sessionId, cwdHash, via }) => {
+					// A resumed or loaded session did not exist unbound in this process; nothing held is its (CLI-P47).
+					detachPreBind()?.release(null);
 					liveSession = cwdHash === undefined ? null : { id: sessionId, cwdHash };
 					journals.keepOpen(liveSession?.id ?? null);
 					if (liveSession) recordLifecycle(liveSession, "session.resumed", { via });
@@ -435,8 +448,7 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			liveSession = null;
 			await Promise.all(pendingRecords);
 			// No session bound: what was held goes where it went before the hold, while the process journal is open.
-			preBind?.release(null);
-			preBind = undefined;
+			detachPreBind()?.release(null);
 			await journals.closeAll();
 			// A process that recorded nothing process-scoped never opened a journal, and closing it writes nothing.
 			await processJournal?.close(processExitStatus());
