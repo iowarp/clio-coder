@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { readLayeredSettings, readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { bootAuthStatus } from "../../src/domains/providers/auth/boot-status.js";
+import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { type RuntimeAuthMetadata, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import { runCli } from "../harness/headless-run.js";
 import { closeServer } from "../harness/openai-compat-fixture.js";
@@ -102,6 +103,55 @@ test("a project targets list that drops a user-only target warns against the pro
 		[...userTargets, "safety:", "  review:", "    target: ghost", ""].join("\n"),
 	);
 	throws(() => readStrictLayeredSettings(workspace), /safety\.review\.target: unknown target 'ghost'/);
+});
+
+test("a trusted project target that names its key variable is sent that variable and nothing else", async (t) => {
+	const home = await isolateClioEnv("clio-project-named-key-");
+	const saved = { team: process.env.TEAM_KEY, openai: process.env.OPENAI_API_KEY };
+	t.after(() => {
+		for (const [name, value] of [
+			["TEAM_KEY", saved.team],
+			["OPENAI_API_KEY", saved.openai],
+		] as const) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+		home.restore();
+	});
+	const workspace = join(home.dir, "workspace");
+	mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+	writeFileSync(
+		join(workspace, ".clio-coder", "settings.yaml"),
+		"targets:\n  - id: team\n    runtime: openai\n    url: https://llm.team.example.org/v1\n    auth: { apiKeyEnvVar: TEAM_KEY }\n",
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	const target = readLayeredSettings(workspace).settings.targets.find((entry) => entry.id === "team");
+	ok(target);
+	const openai: RuntimeAuthMetadata = {
+		id: "openai",
+		tier: "cloud",
+		auth: "api-key",
+		credentialsEnvVar: "OPENAI_API_KEY",
+	};
+	const authTarget = resolveAuthTarget(target, openai);
+	strictEqual(authTarget.credentialRefusal, undefined);
+	const auth = openAuthStorage();
+	auth.setApiKey("openai", "sk-stored-canary");
+	process.env.OPENAI_API_KEY = "sk-env-canary";
+	delete process.env.TEAM_KEY;
+	// Unset, the operator's own openai key never stands in for the variable the project named.
+	const unset = await auth.resolveForTarget(authTarget);
+	strictEqual(unset.available, false);
+	strictEqual(unset.apiKey, undefined);
+	strictEqual(bootAuthStatus(target, openai).available, false);
+	process.env.TEAM_KEY = "team-secret";
+	const set = await auth.resolveForTarget(authTarget);
+	strictEqual(set.apiKey, "team-secret");
+	strictEqual(set.detail, "TEAM_KEY");
+	strictEqual(auth.statusForTarget(authTarget).available, true);
+	strictEqual(bootAuthStatus(target, openai).available, true);
 });
 
 // The stub listens on one of this host's non-loopback addresses, the case a loopback-only check would miss.

@@ -1429,12 +1429,15 @@ export async function runDoctorModelChecks(
 						? `sign-in is the \`${runtime.externalLogin}\` the runtime reads; Clio stores no credential`
 						: "no credential required";
 			try {
-				const status = openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), {
+				const authTarget = resolveAuthTarget(target, runtime);
+				const status = openAuthStorage().statusForTarget(authTarget, {
 					includeFallback: false,
 				});
 				credentialAvailable = !requiredCredential || status.available;
 				const stored = openAuthStorage().get(status.providerId);
-				if (status.source === "stored-oauth" && stored?.type === "oauth" && stored.expires <= Date.now()) {
+				if (requiredCredential && !status.available && authTarget.projectKeyEnvVar) {
+					credentialDetail = `required credential not found: this project sends only $${authTarget.projectKeyEnvVar} to ${target.url ?? "its url"}, and ${authTarget.projectKeyEnvVar} is not set`;
+				} else if (status.source === "stored-oauth" && stored?.type === "oauth" && stored.expires <= Date.now()) {
 					credentialAvailable = !requiredCredential;
 					credentialDetail = `stored sign-in expired; operator sign-in required: run \`clio-coder auth login ${target.id}\``;
 				} else if (status.available && status.source !== "not-required")

@@ -1,5 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { projectChosenTargetUrl } from "../../../core/project-target-urls.js";
+import { projectChosenTargetUrl, projectTargetKeyVariable } from "../../../core/project-target-urls.js";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
 import { telemetryHub } from "../../../core/telemetry/hub.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
@@ -115,6 +115,11 @@ export interface AuthTarget {
 	runtimeAuth: RuntimeAuth;
 	/** Why no stored or environment credential may be sent for this target; only a per-target `--api-key` still applies. */
 	credentialRefusal?: string;
+	/**
+	 * The one variable a trusted project named for the URL it chose (`auth.apiKeyEnvVar`). Only that variable, or a
+	 * per-target `--api-key`, is sent there; no stored key, sign-in or runtime-wide variable stands in for it.
+	 */
+	projectKeyEnvVar?: string;
 }
 
 export interface AuthStatus {
@@ -299,6 +304,21 @@ function targetEnvApiKey(envVar: string | undefined): { envVar: string; apiKey: 
 	return apiKey ? { envVar, apiKey } : null;
 }
 
+/** A project-chosen URL's credential: the variable the trusted project named, from this shell, or nothing. */
+function projectKeyResolution(providerId: string, envVar: string): AuthResolution {
+	const env = targetEnvApiKey(envVar);
+	return env
+		? {
+				providerId,
+				available: true,
+				credentialType: "api_key",
+				source: "environment",
+				detail: envVar,
+				apiKey: env.apiKey,
+			}
+		: { providerId, available: false, credentialType: null, source: "none", detail: `${envVar} is not set` };
+}
+
 /**
  * Where a copy of a key variable is stored for a process that cannot see the shell's environment (the desktop
  * app's background service). Only a target naming that variable reads it, and only while the variable is unset,
@@ -342,7 +362,10 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuth
 	const targetEnvVar = target.auth?.apiKeyRef?.trim() ? undefined : targetKeyEnvVar?.trim();
 	if (targetEnvVar) authTarget.targetEnvVar = targetEnvVar;
 	const projectUrl = projectChosenTargetUrl(target, targetRequiresAuth(target, runtime));
-	if (projectUrl) {
+	const projectKey = projectUrl && targetEnvVar !== undefined ? projectTargetKeyVariable(target) : null;
+	if (projectKey !== null && projectKey === targetEnvVar) {
+		authTarget.projectKeyEnvVar = projectKey;
+	} else if (projectUrl) {
 		authTarget.credentialRefusal = `project settings point target ${target.id} at ${projectUrl}; Clio does not send your stored or environment ${providerId} credential to a URL a project chose. Define this target in your user settings to use it.`;
 	}
 	return authTarget;
@@ -642,8 +665,12 @@ export class AuthStorage {
 	}
 
 	private refusedFor(target: AuthTarget): AuthStatus | null {
-		if (!target.credentialRefusal) return null;
 		if (target.targetId && this.runtimeOverrides.has(target.targetId)) return null;
+		if (target.projectKeyEnvVar) {
+			const { apiKey: _key, ...status } = projectKeyResolution(target.providerId, target.projectKeyEnvVar);
+			return status;
+		}
+		if (!target.credentialRefusal) return null;
 		return {
 			providerId: target.providerId,
 			available: false,
@@ -1033,6 +1060,9 @@ export class AuthStorage {
 		target: AuthTarget,
 		opts?: { includeFallback?: boolean; signal?: AbortSignal; rejectedApiKey?: string; refresh?: false },
 	): Promise<AuthResolution> {
+		if (target.projectKeyEnvVar && !(target.targetId && this.runtimeOverrides.has(target.targetId))) {
+			return remembered(projectKeyResolution(target.providerId, target.projectKeyEnvVar));
+		}
 		const refused = this.refusedFor(target);
 		if (refused) return refused;
 		if (opts?.rejectedApiKey !== undefined) {
