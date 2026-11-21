@@ -366,6 +366,23 @@ describe("headless no-op contract through the built binary", () => {
 		match(turn.stderr, /answered with 1 blocked call: bash \(/);
 	});
 
+	test("a --read-only review whose read was blocked still succeeds and names the blocked call", async () => {
+		// C-1: a read-only run asks for no change, so a read a rule refused along the way left nothing unmet.
+		const { turn, envelope } = await headlessTurn({
+			autonomy: "default",
+			steps: [{ id: "call-read", name: "read", arguments: { path: ".env" } }],
+			failOnNoop: false,
+			flags: ["--read-only"],
+			prompt: "Review sentinel.txt.",
+			reply: "The fixture text reads fine.",
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(envelope.outcome, "succeeded");
+		match(turn.stdout, /The fixture text reads fine\./);
+		doesNotMatch(turn.stderr, /no-op/);
+		match(turn.stderr, /answered with 1 blocked call: read/);
+	});
+
 	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
 		const { turn, envelope, project } = await headlessTurn({
 			autonomy: "default",

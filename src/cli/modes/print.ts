@@ -347,8 +347,9 @@ interface HeadlessMainAgentRunStats {
 	 */
 	failedDispatch: { reason: string; started: boolean } | null;
 	/**
-	 * Whether the task asked for a change. Only an explicit `--turn-mode answer`
-	 * or `proposal` says it did not; the no-op verdict applies only when it did.
+	 * Whether the task asked for a change. An explicit `--turn-mode answer` or
+	 * `proposal`, or the `--read-only` ceiling, says it did not; the no-op verdict
+	 * applies only when it did.
 	 */
 	changeAsked: boolean;
 }
@@ -1215,7 +1216,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
 		failedDispatch: null,
-		changeAsked: options.constraints?.mode !== "answer" && options.constraints?.mode !== "proposal",
+		// A read-only run can change nothing, so like an answer turn it asked for no change (C-1).
+		changeAsked:
+			options.constraints?.readOnly !== true &&
+			options.constraints?.mode !== "answer" &&
+			options.constraints?.mode !== "proposal",
 	};
 	// The ledger row is this run's accounting, so it has to exist on the costly
 	// failure paths too. Two callers can reach it: the turn's own completion
