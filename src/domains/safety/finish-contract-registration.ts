@@ -241,6 +241,7 @@ export function createFinishContractRegistration(
 				return [];
 			}
 			if (rigor === "high") {
+				const failedChecks = assessment.failedAfterEdit?.length ? { failedChecks: assessment.failedAfterEdit } : {};
 				const constraints = options.getTurnConstraints?.();
 				const names = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
 				const reachable = typeof names === "string" ? names.split(",") : undefined;
@@ -262,6 +263,7 @@ export function createFinishContractRegistration(
 							severity: "warn",
 							message: `${assessment.message} The current task scope does not permit automatic validation recovery; report the change as unverified. This notice grants no additional authority.`,
 							fact: "unvalidated_mutation",
+							...failedChecks,
 						},
 					];
 				}
@@ -272,7 +274,7 @@ export function createFinishContractRegistration(
 				const directive = assessment.quality?.length
 					? `${assessment.message}${canRecordLimitation ? " Alternatively, record a limitation with each outstanding check's exact ID in limitation.paths; these checks remain unverified." : ""}`
 					: verificationTools.length > 0 && canRecordLimitation
-						? activeAcceptance?.verification.length || assessment.message.includes("quality policy")
+						? activeAcceptance?.verification.length || assessment.policyUnassessable
 							? assessment.message
 							: HIGH_RIGOR_REVALIDATION_MESSAGE
 						: `[CLIO Coder] High-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
@@ -285,10 +287,18 @@ export function createFinishContractRegistration(
 						...(reserved ? { reserved: "verification" as const } : {}),
 						fact: "unvalidated_mutation",
 					},
-					{ kind: "inject_reminder", message, severity: "warn" },
+					{ kind: "inject_reminder", message, severity: "warn", ...failedChecks },
 				];
 			}
-			return [{ kind: "inject_reminder", message: assessment.message, severity: "warn", fact: "unvalidated_mutation" }];
+			return [
+				{
+					kind: "inject_reminder",
+					message: assessment.message,
+					severity: "warn",
+					fact: "unvalidated_mutation",
+					...(assessment.failedAfterEdit?.length ? { failedChecks: assessment.failedAfterEdit } : {}),
+				},
+			];
 		},
 	};
 }

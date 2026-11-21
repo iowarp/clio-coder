@@ -24,7 +24,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
-for (const [message, text, key] of [
+for (const [message, text, key, failedChecks] of [
 	[FINISH_CONTRACT_ADVISORY_MESSAGE, "Clio changed files but ran no check on them afterwards", "finish.unverified"],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast, lint. Run checks: run-acceptance.`,
@@ -37,9 +37,16 @@ for (const [message, text, key] of [
 		"finish.unverified",
 	],
 	[
-		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Ran after the edit: src/clean.py. Failed after the edit: npx tsc --noEmit -p a.b.`,
-		"Clio changed files and ran npx tsc --noEmit -p a.b after the edit; it failed",
+		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast. Ran after the edit: src/clean.py.`,
+		"Clio changed files and ran npx tsc --noEmit -p a.b after the edit; it failed; run verify unit.fast",
 		"finish.unverified",
+		["npx tsc --noEmit -p a.b"],
+	],
+	[
+		`${FINISH_CONTRACT_ADVISORY_MESSAGE} The current task scope does not permit automatic validation recovery; report the change as unverified. This notice grants no additional authority.`,
+		`Clio changed files and ran pytest -k "a, b" and 1 more after the edit; they failed`,
+		"finish.unverified",
+		['pytest -k "a, b"', "npx tsc --noEmit"],
 	],
 	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Run checks: run-acceptance.`,
@@ -56,7 +63,7 @@ for (const [message, text, key] of [
 		"validation evidence recorded; coverage of the change not measured",
 		"finish.coverage-unverified",
 	],
-] as const)
+] as const satisfies ReadonlyArray<readonly [string, string, string, ReadonlyArray<string>?]>)
 	test(`finish advisory ${key} stays operator-facing without becoming a user reminder`, async () => {
 		const footer: string[] = [];
 		const notices: string[] = [];
@@ -70,7 +77,7 @@ for (const [message, text, key] of [
 			state: createTurnState("off"),
 			middleware: {
 				runHook: () => ({
-					effects: [{ kind: "inject_reminder", message, severity: "warn" }],
+					effects: [{ kind: "inject_reminder", message, severity: "warn", ...(failedChecks ? { failedChecks } : {}) }],
 					ruleIds: [],
 				}),
 			} as unknown as MiddlewareContract,

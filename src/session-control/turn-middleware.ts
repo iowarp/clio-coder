@@ -31,7 +31,6 @@ import {
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_DECLARED_CHECKS_PREFIX,
 	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
-	FINISH_CONTRACT_FAILED_AFTER_EDIT_PREFIX,
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_RAN_CHANGED_PREFIX,
 	FINISH_CONTRACT_RUN_CHECKS_PREFIX,
@@ -409,6 +408,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		source: NoticeSource = "reminder",
 		modelOnly = false,
 		firingId?: string,
+		failedChecks: ReadonlyArray<string> = [],
 	): boolean => {
 		if (modelOnly && severity !== "hard-block") {
 			// Advice for the model rides the next request and stays in the ledger
@@ -423,21 +423,19 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// warning to the operator without posing it as a new user instruction
 			// or carrying stale advice into the next model turn. When the workspace
 			// declares checks, name the one to run rather than leave a bare warning.
-			const named = (prefix: string, last = false): string[] => {
+			const named = (prefix: string): string[] => {
 				const at = message.indexOf(prefix);
 				if (at < 0) return [];
-				// Check ids may hold dots, so a list ends at ". " or the message's final period; the last list, whose
-				// names are observed commands, always runs to the final period.
+				// Check ids may hold dots, so a list ends at ". " or the message's final period.
 				const rest = message.slice(at + prefix.length);
-				const stop = last ? -1 : rest.indexOf(". ");
+				const stop = rest.indexOf(". ");
 				const list = stop >= 0 ? rest.slice(0, stop) : rest.replace(/\.$/u, "");
 				return list.split(", ").filter((id) => id.length > 0);
 			};
 			const declared = named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX);
 			const runChecks = named(FINISH_CONTRACT_RUN_CHECKS_PREFIX);
 			const ran = named(FINISH_CONTRACT_RAN_CHANGED_PREFIX);
-			const failed = named(FINISH_CONTRACT_FAILED_AFTER_EDIT_PREFIX, true);
-			const more = (list: string[]) => (list.length > 1 ? ` and ${list.length - 1} more` : "");
+			const more = (list: ReadonlyArray<string>) => (list.length > 1 ? ` and ${list.length - 1} more` : "");
 			const hint =
 				declared.length > 0
 					? `; run verify ${declared[0]}${declared.length > 1 ? ` (or ${declared.slice(1).join(", ")})` : ""}`
@@ -446,8 +444,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						: "";
 			deps.emitFooterNotice(
 				"warning",
-				failed.length > 0
-					? `Clio changed files and ran ${failed[0]}${more(failed)} after the edit; ${failed.length > 1 ? "they" : "it"} failed${hint}`
+				failedChecks.length > 0
+					? `Clio changed files and ran ${failedChecks[0]}${more(failedChecks)} after the edit; ${failedChecks.length > 1 ? "they" : "it"} failed${hint}`
 					: ran.length > 0
 						? `Clio changed files and ran ${ran[0]}${more(ran)} afterwards, but no recognized check covered the change${hint}`
 						: `Clio changed files but ran no check on them afterwards${hint}`,
@@ -899,6 +897,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						effect.source === "memory" ? "memory" : "reminder",
 						effect.audience === "model",
 						firings.get(effect),
+						effect.failedChecks,
 					);
 					enter(effect, carried);
 					continue;

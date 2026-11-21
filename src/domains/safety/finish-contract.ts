@@ -15,6 +15,7 @@ import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { ObservedCheck } from "../session/task-board.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
+import { sanitizeCallTargetText } from "./call-target.js";
 import { callVerdict } from "./check-classifier.js";
 import { type RunCheckFacts, runCheckFacts } from "./observed-checks.js";
 import {
@@ -29,6 +30,7 @@ import {
 	splitSegments,
 	toolMutationPaths,
 } from "./protected-artifacts.js";
+import { redactSecretString } from "./redaction.js";
 import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
@@ -50,11 +52,8 @@ export const FINISH_CONTRACT_RUN_CHECKS_PREFIX = " Run checks: ";
  */
 export const FINISH_CONTRACT_RAN_CHANGED_PREFIX = " Ran after the edit: ";
 
-/**
- * Appended last for checks that ran after the last change and came back red, as the fold seals them. They left no
- * passing evidence, so the change stays unverified, but the footer must say a check ran and failed (CLI-P54).
- */
-export const FINISH_CONTRACT_FAILED_AFTER_EDIT_PREFIX = " Failed after the edit: ";
+/** The longest failed-check label the operator sees; a longer observed command is cut with an ellipsis. */
+const FAILED_CHECK_LABEL_MAX = 120;
 
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
 	"[CLIO Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
@@ -138,6 +137,13 @@ export type FinishContractAssessment =
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
 			verificationScope?: FinishContractVerificationScope;
+			/**
+			 * Checks that ran on the tree the last change left and came back red, as operator-safe labels (secrets
+			 * redacted, one line, capped). Operator status only: never part of `message`, which reaches the model (CLI-P54).
+			 */
+			failedAfterEdit?: ReadonlyArray<string>;
+			/** The project quality policy could not be read, so `message` says why rather than naming checks. */
+			policyUnassessable?: true;
 	  };
 
 /** A check declared for this session that has no project catalog entry, such as `run --verify`. */
@@ -313,15 +319,23 @@ export function standingFailedCheck(input: FinishContractInput): boolean {
 }
 
 function checkFailedSinceLastChange(input: FinishContractInput, scope: AssessmentScope): boolean {
-	return failingSinceLastChange(input, scope).length > 0;
+	if (input.workspaceRoot === undefined) return false;
+	// Only a failed result can seal a red, so an all-green window skips the replay's reads.
+	if (!capabilityEntries(scope.window).some(failedResult)) return false;
+	return scope.facts().failing.length > 0;
 }
 
-/** The checks whose last outcome since the last change is red. */
-function failingSinceLastChange(input: FinishContractInput, scope: AssessmentScope): ReadonlyArray<string> {
-	if (input.workspaceRoot === undefined) return [];
-	// Only a failed result can seal a red, so an all-green window skips the replay's reads.
-	if (!capabilityEntries(scope.window).some(failedResult)) return [];
-	return scope.facts().failing;
+/** The reds that ran on the tree the last change left, as labels safe for an operator surface. */
+function failedAfterEditLabels(input: FinishContractInput, scope: AssessmentScope): string[] {
+	if (input.workspaceRoot === undefined || !capabilityEntries(scope.window).some(failedResult)) return [];
+	return [
+		...new Set(
+			scope.facts().failedAfterChange.map((name) => {
+				const label = sanitizeCallTargetText(redactSecretString(name)).trim();
+				return label.length > FAILED_CHECK_LABEL_MAX ? `${label.slice(0, FAILED_CHECK_LABEL_MAX - 1)}…` : label;
+			}),
+		),
+	].filter((label) => label.length > 0);
 }
 
 function failedResult(entry: unknown): boolean {
@@ -387,6 +401,7 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 				message: `[CLIO Coder] quality policy cannot be assessed: ${loaded.reason}. Report the change as unverified; this notice grants no additional authority.`,
 				evidence: [...evidence, ...limitations],
 				mutatedPaths,
+				policyUnassessable: true,
 			};
 		if (loaded.policy)
 			quality = assessQualityPolicy(input.workspaceRoot, loaded.policy, mutatedPaths, capabilityEntries(window));
@@ -469,13 +484,14 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 		return ids.length > 0 ? `${prefix}${ids.join(", ")}.` : "";
 	};
 	const ran = changedFilesRunAfterEdit(window, mutatedPaths, input.workspaceRoot);
-	const failed = failingSinceLastChange(input, scope);
+	const failedAfterEdit = failedAfterEditLabels(input, scope);
 	return {
 		kind: "engage",
 		reason: "unvalidated_mutation",
-		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}${failed.length > 0 ? `${FINISH_CONTRACT_FAILED_AFTER_EDIT_PREFIX}${failed.join(", ")}.` : ""}`,
+		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}`,
 		evidence: [],
 		mutatedPaths,
+		...(failedAfterEdit.length > 0 ? { failedAfterEdit } : {}),
 	};
 }
 
