@@ -24,13 +24,13 @@ export interface MemoryRecallDeps {
 
 /**
  * Orchestrator-only and read-only: the tool never saves, proposes, approves or
- * rejects. Writes stay with the guardian model and the operator's review.
+ * rejects. Writes stay with `memory_note`, rules capture and the operator's review.
  */
 export function createMemoryRecallTool(deps: MemoryRecallDeps): ToolSpec {
 	return {
 		name: ToolNames.MemoryRecall,
 		description:
-			"Search this session's task memory (knowledge and procedural entries) and approved durable memory that applies to this repository and runtime. Read-only: it cannot save, propose or approve memory.",
+			"Search this session's task memory (knowledge and procedural entries) and the durable lessons and unverified notes that apply to this repository and runtime, each labelled with its layer and evidence. Read-only: it cannot save, propose or approve memory.",
 		parameters: Type.Object({
 			query: Type.String({ minLength: 1, description: "Words to match against memory text." }),
 			limit: Type.Optional(

@@ -16,9 +16,11 @@ are authorized, and run `clio-coder memory promote --from-handoff <path>
 --entry <id> --scope repo --repository <canonical-absolute-path>`.
 With memory off there is no bank to export and the request carries no snapshot.
 If the entry is absent, report that limit; never invent entries, provenance, or
-a memory-writing tool. {memory_recall} `memory_recall` only reads: it searches task-bank
-knowledge and procedural entries and approved durable records that apply here,
-and no tool writes memory. Promotion persists an unapproved proposal. The operator
+a memory tool. {memory_recall} `memory_recall` only reads: it searches task-bank
+knowledge and procedural entries, and the lessons and unverified notes that apply
+here, each labelled. {memory_note} `memory_note` writes one unverified note: a command it names must
+have succeeded in this session and a path must have been read here, and a note with
+neither is found only by recall and never promoted without the operator. Promotion persists an unapproved proposal. The operator
 reviews its lesson, citations and scope with `clio-coder memory list`, then
 separately runs `clio-coder memory approve <memoryId>`, or selects it under
 pending review in `/memory` and presses `a` to approve or `x` to reject.

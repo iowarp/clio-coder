@@ -189,7 +189,7 @@ Inspect:
 - `find` (gateway): Find paths by glob pattern with optional mtime ordering. args={"pattern":"**/*.ts","path":".","limit":20} Names only, not contents; match the requested extension.
 - `grep` (gateway): Search file contents and return line-referenced matches. args={"pattern":"retry","path":".","literal":true,"limit":20} Start in the named path; stop when the matching lines answer the question.
 - `ls` (gateway): List directory entries.
-- `memory_recall` (gateway): Recall task memory and approved durable memory that matches a query, without writing memory. Required args: query.
+- `memory_recall` (gateway): Recall task memory, durable lessons and unverified notes that match a query, without writing memory. Required args: query.
 - `read`: Read exact UTF-8 file content with line and byte bounds.
 - `store` (gateway): Keep files as blobs in named tags outside the working tree, shared with every worker, with what Clio observed about each; a `<tag>:<blob>` ref names one. args={"op":"put","tag":"results","path":"out/summary.csv","note":"baseline run"}
 - `web_fetch` (gateway): Fetch HTTP(S) text for explicit external research. Required args: url.

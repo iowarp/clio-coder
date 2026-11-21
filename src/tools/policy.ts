@@ -101,6 +101,9 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// consult asks the bound decision model and changes nothing. Read class;
 	// parallel because each call is independent and bounded per turn.
 	[ToolNames.Consult]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
+	// memory_note writes one unverified note to Clio's own memory store and no workspace file. Read class like decide;
+	// sequential so two notes in one batch take the store lock in order.
+	[ToolNames.MemoryNote]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Vision]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	// web_read is the GET-only half of the split: no method, headers, or body,
 	// so it is never an outward action.
@@ -166,6 +169,8 @@ const DECISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Consult]);
 const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
 /** Registered only on the orchestrator registry, which owns the session task bank. */
 const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
+/** Registered only on the orchestrator registry, and only when a session starts with `lessons: agent`. */
+const MEMORY_NOTE_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryNote]);
 /** Registered only on the orchestrator registry: an agent's report is the main session's, never a worker's. */
 const REPORT_BOUND_TOOLS = new Set<ToolName>([ToolNames.Report]);
 /** Registered only on the orchestrator registry: the main agent declares completion here, a worker in its report. */
@@ -193,6 +198,7 @@ export function isWorkerSurfaceExcludedTool(name: ToolName): boolean {
 		DECISION_BOUND_TOOLS.has(name) ||
 		VISION_BOUND_TOOLS.has(name) ||
 		MEMORY_RECALL_BOUND_TOOLS.has(name) ||
+		MEMORY_NOTE_BOUND_TOOLS.has(name) ||
 		REPORT_BOUND_TOOLS.has(name) ||
 		FINISH_BOUND_TOOLS.has(name)
 	);
@@ -284,6 +290,7 @@ export function validateBuiltinToolPolicy(
 		if (VISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MEMORY_RECALL_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (MEMORY_NOTE_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (REPORT_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (FINISH_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (SELF_REPO_BOUND_TOOLS.has(tool)) required.delete(tool);
