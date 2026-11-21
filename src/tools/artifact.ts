@@ -19,8 +19,10 @@ import { artifactToolLanding, hookLandingRefusal, publishTargetAdmission } from 
  * Placement: gateway. The terminal contract survives the indirection because
  * the gateway propagates `terminate`, `details.kind`, and `details.paths`
  * from this result unchanged, so the turn still ends and `/view` still lists
- * the document. The write is an atomic publish (temp file, fsync, rename) so
- * a failed write never leaves a half-written artifact behind.
+ * the document. The agent-tool adapter then sets an event's `details.kind` to
+ * the result kind ("ok"), so a reader of tool events takes the artifact's kind
+ * from the call's arguments. The write is an atomic publish (temp file, fsync,
+ * rename) so a failed write never leaves a half-written artifact behind.
  *
  * A pathless call lands under `.clio-coder/artifacts/`, not in the repo working
  * tree. A turn nobody asked for a file from used to drop REPORT.md into the

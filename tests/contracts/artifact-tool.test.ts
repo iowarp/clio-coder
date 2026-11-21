@@ -74,6 +74,22 @@ describe("artifact tool", () => {
 		deepStrictEqual([file.before.bytes, file.after.bytes], [2, 11]);
 	});
 
+	it("refuses an architect run's plan at any path but its contract path, before writing", async () => {
+		registry = createWorkerToolRegistry(
+			undefined,
+			createWorkerSafety({ cwd: workspace, requiredArtifactPath: ".clio-coder/artifacts/PLAN.md" }),
+		);
+		const elsewhere = await viaGateway({ kind: "plan", content: "step one", path: "PLAN.md" });
+		strictEqual(elsewhere.kind, "blocked", JSON.stringify(elsewhere));
+		const detail =
+			elsewhere.kind === "blocked" && "rejection" in elsewhere.decision ? elsewhere.decision.rejection?.detail : "";
+		match(detail ?? "", /plan goes to its contract path \.clio-coder\/artifacts\/PLAN\.md, not PLAN\.md/);
+		strictEqual(existsSync(join(workspace, "PLAN.md")), false);
+		await written({ kind: "plan", content: "step one", path: "./.clio-coder/artifacts/PLAN.md" });
+		await written({ kind: "plan", content: "step two" });
+		strictEqual(readFileSync(join(workspace, ".clio-coder", "artifacts", "PLAN.md"), "utf8"), "step two");
+	});
+
 	it("refuses empty content, an unknown kind, and a path outside the workspace without writing", async () => {
 		const empty = await viaGateway({ kind: "review", content: "" });
 		ok(empty.kind === "ok" && empty.result.kind === "error", JSON.stringify(empty));
