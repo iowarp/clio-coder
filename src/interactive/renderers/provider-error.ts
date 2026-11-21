@@ -79,7 +79,7 @@ export function presentProviderError(value: string, options: { remedyStated?: bo
 	// window, so a long diagnostic is matched on its bounded tail instead.
 	const beyondScan = value.length > SCAN_LIMIT;
 	const routeParts = (beyondScan ? providerErrorEvidence(value.slice(-ROUTE_ADVICE_TAIL)) : available).match(
-		/\n\n((LiteLLM route [^\n]+ failed\.) CLIO Coder did not (?:retry or )?(substitute another model); (select a different route with \/model, then resend\.))$/,
+		/\n\n((LiteLLM route [^\n]+ failed\.) (?:Clio|CLIO Coder) did not (?:retry or )?(substitute another model); (select a different route with \/model, then resend\.))$/,
 	);
 	const routeAdvice = routeParts?.[1];
 	const sample =

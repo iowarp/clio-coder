@@ -45,7 +45,7 @@ export function liteLLMRouteFailureMessage(
 
 // Sessions saved before the retry ladder could run on this path still carry the longer sentence.
 const ROUTE_FAILURE_TAIL =
-	/\n\n(?:LiteLLM route '([^'\n]*)' on target '([^'\n]*)' failed\. )CLIO Coder did not (?:retry or )?substitute another model; select a different route with \/model, then resend\.$/;
+	/\n\n(?:LiteLLM route '([^'\n]*)' on target '([^'\n]*)' failed\. )(?:Clio|CLIO Coder) did not (?:retry or )?substitute another model; select a different route with \/model, then resend\.$/;
 
 function jsonMessage(value: unknown): string | undefined {
 	if (typeof value === "string") return value.trim() || undefined;
