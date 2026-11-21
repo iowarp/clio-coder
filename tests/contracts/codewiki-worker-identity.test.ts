@@ -79,3 +79,17 @@ it("concurrent code_nav loads for one workspace share one reconciliation worker"
 		unsubscribe("worker_threads", count);
 	}
 });
+
+it("a load behind a queued writer reconciles from the artifact that writer committed", async () => {
+	// Inputs read before the writer committed were cached under the replaced identity, so the next call missed.
+	const cwd = isolated.dir;
+	writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+	const write = coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" }));
+	const load = loadCodewikiForTool(cwd);
+	ok(await write);
+	const behind = await load;
+	ok(behind.ok);
+	const next = await loadCodewikiForTool(cwd);
+	ok(next.ok);
+	strictEqual(next.codewiki, behind.codewiki);
+});

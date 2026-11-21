@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { codewikiPath, readCodewiki } from "../../domains/context/codewiki/artifact.js";
-import { reconcileCodewikiCandidate } from "../../domains/context/codewiki/coordinator.js";
+import { afterCodewikiWritesAhead, reconcileCodewikiCandidate } from "../../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../../domains/context/codewiki/schema.js";
 import { readClioState } from "../../domains/context/state.js";
 
@@ -114,6 +114,9 @@ function codewikiUnavailable(err: unknown): CodewikiToolLoad {
 
 async function reconcileCodewikiForTool(workspace: string): Promise<CodewikiToolLoad> {
 	try {
+		// Take the inputs after writers queued ahead commit, or the snapshot predates them and is cached under the
+		// artifact identity they replaced.
+		await afterCodewikiWritesAhead(workspace);
 		const identity = codewikiArtifactIdentity(workspace);
 		const cached = transientCodewikis.get(workspace);
 		const sameDisk =

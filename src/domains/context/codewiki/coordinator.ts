@@ -313,27 +313,34 @@ export function coordinateCodewikiExclusive<T>(
 }
 
 /**
- * Reconcile a read tool's private snapshot without a writer lease or workspace mutation. It still joins the
- * workspace queue, so a read reconcile never runs its worker beside a writer's or another reader's for one tree.
+ * Reconcile a read tool's private snapshot without a writer lease or workspace mutation. A reader does not join the
+ * writer queue, so `drainCodewikiWrites` (stop, refresh) never waits on it; call `afterCodewikiWritesAhead` before
+ * reading the inputs this request carries, so they are taken after every writer already queued has committed.
  */
-export function reconcileCodewikiCandidate(
+export async function reconcileCodewikiCandidate(
 	request: Extract<CodewikiBuildWorkerRequest, { kind: "ensure" }> & { current: Codewiki | null },
 ): Promise<CodewikiBuildWorkerResult> {
-	return enqueueWorkspace(resolve(request.cwd), async () => {
-		if (request.current !== null) {
-			const check = await executeInWorker({
-				kind: "check",
-				cwd: request.cwd,
-				current: artifactRef(request.current),
-				previous: request.previous,
-			});
-			if (!check.changed) return { codewiki: request.current, fingerprint: check.fingerprint, changed: false };
-		}
-		const outcome = await executeInWorker(request);
-		const codewiki = outcome.codewiki ?? request.current;
-		if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
-		return { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
-	});
+	if (request.current !== null) {
+		const check = await executeInWorker({
+			kind: "check",
+			cwd: request.cwd,
+			current: artifactRef(request.current),
+			previous: request.previous,
+		});
+		if (!check.changed) return { codewiki: request.current, fingerprint: check.fingerprint, changed: false };
+	}
+	const outcome = await executeInWorker(request);
+	const codewiki = outcome.codewiki ?? request.current;
+	if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
+	return { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
+}
+
+/**
+ * Settle once every writer queued for the workspace at call time has finished. Unlike `drainCodewikiWrites`, it does
+ * not follow writers admitted later, so a reader is never starved by a busy queue.
+ */
+export async function afterCodewikiWritesAhead(cwd: string): Promise<void> {
+	await workspaceTails.get(legacyCodewikiPath(resolve(cwd)));
 }
 
 /** Build a preview candidate in the worker without acquiring a writer lease or touching disk. */
