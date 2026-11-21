@@ -160,6 +160,7 @@ export const routes = {
 	sessions: { name: "sessions", method: "GET", path: "/api/sessions" },
 	sessionOverview: { name: "sessionOverview", method: "GET", path: "/api/sessions/overview" },
 	session: { name: "session", method: "GET", path: "/api/sessions/:id" },
+	sessionPresence: { name: "sessionPresence", method: "GET", path: "/api/sessions/:id/presence" },
 	turn: { name: "turn", method: "POST", path: "/api/sessions/:id/turns" },
 	closeSession: { name: "closeSession", method: "POST", path: "/api/sessions/:id/close" },
 	launch: { name: "launch", method: "POST", path: "/api/launch" },

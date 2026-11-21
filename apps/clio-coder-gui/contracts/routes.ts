@@ -1131,6 +1131,13 @@ export const routes = {
 		summary: "Session projection snapshot",
 		...runtimeRoutes.session,
 	}),
+	sessionPresence: defineRoute({
+		...get,
+		params: operationParams,
+		response: Type.Object({ open: Type.Boolean() }, { additionalProperties: false }),
+		summary: "Whether this server holds the session, so a page can ask before reading a snapshot it may not have",
+		...runtimeRoutes.sessionPresence,
+	}),
 	turn: defineRoute({
 		...post,
 		params: operationParams,

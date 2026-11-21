@@ -229,6 +229,7 @@ export function sessionRoutes(
 		await snapshotHold?.();
 		return snapshot;
 	});
+	register(app, hub, routes.sessionPresence, ({ params }) => ({ open: supervisor.knows(params.id) }));
 	register(app, hub, routes.turn, ({ params, body }, context) =>
 		commands.run(`turn:${params.id}`, idempotencyKey(context), body, async () =>
 			supervisor.startTurn(params.id, body.text, body.images, body.files),

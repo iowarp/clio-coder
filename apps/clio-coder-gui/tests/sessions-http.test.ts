@@ -11,6 +11,10 @@ import { AcpProtocolError } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
 import { seedHistory } from "./harness/history-fixture.js";
 
+const { QueryClient } = await import("@tanstack/react-query");
+const { ApiProblem } = await import("../client/api/client.js");
+const { sessionQuery } = await import("../client/api/session-query.js");
+
 test("ACP problems explain missing credentials and failed turns without forwarding upstream prose", () => {
 	const failure = (code: unknown, reason?: unknown) =>
 		acpProblem(
@@ -452,6 +456,29 @@ test("a saved task another process holds names its holder, keeps its history rea
 	assert.equal(unregistered?.surface, "process");
 	// No live record means no heartbeat to ask through, so Take over is refused rather than guessed.
 	assert.equal(unregistered?.canTakeOver, false);
+	// Opening it asks whether this server holds it, and that answer is never a 404 in the browser console.
+	const presence = await h.request("/api/sessions/seeded-3/presence");
+	assert.equal(presence.status, 200, await presence.clone().text());
+	assert.deepEqual(await json(presence, routes.sessionPresence.response), { open: false });
+	const asked: string[] = [];
+	const client = {
+		call: async (route: { path: string }, input: { params: Record<string, string> }) => {
+			const path = route.path.replace(/:(\w+)/gu, (_, name: string) => input.params[name] ?? "");
+			asked.push(path);
+			const response = await h.request(path);
+			if (!response.ok) throw new ApiProblem(await response.json());
+			return response.json();
+		},
+	} as unknown as Parameters<typeof sessionQuery>[0];
+	const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	t.after(() => queries.clear());
+	const opened = await queries.fetchQuery(sessionQuery(client, "seeded-3")).then(
+		() => null,
+		(error: unknown) => error,
+	);
+	assert.ok(opened instanceof ApiProblem, String(opened));
+	assert.equal(opened.problem.code, "not_found");
+	assert.deepEqual(asked, ["/api/sessions/seeded-3/presence"]);
 	const loaded = await h.post("/api/sessions/seeded-3/load", { workspaceId: workspace.id });
 	assert.equal(loaded.status, 409, await loaded.clone().text());
 	assert.deepEqual(await h.files.read("children"), []);
