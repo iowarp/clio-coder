@@ -135,6 +135,12 @@ function clioRoot(role) {
 	return path.join(base && path.isAbsolute(base) ? base : path.join(home, fallback), "clio-coder");
 }
 
+// One launch receipt per running launcher, in the state root so a read-only install root
+// still launches. A receipt names the install root it was launched from.
+function launchReceipts() {
+	return path.join(clioRoot("state"), "launches");
+}
+
 function inside(root, file) {
 	if (typeof file !== "string" || !path.isAbsolute(file)) return false;
 	const rel = path.relative(root, file);
@@ -507,7 +513,7 @@ function prune(root, options = {}) {
 		}
 	}
 	const deadReceipts = [];
-	for (const file of listed(path.join(root, ".active"), (name) => name.endsWith(".json"))) {
+	for (const file of listed(launchReceipts(), (name) => name.endsWith(".json"))) {
 		let receipt;
 		try {
 			receipt = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -678,33 +684,43 @@ async function main() {
 		}
 		const removing = path.join(root, ".install-lock", "uninstall");
 		if (fs.existsSync(removing)) throw new Error("Uninstall is in progress; retry after it exits");
-		const active = path.join(root, ".active");
-		fs.mkdirSync(active, { recursive: true });
-		const receipt = path.join(active, `${process.pid}.json`);
+		let receipt = path.join(launchReceipts(), `${process.pid}.json`);
 		// Publish before importing, then recheck activation. A launcher paused across upgrades
 		// must follow the new manifest rather than importing a prefix collection just removed.
 		for (;;) {
-			atomic(
-				receipt,
-				JSON.stringify({
-					pid: process.pid,
-					host: os.hostname(),
-					current: current.current,
-					node: current.node,
-					launcherNode: process.execPath,
-				}),
-			);
+			if (receipt) {
+				try {
+					fs.mkdirSync(path.dirname(receipt), { recursive: true });
+					atomic(
+						receipt,
+						JSON.stringify({
+							pid: process.pid,
+							host: os.hostname(),
+							root,
+							current: current.current,
+							node: current.node,
+							launcherNode: process.execPath,
+						}),
+					);
+				} catch (error) {
+					// A sandbox or a shared home can leave the state root unwritable, or hide it. The
+					// launch still runs; prune and uninstall see the process in the process table.
+					if (!["EROFS", "EACCES", "EPERM", "ENOENT"].includes(error.code)) throw error;
+					receipt = null;
+				}
+			}
 			const latest = record(root);
 			if (latest.current === current.current && latest.node === current.node) break;
 			current = latest;
 		}
-		process.on("exit", () => {
-			try {
-				fs.rmSync(receipt, { force: true });
-			} catch {
-				/* Uninstall may already have removed the receipt. */
-			}
-		});
+		if (receipt)
+			process.on("exit", () => {
+				try {
+					fs.rmSync(receipt, { force: true });
+				} catch {
+					/* Uninstall may already have removed the receipt. */
+				}
+			});
 		if (fs.existsSync(removing)) throw new Error("Uninstall is in progress; retry after it exits");
 		let cli = entry(current.current);
 		// The installed desktop host stays capable across rollback to an older CLI. It launches
@@ -865,6 +881,8 @@ async function main() {
 		);
 	}
 	check(node, current, postInstall === "1");
+	// Launch receipts moved to the state root; the old directory in the install root is never read.
+	fs.rmSync(path.join(root, ".active"), { recursive: true, force: true });
 	// Activation has one commit point: launchers read this manifest on each invocation.
 	const helper = fs.readFileSync(__filename, "utf8");
 	const helpers = path.join(root, "launchers");
