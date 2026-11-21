@@ -57,13 +57,6 @@ const SELF_AGENT_SOURCE = "clio-coder:coder";
 /** Token every Clio-created pane carries so orphans are findable. */
 const OWNER_TOKEN_KEY = "clio_coder_owner";
 const OWNER_TOKEN_VALUE = "clio-coder:mux";
-/**
- * The token 0.4 sessions wrote. Clio no longer writes it, but ownership readers
- * keep matching it so a pane an older session left open is still found and
- * cleaned up.
- */
-const LEGACY_OWNER_TOKEN_KEY = "clio_owner";
-const LEGACY_OWNER_TOKEN_VALUE = "clio:mux";
 /** herdr caps a metadata token value at 80 characters. */
 const TOKEN_VALUE_MAX = 80;
 /** How long `available()` stays false after a transport failure before probing again. */
@@ -301,7 +294,7 @@ function processIsAlive(pid: number): boolean {
 }
 
 function hasOwnedPaneToken(tokens: Readonly<Record<string, string>>): boolean {
-	return tokens[OWNER_TOKEN_KEY] === OWNER_TOKEN_VALUE || tokens[LEGACY_OWNER_TOKEN_KEY] === LEGACY_OWNER_TOKEN_VALUE;
+	return tokens[OWNER_TOKEN_KEY] === OWNER_TOKEN_VALUE;
 }
 
 export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {

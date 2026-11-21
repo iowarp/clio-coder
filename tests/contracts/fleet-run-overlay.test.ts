@@ -280,6 +280,7 @@ test("an earlier fleet read from its record counts steps and loops as the live r
 			cwd: root,
 			fleet: "build-test",
 			planHash: "hash",
+			planIdentityHash: "hash",
 			stepIds: ["build", "suite.check.1", "suite.repair.1", "suite.check.2"],
 			planSteps: [
 				{ id: "build", kind: "agent", agentId: "coder" },

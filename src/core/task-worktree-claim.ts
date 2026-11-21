@@ -10,7 +10,6 @@ import { basename, dirname, join, resolve } from "node:path";
 export const SAFE_TASK_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const TASK_WORKTREE_OWNER_SUFFIX = ".task-owner.json";
 export const TASK_WORKTREE_KIND = "clio-coder-task-worktree";
-export const LEGACY_TASK_WORKTREE_KIND = "clio-task-worktree";
 
 /** The claim always lives on disk with the repository, wherever the working tree is. */
 export function taskWorktreeClaimParent(projectRoot: string): string {
@@ -44,8 +43,8 @@ export function taskWorktreeOrigin(workspace: string): string | null {
 		if (claim === null || typeof claim !== "object" || Array.isArray(claim)) return null;
 		const marker = claim as Record<string, unknown>;
 		if (
-			(marker.version !== 1 && marker.version !== 2) ||
-			(marker.kind !== TASK_WORKTREE_KIND && marker.kind !== LEGACY_TASK_WORKTREE_KIND) ||
+			marker.version !== 2 ||
+			marker.kind !== TASK_WORKTREE_KIND ||
 			marker.runId !== runId ||
 			typeof marker.root !== "string" ||
 			realpathSync(marker.root) !== origin ||

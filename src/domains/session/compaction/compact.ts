@@ -66,7 +66,12 @@ import {
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
 import { findLastEntry } from "../tree/active-path.js";
-import { serializeConversation, TOOL_RESULT_MAX_CHARS } from "./branch-summary.js";
+import {
+	codeReadSkeletons,
+	type SerializeConversationOptions,
+	serializeConversation,
+	TOOL_RESULT_MAX_CHARS,
+} from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
 import {
@@ -197,14 +202,15 @@ export interface CompactInput extends SideCallAuth {
 	/**
 	 * Memory's substitute for one history slice. `slice` holds the raw ledger
 	 * entries the slice covers, which is what observation batches were prepared
-	 * from and are keyed on; `projected` holds the same positions after the
-	 * working-set projection (evicted results as stubs), which is what any
-	 * uncovered unit is serialized from so the fallback text stays the ordinary one.
+	 * from and are keyed on; `serializeRefs` renders the entries with those turn
+	 * ids from the same positions after the working-set projection (evicted
+	 * results as stubs) and under the body caps the ordinary text was serialized
+	 * with, so an uncovered unit costs and carries what the ordinary text does.
 	 */
 	offerMemory?: (
 		slice: readonly SessionEntry[],
 		ordinary: string,
-		projected: readonly SessionEntry[],
+		serializeRefs: (refs: readonly string[]) => string,
 	) => MemoryCompactionOffer | null;
 	/**
 	 * Admission after exact request-fit, before each provider call. Its time is the call's admission stage; it sets
@@ -436,6 +442,42 @@ function hasConversation(slice: ReadonlyArray<SessionEntry>): boolean {
 			(entry.kind === "bashExecution" && entry.excludeFromContext !== true) ||
 			entry.kind === "branchSummary",
 	);
+}
+
+/** The operator turn an automatic pass carries verbatim whether or not it is cut, so it compresses nothing. */
+function preservedOperatorTurnId(input: CompactInput, entries: ReadonlyArray<SessionEntry>): string | undefined {
+	if (input.pendingOperatorTurn) return undefined;
+	return (
+		input.preserveUserTurnId ??
+		[...entries]
+			.reverse()
+			.find(
+				(entry) =>
+					entry.kind === "message" &&
+					entry.role === "user" &&
+					(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+			)?.turnId
+	);
+}
+
+/**
+ * A1(b) on a native route. A native checkpoint covers the whole ledger and its size is opaque, so what an automatic
+ * pass would fold is the conversation since the latest checkpoint; below the summary room the portable path uses as
+ * its bar, the paid native call gains nothing (CTX-12). A pass the request needs to fit, and /compact, always run.
+ */
+function nativeSkipReason(input: CompactInput): "nothing-to-summarize" | "below-summary-room" | undefined {
+	if (input.automatic !== true || input.requireFit === true) return undefined;
+	const checkpoint = input.entries.map((entry) => entry.kind === "compactionSummary").lastIndexOf(true);
+	const preserved = preservedOperatorTurnId(input, input.entries);
+	const span = input.entries.slice(checkpoint + 1).filter((entry) => entry.turnId !== preserved);
+	if (!hasConversation(span)) return "nothing-to-summarize";
+	const room = summaryOutputBudget(
+		input.model,
+		input.reserveTokens ?? DEFAULT_RESERVE_TOKENS,
+		input.summaryOutputCap,
+		input.summaryThinkingLevel,
+	).summaryRoom;
+	return span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < room ? "below-summary-room" : undefined;
 }
 
 /**
@@ -1500,6 +1542,19 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	let fallbackReason = input.providerFallbackReason;
 	const providerCompaction = input.providerCompaction;
 	if (providerCompaction && input.providerCheckpointSource && input.entries.some((entry) => entry.kind === "message")) {
+		const skip = nativeSkipReason(input);
+		if (skip !== undefined)
+			return {
+				summary: "",
+				firstKeptEntryIndex: input.entries.length,
+				firstKeptTurnId: null,
+				tokensBefore: calculateContextTokens(input.entries, getLastAssistantUsage(input.entries), input.continuityNote),
+				messagesSummarized: 0,
+				conversationMessagesSummarized: 0,
+				isSplitTurn: false,
+				emptyReason: skip,
+				...(skip === "below-summary-room" ? { noGain: true } : {}),
+			};
 		input.signal?.throwIfAborted();
 		const selection =
 			input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
@@ -1642,7 +1697,6 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	const rawTurnPrefix = turnPrefix.length > 0 ? input.entries.slice(...prefixRange) : [];
 	const previousContextEntries = priorCompactionContextEntries(entries, prevCompactionIndex);
 	const rawPriorSuffix = priorCompactionContextEntries(input.entries, prevCompactionIndex).slice(1);
-	const previousContextText = serializeConversation(previousContextEntries, seenBy(entries, previousContextEntries));
 	const compactedEntries = [
 		...priorCompactionContextEntries(input.entries, prevCompactionIndex),
 		...input.entries.slice(boundaryStart, cut.firstKeptEntryIndex),
@@ -1683,18 +1737,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		return emptyResult(cut === rawCut ? "protected-recent" : "protected-skill");
 	}
 	if (input.automatic === true && input.requireFit !== true) {
-		// The preserved turn rides verbatim whether or not it is cut, so it compresses nothing.
-		const preservedTurnId = input.pendingOperatorTurn
-			? undefined
-			: (input.preserveUserTurnId ??
-				[...entries]
-					.reverse()
-					.find(
-						(entry) =>
-							entry.kind === "message" &&
-							entry.role === "user" &&
-							(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
-					)?.turnId);
+		const preservedTurnId = preservedOperatorTurnId(input, entries);
 		const span = (summarizePriorSuffix ? priorSuffix : [...pre, ...turnPrefix]).filter(
 			(entry) => entry.turnId !== preservedTurnId,
 		);
@@ -1817,50 +1860,85 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		summaryWindow > 0
 			? Math.floor((summaryWindow - Math.min(maxTokens ?? summaryRoom, Math.floor(summaryWindow / 2))) * 0.8)
 			: 0;
-	const serializeWithinBudget = (slice: readonly SessionEntry[], build: (text: string) => string): string => {
+	// The previous context (the prior checkpoint and the suffix it kept live) shares the slice's tool-result cap and is
+	// priced with it: at the fixed floor a read the model last saw whole reached the next summary as its head and tail
+	// alone (CTX-6). Message clipping stays on the slice.
+	// A code read that would be clipped goes in as its signatures instead (CTX-17); one that fits stays whole.
+	const skeletons = await codeReadSkeletons([...previousContextEntries, ...pre, ...turnPrefix], TOOL_RESULT_MAX_CHARS);
+	interface Serialized {
+		text: string;
+		previous: string;
+		options: SerializeConversationOptions;
+	}
+	const serializeWithinBudget = (
+		slice: readonly SessionEntry[],
+		previousEntries: readonly SessionEntry[],
+		build: (text: string, previous: string) => string,
+	): Serialized => {
 		const seen = seenBy(entries, slice);
-		const capped = serializeConversation(slice, seen);
+		const previousSeen = seenBy(entries, previousEntries);
+		const render = (toolResultMaxChars?: number, messageMaxChars?: number): Serialized => {
+			const caps = toolResultMaxChars === undefined ? {} : { toolResultMaxChars };
+			const options = { ...seen, skeletons, ...caps, ...(messageMaxChars === undefined ? {} : { messageMaxChars }) };
+			return {
+				text: serializeConversation(slice, options),
+				previous:
+					previousEntries.length > 0 ? serializeConversation(previousEntries, { ...previousSeen, skeletons, ...caps }) : "",
+				options,
+			};
+		};
+		const capped = render();
 		if (summaryInputBudget <= 0) return capped;
-		const price = (text: string) =>
-			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(build(text))] });
-		const whole = serializeConversation(slice, { ...seen, toolResultMaxChars: Number.POSITIVE_INFINITY });
+		const price = (serialized: Serialized) =>
+			estimateAgentContextTokens({
+				systemPrompt,
+				messages: [buildUserMessage(build(serialized.text, serialized.previous))],
+			});
+		const whole = render(Number.POSITIVE_INFINITY);
 		if (price(whole) <= summaryInputBudget) return whole;
-		if (whole === capped || price(capped) >= summaryInputBudget) {
+		if ((whole.text === capped.text && whole.previous === capped.previous) || price(capped) >= summaryInputBudget) {
 			// Smallest tool-result cap still does not fit: one oversized user or
 			// assistant message would block every compaction, so clip message text
 			// for the summarizer only, halving down to a floor.
-			let messageMaxChars = capped.length;
+			let messageMaxChars = capped.text.length;
 			let clipped = capped;
 			while (messageMaxChars > MESSAGE_MIN_CHARS) {
 				messageMaxChars = Math.max(MESSAGE_MIN_CHARS, Math.floor(messageMaxChars / 2));
-				clipped = serializeConversation(slice, { ...seen, messageMaxChars });
+				clipped = render(undefined, messageMaxChars);
 				if (price(clipped) <= summaryInputBudget) return clipped;
 			}
 			return clipped;
 		}
 		let fits = TOOL_RESULT_MAX_CHARS;
-		let over = whole.length;
+		let over = Math.max(whole.text.length, whole.previous.length);
 		while (over - fits > 1) {
 			const cap = Math.floor((fits + over) / 2);
-			if (price(serializeConversation(slice, { ...seen, toolResultMaxChars: cap })) <= summaryInputBudget) fits = cap;
+			if (price(render(cap)) <= summaryInputBudget) fits = cap;
 			else over = cap;
 		}
-		return serializeConversation(slice, { ...seen, toolResultMaxChars: fits });
+		return render(fits);
 	};
 	const represent = (
 		slice: readonly SessionEntry[],
 		rawSlice: readonly SessionEntry[],
-		previous: string,
+		previousEntries: readonly SessionEntry[],
 		split: boolean,
 	): string => {
-		const build = (text: string) =>
+		const buildWith = (text: string, previous: string) =>
 			split
 				? buildTurnPrefixUserText(text, input.instructions, previous, prefixRoom)
 				: buildUserText(text, input.instructions, previous, activeRequest, historyRoom);
-		const ordinary = serializeWithinBudget(slice, build);
+		const serialized = serializeWithinBudget(slice, previousEntries, buildWith);
+		const ordinary = serialized.text;
+		const build = (text: string) => buildWith(text, serialized.previous);
 		const raw = build(ordinary);
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
-		const offer = input.offerMemory(rawSlice, ordinary, slice);
+		const offer = input.offerMemory(rawSlice, ordinary, (refs) =>
+			serializeConversation(
+				slice.filter((entry) => refs.includes(entry.turnId)),
+				serialized.options,
+			),
+		);
 		if (offer) issuedOffers.push(offer);
 		const declined = (reason: string, facts: Record<string, unknown> = {}) => {
 			if (offer) tellOffer(offer, { kind: "declined", reason });
@@ -1899,7 +1977,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			? represent(
 					summarizePriorSuffix ? priorSuffix : pre,
 					summarizePriorSuffix ? rawPriorSuffix : rawPre,
-					summarizePriorSuffix ? serializeConversation(previousContextEntries.slice(0, 1)) : previousContextText,
+					summarizePriorSuffix ? previousContextEntries.slice(0, 1) : previousContextEntries,
 					false,
 				)
 			: undefined;
@@ -1907,7 +1985,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// carried it too wrote the prior checkpoint twice, so each checkpoint grew by a copy of the last (bt-18).
 	const prefixText =
 		turnPrefix.length > 0
-			? represent(turnPrefix, rawTurnPrefix, historyText === undefined ? previousContextText : "", true)
+			? represent(turnPrefix, rawTurnPrefix, historyText === undefined ? previousContextEntries : [], true)
 			: undefined;
 	// T4: the live request is chosen only when its cached price is below the portable requests' plain input, and it
 	// fits the window with the whole transcript in it.

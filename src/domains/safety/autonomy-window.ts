@@ -24,13 +24,18 @@ import { isSecretArgKey, redactQuotedSecrets, redactSecretString } from "./redac
 export const AUTONOMOUS_CAP_REASON = "autonomous-cap";
 /** The `outcomeDetail` and abort reason prefix of a judge-streak halt. */
 export const JUDGE_STREAK_REASON = "judge-streak";
+/**
+ * The `outcomeDetail`, abort reason prefix and run cause of a decision-gate halt (exploration design X7): an
+ * unattended streak of read-only calls that kept reading after every note and two refused rounds.
+ */
+export const EXPLORATION_STALLED_REASON = "exploration_stalled";
 /** A headless run a cap paused exits as a spend ceiling does. */
 export const AUTONOMOUS_CAP_EXIT_CODE = 4;
 /** A headless run the judge's block streak ended exits as a permission refusal does. */
 export const AUTONOMY_JUDGE_STREAK_EXIT_CODE = 3;
 
 export type AutonomousCapKind = "calls" | "minutes" | "tokens";
-export type AutonomyHaltKind = AutonomousCapKind | "judge";
+export type AutonomyHaltKind = AutonomousCapKind | "judge" | "exploration";
 
 /** Each cap is a positive limit or 0 for off. */
 export interface AutonomousCaps {
@@ -48,7 +53,7 @@ export interface AutonomyUsage {
 
 export interface AutonomyHalt {
 	kind: AutonomyHaltKind;
-	/** The cap that tripped; absent for a judge streak. */
+	/** The cap that tripped; absent for a judge streak or a decision-gate stall. */
 	limit?: number;
 	/** One clause naming what stopped the run, for notices and summaries. */
 	detail: string;
@@ -114,11 +119,11 @@ export interface AutonomyWindow {
 	turnStarted(): void;
 	turnSettled(): void;
 	/**
-	 * Halt for a reason outside the caps, the judge's escalation today. With `afterBlock` the halt waits for the
-	 * block that crossed the line to be recorded as an open decision, or for that call to settle, so the notice names it;
-	 * the turn settling, the operator speaking or a new session drops it.
+	 * Halt for a reason outside the caps: the judge's escalation, or the read-streak decision gate's stall (X7). With
+	 * `afterBlock` the halt waits for the block that crossed the line to be recorded as an open decision, or for that
+	 * call to settle, so the notice names it; the turn settling, the operator speaking or a new session drops it.
 	 */
-	haltFor(kind: "judge", detail: string, afterBlock?: boolean): void;
+	haltFor(kind: "judge" | "exploration", detail: string, afterBlock?: boolean): void;
 	halted(): AutonomyHalt | null;
 	/** The operator spoke or resumed: a fresh window, and the halt it cleared if any. */
 	reopen(): AutonomyHalt | null;
@@ -349,10 +354,21 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		end() {
 			follow();
 			pendingJudge = null;
-			ended(halt === null ? "shutdown" : halt.kind === "judge" ? "judge-streak" : "autonomous-cap", session);
+			ended(halt === null ? "shutdown" : autonomyHaltReason(halt), session);
 			closed = true;
 		},
 	};
+}
+
+/** The reason a halt is journaled, aborted and reported under, by kind. */
+export function autonomyHaltReason(
+	halt: Pick<AutonomyHalt, "kind">,
+): typeof AUTONOMOUS_CAP_REASON | typeof JUDGE_STREAK_REASON | typeof EXPLORATION_STALLED_REASON {
+	return halt.kind === "judge"
+		? JUDGE_STREAK_REASON
+		: halt.kind === "exploration"
+			? EXPLORATION_STALLED_REASON
+			: AUTONOMOUS_CAP_REASON;
 }
 
 /** Settings to caps: the window runs at yolo alone, contained or unconfined; all caps 0 still latches a judge halt. */
@@ -458,11 +474,16 @@ export function autonomyHaltNotice(
 		const what =
 			halt.kind === "judge"
 				? `${JUDGE_STREAK_REASON}: the safety judge blocked too many calls (${halt.detail}), so yolo ended the run`
-				: `${AUTONOMOUS_CAP_REASON}: yolo paused at the ${halt.detail}`;
+				: halt.kind === "exploration"
+					? `${EXPLORATION_STALLED_REASON}: ${halt.detail}, so yolo ended the run`
+					: `${AUTONOMOUS_CAP_REASON}: yolo paused at the ${halt.detail}`;
 		return `${what} after ${spent}; review it, then \`clio-coder run --continue "<prompt>"\` resumes with a fresh window${left === "" ? "" : `.${left}`}`;
 	}
 	if (halt.kind === "judge") {
 		return `yolo paused: the safety judge blocked too many calls (${halt.detail}). Enter on an empty prompt continues and turns review back on; a new message also continues.${left}`;
+	}
+	if (halt.kind === "exploration") {
+		return `yolo paused: ${halt.detail} (${spent}). Send the decision or the next step; Enter on an empty prompt continues with a fresh streak.${left}`;
 	}
 	const again =
 		halt.kind === "calls"

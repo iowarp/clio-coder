@@ -46,12 +46,18 @@ import {
 import { workspaceSnapshotRepositoryPresent } from "../domains/workspace-snapshots/store.js";
 import { classifyDefaultTarget, describeVerdict, firstMissing } from "./default-target.js";
 import { copilotSignInReport } from "./doctor-copilot.js";
+import { dispatchAdmissionFindings } from "./doctor-dispatch-admission.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { installationFindings } from "./doctor-installation.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { slurmMcpFindings } from "./doctor-slurm.js";
-import { homeStorageFinding, installRootFinding, stateStorageFinding } from "./doctor-state-size.js";
+import {
+	homeStorageFinding,
+	installRootFinding,
+	sandboxCacheFinding,
+	stateStorageFinding,
+} from "./doctor-state-size.js";
 import { storeFindings } from "./doctor-store.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { pdfAttachmentFinding, toolchainFindings } from "./doctor-toolchain.js";
@@ -73,6 +79,8 @@ asking; sign-ins still require the operator.
 Plain doctor reports the proposed repairs and running builds that need a restart.
 --fix also records the fleet preflight, which is what admits an SSH node to
 dispatch for the current project root; plain doctor only reports it.
+--fix also prunes the sandbox cache to safety.sandboxCacheMaxGiB, least recently
+used tool directory first, unless a running session may use it.
 Settings are validated directly against the current schema.
 Pass --json to emit a machine-readable report on stdout.
 The text report folds the toolchain, interop, slurm, and naming rows into one
@@ -487,7 +495,12 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 	const installRoot = installRootFinding();
 	const storageChecks = untouched
 		? []
-		: [stateStorageFinding(), homeStorageFinding(), ...(installRoot === null ? [] : [installRoot])];
+		: [
+				stateStorageFinding(),
+				homeStorageFinding(),
+				...(installRoot === null ? [] : [installRoot]),
+				await sandboxCacheFinding({ fix }),
+			];
 	const runtimeChecks = await runDoctorRuntimeChecks();
 	// Every model pointer is checked against what its target advertises, so a
 	// placeholder id saved by configure is reported here and not on the first turn.
@@ -543,6 +556,8 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });
+	// The admission store reads one state file; --fix drops records no reader accepts.
+	const admissionChecks = untouched ? [] : dispatchAdmissionFindings({ fix });
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
 	// A checkout repair replaces lazy chunks. Finish every other dynamic check before rebuilding disk.
 	const installChecks = await installationFindings(fix);
@@ -568,6 +583,7 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 		...contractChecks,
 		...scratchChecks,
 		...worktreeChecks,
+		...admissionChecks,
 		...deepChecks,
 	].map(withDoctorCommand);
 }

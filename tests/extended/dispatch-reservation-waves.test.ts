@@ -1,6 +1,7 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
+import { dispatchAdmissionFindings } from "../../src/cli/doctor-dispatch-admission.js";
 import { withStateFileLockSync } from "../../src/core/state-file-lock.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import {
@@ -308,6 +309,62 @@ it("keeps healthy collective reservations beyond their advisory lifetime", () =>
 	const first = transfer(reservation.ownerId, "task-1");
 	releaseCapacityLease(first.leaseId);
 	releaseDispatchReservation(reservation.ownerId);
+});
+
+it("drops invalid settled admission records on boot and refuses only an invalid live one, naming it and the repair", () => {
+	// The shape a pre-host build left behind: settled plans with no `host`, and a lease long past its expiry.
+	const old = "2026-10-09T19:03:47.821Z";
+	const member = { memberId: "steward", wave: 0, nodeId: "local", costUpperBoundUsd: 0, consumedAt: null };
+	const settled = (status: string, ownerId: string) => ({
+		ownerId,
+		ownerPid: 1788226,
+		topology: "parallel",
+		status,
+		createdAt: old,
+		expiresAt: old,
+		settledAt: old,
+		members: [{ ...member, status: "released", releasedAt: old }],
+	});
+	const kept = reserve();
+	releaseDispatchReservation(kept.ownerId);
+	const state = readCapacityStateUnsafe();
+	const staleLease = { leaseId: "lease-old", assignmentId: "a", nodeId: "local", ownerPid: 1, expiresAt: old };
+	const write = (reservations: unknown[], leases: unknown[]) =>
+		writeFileSync(capacityStateLockPath(), JSON.stringify({ ...state, leases, reservations }));
+	write([...state.reservations, settled("released", "plan-a"), settled("expired", "plan-b"), null], [staleLease]);
+	const warned = dispatchAdmissionFindings();
+	deepStrictEqual(
+		warned.map((row) => [row.name, row.ok, row.level ?? "ok"]),
+		[
+			["dispatch reservations", true, "warn"],
+			["dispatch capacity leases", true, "warn"],
+		],
+	);
+	match(warned[0]?.detail ?? "", /1 valid record; 3 invalid settled records \('plan-a', 'plan-b', #\d+\)/);
+	strictEqual(cleanupDispatchReservations({ startup: true }), 0);
+	const onDisk = JSON.parse(readFileSync(capacityStateLockPath(), "utf8")) as {
+		leases: unknown[];
+		reservations: unknown[];
+	};
+	deepStrictEqual(onDisk.leases, []);
+	deepStrictEqual(
+		onDisk.reservations.map((record) => (record as { ownerId: string }).ownerId),
+		[kept.ownerId],
+	);
+	strictEqual(getDispatchReservation(kept.ownerId)?.status, "released");
+
+	write([...state.reservations, { ...settled("active", "plan-live"), settledAt: null }], []);
+	throws(() => cleanupDispatchReservations({ startup: true }), /invalid active reservation 'plan-live'.*doctor --fix/);
+	const fresh = new Date(Date.now() + 30_000).toISOString();
+	write(state.reservations, [{ ...staleLease, leaseId: "lease-live", expiresAt: fresh }]);
+	throws(() => capacityLeaseUsage(), /invalid capacity lease 'lease-live'.*doctor --fix/);
+	strictEqual(dispatchAdmissionFindings()[1]?.ok, false);
+	match(dispatchAdmissionFindings({ fix: true })[1]?.detail ?? "", /dropped 1 invalid record \('lease-live'\)/);
+	strictEqual(capacityLeaseUsage().global, 0);
+	writeFileSync(capacityStateLockPath(), "{");
+	strictEqual(dispatchAdmissionFindings()[0]?.ok, false);
+	strictEqual(dispatchAdmissionFindings({ fix: true })[0]?.ok, true);
+	deepStrictEqual(readCapacityStateUnsafe().reservations, []);
 });
 
 it("counts another host's loopback endpoint lease only when it runs on a named node", () => {

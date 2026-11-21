@@ -597,7 +597,7 @@ export interface ChatSettings extends WorkerTarget {
 export interface MemorySurfaceSettings {
 	/**
 	 * Observation preparation for a predicted fold. Off by default as a policy choice: its cost is measured and its
-	 * benefit is not. `context.memory.observations.enabled: true` still turns it on when this key is unset.
+	 * benefit is not.
 	 */
 	observe: "off" | "on";
 	/**
@@ -743,6 +743,12 @@ export interface SafetySettings {
 	 * them reachable. Read only from the operator's own settings file.
 	 */
 	sandboxUnixSockets: UnixSocketMode;
+	/**
+	 * Cap in GiB on the main-session sandbox's tool cache (`<cache dir>/sandbox-cache`). Once a day at startup, and
+	 * on `doctor --fix`, its least recently used top-level tool directories are removed until it fits, unless a
+	 * running process may still use it; 0 is no cap. Read only from the operator's own settings file.
+	 */
+	sandboxCacheMaxGiB: number;
 	/**
 	 * Workspace snapshots before the main agent mutates a Git work tree: auto
 	 * snapshots before each turn's first mutating call and before every
@@ -978,6 +984,7 @@ export const DEFAULT_SETTINGS = {
 		scratchRoots: [] as string[],
 		sandboxPassEnv: [] as string[],
 		sandboxUnixSockets: "block" as UnixSocketMode,
+		sandboxCacheMaxGiB: 4,
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		validationWrappers: [] as string[],
 		unattendedAfterSeconds: 300,
@@ -1235,6 +1242,11 @@ safety:
   # hides only your own, so system daemons (MUNGE, SSSD) stay reachable.
   # Honored only in this file.
   sandboxUnixSockets: block
+  # GiB the sandbox's own tool cache (npm, pnpm, pip, uv, Playwright) may hold.
+  # Once a day at startup, and on doctor --fix, the least recently used tool
+  # dirs are removed until it fits, never while a session may use them. 0 is
+  # no cap. Honored only in this file.
+  sandboxCacheMaxGiB: 4
   # Git snapshots before the agent changes files, restored with /rewind: auto | off.
   snapshots: auto
   # Wrapper scripts (a path, or a bare basename) that run a check with the

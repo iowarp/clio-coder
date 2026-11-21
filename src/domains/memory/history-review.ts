@@ -189,8 +189,8 @@ interface SessionCursor {
 	size: number;
 	/** The ledger recorded a flow restriction or a memory-off marker at or before `offset`; nothing later is read. */
 	restricted?: true;
-	/** Ledger file identity the offset was recorded against; absent on cursors written before it existed. */
-	identity?: string;
+	/** Ledger file identity the offset was recorded against. */
+	identity: string;
 }
 
 interface RepositoryCursors {
@@ -348,7 +348,7 @@ export function createHistoryReviewSource(input: {
 				// A cursor recorded against another file identity, or past the end of a
 				// shorter file, belongs to a rewritten ledger; read it again from the
 				// start and let the seen-call set drop what was already reviewed.
-				const sameLedger = prior !== undefined && (prior.identity === undefined || prior.identity === ledger.identity);
+				const sameLedger = prior !== undefined && prior.identity === ledger.identity;
 				if (sameLedger && prior?.restricted) continue;
 				let offset = sameLedger && prior !== undefined && prior.offset <= ledger.size ? prior.offset : 0;
 				if (offset >= ledger.size) continue;
@@ -466,14 +466,11 @@ function mergeCursors(
 			sessions[key] = cursor;
 			continue;
 		}
-		if (other.identity === cursor.identity || other.identity === undefined || cursor.identity === undefined) {
+		if (other.identity === cursor.identity) {
 			const furthest = cursor.offset >= other.offset ? cursor : other;
 			sessions[key] = {
 				...furthest,
 				...(cursor.restricted || other.restricted ? { restricted: true as const } : {}),
-				...((furthest.identity ?? cursor.identity ?? other.identity)
-					? { identity: furthest.identity ?? cursor.identity ?? other.identity }
-					: {}),
 			};
 			continue;
 		}
@@ -899,12 +896,13 @@ function readRepositoryCursors(path: string, repositoryKey: string): RepositoryC
 	const sessions: Record<string, SessionCursor> = {};
 	for (const [key, value] of Object.entries(record(entry.sessions))) {
 		const cursor = record(value);
-		if (typeof cursor.offset !== "number" || typeof cursor.size !== "number") continue;
+		if (typeof cursor.offset !== "number" || typeof cursor.size !== "number" || typeof cursor.identity !== "string")
+			continue;
 		sessions[key] = {
 			offset: cursor.offset,
 			size: cursor.size,
 			...(cursor.restricted === true ? { restricted: true as const } : {}),
-			...(typeof cursor.identity === "string" ? { identity: cursor.identity } : {}),
+			identity: cursor.identity,
 		};
 	}
 	const seenCalls = Array.isArray(entry.seenCalls)
