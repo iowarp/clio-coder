@@ -82,6 +82,7 @@ export {
 export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
 export {
 	createReadStreakRegistration,
+	READ_STREAK_GATE_EVIDENCE,
 	READ_STREAK_REGISTRATION_ID,
 	READ_STREAK_SERIAL_EVIDENCE,
 	type ReadStreakClassifiers,

@@ -1024,6 +1024,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						readStreakEscalated = 0;
 						streakNoteOpen = false;
 					},
+					// X7: a worker is never continued by an operator, so a streak past every note meets the decision gate,
+					// and its second refused round ends the run as a bound does, with its own outcome code.
+					unattended: true,
+					stall: (detail) => {
+						emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "exploration_stalled" } });
+						if (workerBoundAborted) return;
+						workerBoundAborted = true;
+						workerBoundFailure ??= `exploration_stalled: ${detail}`;
+						process.stderr.write(`[worker] read-streak gate: ${detail}; stopped the run\n`);
+						abortWorkerForBound?.();
+					},
 				})
 			: null;
 	const observations = createWorkerObservationStore(input.telemetryContext?.runId, seedLineage);

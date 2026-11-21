@@ -318,13 +318,12 @@ export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 import { emitApproval } from "../core/telemetry/approvals.js";
 import type { PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import {
-	AUTONOMOUS_CAP_REASON,
 	type AutonomyHalt,
 	autonomousCaps,
 	autonomyHaltNotice,
+	autonomyHaltReason,
 	createAutonomyWindow,
 	describeOpenDecision,
-	JUDGE_STREAK_REASON,
 	settledCallTokens,
 } from "../domains/safety/autonomy-window.js";
 import {
@@ -1703,7 +1702,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		emit: (name, payload, sessionId) => bus.emit(name, payload, sessionTelemetryContext(sessionId)),
 		onHalt: (halt) => {
 			lastAutonomyHalt = halt;
-			const prefix = halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON;
+			const prefix = autonomyHaltReason(halt);
 			// Synchronous, inside the call that crossed the line: the cancel can only reach the turn that halted.
 			chat.cancel({
 				reason: `[CLIO Coder] ${autonomyHaltNotice(
@@ -2580,6 +2579,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		workspaceRoot: memoryWorkspaceRoot,
 		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(getCurrentSettings) },
 		readStreakObserver: turnOutcomeCollector,
+		readStreakStall: (detail) => autonomyWindow.haltFor("exploration", detail),
 	}))
 		middlewareRegistrar.registerHook(registration);
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());

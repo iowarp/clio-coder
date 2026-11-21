@@ -127,7 +127,7 @@ Cause codes, in precedence order:
 | `5` | `unscripted` |
 | `3` | `permission_required`, `judge_streak` |
 | `4` | `session_cost_ceiling`, `max_cost_usd`, `autonomous_cap`, `max_requests`, `max_tool_calls` |
-| `1` | `provider_error`, `context_overflow`, `no_answer`, `output_limit`, `schema_mismatch`, `verify_failed`, `quality_failed`, `verdict_failed`, `noop`, `limitation`, `dispatched_worker_failed`, `worker_failed`, `output_write_failed`, `run_failed` |
+| `1` | `provider_error`, `context_overflow`, `no_answer`, `exploration_stalled`, `output_limit`, `schema_mismatch`, `verify_failed`, `quality_failed`, `verdict_failed`, `noop`, `limitation`, `dispatched_worker_failed`, `worker_failed`, `output_write_failed`, `run_failed` |
 
 `not_started` covers a request refused before any work, and `run_failed` a failure no narrower code names. After a step template's turns, the sealed run record (not the envelope) keeps `stepPipeline`, which names the step tool and says whether it signalled `done`; a pipeline left unfinished keeps the outcome and carries `stoppedBy` (`cap` for the yolo continuation cap with a step still running, `unreported` when the last turn at the cap made no step call and ended on its own summary, so the step tool simply never signalled `done`, `cancel` or `failure` when a cancel or a failed turn ended it, `turn` for a turn nothing continued). Always judge overall success/failure from `run_end`, not from model-level `agent_end` ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 

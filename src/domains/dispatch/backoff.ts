@@ -9,6 +9,7 @@ export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefin
 		code === "worker_turn_timeout" ||
 		code === "worker_output_cap_exhausted" ||
 		code === "loop_guard_tools_disabled_exhausted" ||
+		code === "exploration_stalled" ||
 		code === "result_contract_exhausted" ||
 		code === "host_verification_rejected" ||
 		code === "worker_no_work" ||

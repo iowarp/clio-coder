@@ -202,7 +202,9 @@ function autonomySummary(snapshot: Pick<ExitSummarySnapshot, "autonomy">, list: 
 			: [
 					report.halted.kind === "judge"
 						? `ended by the safety judge (${report.halted.detail})`
-						: `paused at the ${report.halted.detail}`,
+						: report.halted.kind === "exploration"
+							? `ended by the read-streak gate (${report.halted.detail})`
+							: `paused at the ${report.halted.detail}`,
 				];
 	const shown = list ? report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision) : [];
 	return [

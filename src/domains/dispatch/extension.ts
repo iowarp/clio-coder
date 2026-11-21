@@ -1472,6 +1472,7 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"worker_output_cap_exhausted",
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
 	"worker_no_work",
@@ -1494,6 +1495,7 @@ function hasDurableFinalOutput(output: RunResultOutput | undefined): boolean {
 const LOOP_DEGENERATION_CODES: ReadonlySet<RunOutcomeCode> = new Set([
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
+	"exploration_stalled",
 	"worker_tool_call_cap_exhausted",
 ]);
 

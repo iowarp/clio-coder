@@ -3881,7 +3881,9 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		findings.push(
 			autonomy.halt.kind === "judge"
 				? `Yolo ended the run at ${autonomy.halt.at}: the safety judge blocked too many calls (judge-streak).`
-				: `Yolo paused at ${autonomy.halt.at} on its ${autonomy.halt.limit !== undefined ? `${renderCount(autonomy.halt.limit)}-` : ""}${autonomy.halt.kind === "calls" ? "call" : autonomy.halt.kind === "minutes" ? "minute" : "token"} cap (autonomous-cap).`,
+				: autonomy.halt.kind === "exploration"
+					? `Yolo ended the run at ${autonomy.halt.at}: the read-streak decision gate refused two rounds of reads after every note (exploration_stalled).`
+					: `Yolo paused at ${autonomy.halt.at} on its ${autonomy.halt.limit !== undefined ? `${renderCount(autonomy.halt.limit)}-` : ""}${autonomy.halt.kind === "calls" ? "call" : autonomy.halt.kind === "minutes" ? "minute" : "token"} cap (autonomous-cap).`,
 		);
 	if (autonomy && autonomy.openDecisions > 0)
 		findings.push(

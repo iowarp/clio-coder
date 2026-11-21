@@ -38,6 +38,13 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCa
  * A writer worker (X3) has no turn_start report, so it passes its surface,
  * and it has its own host channel: the second step goes there once, in place
  * of the second and last notes.
+ *
+ * The decision gate (X7). On a turn that will be continued without an
+ * operator, a streak that reaches {@link GATE_READS} with every note its
+ * surface gets already delivered refuses read-class calls at before_tool,
+ * with that surface's second-step text, until a call that resets the streak
+ * succeeds. The second refused round hands the stall to the composition,
+ * which ends the unattended run with the typed cause `exploration_stalled`.
  */
 
 export const READ_STREAK_REGISTRATION_ID = "nudge.read-streak";
@@ -46,9 +53,17 @@ const FIRST_NOTE = 25;
 const SECOND_NOTE = 40;
 const LAST_NOTE = 60;
 const SERIAL_ROUNDS = 4;
+/** Reads at which the decision gate arms on an unattended turn whose notes are spent (X7, Q1). */
+const GATE_READS = 80;
+/** Refused rounds after which the gate hands the stall to the composition. */
+const GATE_STALL_ROUNDS = 2;
+/** A turn that cannot write (read-only, answer, proposal) is gated too, with its answer wording (X7, Q3). */
+const GATE_TURNS_THAT_CANNOT_WRITE = true;
 const STREAK_EVIDENCE = "count:read-class-calls@no-progress-streak";
 /** The evidence class of the serial-round note, which settles on round width rather than on progress (3.4). */
 export const READ_STREAK_SERIAL_EVIDENCE = "count:single-read-rounds@no-progress-streak";
+/** The evidence class of a decision-gate refusal (X7): a block, settled as one, never a ladder note. */
+export const READ_STREAK_GATE_EVIDENCE = "count:read-class-calls@decision-gate";
 const BATCH_SENTENCE = "Send the reads and searches you already know you need together in one round.";
 /** Compaction stages that may remove tool results from the request; a recall restores them instead. */
 const NON_FOLD_STAGES: ReadonlySet<string> = new Set(["working_set_recall"]);
@@ -126,6 +141,13 @@ interface StreakState {
 	surface: TurnSurface;
 	/** The gateway chain running now: its steps reach after_tool one by one, each with the outer call's batch size. */
 	chain: { id: string | undefined; steps: number } | null;
+	/** Ladder notes delivered in this streak, the worker's second step included. */
+	notes: number;
+	/** Rounds the gate refused in this streak, and the batch of the latest one. */
+	refusedRounds: number;
+	refusedBatch: string | undefined;
+	/** The stall was handed over; once per streak. */
+	stalled: boolean;
 }
 
 const WRITER: TurnSurface = { canWrite: true, canPlan: true, canAsk: true };
@@ -214,6 +236,11 @@ function hostNote(message: string): MiddlewareEffect {
 
 type CallEffect = "read" | "progress" | "other";
 
+/** How many ladder notes a surface gets: three for a main writer, two for a worker writer, one answer note otherwise. */
+function ladderNotes(surface: TurnSurface, secondStep: boolean): number {
+	return !surface.canWrite ? 1 : secondStep ? 2 : 3;
+}
+
 export function createReadStreakRegistration(deps: {
 	observer?: ReadStreakObserver;
 	classifiers: ReadStreakClassifiers;
@@ -224,6 +251,13 @@ export function createReadStreakRegistration(deps: {
 	secondStep?: (count: number) => void;
 	/** Called whenever the streak starts over, so a host holding the second step can drop it. */
 	onReset?: () => void;
+	/**
+	 * The decision gate's stop (X7): called once per streak when the gate refused its second round. Without it the
+	 * gate never arms. `detail` is one clause naming the streak for the run's closing notice.
+	 */
+	stall?: (detail: string) => void;
+	/** The run is never continued by an operator (a worker); otherwise the tool hook's `turnBudgetContinues` decides. */
+	unattended?: boolean;
 }): MiddlewareHookRegistration & { resetStreak(): void } {
 	const state: StreakState = {
 		sessionId: undefined,
@@ -234,12 +268,20 @@ export function createReadStreakRegistration(deps: {
 		folded: false,
 		surface: deps.surface ?? WRITER,
 		chain: null,
+		notes: 0,
+		refusedRounds: 0,
+		refusedBatch: undefined,
+		stalled: false,
 	};
 	const reset = (): void => {
 		state.reads = 0;
 		state.serial = 0;
 		state.serialNoted = false;
 		state.folded = false;
+		state.notes = 0;
+		state.refusedRounds = 0;
+		state.refusedBatch = undefined;
+		state.stalled = false;
 		deps.onReset?.();
 	};
 	const followSession = (sessionId: string | undefined): void => {
@@ -290,6 +332,7 @@ export function createReadStreakRegistration(deps: {
 		if (deps.secondStep !== undefined && surface.canWrite && state.reads >= SECOND_NOTE) {
 			if (state.reads === SECOND_NOTE) {
 				context?.evidence?.(STREAK_EVIDENCE);
+				state.notes += 1;
 				deps.secondStep(state.reads);
 			}
 			return NONE;
@@ -308,6 +351,7 @@ export function createReadStreakRegistration(deps: {
 				state.serialNoted = true;
 			}
 			context?.evidence?.(STREAK_EVIDENCE);
+			state.notes += 1;
 			noted = "ladder";
 			return [
 				state.reads === FIRST_NOTE ? { kind: "annotate_tool_result", message, severity: "info" } : hostNote(message),
@@ -322,6 +366,33 @@ export function createReadStreakRegistration(deps: {
 		return NONE;
 	};
 
+	/**
+	 * The decision gate at before_tool (X7): a read-class call of an unattended turn whose streak reached the gate with
+	 * its surface's notes spent is refused with the second-step text. The second refused round hands over the stall.
+	 */
+	const gate = (input: MiddlewareHookInput, context?: MiddlewareHookEvaluationContext): MiddlewareEffect | null => {
+		const stall = deps.stall;
+		if (stall === undefined || state.reads < GATE_READS) return null;
+		const surface = state.surface;
+		if (!surface.canWrite && !GATE_TURNS_THAT_CANNOT_WRITE) return null;
+		if (state.notes < ladderNotes(surface, deps.secondStep !== undefined)) return null;
+		if (deps.unattended !== true && input.metadata?.turnBudgetContinues !== true) return null;
+		if (input.metadata?.nested === true || input.metadata?.origin === "harness" || outerChain(input)) return null;
+		if (classify(input) !== "read") return null;
+		const batch = input.correlationId ?? input.toolCallId;
+		if (batch === undefined || batch !== state.refusedBatch) {
+			state.refusedRounds += 1;
+			state.refusedBatch = batch;
+		}
+		context?.evidence?.(READ_STREAK_GATE_EVIDENCE);
+		if (state.refusedRounds >= GATE_STALL_ROUNDS && !state.stalled) {
+			state.stalled = true;
+			stall(`${state.reads} read-only calls in a row with no edit, plan or question after every note`);
+		}
+		const reason = surface.canWrite ? secondNote(state.reads, surface, state.folded) : answerNote(state.reads);
+		return { kind: "block_tool", reason, severity: "hard-block" };
+	};
+
 	return {
 		id: READ_STREAK_REGISTRATION_ID,
 		// A run with no turn_start report (a worker) starts the streak over here when its operator steers it.
@@ -334,7 +405,8 @@ export function createReadStreakRegistration(deps: {
 			followSession(input.sessionId);
 			if (input.hook === "turn_start") {
 				state.chain = null;
-				if (operatorTurnStart(input)) reset();
+				// A turn that starts after a stall got past the halt it raised, so the operator resumed: a fresh streak.
+				if (operatorTurnStart(input) || state.stalled) reset();
 				state.surface = turnSurface(input);
 				const userTurnId = input.metadata?.userTurnId;
 				state.userTurnId = typeof userTurnId === "string" ? userTurnId : undefined;
@@ -370,7 +442,8 @@ export function createReadStreakRegistration(deps: {
 					const steps = input.toolArgs?.steps;
 					state.chain = { id: input.toolCallId, steps: Array.isArray(steps) ? Math.max(steps.length, 1) : 1 };
 				}
-				return NONE;
+				const refusal = gate(input, context);
+				return refusal === null ? NONE : [refusal];
 			}
 			if (input.hook !== "after_tool" || input.toolName === undefined) return NONE;
 			// The chain's own result closes its round; its steps were already judged one by one.

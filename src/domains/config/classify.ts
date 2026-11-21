@@ -68,6 +68,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// Read the same way: per contained call in the main session, into each
 	// new WorkerSpec for workers.
 	"safety.sandboxUnixSockets",
+	// The startup prune reads it from the live snapshot when it runs and doctor reads the file, so neither keeps an old
+	// value; it takes effect at the next prune.
+	"safety.sandboxCacheMaxGiB",
 	// The main registry asks on every mutating call whether to snapshot.
 	"safety.snapshots",
 	// The safety domain's shell reader reads it from the live snapshot at every check reading, so the next one observes

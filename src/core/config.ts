@@ -2330,6 +2330,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"scratchRoots",
 				"sandboxPassEnv",
 				"sandboxUnixSockets",
+				"sandboxCacheMaxGiB",
 				"snapshots",
 				"validationWrappers",
 				"unattendedAfterSeconds",
@@ -2387,6 +2388,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("sandboxUnixSockets" in safety) {
 				const parsed = expectEnum(issues, "safety.sandboxUnixSockets", safety.sandboxUnixSockets, UNIX_SOCKET_MODES);
 				if (parsed !== undefined) settings.safety.sandboxUnixSockets = parsed;
+			}
+			if ("sandboxCacheMaxGiB" in safety) {
+				const parsed = expectNumber(issues, "safety.sandboxCacheMaxGiB", safety.sandboxCacheMaxGiB, { min: 0 });
+				if (parsed !== undefined) settings.safety.sandboxCacheMaxGiB = parsed;
 			}
 			if ("yoloAccepted" in safety) {
 				const parsed = expectBoolean(issues, "safety.yoloAccepted", safety.yoloAccepted);
