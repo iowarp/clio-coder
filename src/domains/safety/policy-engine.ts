@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, type Dirent, lstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { bashSearchPath, probeToolEnv } from "../../core/bash-exec.js";
@@ -156,8 +156,10 @@ import {
 } from "./skill-authority.js";
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 import {
+	commandAssignments,
 	MAX_RAW_TEXT_BYTES,
 	pinnedClioCommand,
+	setsVariablesAtRunTime,
 	YOLO_FLOOR_AUTHORITY_REMEDY,
 	YOLO_FLOOR_AUTHORITY_RULE_IDS,
 	YOLO_FLOOR_PACK_RULE_IDS,
@@ -1078,15 +1080,17 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	};
 	/** A write or delete into one of Clio's own trees, however the command spells or reaches it. */
 	const clioOwnedMutation = (call: ClassifierCall, callCwd: string, command: string | null, trees: ClioOwnedTrees) => {
-		const scanned = pathPolicyTargets(call, callCwd).filter((target) => target.operation !== "read");
-		const targets = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, scanned, callCwd)];
+		const scanned = pathPolicyTargets(call, callCwd)
+			.filter((target) => target.operation !== "read")
+			.map((target) => ({ ...target, path: accountHomeExpanded(target.path) }));
+		const targets = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, callCwd, trees.roots)];
 		if (targets.length === 0) return false;
 		const spelled = targets.some(
 			(target) =>
 				CLIO_OWNED_VARIABLE.test(target.path) ||
 				trees.spellings.some((spelling) => target.path === spelling || target.path.startsWith(`${spelling}/`)),
 		);
-		if (spelled) return true;
+		if (spelled || (command !== null && writesThroughClioVariable(command, targets, trees))) return true;
 		const memo = createPathWalkMemo();
 		return skillMutationReason(trees.roots, mutationCandidates(targets, callCwd, command, memo), memo) !== null;
 	};
@@ -1272,6 +1276,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				(text): text is string => text !== null,
 			);
 			const commands = [...new Set([command, ...decoded])];
+			// Each decoded spelling gets its own pin reading: a pin read only from the text as written misses what `$'...'` spells.
+			const owned =
+				pins === null
+					? undefined
+					: [...new Set(commands.flatMap((text) => (text === command ? pins.readings : pinnedClioCommand(text).readings)))];
 			const hit = commandFloorHit(
 				[...new Set([...commands, ...shellCommandSegments(command)])],
 				commands,
@@ -1279,7 +1288,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				trees,
 				false,
 				gitOnly,
-				pins?.readings,
+				owned,
 			);
 			if (hit !== null) return held(hit);
 		} else if (!gitOnly && clioOwnedMutation(call, callCwd, null, trees)) {
@@ -4470,46 +4479,181 @@ function clioOwnedTrees(workspace: string): ClioOwnedTrees {
 		const rest = root.slice(home.length);
 		for (const prefix of ["~", "$HOME", `\${HOME}`]) spellings.add(`${prefix}${rest}`);
 	}
+	// `~name` is the account's passwd home whatever HOME holds.
+	const account = accountHome();
+	for (const root of roots) {
+		if (account === null || !isSameOrDescendant(root, account.home) || root === account.home) continue;
+		spellings.add(`~${account.name}${root.slice(account.home.length)}`);
+	}
 	return { roots: [...roots], spellings: [...spellings] };
 }
 
+/** Whether text spells one of Clio's trees, with or without its quotes: a Clio variable, a root, or a home-relative spelling. */
+function namesClioTree(text: string, trees: ClioOwnedTrees): boolean {
+	return [text, text.replace(/["'\\]/gu, "")].some(
+		(form) =>
+			CLIO_OWNED_VARIABLE.test(form) || [...trees.roots, ...trees.spellings].some((spelling) => form.includes(spelling)),
+	);
+}
+
+/** A `$NAME` or `${NAME...}` reference to `name`. */
+function referenceTo(name: string): RegExp {
+	return new RegExp(`\\$\\{?${name}(?![A-Za-z0-9_])`, "u");
+}
+
 /**
- * Write targets the floor reads beyond the general scan (FX-8): an `rsync` destination, and a write that goes through a
- * symbolic link an `ln -s` in the same command plants, spelled at the link's target. The scan judges paths as they
- * stand before the command runs, when that link does not exist yet. A link a cd places elsewhere resolves from `cwd`.
+ * Whether a write lands on a variable that may hold one of Clio's trees where no pin placed it (the reading kept
+ * `$NAME`): one the command assigns a value naming a tree, directly or through other assignments, however the shell
+ * then splits or joins it; or, while the command's text names a tree, one a run-time assigner (`read`, `mapfile`,
+ * `printf -v`, `eval`, `${NAME:=...}`) may set, which the command names bare as their operands are, or REPLY and
+ * MAPFILE, which `read` and `mapfile` set unnamed.
+ */
+function writesThroughClioVariable(
+	command: string,
+	targets: ReadonlyArray<{ path: string }>,
+	trees: ClioOwnedTrees,
+): boolean {
+	const referenced = new Set(
+		targets.flatMap((target) => [...target.path.matchAll(/\$\{?([A-Za-z_]\w*)/gu)].map((match) => match[1] as string)),
+	);
+	if (referenced.size === 0) return false;
+	const assignments = commandAssignments(command);
+	const tainted = new Set<string>();
+	for (let grew = true; grew; ) {
+		grew = false;
+		for (const { name, text } of assignments) {
+			if (tainted.has(name)) continue;
+			if (namesClioTree(text, trees) || [...tainted].some((held) => referenceTo(held).test(text))) {
+				tainted.add(name);
+				grew = true;
+			}
+		}
+	}
+	if ([...referenced].some((name) => tainted.has(name))) return true;
+	if (!namesClioTree(command, trees) || !setsVariablesAtRunTime(command)) return false;
+	const forms = [command, command.replace(/["'\\]/gu, "")];
+	return [...referenced].some(
+		(name) =>
+			name === "REPLY" ||
+			name === "MAPFILE" ||
+			forms.some((form) => new RegExp(`(?<![\\w$]|\\$\\{)${name}(?!\\w)`, "u").test(form)),
+	);
+}
+
+/** The account running Clio and its passwd home, or null where the platform has none. */
+function accountHome(): { name: string; home: string } | null {
+	try {
+		const info = userInfo();
+		return { name: info.username, home: info.homedir };
+	} catch {
+		return null;
+	}
+}
+
+/** `~name` for the account running Clio is its passwd home, whatever HOME holds, as bash reads it. */
+function accountHomeExpanded(raw: string): string {
+	const account = accountHome();
+	if (account === null) return raw;
+	const prefix = `~${account.name}`;
+	return raw === prefix || raw.startsWith(`${prefix}/`) ? `${account.home}${raw.slice(prefix.length)}` : raw;
+}
+
+/**
+ * The paths a `mktemp` makes: its template under its `-p`, `--tmpdir` or `-t` directory, which is TMPDIR as the
+ * session or the command itself sets it; none for `-u`, which only prints a name.
+ */
+function mktempTargets(args: ReadonlyArray<string>, temps: ReadonlyArray<string>): string[] {
+	let dir: string | null = null;
+	let underTemp = false;
+	let template: string | null = null;
+	for (let index = 0; index < args.length; index += 1) {
+		const word = args[index] as string;
+		if (word === "--") {
+			template ??= args[index + 1] ?? null;
+			break;
+		}
+		if (word === "--dry-run") return [];
+		if (word === "--tmpdir") underTemp = true;
+		else if (word.startsWith("--tmpdir=")) dir = word.slice("--tmpdir=".length);
+		else if (word === "--suffix") index += 1;
+		else if (word.startsWith("--")) continue;
+		else if (word.startsWith("-") && word.length > 1) {
+			// A cluster's flags run up to `p`, whose value is the rest of the word or the next one.
+			const valued = word.indexOf("p");
+			const flags = valued < 0 ? word.slice(1) : word.slice(1, valued);
+			if (flags.includes("u")) return [];
+			if (flags.includes("t")) underTemp = true;
+			if (valued >= 0) {
+				const rest = word.slice(valued + 1);
+				dir = rest.length > 0 ? rest : (args[index + 1] ?? null);
+				if (rest.length === 0) index += 1;
+			}
+		} else template ??= word;
+	}
+	const name = template ?? "tmp.XXXXXXXXXX";
+	if (dir !== null) return [path.join(dir, name)];
+	if (template !== null && !underTemp) return [template];
+	return temps.map((temp) => path.join(temp, name));
+}
+
+/**
+ * Write targets the floor reads beyond the general scan (FX-8): an `rsync` destination, what a `mktemp` makes, and
+ * every link the command makes. A symbolic or hard link (`ln`, `cp -s`, `cp -l`) whose source is in, or holds, one of
+ * Clio's trees counts as a write there: what the command writes through the link, however it later names, moves or
+ * cds into it, lands in that tree. A source with a variable in it is judged as written, so a Clio variable reads as
+ * Clio's tree.
  */
 function sameCommandWriteTargets(
 	command: string,
-	targets: ReadonlyArray<{ operation: PathPolicyOperation; path: string }>,
 	cwd: string,
+	roots: ReadonlyArray<string>,
 ): Array<{ operation: PathPolicyOperation; path: string }> {
 	const found: Array<{ operation: PathPolicyOperation; path: string }> = [];
-	const links = new Map<string, { target: string; planted: number }>();
-	const literal = (word: string) => !/[$`]/u.test(word);
-	for (const step of shellCommandSteps(command, homedir())) {
+	const home = homedir();
+	const expand = (word: string) =>
+		accountHomeExpanded(word === "~" || word.startsWith("~/") ? path.join(home, word.slice(1)) : word);
+	const linked = (source: string, base: string) => {
+		const raw = expand(source);
+		if (/[$`]/u.test(raw)) {
+			found.push({ operation: "write", path: raw });
+			return;
+		}
+		const at = path.resolve(base, raw);
+		found.push({ operation: "write", path: at });
+		for (const root of roots) if (isSameOrDescendant(root, at)) found.push({ operation: "write", path: root });
+	};
+	// TMPDIR as the session holds it, and as any assignment in the command sets it for a `mktemp` that reads it.
+	const temps = [
+		process.env.TMPDIR || "/tmp",
+		...commandAssignments(command)
+			.filter(({ name }) => name === "TMPDIR")
+			.map(({ text }) => expand(text.replace(/["']/gu, ""))),
+	];
+	for (const step of shellCommandSteps(command, home)) {
+		if (step.executable === "mktemp") {
+			for (const made of mktempTargets(step.args, temps)) found.push({ operation: "write", path: expand(made) });
+			continue;
+		}
 		const operands: string[] = [];
 		let targetDir: string | null = null;
-		let symbolic = false;
+		let links = step.executable === "ln";
 		for (let index = 0, options = true; index < step.args.length; index += 1) {
 			const word = step.args[index] as string;
 			if (options && word === "--") options = false;
 			else if (options && word.startsWith("--")) {
-				if (word === "--symbolic") symbolic = true;
-				else if (word.startsWith("--target-directory=")) targetDir = word.slice("--target-directory=".length);
+				if (["--symbolic-link", "--link"].includes(word) && step.executable === "cp") links = true;
+				if (word.startsWith("--target-directory=")) targetDir = word.slice("--target-directory=".length);
 				else if (word === "--target-directory" || word === "--suffix") {
 					if (word === "--target-directory") targetDir = step.args[index + 1] ?? null;
 					index += 1;
 				}
 			} else if (options && word.startsWith("-") && word.length > 1) {
-				if (step.executable !== "ln") continue;
-				if (word.includes("s")) symbolic = true;
+				if (step.executable === "cp" && /^-[^-]*[sl]/u.test(word)) links = true;
 				const valued = /[tS]/u.exec(word);
-				if (valued !== null) {
-					const rest = word.slice(valued.index + 1);
-					if (rest.length === 0) index += 1;
-					const value = rest.length > 0 ? rest : (step.args[index] ?? null);
-					if (valued[0] === "t") targetDir = value;
-				}
+				if (valued !== null && word.slice(valued.index + 1).length === 0) {
+					if (valued[0] === "t") targetDir = step.args[index + 1] ?? null;
+					index += 1;
+				} else if (valued?.[0] === "t") targetDir = word.slice(valued.index + 1);
 			} else operands.push(word);
 		}
 		if (step.executable === "rsync") {
@@ -4519,38 +4663,16 @@ function sameCommandWriteTargets(
 				found.push({ operation: "write", path: destination });
 			continue;
 		}
-		if (step.executable !== "ln" || !symbolic || !operands.every(literal)) continue;
-		const plant = (link: string, source: string) => {
-			const at = path.resolve(cwd, link);
-			const entry = links.get(at);
-			links.set(at, { target: path.resolve(path.dirname(at), source), planted: (entry?.planted ?? 0) + 1 });
-		};
-		if (targetDir !== null) {
-			if (literal(targetDir)) for (const source of operands) plant(path.join(targetDir, path.basename(source)), source);
-		} else if (operands.length === 1) plant(path.basename(operands[0] as string), operands[0] as string);
-		else {
-			const destination = operands.at(-1) as string;
-			const sources = operands.slice(0, -1);
-			// One source may name the link itself or, when the destination is a directory, a link inside it.
-			if (sources.length === 1) plant(destination, sources[0] as string);
-			for (const source of sources) plant(path.join(destination, path.basename(source)), source);
-		}
-	}
-	if (links.size === 0) return found;
-	const seen = new Map<string, number>();
-	for (const target of targets) {
-		if (!literal(target.path)) continue;
-		const raw =
-			target.path === "~" || target.path.startsWith("~/") ? path.join(homedir(), target.path.slice(1)) : target.path;
-		const at = path.resolve(cwd, raw);
-		for (const [link, { target: linked, planted }] of links) {
-			if (at === link) {
-				// The `ln` step names its own link once; another write naming it writes through it.
-				const count = (seen.get(link) ?? 0) + 1;
-				seen.set(link, count);
-				if (count > planted) found.push({ operation: target.operation, path: linked });
-			} else if (isSameOrDescendant(at, link)) {
-				found.push({ operation: target.operation, path: path.join(linked, path.relative(link, at)) });
+		if (!links) continue;
+		// A source is resolved from the link's directory, which may be the cwd or the named destination; both count.
+		const sources = targetDir !== null || operands.length === 1 ? operands : operands.slice(0, -1);
+		const destination = targetDir ?? (operands.length > 1 ? (operands.at(-1) as string) : ".");
+		const linkDir = /[$`]/u.test(destination) ? null : path.resolve(cwd, expand(destination));
+		for (const source of sources) {
+			linked(source, cwd);
+			if (linkDir !== null && !path.isAbsolute(expand(source))) {
+				linked(source, linkDir);
+				linked(source, path.dirname(linkDir));
 			}
 		}
 	}

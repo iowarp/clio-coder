@@ -483,6 +483,93 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 			command,
 		);
 	}
+	// Neon review of the pins: a pin is a parsed assignment of a plain value, and what the parser cannot place keeps
+	// Clio's names reading as Clio's trees. `~/<base>` is the session's ~/.local/state/clio-coder kin here.
+	const base = basename(home.dir);
+	const account = dirname(home.dir);
+	const neon = [
+		// 1: a value holding a comment or a quote rewrote the text the floor judged.
+		`A="#"; echo $A > ~/${base}/config/settings.yaml`,
+		`A="#"; : $A && rm -rf ~/${base}/state ~/${base}/data ~/${base}/cache`,
+		`A="'"; echo $A > ~/${base}/config/settings.yaml $A`,
+		`A='${scratchHome}/"'; echo $A > ~/${base}/config/settings.yaml $A`,
+		// 2: `&&` after a mktemp that fails skips the pin while `;` still runs the write.
+		`H=$(mktemp -d /nonexistent/a.XXX) && HOME=${scratchHome}; echo x > ~/${base}/config/settings.yaml`,
+		`H=$(mktemp -d /nonexistent/a.XXX) && export CLIO_CODER_HOME=${scratchHome}; echo x > "$CLIO_CODER_HOME/state/pwn"`,
+		// 3: an unexported pin is empty in a child shell.
+		`H=${scratchHome}; sh -c 'echo x > "$H$HOME/${base}/state/pwn"'`,
+		`H=${scratchHome}; sh -c 'echo x > "$H${home.dir}/state/pwn"'`,
+		// 4: env clears or sets what the pin claimed.
+		`HOME=${scratchHome}; env -i bash -c 'echo x > ~/${base}/state/pwn'`,
+		`CLIO_CODER_HOME=${scratchHome}; env CLIO_CODER_HO''ME="$CLIO_CODER_STATE_DIR" bash -c 'echo x > "$CLIO_CODER_HOME/pwn"'`,
+		// 5: a changed IFS splits an unquoted pin into two paths.
+		`H=${scratchHome}/x:$HOME/${base}/config/settings.yaml; IFS=:; echo x | tee $H`,
+		`H=${scratchHome}/x:${home.dir}/state; IFS=:; rm -rf $H`,
+		// 6 and 7: two mktemps can fail apart, and a template can hold an earlier one's empty result.
+		`A=$(mktemp -d /nonexistent/a.XXX); B=$(mktemp -d "$A${home.dir}/state/b.XXX"); echo x > "$B/../pwn"`,
+		`A=$(mktemp -d /nonexistent/a.XXX); B=$(mktemp -d b.XXX); echo x > "$A$B/../${relative(cwd, join(home.dir, "state"))}/pwn"`,
+		// 8: an escaped or quoted builtin, a here-string read, a quoted printf -v, a trap and eval set the name.
+		`HOME=${scratchHome}; \\unset HO''ME; echo x > ~/${base}/state/pwn`,
+		`H=${scratchHome}; read<<<"${home.dir}/state" H''; echo x > "$H/pwn"`,
+		`HOME=${scratchHome}; printf '-v' HO''ME ${account}; echo x > ~/${base}/state/pwn`,
+		`HOME=${scratchHome}; trap $'\\x48OME=${account}' DEBUG; :; echo x > ~/${base}/state/pwn`,
+		`CLIO_CODER_HOME=${scratchHome}; \\eval 'CLIO_CODER_HO''ME='"$CLIO_CODER_STATE_DIR"; echo x > "$CLIO_CODER_HOME/pwn"`,
+		// 9: a link the command plants, read through `..`, a variable source, two hops or a cd.
+		`H=$(mktemp -d "$TMPDIR/h.XXXX"); ln -s ${home.dir}/state/sub "$H/link"; echo x > "$H/link/../pwn"`,
+		`H=$(mktemp -d "$TMPDIR/h.XXXX"); ln -s "$CLIO_CODER_STATE_DIR" "$H/link"; echo x > "$H/link/pwn"`,
+		`H=$(mktemp -d "$TMPDIR/h.XXXX"); ln -s ${home.dir}/state "$H/a"; ln -s "$H/a" "$H/b"; echo x > "$H/b/pwn"`,
+		`H=$(mktemp -d "$TMPDIR/h.XXXX"); cd "$H" && ln -s ${home.dir}/state link && echo x > "$H/link/pwn"`,
+		`ln -s ${home.dir}/state/sub ${scratchHome}/l1; echo x > ${scratchHome}/l1/../pwn`,
+		`ln -s ${home.dir}/state ${scratchHome}/l2; ln -s ${scratchHome}/l2 ${scratchHome}/l3; echo x > ${scratchHome}/l3/pwn`,
+		// 11: mktemp itself makes a directory in Clio's tree.
+		`H=$(mktemp -d ~/${base}/state/pwn.XXX); true`,
+		`mktemp -p ${home.dir}/state`,
+		// Red-team round on the parsed pins: an unresolved reference inside a pin, `${X:=}`, REPLY and a quoted
+		// printf -v name, an escaped ANSI-C quote, links moved or entered, TMPDIR the command sets, chained assignments.
+		`CLIO_CODER_STATE_DIR=$HOME$U/${base}/state; rm -rf "$CLIO_CODER_STATE_DIR"`,
+		`A=$HOME; HOME=$A$U; rm -rf ~/${base}/state`,
+		`: \${X:=~/${base}/state}; rm -rf "$X"`,
+		`read <<< ~/${base}/state; rm -rf "$REPLY"`,
+		`printf -v d""ir ~/${base}/config; touch "$dir/pwn"`,
+		`echo $""$'\\''; read x <<< ~/${base}/config; touch "$x/pwn" # '`,
+		`ln -s ~/${base}/config ./a && cd ./a && touch pwn`,
+		`ln -s ~/${base}/config ./a && mv ./a ./b && touch ./b/pwn`,
+		`cp -s ~/${base}/config/settings.yaml ./l && echo x > ./l`,
+		`ln ~/${base}/config/settings.yaml ./hl && echo x > ./hl`,
+		`mktemp -dp${home.dir}/state`,
+		`TMPDIR=~/${base}/state mktemp -d`,
+		`true; A=~/${base}/config; B=$A; touch "$B/pwn"`,
+		`true; A=~/${base}/'config'; touch "$A/pwn"`,
+		// The failed-mktemp reading: HOME falls back to the account's home when H is empty and the write still runs.
+		`H=$(mktemp -d "$TMPDIR/home.XXXX"); export HOME=$H${account}; echo x > ~/${base}/state/f`,
+	];
+	// 10: `~user` is the account's passwd home whatever HOME holds; spelled only when the tree lies under it.
+	const account10 = relative(userInfo().homedir, home.dir);
+	if (!account10.startsWith(".."))
+		neon.push(
+			`HOME=${scratchHome}; echo x > ~${userInfo().username}/${account10}/state/pwn`,
+			`cd ~${userInfo().username}/${account10}/config && touch pwn`,
+			`mktemp -d ~${userInfo().username}/${account10}/config/x.XXXX`,
+		);
+	const admitted = neon.filter(
+		(command) =>
+			sessionEngine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode !== "yolo-floor:clio-owned-state",
+	);
+	deepStrictEqual(admitted, []);
+	// The parsed pins still place a scratch home built in one `&&` chain, and a plain value the command quotes.
+	for (const command of [
+		'H=$(mktemp -d "$TMPDIR/home.XXXX") && export HOME=$H/home CLIO_CODER_HOME=$H/clio && mkdir -p "$CLIO_CODER_HOME/state" && node dist/cli/index.js --version',
+		`export CLIO_CODER_HOME='${scratchHome}'; echo x > "$CLIO_CODER_HOME/state/f"`,
+		// Reading Clio's tree and writing elsewhere stays a read, beside a run-time assigner or a variable naming the tree.
+		`printf '%s\\n' "$(cat ~/${base}/state/log)" > "$TMPDIR/copy"`,
+		`X=~/${base}/state/log; cp $X "$TMPDIR/copy"`,
+		// A program with parentheses in its quoted script, a quoted HOME=, and a cleanup the mktemp's `&&` guards.
+		scratch('mkdir -p "$CLIO_CODER_HOME/state" && node -e "console.log(1)"'),
+		scratch('mkdir -p "$CLIO_CODER_HOME/state" && echo "HOME=$HOME"'),
+		`H=$(mktemp -d "$TMPDIR/home.XXXX") && export HOME=$H${account} && mkdir -p ~/${base}/state && echo x > ~/${base}/state/f`,
+	]) {
+		strictEqual(sessionEngine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
+	}
 	for (const key of ["HOME", "CLIO_CODER_HOME", "CLIO_CODER_STATE_DIR"]) process.env[key] = previousEnv[key];
 	// FX-7: `$TMPDIR` is the temp directory this process runs commands with, so a scratch file there deletes as one.
 	const scratchRm = bash('rm -f "$TMPDIR/probe.test.ts"');
