@@ -127,6 +127,7 @@ import type { ApprovalRequestView, MutationFacts } from "../../session-control/a
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import {
 	classifyTurnEnding,
+	HOST_STATUS_NOTICE_KEY,
 	THINKING_CLAMP_NOTICE_KEY,
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
@@ -926,10 +927,15 @@ const ACP_ADMISSION_FALLBACK_REASON = "admission-failed";
 
 /**
  * Host information lines are not reply text: context engine status (working set, the compaction row, the no-gain line)
- * reports Clio's own housekeeping, and the thinking clamp line says the route cannot apply the requested level. Their
- * producers tag them by key; the wording is free to change.
+ * reports Clio's own housekeeping, the thinking clamp line says the route cannot apply the requested level, and host
+ * status lines report the route, model residency, skill surface, image sidecar and project instructions. Their
+ * producers tag them by key; the wording is free to change. Warnings, errors and untagged lines stay reply text.
  */
-const ACP_HOST_INFO_NOTICE_KEYS: ReadonlySet<unknown> = new Set([CONTEXT_STATUS_NOTICE_KEY, THINKING_CLAMP_NOTICE_KEY]);
+const ACP_HOST_INFO_NOTICE_KEYS: ReadonlySet<unknown> = new Set([
+	CONTEXT_STATUS_NOTICE_KEY,
+	THINKING_CLAMP_NOTICE_KEY,
+	HOST_STATUS_NOTICE_KEY,
+]);
 
 function isHostInfoNotice(level: unknown, noticeKey: unknown): boolean {
 	return level === "info" && ACP_HOST_INFO_NOTICE_KEYS.has(noticeKey);
