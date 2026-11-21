@@ -218,6 +218,7 @@ import {
 } from "./live-telemetry.js";
 import type { AcpAutonomyPosture, AcpReadoutsSession } from "./readouts.js";
 import { createAcpReadoutsEmitter } from "./readouts.js";
+import { createAcpRuntimeNoticeRelay } from "./runtime-notice.js";
 import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
@@ -4907,10 +4908,23 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	});
 
 	const unsubscribeEvents: Array<() => void> = [];
+	// Runtime notices cross as session metadata like startup hints, never on stderr, which a client keeps only as a crash tail.
+	const runtimeNotices = createAcpRuntimeNoticeRelay((sessionId, notice) =>
+		options.transport.notify("session/update", {
+			sessionId,
+			update: {
+				sessionUpdate: "session_info_update",
+				_meta: { [ACP_NOTICE_META_KEY]: { ...notice, text: safeStoredString(notice.text, ACP_MAX_CHUNK_BYTES) } },
+			},
+		}),
+	);
 	if (options.bus !== undefined) {
 		const bus = options.bus;
 		unsubscribeEvents.push(
 			bus.subscribe("context.pruned", () => telemetry.contextFolded()),
+			bus.subscribe("runtime.notice_raised", (payload) =>
+				runtimeNotices.raise(payload, handshake.initialized ? (activeSessionId ?? boundSessionId) : null),
+			),
 			bus.subscribe("session.eggs_changed", (payload) => {
 				const sessionId = activeSessionId ?? boundSessionId;
 				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;
@@ -8325,6 +8339,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					});
 				}
 			}
+			runtimeNotices.flush(session.id);
 			const trimmed = text.trim();
 			const commandMatch = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/u.exec(trimmed);
 			const command = commandMatch?.[1];
