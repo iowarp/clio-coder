@@ -186,6 +186,7 @@ import type {
 	AnthropicResponseObservation,
 	CodexConfiguration,
 	CodexTransportObservation,
+	ResponsesCacheDiagnostic,
 	Usage,
 } from "../engine/types.js";
 import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
@@ -526,6 +527,7 @@ export interface TurnContext {
 		backend?: BackendCompletionTimings,
 		anthropicResponse?: AnthropicResponseObservation,
 		transport?: CodexTransportObservation,
+		responsesDiagnostic?: ResponsesCacheDiagnostic,
 	): Record<string, unknown>;
 	/** Record the settled run's cache summary for /context. */
 	noteRunCacheSummary(messages: ReadonlyArray<AgentMessage>, runFirstCallVerdict: BackendCacheVerdict | null): void;
@@ -4412,6 +4414,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			backend?: BackendCompletionTimings,
 			anthropicResponse?: AnthropicResponseObservation,
 			transport?: CodexTransportObservation,
+			responsesDiagnostic?: ResponsesCacheDiagnostic,
 		): Record<string, unknown> {
 			// Per-call prompt-cache record (T3.2) keeps normalized provider usage
 			// beside any timings captured from the server response. The run's first
@@ -4507,6 +4510,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					return typeof transformation?.type === "string" ? [transformation.type] : [];
 				});
 				observation.providerDiagnostic = { provider: "anthropic", type: `input_transformations:${types.join(",")}` };
+			} else if (responsesDiagnostic !== undefined) {
+				// PV-2: the public Responses verdict against the previous response; only a named miss is a cause.
+				observation.providerDiagnostic = {
+					provider: responsesDiagnostic.provider,
+					type: responsesDiagnostic.reason ?? responsesDiagnostic.type,
+					...(responsesDiagnostic.missedInputTokens === undefined
+						? {}
+						: { missedInputTokens: responsesDiagnostic.missedInputTokens }),
+				};
+				const causes = {
+					model_changed: "model_changed",
+					tools_changed: "tools_changed",
+					input_changed: "input_changed",
+					reasoning_effort_changed: "reasoning_changed",
+					context_compacted: "compaction",
+				} as const;
+				const reason = responsesDiagnostic.type === "cache_miss" ? responsesDiagnostic.reason : undefined;
+				if (reason !== undefined && Object.hasOwn(causes, reason)) {
+					observation.cause = causes[reason as keyof typeof causes];
+					observation.causeBasis = "provider";
+				}
 			}
 			if (observation.cause === "prompt_recompiled" && nextChangedSection !== undefined) {
 				observation.changedSection = nextChangedSection;

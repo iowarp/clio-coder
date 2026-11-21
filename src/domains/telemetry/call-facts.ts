@@ -27,9 +27,9 @@ export function reportedModelFromMessage(message: unknown): Fact<string> {
 }
 
 /**
- * Transport facts Clio observes under option B: Pi keeps the Codex socket, so continuation, reuse and the SSE pin
- * come from Pi's per-session counters, attributed only when no other stream overlapped the call. The connect span and
- * handshake headers stay unknown. A delta frame's bytes are not the payload's, so they stay unknown too (#434).
+ * Transport facts Clio counts itself: its Responses socket (`src/engine/apis/responses-websocket.ts`) records each
+ * call's sends, reuse and SSE pin, attributed to that call alone. The connect span stays unknown. A delta frame's
+ * bytes are not the payload's, so they stay unknown too (#434).
  */
 function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettled["transport"] {
 	const codex = record(raw.codexTransport);

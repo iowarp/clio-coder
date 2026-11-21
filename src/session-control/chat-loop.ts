@@ -1893,8 +1893,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				? undefined
 				: { kind: entry.kind, ...(entry.origin !== undefined ? { origin: entry.origin } : {}) };
 		},
-		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
-			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
+		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport, responsesDiagnostic) =>
+			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport, responsesDiagnostic),
 		telemetry: deps.telemetry,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
