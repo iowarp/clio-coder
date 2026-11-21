@@ -153,3 +153,24 @@ export function observedReadEvents(path = "fixture.txt", toolCallId = "observed-
 		{ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId, outcome: "ok", durationMs: 1 } },
 	];
 }
+
+/**
+ * One check the worker ran through bash and that passed, as a dispatch stub yields it: a checker's or reviewer's
+ * claimed check must be one the run executed (fleet design 4.8), so a stub that claims `command` runs it first.
+ */
+export function observedCheckEvents(
+	command = "npm test",
+	toolCallId = "observed-check",
+): Array<Record<string, unknown>> {
+	return [
+		{ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command } },
+		{
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: "bash",
+			isError: false,
+			result: { content: [{ type: "text", text: "ok" }] },
+		},
+		{ type: "clio_coder_tool_finish", payload: { tool: "bash", toolCallId, outcome: "ok", durationMs: 1 } },
+	];
+}
