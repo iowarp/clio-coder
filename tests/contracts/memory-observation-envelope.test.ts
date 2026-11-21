@@ -204,7 +204,13 @@ test("the observer prepares only near a portable fold, stops after two declined 
 	strictEqual(memory({ surfaces: { observe: "on" } }), "on");
 
 	// The projection names the planner's path: live only when its live-prefix request is available.
-	const fold = { pressure: 0.79, livePrefix: true as boolean | undefined, auto: true, runtimeId: "anthropic" };
+	const fold = {
+		pressure: 0.79,
+		livePrefix: true as boolean | undefined,
+		auto: true,
+		runtimeId: "anthropic",
+		trigger: 0.8,
+	};
 	const planner = {
 		inspectLiveBudget: () =>
 			({
@@ -218,7 +224,7 @@ test("the observer prepares only near a portable fold, stops after two declined 
 				},
 				...(fold.livePrefix === undefined ? {} : { livePrefixSummary: () => fold.livePrefix }),
 			}) as never,
-		contextLedger: () => ({ compactionAuto: fold.auto, compactionThreshold: 0.8 }),
+		contextLedger: () => ({ compactionAuto: fold.auto, compactionThreshold: fold.trigger }),
 	};
 	strictEqual(foldProjection(planner, {})?.path, "live");
 	fold.livePrefix = false;
@@ -308,6 +314,12 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		fold.pressure = 0.6;
 		await runtime.runIdleStep();
 		strictEqual(calls, 0, "no preparation below the margin");
+		// C-5: a 1M route's trigger caps at 0.40, so a whole-window margin started observing 150K tokens early.
+		fold.trigger = 0.4;
+		fold.pressure = 0.3;
+		await runtime.runIdleStep();
+		strictEqual(calls, 0, "the margin is a share of the trigger, not of the window");
+		fold.trigger = 0.8;
 		fold.pressure = 0.7;
 		await runtime.runIdleStep();
 		strictEqual(calls, 1, "a portable fold within the margin prepares");

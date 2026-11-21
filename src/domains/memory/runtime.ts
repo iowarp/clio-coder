@@ -163,10 +163,12 @@ const OBSERVATION_RESERVED_ARTIFACTS = 4;
 const OBSERVATION_WRAPPER_TOKENS = 48;
 const OBSERVATION_MIN_NOTE_TOKENS = 64;
 /**
- * No preparation until pressure is within this share of the window below the
- * automatic fold's trigger: a session that never nears a fold never pays for
- * notes it cannot use. Uncalibrated: calibrating it needs held-out sessions that
- * do and do not fold naturally, scored for false preparations and missed folds.
+ * No preparation until pressure is within this share of the automatic fold's
+ * trigger: a session that never nears a fold never pays for notes it cannot
+ * use. A share of the trigger, not of the window: a 1M route's trigger caps at
+ * 0.40 of its window, where a window share started observing 150K tokens early
+ * (C-5). Uncalibrated: calibrating it needs held-out sessions that do and do
+ * not fold naturally, scored for false preparations and missed folds.
  */
 const OBSERVATION_FOLD_MARGIN = 0.15;
 /**
@@ -753,7 +755,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				this.#lastReason = `fold-${projection.path}`;
 				return null;
 			}
-			if (projection.pressure < projection.trigger - OBSERVATION_FOLD_MARGIN) {
+			if (projection.pressure < projection.trigger * (1 - OBSERVATION_FOLD_MARGIN)) {
 				this.#lastReason = "below-margin";
 				return null;
 			}
