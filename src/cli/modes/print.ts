@@ -1268,7 +1268,12 @@ async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, m
 	});
 }
 
+/** How every line this run writes to stderr starts. */
+const RUN_STDERR_PREFIX = "clio-coder run: ";
+
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
+	/** The unscripted question that stopped the turn, and whether its cancel notice already told the operator. */
+	let unscriptedStop = null as { text: string; told: boolean } | null;
 	if (runOverrides().requirePriced === true) {
 		const delegating = options.constraints?.delegation !== "forbidden";
 		const unpriced = options.unpricedRoutes?.(delegating ? "delegating" : "main") ?? [];
@@ -1609,7 +1614,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				event.source === "reminder"
 					? `reminder to the model: ${reminderGist(event.text.replace(/^\s*\[(?:CLIO|Clio) Coder\]\s*/u, ""))}`
 					: event.text;
-			process.stderr.write(`clio-coder run: ${redactUrlCredentials(text)}\n`);
+			// A stop reason this run wrote, such as an unscripted question, already carries the prefix.
+			const line = text.startsWith(RUN_STDERR_PREFIX) ? text.slice(RUN_STDERR_PREFIX.length) : text;
+			if (unscriptedStop !== null && text.trim() === unscriptedStop.text) unscriptedStop.told = true;
+			process.stderr.write(`${RUN_STDERR_PREFIX}${redactUrlCredentials(line)}\n`);
 		}
 		if (event.type === "notice" && unreportedUsage === null && isUnreportedUsageNotice(event.text))
 			unreportedUsage = event.text;
@@ -1659,9 +1667,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// The first question the answers file does not script stops the turn once the call that asked it settles,
 	// so an extension still hears its step cancelled as unscripted before the run ends.
 	const scripted = options.answers;
-	const unsubscribeUnscripted = scripted?.onUnscripted((question) =>
-		chat.cancel({ reason: unscriptedRunMessage(scripted, question), atToolBoundary: true }),
-	);
+	const unsubscribeUnscripted = scripted?.onUnscripted((question) => {
+		unscriptedStop = { text: unscriptedRunMessage(scripted, question), told: false };
+		chat.cancel({ reason: unscriptedStop.text, atToolBoundary: true });
+	});
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
 		// A line written before the first turn streams waits for that turn instead of being refused.
@@ -2004,7 +2013,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			failureMessage,
 			outcomeDetail: "unscripted",
 		};
-		stderrMessage = failureMessage;
+		// The stop's own notice already told the operator, so the closing line does not say it again.
+		stderrMessage = unscriptedStop?.told === true && unscriptedStop.text === failureMessage ? null : failureMessage;
 		answerMessage = null;
 	}
 	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);

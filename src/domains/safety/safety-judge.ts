@@ -215,6 +215,11 @@ export interface SafetyJudgeSubject {
 	approvalAuthority: ApprovalAuthority;
 	/** A plan-scale dispatch, whose body requires an authenticated operator approval. */
 	dispatchPlan?: boolean;
+	/**
+	 * The session scope, described, that the operator approved and this sandbox escape lies inside (M-7), when the
+	 * scoped route sends a covered escape to the judge: the operator's approval of leaving the sandbox.
+	 */
+	escapeScope?: string;
 	/** A call the harness made on its own decision. */
 	harness?: boolean;
 	/**
@@ -477,6 +482,12 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				} catch {
 					// As above: a feature, never a precondition.
 				}
+				if (subject.escapeScope !== undefined) {
+					consequences = [
+						...consequences,
+						`operator-approved session scope: the operator chose "Approve for this session: ${boundedLine(redactSecretString(subject.escapeScope), 400)}" on an approval card, and this sandbox escape lies inside it`,
+					];
+				}
 				let scripts: ScriptFileRun[] = [];
 				try {
 					// The script file a call runs, read inside the workspace and scratch roots, so a scope naming its
@@ -587,6 +598,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					const unnamedEscape =
 						source === null &&
 						asksToLeaveSandbox(subject.decision) &&
+						subject.escapeScope === undefined &&
 						!(citedOperator && (escapeApproved || operatorMentionsSandbox(operatorWords)));
 					record({
 						...base,
