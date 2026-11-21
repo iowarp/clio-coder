@@ -4333,6 +4333,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
+					// A turn that ended without its turn_end hook (a throw or an abort before any reply) ended here, while this
+					// submit still owns the stream and its lease: a resubmit below can take ownership and return before its turn_start.
+					if (promptStarted && submitOwner === owner) outcomeCollector.endTurn();
 					state.streaming = false;
 					// A run that ended without reaching its tool boundary has nothing left to stop.
 					boundaryStop = null;
@@ -4575,8 +4578,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 			} finally {
-				await turnLease?.release();
+				// Settlements land before the lease release flushes, and possibly seals, the session's journal.
 				middleware.releaseTurnHolds(turnHolds);
+				await turnLease?.release();
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
@@ -4902,6 +4906,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queues.reset({ keepOperator: sessionId !== null && sessionId === queueSessionId });
 			queueSessionId = sessionId;
 			middleware.clearPendingReminders();
+			// The turn the reset cut off never reaches its turn_end hook: what its requests carried settles with it now.
+			outcomeCollector.closeSession();
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			state.lastRunSnapshot = null;

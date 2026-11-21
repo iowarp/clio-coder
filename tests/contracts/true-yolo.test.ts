@@ -470,20 +470,37 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		for (const mode of [undefined, "default", "yolo"] as const)
 			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
 	}
-	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge.
+	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge, and none asks for a
+	// workspace snapshot: after the leading temp cd a relative operand is placed under the temp root.
 	for (const command of [
 		'B=$TMPDIR/base; mkdir -p "$B"; rm -rf "$B"',
 		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
 		'H=$(mktemp -d); rm -rf "$H"',
-		'cd "$TMPDIR" && mkdir -p probe-rows; rm -rf probe-rows',
+		'cd "$TMPDIR" && mkdir -p probe-rows && rm -rf probe-rows',
 	]) {
-		const decision = engine.evaluate(bash(command), "default", {
-			...atDefault,
-			snapshots: command.startsWith("cd "),
-		});
+		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
+	}
+	// A failed cd leaves the shell in the workspace, where a delete after `;` or a newline still runs, and a TMPDIR that
+	// is no directory never moves the shell: each keeps the .git block and the workspace snapshot ask.
+	const absentTemp = join(temp, "xr43-absent");
+	for (const [command, env] of [
+		['cd "$TMPDIR"; rm -rf .git', temp],
+		['cd "$TMPDIR"\nrm -rf src', temp],
+		['cd "$TMPDIR" && mkdir -p x; rm -rf .git', temp],
+		['cd "$TMPDIR" && rm -rf .git', absentTemp],
+	] as const) {
+		process.env.TMPDIR = env;
+		try {
+			strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
+			const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
+			strictEqual(decision.kind, "ask", command);
+			match(decision.reasons.join("; "), /deletes (?:\.git|src) with no workspace snapshot/u, command);
+		} finally {
+			process.env.TMPDIR = temp;
+		}
 	}
 	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
 	const linkDir = mkdtempSync(join(temp, "xr43-"));
@@ -523,6 +540,17 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
+	}
+	// The shell keeps the whitespace in a TMPDIR value and word-splits it, so a padded TMPDIR is no stable temp root,
+	// even when the padded name links to the directory itself.
+	const paddedTemp = join(linkDir, "padded");
+	mkdirSync(paddedTemp);
+	symlinkSync(paddedTemp, `${paddedTemp} `);
+	process.env.TMPDIR = `${paddedTemp} `;
+	try {
+		strictEqual(verdict("rm -rf $TMPDIR/etc"), "block/damage-control:delete-outside-workspace");
+	} finally {
+		process.env.TMPDIR = temp;
 	}
 	// Reading Clio's own state, cleaning the workspace and writing /dev/null stay off the floor.
 	for (const command of [
