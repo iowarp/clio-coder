@@ -540,6 +540,16 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		"git --git-dir .git worktree remove --force .",
 		`git -C.. worktree remove --force ${ws}`,
 		`cd .. && shred ${ws}/.git`,
+		// Row 261 last pass (r261f): env by path or with clustered options, a here-document body after a grouped or
+		// negated alias step, and a find -execdir operand.
+		`env -iC .. rm -rf ${ws}/.git`,
+		`env -iC .. sh -c 'rm -rf ${ws}/.git'`,
+		`/usr/bin/env -C .. rm -rf ${ws}/.git`,
+		"/usr/bin/env rm -rf .git",
+		'S=sh; T=opt; A=al; B=ias; { "$S$T" -s expand_aliases; }; { "$A$B" echo=sh; }\necho <<\'EOF\'\nrm -rf .git\nEOF',
+		"! S=sh; X=1 \"$S\" -c true\necho <<'EOF'\nrm -rf .git\nEOF",
+		`find . -name package.json -execdir rm -r ${cwd} {} +`,
+		`find . -name package.json -execdir rm -r -f ${cwd} {} +`,
 	];
 	// Row 261 final: every fail-open both second-round reviews named ends blocked or with the judge, never allowed:
 	// without a sandbox no verdict is an allow, and with one an allow is only the sandbox's own containment.

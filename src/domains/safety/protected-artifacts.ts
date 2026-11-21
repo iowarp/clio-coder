@@ -1405,9 +1405,10 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	// `env -C DIR cmd` runs cmd in DIR, and `env -S 'cmd args'` runs the words of its string (row 261); cmd, a shell's
 	// `-c` script included, runs inside DIR, so the subshell closes after it.
 	const env = envInvocation(argv);
-	if (env !== null && env.chdirs.length > 0) {
+	const chdirs = env?.chdirs ?? [];
+	if (chdirs.length > 0) {
 		walk.events.push({ kind: "subshell", open: true });
-		for (const target of env.chdirs) walk.events.push({ kind: "cd", target, unmodeled });
+		for (const target of chdirs) walk.events.push({ kind: "cd", target, unmodeled });
 	}
 	const writes: string[] = [];
 	collectRedirectTargets(segment, writes);
@@ -1417,6 +1418,20 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	collectLinkEvents(argv, walk.events);
 	const deletesFrom = walk.events.length;
 	collectDeleteEvents(argv, walk.events);
+	const addedFrom = walk.events.length;
+	// An env spelled as a path (`/usr/bin/env`) or with clustered options (`env -iC ..`) hides the command it runs from
+	// the readers above, so it is read again from where env starts it (r261f-1).
+	const hidden =
+		env !== null &&
+		env.split === undefined &&
+		env.commandIndex < argv.length &&
+		env.commandIndex !== commandTokenIndex(argv)
+			? argv.slice(env.commandIndex)
+			: null;
+	if (hidden !== null) {
+		collectLinkEvents(hidden, walk.events);
+		collectDeleteEvents(hidden, walk.events);
+	}
 	// `xargs rm` removes what the stage piped into it prints: an echo's or printf's words, or a find's matches.
 	if (
 		walk.pipedFrom !== null &&
@@ -1424,12 +1439,16 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	)
 		walk.events.push(...pipedDeletes(walk.pipedFrom));
 	if (env?.split !== undefined) collectChildScript(env.split, depth, walk);
+	const hiddenScript = hidden === null ? null : segmentShellScript(hidden);
+	if (typeof hiddenScript === "string") collectChildScript(hiddenScript, depth, walk);
+	// What these readings add never counts toward a scratch-only call (r261e-4).
+	for (const event of walk.events.slice(addedFrom)) if (event.kind === "delete") event.added = true;
 	const cd = cdTarget(argv);
 	if (cd !== null) walk.events.push({ kind: "cd", target: cd, unmodeled });
 	walk.lastArgv = argv;
 	const script = segmentShellScript(argv);
 	if (typeof script === "string") collectChildScript(script, depth, walk);
-	if (env !== null && env.chdirs.length > 0 && !walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
+	if (chdirs.length > 0 && !walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
 	// The body starts on the next line, so this segment's own cd is real.
 	if ((depth > 0 || walk.topLevelHeredocs) && segment.some((token) => token.operator && token.value === "<<"))
 		walk.heredocSeen = true;
@@ -1457,9 +1476,10 @@ const ENV_PREFIXES: ReadonlySet<string> = new Set([
  * What an `env` does besides setting variables: `-C DIR` (`--chdir`) runs the command in DIR, and `-S STR`
  * (`--split-string`) runs the words of STR followed by the rest. Read past leading assignments and the prefixes that
  * run what follows (`command`, `!`, `timeout 5`, `nice -n 5`), and through nested `env`s, whose chdirs apply in turn.
- * A prefix's options and number-like values are skipped without knowing which take one. Null when no env stands there.
+ * A prefix's options and number-like values are skipped without knowing which take one. `commandIndex` is where the
+ * command env runs stands. Null when no env stands there.
  */
-function envInvocation(argv: ReadonlyArray<string>): { chdirs: string[]; split?: string } | null {
+function envInvocation(argv: ReadonlyArray<string>): { chdirs: string[]; split?: string; commandIndex: number } | null {
 	const out: { chdirs: string[]; split?: string } = { chdirs: [] };
 	let index = 0;
 	let found = false;
@@ -1515,7 +1535,7 @@ function envInvocation(argv: ReadonlyArray<string>): { chdirs: string[]; split?:
 		const rest = argv.slice(index).map((word) => `'${word.replaceAll("'", `'\\''`)}'`);
 		out.split = [out.split, ...rest].join(" ");
 	}
-	return out.chdirs.length === 0 && out.split === undefined ? null : out;
+	return { ...out, commandIndex: index };
 }
 
 /**
