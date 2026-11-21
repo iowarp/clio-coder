@@ -58,6 +58,9 @@ export function createProcessJournal(
 		kind: "process.started" | "process.exited" | "journal.gap",
 		data: PendingTelemetry["data"],
 	): PendingTelemetry => ({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() }) as PendingTelemetry;
+	// The process starts when its journal is created, not when the writer finishes opening: an async open lands after
+	// boot facts the pending queue already holds, so the record is stamped now and enqueued first (C-30).
+	const started = stamp("process.started", {});
 	const open = (): Promise<CallJournal | null> =>
 		(writer ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8")
 			.then((text) => {
@@ -76,7 +79,7 @@ export function createProcessJournal(
 			})
 			.then((journal) => {
 				ready = journal;
-				journal.enqueue(stamp("process.started", {}));
+				journal.enqueue(started);
 				for (const record of pending.splice(0)) journal.enqueue(record);
 				// What the queue refused before the writer opened is a gap the journal itself must show (#434).
 				if (dropped > 0)

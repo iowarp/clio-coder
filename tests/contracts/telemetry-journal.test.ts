@@ -866,6 +866,33 @@ test("memory and observation traces journal content only under research capture 
 	}
 });
 
+test("process.started is stamped when the process journal is created and leads its first batch (C-30)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const processJournal = createProcessJournal(stateDir, () => {});
+	try {
+		// A boot fact emitted while the writer is still opening must not precede the process's own start.
+		telemetryHub().emit("process.booted", {
+			surface: "run",
+			node: process.version,
+			platform: process.platform,
+			totalMs: 1,
+			phases: [],
+		});
+		await processJournal.close(0);
+		const [processId] = await readdir(telemetryProcessesDirectory(stateDir));
+		const records = (await readCallJournal(telemetryProcessDirectory(stateDir, processId as string))).records.map(
+			({ record }) => record,
+		);
+		const [started] = records;
+		const booted = records.find((record) => record.k === "process.booted");
+		strictEqual(started?.k, "process.started");
+		ok(booted && started.mono < booted.mono, "process.started carries the journal's creation time");
+	} finally {
+		await processJournal.close(0);
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
 test("the process journal receives one health window per process, carrying loop lag, RSS and its writers' pressure (#434)", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	const processJournal = createProcessJournal(stateDir, () => {});
