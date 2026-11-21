@@ -103,16 +103,16 @@ CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-
 - The dispatch plan card and the approval card state each run's bounds: the cost per model call at its output bound, or that the route is unpriced and has no wall-clock bound unless `timeout_ms` is set.
 - Workers hand back by role, at 70% of the context window, or 85% for a builder. A batch shares a 12,000-byte answer budget, and a cut answer names `monitor(mode="answer", run_id=…)`.
 - `fleet run --output-format text|json|stream-json` ends with a `fleet_end` result, and `fleet run` gains `--cwd`, `--timeout` and `--max-cost-usd`.
-- `fleet run --detach` prints `fleet_accepted` once the fleet root is recorded. `fleet wait <fleetRootId>` prints the result and exits with its code, and `fleet cancel <fleet-...>` cancels a whole fleet root.
+- `fleet run --detach` returns once the fleet root is recorded (a `fleet_accepted` frame under `--output-format json|stream-json`). `fleet wait <fleetRootId>` prints the result and exits with its code, and `fleet cancel <fleet-...>` cancels a whole fleet root.
 - `fleet list` shows this project's fleet roots with their state and sealed outcome, and `fleet admission [status|drain|open]` controls dispatch admission.
 - `--exit-code` on `fleet verify` (0 verified, 1 failed or unavailable, 75 pending), `evidence inspect` and `campaign run`.
-- A person at a fleet worker's approval card can keep it open past 15 minutes, up to one hour after the ask opened.
+- A person at a fleet worker's approval card can keep it open past 15 minutes: each key renews the hold for 15 minutes, up to one hour after the ask opened.
 - The coordinator has `grep` and `code_nav` attached directly. Running fleet rows show each worker's context fill, and the Turn ended row states detached worker spend apart from the turn's own.
 
 **Delegation to other agents**
 
 - The Antigravity CLI is a built-in ACP delegation target (`antigravity`). Add it with `clio-coder configure --interop` and run it with `/run antigravity`. It uses the `agy` login already on the machine.
-- A `<model>-<level>` id selects the model and its thinking level, and a refusal lists the values the agent offers.
+- A dispatch that names a `<model>-<level>` id selects the model and its thinking level, and a refusal lists the values the agent offers.
 - Questions from the delegated agent reach the operator as a card headed "Delegated agent", and are cancelled when no operator is attached. A steer goes to the agent as its own prompt.
 - Quota exhaustion fails the run as `usage_limit_reached` with the reset time and the retry moves to another target. The agent's `run_command` and `run_workflow` calls are judged by the command they run.
 - ACP delegation failures settle under their own codes (`acp_auth_required`, `acp_model_unavailable`, `acp_thinking_unavailable`, `acp_transport_error`), and a sign-in failure is retried on another target.
@@ -120,8 +120,8 @@ CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-
 **Memory**
 
 - The `memory_note` tool lets the main agent record a note bound to a command that succeeded or a file read in the session. A failed command followed by a success that changed only its options is filed as a fix. `context.memory.surfaces.lessons` (`off|rules|agent|side`, default `agent`) selects who writes lessons.
-- A note is a claim identified by repository, kind, body and conditions, and it is promoted only after it has been demonstrated. Operator decisions are never evicted.
-- A stored lesson is checked once per session before delivery: its command must still resolve and its quoted source must still be in the file. A lesson that binds another worktree or a scratch path is withheld. `context.memory.surfaces.delivery` (`off|section|decision|broadcast`, default `decision`) selects how lessons reach the model.
+- A note is a claim identified by repository, kind, body and conditions, and it is promoted only after two sessions other than its author's have demonstrated it. Operator decisions are never evicted.
+- A stored lesson is checked once per session before delivery: its command must still resolve and its quoted source must still be in the file. A lesson that binds another worktree, a path outside the checkout or a program under a temp directory is withheld. `context.memory.surfaces.delivery` (`off|section|decision|broadcast`, default `decision`) selects how lessons reach the model.
 - `context.memory.sideShare` (default `0.15`) caps automatic memory calls at a share of the session's main output after the first three, and `0` removes the cap. `context.memory.surfaces.correct` and `.bank` (`rules|model`, default `rules`) select whether a model step runs.
 - `clio-coder memory consolidate [--json]` merges records of one claim, demotes lessons that no longer hold and drops automatic notes with no evidence, with no model call. `memory list --approved-by operator|guardian` lists approved memory by approver, and `memory list` reports records the store set aside as invalid.
 - `context.memory.thinkingLevel` and `chat.steering.triage.thinkingLevel` (default `off`) set how much the memory and steering-triage side calls reason.
@@ -276,7 +276,7 @@ CLIO Coder 0.8.5 makes the command line something a script can depend on. `clio-
 
 ### Security
 
-- The safety floor reads shell scripts a command runs by path, through `exec` or by `source`. A script it cannot place or read sends the call to the safety judge.
+- The safety floor reads shell scripts a command runs by path, through `exec` or by `source`. A script it cannot place or read sends the call to the safety judge, where one runs.
 - Changes only the operator may make (project trust, settings, CLIO Coder's own state) are refused with a message that sends the model to the operator, and `config trust` is recognized in any program's arguments.
 - An `ask_user` answer approves a sandbox escape only when its question names leaving the sandbox.
 - MCP results, errors and refusals can no longer open or close a host reminder or middleware frame, and handoff blocks end with a delimiter the handed-off text cannot forge.

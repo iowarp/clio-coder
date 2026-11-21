@@ -31,7 +31,10 @@ machines. Commands run unsandboxed, as you, with your credentials. It needs
 `safety.yoloConfinement: unconfined` in your user settings and its own one-time
 acceptance. A short floor still blocks wiping `/`, your home directory or a
 system tree, formatting disks, fork bombs, and writes into CLIO Coder's own
-settings and credentials.
+settings and credentials. The floor also reads the shell scripts a
+command runs by path, through `exec` or with `source`. A change only you may
+make, such as project trust or CLIO Coder's own settings, is refused with a
+message that sends the agent to you.
 
 Set the level in `/settings`, `clio-coder configure`, with `--autonomy`, or
 with the leader key and `y`. The first switch to yolo shows a one-time
@@ -115,7 +118,8 @@ sandbox only in the narrow cases described in
 When a contained command fails because of the sandbox, CLIO Coder can rerun it
 with `unsandboxed: true`. That rerun also goes to the judge, which lets it run
 only when one of your messages mentions leaving the sandbox; otherwise it asks
-you.
+you. An `ask_user` answer approves the escape only when its question names
+leaving the sandbox, so "Run it in the sandbox?" answered yes approves nothing.
 
 Scheduler clients authenticate through a local daemon socket that the sandbox
 refuses, so a script that calls `sbatch` itself fails inside the sandbox.

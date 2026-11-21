@@ -26,7 +26,7 @@ The policy names existing checks; it cannot introduce shell commands or bypass a
 
 CLIO Coder compares source, check-declaration, and policy fingerprints. Edits after a passing run can make the result **stale**; a later failing run supersedes an earlier pass. Missing or unavailable evidence remains unverified.
 
-A valid policy selects high rigor by default, which requests continuation for outstanding checks when recovery is possible. Setting `CLIO_CODER_RIGOR=normal` makes the assessment advisory. Neither mode grants additional execution authority.
+A valid policy selects high rigor by default, which requests continuation for outstanding checks when recovery is possible. Setting `CLIO_CODER_RIGOR=normal` makes the assessment advisory. Neither mode grants additional execution authority. A turn the agent declared `partly_done` or `not_done` through `finish` settles as declared, and a declared `done` with a required check still open is assessed as partly done.
 
 Snapshots need Git and a workspace at the repository root. They cover tracked and nonignored untracked source, not external datasets, installed dependencies, or running services. Use domain-specific checks for those requirements. The full guide explains bounded snapshots and permitted limitations.
 

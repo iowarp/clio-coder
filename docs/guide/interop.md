@@ -20,7 +20,7 @@ agent, their directories (`.windsurf/`, `.clinerules/`, `~/.codeium/windsurf/`,
 ## Quick start
 
 1. Install and sign in to the other agent's own CLI, such as Claude Code,
-   Codex or OpenCode.
+   Codex, OpenCode or the Antigravity CLI.
 2. Run `clio-coder interop inspect` or open `/library interop` to see what
    CLIO Coder found and which connections are ready.
 3. Add an ACP connection with `clio-coder configure --interop`.
@@ -53,16 +53,16 @@ are selected explicitly; CLIO Coder does not silently switch agents or modes.
 | Codex | `npx -y @agentclientprotocol/codex-acp@2.1.1` | `codex-cli` | `codex` |
 | OpenCode | Native `opencode acp --cwd .` | `opencode-cli` | `opencode` |
 | GitHub Copilot CLI | Native `copilot --acp` | None | None |
-| Antigravity CLI | No verified ACP recipe | `antigravity-code` | `antigravity` |
+| Antigravity CLI | Native `agy acp --gemini-dir ~/.gemini --app-data-dir antigravity-cli` | `antigravity-code` | `antigravity` |
 | Pi CLI | No verified ACP recipe | `pi-cli` | `pi` |
 | A second CLIO Coder | None | None | `clio` |
 
-The recipes live in [registry.ts](../../src/domains/interop/registry.ts). Antigravity
-CLI and Pi have no built-in ACP connection. An operator-configured ACP peer entry
+The recipes live in [registry.ts](../../src/domains/interop/registry.ts). Pi has
+no built-in ACP connection. An operator-configured ACP peer entry
 can use a compatible adapter. A pinned bridge counts as verified only when that
 package at the pinned version sits in the project's `node_modules`; otherwise
 inspection reports the adapter as `unknown` and `npx` may fetch it at first
-launch. OpenCode and GitHub Copilot CLI have no adapter package, so their binary is the whole recipe. A `clio` pane opens another `clio-coder` against this session's CLIO Coder directories and saved credentials; it takes no brief on its command line, and the model gives it a task through the `panes` tool's `send` action ([Panes and the Files Pane](panes-and-files.md)).
+launch. OpenCode, GitHub Copilot CLI and the Antigravity CLI have no adapter package, so their binary is the whole recipe ([Antigravity CLI over ACP](#antigravity-cli-over-acp)). A `clio` pane opens another `clio-coder` against this session's CLIO Coder directories and saved credentials; it takes no brief on its command line, and the model gives it a task through the `panes` tool's `send` action ([Panes and the Files Pane](panes-and-files.md)).
 
 CLIO Coder starts an external `pi` with `--print --mode json --no-session --no-extensions --no-approve`.
 Pi 0.99 and later also disable their built-in providers under `--no-extensions`, so
@@ -246,6 +246,43 @@ Without a terminal, `configure --interop` prints the proposals and writes
 nothing. The operator's answer is stored in `interop.json` under the state
 directory and suppresses a repeat proposal only while the binary, version, and
 recipe are unchanged.
+
+### Antigravity CLI over ACP
+
+The Antigravity CLI (`agy`) is a built-in ACP delegation target with the id
+`antigravity`. Install `agy` and sign in with it, add the connection with
+`clio-coder configure --interop`, and run it from a session:
+
+```text
+/run antigravity Review the proposed parser change and its edge cases.
+```
+
+The recipe is `agy acp --gemini-dir ~/.gemini --app-data-dir antigravity-cli`,
+so the delegation uses the login and conversation store `agy` already keeps in
+`~/.gemini/antigravity-cli`. CLIO Coder expands `~` at launch and turns `agy`'s
+self-update off for the run. An entry whose `args` point those two flags at
+another directory runs an isolated profile. CLIO Coder drives `agy` 1.5.1 or
+later and refuses an older build with a message that says to upgrade. A session
+request made before sign-in settles `acp_auth_required` and names the login
+command, `agy acp --gemini-dir ~/.gemini --app-data-dir antigravity-cli --login`.
+
+| Topic | Behavior |
+| --- | --- |
+| Model and thinking | A dispatch to `antigravity` may name a `model` and a `thinking` level, checked against the options `agy` announces for the session. A `<model>-<level>` id such as `gemini-3.8-flash-high` selects the model and its thinking level together. A model `agy` does not offer settles `acp_model_unavailable`, and a level it does not offer for that model settles `acp_thinking_unavailable`; both messages list the offered values. `/run` takes no `--model` or `--thinking` for an external agent, so without a dispatch that names one the agent's own current model answers. |
+| Questions | A fixed-choice question from `agy` reaches the operator as a card headed `Delegated agent` that reads `antigravity asks: <question>`, with any security warning `agy` attached. Only the operator's own pick goes back. The question is answered cancelled when no operator is attached, at contained `yolo`, or when `fleet.permissions.mode` is `deny` or `fail`. |
+| Steering | A steer to the running delegation is sent to `agy` as another prompt in the same turn, so the turn and its subagents keep running. The steer counts as received when `agy` answers it. |
+| Quota | `agy` records a quota exhaustion in its own store and ends the turn as if it had finished. CLIO Coder reads that store after each turn and fails the run with `Antigravity quota exhausted`, the model, and `resets at <time>` when `agy` recorded one. The failure cause is `usage_limit_reached`, and the retry moves to another target. |
+| Tool calls | Under `toolGovernance: clio-coder-policy`, a `run_command` call is judged as the shell command it runs, entered from its own working directory when it names one, and a `run_workflow` call as the inline script it runs. Reads, searches, fetches and edits are judged on their targets, and any other tool `agy` names is denied as an unknown tool, `agy:<name>`. |
+
+ACP delegation failures settle under their own outcome codes, for every ACP
+peer:
+
+| Outcome code | Shown as | Retry |
+| --- | --- | --- |
+| `acp_auth_required` | `agent needs sign-in` | On another target. |
+| `acp_model_unavailable` | `agent does not offer that model` | None. |
+| `acp_thinking_unavailable` | `agent does not offer that thinking level` | None. |
+| `acp_transport_error` | `lost the connection to the agent` | Follows the dispatch retry rules. |
 
 ### Claude Agent SDK runtime
 

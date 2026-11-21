@@ -32,6 +32,8 @@ p3    scout on anthropic-max · claude-haiku-5-5
 cost  counts against this session's $5.00 limit
 ```
 
+The card also states each run's bounds: the cost per model call at its output bound, or that the route is unpriced.
+
 Enter allows it, and Esc denies it without starting anyone. At `yolo` the plan runs without this stop. Participants run as the `scout` agent, and every member of a poll or council gets only read-only tools: `read`, `grep`, `find`, `ls`, `git`, `code_nav` and `context`.
 
 ## Read the vote
@@ -89,6 +91,8 @@ Yes. `index.test.js` tests `add(2, 2) === 4`. The smallest test is a single asse
 A council does not hide a weak member. `/view` shows each member's answer beside the synthesis, so you can see that this verdict rests on one member's reading.
 
 `--synthesis vote` tallies the members' votes instead, and `none`, the default, returns each answer as it is. `--rounds 2` or `3` shows each member the others' previous answers before it answers again. `--deadline 90s` stops a member that runs too long, and the council returns the rest marked partial.
+
+A member whose target is down is reported as not run while the others deliberate, and a council with fewer than two live members is refused.
 
 ::: result What you have
 A spread of independent answers to one question, and for a council either a tally or one written answer with every member's answer behind it. Each member's run has its own sealed run record, and no file in the project changed.

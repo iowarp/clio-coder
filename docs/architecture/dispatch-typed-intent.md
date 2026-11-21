@@ -91,7 +91,13 @@ compatibility classifier reports nothing for omitted intent, so the dispatch
 path treats it as ordinary. The approval artifact remains the operator-visible
 record.
 
-An absolute or malformed path token in prose is not silently dropped. It throws
+Before inference runs, the normalize stage of dispatch admission
+([dispatch-normalize.ts](../../src/tools/dispatch-normalize.ts)) rewrites an absolute
+token equal to or under the run's `cwd`, and a leading-slash workspace path, to its
+workspace-relative form and reports the rewrite in a `[dispatch normalize]` line
+([the normalize stage](../guide/fleet-dispatch.md#the-normalize-stage)). An absolute
+token outside the workspace or a malformed path token in prose is not silently
+dropped. It throws
 `DispatchPathScopeInferenceError` with code `legacy_scope_path_absolute` or
 `legacy_scope_path_malformed`, because a token the inference cannot normalize is
 exactly where a silent omission would hide an applicable rule. A `<scheme>://` URI
@@ -266,7 +272,7 @@ compatibility identifiers that have no current producer.
 | `verification_over_cap` | refuse | More than 8 verification entries. |
 | `verification_check_undeclared` | refuse | A `check` id is not declared by any catalog source. |
 | `gate_and_intent_verification_conflict` | refuse | `gate` combined with `intent.verification`. |
-| `legacy_scope_path_absolute` | refuse | Prose inference met an absolute path token. |
+| `legacy_scope_path_absolute` | refuse | Prose inference met an absolute path token outside the workspace. |
 | `legacy_scope_path_malformed` | refuse | Prose inference met a malformed path token. |
 | `task_forbids_writes` | refuse | The task prose forbids writing any file (`forbidsFileWrites` in `src/core/write-prohibition.ts`), but the agent's capability class is `artifact-write`, so its deliverable is a written artifact. Among the builtins only `architect` has that class. The message names the read-only agents `scout`, `oracle` and `researcher` as the alternative. A scoped prohibition, such as one limited to a directory or with an exception, does not trigger it. |
 

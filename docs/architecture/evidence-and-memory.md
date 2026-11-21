@@ -203,6 +203,16 @@ The composition rules prohibit cross-axis promotion:
   `finish_contract` source may speak for completion evidence, and a run
   assessment records the axis as `absent` (`not_recorded`).
 
+The main agent's `finish` declaration is recorded the same way: as a claim
+beside the host's assessment, never in place of it. The declaration is the
+`finish` tool call and its result in the session ledger. At the end of the turn
+the host seals `claimed` (`done`, `partly_done` or `not_done`) with `assessed`,
+which lowers a claimed `done` to `partly_done` when any fact stands against it
+(`unvalidated_mutation`, `failed_check`, `uncollected_run`, `open_task` or
+`observation_budget`), and an undeclared turn is assessed `unknown`
+([finish.ts](../../src/tools/finish.ts)). A headless run's `run_end` envelope
+carries the sealed record as its `completion` block.
+
 #### Validation grounding precedence
 
 For a run whose record is authenticated, `adaptRunTrustStatus` reads the run's settled facts and takes the first rule that applies:
@@ -351,13 +361,14 @@ Nothing enforces a manifest at edit time. The self-edit gate that would require 
 ## Memory CLI
 
 ```bash
-clio-coder memory list
+clio-coder memory list [--approved-by operator|guardian] [--json]
 clio-coder memory propose --from-evidence <runId> [scope options]
 clio-coder memory propose --from-claim <claim-id-prefix>
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
 clio-coder memory prune --stale
+clio-coder memory consolidate [--json]
 ```
 
 Memory records live in:
@@ -366,16 +377,17 @@ Memory records live in:
 <dataDir>/memory/records.json
 ```
 
-The store is a JSON object `{ "version": 1, "records": [...] }` (`MEMORY_VERSION`), capped at `500` records and sorted by scope, key, creation time, and id for stable writes. A write that would pass the cap first evicts undecided proposals, oldest first, starting with those that cite no `command:` or `source:` evidence; approved and operator-rejected records are never evicted, and the write fails with `memory store limit reached (500); run clio-coder memory prune --stale` only when too few proposals can go. The store is written with mode 0600. A store whose envelope fails validation, or that a newer version wrote, makes every memory command and the prompt reader fail with `memory store invalid`, listing each issue path. A single invalid record is skipped instead: the rest of the store keeps working, one notice per process names the count, and the next store write moves the record to `records.invalid.json` beside the store (0600, at most 100 entries).
+The store is a JSON object `{ "version": 1, "records": [...] }` (`MEMORY_VERSION`), capped at `500` records and sorted by scope, key, creation time, and id for stable writes. A write that would pass the cap first evicts unpromoted notes, those that cite no `command:` or `source:` evidence before the others and then the one observed longest ago first; approved and operator-rejected records are never evicted, and the write fails with `memory store limit reached (500); run clio-coder memory prune --stale` only when too few proposals can go. The store is written with mode 0600. A store whose envelope fails validation, or that a newer version wrote, makes every memory command and the prompt reader fail with `memory store invalid`, listing each issue path. A single invalid record is skipped instead: the rest of the store keeps working, one notice per process names the count, and the next store write moves the record to `records.invalid.json` beside the store (0600, at most 100 entries).
 
 | Command | Behavior |
 | --- | --- |
-| `list` | Prints the record count, then per record: ID, status (`proposed`, `approved`, `rejected`), scope, confidence, evidence refs, key, lesson and each regression. |
+| `list` | Prints the record count, then per record: ID, status (`proposed`, `approved`, `rejected`), scope, confidence, evidence refs, key, lesson and each regression. `--approved-by operator` or `--approved-by guardian` keeps the approved records that approver let into the prompt; a record approved before approvals were stamped counts as the operator's. Both listings note on stderr how many records the store set aside as invalid, and `--json` lists them under `invalid` with their issues. |
 | `propose` | Builds one unapproved record from a run's evidence and prints it with a `review:` hint. A repeated proposal for the same run and scope returns the existing record. `--from-claim` instead builds an unapproved `repo` record citing `claim:<id>` for one claim of the project at the current directory; it takes no scope options and is refused, like an evidence proposal, when the claim's run or session carries an information-flow restriction. |
 | `promote` | Builds unapproved records from a version 2 handoff snapshot. |
 | `approve <id>` | Sets `approved`, stamps `lastVerifiedAt` with the current time and clears `rejectedAt`. It stamps `approval.by: operator` and clears regressions. Approving an approved record refreshes `lastVerifiedAt`. |
 | `reject <id>` | Clears `approved` and stamps `rejectedAt`. |
 | `prune --stale` | Deletes stale records and prints the count; see [Retention and pruning](#retention-and-pruning). |
+| `consolidate` | One pass over the records the current checkout would use, with no model call ([consolidate.ts](../../src/domains/memory/consolidate.ts)). Records of one claim identity merge into one, the other wordings kept as revisions. A lesson of this repository that fails the delivery check is demoted to a note with a regression, or reported as withheld when an operator approved it. A note the automatic tier wrote with no `command:` or `source:` evidence, no observation and no delivery is dropped. Operator-approved and operator-rejected records and other repositories' records are left as they are. See [Consolidate the store](../guide/proactive-memory.md#consolidate-the-store). |
 
 Usage errors exit 2 with the usage text on stderr; every other failure exits 1.
 
@@ -425,7 +437,7 @@ Records must cite at least one evidence ID to be considered for prompt injection
 
 ### Retention and pruning
 
-`memory prune --stale` is the only deletion path apart from the eviction of undecided proposals at the 500-record cap. A record is stale when the time since `lastVerifiedAt` (or `createdAt` when it was never verified) exceeds 30 days for an unapproved record, proposed or rejected, or 180 days for an approved record. A record whose reference timestamp does not parse is stale. Re-approving a record restarts its clock. Nothing else prunes automatically and nothing decays a record's confidence; prompt priority is the reference timestamp, newest first.
+`memory prune --stale` and `memory consolidate` are the only deletion paths apart from the eviction of unpromoted notes at the 500-record cap. A record is stale when the time since `lastVerifiedAt` (or `createdAt` when it was never verified) exceeds 30 days for an unapproved record, proposed or rejected, or 180 days for an approved record. A record whose reference timestamp does not parse is stale. Re-approving a record restarts its clock. Nothing else prunes automatically and nothing decays a record's confidence; prompt priority is the reference timestamp, newest first.
 
 Task-bank promotion is a reviewed export from transient execution memory. The
 `/memory` overlay offers repo and global proposal actions only on selected
@@ -452,7 +464,7 @@ Explicit overlay and handoff promotion leave proposals unapproved. Automatic tas
 
 ### Host-evidence approval for repository knowledge
 
-CLIO Coder's durable-memory gate in [guardian-gate.ts](../../src/domains/memory/guardian-gate.ts) can approve repository-scoped `task-bank-entry` knowledge after one session records `held`, provided there is no contradiction or regression, the record cites a `command:` ref and not only `source:` refs (a file quote is provenance, not proof, so a record backed by quotes alone waits for the operator), and no other approved, unrejected record of the same repository already carries one of its `command:` evidence refs; such a record waits for the operator, and nothing merges by command. Procedural proposals and global, runtime and agent scopes still require operator approval. Operator approvals and rejections, including legacy unstamped approvals, are never reversed by the gate. A later contradiction demotes a guardian-approved record, removes its approval stamp and records a regression.
+CLIO Coder's durable-memory gate in [guardian-gate.ts](../../src/domains/memory/guardian-gate.ts) treats a record as a claim: its identity is the repository, the claim kind (`command`, `fix` or `source`), the claim body and any stated condition, so one claim is one record however many sessions file it. The gate can approve a repository-scoped note that came from `task-bank-entry` knowledge, a `memory_note` command note or a rule-captured fix pair after two complete demonstrations of its current wording from distinct sessions other than its author, provided there is no contradiction or regression, the record cites a `command:` ref and not only `source:` refs (a file quote is provenance, not proof, so a record backed by quotes alone waits for the operator), and no other approved, unrejected record of the same repository already carries one of its `command:` evidence refs; such a record waits for the operator, and nothing merges by command. Procedural proposals and global, runtime and agent scopes still require operator approval. Operator approvals and rejections, including legacy unstamped approvals, are never reversed by the gate. A later contradiction demotes a guardian-approved record, removes its approval stamp and records a regression.
 
 The claims log is the other regression producer ([record.ts](../../src/domains/claims/record.ts)). When a judged check that agreed disagrees with the same pinned conditions (for `numeric-compare`, possibly with a different working tree at the same commit), every memory record whose evidence refs cite one of the overturned agreeing claims (`claim:<id>`, or the run id whose host verification produced it) gets a regression naming both claims and what matched between them, appended inside the store's locked mutation. Approval is left as it was, the suppression filter keeps the record out of the prompt and recall, and `approve` clears the regression.
 
@@ -602,6 +614,7 @@ Defaults:
 | Suppression | Records with active `regressions[]` entries are skipped |
 | Order | Operator-stated records first, then the rest; within each, `lastVerifiedAt`, or `createdAt` when never verified, newest first, then ID |
 | Relevance (main sessions) | Only records the turn concerns; see below |
+| Delivery | `context.memory.surfaces.delivery: off` delivers nothing from the store. The section carries a lesson with `command:` evidence or an operator approval. A lesson that fails its once-per-session delivery check is withheld; see [Delivery checks](../guide/proactive-memory.md#delivery-checks) |
 
 Rendered memory lines always cite record ID, scope, who stands behind the record, lesson, and evidence IDs, and may add `Applies when:` and `Avoid when:` lines. The standing reads `operator-stated <kind>` for a record the operator stated, `operator-approved` for one the operator approved, `retained automatically from execution evidence` for one the evidence gate kept on a `command:` ref, and `unreviewed, quoted from a repository file` for an automatically kept record that cites only file quotes. The prompt tells the model not to extrapolate beyond cited findings. A record that would push the section past the token budget or the item limit is skipped.
 

@@ -9,8 +9,10 @@ the tool:
 
 - A main session starts with `read`, `bash`, `edit`, `write`, `grep`,
   `code_nav`, `verify`, `ask_user`, `finish` and `gateway` attached, plus
-  `dispatch` when workers are available and `consult` when a decision route is
-  bound. Everything else is one `gateway` call away.
+  `dispatch` when workers are available, `consult` when a decision route is
+  bound and `memory_note` when the session starts with
+  `context.memory.surfaces.lessons: agent` (the default). Everything else is one
+  `gateway` call away.
 - To limit what the agent may use, start it with
   `clio-coder --allow-tools read,grep,find,ls`; `--delegate-tools` limits its
   workers. See
@@ -30,7 +32,7 @@ the tool:
 | Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk), [`store`](#store-keep-results-and-datasets-outside-the-working-tree) |
 | Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify), [`finish`](#finish-declare-how-the-turn-ended) |
 | Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-cancel-or-approve-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
-| Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports) |
+| Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports), [`memory_note`](#memorynote-keep-a-note-for-later-sessions) |
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-component-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
 | Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder), [`report`](#report-draft-a-clio-coder-report-for-the-operator) |
@@ -47,7 +49,7 @@ Tool registration and argument normalization are owned by [agent-tools.ts](../..
 
 Main CLIO Coder sessions attach a small basic surface: `read`, `bash`, `edit`,
 `write`, `grep`, `code_nav`, `verify`, `ask_user`, `finish` and `gateway`, plus
-`dispatch` when delegation is wired and `consult` when a decision route is bound. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
+`dispatch` when delegation is wired, `consult` when a decision route is bound and `memory_note` when the session starts with `context.memory.surfaces.lessons: agent`. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
 execution and observation tools. Ordinary dispatch has a compact attached
 schema; `gateway(op="describe", capability="dispatch")` returns that schema plus
 an `advanced` block with the canonical fields it omits, such as `candidates`,
@@ -81,7 +83,7 @@ steps in a chain. Describing `gateway` returns composition syntax; describing
 
 | Placement | Tools |
 | --- | --- |
-| Direct in main sessions | read, bash, edit, write, grep, code_nav, verify, ask_user, finish, gateway; dispatch and consult when wired |
+| Direct in main sessions | read, bash, edit, write, grep, code_nav, verify, ask_user, finish, gateway; dispatch and consult when wired; memory_note when the session starts with `context.memory.surfaces.lessons: agent` |
 | Gateway in main sessions | Every other wired builtin, including find, ls, count, context, run_script, tasks, monitor, steer, ledger, panes, music, limitation, decide and self_compact |
 | Direct in workers | The builtins that `TOOL_PLACEMENT` marks direct and the recipe admits. `find`, `ls` and `count` move behind the gateway when the worker's surface admits `bash`. See its discovered tools rather than assuming the main surface |
 | Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>`. An extension tool its manifest lists in `runtime.promote` is attached directly instead, and the gateway refuses that name |
@@ -204,6 +206,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `music` | direct | gateway | orchestrate | read | sequential |
 | `limitation` | direct | gateway | orchestrate | read | parallel |
 | `finish` | direct | direct | orchestrate | read | sequential |
+| `memory_note` | direct (main session only) | not offered | orchestrate | read | sequential |
 | `decide` | direct | gateway | orchestrate | read | sequential |
 | `consult` | direct | direct | orchestrate | read | parallel |
 | `vision` | gateway | gateway | observe | read | parallel |
@@ -242,6 +245,17 @@ JSON-format results (including code_nav, context workspace, clio_docs, data, and
 Turn budget: all envelope-backed tools draw from one shared pool per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). At the default of 192KB the pool grows with the model's context window, at 1.5 bytes per window token, so windows up to 128K tokens get 192KB and larger windows get more, up to 1MB. Any other configured value applies exactly. When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn. A fourth consecutive exhausted call in one turn fails as an error instead of returning another notice.
 
 A prompt template's `budget` bounds the turn it runs in. `budget.observationBytes` sets this pool and `budget.toolCalls` sets the turn's tool-call limit (`safety.limits.chatToolCallsPerTurn`, default 60). A template value at or below the operator's limit always applies. A higher value applies only up to `safety.limits.templateObservationBytesPerTurnMax` or `safety.limits.templateToolCallsPerTurnMax`; both are unset by default, so by default a template can only lower the limits. The limit notices name the bound that applied. See [prompt template turn budget](extensions-and-sharing.md#prompt-template-turn-budget).
+
+The turn's tool-call limit scales with how many calls per round the route makes, so a route that batches wide gets a wider budget than `safety.limits.chatToolCallsPerTurn` alone. At the limit a parallel batch is admitted or refused whole, a continued turn that crosses its budget rolls into a fresh turn, and `finish` stays admissible after the budget is spent ([turn-budget-width.ts](../../src/core/turn-budget-width.ts)).
+
+## Host notes on long read runs
+
+Two host notes watch a main agent that keeps reading without deciding. Both read typed signals only: tool names, the read class and path arguments, never the wording of a reply.
+
+- **Read streak.** The host counts read-class calls since the last progress event: a workspace change, a plan update, a question, a started dispatch or a `finish` declaration. At 25 reads the read that crossed the line carries a note asking for one line on what is known and what is still unknown, then an action. At 40 and 60 a firmer note asks for the smallest defensible edit, a plan, or a plain statement of what blocks the work. A turn that cannot write gets one note at 40 asking for the answer. Four rounds in a row of one read each add a sentence asking for batched reads. An operator's own turn resets the count, and a writer worker follows the same rule through its own channel ([read-streak.ts](../../src/domains/middleware/read-streak.ts)).
+- **Scout survey.** Once per user turn, when 10 succeeded read-class calls inside the workspace touch three or more top-level directories and no dispatch ran, one note suggests a single parallel `scout` dispatch with one task per area. A turn that already changed the workspace is never nudged, `bash` is not counted, and the turn must be able to dispatch ([scout-nudge.ts](../../src/domains/middleware/scout-nudge.ts)).
+
+A reread of lines already returned in the turn is not blocked. Its result carries the note `These lines were already shown in this turn; reuse them unless the file changed.`
 
 ## Repeated calls: the loop guard and superseded results
 
@@ -349,6 +363,10 @@ Operator display is independently folded and tail-biased at 16 KiB. If display o
 
 A command that outlives `timeout_ms` is stopped, and the result opens with `bash: this command ran past its own <limit> timeout and was stopped.`, where `<limit>` gives human units and the raw value, such as `5 min (300000 ms)`. It adds a note when the command printed nothing, then `The bash tool still works; the next call runs normally.` Only a test command also gets `Validation did not finish.` with a hint to narrow the selection. A command the host ended instead reads `bash: command aborted after <n>s of its <limit> time limit.` followed by the cause, or by a note that none was recorded.
 
+`safety.limits.bashIdleSeconds` (default `0`, off) adds an idle watchdog to the main session's foreground `bash` calls. A command that prints nothing and uses no CPU anywhere in its process tree for that many seconds is stopped, and the result opens with `bash: this command printed nothing and used no CPU for <limit> and was stopped as idle (safety.limits.bashIdleSeconds), before the <limit> timeout ran out.` A command that is computing quietly keeps running, because CPU use counts as activity.
+
+A steer you queue while a call runs does not wait for the call to finish. In the main session, a running `bash`, `run_script`, `verify`, `find`, `grep`, `web_read` or `web_fetch` call is ended once the steer has waited 10 seconds, counted from when the steer was queued or the call started, whichever is later ([steer-interrupt.ts](../../src/session-control/steer-interrupt.ts)). Only that call ends. Its partial result is marked `aborted-by-steer`, the turn continues, and the steer lands at the tool boundary that follows. A run cancellation takes precedence over a steer, and with no steer queued nothing changes.
+
 At `default` the main session runs `bash` inside the main-session sandbox when the host has a backend, and such a contained call runs without asking whatever the recognition below says; see [Containment at default](../architecture/safety-model.md#containment-at-default). A contained command gets a tool cache of its own, `<cache dir>/sandbox-cache`, through `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH`; `~/.cache` and `~/.npm` stay read-only, so a tool that ignores those variables fails on write there. Recognition decides a worker's command and the main session's command on a host without a backend or with `safety.sandbox: off`; a call with `unsandboxed: true` asks whatever its recognition, so the safety judge reviews it first. Repository test runners are allowed without confirmation at both levels, except that an attended main session (TUI or ACP) at `default` asks once before its first uncontained test runner, whoever wrote the code it runs, and that approval covers test runners for the rest of the session. A headless `clio-coder run` runs them without asking. The runners are `npm test`, `npm run test` and `npm run test:<name>` (also `pnpm`, `yarn` and `bun`), `node --test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `uv run --no-sync pytest` and `uv run --no-sync python -m pytest`, `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words to qualify as recognized. The Python runners also accept a leading `PYTHONPATH=<relative paths>`, such as `PYTHONPATH=src python3 -m pytest`; an absolute or `..` entry leaves the command unrecognized ([Recognized commands](../architecture/safety-model.md#recognized-commands)). Read-only inspection on workspace paths also runs without asking (`cat`, `head`, `tail`, `wc`, `ls`, `grep`, `rg`, `find`, `sed -n`, `git status`, `git diff`, `git log`, `git show` and similar), joined by `&&`, `||`, `;` or `|` and redirected only to `/dev/null` or `2>&1`. The statement the main session receives is the `safety.default` body for its shell (`safety.default-sandboxed` or `safety.default-unsandboxed`); a worker receives `safety.worker`. An `&&` chain is admitted in `default` only if each command qualifies. Repository build, lint, typecheck and CI scripts (`npm run lint`, `npm run build`, `npm run typecheck`, `npm run ci`) are unrecognized by default: uncontained at `default` they go to the safety judge, and they run in `yolo`. A project safety policy entry can recognize one. Its `requireConfirmation` setting asks in `default`, contained or not, and is skipped in `yolo`.
 
 A `git push` other than `--dry-run`, a code-host or cloud CLI such as `gh` or `aws`, `ssh`, `scp` and `sftp`, a Slurm, PBS, LSF or Flux client such as `sbatch` or `squeue`, a publish command such as `npm publish`, and a network write such as `curl -X POST` reach outward: they run outside the sandbox after the safety judge reviews them at `default`, and run at `yolo`. A workspace file named like one of these clients (`./sbatch`, `bin/ssh`) is not one and stays contained, and so does a script that calls `sbatch` itself.
@@ -403,12 +421,12 @@ run_script(interpreter="python3", script="scripts/summarize.py", args=["sim:run0
 
 ## data: inspect structured files through the gateway
 
-Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL; `inspect` and `select` for SQLite databases; and `inspect`, `select`, and `stats` for HDF5, NetCDF and Parquet. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and nothing is installed into the project or CLIO Coder's package.
+Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL; `inspect` and `select` for SQLite databases; `inspect`, `select`, and `stats` for HDF5, NetCDF, Parquet and Zarr stores; and `inspect` for ADIOS2 BP4 and BP5 outputs. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and nothing is installed into the project or CLIO Coder's package.
 
 | Argument | Contract |
 | --- | --- |
 | `op`, `path` | Required operation and file path. |
-| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, `sqlite`, `hdf5`, `netcdf`, or `parquet`. The file's signature still decides between HDF5 (which includes NetCDF-4) and classic NetCDF. |
+| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, `sqlite`, `hdf5`, `netcdf`, `parquet`, `zarr`, or `adios2`. A `.zarr` or `.bp` path, or a directory holding the format's metadata files, selects the last two. The file's signature still decides between HDF5 (which includes NetCDF-4) and classic NetCDF. |
 | `delimiter`, `header` | CSV/TSV overrides; delimiter is one character, header defaults to `auto`. Detection considers comma, tab, semicolon, pipe. |
 | `sample_rows` | Inspection preview; default 10, max 1000. |
 | `max_rows` | Inspect/validate scan bound; default 100000, `null` means scan to EOF. |
@@ -432,6 +450,8 @@ Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777
 HDF5 and NetCDF-4 are read by h5wasm 0.10.3 (the HDF5 C library compiled to wasm), Parquet by hyparquet 1.31.5, and classic NetCDF (CDF-1, CDF-2 and CDF-5) by a reader built into CLIO Coder. The two libraries are not shipped: each is downloaded once on first use as its npm registry tarball, accepted only when its sha256 matches the pin in `src/tools/data/reader-assets.ts`, and unpacked under `<cache>/data-readers/<package>@<version>/`. The cached tarball is hashed again on every load, so a copy whose sha256 differs is fetched afresh. One download may hold the call for up to 20 s. A failed download is recorded beside the cache path, and no process on the host tries again for 10 minutes; when the record cannot be written, the next process tries again at once. The refusal names the reader, the URL, the cache path to copy the tarball to on an offline or air-gapped host, and the `run_script` route with h5py, netCDF4 or pyarrow. Classic NetCDF needs no download.
 
 Every call runs in a worker thread with a 120 s ceiling, so a long pass never blocks the session and an abort stops it. Files are opened read-only and read lazily: HDF5 reads only the metadata and chunks a call touches, Parquet reads its footer and then only the column chunks of the row groups in the window.
+
+Zarr and ADIOS2 are read by readers built into CLIO Coder, with no download. A Zarr store is a directory holding `zarr.json` (v3) or `.zgroup`/`.zarray` (v2); `inspect`, `select` and `stats` read it with raw, zlib, gzip and zstd chunks. A chunk that needs blosc, lz4, sharding or a filter is refused by name with a pointer to `run_script` and the `zarr` Python package. An ADIOS2 output is a directory holding `md.idx` and `md.0`. Only its metadata is read, so `inspect` reports variables, types, shapes, steps, block counts, min/max and attributes, while `select` and `stats` are refused with a pointer to `run_script` with the `adios2` Python package or `bpls -d`. Single-file BP3, big-endian outputs and older BP5 metadata layouts are refused the same way ([zarr.ts](../../src/tools/data/zarr.ts), [adios2.ts](../../src/tools/data/adios2.ts)).
 
 - `inspect` lists groups, variables (dtype, shape, unlimited dimensions as `null` in `maxshape`, named dimensions), global and per-variable attributes with a `cf` block for `units`, `long_name`, `standard_name`, `_FillValue`, `missing_value`, `scale_factor`, `add_offset`, `calendar`, `valid_min`, `valid_max`, `valid_range` and `coordinates`, plus layout, chunk shape, the filter pipeline with deflate level, and uncompressed size. NetCDF-4 files report `format: "netcdf"` with their dimensions, and the netCDF library's own bookkeeping attributes are hidden. Classic NetCDF also reports each variable's exact on-disk size; HDF5 reports `storageBytes: null`, because the bundled reader exposes no storage size. Parquet pages compressed with SNAPPY, GZIP, ZSTD or BROTLI are decoded; other codecs such as LZ4 are refused with the column named. Parquet reports rows, the schema with physical and logical types, per-column codecs and compressed and uncompressed sizes, row groups, and the footer statistics folded across row groups (min, max, null count, and how many row groups carried them). Nothing is scanned. A result past 28 KiB drops attributes to the `cf` block and a count, then lists fewer variables, and says so.
 - `select` reads a hyperslab. With `count` omitted it returns the first 200 elements in row-major order, fewer if their values render past 24 KiB, and marks the result truncated. An explicit `count` above 2000 elements, or one whose values render past 24 KiB, is refused with `selection-too-large`. Parquet selects a row window (`offset`, `limit` up to 1000, `columns`) and cuts rows to 24 KiB, saying so. Values are raw as stored: `scale_factor` and `add_offset` are not applied and fill values are not masked. Float32 values print at float32 precision; integers past 2^53 and non-finite values are `$literal`; classic NetCDF `char` variables are joined into strings along their last dimension.
@@ -810,11 +830,11 @@ Runs git through a fixed argv, never a shell, and accepts no free-form command s
 | --- | --- |
 | `op` | One of `status`, `diff`, `log`, `show`, `add`, `commit`. `mode` and `action` are aliases; when more than one is given they must name the same op. |
 | `path` | `status`, `diff`, `log` and `show`: limit to one file or directory. |
-| `rev` | `show`: one revision, default `HEAD`. `log`: a revision or an `a..b` or `a...b` range. `diff`: one revision against the worktree, or a range. At most 200 characters, built from ref-name characters, `~`, `^` and `@{n}`; a leading `-`, whitespace, `:` and globs are refused. `show` refuses a range. |
+| `rev` | `show`: one revision, default `HEAD`. `log`: a revision or an `a..b` or `a...b` range. `diff`: one revision against the worktree, or a range. At most 200 characters, built from ref-name characters, `~`, `^` and `@{n}`; a leading `-`, whitespace, `:` and globs are refused. `show` refuses a range. `range` and `ref` are accepted in its place; naming two with different values is refused. |
 | `cached` | `diff`: staged changes. |
 | `stat` | `diff` and `show`: summary only. `log`: changed files per commit, with the first-parent diff for merges. |
 | `name_only` | `diff` and `show`: file names only. |
-| `limit` | `log`: commits to show, default 20, maximum 200. |
+| `limit` | `log`: commits to show, default 20, maximum 200. `max_count` is accepted in its place. |
 | `paths` | `add`: a non-empty array of literal paths to stage. |
 | `message` | `commit`: the message, non-empty, without NUL, at most 16,384 characters. |
 | `cwd`, `timeout_ms`, `max_output_bytes` | Every op. Defaults 120000 ms and 600000 bytes. |
@@ -1086,6 +1106,7 @@ Tracks the agent's own work plan. Source: [tasks.ts](../../src/tools/tasks.ts); 
 | `tasks` | Task-title array for plan/add. |
 | `initialStatus` | Plan/add only: `pending` or `blocked`; proposal-mode work starts blocked with a note. |
 | `id` | Required for pick/start/done/block/drop; task IDs (`tN`) or operator task ID (`uN`) for pick. |
+| `ids` | `done`, `block` and `drop` only: a list of task IDs in place of `id`, such as `ids=["t1","t2"]`. The action applies to each in order and stops at the first failure. Sending both `id` and `ids` is refused. |
 | `note` | Required for done (completion claim and validation outcome) and block (reason); optional drop reason. |
 
 Plan replaces the prior board and assigns pending IDs `t1..tN`. Start activates one task and returns any other active task to pending. Done records the agent's completion claim on the session ledger; its note does not certify validation. Verification receipts record observed checks separately. Block requires a reason and suppresses the open-task nudge; drop cancels without reusing the ID. Pick links an operator inbox task; a self-authored plan is not operator authorization. Every action returns the whole board.
@@ -1261,15 +1282,36 @@ A declared turn takes no continuation. The high-rigor finish gate does not re-pr
 finish(state="partly_done", limitations=[{what: "GPU kernels untested", why: "tool_unavailable"}], remaining=["port the solver tests"])
 ```
 
-## memory_recall: search task and approved durable memory
+## memory_note: keep a note for later sessions
+
+Writes one unverified note about this repository for later sessions. Source: [memory-note.ts](../../src/tools/memory-note.ts) and [notes.ts](../../src/domains/memory/notes.ts). Orchestrate plane, read class, sequential. It is attached only to a main session that starts with `context.memory.surfaces.lessons: agent` (the default) and memory on; a worker never has it. It never approves, promotes or rewrites a lesson or an operator's decision.
+
+| Argument | Contract |
+| --- | --- |
+| `note` | Required. What a later session should know, at most 480 characters. |
+| `command` | Optional. A command that succeeded from the workspace root in this session. The host binds it as the note's evidence. |
+| `path` | Optional. A repository file read in this session. The host binds one quoted span of it as evidence. |
+| `applies_when` | Optional. The condition the note holds under. |
+
+Give `command` or `path`, not both. A `command` that has not succeeded from the workspace root in this session is refused, and so is a help, version or always-succeeding command such as `ls` or `echo`. A note with neither is stored for `memory_recall` only and is never promoted without the operator. The result names the note and what it is bound to, for example `Noted [mem-…], unverified, bound to the command that succeeded here.` Writing a claim the store already holds returns `Already noted […]`, or says that the claim is already a kept lesson or that the operator rejected it, and changes nothing.
+
+A note becomes a lesson only after other sessions demonstrate it or the operator approves it; see [Notes, lessons and claims](proactive-memory.md#notes-lessons-and-claims). Once `context.memory.surfaces.lessons` leaves `agent` or memory is turned off, an attached tool refuses with `memory_note: note writing is off for this session`.
+
+```text
+memory_note(note="Run the contract tests with the slot wrapper.", command="scripts/test-slot.sh pnpm run test:contracts")
+memory_note(note="The retry budget is set in one place.", path="src/core/defaults.ts", applies_when="changing retry behaviour")
+```
+
+## memory_recall: search task, lesson and note memory
 
 `gateway(op="call", capability="memory_recall", args={query:"…", limit:8})`
 searches this session's task-memory knowledge and procedural entries and the
-approved durable records eligible for the current repository, runtime and agent.
+durable records eligible for the current repository, runtime and agent: lessons,
+and notes labelled `note, unverified`.
 `query` is required; `limit` defaults to 8, with a maximum of 20. This is a
 read-only orchestrator capability. It cannot save, propose or approve memory,
 and workers do not receive it. No matches returns
-`No task or approved durable memory matched the query.` With
+`No task memory, lesson or note matched the query.` With
 `context.memory.enabled: false` it refuses with `memory is off`. Source:
 `src/tools/memory-recall.ts` and `src/domains/memory/recall.ts`.
 

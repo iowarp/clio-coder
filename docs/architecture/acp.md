@@ -27,7 +27,7 @@ clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allo
 clio-coder acp auth login
 ```
 
-`clio-coder --acp [options]` is an exact alias: the global parser rewrites `--acp` into the `acp` command and passes every later argument to the same option parser, stdout guard, and boot path. Global boot flags go before it. `acp` honors `--api-key KEY`, `--no-context-files` (`-nc`), `--no-skills`, and `--skill PATH`. `--with-panes` is refused. An unknown option or an invalid value prints the usage text and exits 2. `--help` prints it and exits 0.
+Global boot flags go before `acp`. `acp` honors `--api-key KEY`, `--no-context-files` (`-nc`), `--no-skills`, and `--skill PATH`. `--with-panes` is refused. An unknown option or an invalid value prints the usage text and exits 2. `--help` prints it and exits 0.
 
 - `--cwd PATH`: pins the workspace. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. CLIO Coder enters it before reading settings, building project context, or opening a session ledger. A path that does not exist or cannot be entered exits 2 without starting the server. Every session request must then name that root.
 - `--permission-timeout MS`: the server-side ceiling for one mediated permission request, a whole number from 1 through `2147483647` milliseconds. Other values are refused before the protocol server starts. It overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts`). The same ceiling bounds one interview round and one forwarded worker ask. A client that negotiates `timeoutMs` in its [attended opt-ins](#attended-clients) replaces the configured default, never this flag. If the timer wins on a main-agent request, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result reaches a continuing model loop. A client may enforce a shorter policy by sending `session/cancel`.
@@ -623,7 +623,9 @@ This outbound path is distinct from the hosted server's permission bridge. The h
 
 ## Delegation peers in the transcript
 
-In the other direction CLIO Coder is an ACP client. `/run <agent-id> <task>` naming an external agent, and any dispatch to an agent id configured under `integrations.externalAgents.entries` run the task on an external peer such as `claude-code`, `codex`, or `opencode`. CLIO Coder provides pinned outbound ACP bridge recipes for Claude Code (`@agentclientprotocol/claude-agent-acp`) and Codex (`@agentclientprotocol/codex-acp`) and uses OpenCode's native `opencode acp`. The Antigravity CLI and Pi integrations have no built-in ACP recipe. Their managed headless runtimes and Herdr pane handoffs are described in the [interoperability guide](../guide/interop.md#delegate-work-to-an-installed-coding-agent).
+In the other direction CLIO Coder is an ACP client. `/run <agent-id> <task>` naming an external agent, and any dispatch to an agent id configured under `integrations.externalAgents.entries` run the task on an external peer such as `claude-code`, `codex`, or `opencode`. CLIO Coder provides pinned outbound ACP bridge recipes for Claude Code (`@agentclientprotocol/claude-agent-acp`) and Codex (`@agentclientprotocol/codex-acp`) and uses the native `opencode acp` and `agy acp` of OpenCode and the Antigravity CLI. The Pi integration has no built-in ACP recipe. Managed headless runtimes and Herdr pane handoffs are described in the [interoperability guide](../guide/interop.md#delegate-work-to-an-installed-coding-agent).
+
+An `agy acp` delegation has its own shims ([antigravity-shims.ts](../../src/engine/acp/antigravity-shims.ts)). The adapter refuses `agy` older than 1.5.1, splits a `<model>-<level>` id into the model and thinking level `agy` announces as session config options ([peer-config-options.ts](../../src/engine/acp/peer-config-options.ts)), sends a steer as a second `session/prompt` in the running turn, and routes an `interaction_*` permission request that is a fixed-choice question to the operator instead of the tool mediator. A tool approval is rewritten before the mediator judges it: `run_command` becomes the shell command it runs and `run_workflow` the inline script. After each turn the adapter reads `agy`'s per-conversation store read-only for failures the wire never carried, such as a quota exhaustion ([antigravity-sideband.ts](../../src/engine/acp/antigravity-sideband.ts)). The operator-facing behavior is in the [interoperability guide](../guide/interop.md#antigravity-cli-over-acp).
 
 A delegated peer is a worker like any other on screen. The adapter maps the peer's `agent_message_chunk` and thought chunks onto the same dispatch event stream a local CLIO Coder worker publishes, so the peer's answer renders as the same attributed block with the same fold behavior, the same `--share` and `/fleet share` path into the main agent's context, and the same replay from its sealed run record. A peer's `plan` update surfaces as a plan event. There is no ACP-specific UI path.
 
@@ -637,13 +639,16 @@ A dispatch to a delegation agent accepts typed intent and renders the declared s
 
 ## Client-side error taxonomy
 
-The outbound ACP client raises three typed errors (`src/engine/acp/errors.ts`), all subclasses of `AcpError` with a `code` and optional `data`:
+The outbound ACP client raises four typed errors (`src/engine/acp/errors.ts`), all subclasses of `AcpError` with a `code` and optional `data`:
 
 | Class | `code` | Raised when |
 | --- | --- | --- |
 | `AcpProtocolError` | `acp_protocol_error` | The peer answered a request with a JSON-RPC error. |
 | `AcpTimeoutError` | `acp_timeout` | A request outlived its timeout, or a timeout was outside 1 to `2147483647` ms. |
 | `AcpProcessError` | `acp_process_error` | The peer process exited, errored, or closed its pipes before replying. |
+| `AcpAuthRequiredError` | `acp_auth_required` | The peer needs its own sign-in before it opens a session. `data.loginCommand` is what the operator runs once. |
+
+A plain `AcpError` carries `acp_model_unavailable` or `acp_thinking_unavailable` when the peer does not offer the requested model or thinking level. A delegation run settles under four ACP outcome codes: `acp_auth_required`, `acp_model_unavailable`, `acp_thinking_unavailable`, and `acp_transport_error` for an `AcpProcessError`. A sign-in failure is retried on another target, and the model and thinking codes are never retried.
 
 The server side uses `AcpRequestError`, which owns the JSON-RPC code, the host-authored message, and the `clio-coder/error` detail. Any other throw becomes `internal_error`.
 

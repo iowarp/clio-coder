@@ -20,6 +20,8 @@ The command cannot read SSH and GPG keys, the SSH agent, cloud and cluster login
 
 `safety.sandbox` is `auto` by default. `required` refuses workers' commands on a machine without a sandbox and keeps unconfined yolo sandboxed; `srun`, `salloc` and `flux` then stay inside it. `off` never sandboxes. Unconfined yolo, for containers only, runs commands as you with your credentials.
 
+A short floor holds at every level. It blocks wiping `/`, your home directory or a system tree, formatting disks, and writes into CLIO Coder's own settings and credentials. The floor also reads the shell scripts a command runs by path or with `source`. A change only you may make, such as project trust, is refused with a message that sends the agent to you.
+
 ## Project configuration and /trust
 
 A repository's own CLIO Coder settings, safety rules, hooks and packages are ignored until you approve their exact contents. A card lists them when you open the project, and `/trust` reopens it. Even approved, project settings can only make CLIO Coder more careful: they cannot raise the autonomy level, loosen the sandbox, raise limits or carry credentials.

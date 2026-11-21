@@ -241,6 +241,7 @@ Scout is the bounded escalation path for broad reconnaissance, not an authority 
 ACP delegation agents (registered under `integrations.externalAgents.entries` in `settings.yaml`) are integrated as first-class workers:
 - **Automatic Routing:** When a task is dispatched to an agent ID matching a configured ACP delegation agent, the dispatch engine automatically routes the execution to that delegation agent.
 - **Dynamic Spec Discovery:** The agent registry synthesizes an AgentSpec for each configured ACP delegation agent. The spec has audience `custom`, capability class `orchestration`, category `explore`, latency class `deep`, no declared tools, project context tier `none`, result contract `external-delegation`, and a 1/0 budget without synthesis. Specs are visible via `clio-coder agents`. A delegation agent receives project context only when its entry sets `projectContext: "bounded"`.
+- **Antigravity CLI:** The built-in `antigravity` delegation target runs `agy acp` under the operator's own `agy` login, with model and thinking selection, operator-answered questions and live steering ([Antigravity CLI over ACP](interop.md#antigravity-cli-over-acp)). It is separate from the `antigravity-code` headless runtime below.
 
 ### Restricted Shadow Agent Delegation
 

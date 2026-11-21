@@ -30,7 +30,7 @@ The three commands answer different needs. Pick by whether you want a recorded r
 ::: compare
 | Command | What happens | What CLIO Coder records |
 | --- | --- | --- |
-| `/run <agent-id> <task>` | A configured ACP peer runs the task; `acp:<id>` names one explicitly | The result and a sealed run record |
+| `/run <agent-id> <task>` | A configured ACP peer such as `antigravity` runs the task; `acp:<id>` names one explicitly | The result and a sealed run record |
 | `/run --target <target> <agent> <task>` | A configured headless target runs it | The result and a sealed run record |
 | `/panes peer <agent> [brief]` | A pane opens beside the conversation for you to work in | No run record |
 :::
@@ -80,7 +80,7 @@ A useful result may be a diagnosis, a patch, or a failed attempt that reveals a 
 When comparing agents, give them the same task and evaluate the actual output. Record the model, connector, setup, check results, and any costs you can substantiate. CLIO Coder coordinating two peers does not make either one better.
 
 ::: limits
-- Supported modes differ by peer, and some cannot receive live steering.
+- Supported modes differ by peer, and some cannot receive live steering. The Antigravity CLI over ACP can.
 - A pane is an interactive handoff; it produces no run record.
 - Peer accounts, subscriptions, and usage limits stay with each peer's own provider.
 :::

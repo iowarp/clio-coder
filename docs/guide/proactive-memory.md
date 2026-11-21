@@ -5,20 +5,26 @@ The [evidence and memory contract](../architecture/evidence-and-memory.md) expla
 After a durable context reduction, restoration uses a commit-scoped offer: stale content jobs and buffered reminders lose authority, known usage remains attributed, and restoration is consumed only after an admitted installation. See [Context continuity and recovery](context-continuity.md) for the lifecycle and its limits.
 
 CLIO Coder's proactive task memory records requirements, environment facts, failed
-attempts, and diagnoses in bounded session banks. Rules and a model step select
-visible reminders at tool or turn boundaries. The design follows
+attempts, and diagnoses in bounded session banks, and reminds the agent of them
+at tool or turn boundaries. What outlives a session is a note: a claim bound to
+a command that succeeded or a file that was read, which becomes a lesson only
+after other sessions demonstrate it or you approve it. The design follows
 Wu et al., *Remember When It Matters: Proactive Memory Agent for Long-Horizon
 Agents* (2026), adapted to CLIO Coder's middleware and model routing.
 
-The rules tier is always part of memory and makes no model calls. The LLM memory
-tier runs on the independent `context.memory.target` and `context.memory.model`
-route when both are set. When neither is set, it runs on the active chat route
-(`chat.target` and `chat.model`), so a default installation with a chat route
-spends model calls on memory. Memory stays in the rules tier only when no route
-resolves, for example when no chat route is configured. The background tier does
-not change the action agent's system prompt or tool surface. Disabling
+The rules tier is always part of memory and makes no model calls. With the
+default [memory surfaces](#memory-surfaces) the automatic paths run on rules
+alone: the main agent writes notes through the `memory_note` tool, a failed
+command followed by its fix is filed by rule, and the only memory model call is
+the classifier that reads a statement you asked CLIO Coder to remember. The
+model steps (`correct: model`, `bank: model`, `lessons: side`, `history: on`,
+`observe: on`) are opt-in. A model step runs on the independent
+`context.memory.target` and `context.memory.model` route when both are set, and
+on the active chat route (`chat.target` and `chat.model`) when neither is. With
+no route, memory stays in the rules tier. Disabling
 `context.memory.enabled` removes observation, bank writes, model resolution,
-reminders, the `# Memory` section, handoff offers, and handoff seeding.
+reminders, the `# Memory` section, the `memory_note` tool's writes, handoff
+offers, and handoff seeding.
 
 ## Quick start
 
@@ -27,18 +33,22 @@ your requirements, facts about your environment, what failed and why, and
 reminds the agent of them when they matter again.
 
 - `/memory` shows what it holds for this session.
+- The agent keeps a note for later sessions with `memory_note`, bound to a
+  command it ran successfully or a file it read. See
+  [Notes, lessons and claims](#notes-lessons-and-claims).
 - On a selected row, `p` proposes it as a lasting lesson for this
   repository, and `g` for every project. `clio-coder memory` reviews the
   proposals.
-- Memory uses your chat model unless you give it a route of its own in
+- Memory's model steps are off by default. When you turn one on it uses your
+  chat model unless you give memory a route of its own in
   `/settings` → **Context and memory** → **Proactive memory**, where you can
-  also turn it off.
+  also turn memory off.
 
 ## Inspect or configure memory
 
 ### Turn memory off
 
-To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context and memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, `/memory` lists each eligible lesson as `off`, and `memory_recall` refuses with `memory is off`. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
+To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context and memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too, and `memory_note` refuses with `memory_note: note writing is off for this session`. An explicit context-handoff request carries no task-memory block, `/memory` lists each eligible lesson as `off`, and `memory_recall` refuses with `memory is off`. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
 
 ### Inspect the memory bank
 
@@ -48,6 +58,8 @@ To turn memory off, set `context.memory.enabled: false` in settings, or use `/se
 | Propose a bank entry for durable review | `/memory`, then `p` (repository scope) or `g` (global scope) on a selected knowledge or procedural row; over ACP, `_clio-coder/memory/propose` (see [ACP](../architecture/acp.md)) |
 | Import the newest handoff's task memory | `/memory seed` |
 | List, approve, reject or prune durable records | `clio-coder memory`, see [Memory CLI](../architecture/evidence-and-memory.md#memory-cli) |
+| List the approved records one approver let into the prompt | `clio-coder memory list --approved-by operator` or `--approved-by guardian` |
+| Merge duplicate claims and demote lessons that no longer hold | `clio-coder memory consolidate`, see [Consolidate the store](#consolidate-the-store) |
 | Select a background model or change memory controls | `/settings` → **Context and memory** → **Proactive memory** |
 | Review recorded cost | `/usage` or `clio-coder usage report` |
 | Look up the default values and routing example | [Operator setup](#operator-setup) |
@@ -94,6 +106,35 @@ The TUI reports each capture as a transcript line such as `Remembered for this p
 A forget first looks for a pin in this session with the same words or words that contain each other. Otherwise it picks the approved record applicable here (global, or this repository) that shares the most words with the request, at least half of the shorter one's terms. An operator-stated record is removed. A lesson that came from evidence is rejected instead, so the same evidence does not propose it again. When nothing matches, nothing is forgotten and the notice says so. The process keeps its last 32 captures for undo and rescoping.
 
 In the desktop app the same capture appears as a banner in the conversation, such as `Remembered for this project`, with the kind and text below it. Its buttons `Keep for this session`, `Keep for all projects` (the scopes it is not in) and `Undo` run `/remember scope` and `/remember undo` for that capture, and `Dismiss` hides it. A forget shows `Forgot` with `Undo`. ACP clients receive the capture as `_meta["clio-coder/memory-capture"]` on the notice's `agent_message_chunk` update, and a read-only ceiling refuses `/remember`.
+
+## Notes, lessons and claims
+
+What CLIO Coder keeps across sessions is a claim, not a sentence. A record is identified by its repository, the kind of claim, the claim's body and any condition it states, so two wordings of one claim are two revisions of one record and every session that reaches the same claim lands on that record ([promotion.ts](../../src/domains/memory/promotion.ts)).
+
+| Claim kind | Body | Evidence that binds it |
+| --- | --- | --- |
+| Command | One command, as its program and words | The shell tool's own successful result for that exact command, run from the workspace root |
+| Fix | A failed command and the command that then succeeded | Both results in one session, differing only in their bare options |
+| Source | One quoted span of one repository file | A read of that file in the session |
+
+A record has one of two standings. A **note** is unverified: `memory_recall` finds it, and a fix note can also ride the reminder on a failed call that matches its failed command, labelled unverified. A **lesson** is a note that was promoted, and only lessons reach the `# Memory` section and the other reminders.
+
+Two writers file notes, and neither approves anything ([notes.ts](../../src/domains/memory/notes.ts)):
+
+- **The main agent, through `memory_note`.** The tool takes `note` (at most 480 characters) and optionally `command`, `path` and `applies_when`. With `command`, the host binds the note to that command's successful result in this session and refuses a command that has not succeeded from the workspace root, or a help, version or always-succeeding command. With `path`, it binds the note to a file the session read. A note with neither is kept for `memory_recall` only and is never promoted without you. The result says which it was, for example `Noted [mem-…], unverified, bound to the command that succeeded here.` The tool is attached only to a main session that starts with `context.memory.surfaces.lessons: agent`, and workers never have it. See [`memory_note`](tool-usage.md#memorynote-keep-a-note-for-later-sessions).
+- **Rules capture.** When one command fails from the workspace root and the same program with the same operands then succeeds with a bare option added or removed, and nothing in the workspace changed in between, the pair is filed as a fix note. A word carrying a value, such as `--filter=b`, is part of what runs, so a different value is a different command. A help, version or always-succeeding command never pairs. Capture runs under every `lessons` value except `off`.
+
+A session whose information flow is restricted writes no note. A note that would carry a secret is refused, and its words are redacted as every stored lesson is.
+
+### Consolidate the store
+
+`clio-coder memory consolidate [--json]` is the explicit pass over the store. It makes no model call and runs only when you run it ([consolidate.ts](../../src/domains/memory/consolidate.ts)). For the records the current checkout would use, it:
+
+- merges records of one claim into one, keeping the other wordings as earlier revisions and joining their verdicts and delivery counts;
+- re-checks each lesson of this repository with the [delivery check](#delivery-checks) and demotes one that fails to a note with a regression, or reports it as withheld when you approved it;
+- drops notes the automatic tier wrote that carry no command or source evidence and that no session ever observed or was delivered.
+
+A record you approved or rejected is never merged, demoted, dropped or rewritten, and another repository's records are left alone. The text result is one line, `memory consolidate: scanned N, merged N, demoted N, withheld N, dropped N`, ending `; nothing changed` when the store was left as it was.
 
 ## Architecture
 
@@ -168,7 +209,12 @@ below before prompt selection can include them.
 
 ## Keep working commands from completed tasks
 
-With `context.memory.enabled: true` (the default), completed-task retention
+Completed-task retention runs only with `context.memory.surfaces.lessons: side`.
+It is armed by evidence and not by activity: a fix pair, or a `finish`
+declaration of `done` in an operator turn with a passed check, since the last
+pass, and it runs at most once per operator turn. Under the default `agent`
+value the main agent writes these notes itself through `memory_note`. When it
+runs, retention
 extracts reusable lessons from the session's own receipts. The host also keeps
 commands the evidence proves, regardless of whether the lesson model proposes
 them. A command qualifies when it is one simple invocation that executes a
@@ -218,8 +264,10 @@ as a run that only edited files, settles as `abstained` with reason
 `lesson-extraction-skipped` observation. Its tool calls stay unreviewed, so
 history review can still file a provisional proposal from them later.
 
-Between turns the guardian also reviews earlier sessions of the same
-repository for lessons. An excerpt counts as reviewed only after what it
+With `context.memory.surfaces.history: on`, the guardian also reviews earlier
+sessions of the same repository for lessons while the session is idle. History
+review is off by default, and the guardian then parks once the live session's
+own work is done. An excerpt counts as reviewed only after what it
 taught is durable: filed in the store, or saved as pending candidates under
 `<stateDir>/memory/history-candidates/`, which a later guardian step files
 without a model call. When neither succeeds, the excerpt stays unreviewed and
@@ -229,9 +277,16 @@ are kept; past that, a failing store holds the review where it is. Source:
 
 ## When a repository lesson becomes approved
 
-Repository-scoped knowledge produced from a task-bank entry can receive
-guardian approval after one session records that the lesson held, with no
-contradiction or recorded regression. It waits for the operator instead when
+A repository note becomes a lesson without you only after it has been
+demonstrated: two complete demonstrations of its current wording, from two
+distinct sessions other than the one that wrote it, with no contradiction of
+that wording. A complete demonstration of a fix claim is its failed command
+failing and then its fixed command succeeding in one session. A success of a
+plain command claim counts only when the session had not been shown the note
+first. A note that is both held and contradicted on one wording is contested
+and waits for you. The gate speaks only for notes the task bank's knowledge
+entries, `memory_note` command notes and rule-captured fix pairs produced. It
+also waits for you when
 another approved or operator-rejected repository lesson already carries one of
 its `command:` evidence refs: two wordings of one command stay separate claims,
 a rejection keeps its authority over rewordings, and which one stands is the
@@ -294,9 +349,20 @@ a verdict on truth. The log is per project, under
 
 ## Offer a lesson beside the action it concerns
 
-An eligible approved lesson can appear at the session's first workspace change,
-with lessons about the changed file first; when a read, edit or command touches
-a file the lesson names; when verification finds no declared check; or when a
+`context.memory.surfaces.delivery` selects which channels carry lessons:
+
+| Value | What delivers |
+| --- | --- |
+| `off` | Nothing from the store. `memory_recall` still reaches every record. |
+| `section` | The `# Memory` section only. |
+| `decision` (default) | The section, plus a reminder at a decision point: a failed command, a verification gap, a touched file or the turn's task. |
+| `broadcast` | Those, plus every pending lesson at the session's first workspace change. |
+
+The `# Memory` section carries a lesson that has command evidence or that you
+approved. Under `broadcast`, an eligible approved lesson can appear at the
+session's first workspace change, with lessons about the changed file first.
+From `decision` up, one can appear when a read, edit or command touches
+a file the lesson names; when verification finds no declared check; when the turn's task concerns it; or when a
 failed command runs the same repository file through the same program as a
 command the lesson recommends, or is exactly a failed example the lesson
 quotes. A lesson recommends the command its `command:` evidence names. Without
@@ -304,12 +370,38 @@ one, it recommends every command it quotes except help and version calls and
 those its own clause says failed or rules out. A lesson appears at most once
 per session, counted from the request that carried it, and is omitted once its
 recommended command has already succeeded there exactly. Each line names who
-stands behind the lesson, `operator-approved` or `retained automatically`, and
+stands behind the lesson, such as `operator-approved`,
+`retained automatically from execution evidence` or
+`unverified note from an earlier session`, and
 carries its stored `Applies when` and `Avoid when` conditions. An approved
 lesson whose reminder was submitted is observed `delivered`, and `held` once
 its recommended command then succeeds exactly. The reminder is advice and never
 grants permission to execute the command. Source:
 `src/domains/memory/intervention.ts` and `src/domains/memory/lesson-projection.ts`.
+
+### Delivery checks
+
+Every lesson is checked once per session, when it is first loaded for delivery,
+and every channel asks the same gate. A lesson is withheld when it is certainly
+dead: the program its command starts with no longer resolves (on `PATH`, as a
+repository program or as a known runner), a file it quotes is gone, or the span
+it pins is known exactly and the file no longer holds it. A lesson that binds a
+path outside its repository checkout, such as another worktree, or a program
+under `/tmp` or `/var/tmp`, is withheld too. A span the check cannot locate is
+undecided and the lesson is delivered. The check proves nothing about a
+subcommand, a flag or the claim itself.
+
+What happens next depends on who approved the lesson:
+
+- A lesson you approved is withheld for the session with its approval intact,
+  and one notice names it, opening `Memory: withheld an operator-approved lesson for this session (<id>)`
+  and stating the failed check. Review it with `clio-coder memory list`.
+- An automatically approved lesson returns to the notes with a regression, and
+  the notice opens `Memory: returned a repository lesson to the notes (<id>)`.
+- An automatic approval that no longer meets the two-demonstration bar returns
+  to the notes.
+- A lesson delivered in three other sessions in a row with no verdict is
+  demoted.
 
 `/memory` opens on **Lessons**: the reusable lessons eligible for this session,
 what each concerns, whether the main prompt carries it (`off` while memory is
@@ -318,11 +410,13 @@ tabs. Opening the view does not activate memory (`src/interactive/memory-overlay
 
 ## Prepare observation notes for compaction
 
-`context.memory.observations.enabled` defaults to `false`. Turning it on while
+`context.memory.surfaces.observe` defaults to `off`. Setting it to `on` while
 `context.memory.enabled` is on lets background memory prepare source-linked
 notes that the existing compactor can use in place of the history they cover.
 These continuity notes are separate from reusable lessons and preserve source
-references; they do not approve a durable record. Source:
+references; they do not approve a durable record.
+`context.memory.observations.enabled: true` turns the surface on when
+`surfaces.observe` is unset. Source:
 `src/domains/memory/observations.ts` and `src/domains/memory/runtime.ts`.
 
 Preparation is sized so a session that never nears compaction pays little:
@@ -330,7 +424,8 @@ Preparation is sized so a session that never nears compaction pays little:
 - It runs only when the next automatic fold would send history to a separate
   summary request: a separate compaction model, or a chat route whose cached
   prefix cannot carry the summary. It waits until the live context is within
-  0.15 of the window (uncalibrated) below the compaction trigger. When the live
+  0.15 of the window (uncalibrated) below the compaction trigger, and never
+  runs when automatic compaction is off. When the live
   budget cannot say, preparation defers with the status reason
   `pressure-unknown`; only a composition that supplies no fold planner at all
   runs without the gate. Two committed folds in a row that decline its notes
@@ -385,7 +480,8 @@ Each session keeps at most 64 artifacts under
 `<stateDir>/memory/observations/<sessionId>/`. When the directory is full,
 unreadable files go first, then batches prepared against another checkpoint or
 branch anchor, then batches a reflection replaced
-(`src/domains/memory/observation-store.ts`).
+(`src/domains/memory/observation-store.ts`). The daily retention sweep removes
+the observations of sessions that no longer exist.
 
 ## Paper mapping and CLIO Coder constraints
 
@@ -455,7 +551,8 @@ All keys live under `context.memory` in `settings.yaml` (`src/core/defaults.ts`,
 | Key | Default | Minimum | Effect |
 | --- | --- | --- | --- |
 | `context.memory.enabled` | `true` | | Enables observation, task bank writes, and reminder injection. `false` is the kill switch for the whole plane. |
-| `context.memory.observations.enabled` | `false` | | Prepare source-linked continuity notes for compaction while memory is enabled. |
+| `context.memory.sideShare` | `0.15` | `0` | Caps automatic memory model calls at a share of the session's main output. See [Background budget](#background-budget). `0` removes the cap. |
+| `context.memory.thinkingLevel` | `off` | | Thinking level of the memory side call. `off` sends no reasoning request. |
 | `context.memory.target` | `null` | | Target for a dedicated background model route. A value that names no configured target resets to `null`. With `target` and `model` both unset, the model tier runs on the active chat route. |
 | `context.memory.model` | `null` | | Wire model on that target. Cleared when `target` is unset; defaults to the target's `defaultModel` when `target` is set and `model` is not. |
 | `context.memory.cadenceToolCalls` | `10` | `2` | Minimum completed-tool interval between background interventions. |
@@ -463,7 +560,18 @@ All keys live under `context.memory` in `settings.yaml` (`src/core/defaults.ts`,
 | `context.memory.maxOutputTokens` | `2000` | `1` | Bounds the rendered memory-bank context, the ordinary policy-model completion, and the reminder (4 characters per token). An always-on-thinking model receives twice this value and at least `4000` tokens, within the model's own output cap, so it can still reach the strict envelope. |
 | `context.memory.timeoutMs` | `60000` | `1` | Wall-clock limit for one background memory-policy step, including its one permitted chat fallback attempt. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route. |
 
-There is no thinking-level key. CLIO Coder always requests thinking off for the memory route.
+### Memory surfaces
+
+Each memory surface has one switch under `context.memory.surfaces`. A change applies at the next turn, with one exception: `memory_note` is attached when a session's tools are registered, so turning `lessons: agent` on reaches the tool in a new session, while an attached tool refuses from the next turn once the value changes.
+
+| Key | Default | Values | Effect |
+| --- | --- | --- | --- |
+| `context.memory.surfaces.lessons` | `agent` | `off`, `rules`, `agent`, `side` | Who writes cross-session notes. `agent` gives the main agent `memory_note`. `rules` keeps only rule-captured fix pairs. `side` adds the memory model's lesson pass and completed-task retention. `off` writes nothing. Rules capture runs under every value but `off`. |
+| `context.memory.surfaces.delivery` | `decision` | `off`, `section`, `decision`, `broadcast` | Which channels deliver lessons. See [Offer a lesson beside the action it concerns](#offer-a-lesson-beside-the-action-it-concerns). A running session's `# Memory` section keeps what it was compiled with. |
+| `context.memory.surfaces.correct` | `rules` | `rules`, `model` | In-session correction after repeated failures. `rules` keeps the repeated-failure annotation and makes no model call. `model` adds a model step on two consecutive tool errors or a loop signal. |
+| `context.memory.surfaces.bank` | `rules` | `rules`, `model` | Task-bank maintenance. `rules` writes procedural entries from failures and knowledge from your statements. `model` adds a model step every `context.memory.cadenceToolCalls` tools. |
+| `context.memory.surfaces.history` | `off` | `off`, `on` | Reviewing this repository's earlier sessions for lessons while the session is idle. Set `on` to turn it on. `clio-coder memory consolidate` is the separate model-free pass. |
+| `context.memory.surfaces.observe` | `off` | `off`, `on` | Preparing observation notes for a predicted compaction. `context.memory.observations.enabled: true` turns it on when this key is unset. |
 
 ## Trigger semantics
 
@@ -599,8 +707,9 @@ The rules tier is enabled by `context.memory.enabled` and makes no model calls.
 The LLM tier resolves its route from `context.memory.target` and
 `context.memory.model`. With both unset it follows the live chat route: each
 step uses whatever `chat.target` and `chat.model` are at that moment, so memory
-tokens are billed to the chat model by default. The rules tier answers alone when
-no chat route is configured. Its default timeout is `context.memory.timeoutMs: 60000`.
+tokens are billed to the chat model unless memory has its own route. The rules tier
+answers alone when no chat route is configured, and under the default
+[memory surfaces](#memory-surfaces) no automatic model step is started. Its default timeout is `context.memory.timeoutMs: 60000`.
 
 Each model step's calls are journaled under the `memory` agent role and shown
 as `memory steps` in `/usage`. `clio-coder usage report` reads the same journal
@@ -726,6 +835,16 @@ kind from its resolved pricing and runtime; there is no setting for it.
   the step is skipped with `time_budget`. With no measurement yet the deadline
   is `context.memory.timeoutMs`.
 
+On every route kind, `context.memory.sideShare` caps what automatic memory may
+spend. A session's first three automatic memory calls always run. After them a
+further call is skipped with `side_share` while the session's settled memory
+output tokens, plus the output budget of each memory call still in flight,
+exceed that share of its settled main output tokens. On a route that reports
+premium units, the same share applies to those. A call you asked for, such as
+the classifier after a remember statement, is never skipped. `0` turns the cap
+off. The default `0.15` is a design assumption, not a measured optimum, and the
+cap can refuse a call that would have helped.
+
 A skipped step is journaled as a `memory.step_decided` record with decision `dropped` and its reason, plus
 `resumeAt` when CLIO Coder knows when room returns (a window reset or a retry instant).
 `/memory` shows the newest skip and that time. A skipped step is not retried;
@@ -734,8 +853,8 @@ the next cadence tick or turn end decides again.
 ## Choosing a background model
 
 Memory reads a trajectory and writes a bounded envelope. A small model can reduce
-latency and resource use. CLIO Coder requests thinking off for the memory route and
-exposes no key to change that.
+latency and resource use. CLIO Coder requests `context.memory.thinkingLevel` for
+the memory route, and the default `off` sends no reasoning request.
 
 The off request depends on runtime and model metadata: llama.cpp reads
 `chat_template_kwargs.enable_thinking`, and LM Studio reads `reasoning_effort`,
@@ -761,15 +880,24 @@ The shipped defaults are:
 context:
   memory:
     enabled: true
+    sideShare: 0.15
+    surfaces:
+      observe: off
+      delivery: decision
+      lessons: agent
+      correct: rules
+      bank: rules
+      history: off
     target: null
     model: null
+    thinkingLevel: off
     cadenceToolCalls: 10
     trajectorySteps: 8
     maxOutputTokens: 2000
     timeoutMs: 60000
 ```
 
-With `context.memory.target` and `context.memory.model` unset, the model tier runs on
+With `context.memory.target` and `context.memory.model` unset, a memory model step runs on
 the active chat route. `/memory` shows `Memory route:` with `chat route (no memory
 model set)` and the target and model in use, and the route line in the system
 prompt reads `memory =chat (no memory model set)`. Set `context.memory.enabled:
@@ -871,9 +999,12 @@ no session, or one running outside a canonical repository, proposes nothing:
 global scope broadens applicability to every future session and is not a claim a
 background step may make on the operator's behalf. An unapproved proposal that is
 never reviewed becomes eligible for `memory prune --stale` after 30 days. When the
-store reaches its 500-record cap, undecided proposals make room, oldest first and
-those without evidence before evidence-backed ones; an invalid record is moved to
-`records.invalid.json` with one notice instead of disabling memory. The repository
+store reaches its 500-record cap, unpromoted notes make room, those without
+evidence before evidence-backed ones and then the one observed longest ago
+first. A lesson and a record you approved or rejected are never evicted. An
+invalid record is moved to `records.invalid.json` with one notice instead of
+disabling memory, and `clio-coder memory list` reports how many records were set
+aside. The repository
 a lesson belongs to is the repository root plus its root commit, and a linked
 worktree shares it only when the main repository registers that worktree; see
 [Repository-scoped identity](../architecture/evidence-and-memory.md#repository-scoped-identity).
@@ -978,7 +1109,7 @@ The reasons are `intervened`, `model_silent`, `duplicate_reminder`, `suppressed`
 `uncited`, `invalid_path`, `resolved_failure`, `no_lost_context`, `over_budget`,
 `invalid_reminder`, `unparseable`, `all_operations_invalid`, `deadline`,
 `timed_out`, `endpoint_busy`, `endpoint_preempted`, `cost_ceiling`,
-`quota_unknown`, `quota_window`, `quota_retry`, `time_budget`, `client_error`,
+`quota_unknown`, `quota_window`, `quota_retry`, `time_budget`, `side_share`, `client_error`,
 `information_flow_blocked`, `no_client`, `no_consumer`, `step_in_flight`,
 `llm_timeout_backoff`, `no_repeated_failure`, `bank_empty` and `scope_changed`.
 
