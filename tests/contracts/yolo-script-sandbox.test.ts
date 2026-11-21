@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -102,40 +103,68 @@ test("the main-session sandbox writes the workspace and scratch roots only, keep
 });
 
 // C-6: pnpm's store lives under the read-only XDG_DATA_HOME, and a masked ~/.npmrc made npm and pnpm print EACCES.
-test("contained package managers get a pnpm store in the sandbox cache and an empty npm user config for a masked ~/.npmrc", (t) => {
-	const cache = "/home/u/.cache/clio-coder/sandbox-cache";
-	const policy = resolveMainSandboxPolicy({ workspace: "/w", scratchRoots: [], sandboxCache: cache, clioDirs: [] });
-	const plain = mainSandboxInvocationSpec(policy, { argv: ["/bin/true"] }, "/w", []).setEnv ?? {};
-	assert.equal(plain["npm_config_store_dir"], join(cache, "pnpm-store"));
-	assert.equal(plain["pnpm_config_store_dir"], join(cache, "pnpm-store"));
-	assert.equal("NPM_CONFIG_USERCONFIG" in plain, false);
-	const masked = mainSandboxInvocationSpec(policy, { argv: ["/bin/true"] }, "/w", [], join(cache, "npmrc-empty"));
-	assert.equal(masked.setEnv?.["NPM_CONFIG_USERCONFIG"], join(cache, "npmrc-empty"));
-
+test("contained package managers get a pnpm store in the sandbox cache and a read-only empty npm user config for a masked ~/.npmrc", (t) => {
 	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-npmrc-")));
 	t.after(() => rmSync(scratch, { recursive: true, force: true }));
 	const home = join(scratch, "home");
-	const real = join(scratch, "cache");
+	const clio = join(scratch, "cache", "clio-coder");
+	const sandboxCache = join(clio, "sandbox-cache");
 	mkdirSync(home);
-	mkdirSync(real);
+	mkdirSync(sandboxCache, { recursive: true });
 	writeFileSync(join(home, ".npmrc"), "//registry.npmjs.org/:_authToken=x\n");
 	const masks = [{ path: join(home, ".npmrc"), kind: "file" as const }];
-	assert.equal(mainSandboxNpmUserConfig(real, [], home), undefined, "an unmasked ~/.npmrc stays in use");
-	const empty = mainSandboxNpmUserConfig(real, masks, home);
-	assert.equal(empty, join(real, "npmrc-empty"));
-	assert.equal(readFileSync(join(real, "npmrc-empty"), "utf8"), "");
-	// A contained command can write the cache: a planted link is replaced, never followed.
+	const real = resolveMainSandboxPolicy({
+		workspace: join(scratch, "ws"),
+		scratchRoots: [],
+		sandboxCache,
+		clioDirs: [clio],
+	});
+	assert.equal(mainSandboxNpmUserConfig(sandboxCache, [], home, real), undefined, "an unmasked ~/.npmrc stays in use");
+	const file = mainSandboxNpmUserConfig(sandboxCache, masks, home, real);
+	assert.ok(file !== undefined);
+	// Contained commands write the sandbox cache, so the file lives where they cannot replace, link or chmod it.
+	assert.equal(file.startsWith(`${sandboxCache}/`), false, file);
+	assert.equal(file.startsWith(`${clio}/`), true, file);
+	assert.equal(readFileSync(file, "utf8"), "");
+	assert.equal(statSync(file).mode & 0o777, 0o444);
+	// Each launch checks it again: a mode, a link or content that is not the empty file is replaced.
+	chmodSync(file, 0o000);
+	assert.equal(mainSandboxNpmUserConfig(sandboxCache, masks, home, real), file);
+	assert.equal(statSync(file).mode & 0o777, 0o444);
 	const victim = join(scratch, "victim");
 	writeFileSync(victim, "keep");
-	rmSync(join(real, "npmrc-empty"));
-	symlinkSync(victim, join(real, "npmrc-empty"));
-	assert.equal(mainSandboxNpmUserConfig(real, masks, home), join(real, "npmrc-empty"));
-	assert.equal(lstatSync(join(real, "npmrc-empty")).isSymbolicLink(), false);
+	rmSync(file);
+	symlinkSync(victim, file);
+	assert.equal(mainSandboxNpmUserConfig(sandboxCache, masks, home, real), file);
+	assert.equal(lstatSync(file).isSymbolicLink(), false);
 	assert.equal(readFileSync(victim, "utf8"), "keep");
-	writeFileSync(join(real, "npmrc-empty"), "registry=http://planted\n");
-	mainSandboxNpmUserConfig(real, masks, home);
-	assert.equal(readFileSync(join(real, "npmrc-empty"), "utf8"), "");
-	assert.match(mainSandboxWriteHint("EROFS", policy) ?? "", /npm_config_store_dir/u);
+	// Where contained commands could write that directory, no user config is offered at all.
+	const open = resolveMainSandboxPolicy({ workspace: scratch, scratchRoots: [], sandboxCache, clioDirs: [] });
+	assert.equal(mainSandboxNpmUserConfig(sandboxCache, masks, home, open), undefined);
+
+	const cache = "/home/u/.cache/clio-coder/sandbox-cache";
+	const policy = resolveMainSandboxPolicy({
+		workspace: "/w",
+		scratchRoots: [],
+		sandboxCache: cache,
+		clioDirs: ["/home/u/.cache/clio-coder"],
+	});
+	const setEnv = (env: NodeJS.ProcessEnv, userConfig?: string) =>
+		mainSandboxInvocationSpec(policy, { argv: ["/bin/true"] }, "/w", [], userConfig, env).setEnv ?? {};
+	const plain = setEnv({});
+	assert.equal(plain["PNPM_HOME"], join(cache, "pnpm"), "pnpm 10 keeps its store under PNPM_HOME");
+	assert.equal(plain["pnpm_config_store_dir"], join(cache, "pnpm", "store"));
+	// npm 11 warns "Unknown env config store-dir" on every call that sees this.
+	assert.equal("npm_config_store_dir" in plain, false);
+	assert.equal("NPM_CONFIG_USERCONFIG" in plain, false);
+	// The operator's own choices stand: a store, a PNPM_HOME the command can write, a user config.
+	assert.equal("pnpm_config_store_dir" in setEnv({ npm_config_store_dir: "/s" }), false);
+	assert.equal("PNPM_HOME" in setEnv({ PNPM_CONFIG_STORE_DIR: "/s" }), false);
+	assert.equal("PNPM_HOME" in setEnv({ PNPM_HOME: "/w/.pnpm" }), false);
+	assert.equal(setEnv({ PNPM_HOME: "/home/u/.local/share/pnpm" })["PNPM_HOME"], join(cache, "pnpm"));
+	assert.equal(setEnv({}, "/c/sandbox-npmrc")["NPM_CONFIG_USERCONFIG"], "/c/sandbox-npmrc");
+	assert.equal("NPM_CONFIG_USERCONFIG" in setEnv({ npm_config_userconfig: "/w/.npmrc" }, "/c/sandbox-npmrc"), false);
+	assert.match(mainSandboxWriteHint("EROFS", policy) ?? "", /PNPM_HOME and pnpm_config_store_dir/u);
 });
 
 test("the sandbox write hint points a read-only tool cache at the run's writable temp directory", () => {

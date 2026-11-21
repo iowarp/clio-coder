@@ -26,7 +26,7 @@ import { withMountAliases } from "../../core/sandbox/mount-aliases.js";
 import { discoverSecretMasks } from "../../core/sandbox/secret-files.js";
 import type { SandboxMode } from "../../core/sandbox/types.js";
 import { unixSocketLaunch } from "../../core/sandbox/unix-sockets.js";
-import { settingsFileMasks, workerSandboxMasks } from "../../core/sandbox/worker-process.js";
+import { physicalSandboxPath, settingsFileMasks, workerSandboxMasks } from "../../core/sandbox/worker-process.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
@@ -698,9 +698,9 @@ export async function compareHostVerificationBase(input: {
 				...secretMasks,
 			]);
 			const masks = withMountAliases([...baseMasks, ...secretMasks, ...sockets.masks], undefined, [
-				worktree.path,
-				worktree.root,
-				...links.map((link) => dirname(link.target)),
+				physicalSandboxPath(worktree.path),
+				physicalSandboxPath(worktree.root),
+				...links.map((link) => physicalSandboxPath(dirname(link.target))),
 			]);
 			// A sandbox that cannot see the mount aliases would leave secrets readable.
 			if (masks instanceof Error) return { exitCode: null, incomplete: true, lines: [] };
