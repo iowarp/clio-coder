@@ -253,15 +253,16 @@ export function validReservationRecord(value: unknown): value is DispatchReserva
 /**
  * A stored record no current reader accepts. A settled one holds no capacity and is dropped where it is read.
  * A live one (an active reservation, or a lease whose expiry has not run out) may still bind a running process's
- * slots, so admission refuses until `clio-coder doctor --fix` drops it.
+ * slots, so admission refuses until `clio-coder doctor --fix` drops it. A main session's cache lane holds no slot, so
+ * an invalid one is never live.
  */
 export interface InvalidAdmissionRecord {
-	kind: "reservation" | "capacity lease";
+	kind: "reservation" | "capacity lease" | "cache lane";
 	label: string;
 	live: boolean;
 }
 
-function recordLabel(value: unknown, key: "ownerId" | "leaseId", index: number): string {
+function recordLabel(value: unknown, key: "ownerId" | "leaseId" | "conversation", index: number): string {
 	const id = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
 	return typeof id === "string" && /^[\w.:-]{1,80}$/u.test(id) ? `'${id}'` : `#${index}`;
 }
@@ -309,7 +310,11 @@ function scanCapacityState(nowMs: number): CapacityStateScan {
 		return false;
 	});
 	// A cache lane holds no capacity, so an invalid one is dropped where it is read, like a settled record.
-	const cacheLanes = Array.isArray(parsed.cacheLanes) ? parsed.cacheLanes.filter(validMainCacheLane) : [];
+	const cacheLanes = (Array.isArray(parsed.cacheLanes) ? parsed.cacheLanes : []).filter((record, index) => {
+		if (validMainCacheLane(record)) return true;
+		invalid.push({ kind: "cache lane", label: recordLabel(record, "conversation", index), live: false });
+		return false;
+	});
 	const { cacheLanes: _stored, ...rest } = parsed;
 	return {
 		state: {
@@ -355,22 +360,56 @@ export interface DispatchAdmissionStoreAudit {
 	problem: string | null;
 	reservations: number;
 	leases: number;
+	/** Main sessions' cache lane records (M-11): held ones and released hints. */
+	cacheLanes: number;
+	/** The processes that hold a cache lane and are still alive, as `pid N` here or `pid N on host` elsewhere. */
+	cacheLaneOwners: ReadonlyArray<string>;
 	invalid: ReadonlyArray<InvalidAdmissionRecord>;
 }
 
-/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
-export function auditDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmissionStoreAudit | null {
-	if (!capacityStateExists()) return null;
-	const scan = scanCapacityState(nowMs);
-	if ("problem" in scan)
-		return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+function unreadableAudit(problem: string): DispatchAdmissionStoreAudit {
+	return {
+		path: capacityStatePath(),
+		problem,
+		reservations: 0,
+		leases: 0,
+		cacheLanes: 0,
+		cacheLaneOwners: [],
+		invalid: [],
+	};
+}
+
+function storeAudit(
+	state: CapacityStateFile,
+	invalid: ReadonlyArray<InvalidAdmissionRecord>,
+	nowMs: number,
+	probe: LeaseOwnerProbe,
+): DispatchAdmissionStoreAudit {
+	const owners = new Set<string>();
+	for (const record of state.cacheLanes ?? []) {
+		if (record.releasedAt !== undefined || !ownerStillHolds(record, nowMs, probe)) continue;
+		owners.add(onThisHost(record.host) ? `pid ${record.ownerPid}` : `pid ${record.ownerPid} on ${record.host}`);
+	}
 	return {
 		path: capacityStatePath(),
 		problem: null,
-		reservations: scan.state.reservations.length,
-		leases: scan.state.leases.length,
-		invalid: scan.invalid,
+		reservations: state.reservations.length,
+		leases: state.leases.length,
+		cacheLanes: state.cacheLanes?.length ?? 0,
+		cacheLaneOwners: [...owners],
+		invalid,
 	};
+}
+
+/** What doctor reports for the admission store, or null when there is none. Reads without writing. */
+export function auditDispatchAdmissionStore(
+	nowMs = Date.now(),
+	probe: LeaseOwnerProbe = defaultProbe,
+): DispatchAdmissionStoreAudit | null {
+	if (!capacityStateExists()) return null;
+	const scan = scanCapacityState(nowMs);
+	if ("problem" in scan) return unreadableAudit(scan.problem);
+	return storeAudit(scan.state, scan.invalid, nowMs, probe);
 }
 
 /**
@@ -383,16 +422,10 @@ export function repairDispatchAdmissionStore(nowMs = Date.now()): DispatchAdmiss
 		const scan = scanCapacityState(nowMs);
 		if ("problem" in scan) {
 			writeCapacityStateUnsafe({ version: 2, draining: null, leases: [], reservations: [] });
-			return { path: capacityStatePath(), problem: scan.problem, reservations: 0, leases: 0, invalid: [] };
+			return unreadableAudit(scan.problem);
 		}
 		if (scan.invalid.length > 0) writeCapacityStateUnsafe(scan.state);
-		return {
-			path: capacityStatePath(),
-			problem: null,
-			reservations: scan.state.reservations.length,
-			leases: scan.state.leases.length,
-			invalid: scan.invalid,
-		};
+		return storeAudit(scan.state, scan.invalid, nowMs, defaultProbe);
 	});
 }
 export function writeCapacityStateUnsafe(file: CapacityStateFile): void {

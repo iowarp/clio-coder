@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { afterEach, beforeEach, it } from "node:test";
 import { dispatchAdmissionFindings } from "../../src/cli/doctor-dispatch-admission.js";
 import { withStateFileLockSync } from "../../src/core/state-file-lock.js";
@@ -9,6 +10,7 @@ import {
 	type CapacityLimits,
 	capacityLeaseUsage,
 	capacityStateLockPath,
+	processBirthToken,
 	readCapacityStateUnsafe,
 	releaseCapacityLease,
 	writeCapacityStateUnsafe,
@@ -329,18 +331,47 @@ it("drops invalid settled admission records on boot and refuses only an invalid 
 	releaseDispatchReservation(kept.ownerId);
 	const state = readCapacityStateUnsafe();
 	const staleLease = { leaseId: "lease-old", assignmentId: "a", nodeId: "local", ownerPid: 1, expiresAt: old };
-	const write = (reservations: unknown[], leases: unknown[]) =>
-		writeFileSync(capacityStateLockPath(), JSON.stringify({ ...state, leases, reservations }));
-	write([...state.reservations, settled("released", "plan-a"), settled("expired", "plan-b"), null], [staleLease]);
+	const write = (reservations: unknown[], leases: unknown[], cacheLanes?: unknown[]) =>
+		writeFileSync(
+			capacityStateLockPath(),
+			JSON.stringify({ ...state, leases, reservations, ...(cacheLanes ? { cacheLanes } : {}) }),
+		);
+	// Main sessions' cache lanes (M-11): one held by this live process, one released hint, and one no reader accepts.
+	const lane = (conversation: string, extra: Record<string, unknown> = {}) => ({
+		key: "head",
+		lane: 0,
+		conversation,
+		host: hostname(),
+		ownerPid: process.pid,
+		processBirthToken: processBirthToken(process.pid),
+		acquiredAt: old,
+		expiresAt: new Date(Date.now() + 60_000).toISOString(),
+		...extra,
+	});
+	write(
+		[...state.reservations, settled("released", "plan-a"), settled("expired", "plan-b"), null],
+		[staleLease],
+		[lane("held"), lane("hint", { lane: 1, releasedAt: new Date().toISOString() }), { key: "head", lane: -1 }],
+	);
 	const warned = dispatchAdmissionFindings();
 	deepStrictEqual(
 		warned.map((row) => [row.name, row.ok, row.level ?? "ok"]),
 		[
 			["dispatch reservations", true, "warn"],
 			["dispatch capacity leases", true, "warn"],
+			["dispatch cache lanes", true, "warn"],
 		],
 	);
 	match(warned[0]?.detail ?? "", /1 valid record; 3 invalid settled records \('plan-a', 'plan-b', #\d+\)/);
+	strictEqual(
+		warned[2]?.detail,
+		`2 valid records (1 live owner: pid ${process.pid}); 1 invalid settled record (#2), dropped at the next store write or by clio-coder doctor --fix`,
+	);
+	match(
+		dispatchAdmissionFindings({ fix: true })[2]?.detail ?? "",
+		/^2 valid records \(1 live owner: pid \d+\); dropped 1 invalid record \(#2\)$/u,
+	);
+	strictEqual(dispatchAdmissionFindings()[2]?.level, undefined, "the fix dropped the invalid lane");
 	strictEqual(cleanupDispatchReservations({ startup: true }), 0);
 	const onDisk = JSON.parse(readFileSync(capacityStateLockPath(), "utf8")) as {
 		leases: unknown[];
