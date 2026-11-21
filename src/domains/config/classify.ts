@@ -65,6 +65,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// The main registry reads it for every contained call; dispatch copies it
 	// into each new WorkerSpec, so a running worker keeps the list it started with.
 	"safety.sandboxPassEnv",
+	// Read per contained call in the main session; workers never read it.
+	"safety.liveCheckTargets",
 	// Read the same way: per contained call in the main session, into each
 	// new WorkerSpec for workers.
 	"safety.sandboxUnixSockets",

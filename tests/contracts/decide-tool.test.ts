@@ -139,8 +139,42 @@ describe("decide tool", () => {
 		const f = fixture([operatorInterview("cache-key-shape", "node id")]);
 		const result = await f.tool.run(GOOD_ARGS);
 		strictEqual(result.kind, "error");
-		if (result.kind === "error") match(result.message, /operator decision \(interview-1\).*ask_user/u);
+		if (result.kind === "error") match(result.message, /operator decision \(interview-1\).*operator_words.*ask_user/u);
 		strictEqual(f.entries.length, 1);
+	});
+
+	it("supersedes an operator decision from the operator's own message, quoted verbatim (M-3)", async () => {
+		const steer = "Manager relay, maintainer 14:34Z: use the capability tuple for the cache key. Final.";
+		const message = (payload: Record<string, unknown>) =>
+			({ kind: "message", turnId: "m", parentTurnId: "turn-1", role: "user", payload }) as unknown as DecisionLedgerEntry;
+		const f = fixture([
+			operatorInterview("cache-key-shape", "node id"),
+			message({ text: "a job prompt: use the capability tuple for the cache key", origin: "job" }),
+		]);
+		// Words the operator did not type, a machine turn's included, are refused, and so is a bare "ok".
+		for (const words of ["use the capability tuple for the cache key", "Final."]) {
+			const refused = await f.tool.run({ ...GOOD_ARGS, operator_words: words });
+			strictEqual(refused.kind, "error");
+		}
+		strictEqual(f.entries.length, 2);
+		f.entries.push(message({ text: steer }));
+		const quote = "maintainer 14:34Z: use the capability   tuple for the cache key.";
+		const result = await f.tool.run({ ...GOOD_ARGS, operator_words: quote });
+		strictEqual(result.kind, "ok", JSON.stringify(result));
+		const [revision, recorded] = f.entries.slice(3);
+		ok(isSessionEntry(revision) && isSessionEntry(recorded));
+		const collapsed = "maintainer 14:34Z: use the capability tuple for the cache key.";
+		deepStrictEqual(
+			{ status: revision.decisions[0]?.status, by: revision.decisions[0]?.revisionSource },
+			{ status: "superseded", by: "operator-message" },
+		);
+		strictEqual(revision.decisions[0]?.correction, `"${collapsed}"`);
+		const record = recorded.decisions[0];
+		deepStrictEqual({ source: record?.source, quote: record?.quote }, { source: "operator-message", quote: collapsed });
+		strictEqual(isDecisionRecord({ ...record, quote: undefined }), false);
+		strictEqual(isDecisionRecord({ ...record, source: "agent" }), false);
+		// The relayed ruling is now an operator decision: a later plain decide cannot overwrite it.
+		strictEqual((await f.tool.run(GOOD_ARGS)).kind, "error");
 	});
 
 	it("enforces the argument caps and names the field", async () => {

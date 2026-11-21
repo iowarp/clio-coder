@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "web-debug",
+	"version": "0.1.0",
+	"description": "Debugs a web front end in a headless browser: starts the dev server and a page check in one command, reads console errors, uncaught exceptions and failed requests as JSON, runs Playwright step files, and takes screenshots only for layout. Not for fetching documentation pages; use web_fetch.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "web-debug",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

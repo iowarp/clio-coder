@@ -7,7 +7,8 @@ import { byteLength } from "./truncate-utf8.js";
 
 /**
  * The model's own design decisions, recorded on the session decision board
- * beside the operator's `ask_user` answers. A `decide` call appends one
+ * beside the operator's `ask_user` answers, and the operator's rulings it
+ * relays from their own messages (`operator_words`, `source: "operator-message"`). A `decide` call appends one
  * `decisionLedger` entry with `origin: "agent"` and one `DecisionRecord` with
  * `source: "agent"`, the alternatives the model rejected, and why. Dispatch
  * seals every active decision's ref onto the run envelope and receipt, and
@@ -22,6 +23,7 @@ export const DECIDE_CAPS = Object.freeze({
 	alternativeBytes: 256,
 	rationaleBytes: 1024,
 	labelBytes: 128,
+	operatorWordsBytes: 1024,
 });
 
 const KEBAB_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -71,7 +73,8 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 			"A decision grants no operator authorization and does not prove implementation or checks succeeded; observe their results before claiming completion. " +
 			"If recording fails, resolve the failure before implementing that choice. " +
 			"Verify implementation against the active choice before commit; decision trailers do not prove adherence. " +
-			"If policy changes, a call with the same key revises your earlier agent choice; operator choices require operator revision through ask_user. " +
+			"If policy changes, a call with the same key revises your earlier agent choice. " +
+			"An operator message or steer that states a new choice already decides it: pass operator_words quoting it and the same key to revise an operator choice, with no ask_user round; ask only when no operator message states it. " +
 			"Record the revision before commit.",
 		parameters: Type.Object({
 			key: Type.String({
@@ -87,6 +90,11 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 			label: Type.Optional(
 				Type.String({
 					description: `Short human-readable title for the decision (at most ${DECIDE_CAPS.labelBytes} bytes).`,
+				}),
+			),
+			operator_words: Type.Optional(
+				Type.String({
+					description: `The operator's sentence stating this choice, copied verbatim from their message or steer in this session; records the decision as theirs (at most ${DECIDE_CAPS.operatorWordsBytes} bytes).`,
 				}),
 			),
 		}),
@@ -113,6 +121,12 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 				if (bounded instanceof Error) return { kind: "error", message: bounded.message };
 				label = bounded;
 			}
+			let operatorWords: string | undefined;
+			if (args.operator_words !== undefined && args.operator_words !== null) {
+				const bounded = boundedText(args.operator_words, "operator_words", DECIDE_CAPS.operatorWordsBytes);
+				if (bounded instanceof Error) return { kind: "error", message: bounded.message };
+				operatorWords = bounded;
+			}
 			if (deps.decisionBoard === undefined) {
 				return { kind: "error", message: "decide: no session decision board is available in this context" };
 			}
@@ -124,6 +138,7 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 					alternatives,
 					rationale,
 					...(label !== undefined ? { label } : {}),
+					...(operatorWords !== undefined ? { operatorWords } : {}),
 				});
 			} catch (error) {
 				return { kind: "error", message: error instanceof Error ? error.message : String(error) };
@@ -134,9 +149,10 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 					? ""
 					: ` (supersedes ${decisionRef(outcome.superseded.interviewId, outcome.superseded.key)})`;
 			const keyNote = key === given ? "" : ` (key read as "${key}" from "${given}")`;
+			const sourceNote = operatorWords !== undefined ? " as the operator's, from their message" : "";
 			return {
 				kind: "ok",
-				output: `decision recorded: ${key} = ${value} [${ref}]${supersededNote}${keyNote}\n`,
+				output: `decision recorded${sourceNote}: ${key} = ${value} [${ref}]${supersededNote}${keyNote}\n`,
 				details: {
 					decision: {
 						ref,
@@ -145,6 +161,7 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 						alternatives,
 						rationale,
 						...(label !== undefined ? { label } : {}),
+						...(operatorWords !== undefined ? { source: "operator-message", quote: operatorWords } : {}),
 						...(outcome.superseded !== null
 							? { superseded: decisionRef(outcome.superseded.interviewId, outcome.superseded.key) }
 							: {}),

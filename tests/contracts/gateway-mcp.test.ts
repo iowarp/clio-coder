@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { crc32, deflateSync } from "node:zlib";
 import { mcpCommandOutput } from "../../src/cli/mcp.js";
 import type { FlowRestrictionSet } from "../../src/core/flow-restrictions.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
@@ -303,6 +304,57 @@ describe("gateway MCP capabilities", () => {
 			args: { op: "call", capability: ECHO, args: { result: { content: [], structuredContent: data } } },
 		});
 		deepStrictEqual(payloadOf(response), data);
+	});
+
+	it("bounds an MCP screenshot larger than the text bound onto vision routes", async () => {
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, source } = wire(scene);
+		open.push(source);
+		// A 96x96 noise PNG: about 37 KB of base64, which the 16 KiB MCP text bound used to drop.
+		const side = 96;
+		const rows = Buffer.alloc(side * (side * 3 + 1));
+		let seed = 0x9e3779b9;
+		for (let i = 0; i < rows.length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >>> 17;
+			seed ^= seed << 5;
+			rows[i] = i % (side * 3 + 1) === 0 ? 0 : seed & 0xff;
+		}
+		const chunk = (type: string, body: Buffer) => {
+			const head = Buffer.alloc(4);
+			head.writeUInt32BE(body.length);
+			const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
+			const crc = Buffer.alloc(4);
+			crc.writeUInt32BE(crc32(typed));
+			return Buffer.concat([head, typed, crc]);
+		};
+		const ihdr = Buffer.alloc(13);
+		ihdr.writeUInt32BE(side, 0);
+		ihdr.writeUInt32BE(side, 4);
+		ihdr.set([8, 2, 0, 0, 0], 8);
+		const png = Buffer.concat([
+			Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+			chunk("IHDR", ihdr),
+			chunk("IDAT", deflateSync(rows)),
+			chunk("IEND", Buffer.alloc(0)),
+		]).toString("base64");
+		ok(png.length > 20 * 1024, String(png.length));
+		const content = [
+			{ type: "text", text: "shot" },
+			{ type: "image", mimeType: "image/png", data: png },
+		];
+		for (const supportsImages of [true, false]) {
+			const response = await registry.invoke(
+				{ tool: ToolNames.Gateway, args: { op: "call", capability: ECHO, args: { result: { content } } } },
+				{ supportsImages, turnId: `mcp-image-${supportsImages}` },
+			);
+			if (response.kind !== "ok" || response.result.kind !== "ok") throw new Error(JSON.stringify(response));
+			strictEqual(response.result.images?.length ?? 0, supportsImages ? 1 : 0);
+			if (supportsImages) doesNotMatch(response.result.output, /image\(s\) omitted/u);
+			else match(response.result.output, /1 image\(s\) omitted/u);
+		}
 	});
 
 	it("keeps MCP result text from opening a host frame", async () => {

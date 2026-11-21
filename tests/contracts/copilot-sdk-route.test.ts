@@ -200,6 +200,29 @@ class FakeSession {
 		}
 		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a", "late-a", "late-a-next"); return; }
 		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null, null, null); return; }
+		if (prompt.includes("op:narration")) {
+			// As claude-opus-5.5 answers on the live runtime: the prose before its tool call is a thinking block whose
+			// signature names the kind narration; the runtime streams both blocks as one reasoning and no message text.
+			const sig = (kind) => {
+				const header = [0x08, 0x14, 0x18, 0x02, 0x38, 0x01, 0x42, kind.length, ...Buffer.from(kind)];
+				const inner = [0x0a, header.length, ...header, 0x12, 0x04, 1, 2, 3, 4];
+				return Buffer.from([0x08, 0x04, 0x12, inner.length, ...inner]).toString("base64");
+			};
+			const thought = "I'm multiplying 37 by 1048576.\n\n";
+			const said = "The cap is 38,797,312 bytes (uploads/limits.py:2).\n\n";
+			for (const delta of [thought, said]) this.emit("assistant.reasoning_delta", { reasoningId: "n1", deltaContent: delta });
+			const name = [...this.tools.keys()][0];
+			this.usage({ model: "fake-model", apiCallId: "msg_n", inputTokens: 20, outputTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 3 });
+			this.emit("assistant.message", {
+				messageId: "n1", apiCallId: "msg_n", content: "", reasoningText: (thought + said).trim(),
+				reasoningBlocks: { provider: "anthropic-messages", blocks: [
+					{ type: "thinking", thinking: thought, signature: sig("thinking") },
+					{ type: "thinking", thinking: said, signature: sig("narration") },
+				] },
+				toolRequests: [{ toolCallId: "call_narrated", name, arguments: {} }],
+			});
+			return;
+		}
 		if (prompt.includes("op:reasoning-only")) {
 			// A call that only reasoned, then went idle before its usage was reported.
 			this.emit("assistant.reasoning_delta", { reasoningId: "r1", deltaContent: "thinking" });
@@ -1649,6 +1672,21 @@ test("a call that only reasoned still owes its usage, so its late report lands o
 	strictEqual(facts.usage?.input.kind, "unknown", "not 90 over two calls");
 	strictEqual(facts.usage?.output.kind, "unknown");
 	strictEqual(facts.billing?.premiumRequests.kind, "unknown");
+	disposeCopilotConversations(key);
+});
+
+test("a thinking block whose signature names it narration is the reply text before the tool call, not reasoning", async () => {
+	const key = "narration-session";
+	const first = await step({ tools: [readTool], messages: [user("op:narration")] }, key);
+	strictEqual(first.stopReason, "toolUse");
+	deepStrictEqual(
+		first.content.map((block) => (block.type === "toolCall" ? { type: "toolCall", id: block.id } : block)),
+		[
+			{ type: "thinking", thinking: "I'm multiplying 37 by 1048576.\n\n" },
+			{ type: "text", text: "The cap is 38,797,312 bytes (uploads/limits.py:2).\n\n" },
+			{ type: "toolCall", id: "call_narrated" },
+		],
+	);
 	disposeCopilotConversations(key);
 });
 

@@ -279,5 +279,13 @@ describe("playbook CLI variables", () => {
 		deepStrictEqual(result.completion, { state: "refused", stopReason: null });
 		strictEqual(result.causes[0]?.code, "not_started", run.stdout);
 		match(result.causes[0]?.message ?? "", /capacity is draining/);
+		// Streamed, the refused run answers with its fleet_end alone: it never announced a start it did not make.
+		const streamed = cli(["fleet", "run", "one", "--output-format", "stream-json"]);
+		strictEqual(streamed.status, 2, streamed.stderr);
+		const events = streamed.stdout
+			.split("\n")
+			.filter((line) => line.trim().length > 0)
+			.map((line) => (JSON.parse(line) as { type: string }).type);
+		deepStrictEqual(events, ["fleet_end"], streamed.stdout);
 	});
 });

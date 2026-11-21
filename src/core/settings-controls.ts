@@ -763,6 +763,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Sandbox environment pass-through",
 		"Environment variables your sandboxed commands keep although they look like credentials. Every other token, key, password and URL with a password is removed before a sandboxed command starts, because it can reach the network without asking. User settings only.",
 	],
+	"safety.liveCheckTargets": [
+		"Live-check login targets",
+		"Target ids whose own login file your sandboxed commands may read, read-only, so a live check of a build can sign in (copilot-sdk targets: the official copilot login in $COPILOT_HOME/config.json). Dispatched workers keep it hidden. User settings only.",
+	],
 	"safety.sandboxUnixSockets": [
 		"Sandbox unix sockets",
 		"Block stops sandboxed commands from opening Unix sockets, because a socket they can reach (tmux, an X11 display, a daemon's control socket) can run commands outside the sandbox. Database sockets, Docker and other local IPC then fail inside it, and a command that needs one runs unsandboxed after review. Owned hides only the sockets you own (tmux, an X11 socket file, your agents) and leaves other users' reachable, such as the MUNGE and SSSD sockets cluster commands need; abstract sockets stay reachable. Allow leaves every socket reachable. User settings only.",

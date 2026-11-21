@@ -132,6 +132,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"lifecycle",
 	"limits",
 	"litellm",
+	"liveCheckTargets",
 	"lmstudio",
 	"load",
 	"loopsUntilStopped",

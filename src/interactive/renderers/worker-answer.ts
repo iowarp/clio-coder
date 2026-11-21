@@ -358,11 +358,14 @@ function ballotAnswer(value: Record<string, unknown>): PresentedContractAnswer |
 	return { lines: [text === null ? verdict : `${verdict}: ${text}`] };
 }
 
-/** A scout-shaped answer that misses a field the full report needs still has a claim a person can read. */
+/**
+ * A scout-shaped answer that misses a field the full report needs still has a claim a person can read. An empty
+ * `findings` alone says nothing about the shape, so it is not read as a report that found nothing (FX-21).
+ */
 function firstFindingClaim(value: Record<string, unknown>): PresentedContractAnswer | null {
 	if (!Array.isArray(value.findings)) return null;
 	const first: unknown = value.findings[0];
-	if (!isObject(first)) return value.findings.length === 0 ? { lines: ["No findings reported."] } : null;
+	if (!isObject(first)) return null;
 	const claim = reportString(first.claim);
 	return claim === null ? null : { lines: [claim] };
 }
