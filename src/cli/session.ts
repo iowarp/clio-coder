@@ -48,6 +48,7 @@ import { type ClioSessionMeta, cwdHash } from "../engine/session.js";
 import type { SessionHistoryVerb } from "./session-history.js";
 
 const USAGE = `usage: clio-coder session list [--json] [--stale]
+       clio-coder session attach <id> [--role observer|approver|pair] [--label <name>] [--json]
        clio-coder session terminate <id> [--force] [--reason <text>] [--json]
        clio-coder session history [--all-projects] [--limit N] [--json]
        clio-coder session show <session> [--all-projects] [--transcript] [--json]
@@ -88,6 +89,7 @@ export async function runSessionCommand(args: ReadonlyArray<string>): Promise<nu
 	}
 	if (sub === "list") return runList(rest);
 	if (sub === "terminate") return runTerminate(rest);
+	if (sub === "attach") return (await import("./session-attach.js")).runSessionAttach(rest);
 	if (sub === undefined || sub === "--help" || sub === "-h") {
 		process.stdout.write(USAGE);
 		return sub === undefined ? 2 : 0;

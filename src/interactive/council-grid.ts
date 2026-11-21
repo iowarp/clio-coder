@@ -14,6 +14,7 @@
  */
 
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { councilAnswerGist } from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import { dotSep, GLYPH, innerDivider, isClioToken, padAnsi, paintHex } from "./theme/index.js";
 
@@ -218,12 +219,9 @@ function councilCompactBody(theme: ClioTheme, group: CouncilGroupView, contentWi
 	const row = (member: CouncilMemberView): string => {
 		const cursor = member.runId === group.selectedRunId ? `${theme.fg("selectedOption", GLYPH.cursor)} ` : "  ";
 		const status = `${theme.fg(member.status.glyphToken ?? member.status.token, member.status.glyph)} ${theme.fg(member.status.token, member.status.label)}`;
-		// A fence line such as ```json says how the answer is formatted, not what it says, so the preview skips it.
+		// The same one-line gist the chat card shows: a typed report's claim, else the first line that is not a code fence.
 		const said =
-			member.tailText
-				.split("\n")
-				.map((line) => line.replace(/^[-*\s]+/u, "").trim())
-				.find((line) => line.length > 0 && !/^(?:`{3,}|~{3,})/u.test(line)) ??
+			councilAnswerGist(member.tailText).replace(/^[*\s]+/u, "") ||
 			(member.why !== undefined ? `no answer: ${member.why}` : "");
 		const tail = said.length > 0 ? `${dot}${theme.fg("assistantProse", said)}` : "";
 		return truncateToWidth(

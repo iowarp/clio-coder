@@ -7,7 +7,7 @@ import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import { mainSessionShellSandboxed } from "../core/sandbox/main-session.js";
 import type { SandboxAvailability } from "../core/sandbox/types.js";
-import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js";
+import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
@@ -38,7 +38,7 @@ import { createContextFold, type FoldDecision, foldCheckpointFor, ledgerHoldsChe
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
-import { createMessageListFold } from "./message-list-digest.js";
+import { createMessageListFold, withSettledHistory } from "./message-list-digest.js";
 import {
 	effectivePosture,
 	POSTURE_GENERATION,
@@ -75,7 +75,6 @@ import type {
 	ContextActivityPhase,
 	ContextActivityStatus,
 	ContextRecalledPayload,
-	ContextWarningPayload,
 	MemoryStepCompletedPayload,
 	ResidencyMutationPayload,
 } from "../core/telemetry/live-events.js";
@@ -186,6 +185,7 @@ import type {
 	AnthropicResponseObservation,
 	CodexConfiguration,
 	CodexTransportObservation,
+	ResponsesCacheDiagnostic,
 	Usage,
 } from "../engine/types.js";
 import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
@@ -497,6 +497,11 @@ export interface TurnContext {
 		signal?: AbortSignal,
 		/** A completed background reminder was just appended to the context tail. */
 		contextChanged?: boolean,
+		/**
+		 * Runs once the guard settles without a stop, synchronously after its last publication and in the same settled
+		 * history stretch, so a publication it makes reads that walk instead of a fresh one (SC-6). It must not await.
+		 */
+		settledTail?: () => void,
 	): Promise<
 		| {
 				context: { messages: AgentMessage[]; tools: AgentRuntime["agent"]["state"]["tools"] };
@@ -507,7 +512,6 @@ export interface TurnContext {
 	>;
 	contextUsage(): LiveContextUsage;
 	contextLedger(): ContextLedger;
-	emitContextWindowWarningTransition(warning: string | null): void;
 	/** Record one known cache disturbance for the current or next call. */
 	noteColdReason(reason: ExpectedColdReason): void;
 	/** The tool choice a request sends; `afterRejection` marks the #426 retry of a request the provider rejected. */
@@ -526,6 +530,7 @@ export interface TurnContext {
 		backend?: BackendCompletionTimings,
 		anthropicResponse?: AnthropicResponseObservation,
 		transport?: CodexTransportObservation,
+		responsesDiagnostic?: ResponsesCacheDiagnostic,
 	): Record<string, unknown>;
 	/** Record the settled run's cache summary for /context. */
 	noteRunCacheSummary(messages: ReadonlyArray<AgentMessage>, runFirstCallVerdict: BackendCacheVerdict | null): void;
@@ -1025,13 +1030,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * flush) clears the flag because it writes the current snapshot state.
 	 */
 	let snapshotPersistPending = false;
-
-	/**
-	 * Publish the window-resolution warning only on transitions (appeared,
-	 * changed, cleared). ensureRuntime runs on every submit; re-emitting the
-	 * same state each turn would spam every ContextWarning subscriber.
-	 */
-	let lastContextWindowWarning: string | null = null;
 
 	const persistContextSnapshot = (snapshot: ContextSnapshot): void => {
 		const currentSession = deps.session?.current();
@@ -4111,20 +4109,25 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return true;
 		},
 
-		async postToolContinuationGuard(agentRuntime: AgentRuntime, signal?: AbortSignal, contextChanged = false) {
-			if (signal?.aborted || (!contextChanged && !toolResultTail(agentRuntime))) return undefined;
+		async postToolContinuationGuard(
+			agentRuntime: AgentRuntime,
+			signal?: AbortSignal,
+			contextChanged = false,
+			settledTail?: () => void,
+		) {
+			if (signal?.aborted || (!contextChanged && !toolResultTail(agentRuntime))) {
+				settledTail?.();
+				return undefined;
+			}
 			// A host tail appended before this guard is a durable insert: a compaction
 			// that rebuilds the messages re-issues it after the checkpoint when the
 			// cut took its anchor, so the rebuild itself carries it.
 			// The tool batch appended results the last publication predates, and the
 			// guard is about to decide on them. Publish before that inspection, not
 			// after it, from the same history observation and estimate it decides on.
-			const history = observeHistory(agentRuntime);
-			const before = liveContextEstimate(agentRuntime, undefined, undefined, history);
-			const beforeView =
-				agentRuntime === state.runtime ? refreshLiveBudget(undefined, history, before) : refreshLiveBudget();
-			const knownWindow = before.contextWindow > 0;
-			const verdict = routeCompaction(agentRuntime, deps.getSettings()).shouldCompact(before.tokens);
+			let history: MessageListDigests | undefined;
+			let knownWindow = false;
+			let mustFit = false;
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
 			const messagesBefore = agentRuntime.agent.state.messages;
@@ -4149,10 +4152,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const { input, reserve } = fitFigures(view);
 				return requestFits(input, reserve, view.effectiveWindow);
 			};
-			// An automatic pass the trigger asks for runs first (A5); the A4 count then decides the overflow pass.
-			let mustFit = knownWindow && (!viewFits(beforeView) || (!verdict.shouldCompact && !a4Fits(beforeView)));
-			// S0 commits under the trigger on an uncached route, so the guard asks there too (SPEC §3.4).
-			const attempted = mustFit || verdict.shouldCompact || supersededStageApplies(agentRuntime.runtimeResolution);
 			const compact = async (requireFit: boolean): Promise<void> => {
 				attemptStarted = true;
 				try {
@@ -4182,29 +4181,49 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					);
 				}
 			};
-			if (attempted) await compact(mustFit);
-			if (attempted && !mustFit && knownWindow && !a4Fits(refreshLiveBudget())) {
+			// The mid-run settled tool-batch boundary: whatever the guard did or
+			// declined to do, this is the context the continuation will send. The
+			// caller's settled tail (the memory install) runs last, in the same
+			// stretch as this view's publication, so it reads that walk (SC-6).
+			const finish = (afterView: LiveBudgetView): ReturnType<typeof continuationContextUpdate> | undefined => {
+				const oversize = mustFit ? overflowStop(agentRuntime) : null;
+				if (oversize !== null) throw oversizedResultStop(oversize);
+				const after = fitFigures(afterView);
+				if (knownWindow && !requestFits(after.input, after.reserve, afterView.effectiveWindow)) {
+					// The guard's own stop, like the oversized-result one: the harness cause, not a route failure (CLI-3).
+					throw oversizedResultStop(
+						`[CLIO Coder] post-tool context guard stopped continuation before provider call: estimated input ${after.input} plus reserved output ${after.reserve} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
+					);
+				}
+				const update =
+					compacted || agentRuntime.agent.state.messages !== messagesBefore
+						? continuationContextUpdate(agentRuntime)
+						: undefined;
+				settledTail?.();
+				return update;
+			};
+			// One settled stretch from the first observation to the decision; without an attempt the guard never yields or
+			// touches the messages, so the first publication already describes the context and the tail runs in it too.
+			const decision = withSettledHistory(() => {
+				history = observeHistory(agentRuntime);
+				const before = liveContextEstimate(agentRuntime, undefined, undefined, history);
+				const beforeView =
+					agentRuntime === state.runtime ? refreshLiveBudget(undefined, history, before) : refreshLiveBudget();
+				knownWindow = before.contextWindow > 0;
+				const verdict = routeCompaction(agentRuntime, deps.getSettings()).shouldCompact(before.tokens);
+				// An automatic pass the trigger asks for runs first (A5); the A4 count then decides the overflow pass.
+				mustFit = knownWindow && (!viewFits(beforeView) || (!verdict.shouldCompact && !a4Fits(beforeView)));
+				// S0 commits under the trigger on an uncached route, so the guard asks there too (SPEC §3.4).
+				const attempted = mustFit || verdict.shouldCompact || supersededStageApplies(agentRuntime.runtimeResolution);
+				return attempted ? { attempted: true as const } : { attempted: false as const, update: finish(beforeView) };
+			});
+			if (!decision.attempted) return decision.update;
+			await compact(mustFit);
+			if (!mustFit && knownWindow && !a4Fits(refreshLiveBudget())) {
 				mustFit = true;
 				await compact(true);
 			}
-
-			// The mid-run settled tool-batch boundary: whatever the guard did or
-			// declined to do, this is the context the continuation will send. Without
-			// a compaction attempt the guard never yielded or touched the messages,
-			// so the first publication already describes it.
-			const afterView = attempted ? refreshLiveBudget() : beforeView;
-			const oversize = mustFit ? overflowStop(agentRuntime) : null;
-			if (oversize !== null) throw oversizedResultStop(oversize);
-			const after = fitFigures(afterView);
-			if (knownWindow && !requestFits(after.input, after.reserve, afterView.effectiveWindow)) {
-				// The guard's own stop, like the oversized-result one: the harness cause, not a route failure (CLI-3).
-				throw oversizedResultStop(
-					`[CLIO Coder] post-tool context guard stopped continuation before provider call: estimated input ${after.input} plus reserved output ${after.reserve} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
-				);
-			}
-			return compacted || agentRuntime.agent.state.messages !== messagesBefore
-				? continuationContextUpdate(agentRuntime)
-				: undefined;
+			return withSettledHistory(() => finish(refreshLiveBudget()));
 		},
 
 		contextUsage(): LiveContextUsage {
@@ -4336,16 +4355,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			});
 		},
 
-		emitContextWindowWarningTransition(warning: string | null): void {
-			if (warning === lastContextWindowWarning) return;
-			lastContextWindowWarning = warning;
-			deps.bus?.emit(
-				"context.warning_raised",
-				{ warning } satisfies ContextWarningPayload,
-				sessionTelemetryContext(deps.session?.current()?.id),
-			);
-		},
-
 		noteColdReason,
 
 		consumeExpectedColdReasons(runtimeId: string): void {
@@ -4412,6 +4421,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			backend?: BackendCompletionTimings,
 			anthropicResponse?: AnthropicResponseObservation,
 			transport?: CodexTransportObservation,
+			responsesDiagnostic?: ResponsesCacheDiagnostic,
 		): Record<string, unknown> {
 			// Per-call prompt-cache record (T3.2) keeps normalized provider usage
 			// beside any timings captured from the server response. The run's first
@@ -4507,6 +4517,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					return typeof transformation?.type === "string" ? [transformation.type] : [];
 				});
 				observation.providerDiagnostic = { provider: "anthropic", type: `input_transformations:${types.join(",")}` };
+			} else if (responsesDiagnostic !== undefined) {
+				// PV-2: the public Responses verdict against the previous response; only a named miss is a cause.
+				observation.providerDiagnostic = {
+					provider: responsesDiagnostic.provider,
+					type: responsesDiagnostic.reason ?? responsesDiagnostic.type,
+					...(responsesDiagnostic.missedInputTokens === undefined
+						? {}
+						: { missedInputTokens: responsesDiagnostic.missedInputTokens }),
+				};
+				const causes = {
+					model_changed: "model_changed",
+					tools_changed: "tools_changed",
+					input_changed: "input_changed",
+					reasoning_effort_changed: "reasoning_changed",
+					context_compacted: "compaction",
+				} as const;
+				const reason = responsesDiagnostic.type === "cache_miss" ? responsesDiagnostic.reason : undefined;
+				if (reason !== undefined && Object.hasOwn(causes, reason)) {
+					observation.cause = causes[reason as keyof typeof causes];
+					observation.causeBasis = "provider";
+				}
 			}
 			if (observation.cause === "prompt_recompiled" && nextChangedSection !== undefined) {
 				observation.changedSection = nextChangedSection;

@@ -486,14 +486,14 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
 				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [DOWN, ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			strictEqual(readFileSync(join(testEnv.root, "copilot-probe"), "utf8"), "no login");
 
 			const screen = plainText(result.transcript());
 			for (const expected of [
-				"Welcome to Clio Coder",
+				"Welcome to CLIO Coder",
 				"What do you have?",
 				"↑↓ move",
 				"reachable, 2 models",
@@ -510,7 +510,7 @@ describe("contracts/configure-onboarding", () => {
 			ok(!/Selection \[/u.test(screen), `a numbered prompt is still here:\n${screen}`);
 			ok(!/\[y\/N\]|\[Y\/n\]/u.test(screen), `a yes/no prompt is still here:\n${screen}`);
 			// A server that answers without a key is not asked about one, and the source taxonomy is gone.
-			ok(!screen.includes("How should Clio get the API key?"), screen);
+			ok(!screen.includes("How should CLIO Coder get the API key?"), screen);
 			ok(!screen.includes("Where does your model come from?"), screen);
 			ok(!screen.includes("Which provider or app do you use?"), screen);
 
@@ -546,7 +546,7 @@ describe("contracts/configure-onboarding", () => {
 			const result = await runWizard(env, [
 				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
 				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			const screen = plainText(result.transcript());
@@ -571,16 +571,16 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "What do you have?", keys: [ENTER] },
 				{ waitFor: "Paste your API key", keys: [...key.split(""), ENTER] },
 				// "Choose a different model" opens the list the flow skipped, recommended row first.
-				{ waitFor: "Review what Clio could verify", keys: [DOWN, ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [DOWN, ENTER] },
 				{ waitFor: "Which model?", keys: [ESCAPE] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			const screen = plainText(result.transcript());
 			ok(!screen.includes(key), "the pasted key is masked");
 			ok(screen.includes("Anthropic  (from the key)"), screen);
 			ok(screen.includes("claude-sonnet-5-5 (recommended)"), screen);
-			for (const absent of ["Which provider or app do you use?", "How should Clio get the API key?"])
+			for (const absent of ["Which provider or app do you use?", "How should CLIO Coder get the API key?"])
 				ok(!screen.includes(absent), `${absent} was asked:\n${screen}`);
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
 			match(settings, /runtime: anthropic/u);
@@ -597,11 +597,11 @@ describe("contracts/configure-onboarding", () => {
 			const result = await runWizard(hosted.env, [
 				{ waitFor: "What do you have?", keys: [ENTER] },
 				{ waitFor: "Paste your API key", keys: [..."sk-ant-api03-clio-test-key".split(""), ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			const screen = plainText(result.transcript());
-			ok(screen.includes("Review what Clio could verify"), screen);
+			ok(screen.includes("Review what CLIO Coder could verify"), screen);
 			ok(!screen.includes("Automatic local workers"), `a remote target must not list local workers:\n${screen}`);
 		} finally {
 			hosted.cleanup();
@@ -614,7 +614,7 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
 				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			const screen = plainText(result.transcript());
@@ -653,7 +653,10 @@ describe("contracts/configure-onboarding", () => {
 			ok(screen.includes("Anthropic refused the key (401)"), screen);
 			match(screen, /answered in 1\.2 s\./u);
 			ok(screen.includes("Saved. Chat and workers use this model."), screen);
-			ok(!screen.includes("Review what Clio could verify"), `the first run ends on the test, not a review:\n${screen}`);
+			ok(
+				!screen.includes("Review what CLIO Coder could verify"),
+				`the first run ends on the test, not a review:\n${screen}`,
+			);
 			deepStrictEqual(sent, ["sk-ant-bad-key", "sk-ant-good-key"]);
 			const credentials = readFileSync(join(fixed.settingsFile, "..", "credentials.yaml"), "utf8");
 			ok(credentials.includes("sk-ant-good-key") && !credentials.includes("sk-ant-bad-key"), credentials);
@@ -711,7 +714,7 @@ describe("contracts/configure-onboarding", () => {
 					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
 					// The old review sits behind "Connection and machine details"; its Save tests again.
 					{ waitFor: "The test request failed", keys: [DOWN, DOWN, DOWN, ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 					{ waitFor: "The test request failed", keys: [DOWN, DOWN, ENTER] },
 				],
 				{ mode: "first", verify: refuseBad },
@@ -747,8 +750,8 @@ describe("contracts/configure-onboarding", () => {
 		const testEnv = unconfiguredEnv();
 		try {
 			const result = await runWizard({ ...testEnv.env, ANTHROPIC_API_KEY: "sk-ant-env-key" }, [
-				{ waitFor: "Clio found a way to reach a model:", keys: [ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "CLIO Coder found a way to reach a model:", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			const screen = plainText(result.transcript());
@@ -793,8 +796,8 @@ describe("contracts/configure-onboarding", () => {
 				const testEnv = unconfiguredEnv();
 				try {
 					const result = await runWizard(testEnv.env, [
-						{ waitFor: "Clio found a way to reach a model:", keys: [ENTER] },
-						{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+						{ waitFor: "CLIO Coder found a way to reach a model:", keys: [ENTER] },
+						{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 					]);
 					strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 					const screen = plainText(result.transcript());
@@ -823,7 +826,7 @@ describe("contracts/configure-onboarding", () => {
 				const result = await runWizard(
 					{ ...testEnv.env, ANTHROPIC_API_KEY: "sk-ant-env-key" },
 					[
-						{ waitFor: "Clio found a way to reach a model:", keys: [ENTER] },
+						{ waitFor: "CLIO Coder found a way to reach a model:", keys: [ENTER] },
 						...(keys.length > 0 ? [{ waitFor: QUESTION, keys }] : []),
 					],
 					{ mode: "first", verify: answered },
@@ -991,14 +994,14 @@ describe("contracts/configure-onboarding", () => {
 			const result = await runWizard(
 				localEnv.env,
 				[
-					{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+					{ waitFor: "How should CLIO Coder get the API key?", keys: [ENTER] },
 					{ waitFor: "Where is the server?", keys: [CTRL_C] },
 				],
 				{ mode: "first", runtime: llamacpp },
 			);
 			const screen = plainText(result.transcript());
 			ok(screen.includes("❯ http://127.0.0.1:8080"), `the local default must stay:\n${screen}`);
-			ok(screen.includes("host:port is enough; Clio fills in the scheme and the port it knows"), screen);
+			ok(screen.includes("host:port is enough; CLIO Coder fills in the scheme and the port it knows"), screen);
 			ok(!screen.includes("gateway URL"), screen);
 		} finally {
 			localEnv.cleanup();
@@ -1014,7 +1017,7 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(res.code, 130, res.stderr);
 			match(res.stderr, /configuration cancelled/u);
 			match(res.stdout, /Selection \[1\]/u);
-			ok(!res.stdout.includes("Welcome to Clio Coder"), "the arrow-key wizard must not open on a pipe");
+			ok(!res.stdout.includes("Welcome to CLIO Coder"), "the arrow-key wizard must not open on a pipe");
 		} finally {
 			testEnv.cleanup();
 		}
@@ -1040,18 +1043,18 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				env,
 				[
 					// LiteLLM defaults to storing a key; UP selects an environment variable.
-					{ waitFor: "How should Clio get the API key?", keys: ["\x1b[A", ENTER] },
+					{ waitFor: "How should CLIO Coder get the API key?", keys: ["\x1b[A", ENTER] },
 					{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
 					{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 					{ waitFor: "Which model?", keys: [ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 				],
 				{ mode: "first", runtime: litellmRuntime() },
 			);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 
 			const screen = plainText(result.transcript());
-			const credAt = screen.indexOf("How should Clio get the API key?");
+			const credAt = screen.indexOf("How should CLIO Coder get the API key?");
 			const urlAt = screen.indexOf("Where is the server?");
 			ok(credAt >= 0 && urlAt > credAt, `credential step must come before the URL step:\n${screen}`);
 			ok(screen.includes("reachable, 3 models"), `the probe must succeed once it has the key:\n${screen}`);
@@ -1078,12 +1081,12 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				testEnv.env,
 				[
 					// Deliberately skip the default stored-key choice.
-					{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
+					{ waitFor: "How should CLIO Coder get the API key?", keys: [DOWN, ENTER] },
 					{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
-					{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+					{ waitFor: "How should CLIO Coder get the API key?", keys: [ENTER] },
 					{ waitFor: "Paste the API key", keys: [..."sk-a-key-this-run-never-sends".split(""), ENTER] },
 					{ waitFor: "Which model?", keys: [ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 				],
 				{ mode: "first", runtime: litellmRuntime() },
 			);
@@ -1125,7 +1128,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 		const host: ConfigureWizardHost = {
 			async select(options) {
 				const heading = headingOf(options.heading);
-				if (heading.includes("How should Clio get the API key?")) {
+				if (heading.includes("How should CLIO Coder get the API key?")) {
 					credentialAsks += 1;
 					const want = credentialAsks === 1 ? "skip" : "stored";
 					const choice = options.choices.find((entry) => entry.value === (want as unknown));
@@ -1196,10 +1199,10 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 			const result = await runWizard(testEnv.env, [
 				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
 				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
-				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "How should CLIO Coder get the API key?", keys: [ENTER] },
 				{ waitFor: "Paste the API key", keys: [...key.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				{ waitFor: "Review what CLIO Coder could verify", keys: [ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			const screen = plainText(result.transcript());

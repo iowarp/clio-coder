@@ -25,7 +25,7 @@ const state = (status: SetupState["status"], messages: string[]): SetupState => 
 test("the routes Clio found and the test-request failure are steps of their own, not generic prompts", () => {
 	const offered = stepFor(
 		select(
-			["Clio found a way to reach a model:"],
+			["CLIO Coder found a way to reach a model:"],
 			["Anthropic, with the key in ANTHROPIC_API_KEY", "Set up something else"],
 		),
 	);
@@ -58,7 +58,7 @@ test("the routes Clio found and the test-request failure are steps of their own,
 
 	const review = stepFor(
 		select(
-			["Review what Clio could verify", "Connection: anthropic", "Save sends one short test message first."],
+			["Review what CLIO Coder could verify", "Connection: anthropic", "Save sends one short test message first."],
 			["Save target", "Connection and machine details", "Back", "Cancel setup"],
 		),
 	);

@@ -180,6 +180,7 @@ function restorationProcess(session: SessionContract, bank: TaskMemoryBank, budg
 		notes,
 		failure,
 		context,
+		runtime,
 		install: () => context.installMemoryRestoration(runtime, "next"),
 		live: () => restorations(runtime.agent.state.messages),
 		rendered: () => restorations(render()),
@@ -310,6 +311,61 @@ test("restoration after a failure between the flush and the push is delivered at
 			p.dispose();
 			await session.close();
 		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("the tool-batch guard runs the memory install in its settled stretch, so both read one history walk (SC-6)", async () => {
+	const env = await isolateClioEnv("memory-restoration-walks-");
+	try {
+		const session = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		session.create({ cwd: env.dir });
+		const at = new Date(0).toISOString();
+		session.appendEntry({
+			kind: "message",
+			turnId: "u1",
+			parentTurnId: null,
+			timestamp: at,
+			role: "user",
+			payload: { text: "fix the runner" },
+		} as SessionEntryInput);
+		session.appendEntry({
+			kind: "message",
+			turnId: "a1",
+			parentTurnId: "u1",
+			timestamp: at,
+			role: "assistant",
+			payload: { content: [{ type: "text", text: "on it" }], stopReason: "stop" },
+		} as SessionEntryInput);
+		const bank = new TaskMemoryBank();
+		bank.saveKnowledge("Tests run from the repo root.");
+		const p = restorationProcess(session, bank, { tokens: 400 });
+		p.context.notifyMemoryCommit("commit-1", "continuity", "summarized");
+		const runtime = p.runtime;
+		// The operator's message stands for the history: the fold's trace check reads it once per walk.
+		const first = runtime.agent.state.messages[0] as { content?: unknown };
+		const content = first.content;
+		let walks = 0;
+		Object.defineProperty(first, "content", {
+			enumerable: true,
+			get: () => {
+				if (new Error().stack?.includes("matchesTrace")) walks += 1;
+				return content;
+			},
+		});
+		p.context.refreshLiveBudget();
+		walks = 0;
+		let installed = false;
+		await p.context.postToolContinuationGuard(runtime, undefined, true, () => {
+			installed = p.install();
+		});
+		strictEqual(installed, true, "the guard ran the install as its tail");
+		strictEqual(p.live().length, 1, "one restoration in the request");
+		// Base walked twice: the guard's publication, then the install's own after the await.
+		strictEqual(walks, 1, "the guard and the install read one walk");
+		p.dispose();
+		await session.close();
 	} finally {
 		env.restore();
 	}

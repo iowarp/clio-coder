@@ -12,6 +12,7 @@ import {
 	runBashCommand,
 } from "../../src/core/bash-exec.js";
 import { bashShellEnvironment, POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
+import { runCommandVector } from "../../src/core/safe-exec.js";
 import { setRunDeadline } from "../../src/core/termination-phase.js";
 import { bashTool } from "../../src/tools/bash.js";
 
@@ -293,6 +294,79 @@ describe("worker cancel stops running commands", () => {
 		killLiveCommandGroups();
 		const settled = await Promise.race([run, new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000))]);
 		ok(settled !== null, "the command outlived the kill");
+	});
+});
+
+// M-12: a tool command that inherited the TUI's terminal or its pane host's coordinates typed into the composer and
+// hung the TUI up. Each command leads a session of its own with none of them, and a timeout still stops its whole tree.
+describe("tool commands never reach the TUI's terminal (M-12)", { skip: process.platform === "win32" }, () => {
+	it("runs bash and safe-exec children without a controlling terminal or the host's pane coordinates", async () => {
+		const host: Record<string, string> = {
+			HERDR_ENV: "1",
+			HERDR_SOCKET_PATH: "/run/user/0/clio-coder/clio-coder-000000000000.sock",
+			HERDR_PANE_ID: "w1:p1",
+			TMUX: "/tmp/tmux-0/default,1,0",
+			TMUX_PANE: "%0",
+			GPG_TTY: "/dev/pts/0",
+		};
+		const saved = new Map(Object.keys(host).map((key) => [key, process.env[key]]));
+		Object.assign(process.env, host);
+		const probe = [
+			'printf "env=%s|%s|%s|%s|%s|%s\\n" "${HERDR_ENV-}" "${HERDR_SOCKET_PATH-}" "${HERDR_PANE_ID-}" "${TMUX-}" "${TMUX_PANE-}" "${GPG_TTY-}"',
+			'printf "tmux=%s\\n" "${TMUX_TMPDIR-}"',
+			'printf "sid=%s pid=%s\\n" "$(ps -o sid= -p $$ | tr -d " ")" "$$"',
+			"if (exec 3<>/dev/tty) 2>/dev/null; then echo tty=open; else echo tty=none; fi",
+		].join("; ");
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-bash-tree-"));
+		const pidFile = join(dir, "child.pid");
+		try {
+			const bash = await runBashCommand(probe, { timeoutMs: 30_000 });
+			const vector = await runCommandVector("/bin/sh", ["-c", probe], { baseEnv: { ...process.env }, timeoutMs: 30_000 });
+			for (const out of [bash.stdout, vector.stdout]) {
+				match(out, /^env=\|\|\|\|\|$/mu);
+				match(out, /^tmux=\S*clio-coder-tool-tmux-/mu);
+				const ids = /^sid=(\d+) pid=(\d+)$/mu.exec(out);
+				ok(ids !== null && ids[1] === ids[2], `the command leads its own session: ${out}`);
+				match(out, /^tty=none$/mu);
+			}
+			// What needs a terminal fails with the reason, instead of reaching the TUI's.
+			const hinted = await bashTool.run({ command: "printf x > /dev/tty" }, {});
+			strictEqual(hinted.kind, "error");
+			if (hinted.kind === "error") match(hinted.message, /needed a terminal[\s\S]*cannot reach the TUI's terminal/u);
+			// A timeout signals the command's group, so a background child dies with the shell.
+			const stopped = await runBashCommand(`sleep 60 & echo $! > '${pidFile}'; wait`, { timeoutMs: 300 });
+			strictEqual(stopped.timedOut, true);
+			const pid = Number(readFileSync(pidFile, "utf8"));
+			const running = (): boolean => {
+				try {
+					process.kill(pid, 0);
+				} catch {
+					return false;
+				}
+				if (process.platform !== "linux") return true;
+				try {
+					const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+					return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
+				} catch {
+					return false;
+				}
+			};
+			for (let attempt = 0; attempt < 80 && running(); attempt += 1) await new Promise((r) => setTimeout(r, 25));
+			ok(!running(), `background child ${pid} outlived the timeout`);
+		} finally {
+			for (const [key, value] of saved) {
+				if (value === undefined) Reflect.deleteProperty(process.env, key);
+				else process.env[key] = value;
+			}
+			if (existsSync(pidFile)) {
+				try {
+					process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+				} catch {
+					// Already gone.
+				}
+			}
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -410,6 +410,8 @@ for (const [level, enableThinking] of [
 			strictEqual(request.model, fixture.modelId);
 			deepStrictEqual(request.chat_template_kwargs, { enable_thinking: enableThinking });
 			strictEqual(request.reasoning_effort, undefined);
+			// A raised level gets reasoning room beside the verdict's 600 tokens (f-m-sidecall-thinking).
+			strictEqual(request.max_tokens ?? request.max_completion_tokens, level === "off" ? 600 : 2648);
 			release();
 			await turn;
 		} finally {

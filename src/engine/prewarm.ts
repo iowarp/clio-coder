@@ -181,6 +181,19 @@ async function runPrewarmAttempt(input: PrewarmRoundInput, scope: CallScope): Pr
 		}
 	}
 
+	// OI-7: the Codex backend warms a request without generating. The prefix is the history as it stands, with no
+	// placeholder user message, and the response carries usage but no output.
+	const generationFree = input.model.api === "openai-codex-responses";
+	if (generationFree) {
+		const onPayload = options.onPayload as ((payload: unknown, model: EngineModel) => unknown) | undefined;
+		options.onPayload = async (payload: unknown, currentModel: EngineModel) => {
+			const patched = (await onPayload?.(payload, currentModel)) ?? payload;
+			return typeof patched === "object" && patched !== null && !Array.isArray(patched)
+				? { ...(patched as Record<string, unknown>), generate: false }
+				: patched;
+		};
+	}
+
 	if (metadata?.runtimeId === "litellm") {
 		const onPayload = input.agent?.onPayload;
 		options.onPayload = async (payload: unknown, currentModel: EngineModel) => {
@@ -209,7 +222,8 @@ async function runPrewarmAttempt(input: PrewarmRoundInput, scope: CallScope): Pr
 			input.state.systemPrompt,
 			input.state.tools,
 		);
-		messages.push({ role: "user", content: [{ type: "text", text: PREWARM_USER_TEXT }], timestamp: Date.now() });
+		if (!generationFree)
+			messages.push({ role: "user", content: [{ type: "text", text: PREWARM_USER_TEXT }], timestamp: Date.now() });
 		if (input.agent?.transformContext) messages = await input.agent.transformContext(messages, input.signal);
 		const converted = input.agent
 			? await input.agent.convertToLlm(messages)
