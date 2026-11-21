@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { readBuildStamp } from "../../core/build-info.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
@@ -65,6 +66,7 @@ export function createProcessJournal(
 		(writer ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8")
 			.then((text) => {
 				const pkg = JSON.parse(text) as { version?: string; dependencies?: Record<string, string> };
+				const build = readBuildStamp();
 				return openCallJournal({
 					directory: telemetryProcessDirectory(stateDir, context.processId),
 					context,
@@ -74,6 +76,8 @@ export function createProcessJournal(
 					writer: {
 						clioCoderVersion: pkg.version ?? "unknown",
 						piVersion: pkg.dependencies?.["@earendil-works/pi-ai"] ?? "unknown",
+						// Which build wrote the process, when the bundle recorded one (C-31).
+						...(build ? { build } : {}),
 					},
 				});
 			})

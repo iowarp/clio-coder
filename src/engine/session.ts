@@ -45,6 +45,7 @@ import {
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { type BuildStamp, readBuildStamp } from "../core/build-info.js";
 import { cwdHash } from "../core/cwd-hash.js";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
 import { readClioVersion } from "../core/package-root.js";
@@ -62,6 +63,12 @@ export interface ClioSessionMeta {
 	model: string | null;
 	target: string | null;
 	clioCoderVersion: string;
+	/**
+	 * The build that created the session: commit, dirty flag, build id and build time, each when the bundle recorded it.
+	 * Two builds of one `-dev` version share `clioCoderVersion`; this tells them apart. Source runs and older sessions
+	 * omit it (C-31).
+	 */
+	build?: BuildStamp;
 	piMonoVersion: string;
 	platform: string;
 	nodeVersion: string;
@@ -598,6 +605,10 @@ function newTurnId(): string {
 	return raw.padStart(12, "0");
 }
 
+function withBuild(build: BuildStamp | undefined): { build?: BuildStamp } {
+	return build ? { build } : {};
+}
+
 function buildMeta(input: { cwd: string; model?: string | null; target?: string | null }): ClioSessionMeta {
 	const resolvedCwd = resolve(input.cwd);
 	return {
@@ -609,6 +620,7 @@ function buildMeta(input: { cwd: string; model?: string | null; target?: string 
 		model: input.model ?? null,
 		target: input.target ?? null,
 		clioCoderVersion: readClioVersion(),
+		...withBuild(readBuildStamp()),
 		piMonoVersion: readPiMonoVersion(),
 		platform: process.platform,
 		nodeVersion: process.version,

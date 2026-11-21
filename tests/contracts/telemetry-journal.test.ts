@@ -18,12 +18,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Value } from "typebox/value";
+import { buildStampText, readBuildStamp } from "../../src/core/build-info.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureAdmits, effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../src/core/telemetry/capture.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { CostReportV1, ExplanationV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { makeTelemetryRecord, SegmentHeaderSchema } from "../../src/core/telemetry/envelope.js";
 import type { Fact } from "../../src/core/telemetry/fact.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
@@ -56,6 +58,7 @@ import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domain
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import {
+	callJournalHeader,
 	openCallJournal,
 	openCallJournalHealth,
 	readCallJournal,
@@ -904,6 +907,32 @@ test("memory and observation traces journal content only under research capture 
 		await journals.closeAll();
 		await rm(stateDir, { recursive: true, force: true });
 	}
+});
+
+test("session meta and segment headers carry the build that wrote them (C-31)", () => {
+	const stamp = readBuildStamp(
+		{ commit: "9d2e646", dirty: true },
+		"0b6f7c1e-9a51-4f0e-8d3c-2f1a7e5b9c40",
+		"2026-11-21T00:51:02.000Z",
+	);
+	deepStrictEqual(stamp, {
+		commit: "9d2e646",
+		dirty: true,
+		id: "0b6f7c1e-9a51-4f0e-8d3c-2f1a7e5b9c40",
+		builtAt: "2026-11-21T00:51:02.000Z",
+	});
+	strictEqual(readBuildStamp(null, null, null), undefined, "a source run records no build");
+	strictEqual(
+		buildStampText(stamp as NonNullable<typeof stamp>),
+		"9d2e646-dirty built 2026-11-21T00:51:02.000Z (build 0b6f7c1e-9a51-4f0e-8d3c-2f1a7e5b9c40)",
+	);
+	const header = callJournalHeader({
+		clioCoderVersion: "0.8.5-dev",
+		piVersion: "0.0.0",
+		...(stamp ? { build: stamp } : {}),
+	});
+	ok(Value.Check(SegmentHeaderSchema, header), "a segment header names its build in the writer block");
+	ok(Value.Check(SegmentHeaderSchema, callJournalHeader({ clioCoderVersion: "0.8.5-dev", piVersion: "0.0.0" })));
 });
 
 test("process.started is stamped when the process journal is created and leads its first batch (C-30)", async () => {

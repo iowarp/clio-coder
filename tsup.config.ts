@@ -28,6 +28,8 @@ const require = createRequire(import.meta.url);
 const buildStartedAt = performance.now();
 /** Minted at each build's start, so every watch rebuild records an id that matches its own chunks. */
 let buildId = randomUUID();
+/** When the most recent esbuild run started, served beside its id (C-31). */
+let buildAt = new Date().toISOString();
 /** The dist-relative files the most recent esbuild run wrote, from its metafile. */
 let lastBuildOutputs: string[] = [];
 
@@ -48,6 +50,7 @@ export const buildIdPlugin = {
 	}): void {
 		build.onStart(() => {
 			buildId = randomUUID();
+			buildAt = new Date().toISOString();
 		});
 		build.onEnd?.((result) => {
 			lastBuildOutputs = Object.keys(result.metafile?.outputs ?? {}).map((path) =>
@@ -55,7 +58,7 @@ export const buildIdPlugin = {
 			);
 		});
 		build.onLoad({ filter: BUILD_ID_MODULE }, () => ({
-			contents: `export const runningBuildId: string | null = ${JSON.stringify(buildId)};\n`,
+			contents: `export const runningBuildId: string | null = ${JSON.stringify(buildId)};\nexport const runningBuildAt: string | null = ${JSON.stringify(buildAt)};\n`,
 			loader: "ts",
 		}));
 	},

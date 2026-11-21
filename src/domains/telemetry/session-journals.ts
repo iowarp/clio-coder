@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { readBuildStamp } from "../../core/build-info.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import type { TelemetryAgent, TelemetryContext } from "../../core/telemetry/context.js";
@@ -91,6 +92,12 @@ export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 /** Sessions whose origin a writer set remembers for reopening; an ACP server hosts a few at most. */
 const KNOWN_ORIGINS = 256;
 
+/** The writer block's build, present only when the bundle recorded one (C-31). */
+function withBuildStamp(): { build?: NonNullable<SegmentHeader["writer"]["build"]> } {
+	const build = readBuildStamp();
+	return build ? { build } : {};
+}
+
 /** Active work, rather than the selected UI session, owns the writer's lifetime (#434). */
 export function createSessionJournals(
 	stateDir: string,
@@ -113,6 +120,7 @@ export function createSessionJournals(
 			return {
 				clioCoderVersion: pkg.version ?? "unknown",
 				piVersion: pkg.dependencies?.["@earendil-works/pi-ai"] ?? "unknown",
+				...withBuildStamp(),
 			};
 		}));
 	const report = () => {
