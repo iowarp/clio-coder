@@ -8,6 +8,7 @@
  * init message, loaded by absolute path.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -26,6 +27,8 @@ import type {
 	BrowserRequest,
 	BrowserRequestRecord,
 	BrowserRunRequest,
+	BrowserServeRequest,
+	BrowserServerState,
 	BrowserShot,
 	BrowserSnapshot,
 	BrowserViewport,
@@ -44,6 +47,11 @@ const OPEN_SNAPSHOT_LINES = 40;
 const VALUE_CAP_BYTES = 8 * 1024;
 const LOG_CAP_LINES = 60;
 const ACTION_CAP = 60;
+const MAX_SERVERS = 4;
+const SERVER_LOG_LINES = 200;
+const SERVER_TAIL_LINES = 30;
+const SERVER_STOP_GRACE_MS = 2_000;
+const READY_POLL_MS = 250;
 
 const writeOut = process.stdout.write.bind(process.stdout);
 const send = (reply: BrowserReply): void => {
@@ -243,7 +251,7 @@ function routeGranted(route: Any): unknown {
 	} catch {
 		return route.continue();
 	}
-	if (isLoopbackHost(host) || grantedHosts.has(host.toLowerCase())) return route.continue();
+	if (isLoopbackHost(host) || (!init?.hermetic && grantedHosts.has(host.toLowerCase()))) return route.continue();
 	blockedHosts.add(host);
 	newlyBlocked.add(host.toLowerCase());
 	return route.abort("blockedbyclient");
@@ -325,7 +333,9 @@ function listen(id: string, page: Any): void {
 			url: redact(r.url()),
 			error:
 				errorText.startsWith("net::ERR_BLOCKED_BY_CLIENT") && blockedHosts.has(host)
-					? `blocked: ${host} is not granted to this browser session; browser open with allow_hosts ${JSON.stringify([host.toLowerCase()])} admits it`
+					? init?.hermetic
+						? `blocked: ${host} is outside loopback and this browser session is hermetic, so it is not reachable`
+						: `blocked: ${host} is not granted to this browser session; browser open with allow_hosts ${JSON.stringify([host.toLowerCase()])} admits it`
 					: clip(errorText),
 			resource: r.resourceType(),
 		});
@@ -640,7 +650,7 @@ async function run(request: BrowserRunRequest): Promise<BrowserReply> {
 
 async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
 	await ensureContext();
-	for (const host of request.grantHosts ?? []) grantedHosts.add(host.toLowerCase());
+	if (!init?.hermetic) for (const host of request.grantHosts ?? []) grantedHosts.add(host.toLowerCase());
 	let id = request.page;
 	let page: Any;
 	// A page id nothing opened yet names the new page, so `open` with page "main" works on the first call.
@@ -664,6 +674,9 @@ async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
 		await settle(page);
 	} catch (error) {
 		loadError = clip(error instanceof Error ? error.message.split("\n")[0] : error, 600);
+		if (init?.hermetic && /ERR_CONNECTION_REFUSED/u.test(loadError))
+			loadError +=
+				"; this hermetic session has its own loopback, so a server started outside it is not reachable: start it here with op=serve";
 	}
 	const snapshot = await page
 		.ariaSnapshot({ mode: "ai" })
@@ -783,8 +796,172 @@ async function look(request: BrowserLookRequest): Promise<BrowserReply> {
 	return { id: request.id, ok: true, ...body };
 }
 
+// ── Servers ──────────────────────────────────────────────────────────────────
+
+interface Server {
+	state: Omit<BrowserServerState, "logTail">;
+	child: ChildProcess;
+	log: string[];
+	partial: string;
+	exited: Promise<void>;
+}
+
+/** Dev servers this session started, by working directory and command line. */
+const servers = new Map<string, Server>();
+const serving = new Map<number, { cancelled: boolean }>();
+
+function serverView(server: Server): BrowserServerState {
+	const tail = server.log.slice(-SERVER_TAIL_LINES);
+	if (server.partial.trim() !== "") tail.push(clip(server.partial, 400));
+	return { ...server.state, logTail: tail.slice(-SERVER_TAIL_LINES) };
+}
+
+function appendLog(server: Server, chunk: Buffer): void {
+	const lines = (server.partial + chunk.toString("utf8")).split(/\r?\n/u);
+	server.partial = lines.pop() ?? "";
+	for (const line of lines) if (line.trim() !== "") server.log.push(clip(line, 400));
+	if (server.log.length > SERVER_LOG_LINES) server.log.splice(0, server.log.length - SERVER_LOG_LINES);
+}
+
+function startServer(command: string, cwd: string, ready: string): Server {
+	// Its own process group, so stopping it ends the whole tree a package script starts.
+	const child = spawn(command, {
+		cwd,
+		shell: true,
+		detached: process.platform !== "win32",
+		stdio: ["ignore", "pipe", "pipe"],
+		env: process.env,
+	});
+	let markExited: () => void = () => {};
+	const server: Server = {
+		state: { command, cwd, ready, state: "starting", ...(child.pid !== undefined ? { pid: child.pid } : {}) },
+		child,
+		log: [],
+		partial: "",
+		exited: new Promise<void>((resolve) => {
+			markExited = resolve;
+		}),
+	};
+	child.stdout?.on("data", (chunk: Buffer) => appendLog(server, chunk));
+	child.stderr?.on("data", (chunk: Buffer) => appendLog(server, chunk));
+	child.once("error", (error) => {
+		server.log.push(`(spawn failed) ${error.message}`);
+		if (server.state.state !== "stopped") server.state.state = "exited";
+		markExited();
+	});
+	child.once("exit", (code, signal) => {
+		if (server.state.state !== "stopped") server.state.state = "exited";
+		server.state.exitCode = code;
+		server.state.signal = signal;
+		markExited();
+	});
+	return server;
+}
+
+function signalServer(server: Server, signal: NodeJS.Signals): void {
+	const pid = server.child.pid;
+	if (pid === undefined) return;
+	try {
+		if (process.platform === "win32") server.child.kill(signal);
+		else process.kill(-pid, signal);
+	} catch {
+		// Already gone.
+	}
+}
+
+async function stopServer(server: Server): Promise<void> {
+	const running = server.state.state === "starting" || server.state.state === "ready";
+	server.state.state = "stopped";
+	if (!running) return;
+	signalServer(server, "SIGTERM");
+	const grace = new Promise<"grace">((resolve) => setTimeout(() => resolve("grace"), SERVER_STOP_GRACE_MS).unref());
+	if ((await Promise.race([server.exited.then(() => "exited" as const), grace])) === "grace")
+		signalServer(server, "SIGKILL");
+}
+
+/** Poll `ready` until any HTTP response arrives, the server exits, the call is cancelled, or the limit passes. */
+async function waitReady(
+	server: Server,
+	timeoutMs: number,
+	call: { cancelled: boolean },
+): Promise<"ready" | "exited" | "timeout" | "cancelled"> {
+	const started = Date.now();
+	while (Date.now() - started < timeoutMs) {
+		if (call.cancelled) return "cancelled";
+		if (server.state.state === "exited" || server.state.state === "stopped") return "exited";
+		try {
+			const response = await fetch(server.state.ready, { redirect: "manual", signal: AbortSignal.timeout(2_000) });
+			await response.body?.cancel().catch(() => {});
+			server.state.state = "ready";
+			server.state.readyMs = Date.now() - started;
+			return "ready";
+		} catch {
+			// Not listening yet.
+		}
+		await Promise.race([server.exited, new Promise((resolve) => setTimeout(resolve, READY_POLL_MS))]);
+	}
+	return "timeout";
+}
+
+async function serve(request: BrowserServeRequest): Promise<BrowserReply> {
+	const cwd = request.cwd ?? init?.workspace ?? process.cwd();
+	const key = (command: string) => `${cwd}\0${command}`;
+	if (request.stop) {
+		const chosen =
+			request.command !== undefined
+				? [servers.get(key(request.command))].filter((s): s is Server => s !== undefined)
+				: [...servers.values()];
+		if (request.command !== undefined && chosen.length === 0)
+			return { id: request.id, ok: false, error: `no server runs ${JSON.stringify(request.command)} here` };
+		await Promise.all(chosen.map(stopServer));
+		for (const server of chosen) servers.delete(key(server.state.command));
+		return { id: request.id, ok: true, servers: chosen.map(serverView) };
+	}
+	if (request.command === undefined) return { id: request.id, ok: true, servers: [...servers.values()].map(serverView) };
+	const ready = request.ready;
+	if (ready === undefined)
+		return { id: request.id, ok: false, error: "serve needs ready, the loopback URL to wait for" };
+	let server = servers.get(key(request.command));
+	if (server?.state.state === "ready") return { id: request.id, ok: true, servers: [serverView(server)] };
+	if (server === undefined || server.state.state === "exited" || server.state.state === "stopped") {
+		if (server) servers.delete(key(request.command));
+		const live = [...servers.values()].filter((s) => s.state.state === "starting" || s.state.state === "ready");
+		if (live.length >= MAX_SERVERS)
+			return { id: request.id, ok: false, error: `${MAX_SERVERS} servers are running; stop one with serve stop` };
+		server = startServer(request.command, cwd, ready);
+		servers.set(key(request.command), server);
+	}
+	const call = { cancelled: false };
+	serving.set(request.id, call);
+	try {
+		const outcome = await waitReady(server, request.timeoutMs, call);
+		const view = serverView(server);
+		if (outcome === "ready") return { id: request.id, ok: true, servers: [view] };
+		const ended = `exit ${server.state.exitCode ?? "?"}${server.state.signal ? `, ${server.state.signal}` : ""}`;
+		return {
+			id: request.id,
+			ok: false,
+			error:
+				outcome === "exited"
+					? `the server exited (${ended}) before ${ready} answered`
+					: outcome === "cancelled"
+						? `cancelled while waiting for ${ready}; the server is still starting (serve stop ends it)`
+						: `${ready} did not answer within ${request.timeoutMs} ms; the server is still running (serve stop ends it)`,
+			...(outcome === "cancelled" ? { cancelled: true } : outcome === "timeout" ? { timedOut: true } : {}),
+			servers: [view],
+		};
+	} finally {
+		serving.delete(request.id);
+	}
+}
+
+let shuttingDown = false;
 async function shutdown(code: number): Promise<never> {
-	await releaseBrowser();
+	if (!shuttingDown) {
+		shuttingDown = true;
+		await releaseBrowser();
+		await Promise.all([...servers.values()].map(stopServer));
+	}
 	process.exit(code);
 }
 
@@ -795,14 +972,19 @@ async function handle(request: BrowserRequest): Promise<void> {
 			scope.cancelled = true;
 			scope.cancel?.();
 		}
+		const wait = serving.get(request.target);
+		if (wait) wait.cancelled = true;
 		return;
 	}
 	try {
 		switch (request.op) {
 			case "init":
 				init = request;
-				for (const host of request.grantedHosts) grantedHosts.add(host.toLowerCase());
+				if (!request.hermetic) for (const host of request.grantedHosts) grantedHosts.add(host.toLowerCase());
 				send({ id: request.id, ok: true });
+				return;
+			case "serve":
+				send(await serve(request));
 				return;
 			case "open":
 				send(await open(request));

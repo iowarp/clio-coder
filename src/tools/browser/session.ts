@@ -53,11 +53,15 @@ class BrowserWorker {
 	private stderrTail = "";
 	private exited = false;
 	private idleTimer: NodeJS.Timeout | undefined;
+	/** Process groups of the servers `serve` started, signalled at teardown when no PID namespace ends them. */
+	private readonly serverGroups = new Set<number>();
 
 	private constructor(
 		private readonly child: ChildProcessWithoutNullStreams,
 		readonly key: string,
 		readonly scratchDir: string,
+		readonly hermetic: boolean,
+		private readonly contained: boolean,
 		private readonly onGone: () => void,
 	) {
 		createInterface({ input: child.stdout }).on("line", (line) => this.receive(line));
@@ -70,6 +74,7 @@ class BrowserWorker {
 			const reason = `the browser session ended (${signal ?? `exit ${code}`})${this.stderrTail.trim() ? `: ${this.stderrTail.trim().slice(-1_200)}` : ""}`;
 			for (const waiter of this.pending.values()) waiter.reject(new Error(reason));
 			this.pending.clear();
+			this.killServerGroups();
 			rmSync(path.join(this.scratchDir, "profile"), { recursive: true, force: true });
 			this.onGone();
 		});
@@ -84,6 +89,7 @@ class BrowserWorker {
 		workspace: string,
 		scratchDir: string,
 		grantedHosts: ReadonlyArray<string>,
+		hermetic: boolean,
 		key: string,
 		onGone: () => void,
 	): Promise<BrowserWorker> {
@@ -106,7 +112,7 @@ class BrowserWorker {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		if (afterExit) child.once("exit", afterExit);
-		const worker = new BrowserWorker(child, key, scratchDir, onGone);
+		const worker = new BrowserWorker(child, key, scratchDir, hermetic, sandbox !== undefined, onGone);
 		await worker.request(
 			{
 				op: "init",
@@ -116,7 +122,8 @@ class BrowserWorker {
 				scratchDir,
 				workspace,
 				viewport: DEFAULT_VIEWPORT,
-				grantedHosts: [...grantedHosts],
+				grantedHosts: hermetic ? [] : [...grantedHosts],
+				hermetic,
 			},
 			{ timeoutMs: START_TIMEOUT_MS },
 		);
@@ -138,7 +145,29 @@ class BrowserWorker {
 		const waiter = this.pending.get(reply.id);
 		if (!waiter) return;
 		this.pending.delete(reply.id);
+		if (!this.contained)
+			for (const server of reply.servers ?? []) {
+				if (server.pid === undefined) continue;
+				if (server.state === "starting" || server.state === "ready") this.serverGroups.add(server.pid);
+				else this.serverGroups.delete(server.pid);
+			}
 		waiter.resolve(reply);
+	}
+
+	/**
+	 * Uncontained, a server's process group outlives a driver that was killed before it could stop it. Contained, the
+	 * sandbox's PID namespace ends every server with the driver, and these ids would name other processes on the host.
+	 */
+	private killServerGroups(): void {
+		if (process.platform === "win32") return;
+		for (const pid of this.serverGroups) {
+			try {
+				process.kill(-pid, "SIGKILL");
+			} catch {
+				// Already gone.
+			}
+		}
+		this.serverGroups.clear();
 	}
 
 	private write(message: BrowserRequest): void {
@@ -228,13 +257,14 @@ class BrowserWorker {
 }
 
 /** What a session's worker is keyed on: a call admitted under another sandbox policy gets a fresh worker. */
-function workerKey(sandbox: MainSandboxPolicy | undefined, workspace: string): string {
+function workerKey(sandbox: MainSandboxPolicy | undefined, workspace: string, hermetic: boolean): string {
 	return JSON.stringify({
 		workspace,
 		writable: sandbox?.writableRoots ?? null,
 		network: sandbox?.network ?? null,
 		readOnly: sandbox?.readOnly ?? null,
 		contained: sandbox !== undefined,
+		hermetic,
 	});
 }
 
@@ -244,6 +274,8 @@ export interface BrowserSessionCall {
 	sandbox: MainSandboxPolicy | undefined;
 	workspace: string;
 	grantedHosts: ReadonlyArray<string>;
+	/** Loopback only; contained, the driver also loses the network namespace (`network: false`). */
+	hermetic: boolean;
 }
 
 /** Every live browser session of this process, by Clio session id. */
@@ -252,17 +284,18 @@ export class BrowserSessions {
 	private readonly starting = new Map<string, Promise<BrowserWorker>>();
 
 	/** The running worker for this call's session, started (or restarted under a new sandbox policy) when needed. */
-	async worker(call: BrowserSessionCall): Promise<{ worker: BrowserWorker; restarted: boolean }> {
+	async worker(call: BrowserSessionCall): Promise<{ worker: BrowserWorker; restarted: boolean; fresh: boolean }> {
 		// One conversation owns the browser: a call from another session ends the others' workers with their grants.
 		for (const [sessionId, other] of [...this.workers]) {
 			if (sessionId === call.sessionId) continue;
 			this.workers.delete(sessionId);
 			await other.close();
 		}
-		const key = workerKey(call.sandbox, call.workspace);
+		const sandbox = call.hermetic && call.sandbox !== undefined ? { ...call.sandbox, network: false } : call.sandbox;
+		const key = workerKey(sandbox, call.workspace, call.hermetic);
 		const existing = this.workers.get(call.sessionId);
 		let restarted = false;
-		if (existing?.alive && existing.key === key) return { worker: existing, restarted };
+		if (existing?.alive && existing.key === key) return { worker: existing, restarted, fresh: false };
 		if (existing) {
 			restarted = existing.alive;
 			await existing.close();
@@ -273,10 +306,11 @@ export class BrowserSessions {
 			const scratchDir = path.join(tmpdir(), `clio-coder-browser-${call.sessionId.replace(/[^\w.-]+/gu, "-")}`);
 			pending = BrowserWorker.start(
 				call.component,
-				call.sandbox,
+				sandbox,
 				call.workspace,
 				scratchDir,
 				call.grantedHosts,
+				call.hermetic,
 				key,
 				() => {
 					if (this.workers.get(call.sessionId)?.key === key) this.workers.delete(call.sessionId);
@@ -286,7 +320,7 @@ export class BrowserSessions {
 		}
 		const worker = await pending;
 		this.workers.set(call.sessionId, worker);
-		return { worker, restarted };
+		return { worker, restarted, fresh: true };
 	}
 
 	has(sessionId: string): boolean {

@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { prepareBoundedImage } from "../../core/file-references.js";
+import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../../core/untrusted-content.js";
 import {
@@ -20,23 +22,27 @@ import { readMaxBytes } from "../read.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { imageOmissionNotice } from "../result-shaping.js";
 import { byteLength } from "../truncate-utf8.js";
-import type { BrowserEventDelta, BrowserReply, BrowserViewport } from "./protocol.js";
+import type { BrowserEventDelta, BrowserReply, BrowserServerState, BrowserViewport } from "./protocol.js";
 import { BrowserSessions } from "./session.js";
 import {
 	BROWSER_OPS,
 	type BrowserOp,
 	browserGrantedHosts,
+	browserHermetic,
 	browserOutwardHosts,
 	browserToolSurface,
 	browserUngrantedEndpoint,
 	grantBrowserEndpoint,
 	grantBrowserHosts,
+	isLoopbackHost,
 	normalizeBrowserEndpoint,
 	prepareBrowserArguments,
+	setBrowserHermetic,
 } from "./surface.js";
 
 const RUN_DEFAULT_TIMEOUT_MS = 300_000;
 const RUN_MAX_TIMEOUT_MS = 1_800_000;
+const SERVE_DEFAULT_TIMEOUT_MS = 120_000;
 const OTHER_TIMEOUT_MS = 90_000;
 
 export interface BrowserToolDeps {
@@ -82,9 +88,14 @@ function eventLines(events: BrowserEventDelta | undefined): string[] {
 /**
  * Hosts the session's route refused during this call, stated above the untrusted banner with the exact grant that
  * admits them, so neither the agent nor the operator meets a silently aborted request. Hostnames come from the URL
- * parser and are held to the hostname alphabet before Clio repeats them.
+ * parser and are held to the hostname alphabet before Clio repeats them. A hermetic session grants no host, so it
+ * offers no grant; its failed requests say the host is unreachable.
  */
-function blockedGrant(events: BrowserEventDelta | undefined): { hosts: string[]; grant: string; line: string } | null {
+function blockedGrant(
+	events: BrowserEventDelta | undefined,
+	hermetic: boolean,
+): { hosts: string[]; grant: string; line: string } | null {
+	if (hermetic) return null;
 	const hosts = (events?.blockedHosts ?? []).filter((host) => /^[a-z\d.\-[\]:]{1,253}$/u.test(host));
 	if (hosts.length === 0) return null;
 	const grant = `browser open with allow_hosts ${JSON.stringify(hosts)}`;
@@ -95,18 +106,42 @@ function blockedGrant(events: BrowserEventDelta | undefined): { hosts: string[];
 	};
 }
 
+/** A server's state for the reply head: Clio started it, so its log is the project's own output, as bash output is. */
+function serverLines(servers: ReadonlyArray<BrowserServerState> | undefined, workspace: string): string[] {
+	const lines: string[] = [];
+	for (const s of servers ?? []) {
+		const where = path.relative(workspace, s.cwd) || ".";
+		const ended = s.state === "exited" ? ` (exit ${s.exitCode ?? "?"}${s.signal ? `, ${s.signal}` : ""})` : "";
+		const answered = s.readyMs !== undefined ? ` answered after ${s.readyMs} ms` : "";
+		lines.push(`server ${s.state}${ended}: ${s.command} (cwd ${where}) · ${s.ready}${answered}`);
+		if (s.logTail.length > 0) {
+			lines.push(`  log (last ${s.logTail.length} lines):`);
+			for (const line of s.logTail) lines.push(`    ${line}`);
+		}
+	}
+	return lines;
+}
+
 /** Text first: what Clio ran above the banner, everything the page supplied under it. */
-function formatBrowserReply(op: BrowserOp, reply: BrowserReply, notes: ReadonlyArray<string> = []): string {
+function formatBrowserReply(
+	op: BrowserOp,
+	reply: BrowserReply,
+	notes: ReadonlyArray<string>,
+	view: { workspace: string; hermetic: boolean },
+): string {
 	const head: string[] = [];
 	const facts = reply.pageFacts;
 	head.push(
-		`browser ${op}${facts ? ` page ${facts.page}` : ""}${facts?.status !== undefined ? ` · HTTP ${facts.status}` : ""}${reply.ok ? "" : " · FAILED"}`,
+		`browser ${op}${facts ? ` page ${facts.page}` : ""}${facts?.status !== undefined ? ` · HTTP ${facts.status}` : ""}${view.hermetic ? " · hermetic" : ""}${reply.ok ? "" : " · FAILED"}`,
 	);
 	if (reply.closed) head.push(reply.closed === "session" ? "session closed" : "page closed");
 	if (reply.attached) head.push(`attached to ${reply.attached} (${reply.pages?.length ?? 0} page(s))`);
-	const blocked = blockedGrant(reply.events);
+	const blocked = blockedGrant(reply.events, view.hermetic);
 	if (blocked !== null) head.push(blocked.line);
 	for (const note of notes) head.push(note);
+	if (op === "serve" && reply.ok && (reply.servers ?? []).length === 0) head.push("no server is running");
+	head.push(...serverLines(reply.servers, view.workspace));
+	if (op === "serve" && !reply.ok) head.push(`error: ${reply.error}`);
 	if (reply.actions && reply.actions.length > 0) {
 		head.push(`actions (${reply.actions.length}):`);
 		for (const action of reply.actions) head.push(`  ${action}`);
@@ -116,7 +151,7 @@ function formatBrowserReply(op: BrowserOp, reply: BrowserReply, notes: ReadonlyA
 		for (const shot of reply.shots) head.push(`  ${shot.path} (${shot.viewport})`);
 	}
 	const body: string[] = [];
-	if (!reply.ok) body.push(`error: ${reply.error}`);
+	if (!reply.ok && op !== "serve") body.push(`error: ${reply.error}`);
 	if (facts) body.push(`url: ${facts.url}`, `title: ${facts.title}`);
 	if (reply.pages && (reply.pages.length > 1 || reply.attached))
 		body.push(`pages: ${reply.pages.map((p) => `${p.page} ${p.url}`).join(" | ")}`);
@@ -206,10 +241,19 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 			const viewport = parseViewport(args.viewport);
 			if (viewport === null) return { kind: "error", message: "browser: viewport takes WIDTHxHEIGHT, e.g. 390x844" };
 			const url = str(args, "url");
+			const workspace = deps.getWorkspaceRoot();
+			const hermetic = browserHermetic(args, options?.sessionId);
 			if (op === "open") {
 				if (url === undefined) return { kind: "error", message: "browser open: url is required" };
 				const refusal = options?.flowAdmitsUrl?.(url);
 				if (refusal) return { kind: "error", message: `browser open: ${refusal}` };
+				const beyond = hermetic ? browserOutwardHosts(args, options?.sessionId, { ignoreGrants: true }) : [];
+				if (beyond.length > 0)
+					return {
+						kind: "error",
+						message: `browser open: this browser session is hermetic (loopback only), so ${beyond.join(", ")} is not reachable and nothing was loaded. A hermetic session never grants a host; close the whole session (op=close) and open without hermetic to ask for one.`,
+						details: { op, hermetic: true, unreachable: beyond },
+					};
 			}
 			if (op === "run" && str(args, "script") === undefined && str(args, "file") === undefined)
 				return { kind: "error", message: "browser run: give script (Playwright JavaScript) or file" };
@@ -222,6 +266,36 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 					};
 				const refusal = options?.flowAdmitsUrl?.(endpoint.url);
 				if (refusal) return { kind: "error", message: `browser attach: ${refusal}` };
+			}
+			const command = str(args, "command");
+			const ready = str(args, "ready");
+			let serveCwd: string | undefined;
+			if (op === "serve" && args.stop !== true && command !== undefined) {
+				let readyHost: string | undefined;
+				try {
+					const parsed = ready !== undefined ? new URL(ready) : undefined;
+					if (parsed && (parsed.protocol === "http:" || parsed.protocol === "https:")) readyHost = parsed.hostname;
+				} catch {
+					// Reported below.
+				}
+				if (readyHost === undefined || !isLoopbackHost(readyHost))
+					return {
+						kind: "error",
+						message:
+							"browser serve: ready is required and must be an http(s) loopback URL the server answers, e.g. http://127.0.0.1:5173/",
+					};
+			}
+			if (op === "serve") {
+				try {
+					serveCwd = resolveSafeCwd(str(args, "cwd") ?? ".", workspace);
+				} catch (error) {
+					return {
+						kind: "error",
+						message: `browser serve: ${error instanceof Error ? error.message : String(error)}`,
+					};
+				}
+				if (command === undefined && !sessions.has(sessionId))
+					return { kind: "ok", output: "browser serve: no session is open, so no server is running" };
 			}
 
 			const notes: string[] = [];
@@ -241,8 +315,8 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 				}
 			}
 
-			// Admission already confirmed these hosts for this call.
-			const newHosts = browserOutwardHosts(args, options?.sessionId);
+			// Admission already confirmed these hosts for this call; a hermetic session grants none.
+			const newHosts = hermetic ? [] : browserOutwardHosts(args, options?.sessionId);
 			if (newHosts.length > 0) grantBrowserHosts(options?.sessionId, newHosts);
 			const newEndpoint = browserUngrantedEndpoint(args, options?.sessionId);
 			if (newEndpoint !== undefined) grantBrowserEndpoint(options?.sessionId, newEndpoint);
@@ -253,8 +327,9 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 					sessionId,
 					component,
 					sandbox: options?.shellSandbox,
-					workspace: deps.getWorkspaceRoot(),
+					workspace,
 					grantedHosts: browserGrantedHosts(options?.sessionId),
+					hermetic,
 				});
 			} catch (error) {
 				return {
@@ -262,16 +337,29 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 					message: `browser: the session did not start: ${error instanceof Error ? error.message : String(error)}`,
 				};
 			}
+			if (hermetic) setBrowserHermetic(options?.sessionId, true);
 			if (started.restarted) {
 				attached.delete(sessionId);
-				notes.push("the session restarted because this call runs under a different sandbox policy; earlier pages are gone");
+				notes.push(
+					hermetic
+						? "the session restarted hermetic (loopback only); earlier pages and servers are gone"
+						: "the session restarted because this call runs under a different sandbox policy; earlier pages and servers are gone",
+				);
 			}
+			if (hermetic && options?.shellSandbox === undefined && started.fresh)
+				notes.push(
+					"hermetic without the OS sandbox: pages are held to loopback, but scripts and servers keep the host network",
+				);
 
 			const timeoutMs =
-				op === "run"
+				op === "run" || op === "serve"
 					? Math.min(
 							RUN_MAX_TIMEOUT_MS,
-							typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : RUN_DEFAULT_TIMEOUT_MS,
+							typeof args.timeout_ms === "number" && args.timeout_ms > 0
+								? args.timeout_ms
+								: op === "run"
+									? RUN_DEFAULT_TIMEOUT_MS
+									: SERVE_DEFAULT_TIMEOUT_MS,
 						)
 					: OTHER_TIMEOUT_MS;
 			const page = str(args, "page");
@@ -320,17 +408,31 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 							call,
 						);
 						break;
+					case "serve":
+						reply = await started.worker.request(
+							{
+								op: "serve",
+								...(command !== undefined ? { command } : {}),
+								...(ready !== undefined ? { ready } : {}),
+								...(serveCwd !== undefined ? { cwd: serveCwd } : {}),
+								stop: args.stop === true,
+								timeoutMs,
+							},
+							call,
+						);
+						break;
 					case "close":
 						if (page === undefined) {
 							const from = attached.get(sessionId);
 							attached.delete(sessionId);
 							await sessions.close(sessionId);
+							setBrowserHermetic(options?.sessionId, false);
 							return {
 								kind: "ok",
 								output:
 									from !== undefined
 										? `browser close: detached from ${from}; the tabs Clio opened there are closed, the browser and its other tabs keep running`
-										: "browser close: session closed; its pages and profile are gone",
+										: "browser close: session closed; its pages, servers and profile are gone",
 							};
 						}
 						reply = await started.worker.request({ op: "close", page }, call);
@@ -339,13 +441,17 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 			} catch (error) {
 				return { kind: "error", message: `browser ${op}: ${error instanceof Error ? error.message : String(error)}` };
 			}
-			const output = formatBrowserReply(op, reply, notes);
-			const blocked = blockedGrant(reply.events);
+			const output = formatBrowserReply(op, reply, notes, { workspace, hermetic });
+			const blocked = blockedGrant(reply.events, hermetic);
 			const details: Record<string, unknown> = {
 				op,
 				...(reply.pageFacts ? { page: reply.pageFacts.page } : {}),
 				...(reply.shots && reply.shots.length > 0 ? { shots: reply.shots.map((shot) => shot.path) } : {}),
 				...(blocked !== null ? { blockedHosts: blocked.hosts, blockedGrant: blocked.grant } : {}),
+				...(reply.servers && reply.servers.length > 0
+					? { servers: reply.servers.map((s) => ({ command: s.command, ready: s.ready, state: s.state })) }
+					: {}),
+				...(hermetic ? { hermetic: true } : {}),
 				...(reply.ok ? {} : { failed: true }),
 				...(!reply.ok && reply.cancelled ? { cancelled: true } : {}),
 				...(!reply.ok && reply.timedOut ? { timedOut: true } : {}),

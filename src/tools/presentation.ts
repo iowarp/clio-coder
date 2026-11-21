@@ -652,10 +652,10 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 			plain(
 				joinDefined(
 					`browser ${text(args, "op") ?? ""}`.trim(),
-					text(args, "url") ?? text(args, "endpoint") ?? text(args, "target") ?? text(args, "page"),
+					text(args, "url") ?? text(args, "endpoint") ?? text(args, "command") ?? text(args, "target") ?? text(args, "page"),
 				),
 			),
-		consumes: ["op", "url", "endpoint", "page", "target", "script", "file"],
+		consumes: ["op", "url", "endpoint", "page", "target", "script", "file", "command"],
 	},
 	[ToolNames.Verify]: {
 		class: "execute",
