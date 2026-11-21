@@ -703,7 +703,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const presenter = createLifecyclePresenter({ json: args.json });
 	if (args.inactive) return uninstallInactive(installation, args, presenter);
 
-	presenter.header("Uninstall Clio Coder", "uninstall");
+	presenter.header("Uninstall CLIO Coder", "uninstall");
 	presenter.step(
 		`Installation method: ${method === "source" ? "source symlink" : method === "npm" ? "npm global" : method === "installer" ? "installer" : method}`,
 	);
@@ -1178,7 +1178,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			return 1;
 		}
 
-		presenter.message("Thank you for using Clio Coder.");
+		presenter.message("Thank you for using CLIO Coder.");
 		presenter.done("Done");
 		return 0;
 	} finally {

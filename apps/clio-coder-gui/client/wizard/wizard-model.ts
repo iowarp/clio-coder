@@ -472,7 +472,7 @@ export function stepFor(prompt: Prompt): StepView {
 
 // The CLI wraps its introduction at 80 columns, so the tails of two sentences arrive as lines of their own.
 const INTRO =
-	/^(Welcome to Clio Coder|Add a target|Edit target:|Choose what you already use|Back returns|Escape goes back|Saved result:|provider allows it\.|you complete\.)/u;
+	/^(Welcome to CLIO Coder|Add a target|Edit target:|Choose what you already use|Back returns|Escape goes back|Saved result:|provider allows it\.|you complete\.)/u;
 
 export interface ProbeReading {
 	readonly state: "reachable" | "unreachable" | "auth-failed" | "warning";

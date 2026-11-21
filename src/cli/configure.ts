@@ -1421,7 +1421,7 @@ const DIAGNOSTICS_SECTION: SectionSpec = {
 		const dirs = resolveClioDirs();
 		const info = getVersionInfo();
 		return [
-			["Clio Coder", readClioVersionLabel()],
+			["CLIO Coder", readClioVersionLabel()],
 			["Node.js", info.node],
 			["Platform", info.platform],
 			["Config dir", shortenPath(dirs.config)],
@@ -2120,7 +2120,7 @@ async function runConfigSectionsMenu(
 	for (;;) {
 		rl.clearScreen();
 		const presenter = createLifecyclePresenter({ stream: streams.out });
-		presenter.header("Clio Coder Settings", "configure");
+		presenter.header("CLIO Coder Settings", "configure");
 		presenter.note(`Source: ${shortenPath(settingsPath())}`);
 		presenter.note("Changes here become your saved defaults.");
 		presenter.blank();
@@ -2146,7 +2146,7 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 	for (;;) {
 		rl.clearScreen();
 		const presenter = createLifecyclePresenter({ stream: streams.out });
-		presenter.header("Clio Coder", "configure");
+		presenter.header("CLIO Coder", "configure");
 		presenter.note("Start with what you recognize. Clio explains and checks the technical details.");
 		presenter.blank();
 		const choice = await pickEntry(

@@ -56,7 +56,7 @@ function legacyGitRefsFinding(cwd: string): DoctorFinding {
 		refs = [];
 	}
 	if (refs.length === 0) {
-		return { ok: true, name: "naming git refs", detail: "no legacy Clio Coder task or compete refs found" };
+		return { ok: true, name: "naming git refs", detail: "no legacy CLIO Coder task or compete refs found" };
 	}
 	const shown = refs.slice(0, 20);
 	return {

@@ -121,13 +121,13 @@ async function vendoredHerdr(): Promise<{ binaryPath: string; version: string } 
 	const { clioStateDir } = await import("../core/xdg.js");
 	const stamp = installFailureStamp(clioStateDir());
 	if (recentInstallFailure(stamp, entry.version, Date.now())) return null;
-	process.stderr.write("Clio Coder: setting up terminal panes (one time)...\n");
+	process.stderr.write("CLIO Coder: setting up terminal panes (one time)...\n");
 	const installed = await installTool("herdr", { timeoutMs: LAUNCH_INSTALL_TIMEOUT_MS });
 	const resolved = installed.ok ? resolveVendoredBinary("herdr") : null;
 	if (resolved === null) {
 		const why = installed.ok ? "the installed binary was not found" : installed.message.split("\n")[0];
 		process.stderr.write(
-			`Clio Coder: terminal panes unavailable (${why}). Continuing in this terminal; run \`clio-coder panes install\` to retry.\n`,
+			`CLIO Coder: terminal panes unavailable (${why}). Continuing in this terminal; run \`clio-coder panes install\` to retry.\n`,
 		);
 		writeStamp(stamp, entry.version);
 	} else {
@@ -173,10 +173,10 @@ export async function maybeLaunchWorkspace(
 		cwd: process.cwd(),
 		clioArgv: clioArgv(),
 		clioEnv: { ...clioPaneEnv(process.env, settings.targets), ...terminalHandover() },
-		notice: (line) => process.stderr.write(`Clio Coder: ${line}.\n`),
+		notice: (line) => process.stderr.write(`CLIO Coder: ${line}.\n`),
 	});
 	if (result.status === "fallback") {
-		process.stderr.write(`Clio Coder: terminal panes unavailable (${result.reason}). Continuing in this terminal.\n`);
+		process.stderr.write(`CLIO Coder: terminal panes unavailable (${result.reason}). Continuing in this terminal.\n`);
 		return null;
 	}
 	// The pane that printed the exit summary is gone; this is the terminal the operator reads.

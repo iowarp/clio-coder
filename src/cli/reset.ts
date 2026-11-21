@@ -219,7 +219,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	const credentialsPath = join(dirs.config, "credentials.yaml");
 	const presenter = createLifecyclePresenter({ json: args.json });
 
-	presenter.header("Reset Clio Coder", "reset");
+	presenter.header("Reset CLIO Coder", "reset");
 
 	// Determine scopes to clear
 	const resetData = args.all || args.data;

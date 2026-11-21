@@ -375,9 +375,9 @@ function pointerBody(fields: {
 	profile: string;
 }): string {
 	return [
-		"An encrypted telemetry share from Clio Coder. Only the Clio Coder maintainers can open it; counts derived from it, never its contents, help rank what to fix next.",
+		"An encrypted telemetry share from CLIO Coder. Only the CLIO Coder maintainers can open it; counts derived from it, never its contents, help rank what to fix next.",
 		"",
-		`The sender can delete it at any time with \`clio-coder telemetry share forget ${fields.shareId}\` or on github.com; once it is ${SHARE_RETENTION_DAYS} days old, Clio Coder deletes it the next time the sender runs \`clio-coder report\` or \`clio-coder telemetry share\`.`,
+		`The sender can delete it at any time with \`clio-coder telemetry share forget ${fields.shareId}\` or on github.com; once it is ${SHARE_RETENTION_DAYS} days old, CLIO Coder deletes it the next time the sender runs \`clio-coder report\` or \`clio-coder telemetry share\`.`,
 		"",
 		"```clio-coder-share",
 		"v: 1",
@@ -618,7 +618,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: Telem
 		if (send !== null) {
 			const text = consentText();
 			io.out(
-				`--send seals this archive so that only the Clio Coder maintainers can open it, uploads it as a secret gist in your GitHub account, and opens a public discussion in "${DISCUSSION_CATEGORY}" on iowarp/clio-coder that names the gist.\nBy sending it you agree to:\n  ${text.debug}\n${send.consent.includes("dataset") ? `  ${text.dataset}\n` : ""}  ${text.share}\n`,
+				`--send seals this archive so that only the CLIO Coder maintainers can open it, uploads it as a secret gist in your GitHub account, and opens a public discussion in "${DISCUSSION_CATEGORY}" on iowarp/clio-coder that names the gist.\nBy sending it you agree to:\n  ${text.debug}\n${send.consent.includes("dataset") ? `  ${text.dataset}\n` : ""}  ${text.share}\n`,
 			);
 		}
 		if (args.dryRun) {
@@ -649,7 +649,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: Telem
 			}
 			if (interactive) {
 				const confirm = await promptSelect<boolean>({
-					heading: "Send this encrypted share to the Clio Coder maintainers?",
+					heading: "Send this encrypted share to the CLIO Coder maintainers?",
 					choices: [
 						{ value: true, label: "send" },
 						{ value: false, label: "cancel" },

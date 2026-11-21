@@ -484,7 +484,7 @@ describe("contracts/configure-onboarding", () => {
 
 			const screen = plainText(result.transcript());
 			for (const expected of [
-				"Welcome to Clio Coder",
+				"Welcome to CLIO Coder",
 				"What do you have?",
 				"↑↓ move",
 				"reachable, 2 models",
@@ -1005,7 +1005,7 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(res.code, 130, res.stderr);
 			match(res.stderr, /configuration cancelled/u);
 			match(res.stdout, /Selection \[1\]/u);
-			ok(!res.stdout.includes("Welcome to Clio Coder"), "the arrow-key wizard must not open on a pipe");
+			ok(!res.stdout.includes("Welcome to CLIO Coder"), "the arrow-key wizard must not open on a pipe");
 		} finally {
 			testEnv.cleanup();
 		}

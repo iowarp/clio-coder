@@ -185,7 +185,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 		detail:
 			legacyOwnedPanes > 0 || staleWatchTitles > 0
 				? `${legacyOwnedPanes} panes carry only the legacy clio_owner=clio:mux token; ${staleWatchTitles} owned panes retain the stale 'clio watch' title; quit/cleanup recognizes both token schemes`
-				: "no legacy Clio Coder pane ownership tokens or watch titles found",
+				: "no legacy CLIO Coder pane ownership tokens or watch titles found",
 	});
 	findings.push(journalWritabilityFinding());
 	return findings;

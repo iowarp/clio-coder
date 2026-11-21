@@ -1843,7 +1843,7 @@ export async function runOnboardingWizard(
 		options.mode === "edit"
 			? `Edit target: ${options.target.id}`
 			: options.mode === "first"
-				? "Welcome to Clio Coder"
+				? "Welcome to CLIO Coder"
 				: "Add a target",
 		"configure",
 	);

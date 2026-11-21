@@ -160,7 +160,7 @@ interface ChangeCount {
 	changePct: number | null;
 }
 
-/** The headline numbers for Clio Coder from summary.json; a field the summary lacks is null. */
+/** The headline numbers for CLIO Coder from summary.json; a field the summary lacks is null. */
 interface FlywheelUsage {
 	asOf: string | null;
 	npmDownloads7d: ChangeCount | null;
@@ -285,7 +285,7 @@ function count(value: number | null): string {
 function formatUsage(usage: FlywheelUsage): string {
 	const line = (label: string, value: string) => `  ${label.padEnd(18)}${value}\n`;
 	const trend = (value: ChangeCount | null) => (value === null ? "-" : `${value.current}${signed(value.changePct)}`);
-	let text = `Usage, Clio Coder${usage.asOf !== null ? ` (7 days to ${usage.asOf})` : ""}\n`;
+	let text = `Usage, CLIO Coder${usage.asOf !== null ? ` (7 days to ${usage.asOf})` : ""}\n`;
 	text += line("npm downloads", trend(usage.npmDownloads7d));
 	text += line("install script", count(usage.installScriptRequests7d));
 	text += line("GitHub", `${trend(usage.githubViews7d)} views, ${trend(usage.githubClones7d)} clones`);
