@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AskUserToolPolicy } from "../../tools/registry.js";
 import type { AutonomyExposure } from "../safety/autonomy.js";
 import { type DecisionLedgerEntry, type DecisionRecord, type DecisionSource, decisionRef } from "./entries.js";
+import { isOperatorTypedUserPayload, operatorTextOfUserPayload } from "./history.js";
 
 export interface DecisionLedgerEntryFields {
 	kind: "decisionLedger";
@@ -38,6 +39,31 @@ export interface AgentDecisionInput {
 	alternatives: ReadonlyArray<string>;
 	rationale: string;
 	label?: string;
+	/**
+	 * The operator's own words that state this choice, quoted verbatim from a typed or steering message on the
+	 * active branch. With them the decision is the operator's (`source: "operator-message"`) and may supersede an
+	 * operator decision with the same key, so a relayed ruling needs no ask_user round (M-3).
+	 */
+	operatorWords?: string;
+}
+
+/** The shortest quote that can state a ruling; "yes" or "ok" answer something, but name no choice. */
+export const OPERATOR_QUOTE_MIN_CHARS = 12;
+
+function collapse(text: string): string {
+	return text.replace(/\s+/gu, " ").trim();
+}
+
+/** Whether `quote` appears verbatim, whitespace collapsed, in a message the operator typed on this path. */
+function operatorSaid(entries: ReadonlyArray<unknown>, quote: string): boolean {
+	for (const entry of entries) {
+		if (!entry || typeof entry !== "object") continue;
+		const row = entry as { kind?: unknown; role?: unknown; payload?: unknown };
+		if (row.kind !== "message" || row.role !== "user" || !isOperatorTypedUserPayload(row.payload)) continue;
+		const text = operatorTextOfUserPayload(row.payload);
+		if (text !== null && collapse(text).includes(quote)) return true;
+	}
+	return false;
 }
 
 export interface AgentDecisionOutcome {
@@ -57,7 +83,8 @@ export interface DecisionBoardStore {
 	 * (`origin: "agent"`, `interviewId: "agent:<uuid>"`, `roundCount: 0`). An
 	 * earlier active agent decision with the same key is superseded first with
 	 * the new rationale as its correction. An active operator decision with the
-	 * same key is never overwritten by the model; that throws.
+	 * same key is overwritten only by the operator's own words (`operatorWords`,
+	 * checked against their messages on the active branch); otherwise that throws.
 	 */
 	recordAgentDecision(input: AgentDecisionInput): AgentDecisionOutcome;
 	/** Append an operator revision snapshot anchored to the active branch leaf. */
@@ -253,19 +280,35 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 		},
 		recordAgentDecision(input: AgentDecisionInput): AgentDecisionOutcome {
 			syncToSession();
+			const quote = input.operatorWords !== undefined ? collapse(input.operatorWords) : undefined;
+			if (quote !== undefined) {
+				if (Array.from(quote).length < OPERATOR_QUOTE_MIN_CHARS) {
+					throw new Error(
+						`decision board: operator words must quote the sentence that states the choice (at least ${OPERATOR_QUOTE_MIN_CHARS} characters)`,
+					);
+				}
+				if (!operatorSaid(deps.readEntries?.() ?? [], quote)) {
+					throw new Error(
+						"decision board: operator words were not found verbatim in any message the operator typed on this branch; quote their message exactly",
+					);
+				}
+			}
+			const source: DecisionSource = quote !== undefined ? "operator-message" : "agent";
 			let superseded: AgentDecisionOutcome["superseded"] = null;
 			for (const interview of interviews) {
 				const prior = interview.decisions.find((decision) => decision.key === input.key && decision.status === "active");
 				if (prior === undefined) continue;
-				if (interview.origin !== "agent" || prior.source !== "agent") {
+				if (quote === undefined && (interview.origin !== "agent" || prior.source !== "agent")) {
 					throw new Error(
-						`decision board: '${input.key}' is an operator decision (${interview.interviewId}); it can only be revised through ask_user`,
+						`decision board: '${input.key}' is an operator decision (${interview.interviewId}); revise it with operator_words quoting the operator's message that states the new choice, or through ask_user when no message does`,
 					);
 				}
 				superseded = { interviewId: interview.interviewId, key: prior.key };
 				break;
 			}
-			if (superseded !== null) revise(superseded.interviewId, superseded.key, "agent", input.rationale);
+			if (superseded !== null) {
+				revise(superseded.interviewId, superseded.key, source, quote !== undefined ? `"${quote}"` : input.rationale);
+			}
 			const now = (deps.now?.() ?? new Date()).toISOString();
 			const entries = deps.readEntries?.() ?? [];
 			const parentTurnId = deps.getActiveLeafTurnId?.() ?? activeLeafFromEntries(entries);
@@ -287,7 +330,8 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 						...(input.label ? { label: input.label } : {}),
 						status: "active",
 						decidedAt: now,
-						source: "agent",
+						source,
+						...(quote !== undefined ? { quote } : {}),
 						alternatives: [...input.alternatives],
 						rationale: input.rationale,
 					},

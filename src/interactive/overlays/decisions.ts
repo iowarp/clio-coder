@@ -153,6 +153,8 @@ function decisionLines(
 		if (decision.source === "agent" && decision.rationale)
 			facts.push({ label: "chosen by Clio", value: decision.rationale });
 		if (decision.operator_choice === true) facts.push({ label: "chosen by", value: "you, as your own choice" });
+		if (decision.source === "operator-message" && decision.quote)
+			facts.push({ label: "from your message", value: decision.quote });
 	}
 	if (facts.length > 0) {
 		lines.push(

@@ -615,7 +615,12 @@ export type DecisionStatus = "active" | "superseded";
  * through the `decide` tool, with the alternatives it rejected and why. Absent
  * on entries written before agent decisions existed, which were all operator.
  */
-export type DecisionSource = "operator" | "agent";
+/**
+ * Who made a decision or a revision: the operator through ask_user, the agent through `decide`, or the operator's
+ * own words in a typed or steering message, which `decide` quotes verbatim (M-3).
+ */
+export type DecisionSource = "operator" | "agent" | "operator-message";
+const DECISION_SOURCES: ReadonlyArray<DecisionSource> = ["operator", "agent", "operator-message"];
 
 export interface DecisionRecord {
 	key: string;
@@ -629,6 +634,8 @@ export interface DecisionRecord {
 	revisionSource?: DecisionSource;
 	correction?: string;
 	source?: DecisionSource;
+	/** The operator's words a `source: "operator-message"` decision quotes, verbatim from their message. */
+	quote?: string;
 	/** Options considered and not taken. Only agent decisions carry these. */
 	alternatives?: string[];
 	/** Why `value` won over `alternatives`. Only agent decisions carry this. */
@@ -1008,8 +1015,9 @@ export function isDecisionRecord(value: unknown): value is DecisionRecord {
 	if (!isString(value.key) || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(value.key)) return false;
 	if (!isString(value.value) || !isOneOf(value.status, DECISION_STATUSES) || !isString(value.decidedAt)) return false;
 	if (!isOptionalString(value.label) || !isOptionalString(value.source_question)) return false;
-	if (value.source !== undefined && !isOneOf(value.source, ["operator", "agent"])) return false;
-	if (value.revisionSource !== undefined && !isOneOf(value.revisionSource, ["operator", "agent"])) return false;
+	if (value.source !== undefined && !isOneOf(value.source, DECISION_SOURCES)) return false;
+	if (value.revisionSource !== undefined && !isOneOf(value.revisionSource, DECISION_SOURCES)) return false;
+	if ((value.source === "operator-message") !== isString(value.quote)) return false;
 	if (value.alternatives !== undefined && !isStringArray(value.alternatives)) return false;
 	if (!isOptionalString(value.rationale)) return false;
 	if (value.operator_choice !== undefined && (value.operator_choice !== true || value.source === "agent")) return false;

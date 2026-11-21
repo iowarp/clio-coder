@@ -833,6 +833,7 @@ export function planMainSandboxSpawn(
 					{ revealSettings: policy.env.maskSettings !== true },
 				)
 			: null;
+	const revealed = revealedFiles(policy.env.revealFiles);
 	const baseMasks = [
 		...workerSandboxMasks(),
 		...mainSandboxAgentMasks(),
@@ -845,7 +846,7 @@ export function planMainSandboxSpawn(
 			: []),
 		...hookMasks,
 		...(configMask === null && policy.env.maskSettings === true ? settingsFileMasks() : []),
-	];
+	].filter((mask) => !(mask.kind === "file" && revealed.has(mask.path)));
 	// The config mask goes after the scan, which drops a find inside a masked directory, even a revealed one.
 	const secretMasks = [
 		...(configMask !== null ? [configMask] : []),
@@ -917,6 +918,22 @@ export function planMainSandboxSpawn(
  * the host's /tmp, so those directories are masked here, and so is the
  * session's own SSH_AUTH_SOCK wherever it lives (#419).
  */
+/**
+ * The physical paths of the live-check login files the operator declared, which the launch leaves unmasked. Only a
+ * file mask on exactly that file is dropped: a mask on a directory holding it, or on a link to it, still stands.
+ */
+function revealedFiles(files: ReadonlyArray<string> | undefined): ReadonlySet<string> {
+	const out = new Set<string>();
+	for (const file of files ?? []) {
+		try {
+			out.add(realpathSync(file));
+		} catch {
+			// An absent login file has no mask to leave off.
+		}
+	}
+	return out;
+}
+
 export function mainSandboxAgentMasks(env: NodeJS.ProcessEnv = process.env, tmp: string = "/tmp"): SandboxMaskedPath[] {
 	const masks: SandboxMaskedPath[] = [];
 	try {
