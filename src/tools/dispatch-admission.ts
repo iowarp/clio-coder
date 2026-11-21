@@ -417,13 +417,13 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						message: `verification_check_per_run: '${perRun.check}' judges one sweep run per call; run it on the main thread as verify(check="${perRun.check}/<run>").`,
 					};
 				}
-				// A browser check drives a browser session that only the main agent's verify and a fleet loop's check command
-				// start; host verification runs a sealed argv, which for this kind is the dev server, not the check.
+				// For a browser check, host verification would run its sealed argv, which is the dev server, not the check.
+				// Workers get browser checks at S7; until then the main thread's verify and a fleet loop's code check run it.
 				const browserCheck = normalized.intent.verification.find((entry) => byId.get(entry.check)?.kind === "browser");
 				if (browserCheck !== undefined) {
 					return {
 						ok: false,
-						message: `verification_check_browser: '${browserCheck.check}' is a browser check, which host verification does not run for a worker; run it on the main thread as verify(check="${browserCheck.check}") or as a fleet loop's check command.`,
+						message: `verification_check_browser: '${browserCheck.check}' is a browser check: host verification would run its sealed argv, which is the dev server, not the check, so a worker cannot verify with it (workers get browser checks at S7). Run it on the main thread as verify(check="${browserCheck.check}"), or in a fleet loop as a commands.yaml code check running 'clio-coder verifiers dry-run ${browserCheck.check}'.`,
 					};
 				}
 				announceDotWriteRoot(deps, rawIntent);
