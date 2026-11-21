@@ -1311,43 +1311,6 @@ describe("safety gate boundary", () => {
 		}
 	});
 
-	it("reads a quoted here-document copied into a file as content, and keeps judging the file it writes (C-7)", () => {
-		const artifacts = {
-			artifacts: [
-				{
-					path: join(scratch, ".planning/interactions"),
-					protectedAt: "2026-11-20T00:00:00Z",
-					reason: "fixture",
-					source: "user" as const,
-				},
-			],
-		};
-		const body =
-			"export const f = (a: number[]) => a.length > [5]).map((x) => x > 0);\nif (n >= 2) out = n > m ? 1 : 0;\n";
-		const reason = (command: string) => protectedArtifactMutationBlockReason(artifacts, ToolNames.Bash, { command });
-		for (const command of [
-			`cat > src/probe.ts <<'EOF'\n${body}EOF`,
-			`cat >> tests/probe.test.ts <<'EOF'\n${body}EOF\nwc -l tests/probe.test.ts`,
-			`cat > src/probe.ts <<'EOF'\n${body}EOF\ngit diff src/probe.ts`,
-			`tee src/probe.ts <<'EOF'\n${body}EOF`,
-			`tee src/probe.ts > /dev/null <<'EOF'\n${body}EOF`,
-			"git add -A && git commit -q -F - <<'EOF'\nfix: map a > [5]) to b\nEOF",
-		])
-			strictEqual(reason(command), null, command);
-		for (const command of [
-			"cat > .planning/interactions/x <<'EOF'\nhello\nEOF",
-			`cat > src/probe.ts <<EOF\n${body}EOF`,
-			"cat > run.sh <<'EOF'\nrm -rf .planning\nEOF\nbash run.sh",
-			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
-			// Row 261 bounce: only a call whose later steps provably run nothing reads the body as data.
-			`cat > probe.ts <<'EOF'\n${body}EOF\nnode --version`,
-			"cat > a.txt <<'EOF'\nrm -rf .planning\nEOF\nbash a.'txt'",
-			"cat > a.txt <<'EOF'\nrm -rf .planning\nEOF\nbash a.t*",
-			"cat > a.txt <<'EOF'\nrm -rf .planning\nEOF\n'.' a.t*",
-		])
-			strictEqual(reason(command) !== null, true, command);
-	});
-
 	it("keeps a child whose name starts with .. inside its parent", () => {
 		const artifact = (path: string) => ({
 			path,

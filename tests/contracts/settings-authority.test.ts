@@ -96,37 +96,13 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		strictEqual(engine.evaluate(bash(command)).kind, "allow", command);
 	// XR-43: a quoted commit message is not a file operand; real readers and unquoted substitutions still are.
 	const commitMessage = "git add src/x.ts && git commit -q -F - <<'EOF'\nMention credentials.yaml\nEOF\n";
-	// C-22: a quoted body `cat` or `tee` copies into a file is content too; the file it writes stays judged.
-	for (const command of [
-		commitMessage,
-		"true <<-'EOF'\n\tcredentials.yaml\n\tEOF\n",
-		"cat > notes.yaml <<'EOF'\nsecrets:\n  - credentials.yaml,\nEOF",
-		"cat >> report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF",
-		"tee report.md > /dev/null <<'EOF'\nsee nope.key\nEOF",
-		// Row 261 bounce: tee's copy to stdout is the terminal, and an inert step after the copy reads nothing as code.
-		"tee report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF",
-		"cat > report.md <<'EOF'\nThe rail read credentials.yaml as a path.\nEOF\nwc -l report.md",
-	]) {
+	for (const command of [commitMessage, "true <<-'EOF'\n\tcredentials.yaml\n\tEOF\n"]) {
 		strictEqual(engine.evaluate(bash(command), "default", OPERATOR_DEFAULT).kind, "allow", command);
 	}
 	for (const command of [
 		`${commitMessage}cat credentials.yaml`,
 		"bash <<'EOF'\ncat credentials.yaml\nEOF",
 		"git commit -F - <<EOF\n$(cat credentials.yaml)\nEOF",
-		"cat > notes.md <<EOF\n$(cat credentials.yaml)\nEOF",
-		"cat > run.sh <<'EOF'\ncat credentials.yaml\nEOF\nbash run.sh",
-		// Row 261 bounce: a later step that may run the copy under a glob, a quote-split or variable name, or after
-		// redefining the copier keeps the body read as commands.
-		"cat > x.py <<'EOF'\nprint(open(\"credentials.yaml\").read())\nEOF\npython3 *.py",
-		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\nbash a.t*",
-		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\ncat a.t*|sh",
-		"cat > a.'txt' <<'EOF'\ncat credentials.yaml\nEOF\nbash a.txt",
-		"F=a; cat > \"$F.txt\" <<'EOF'\ncat credentials.yaml\nEOF\nbash a.txt",
-		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\n'.' a.t*",
-		"cat > a.txt <<'EOF'\ncat credentials.yaml\nEOF\ns''ource a.t*",
-		"printf -v PATH /tmp/evil; cat > /dev/null <<'EOF'\ncat credentials.yaml\nEOF",
-		"cat <<'EOF' | sh\ncat credentials.yaml\nEOF",
-		"cat credentials.yaml > out.txt <<'EOF'\nx\nEOF",
 		"wc -c < nope.key",
 		"if head nope.key; then :; fi",
 		"od -c *.key",
