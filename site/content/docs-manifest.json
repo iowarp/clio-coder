@@ -5,7 +5,7 @@
   "source": {
     "version": "0.8.4",
     "ref": "v085-copy",
-    "commit": "1fbd0856556665d09fd0053d59687af5d79fff4b",
+    "commit": "5fe393310498a03e7d93469bde5ce97940f8a4da",
     "mode": "working-tree"
   },
   "files": [
@@ -25,13 +25,13 @@
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "4476babd41a435d0f86af67958aa3c8d654c4b45adc7c2678d56a9a7e7d824d3",
-      "sourceSha256": "89d72eb226d37ca96cab1502aa35227666f52ba2151541a6cefaba2932e76f2c"
+      "sourceSha256": "7582fba00abff32019cdfb1e5e733ede9a2ff55430f2f7525f7292800e9a583e"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "4add7e52a24750a16f984ba11984d23abc5a57ec5b93be26c72aa55ff38d6e0f",
-      "sourceSha256": "5262b1d0b560c3eb51e9f1449b8d91336f33afb54c0fb7b6ba3c1cfaa64f077a"
+      "sourceSha256": "b8c349efc6e6fbea60ab98ffccc6cd2ff0d079f2f4f083b398bc4b4c3f6ae425"
     },
     {
       "path": "guide/tool-usage.md",
@@ -61,7 +61,7 @@
       "path": "guide/panes-and-files.md",
       "source": "docs/guide/panes-and-files.md",
       "sha256": "65beccb0cbc69a5a41552245f9c152bf34576a05f30d278ef1931854126623bf",
-      "sourceSha256": "76fc49aacb30bcc0936542f32014b06422632c9638084d4544e5997258a8d75e"
+      "sourceSha256": "421efa4d6332010860ec7d392889bd74ccde98f42ace393c85143c524ae50ac4"
     },
     {
       "path": "guide/gui.md",
@@ -109,13 +109,13 @@
       "path": "guide/doctor.md",
       "source": "docs/guide/doctor.md",
       "sha256": "7884785ff89529a316b6190e713c2fafa5712e19a3ad191561624bd9c04e23dc",
-      "sourceSha256": "a0e07da54a415634afbe4281591e4af281ee4bac0d1939e040a04d554baf4c86"
+      "sourceSha256": "24c33f4f52a63b7e1437c1012d99f58bc8e0cfad23024f68be2c9407b2b9a329"
     },
     {
       "path": "guide/troubleshooting.md",
       "source": "docs/guide/troubleshooting.md",
       "sha256": "464464b79cf22dd7204fc481630c18cdbbb4eb4cd0806993e8a1b66c53fff02f",
-      "sourceSha256": "c7912fa79128b20abe2fa6bcaea7ad076a5908483d45956c3a3984985062925f"
+      "sourceSha256": "e6d5a246fd4cf2be915d740180bebd57baa5e06b3c0526aa2f57412ed4f9e288"
     },
     {
       "path": "guide/quality-policy.md",
@@ -145,7 +145,7 @@
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
       "sha256": "f6130cefa0a3fc9c3624073e8aceecf070f9b7a982b538165e4dc6f8bbd692a9",
-      "sourceSha256": "1f8a72684c388b3471cb47eb11818847f48fd5a29cafb4923a85e841f0ba25b4"
+      "sourceSha256": "806f01d8648eaf9616c2187d4d560f7d757f6de951a7183c6d9963988b1e4884"
     },
     {
       "path": "guide/environment-variables.md",
@@ -157,7 +157,7 @@
       "path": "guide/system-one.md",
       "source": "docs/guide/system-one.md",
       "sha256": "07d944246bf7acb53ff8d4c484ef93edd323d234fd322f9f488358439a76a0e6",
-      "sourceSha256": "f9586fc12c33538b10924ce786bd26da12782efa238b9cecced4ad57e462e51b"
+      "sourceSha256": "6b7c695d5adc05b4aa6df8736e3372c37da472c7e492fd6e40f85ead109100b0"
     },
     {
       "path": "guide/information-flow.md",
