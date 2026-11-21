@@ -5280,9 +5280,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						: used;
 				// Nothing was summarized, so instructions given for the summary went unused, and the operator should know (bt-11).
 				const unused = instructions?.trim() ? ". Your compaction instructions were not used" : "";
+				// Every turn since the last checkpoint sat in the kept recent window; the count says why nothing moved (CLI-P55).
+				let checkpoint = -1;
+				for (const [index, entry] of entries.entries()) if (entry.kind === "compactionSummary") checkpoint = index;
+				const kept = entries.slice(checkpoint + 1).filter((entry) => entry.kind === "message" && entry.role === "user");
+				const turns =
+					kept.length > 0
+						? kept.length
+						: agentRuntime.agent.state.messages.filter((message) => message.role === "user").length;
 				emitNotice(
 					hasMessages
-						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet${unused}`
+						? `[/context compact] too short to compact (${budget}; turns protected: ${turns}); no older history can be summarized yet; a turn becomes summarizable once newer work pushes it out of the kept window${unused}`
 						: `[/context compact] session is empty; start a conversation first${unused}`,
 				);
 			}

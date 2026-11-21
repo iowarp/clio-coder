@@ -83,7 +83,9 @@ export function formatContextActivityRailLines(
 	const theme = clioTheme();
 	const outcome = activity.outcome;
 	const settled = activity.completedAtMs !== null;
-	const done = settled && activity.status === "completed";
+	// An operation that changed nothing finished no work: a check mark and a full bar read as done work (CLI-P55).
+	const unchanged = settled && outcome === "unchanged";
+	const done = settled && activity.status === "completed" && !unchanged;
 	const cancelled = outcome === "cancelled";
 	// A stop reports through the failed status but is the operator's choice, so it wears the cancel mark, not an error's.
 	const failed = activity.status === "failed" && !cancelled;
@@ -91,7 +93,15 @@ export function formatContextActivityRailLines(
 	const index = done ? stages.length : Math.max(0, stages.indexOf(activity.phase));
 	const elapsed = formatCompactMs(Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs));
 	const tone = outcome ? outcomeTone(outcome) : failed ? "error" : done ? "success" : "contextAction";
-	const glyph = cancelled ? GLYPH.cancelled : failed ? GLYPH.error : done ? GLYPH.ok : spinnerFrame(tick);
+	const glyph = cancelled
+		? GLYPH.cancelled
+		: failed
+			? GLYPH.error
+			: unchanged
+				? GLYPH.dot
+				: done
+					? GLYPH.ok
+					: spinnerFrame(tick);
 	const title = theme.fg(tone, `${glyph} ${CONTEXT_KIND_TITLES[activity.kind]}`);
 	const step = settled
 		? outcome
@@ -130,8 +140,9 @@ export function formatContextActivityRailLines(
 	// nothing is measurable yet, so the reading survives a rail too narrow for the message row.
 	const measure = !settled ? tokenMeasure(activity) : "";
 	const barWidth = measure && width - visibleWidth(measure) - 1 >= 12 ? width - visibleWidth(measure) - 1 : width;
-	const known =
-		activity.total !== null && activity.total > 0 && activity.current !== null
+	const known = unchanged
+		? 0
+		: activity.total !== null && activity.total > 0 && activity.current !== null
 			? Math.max(0, Math.min(1, activity.current / activity.total))
 			: activity.status === "completed"
 				? 1
@@ -147,8 +158,8 @@ export function formatContextActivityRailLines(
 	rows.push(
 		theme.fg(tone, GLYPH.barFull.repeat(known === null ? 0 : filled)) +
 			theme.fg("meterFree", GLYPH.barEmpty.repeat(known === null ? marker : 0)) +
-			(!done ? theme.fg(tone, failed ? GLYPH.error : cancelled ? GLYPH.cancelled : "▸") : "") +
-			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done ? 0 : 1)))) +
+			(!done && !unchanged ? theme.fg(tone, failed ? GLYPH.error : cancelled ? GLYPH.cancelled : "▸") : "") +
+			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done || unchanged ? 0 : 1)))) +
 			(barWidth < width ? ` ${theme.fg("toolMetadata", measure)}` : ""),
 	);
 	const counts =
