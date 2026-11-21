@@ -77,6 +77,38 @@ export function hostedInWorkspace(env: NodeJS.ProcessEnv = process.env): boolean
 
 /** A marker larger than this is not an exit summary Clio wrote, and is not printed. */
 const EXIT_SUMMARY_MAX_BYTES = 256 * 1024;
+/** How much of the pane's stderr a failed exit hands to the launcher, and how many of its last lines. */
+const FAILURE_TAIL_CHARS = 4096;
+const FAILURE_LINES = 3;
+const FAILURE_HEADER = "clio-coder-failure:";
+
+let failureTail = "";
+
+/**
+ * Called by a Clio that is starting in a hosted pane. A boot that fails prints its cause on the pane's stderr,
+ * and the pane closes with the workspace, so the launcher would report only an exit code. This keeps the last
+ * few kilobytes written to `stream` for a failed exit's marker.
+ */
+export function captureFailureForLauncher(stream: { write: (...args: never[]) => boolean } = process.stderr): void {
+	failureTail = "";
+	const original = stream.write.bind(stream) as (...args: unknown[]) => boolean;
+	stream.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
+		const text =
+			typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk).toString("utf8") : "";
+		failureTail = (failureTail + text).slice(-FAILURE_TAIL_CHARS);
+		return original(chunk, ...rest);
+	}) as typeof stream.write;
+}
+
+function failureLines(): string | null {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: strips terminal colour codes
+	const plain = failureTail.replace(/\u001b\[[0-9;?]*[A-Za-z]/gu, "");
+	const lines = plain
+		.split(/\r?\n/u)
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+	return lines.length === 0 ? null : lines.slice(-FAILURE_LINES).join("\n");
+}
 
 /**
  * Called by a Clio that is exiting. Inside Clio's own host it tells
@@ -91,7 +123,10 @@ export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env, exitCode
 	const paneId = env.HERDR_PANE_ID;
 	if (!hostedInWorkspace(env) || !socket || !paneId) return;
 	const marker = exitMarkerPath(socket, paneId);
-	const header = exitCode === 0 ? "" : `clio-coder-exit:${exitCode}\n`;
+	const failure = exitCode === 0 ? null : failureLines();
+	const header =
+		(exitCode === 0 ? "" : `clio-coder-exit:${exitCode}\n`) +
+		(failure === null ? "" : `${FAILURE_HEADER}${JSON.stringify(failure)}\n`);
 	// Sanitized pane ids hold no dot, so the staged name is never another pane's marker.
 	const staged = `${marker}.${process.pid}.tmp`;
 	try {
@@ -109,10 +144,12 @@ export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env, exitCode
 }
 
 /**
- * The exit status and summary a marker carries, or null when it is invalid. Read by the
- * launcher before it deletes the marker with the workspace.
+ * The exit status, summary and, for a failed exit, the pane's last stderr lines a marker carries, or null when
+ * it is invalid. Read by the launcher before it deletes the marker with the workspace.
  */
-export function readWorkspaceExitResult(marker: string): { exitCode: number; summary: string | null } | null {
+export function readWorkspaceExitResult(
+	marker: string,
+): { exitCode: number; summary: string | null; failure?: string } | null {
 	try {
 		const stat = lstatSync(marker);
 		if (!stat.isFile() || stat.size > EXIT_SUMMARY_MAX_BYTES) return null;
@@ -120,8 +157,15 @@ export function readWorkspaceExitResult(marker: string): { exitCode: number; sum
 		const header = /^clio-coder-exit:(\d+)\n/u.exec(raw);
 		const exitCode = header ? Number(header[1]) : 0;
 		if (exitCode > 255) return null;
-		const summary = header ? raw.slice(header[0].length) : raw;
-		return { exitCode, summary: summary || null };
+		let rest = header ? raw.slice(header[0].length) : raw;
+		let failure: string | undefined;
+		if (header && rest.startsWith(FAILURE_HEADER)) {
+			const end = rest.indexOf("\n");
+			const parsed: unknown = JSON.parse(rest.slice(FAILURE_HEADER.length, end < 0 ? undefined : end));
+			if (typeof parsed === "string") failure = parsed;
+			rest = end < 0 ? "" : rest.slice(end + 1);
+		}
+		return { exitCode, summary: rest || null, ...(failure !== undefined ? { failure } : {}) };
 	} catch {
 		return null;
 	}
