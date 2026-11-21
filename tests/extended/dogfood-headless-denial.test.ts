@@ -13,6 +13,7 @@ import {
 	HEADLESS_PERMISSION_DENIED_MARKER,
 	HEADLESS_PERMISSION_DENIED_REASON,
 } from "../../src/core/headless-permission.js";
+import { WORKER_OUTPUT_MAX_BYTES } from "../../src/domains/dispatch/event-pump.js";
 
 import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
 import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
@@ -225,6 +226,7 @@ describe("headless no-op contract through the built binary", () => {
 		prompt?: string;
 		flags?: ReadonlyArray<string>;
 		settingsPatch?: (yaml: string) => string;
+		projectFiles?: Record<string, string>;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -240,6 +242,7 @@ describe("headless no-op contract through the built binary", () => {
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		writeFileSync(join(project, "sentinel.txt"), "blocked is harmless fixture text\n");
+		for (const [name, text] of Object.entries(input.projectFiles ?? {})) writeFileSync(join(project, name), text);
 		if (input.packageScripts)
 			writeFileSync(join(project, "package.json"), JSON.stringify({ scripts: input.packageScripts }));
 		const turn = await runCli(
@@ -390,7 +393,8 @@ describe("headless no-op contract through the built binary", () => {
 			autonomy: "default",
 			steps: [writeProof],
 			failOnNoop: true,
-			reply: "done",
+			// The secret starts 13 bytes before the result object's bound would cut it.
+			reply: `done ${"x".repeat(WORKER_OUTPUT_MAX_BYTES - 38)} sk_live_${"A1b2C3d4E5".repeat(2)}A1b2 end`,
 		});
 		strictEqual(turn.code, 0, turn.stderr);
 		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
@@ -402,7 +406,12 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(evidence.firstPassSuccess, false);
 		// C-12: the main run's result object holds its answer, as a worker's does.
 		const result = readVerifiedRun(stateDir, envelope.id)?.result;
-		match(result?.state === "resolved" ? (result.value.output?.text ?? "") : "", /^done/);
+		const output = result?.state === "resolved" ? result.value.output : undefined;
+		match(output?.text ?? "", /^done/);
+		// C-12: the answer is redacted before its bound, so no part of a secret the bound cuts is stored.
+		strictEqual(output?.truncated, true);
+		doesNotMatch(output?.text ?? "", /sk_live_/);
+		ok(Buffer.byteLength(output?.text ?? "", "utf8") <= WORKER_OUTPUT_MAX_BYTES);
 	});
 
 	test("one blocked call and one successful write is not a no-op under --fail-on-noop", async () => {
@@ -472,7 +481,9 @@ describe("headless no-op contract through the built binary", () => {
 			autonomy: "default",
 			steps: [],
 			failOnNoop: true,
-			reply: "The answer is 42.",
+			flags: ["--output-schema", "answer.schema.json"],
+			projectFiles: { "answer.schema.json": JSON.stringify({ type: "object", required: ["answer"] }) },
+			reply: '```json\n{"answer": 42}\n```',
 		});
 		strictEqual(turn.code, 0, turn.stderr);
 		strictEqual(envelope.status, "completed");
@@ -480,6 +491,10 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(envelope.outcome, "succeeded");
 		// C-37: an answer that changed nothing needs no validation to be a first-pass success.
 		strictEqual((await inspectRunEvidence(stateDir, envelope.id)).firstPassSuccess, true);
+		// C-12: the result object stores the answer stdout printed, the validated JSON alone.
+		strictEqual(turn.stdout, '{"answer": 42}\n');
+		const result = readVerifiedRun(stateDir, envelope.id)?.result;
+		strictEqual(result?.state === "resolved" ? result.value.output?.text : undefined, '{"answer": 42}');
 	});
 
 	test("tools that all failed without a block are a no-op under --fail-on-noop", async () => {

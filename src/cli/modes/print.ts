@@ -51,6 +51,7 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
+import { createRedactionTally, redactSecretsText } from "../../domains/evidence/redact.js";
 import { describeMissing, missingFromFailedCall } from "../../domains/lifecycle/setup-status.js";
 import {
 	AUTONOMOUS_CAP_EXIT_CODE,
@@ -63,7 +64,7 @@ import {
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
-import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
+import { redactFinalUrlCredentials, redactSecretString, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import {
 	createRunEffectsRecorder,
 	type RunEffectsRecorder,
@@ -922,11 +923,26 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	for (const stat of stats.values()) count += stat.count;
 	return count;
 }
-/** The answer as a result object holds it: final, within the bound a worker's output seals under. */
-function boundedAnswer(text: string): RunResultOutput {
+/**
+ * The printed answer as a result object holds it, within the bound a worker's output seals under. It is redacted as the
+ * object store redacts before the bound: a bound first would cut a secret into a piece no redactor recognizes (#446).
+ */
+function boundedAnswer(answer: HeadlessStoredAnswer): RunResultOutput {
+	const text = redactSecretsText(redactSecretString(answer.text), createRedactionTally());
 	const bytes = Buffer.byteLength(text, "utf8");
-	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, "\n[output truncated]");
-	return { state: "final", text: bounded, bytes, truncated: bounded !== text };
+	// The marker follows the kept bytes, so they leave it room within the bound.
+	const marker = "\n[output truncated]";
+	const bounded =
+		bytes <= WORKER_OUTPUT_MAX_BYTES
+			? text
+			: truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES - Buffer.byteLength(marker, "utf8"), marker);
+	return { state: answer.state, text: bounded, bytes, truncated: bounded !== text };
+}
+
+/** What stdout printed as the run's answer; partial when the output token limit stopped it. */
+interface HeadlessStoredAnswer {
+	text: string;
+	state: RunResultOutput["state"];
 }
 
 /**
@@ -1012,8 +1028,8 @@ async function recordHeadlessMainAgentRun(input: {
 	stoppedChecks?: ReadonlyArray<{ id: string; command: string }>;
 	/** Passing dispatch run records still standing at the end, as the observed line names them (bt-verify7a). */
 	dispatchRuns?: ReadonlyArray<string>;
-	/** The run's printed answer, already redacted as stdout carries it; empty when the turn ended without one. */
-	answer?: string;
+	/** The answer stdout printed for this run; absent when it printed none. */
+	answer?: HeadlessStoredAnswer;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -1131,7 +1147,7 @@ async function recordHeadlessMainAgentRun(input: {
 		sessionId,
 		...(input.calls ? { callIds: input.calls.callIds } : {}),
 		// The answer seals in the result object as a worker's does, under the same bound (C-12).
-		...(input.answer !== undefined && input.answer.length > 0 ? { output: boundedAnswer(input.answer) } : {}),
+		...(input.answer !== undefined && input.answer.text.length > 0 ? { output: boundedAnswer(input.answer) } : {}),
 	};
 	try {
 		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal. The
@@ -1325,6 +1341,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal: HeadlessTerminalOutcome,
 		acceptance: ReadonlyArray<RunJsonVerifyResult> | null = null,
 		stoppedChecks: ReadonlyArray<{ id: string; command: string }> = [],
+		answer: HeadlessStoredAnswer | null = null,
 	): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
@@ -1355,10 +1372,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				acceptance,
 				stoppedChecks,
 				dispatchRuns,
-				answer: redactFinalUrlCredentials(
-					printedAnswer(result),
-					result.sawTerminatingToolResult || !result.outputExhausted,
-				),
+				...(answer !== null ? { answer } : {}),
 			});
 		})().catch((error: unknown) => {
 			process.stderr.write(
@@ -1768,7 +1782,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		failureMessage: null,
 	};
 	let stderrMessage: string | null = null;
-	let stdoutMessage: string | null = null;
+	// The answer a text run prints, computed once: stdout prints it and the result object stores it (C-12).
+	let answerMessage: string | null = null;
+	let answerState: RunResultOutput["state"] = "final";
 	if (termination.isShuttingDown()) {
 		// The turn did not fail; a signal ended it. Both this path and the drain
 		// hook read interruption from the coordinator, so whichever seals first
@@ -1823,7 +1839,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		// Text mode printed the chat loop's notice for a thinking-only stop as it arrived.
 		stderrMessage = mode === "text" && result.thinkingOnlyLength ? null : failureMessage;
-		if (mode === "text" && printedAnswer(result).length > 0) stdoutMessage = settledAnswer(printedAnswer(result));
+		if (printedAnswer(result).length > 0) {
+			answerMessage = settledAnswer(printedAnswer(result));
+			answerState = "partial";
+		}
 	} else if (result.noAnswer !== null) {
 		// Earlier chatter or a line of markup is not the answer the caller asked for, whatever it reads like.
 		const failureMessage = `clio-coder run: the turn ended without an answer. ${result.noAnswer}`;
@@ -1888,23 +1907,21 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "verify_failed" };
 			stderrMessage = failureMessage;
 		}
-		if (mode === "text") {
-			// A terminating tool ends the turn in place of an assistant message, so its
-			// result is the answer and any assistant text before it is mid-workflow
-			// chatter the model never offered as a reply. Printing that chatter instead
-			// hands the operator a dangling "let me try..." for a turn that succeeded.
-			const answer = printedAnswer(result);
-			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
-		}
+		// A terminating tool ends the turn in place of an assistant message, so its
+		// result is the answer and any assistant text before it is mid-workflow
+		// chatter the model never offered as a reply. Printing that chatter instead
+		// hands the operator a dangling "let me try..." for a turn that succeeded.
+		const answer = printedAnswer(result);
+		answerMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		// SPEC 6.8: an answer that still does not match outranks verify, noop and limitation (6.5 order); nothing
 		// reaches stdout or `-o`. A match prints the validated JSON alone.
 		if (structuredVerdict !== null && !structuredVerdict.ok) {
 			const failureMessage = schemaMismatchMessage(structuredVerdict.errors);
 			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "schema_mismatch" };
 			stderrMessage = failureMessage;
-			stdoutMessage = null;
-		} else if (structuredVerdict?.ok === true && mode === "text" && terminal.exitCode === 0) {
-			stdoutMessage = structuredVerdict.json;
+			answerMessage = null;
+		} else if (structuredVerdict?.ok === true && terminal.exitCode === 0) {
+			answerMessage = structuredVerdict.json;
 		}
 		if (terminal.exitCode === 0 && !runStats.changeAsked) {
 			const notice = blockedCallsNotice(runStats);
@@ -1943,7 +1960,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			outcomeDetail: "permission_required",
 		};
 		stderrMessage = permissionStop;
-		stdoutMessage = null;
+		answerMessage = null;
 	}
 	const unscripted = scripted !== undefined && !termination.isShuttingDown() ? scripted.unscripted() : null;
 	if (scripted !== undefined && unscripted !== null) {
@@ -1956,7 +1973,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			outcomeDetail: "unscripted",
 		};
 		stderrMessage = failureMessage;
-		stdoutMessage = null;
+		answerMessage = null;
 	}
 	const exitCode = terminal.exitCode;
 	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
@@ -1988,22 +2005,26 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	}
 	writeVerifyFrame(verify);
 
+	if (answerMessage !== null) {
+		// CLI-P42: a run the observation pool stopped says so after its answer, as `run --agent` prints its limits.
+		const notVerified = options.outputSchema === undefined ? sealedFactsNotVerified(sealedCompletion.facts) : "";
+		if (notVerified.length > 0) answerMessage = `${answerMessage}\n${notVerified.replace(/\n$/u, "")}`;
+	}
+	const storedAnswer = answerMessage !== null ? { text: answerMessage, state: answerState } : null;
+
 	await frameChain;
 	// A shutdown seals what the drain would, whichever of this path and the drain arrives first.
-	if (termination.isShuttingDown()) await recordRun(terminal, verify ?? [], stoppedVerifyChecks(verify ?? []));
-	else await recordRun(terminal, verify);
+	if (termination.isShuttingDown())
+		await recordRun(terminal, verify ?? [], stoppedVerifyChecks(verify ?? []), storedAnswer);
+	else await recordRun(terminal, verify, [], storedAnswer);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);
 	}
-	if (stdoutMessage !== null) {
-		// CLI-P42: a run the observation pool stopped says so after its answer, as `run --agent` prints its limits.
-		const notVerified =
-			mode === "text" && options.outputSchema === undefined ? sealedFactsNotVerified(sealedCompletion.facts) : "";
-		if (notVerified.length > 0) stdoutMessage = `${stdoutMessage}\n${notVerified.replace(/\n$/u, "")}`;
+	if (answerMessage !== null && mode === "text") {
 		// CLI-P22: text mode's `-o` holds exactly these bytes; a v1 or v2 JSON run reads its answer from its frames.
-		if (mode === "text") noteTextAnswer(stdoutMessage);
-		writeRawStdout(`${stdoutMessage}\n`);
+		noteTextAnswer(answerMessage);
+		writeRawStdout(`${answerMessage}\n`);
 	}
 	// What the harness saw, beside the model's account; stdout stays the answer and the exit code is unchanged.
 	const observedLine =
