@@ -9,8 +9,10 @@
  *
  * Invariants (pinned by tests/contracts/dispatch.test.ts):
  *   - Each recognized outcome (ok|error|blocked) increments its own bucket and
- *     count, so count == ok + errors + blocked whenever every recorded finish
- *     carried an outcome. The worker ToolFinishEvent always does; a synthetic
+ *     count, so count == ok + errors + blocked + withheld whenever every recorded
+ *     finish carried an outcome. An `ok` finish the spent observation pool
+ *     stopped before it ran (`notExecuted: "observation_budget"`, C-17) counts
+ *     withheld instead of ok. The worker ToolFinishEvent always does; a synthetic
  *     finish without an outcome increments count only.
  *   - totalDurationMs accumulates only finite non-negative durations.
  *   - snapshot is sorted by tool-name UTF-16 code unit ascending so receipt
@@ -27,6 +29,8 @@ export interface ToolFinishPayload {
 	durationMs?: number;
 	outcome?: "ok" | "error" | "blocked";
 	actionClass?: string;
+	/** An `ok` call that did no work (C-17); see `ToolFinishEvent.notExecuted`. */
+	notExecuted?: string | undefined;
 }
 
 export interface ToolStartPayload {
@@ -58,6 +62,18 @@ function blankStat(tool: string): ToolCallStat {
 	return { tool, count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0 };
 }
 
+/**
+ * The `details.notExecuted` type a tool result carries when its call returned a notice without running (C-17), for
+ * the stats folds that see the result rather than the finish event: a gateway chain's steps and a headless run.
+ */
+export function resultNotExecuted(result: unknown): string | undefined {
+	if (result === null || typeof result !== "object") return undefined;
+	const details = (result as { details?: unknown }).details;
+	if (details === null || typeof details !== "object") return undefined;
+	const value = (details as { notExecuted?: unknown }).notExecuted;
+	return typeof value === "string" ? value : undefined;
+}
+
 export function recordToolFinish(stats: Map<string, ToolCallStat>, payload: ToolFinishPayload): void {
 	if (typeof payload.tool !== "string") return;
 	const existing = stats.get(payload.tool) ?? blankStat(payload.tool);
@@ -65,7 +81,9 @@ export function recordToolFinish(stats: Map<string, ToolCallStat>, payload: Tool
 	if (typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0) {
 		existing.totalDurationMs += payload.durationMs;
 	}
-	if (payload.outcome === "ok") existing.ok += 1;
+	if (payload.outcome === "ok" && payload.notExecuted === "observation_budget")
+		existing.withheld = (existing.withheld ?? 0) + 1;
+	else if (payload.outcome === "ok") existing.ok += 1;
 	else if (payload.outcome === "error") existing.errors += 1;
 	else if (payload.outcome === "blocked") existing.blocked += 1;
 	// The store tool's class depends on its op, so the tool name alone reads a

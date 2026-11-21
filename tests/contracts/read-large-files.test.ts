@@ -4,6 +4,11 @@ import { appendFileSync, closeSync, openSync, statSync, truncateSync, writeFileS
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
+import { ToolNames } from "../../src/core/tool-names.js";
+import { recordToolFinish } from "../../src/domains/dispatch/tool-stats.js";
+import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { createConsultTool } from "../../src/tools/consult.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { runGatewayChain } from "../../src/tools/gateway/chain.js";
@@ -18,6 +23,7 @@ import {
 	readTestSeams,
 	readTool,
 } from "../../src/tools/read.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { truncateTail } from "../../src/tools/truncate.js";
 import { makeScratchHome, type ScratchHome } from "../harness/scratch-env.js";
 
@@ -600,9 +606,10 @@ describe("read windowed reader", () => {
 		const options = { sessionId: "read-parallel", turnId: scratch.dir };
 		const results = await Promise.all(paths.map((path) => readTool.run({ path }, options)));
 		// Each sibling used to reserve against the untouched pool across its stat
-		// and return a full 4 KiB slice, spending the 8 KiB pool twice over.
+		// and return a full 4 KiB slice, spending the 8 KiB pool twice over. A read
+		// reserves once its stat resolves (C-17), so which two win is the stat order.
 		const exhausted = results.map((result) => result.kind === "ok" && result.output.startsWith("[observation budget"));
-		deepStrictEqual(exhausted, [false, false, true, true]);
+		deepStrictEqual([...exhausted].sort(), [false, false, true, true]);
 	});
 
 	it("reserves a narrow parallel read by its range and words sibling reservations apart from returned bytes", async () => {
@@ -619,13 +626,112 @@ describe("read windowed reader", () => {
 			[10, 20, 30, 40, 50, 60].map((line) => `L${String(line).padStart(10, "0")} `),
 		);
 		const options = { sessionId: "read-narrow", turnId: `${scratch.dir}:b` };
-		const [, , refused] = await Promise.all([
-			readTool.run({ path }, options),
-			readTool.run({ path }, options),
-			readTool.run({ path, offset: 5, limit: 1 }, options),
-		]);
-		ok(refused?.kind === "ok");
-		match(refused.output, /: 0B already returned and 32\.0KB reserved by sibling calls of 32\.0KB\./);
+		// Hold both whole reads once they hold their reservation, so the narrow sibling reserves after them.
+		let holding = 0;
+		let release = () => {};
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let bothHeld = () => {};
+		const held = new Promise<void>((resolve) => {
+			bothHeld = resolve;
+		});
+		readTestSeams.afterIdentity = async () => {
+			holding += 1;
+			if (holding === 2) bothHeld();
+			await released;
+		};
+		try {
+			const whole = [readTool.run({ path }, options), readTool.run({ path }, options)];
+			await held;
+			const refused = await readTool.run({ path, offset: 5, limit: 1 }, options);
+			release();
+			await Promise.all(whole);
+			ok(refused.kind === "ok");
+			match(refused.output, /: 0B already returned and 32\.0KB reserved by sibling calls of 32\.0KB\./);
+		} finally {
+			readTestSeams.afterIdentity = undefined;
+		}
+	});
+
+	it("reserves a whole-file read by its size and a range by 256 bytes a line, not the per-call cap (C-17)", async () => {
+		configureGuardrails({ readMaxBytes: 16384, observationTurnBudgetBytes: 32768 });
+		const small = ["a", "b", "c", "d", "e"].map((name) => join(scratch.dir, `${name}.small.txt`));
+		for (const path of small) writeFileSync(path, Array.from({ length: 16 }, (_, i) => fixedLine(i + 1, 64)).join(""));
+		const whole = await Promise.all(
+			small.map((path, n) =>
+				readTool.run({ path, line_numbers: n % 2 === 0 }, { sessionId: "c17-reserve", turnId: `${scratch.dir}:whole` }),
+			),
+		);
+		// Five 1 KiB files once reserved 16 KiB each, so the third was refused against a pool that returned 2 KiB.
+		deepStrictEqual(
+			whole.map((result) => (result.kind === "ok" ? result.output.startsWith("[observation budget") : result.message)),
+			[false, false, false, false, false],
+		);
+		const path = join(scratch.dir, "ledger.txt");
+		writeFileSync(path, Array.from({ length: 400 }, (_, i) => fixedLine(i + 1, 64)).join(""));
+		const ranges = await Promise.all(
+			[1, 51, 101, 151, 201].map((offset) =>
+				readTool.run({ path, offset, limit: 8 }, { sessionId: "c17-reserve", turnId: `${scratch.dir}:range` }),
+			),
+		);
+		deepStrictEqual(
+			ranges.map((result) => (result.kind === "ok" ? result.output.slice(0, 12) : result.message)),
+			[1, 51, 101, 151, 201].map((line) => `L${String(line).padStart(10, "0")} `),
+		);
+	});
+
+	it("charges the turn pool what the shaped result delivered, not the bytes before the session cap (C-17)", async () => {
+		configureGuardrails({ readMaxBytes: 16384, observationTurnBudgetBytes: 65536 });
+		const path = join(scratch.dir, "shaped.txt");
+		writeFileSync(path, Array.from({ length: 128 }, (_, i) => fixedLine(i + 1, 64)).join(""));
+		const turn = { sessionId: "c17-shaped", turnId: scratch.dir };
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch.dir }), autonomy: () => "default" });
+		registry.register(readTool);
+		const verdict = await registry.invoke({ tool: "read", args: { path } }, { ...turn, toolResultMaxBytes: 4096 });
+		ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify(verdict).slice(0, 300));
+		const delivered = Buffer.byteLength(verdict.result.modelContext ?? verdict.result.output);
+		ok(delivered < 8192, `the session cap shaped the result: ${delivered}`);
+		const next = await readTool.run({ path, limit: 1 }, turn);
+		strictEqual((next.details?.observation as Observation).budget?.usedBeforeBytes, delivered);
+	});
+
+	it("types a budget notice as not executed and counts it withheld in tool stats, not ok (C-17)", async () => {
+		configureGuardrails({ readMaxBytes: 1024, observationTurnBudgetBytes: 1024 });
+		const path = join(scratch.dir, "withheld.txt");
+		writeFileSync(path, "alpha\nbeta\n");
+		const turn = { sessionId: "c17-withheld", turnId: scratch.dir };
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch.dir }), autonomy: () => "default" });
+		registry.register({ ...readTool, run: (args) => readTool.run(args, turn) });
+		const events: ToolFinishEvent[] = [];
+		for (let n = 0; n < 2; n += 1)
+			await invokeRegisteredTool(registry, ToolNames.Read, { path }, { telemetry: { onFinish: (e) => events.push(e) } });
+		const notice = await readTool.run({ path }, turn);
+		strictEqual(notice.details?.notExecuted, "observation_budget");
+		const stats = new Map<string, ToolCallStat>();
+		for (const event of events) recordToolFinish(stats, event);
+		const stat = stats.get(ToolNames.Read);
+		deepStrictEqual([stat?.count, stat?.ok, stat?.withheld], [2, 1, 1]);
+	});
+
+	it("escalates the exhausted-pool refusal on the fourth batch, never on the fourth sibling of one batch (C-17)", async () => {
+		configureGuardrails({ readMaxBytes: 1024, observationTurnBudgetBytes: 1024 });
+		const path = join(scratch.dir, "batches.txt");
+		writeFileSync(path, "alpha\nbeta\n");
+		const turn = { sessionId: "c17-batches", turnId: scratch.dir };
+		ok((await readTool.run({ path }, turn)).kind === "ok");
+		const batch = (correlationId: string, size: number) =>
+			Promise.all(Array.from({ length: size }, () => readTool.run({ path }, { ...turn, correlationId })));
+		const kinds = async (correlationId: string, size: number) => (await batch(correlationId, size)).map((r) => r.kind);
+		deepStrictEqual(await kinds("round-1", 4), ["ok", "ok", "ok", "ok"]);
+		deepStrictEqual(await kinds("round-2", 2), ["ok", "ok"]);
+		deepStrictEqual(await kinds("round-3", 1), ["ok"]);
+		const fourth = await batch("round-4", 2);
+		deepStrictEqual(
+			fourth.map((r) => r.kind),
+			["error", "error"],
+		);
+		match(fourth[0]?.kind === "error" ? fourth[0].message : "", /This is the 4th tool batch to hit it/);
 	});
 
 	it("reports a file that changes in flight with both identities and a notice", async () => {

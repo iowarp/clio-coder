@@ -45,6 +45,7 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { validateEngineToolArguments } from "../engine/ai.js";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../engine/types.js";
+import { OBSERVATION_BUDGET_NOT_EXECUTED } from "./observation.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
 import { prepareToolArgs } from "./registry.js";
@@ -188,6 +189,11 @@ export interface ToolFinishEvent {
 	 * `verify` check that is not declared. A validation it never ran is not a failed validation (J2-F01).
 	 */
 	unresolved?: true;
+	/**
+	 * An `ok` result for a call that did no work: the spent per-turn observation pool stopped it (C-17,
+	 * `OBSERVATION_BUDGET_NOT_EXECUTED`). Tool stats count it withheld, not ok.
+	 */
+	notExecuted?: "observation_budget";
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
@@ -361,6 +367,9 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		...(resultFacts ? { callFacts: resultFacts } : {}),
 		...(verdict.executionStarted === true ? { executionStarted: true as const } : {}),
 		...(verdict.executionDecisions !== undefined ? { executionDecisions: verdict.executionDecisions } : {}),
+		...(verdict.result.kind === "ok" && verdict.result.details?.notExecuted === OBSERVATION_BUDGET_NOT_EXECUTED
+			? { notExecuted: OBSERVATION_BUDGET_NOT_EXECUTED }
+			: {}),
 	};
 	if (verdict.result.kind === "error") {
 		finish(
@@ -521,6 +530,7 @@ function emitFinish(
 		deniedPark?: true;
 		redundantRepeat?: true;
 		unresolved?: true;
+		notExecuted?: "observation_budget";
 		denial?: ToolDenial;
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
@@ -542,6 +552,7 @@ function emitFinish(
 	if (extra?.deniedPark === true) event.deniedPark = true;
 	if (extra?.redundantRepeat === true) event.redundantRepeat = true;
 	if (extra?.unresolved === true) event.unresolved = true;
+	if (extra?.notExecuted !== undefined) event.notExecuted = extra.notExecuted;
 	if (extra?.denial !== undefined) event.denial = extra.denial;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;

@@ -80,6 +80,7 @@ import { type WorkspaceSnapshotTrigger, workspaceSnapshotTrigger } from "../doma
 import type { ImageContent } from "../engine/types.js";
 import { approvalGiver, gateReasonText, withApprovalNote } from "./approval-note.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
+import { settleObservationCharge } from "./observation.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import { type ToolResultDigest, type ToolResultDisposition, toolResultContextText } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
@@ -1577,6 +1578,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					options,
 					resultDisposition,
 				);
+				// The turn pool pays for what the model receives once shaping has cut the result (C-17).
+				settleObservationCharge(finalResult);
 				return { kind: "ok", result: finalResult, decision, ...execution };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);

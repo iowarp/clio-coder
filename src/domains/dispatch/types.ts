@@ -540,6 +540,8 @@ export interface ToolCallStat {
 	totalDurationMs: number;
 	/** Successful calls the safety layer classed as write or destructive, for tools whose class depends on arguments. */
 	okWrites?: number;
+	/** Calls that returned a notice without running: the spent per-turn observation pool stopped them (C-17). */
+	withheld?: number;
 }
 
 /**

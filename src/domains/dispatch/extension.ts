@@ -539,6 +539,7 @@ import {
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
+	resultNotExecuted,
 	snapshotToolStats,
 	snapshotUnfinishedTools,
 	summarizeToolActivity,
@@ -9085,6 +9086,7 @@ export function createDispatchBundle(
 						recordToolFinish(toolStats, {
 							tool: child.capability,
 							outcome: child.admission.outcome,
+							notExecuted: resultNotExecuted(child.result),
 						});
 						const guardBlock =
 							child.admission.decision === "blocked" && child.admission.reasonCode === TOOL_GUARD_REASON_CODE;

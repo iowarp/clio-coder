@@ -22,6 +22,7 @@ import {
 	observationBudgetExhausted,
 	releaseObservation,
 	reserveObservation,
+	widenObservationReservation,
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { DocumentKind } from "./read-documents/index.js";
@@ -166,19 +167,26 @@ export function readMaxBytes(): number {
 	return Math.max(MIN_READ_CAP_BYTES, resolveGuardrail("readMaxBytes"));
 }
 
-// A narrow read (a small `limit` or `tail`) holds this much of the shared turn
-// pool per requested line plus room for its notices, instead of the whole
-// per-call cap, so parallel siblings are not refused against a worst case it
-// cannot fill. A line longer than its share is cut at the window with the
-// usual continuation. Images are decoded whole, so they keep the full cap.
-const NARROW_READ_BYTES_PER_LINE = 4 * 1024;
-const NARROW_READ_BASE_BYTES = 2 * 1024;
+// A read holds only what it can return from the shared turn pool, so parallel
+// siblings are not refused against a worst case it cannot fill (C-17): a whole
+// file its size plus line numbers, a range (`limit` or `tail`) 256 bytes a
+// requested line, each with room for its notices and never above the per-call
+// cap. A line longer than its share is cut at the window with the usual
+// continuation. Images are decoded whole, so they keep the full cap, and a
+// read that turns out to render an image, a document or a bundled doc's index
+// widens its hold once it knows (`widenObservationReservation`).
+const RANGE_READ_BYTES_PER_LINE = 256;
+const READ_NOTICE_BYTES = 2 * 1024;
 const IMAGE_PATH_PATTERN = /\.(?:png|jpe?g|gif|webp)$/iu;
 
-function narrowReadBytes(pathArg: string, request: ReadRequest): number | undefined {
-	const lines = request.tail ?? request.limit;
-	if (lines === null || IMAGE_PATH_PATTERN.test(pathArg)) return undefined;
-	return NARROW_READ_BASE_BYTES + lines * NARROW_READ_BYTES_PER_LINE;
+function readReservationBytes(pathArg: string, request: ReadRequest, fileBytes: number): number | undefined {
+	if (IMAGE_PATH_PATTERN.test(pathArg)) return undefined;
+	const window = request.tail ?? request.limit;
+	// A file has at most one line per byte plus a last unterminated one, and a window shows at most DEFAULT_MAX_LINES.
+	const lines = Math.min(window ?? DEFAULT_MAX_LINES, DEFAULT_MAX_LINES, fileBytes + 1);
+	const labelBytes = String(request.offset + fileBytes + 1).length + " | ".length;
+	const whole = fileBytes + (request.numbered ? lines * labelBytes : 0) + READ_NOTICE_BYTES;
+	return window === null ? whole : Math.min(whole, window * RANGE_READ_BYTES_PER_LINE + READ_NOTICE_BYTES);
 }
 
 // Number only an already bounded slice, retaining its explicit physical line
@@ -895,20 +903,13 @@ export const readTool: ToolSpec = {
 		// hatch appears exactly when the pool is exhausted, so charging these
 		// reads to it made the hatch a dead end. The per-call byte cap still
 		// bounds each slice. A headless run's tracker still hears that the read returned (CLI-P42).
-		const requestedBytes = narrowReadBytes(pathArg, request);
 		const poolEvent = options?.observationPoolEvent;
-		const reservation = isSessionOffloadPath(filePath, options?.sessionId)
-			? reserveObservation(
-					readMaxBytes(),
-					poolEvent === undefined ? undefined : { observationPoolEvent: poolEvent },
-					requestedBytes,
-				)
-			: reserveObservation(readMaxBytes(), options, requestedBytes);
-		// Charge the cap in the same synchronous step as the reservation: the stat
-		// below awaits, and parallel siblings reserving meanwhile must see this
-		// spend. Finalize reconciles it to the bytes returned; the finally block
-		// refunds every early return and error. An exhausted slice charges nothing.
-		commitObservationReservation(reservation);
+		const poolOptions = isSessionOffloadPath(filePath, options?.sessionId)
+			? poolEvent === undefined
+				? undefined
+				: { observationPoolEvent: poolEvent }
+			: options;
+		let held: ObservationReservation | null = null;
 		let handle: FileHandle | null = null;
 		let file: ReadFileIdentity | null = null;
 		try {
@@ -920,6 +921,17 @@ export const readTool: ToolSpec = {
 			file = { bytes: entry.size, mtimeMs: entry.mtimeMs };
 			if (!entry.isFile())
 				return { kind: "error", message: notAFileMessage(filePath, entry.isDirectory()), details: { file } };
+			// Reserve once the stat sizes what this read can return (C-17), and charge the hold in the same synchronous
+			// step: the open below awaits, and parallel siblings reserving meanwhile must see it. Finalize reconciles it
+			// to the bytes returned; the finally block refunds every early return and error. An exhausted slice charges
+			// nothing.
+			const reservation = reserveObservation(
+				readMaxBytes(),
+				poolOptions,
+				readReservationBytes(pathArg, request, entry.size),
+			);
+			held = reservation;
+			commitObservationReservation(reservation);
 			if (reservation.exhausted) {
 				const exhausted = observationBudgetExhausted({
 					tool: ToolNames.Read,
@@ -938,10 +950,14 @@ export const readTool: ToolSpec = {
 				return { kind: "error", message: notAFileMessage(filePath, opened.isDirectory()), details: { file } };
 			await readTestSeams.afterIdentity?.(file, filePath);
 			const first = await readExact(handle, 0, Math.min(file.bytes, READ_SCAN_CHUNK_BYTES));
-			if (detectSupportedImageMimeType(first) !== null)
+			if (detectSupportedImageMimeType(first) !== null) {
+				widenObservationReservation(reservation, readMaxBytes());
 				return await readImage(handle, pathArg, file, reservation, options);
+			}
 			const kind = detectDocumentKind(filePath, first);
 			if (kind !== null) {
+				// A rendered document's size is not its file's: a PDF's text or an archive's listing can exceed it.
+				widenObservationReservation(reservation, readMaxBytes());
 				const documentRequest = {
 					...request,
 					...(pages !== undefined ? { pages } : {}),
@@ -960,10 +976,10 @@ export const readTool: ToolSpec = {
 			if (nul >= 0) return refuseBinary(pathArg, nul, file);
 			const lastByte =
 				file.bytes <= first.length ? first[file.bytes - 1] : (await readExact(handle, file.bytes - 1, 1))[0];
-			const docsIndex =
-				defaultDocsWindow && (await isBundledDoc(filePath))
-					? await bundledDocIndex(handle, file, reservation.callCapBytes, request.signal)
-					: null;
+			const bundledDoc = defaultDocsWindow && (await isBundledDoc(filePath));
+			// The section index rides beside the head, so a bundled doc keeps the per-call cap it always had.
+			if (bundledDoc) widenObservationReservation(reservation, readMaxBytes());
+			const docsIndex = bundledDoc ? await bundledDocIndex(handle, file, reservation.callCapBytes, request.signal) : null;
 			if (docsIndex !== null) request.limit = DEFAULT_DOCS_HEAD_LINES;
 			const plan: ReadPlan = {
 				file,
@@ -1014,7 +1030,7 @@ export const readTool: ToolSpec = {
 			}
 			return { kind: "error", message: `read: ${msg}` };
 		} finally {
-			releaseObservation(reservation);
+			if (held !== null) releaseObservation(held);
 			if (handle !== null) await handle.close().catch(() => undefined);
 		}
 	},

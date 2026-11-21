@@ -36,6 +36,7 @@ import {
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
 import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
+import { resultNotExecuted } from "../../domains/dispatch/tool-stats.js";
 import type {
 	RunEnvelope,
 	RunKind,
@@ -598,8 +599,12 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		stat.count += 1;
 		const durationMs = durationMsFromEvent(event);
 		if (durationMs !== undefined) stat.totalDurationMs += durationMs;
+		// A notice the spent observation pool returned in place of the call is withheld, not ok (C-17).
+		const withheld = resultNotExecuted(event.result) === "observation_budget";
 		if (outcome === "blocked") stat.blocked += 1;
 		else if (outcome === "error") stat.errors += 1;
+		else if ((outcome === "ok" || (outcome === undefined && !event.isError)) && withheld)
+			stat.withheld = (stat.withheld ?? 0) + 1;
 		else if (outcome === "ok") stat.ok += 1;
 		else if (outcome === undefined) {
 			if (event.isError) stat.errors += 1;
