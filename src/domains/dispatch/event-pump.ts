@@ -16,6 +16,7 @@
  * degrade live display; every receipt-bearing fact was already folded.
  */
 
+import { ToolNames } from "../../core/tool-names.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
 	type ResultContract,
@@ -245,6 +246,38 @@ export function durableAssistantTextFromEvent(event: unknown): string {
 	return assistantTextFromContent(event.message.content);
 }
 
+const TERMINAL_ARTIFACT_KINDS: ReadonlySet<string> = new Set(["plan", "review", "report"]);
+
+/**
+ * The document a terminal artifact call writes, from its start arguments:
+ * the direct `artifact` tool or a gateway `op=call` of it. Null for any other call.
+ */
+function terminalArtifactBody(toolName: unknown, args: unknown): string | null {
+	if (!isRecord(args)) return null;
+	const call =
+		toolName === ToolNames.Artifact
+			? args
+			: toolName === ToolNames.Gateway && args.op === "call" && args.capability === ToolNames.Artifact
+				? args.args
+				: null;
+	if (!isRecord(call) || typeof call.kind !== "string" || !TERMINAL_ARTIFACT_KINDS.has(call.kind)) return null;
+	const content = typeof call.content === "string" ? call.content.trim() : "";
+	if (content.length === 0) return null;
+	const title = typeof call.title === "string" ? call.title.trim() : "";
+	return title.length > 0 && !content.startsWith("#") ? `# ${title}\n\n${content}` : content;
+}
+
+/**
+ * The artifact tool's one-line receipt ("wrote plan artifact (712B) to <path>") when the call settled as one. The
+ * start arguments already named an artifact call; a gateway call reports `details.kind` "ok", so only the written
+ * `paths` mark the document as landed.
+ */
+function terminalArtifactReceipt(result: unknown): string | null {
+	if (!isRecord(result) || !isRecord(result.details) || !Array.isArray(result.details.paths)) return null;
+	const line = assistantTextFromContent(result.content).trim().split("\n")[0] ?? "";
+	return line.length > 0 ? line : null;
+}
+
 function boundedOutput(state: RunResultOutput["state"], text: string, maxBytes: number): RunResultOutput {
 	const bytes = Buffer.byteLength(text, "utf8");
 	const bounded = truncateUtf8(text, maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);
@@ -277,6 +310,10 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 	// its context exhausted: only then does that narration seal, as partial, in place of no text at all (CLI-H3).
 	let narration = "";
 	let contextExhausted = false;
+	// A terminal artifact (plan, review, report) ends the worker's turn, so no assistant message follows it: the
+	// document and the path it landed at are the run's answer, or the caller learns neither (row 295).
+	const pendingArtifacts = new Map<string, string>();
+	let artifactAnswer: string | null = null;
 
 	return {
 		observe(event: unknown): void {
@@ -338,6 +375,19 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 				if (text.length > 0) finalText = text;
 				return;
 			}
+			if (event.type === "tool_execution_start") {
+				const body = terminalArtifactBody(event.toolName, event.args);
+				if (body !== null && typeof event.toolCallId === "string") pendingArtifacts.set(event.toolCallId, body);
+				return;
+			}
+			if (event.type === "tool_execution_end") {
+				if (typeof event.toolCallId !== "string") return;
+				const body = pendingArtifacts.get(event.toolCallId);
+				pendingArtifacts.delete(event.toolCallId);
+				const receipt = body === undefined || event.isError === true ? null : terminalArtifactReceipt(event.result);
+				if (receipt !== null) artifactAnswer = `${receipt}\n\n${body}`;
+				return;
+			}
 			if (event.type !== "message_update") return;
 			const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
 			if (assistantEvent === null || assistantEvent.type !== "text_delta") return;
@@ -359,6 +409,11 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 					bytes: partialBytes,
 					truncated: bounded !== partialText.trim() || partialBytes > partialStored,
 				};
+			}
+			// The receipt line leads so the artifact's path survives the byte bound.
+			if (artifactAnswer !== null) {
+				const text = finalText === null ? artifactAnswer : `${artifactAnswer}\n\n${finalText}`;
+				return boundedOutput("final", text, maxBytes);
 			}
 			if (finalText !== null) return boundedOutput("final", finalText, maxBytes);
 			if (contextExhausted && narration.length > 0) return boundedOutput("partial", narration, maxBytes);
