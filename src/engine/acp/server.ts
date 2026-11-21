@@ -4553,6 +4553,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	let sessionCreated = false;
 	let sessionSlotReserved = false;
 	const withSessionSlot = async <T>(bind: () => Promise<T>): Promise<T> => {
+		// A close in flight frees the slot when it settles, and a client may send its next open without awaiting it.
+		if (closingSessions.size > 0) await Promise.allSettled([...closingSessions.values()]);
 		if (sessionCreated || sessionSlotReserved) {
 			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}

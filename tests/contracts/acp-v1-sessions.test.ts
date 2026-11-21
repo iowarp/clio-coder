@@ -527,6 +527,30 @@ test("ACP close cancels and waits for an active prompt", async () => {
 	}
 });
 
+test("ACP load sent while a close is still in flight waits for the close instead of refusing a second session", async () => {
+	const peer = fixture();
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/resume", { sessionId: "session-4", cwd: peer.cwd, mcpServers: [] });
+		const prompt = peer.call("session/prompt", { sessionId: "session-4", prompt: [{ type: "text", text: "Hello" }] });
+		await Promise.resolve();
+		// The client sends its next open without awaiting the close, which waits for the cancelled prompt to settle.
+		const closing = peer.call("session/close", { sessionId: "session-4" });
+		const loaded = (await peer.call("session/load", { sessionId: "session-5", cwd: peer.cwd, mcpServers: [] })) as {
+			_meta: Record<string, { sessionId?: string }>;
+		};
+		deepStrictEqual(await closing, {});
+		strictEqual(((await prompt) as { stopReason: string }).stopReason, "cancelled");
+		ok(
+			Object.values(loaded._meta).some((meta) => meta?.sessionId === "session-5"),
+			"the load bound the session it named",
+		);
+		strictEqual(peer.session.current()?.id, "session-5");
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP reports a turn the loop guard stopped as max_turn_requests, not cancelled", async () => {
 	const bus = createTelemetryHub();
 	const peer = fixture(
