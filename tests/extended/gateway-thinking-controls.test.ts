@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { applyModelCapabilityPatch } from "../../src/domains/providers/model-capabilities.js";
 import {
 	resolveModelRuntimeCapabilities,
@@ -123,6 +124,7 @@ test("/thinking resolves a typed level through the settings clamp and refuses wo
 		};
 		const commits: string[] = [];
 		const runtime = createInteractiveSlashRuntime({
+			bus: createTelemetryHub(),
 			providers: { list: () => [status], knowledgeBase },
 			chat: {},
 			getSettings: () => settings,
