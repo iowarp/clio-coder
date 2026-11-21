@@ -557,7 +557,7 @@ describe("interop discovery and adoption", () => {
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
 		// The Claude copy keeps the retired fleets layout; Clio does not adopt it and points to the canonical WTF-P install.
 		strictEqual(plan.entries[0]?.action, "skip");
-		ok(plan.entries[0]?.reason.includes("built for an older Clio"), plan.entries[0]?.reason);
+		ok(plan.entries[0]?.reason.includes("built for an older CLIO Coder"), plan.entries[0]?.reason);
 		ok(plan.entries[0]?.reason.includes("wtf-p install clio"), plan.entries[0]?.reason);
 		deepStrictEqual(applyInteropAdoption(plan, true).installed, []);
 		strictEqual(listInstalledPlugins(cwd, { all: true }).length, 0);

@@ -419,7 +419,7 @@ test("a refused simple command keeps the plain refusal, separators inside quotes
 		strictEqual(
 			verdict.reason,
 			[
-				"Clio's safety judge blocked this bash call (rule publish): It uploads assets to a CDN.",
+				"CLIO Coder's safety judge blocked this bash call (rule publish): It uploads assets to a CDN.",
 				"The judge reviewed this call against the operator's own messages and did not find this action authorized.",
 				TODAYS_REFUSAL_ROUTE,
 			].join("\n"),

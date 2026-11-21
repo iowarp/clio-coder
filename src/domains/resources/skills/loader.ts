@@ -497,18 +497,19 @@ function declaredToolSurface(
 		// Scoped shell entries are the spec's own example, and dropping one takes
 		// the shell away, so the warning names the spelling that keeps it.
 		const shellHint = unrecognized.some((entry) => FOREIGN_SHELL_ENTRY.test(entry))
-			? "; Clio narrows whole tools, so write bash to keep the shell"
+			? "; CLIO Coder narrows whole tools, so write bash to keep the shell"
 			: "";
 		diagnostics.push({
 			type: "warning",
-			message: `${key} names ${unrecognized.length === 1 ? "a tool" : "tools"} Clio does not have: ${unrecognized.join(", ")}${shellHint}`,
+			message: `${key} names ${unrecognized.length === 1 ? "a tool" : "tools"} CLIO Coder does not have: ${unrecognized.join(", ")}${shellHint}`,
 			path: filePath,
 		});
 	}
 	if (tools.length === 0 && key === "allowed-tools") {
 		diagnostics.push({
 			type: "warning",
-			message: "allowed-tools names no tool Clio has, so it narrows nothing; declare Clio tool names to confine it",
+			message:
+				"allowed-tools names no tool CLIO Coder has, so it narrows nothing; declare CLIO Coder tool names to confine it",
 			path: filePath,
 		});
 		return undefined;
@@ -560,7 +561,7 @@ export function templateToolSurface(
 	if (deferred.length > 0) {
 		diagnostics.push({
 			type: "warning",
-			message: `${key} keeps ${deferred.join(", ")}, which is no Clio, MCP or extension tool name`,
+			message: `${key} keeps ${deferred.join(", ")}, which is no CLIO Coder, MCP or extension tool name`,
 			path: filePath,
 		});
 	}
@@ -600,7 +601,7 @@ export function importedToolSurface(
 	if (unrecognized.length > 0) {
 		diagnostics.push({
 			type: "warning",
-			message: `${subject} is not narrowed: ${key} names ${unrecognized.length === 1 ? "an entry" : "entries"} Clio cannot map: ${unrecognized.join(", ")}`,
+			message: `${subject} is not narrowed: ${key} names ${unrecognized.length === 1 ? "an entry" : "entries"} CLIO Coder cannot map: ${unrecognized.join(", ")}`,
 			path: filePath,
 		});
 		return undefined;

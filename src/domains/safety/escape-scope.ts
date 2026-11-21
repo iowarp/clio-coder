@@ -112,7 +112,7 @@ function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase
 	} else if (call.tool === ToolNames.Bash) {
 		if (typeof args.command !== "string" || args.command.trim().length === 0) return "it runs no command";
 		const steps = shellCommandSteps(args.command);
-		if (steps.length === 0) return "Clio cannot read its command as steps";
+		if (steps.length === 0) return "CLIO Coder cannot read its command as steps";
 		for (const step of steps) {
 			if (step.truncatingRedirects.length > 0) return "it redirects output into a file";
 			const operand = stepScriptOperand(step);
@@ -136,7 +136,7 @@ function escapeReach(call: ClassifierCall, roots: ReadonlyArray<string>, cwdBase
 			return `its script ${file} lies outside the workspace and scratch roots`;
 		}
 		if (scripts.has(file)) continue;
-		const unreadable = `its script ${file} is not a readable file of at most 16 MiB that Clio can hash`;
+		const unreadable = `its script ${file} is not a readable file of at most 16 MiB that CLIO Coder can hash`;
 		try {
 			const stat = statSync(file);
 			if (!stat.isFile() || stat.size > SCOPE_SCRIPT_MAX_BYTES) return unreadable;

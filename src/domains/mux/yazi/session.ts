@@ -189,7 +189,7 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 				})
 			: null;
 	if (options.profileMode === "managed" && !managedProfile) {
-		return { status: "profile-error", reason: "Clio could not generate a valid managed Yazi profile" };
+		return { status: "profile-error", reason: "CLIO Coder could not generate a valid managed Yazi profile" };
 	}
 
 	const streamPath = join(sessionsDir, `${sessionId}.stream`);

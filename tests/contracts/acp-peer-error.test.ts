@@ -619,7 +619,7 @@ test("ACP adapter fails before prompting when the peer keeps another thinking le
 	}).promise;
 	strictEqual(result.exitCode, 1);
 	strictEqual(result.stopReason, "error");
-	strictEqual(result.failureMessage?.includes("kept thinking level 'medium' after Clio selected 'high'"), true);
+	strictEqual(result.failureMessage?.includes("kept thinking level 'medium' after CLIO Coder selected 'high'"), true);
 });
 
 test("ACP adapter splits agy legacy <model>-<level> ids and names the offered choices when one is refused", {

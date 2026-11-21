@@ -187,7 +187,7 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
  */
 const TREE_ROLE_WORDS: Readonly<Record<string, string>> = {
 	user: "You",
-	assistant: "Clio",
+	assistant: "CLIO Coder",
 	tool_call: "Tool call",
 	tool_result: "Tool result",
 	system: "System",
@@ -536,7 +536,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 				this.setStatus(this.labelBuffer.trim() ? `Label saved on this turn.` : "Label removed from this turn.");
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				this.setStatus(`Clio could not save the label: ${msg}`, "error");
+				this.setStatus(`CLIO Coder could not save the label: ${msg}`, "error");
 			}
 			this.submode = "browse";
 			this.labelBuffer = "";

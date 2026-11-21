@@ -223,12 +223,12 @@ async function pingOnce(host: Host): Promise<{ client: MuxClient; server: MuxSer
 /** Why a running server cannot host this launch, or null when it can. */
 function serverMismatch(server: MuxServerInfo, wantedVersion: string | null): string | null {
 	if (server.protocol < MUX_MIN_PROTOCOL) {
-		return `it speaks protocol ${server.protocol}, below the ${MUX_MIN_PROTOCOL} Clio drives`;
+		return `it speaks protocol ${server.protocol}, below the ${MUX_MIN_PROTOCOL} CLIO Coder drives`;
 	}
 	// herdr's client and server negotiate a private protocol of their own, and
 	// the only pairing known to work is a binary with the server it started.
 	if (wantedVersion !== null && server.version !== wantedVersion) {
-		return `it is herdr ${server.version} and this Clio runs herdr ${wantedVersion}`;
+		return `it is herdr ${server.version} and this CLIO Coder runs herdr ${wantedVersion}`;
 	}
 	return null;
 }
@@ -272,7 +272,7 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 			await running.client.close();
 			const held = live < 0 ? "workspaces it would not list" : `${live} open workspace${live === 1 ? "" : "s"}`;
 			return {
-				refused: `this project's Clio workspace is already running with ${held}, and ${mismatch}; quit Clio there first`,
+				refused: `this project's CLIO Coder workspace is already running with ${held}, and ${mismatch}; quit CLIO Coder there first`,
 			};
 		}
 		const stopped = await stopServer(host, running.client);
@@ -568,7 +568,7 @@ async function openWorkspace(host: Host): Promise<Opened> {
 		if (launch.line !== null && !runHerdr(host, ["pane", "run", clioPane.paneId, launch.line])) {
 			await undoLaunch(host, client, { workspaceId: createdWorkspaceId, startedServer });
 			await client.close();
-			return { refused: "the pane host refused to start Clio in the new workspace" };
+			return { refused: "the pane host refused to start CLIO Coder in the new workspace" };
 		}
 		return { client, clioPane, workspaceId: createdWorkspaceId, createdWorkspace: true, startedServer, workspaceNonce };
 	} catch (error) {
@@ -612,7 +612,8 @@ export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<
 			continue;
 		}
 		if (host === null) return { status: "fallback", reason: refusal };
-		if (slot > 0) options.notice?.("this folder already has a Clio in another terminal; this one has its own panes");
+		if (slot > 0)
+			options.notice?.("this folder already has a CLIO Coder in another terminal; this one has its own panes");
 		return attachWorkspace(host, opened, lockTarget);
 	}
 	return { status: "fallback", reason: refusal };

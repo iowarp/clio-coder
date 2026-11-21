@@ -631,7 +631,7 @@ describe("settings and migration boundary", () => {
 		// The third-party plugin stays in place and is named with the fix.
 		ok(existsSync(join(thirdParty, "fleets", "x.md")));
 		ok(
-			report.attention.some((line) => line.includes("lab-pack") && line.includes("older Clio")),
+			report.attention.some((line) => line.includes("lab-pack") && line.includes("older CLIO Coder")),
 			text,
 		);
 		// The plugin replacement is an upgrade receipt; no extension receipt is written.

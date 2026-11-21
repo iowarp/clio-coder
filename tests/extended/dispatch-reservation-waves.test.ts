@@ -555,3 +555,38 @@ it("splits a 6-task plan on a 4-slot endpoint into two waves instead of refusing
 	for (const lease of second) releaseCapacityLease(lease.leaseId);
 	releaseDispatchReservation(reservation.ownerId);
 });
+
+it("sizes waves to the endpoint slots the main turn leaves free, so every wave admits (M8)", () => {
+	// Main and workers share one capped target: the main turn holds a slot for as long as its dispatch call runs.
+	const cap = { global: 8, nodes: { local: 8 }, endpoints: { [endpointKey]: 4 } };
+	const releaseMain = registerForegroundStream(endpointKey);
+	try {
+		const reservation = createDispatchReservation({
+			topology: "parallel",
+			tasks: Array.from({ length: 6 }, (_, index) => ({
+				memberId: `task-${index + 1}`,
+				wave: 0,
+				nodeId: "local",
+				endpointKey,
+				costUpperBoundUsd: 0,
+			})),
+			capacity: {
+				global: { active: 0, limit: cap.global },
+				nodes: { local: { active: 0, limit: cap.nodes.local } },
+				endpoints: { [endpointKey]: { active: 1, limit: 4, leases: 0, foregroundStreams: 1 } },
+				budget: { currentUsd: 0, ceilingUsd: 100 },
+			},
+		});
+		deepStrictEqual(
+			reservation.members.map((member) => member.wave),
+			[0, 0, 0, 1, 1, 1],
+		);
+		const first = ["task-1", "task-2", "task-3"].map((memberId) => transfer(reservation.ownerId, memberId, cap));
+		for (const lease of first) releaseCapacityLease(lease.leaseId);
+		const second = ["task-4", "task-5", "task-6"].map((memberId) => transfer(reservation.ownerId, memberId, cap));
+		for (const lease of second) releaseCapacityLease(lease.leaseId);
+		releaseDispatchReservation(reservation.ownerId);
+	} finally {
+		releaseMain();
+	}
+});

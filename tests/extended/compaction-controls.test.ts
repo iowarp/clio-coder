@@ -1325,7 +1325,7 @@ describe("production compaction controls", () => {
 		}
 		for (const cycle of cycles) t.diagnostic(JSON.stringify(cycle));
 		// Each cut keeps the newest tool batch of the running turn, so each notice says the turn was split.
-		const lines = notices.filter((text) => text.startsWith("Clio compacted "));
+		const lines = notices.filter((text) => text.startsWith("CLIO Coder compacted "));
 		strictEqual(lines.length, cycles.length);
 		for (const line of lines) ok(line.endsWith(" (the cut fell inside a turn)"), line);
 		// Before this fix the checkpoint outgrew its share each cycle while the kept batch could not shrink, so headroom
@@ -2664,7 +2664,7 @@ describe("production compaction controls", () => {
 			folds.map((fold) => fold.stages.filter((stage) => stage.stage === "llm_summary")),
 			[[{ stage: "llm_summary", outcome: "committed", reason: "summarized", recordId: checkpoint.turnId }]],
 		);
-		ok(notices.includes("Native compaction used Clio's portable path: checkpoint-publication-failed."));
+		ok(notices.includes("Native compaction used CLIO Coder's portable path: checkpoint-publication-failed."));
 	});
 	it("publishes a checkpoint whose append wrote before throwing once, by its id (ContextFold CF-8, F8)", async () => {
 		const f = fixture(true, true, true);

@@ -1065,7 +1065,7 @@ function dispatchCardBody(
 						"started",
 						[
 							...(started === null ? [] : [theme.fg("body", started)]),
-							...(row.earlier === true ? [theme.fg("annotation", "recorded before this Clio started")] : []),
+							...(row.earlier === true ? [theme.fg("annotation", "recorded before this CLIO Coder started")] : []),
 						],
 						contentWidth,
 					),
@@ -1732,9 +1732,9 @@ function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | 
 		case "agent":
 			return "by the main agent";
 		case "harness":
-			return "by Clio on your behalf";
+			return "by CLIO Coder on your behalf";
 		case "internal":
-			return "by Clio";
+			return "by CLIO Coder";
 		default:
 			return null;
 	}

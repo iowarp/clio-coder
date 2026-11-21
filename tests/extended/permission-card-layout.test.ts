@@ -169,7 +169,7 @@ for (const columns of [80, 120, 160]) {
 test("in a wide dock the card stops at the callout width with every fact, and its inspection keeps the dock's columns", () => {
 	const dock = 196;
 	const advisory =
-		"Clio's safety judge gave no verdict because its answer could not be read, so this call needs your decision.";
+		"CLIO Coder's safety judge gave no verdict because its answer could not be read, so this call needs your decision.";
 	const command = `node scripts/release.mjs --channel nightly --notes ${"x".repeat(150)}`;
 	const { mutation: _write, ...call } = WRITE_VIEW;
 	const body = createPermissionOverlayBody(
@@ -428,7 +428,7 @@ test("a card nobody answers denies its call after the window, and the turn conti
 		);
 		match(
 			card.join(" "),
-			/No answer in 0:05 denies this call and Clio continues without it\.\s+Any\s+key\s+holds the card\./u,
+			/No answer in 0:05 denies this call and CLIO Coder continues without it\.\s+Any\s+key\s+holds the card\./u,
 		);
 		// The clock keeps one m:ss shape across the minute (bt-11 q).
 		for (const [ms, shown] of [
@@ -443,12 +443,12 @@ test("a card nobody answers denies its call after the window, and the turn conti
 		strictEqual(settled.kind, "blocked");
 		if (settled.kind !== "blocked") return;
 		strictEqual(settled.deniedPark, true);
-		match(settled.reason, /did not answer this write approval within 5 s, so Clio denied it automatically/u);
+		match(settled.reason, /did not answer this write approval within 5 s, so CLIO Coder denied it automatically/u);
 		strictEqual(settled.denial?.allowedBy, UNATTENDED_ALLOWED_BY);
 		deepStrictEqual(f.stops, [], "a timeout never stops the turn");
 		strictEqual(f.state(), "closed");
 		strictEqual(f.resolved[0]?.decidedBy, "unattended");
-		match(f.notices.at(-1) ?? "", /No answer within 5 s: Clio denied write, which did not run/u);
+		match(f.notices.at(-1) ?? "", /No answer within 5 s: CLIO Coder denied write, which did not run/u);
 		// Nobody can approve the identical call later in the turn, so it is refused without another wait.
 		const repeat = await f.registry.invoke(OUTSIDE_WRITE, { turnId: "turn-1" });
 		strictEqual(repeat.kind, "blocked");

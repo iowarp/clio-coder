@@ -279,7 +279,7 @@ export function projectForeignPlugin(input: {
 	const rawName = typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "";
 	if (!rawName) throw new Error(`${manifestPath} requires a name.`);
 	const id = isPluginId(rawName) ? rawName : safeName(rawName);
-	if (id !== rawName) notes.push(`Package name "${rawName}" normalized to Clio id "${id}".`);
+	if (id !== rawName) notes.push(`Package name "${rawName}" normalized to CLIO Coder id "${id}".`);
 	let version = "0.0.0";
 	if (parsed.version === undefined) notes.push("Vendor manifest declares no version; projected as 0.0.0.");
 	else if (isSemanticVersion(parsed.version)) version = parsed.version as string;
@@ -293,7 +293,7 @@ export function projectForeignPlugin(input: {
 			: `Imported ${input.format === "claude-code" ? "Claude Code" : "Codex"} plugin ${rawName}`;
 	const fieldList = input.format === "claude-code" ? CLAUDE_UNSUPPORTED_FIELDS : CODEX_UNSUPPORTED_FIELDS;
 	for (const field of fieldList)
-		if (parsed[field] !== undefined) unsupported.push(`${manifestPath}#${field}: never activated by Clio import.`);
+		if (parsed[field] !== undefined) unsupported.push(`${manifestPath}#${field}: never activated by CLIO Coder import.`);
 	// Vendor dependencies are prerequisites: a plain name maps to the same-named
 	// imported Clio package and must already be installed; anything else blocks.
 	const requirements: string[] = [];
@@ -528,7 +528,9 @@ export function projectForeignPlugin(input: {
 			// A bound skill that did not convert is a missing prerequisite, not a cosmetic omission.
 			const bound = declared.filter((skill) => !convertedSkills.has(skill));
 			if (bound.length)
-				throw new Error(`Agent binds skills that were not converted: ${bound.join(", ")}; Clio cannot honor the binding.`);
+				throw new Error(
+					`Agent binds skills that were not converted: ${bound.join(", ")}; CLIO Coder cannot honor the binding.`,
+				);
 			// Bindings are expressed through the real Clio schema and resolve inside this package's skill root.
 			return projectAgent({ file, name, bindSkills: declared });
 		});

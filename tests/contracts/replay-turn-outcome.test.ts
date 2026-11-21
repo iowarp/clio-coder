@@ -736,7 +736,7 @@ test("a replayed act states the age its ledger entry records in /view, not the a
 		.inspectionArtifacts()
 		.map((artifact) => [artifact.title, new Date(artifact.timestamp).toISOString()]);
 	assert.deepEqual(stamps, [
-		["$ Clio ran `npm test`", "2026-09-17T00:01:00.000Z"],
+		["$ CLIO Coder ran `npm test`", "2026-09-17T00:01:00.000Z"],
 		["i Now using blade · qwopus", "2026-09-17T00:05:00.000Z"],
 	]);
 	// Live acts after the resume carry the live clock again.
@@ -923,6 +923,7 @@ test("the TUI echoes an operator command and hands the host the same line to rec
 	const blocks: Array<(width: number) => string[]> = [];
 	const recorded: string[] = [];
 	const runtime = createInteractiveSlashRuntime({
+		bus: createTelemetryHub(),
 		io: { stdout() {}, stderr() {} },
 		chatPanel: { appendReplayBlock: (block: (width: number) => string[]) => blocks.push(block), appendUser() {} },
 		requestRender() {},
@@ -944,6 +945,7 @@ test("/export reports a workspace file by its relative path, after a notice that
 	const target = join(workspace, ".clio-coder", "exports", "session.html");
 	try {
 		const runtime = createInteractiveSlashRuntime({
+			bus: createTelemetryHub(),
 			io: { stdout() {}, stderr() {} },
 			chat: { getSessionId: () => "session" },
 			chatPanel: { appendReplayBlock: (block: (width: number) => string[]) => blocks.push(block) },

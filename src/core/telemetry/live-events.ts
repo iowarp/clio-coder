@@ -522,16 +522,18 @@ export interface ConfigSessionChangePayload extends ConfigChangePayload {
  * change is rejected at runtime and the previous good snapshot stays active.
  * Emitted on transitions only, like {@link ContextWarningPayload}: `message`
  * carries one already-formatted operator line while the failure stands, and
- * `null` once a later reload succeeds and the prior failure clears.
+ * `null` once a later reload succeeds and the prior failure clears. A failure
+ * also carries `headline` (the failing key first, for a clamped footer), the
+ * settings `file` and the failing `keys`.
  *
  * The message is pre-formatted by `formatSettingsFailure` (core/config.ts)
  * because the config domain must not import TUI code and the renderer must
  * not learn the settings schema. One line, no stack, no error dump: this
  * event exists so nothing writes an inspected Error over the live frame.
  */
-export interface ConfigReloadFailedPayload {
-	message: string | null;
-}
+export type ConfigReloadFailedPayload =
+	| { message: string; headline: string; file: string; keys: string[] }
+	| { message: null };
 
 // ---------------------------------------------------------------------------
 // Safety and permissions

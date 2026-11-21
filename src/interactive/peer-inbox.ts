@@ -149,7 +149,7 @@ export function createPeerInbox(deps: PeerInboxDeps): PeerInbox | null {
 		// this batch was being read is refused here, not carried into whatever
 		// conversation replaced it.
 		if (!gen.live) {
-			refuse(gen, id, "stale-session", "this Clio left the conversation that inbox was advertised for");
+			refuse(gen, id, "stale-session", "this CLIO Coder left the conversation that inbox was advertised for");
 			return;
 		}
 		const request = parsePeerPromptRequest(join(gen.dir, "claimed", id));
@@ -159,14 +159,14 @@ export function createPeerInbox(deps: PeerInboxDeps): PeerInbox | null {
 		}
 		const now = state();
 		if (now === "blocked") {
-			refuse(gen, id, "blocked", "this Clio is waiting on its operator for an approval or an answer");
+			refuse(gen, id, "blocked", "this CLIO Coder is waiting on its operator for an approval or an answer");
 			return;
 		}
 		if (now === "unknown") {
-			refuse(gen, id, "unknown-state", "this Clio cannot say what it is doing right now");
+			refuse(gen, id, "unknown-state", "this CLIO Coder cannot say what it is doing right now");
 			return;
 		}
-		const origin = `machine prompt from Clio in pane ${request.fromPaneId || "unknown"}`;
+		const origin = `machine prompt from CLIO Coder in pane ${request.fromPaneId || "unknown"}`;
 		const display = { text: request.text, note: origin };
 		if (now === "busy") {
 			// A run is active: the prompt waits for the current turn to finish. It
@@ -181,7 +181,8 @@ export function createPeerInbox(deps: PeerInboxDeps): PeerInbox | null {
 		const declined = (why: string): void => {
 			if (!admitted && !settled) {
 				settled = true;
-				if (!gen.live || disposed) refuse(gen, id, "stale-session", "this Clio left the conversation before admission");
+				if (!gen.live || disposed)
+					refuse(gen, id, "stale-session", "this CLIO Coder left the conversation before admission");
 				else refuse(gen, id, "not-admitted", why);
 			}
 		};
@@ -193,7 +194,7 @@ export function createPeerInbox(deps: PeerInboxDeps): PeerInbox | null {
 				onAdmitted: () => {
 					if (settled || admitted) return;
 					if (!gen.live || disposed) {
-						refuse(gen, id, "stale-session", "this Clio left the conversation before admission");
+						refuse(gen, id, "stale-session", "this CLIO Coder left the conversation before admission");
 						settled = true;
 						return;
 					}
@@ -206,7 +207,7 @@ export function createPeerInbox(deps: PeerInboxDeps): PeerInbox | null {
 			// session's own admission (a failed preflight, a refused target). That
 			// is an answer, and the sender gets it instead of waiting on nothing.
 			.then(
-				() => declined("this Clio's admission declined the turn"),
+				() => declined("this CLIO Coder's admission declined the turn"),
 				(error: unknown) =>
 					declined(`the turn was not admitted: ${error instanceof Error ? error.message : String(error)}`),
 			);

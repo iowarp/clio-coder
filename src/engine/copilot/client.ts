@@ -29,7 +29,7 @@ export interface CopilotAccount {
 }
 
 export const COPILOT_LOGIN_MESSAGE =
-	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry. Clio never signs in to Copilot itself.";
+	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry. CLIO Coder never signs in to Copilot itself.";
 
 /** Why a process without an operator can miss a login the TUI sees. */
 const KEYCHAIN_CLOSED_NOTE = `This process has no operator to answer a keychain prompt (headless \`clio-coder run\`, fleet workers, scripts), so the Copilot runtime keeps the system keychain closed and a \`copilot login\` stored only there is not visible here; the TUI, ACP and the GUI can use it. For headless use, ${COPILOT_HEADLESS_LOGIN_FIX}. \`clio-coder doctor\` in a terminal shows which login the runtime sees.`;
@@ -65,7 +65,7 @@ export class CopilotRuntimeMismatchError extends Error {
 	readonly code = "COPILOT_RUNTIME_MISMATCH";
 	constructor(detail: string) {
 		super(
-			`The GitHub Copilot runtime that started speaks a different protocol version than Clio's pinned @github/copilot-sdk, so it is not the runtime bundled with that SDK. The likely cause is an inherited or foreign Copilot CLI runtime, such as another Copilot CLI install the SDK resolved in place of its own. Reinstall the component with \`clio-coder tools install copilot-sdk\` and retry. (${detail})`,
+			`The GitHub Copilot runtime that started speaks a different protocol version than CLIO Coder's pinned @github/copilot-sdk, so it is not the runtime bundled with that SDK. The likely cause is an inherited or foreign Copilot CLI runtime, such as another Copilot CLI install the SDK resolved in place of its own. Reinstall the component with \`clio-coder tools install copilot-sdk\` and retry. (${detail})`,
 		);
 		this.name = "CopilotRuntimeMismatchError";
 	}
@@ -122,7 +122,7 @@ function warnLayout(missingFields: readonly string[]): void {
 	if (layoutWarned || missingFields.length === 0) return;
 	layoutWarned = true;
 	process.emitWarning(
-		`@github/copilot-sdk no longer exposes ${missingFields.join(", ")} where Clio expects them (pinned 1.0.26); one-shot commands may not exit and a lost Copilot runtime may not be detected.`,
+		`@github/copilot-sdk no longer exposes ${missingFields.join(", ")} where CLIO Coder expects them (pinned 1.0.26); one-shot commands may not exit and a lost Copilot runtime may not be detected.`,
 		{ code: "CLIO_CODER_COPILOT_SDK_LAYOUT" },
 	);
 }
@@ -223,13 +223,13 @@ function openRuntimeKeychain(client: CopilotClient): void {
 	const build = internals.buildRuntimeEnv;
 	if (typeof build !== "function")
 		throw new Error(
-			"@github/copilot-sdk no longer has buildRuntimeEnv (pinned 1.0.26); Clio cannot open the Copilot runtime's keychain. Re-verify the keychain override in src/engine/copilot/client.ts.",
+			"@github/copilot-sdk no longer has buildRuntimeEnv (pinned 1.0.26); CLIO Coder cannot open the Copilot runtime's keychain. Re-verify the keychain override in src/engine/copilot/client.ts.",
 		);
 	internals.buildRuntimeEnv = function (this: unknown): RuntimeEnv {
 		const env = build.call(this);
 		if (env.COPILOT_DISABLE_KEYTAR !== "1")
 			throw new Error(
-				"@github/copilot-sdk no longer sets COPILOT_DISABLE_KEYTAR where Clio expects it (pinned 1.0.26); Clio cannot open the Copilot runtime's keychain. Re-verify the keychain override in src/engine/copilot/client.ts.",
+				"@github/copilot-sdk no longer sets COPILOT_DISABLE_KEYTAR where CLIO Coder expects it (pinned 1.0.26); CLIO Coder cannot open the Copilot runtime's keychain. Re-verify the keychain override in src/engine/copilot/client.ts.",
 			);
 		delete env.COPILOT_DISABLE_KEYTAR;
 		return env;

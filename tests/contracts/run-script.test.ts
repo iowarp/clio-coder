@@ -866,7 +866,7 @@ describe("run_script: argument normalization and safety projection", () => {
 		for (const key of ["BASH_ENV", "CDPATH", "CLIO_CODER_INTERACTIVE", "CLIO_CODER_AUTONOMY_CEILING"]) {
 			const refused = await tool(root).run({ interpreter: "node", script: relative, env: { [key]: "x" } });
 			strictEqual(refused.kind, "error", key);
-			if (refused.kind === "error") match(refused.message, new RegExp(`env\\.${key} is set by Clio`, "u"));
+			if (refused.kind === "error") match(refused.message, new RegExp(`env\\.${key} is set by CLIO Coder`, "u"));
 		}
 		deepStrictEqual(runDirs(root), []);
 		// A session at default, or in contained yolo, holds the clio-coder a script starts to the same limits a bash command would.

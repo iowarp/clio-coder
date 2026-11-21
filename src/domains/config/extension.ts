@@ -1,4 +1,4 @@
-import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
+import { type ClioSettings, type SettingsReloadFailure, settingsReloadFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { configureGitCommitAttribution } from "../../core/git-commit-attribution.js";
@@ -102,10 +102,11 @@ export function createConfigBundle(
 	 * the live frame. The renderer subscribes and shows a normal notice; `null`
 	 * clears it once a later reload succeeds.
 	 */
-	function publishReloadFailure(message: string | null): void {
+	function publishReloadFailure(failure: SettingsReloadFailure | null): void {
+		const message = failure?.message ?? null;
 		if (reloadFailure === message) return;
 		reloadFailure = message;
-		context.bus.emit("config.reload_failed", { message });
+		context.bus.emit("config.reload_failed", failure ?? { message: null });
 	}
 
 	function onWatcherFire(): void {
@@ -125,14 +126,14 @@ export function createConfigBundle(
 		} catch (err) {
 			// The rejection is the whole effect: `snapshot` is untouched, so the
 			// session keeps running on the last good settings.
-			publishReloadFailure(formatSettingsFailure(err));
+			publishReloadFailure(settingsReloadFailure(err));
 			return;
 		}
 		const prev = snapshot;
 		try {
 			assertAgentNamespace(next);
 		} catch (err) {
-			publishReloadFailure(formatSettingsFailure(err));
+			publishReloadFailure(settingsReloadFailure(err));
 			return;
 		}
 		publishReloadFailure(null);

@@ -21,9 +21,16 @@ export function isProjectKeyVariableName(name: string): boolean {
 	return /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name);
 }
 
-/** The one sentence every surface prints for a target whose key variable is unset: run, the TUI and doctor. */
-export function unsetKeyVariableSentence(targetId: string, variable: string): string {
-	return `target ${targetId} reads its key from $${variable}, which is not set in this shell.`;
+/**
+ * The one sentence every surface prints for a target whose key variable is unset: run, the TUI and doctor. With
+ * `projectFile`, the project settings file that declares the target, it also names the two fixes: the shell, or
+ * that file's `auth.apiKeyEnvVar`, since `clio-coder configure` edits only the user's settings.
+ */
+export function unsetKeyVariableSentence(targetId: string, variable: string, projectFile?: string): string {
+	const unset = `target ${targetId} reads its key from $${variable}, which is not set in this shell`;
+	return projectFile === undefined
+		? `${unset}.`
+		: `${unset}; set it with \`export ${variable}=<key>\`, or fix auth.apiKeyEnvVar on target ${targetId} in ${projectFile}.`;
 }
 
 export function isLoopbackUrl(url: string): boolean {
