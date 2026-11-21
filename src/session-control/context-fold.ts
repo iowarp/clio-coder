@@ -489,14 +489,20 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const policy = structural ? resolveWorkingSetPolicy(workingSet.policy) : null;
 			if (policy !== null) policyId = policy.id;
 			const tokens = fitTokens();
-			const reserve = requiredFit ? resolveFitOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) : 0;
+			const fullReseed = agentRuntime.agent.state.model?.api === "copilot-sdk";
+			// Row 144's minimum yield (XR-40) also gates an automatic working-set fold on a full-reseed route: there any
+			// eviction resends the whole request, and a few dozen tokens cost the provider cache (C-3). Other routes'
+			// automatic folds are unchanged.
+			const gated =
+				(requiredFit && !input.summaryFailed) || (fullReseed && trigger === "auto" && !requiredFit && structural);
+			const reserve = requiredFit || gated ? resolveFitOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) : 0;
 			const fitShare = requiredFit ? Math.max(0, 1 - reserve / estimate.contextWindow) : 0;
-			if (requiredFit && !input.summaryFailed) {
+			if (gated) {
 				yieldLimit = overflowEvictionInputLimit({
 					window: estimate.contextWindow,
 					reserve,
 					tokens,
-					fullReseed: agentRuntime.agent.state.model?.api === "copilot-sdk",
+					fullReseed,
 				});
 			}
 			// S1's figures (ContextFold A3); S0's selection reads neither, so its floor and gate are unchanged.
@@ -557,7 +563,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				acted: false,
 				committed: false,
 				fit: false,
-				skipNotice: `[context engine] working set: saving ~${planned.tokensBefore - planned.tokensAfter} tokens would not yield enough overflow relief; llm_summary runs instead`,
+				skipNotice: `[context engine] working set: saving ~${planned.tokensBefore - planned.tokensAfter} tokens would not yield enough ${requiredFit ? "overflow " : ""}relief; llm_summary runs instead`,
 			};
 		}
 		const alone = !folded.structural;

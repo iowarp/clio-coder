@@ -1643,6 +1643,34 @@ describe("production compaction controls", () => {
 		doesNotMatch(tokenRow(operation) ?? "", /−\d+%/);
 	});
 
+	it("holds a 70-token automatic eviction on a copilot-sdk route, as an overflow one is held (XR-40 C-3)", async () => {
+		// 1drfv3bu1745: an automatic pass freed 70 of 161,489 tokens and the full reseed dropped cacheRead to 6,121.
+		const f = fixture();
+		f.settings.context.workingSet.enabled = true;
+		const oldest = f.entries()[0];
+		ok(oldest);
+		const { runtime, context, bus } = automaticContext(f, f.run, {
+			autoCompact: undefined,
+			planEviction: (_policy, plan) => ({
+				policyId: "structural-v2",
+				tokensBefore: plan.pressure.tokens,
+				tokensAfter: plan.pressure.tokens - 70,
+				items: [{ ref: { entry: oldest.turnId }, reason: "age_horizon", tokensFreed: 70, marker: "[evicted]" }],
+			}),
+		});
+		runtime.agent.state.model = { ...runtime.agent.state.model, api: "copilot-sdk" };
+		const folds: ContextFoldPayload[] = [];
+		bus.subscribe("context.fold", (event) => {
+			folds.push(event);
+		});
+		await context.runAutoCompact(runtime, false);
+		strictEqual(f.entries().filter((entry) => entry.kind === "contextEviction").length, 0, "no eviction record");
+		deepStrictEqual(
+			folds.map((fold) => [fold.checkpoint, fold.stages[0]?.stage, fold.stages[0]?.outcome, fold.stages[0]?.reason]),
+			[["tool_batch", "working_set", "held", "no_gain"]],
+		);
+	});
+
 	it("skips an automatic summary whose span prices below the summary room, but not /compact or overflow (bt-47 cf1j-d, ContextFold A1)", async () => {
 		// Each row: user turns of `chars` before the active one, an optional reply in the active turn, how the pass runs,
 		// and what it must do. The active request is preserved verbatim, so it is never part of the span.
