@@ -337,3 +337,13 @@
 	min-width: 0;
 	font-size: var(--text-exact);
 }
+
+/* An unknown or unsummed economic figure reads neutral, never as an amount (token economy S13). */
+.usage-economy [data-tone="unknown"] {
+	color: var(--ink-muted);
+}
+.usage-economy-list {
+	margin: 0.5rem 0;
+	padding-left: 1.25rem;
+	color: var(--ink-muted);
+}

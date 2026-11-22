@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BARS_CAVEAT, usageLabel, usageView } from "../client/pages/usage-model.js";
+import { BARS_CAVEAT, economyView, usageLabel, usageView } from "../client/pages/usage-model.js";
 import type { UsageReport } from "../contracts/reports.js";
 
 const report = (facts: UsageReport["facts"], opportunities: UsageReport["opportunities"] = []): UsageReport => ({
@@ -119,8 +119,8 @@ test("the headline reads the read model's window totals and names an unpriced re
 	const by = new Map(view.headline.map((figure) => [figure.label, figure]));
 	assert.equal(by.get("Tokens")?.value, "≥2,850 (1 call unknown)");
 	assert.equal(by.get("Tokens")?.note, "API calls: ≥14 (1 call unknown)");
-	assert.equal(by.get("Cost")?.value, "$0.03 +?");
-	assert.equal(by.get("Cost")?.note, "Known subtotal; some calls are unpriced");
+	assert.equal(by.get("Route price")?.value, "$0.03 +?");
+	assert.equal(by.get("Route price")?.note, "Known subtotal; some calls are unpriced");
 	assert.match(view.knownSubtotals ?? "", /known subtotals/u);
 	assert.equal(usageView(report([cost("role", exactTotal)])).knownSubtotals, null);
 });
@@ -130,7 +130,7 @@ test("an all-free window says it was recorded as free and leaves which rule to t
 	const view = usageView(
 		report([cost("role", { ...exactTotal, usd: quantity("$0.00 free (declared)", 0), pricedBy: free })]),
 	);
-	const figure = view.headline.find((item) => item.label === "Cost");
+	const figure = view.headline.find((item) => item.label === "Route price");
 	assert.deepEqual([figure?.value, figure?.note], ["$0.00 free (declared)", "Recorded as free"]);
 });
 
@@ -229,4 +229,105 @@ test("a fact recorded many times is one bounded table, and one recorded once sta
 	assert.deepEqual(recall?.rows[3], ["s3", "Not recorded", "tool 0 · operator 3"]);
 	const tools = view.tables.find((table) => table.name === "top-tool");
 	assert.deepEqual([tools?.columns.length, tools?.omittedColumns, tools?.omitted], [6, 1, 0]);
+});
+
+test("the economy reads the report's own displays: estimates labelled, unknown neutral, fees once, references as of", () => {
+	const sum = (measured: number, estimated: number, unknownCount: number) => ({
+		measured,
+		estimated,
+		unknownCount,
+		absentCount: 0,
+		coverage: { measured: measured > 0 ? 1 : 0, estimated: estimated > 0 ? 1 : 0, unknown: unknownCount },
+	});
+	const unknown = { sum: sum(0, 0, 2) };
+	const quantities = {
+		contributions: 2,
+		providerCharge: unknown,
+		marginalCharge: { unit: "USD", sum: sum(0, 0.5, 0) },
+		seatCredits: { unit: "nano-aiu", sum: sum(3e9, 0, 0) },
+		energyKwh: sum(0, 0, 2),
+		energyCost: unknown,
+		apiEquivalent: { refused: "mixed-unit", units: ["USD", "EUR"] },
+		display: {
+			extra: "~$0.50 extra",
+			providerCharge: "unknown",
+			seatCredits: "3 credits",
+			energy: "energy unknown",
+			apiEquivalent: "API equiv not summed (USD, EUR)",
+		},
+	};
+	const fee = {
+		poolId: "team",
+		payer: "employer",
+		period: { kind: "month", start: "2026-09-01T00:00:00.000Z", end: "2026-10-01T00:00:00.000Z" },
+		amount: { kind: "measured", value: 20 },
+		currency: "USD",
+		evidence: "declared",
+		partial: true,
+		display: "$20/month declared (partial period)",
+	};
+	const economy = {
+		version: 1,
+		total: quantities,
+		fees: [fee],
+		cash: { currencies: [], unknownCount: 2, display: "unknown" },
+		groups: { role: [], model: [], target: [], pool: [{ ...quantities, key: "team", periods: [] }] },
+		references: [
+			{ referenceRowId: "openai/gpt-6-luna", asOf: "2026-09-01", basis: "served-model", contributions: 2 },
+			{ referenceRowId: "openai/gpt-6-luna", asOf: "2026-09-01", basis: "requested-model", contributions: 1 },
+		],
+		sources: { attempts: 2, runs: 1, gaps: 0 },
+	} as unknown as NonNullable<UsageReport["economy"]>;
+	assert.equal(economyView(report([])), null);
+	const view = economyView({ ...report([]), economy });
+	assert.ok(view);
+	assert.deepEqual(
+		view.headline.map((figure) => [figure.label, figure.value, figure.tone]),
+		[
+			["Extra charge", "~$0.50 extra", "estimate"],
+			["API equivalent", "API equiv not summed (USD, EUR)", "unknown"],
+			["Seat credits", "3 credits", "known"],
+			["Local energy", "energy unknown", "unknown"],
+			["Cash", "unknown", "unknown"],
+		],
+	);
+	assert.deepEqual(view.pools, [
+		{
+			pool: "team",
+			contributions: "2",
+			extra: "~$0.50 extra",
+			providerCharge: "unknown",
+			apiEquivalent: "API equiv not summed (USD, EUR)",
+			seatCredits: "3 credits",
+			tone: "estimate",
+		},
+	]);
+	assert.deepEqual(
+		view.fees.map((row) => [row.pool, row.payer, row.period, row.value]),
+		[["team", "employer", "month from 2026-09-01", "$20/month declared (partial period)"]],
+	);
+	// One tariff row and date can be both a served-model and a requested-model reference: two rows, two keys.
+	assert.deepEqual(view.references, [
+		{
+			key: "openai/gpt-6-luna:2026-09-01:served-model",
+			id: "openai/gpt-6-luna",
+			asOf: "2026-09-01",
+			basis: "served model",
+			contributions: "2 contributions",
+		},
+		{
+			key: "openai/gpt-6-luna:2026-09-01:requested-model",
+			id: "openai/gpt-6-luna",
+			asOf: "2026-09-01",
+			basis: "requested model",
+			contributions: "1 contribution",
+		},
+	]);
+	// Cash names what the fold sums; fees are whole-pool, and a provider's gross charge is not cash.
+	const cash = view.headline.find((figure) => figure.label === "Cash")?.note ?? "";
+	assert.match(cash, /personally/u);
+	assert.match(cash, /whole pool's fee, not this workspace's spend/u);
+	assert.match(cash, /extra charges and local electricity/u);
+	assert.doesNotMatch(cash, /provider charges/u);
+	assert.equal(view.sources, "2 attempts · 1 run · 0 gaps");
 });

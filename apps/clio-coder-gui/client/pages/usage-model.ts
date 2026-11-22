@@ -221,8 +221,8 @@ export function usageView(report: UsageReport): UsageView {
 			? { label: "Tokens", ...explainable(total.tokens), note: `API calls: ${total.calls.display}` }
 			: { label: "Tokens", value: countText(null), factRef: null },
 		total
-			? { label: "Cost", ...explainable(total.usd), note: costNote(total) }
-			: { label: "Cost", value: "not measured", note: "No spend was measured in this window", factRef: null },
+			? { label: "Route price", ...explainable(total.usd), note: costNote(total) }
+			: { label: "Route price", value: "not measured", note: "No route price was measured in this window", factRef: null },
 		store("sessions", "Sessions"),
 		store("dispatch-runs", "Dispatch runs"),
 	];
@@ -270,6 +270,130 @@ export function usageView(report: UsageReport): UsageView {
 		}),
 		rest: leftover.singles,
 		tables: leftover.tables,
+	};
+}
+
+type Economy = CostReportV1["economy"];
+type EconomyTotal = Economy["total"]["apiEquivalent"];
+/** How a figure reads: `unknown` (no known part, or not summed) renders neutral, never as an amount or as zero. */
+export type EconomyTone = "known" | "estimate" | "unknown";
+
+export interface EconomyFigure {
+	label: string;
+	value: string;
+	tone: EconomyTone;
+	note: string;
+}
+
+export interface EconomyPoolRow {
+	pool: string;
+	/** Folded contributions: a run aggregate or a coverage gap is one, so this is never a call count. */
+	contributions: string;
+	extra: string;
+	providerCharge: string;
+	apiEquivalent: string;
+	seatCredits: string;
+	tone: EconomyTone;
+}
+
+export interface EconomyView {
+	headline: EconomyFigure[];
+	pools: EconomyPoolRow[];
+	/** Each declared fee once per pool and period, as the report lists them. */
+	fees: { key: string; pool: string; payer: string; period: string; value: string }[];
+	/** The public list-price rows the API equivalent was priced from, each with its as-of. */
+	references: { key: string; id: string; asOf: string; basis: string; contributions: string }[];
+	sources: string;
+}
+
+/** Classifies a total from its own coverage; the amount shown is always the report's display. */
+function totalTone(total: EconomyTotal): EconomyTone {
+	if ("refused" in total) return "unknown";
+	if (!("unit" in total)) return total.sum.unknownCount > 0 ? "unknown" : "known";
+	return total.sum.coverage.estimated > 0 ? "estimate" : "known";
+}
+/** The API equivalent is an estimate by definition, unless nothing about it is known. */
+const estimateTone = (total: EconomyTotal): EconomyTone => (totalTone(total) === "unknown" ? "unknown" : "estimate");
+
+function energyTone(quantities: Economy["total"]): EconomyTone {
+	const kwh = quantities.energyKwh;
+	if (kwh.coverage.measured + kwh.coverage.estimated === 0) return kwh.unknownCount > 0 ? "unknown" : "known";
+	return kwh.coverage.estimated > 0 ? "estimate" : "known";
+}
+
+/** The window's economy as the report folded it: every value is the CLI's display, nothing here prices or adds. */
+export function economyView(report: UsageReport): EconomyView | null {
+	const economy = report.economy;
+	if (!economy) return null;
+	const { total } = economy;
+	const counted = (count: number, word: string) => `${countText(count)} ${word}${count === 1 ? "" : "s"}`;
+	return {
+		headline: [
+			{
+				label: "Extra charge",
+				value: total.display.extra,
+				tone: totalTone(total.marginalCharge),
+				note:
+					"Beyond plans and seats. An actual amount only where the provider or a statement says so; ~ marks an estimate and +? an unknown part.",
+			},
+			{
+				label: "API equivalent",
+				value: total.display.apiEquivalent,
+				tone: estimateTone(total.apiEquivalent),
+				note: "Estimate at public list prices, never cash.",
+			},
+			{
+				label: "Seat credits",
+				value: total.display.seatCredits,
+				tone: totalTone(total.seatCredits),
+				note: "The seat's debit in AI credits; ~ marks an estimate at the listing tariff.",
+			},
+			{
+				label: "Local energy",
+				value: total.display.energy,
+				tone: energyTone(total),
+				note: "Measured or estimated kWh and its tariff cost.",
+			},
+			{
+				label: "Cash",
+				value: economy.cash.display,
+				tone: economy.cash.currencies.length
+					? economy.cash.currencies.some((cash) => totalTone(cash) === "estimate")
+						? "estimate"
+						: "known"
+					: economy.cash.unknownCount > 0
+						? "unknown"
+						: "known",
+				note:
+					"Your share per currency, never summed across currencies: fees for pools you pay personally (each a whole pool's fee, not this workspace's spend), extra charges and local electricity. Charges a sponsor or employer pays are not cash to you.",
+			},
+		],
+		pools: economy.groups.pool.map((pool) => ({
+			pool: pool.key,
+			contributions: countText(pool.contributions),
+			extra: pool.display.extra,
+			providerCharge: pool.display.providerCharge,
+			apiEquivalent: pool.display.apiEquivalent,
+			seatCredits: pool.display.seatCredits,
+			tone: totalTone(pool.marginalCharge),
+		})),
+		fees: economy.fees.map((fee) => ({
+			key: `${fee.poolId}:${fee.period.kind}:${fee.period.start}`,
+			pool: fee.poolId,
+			payer: fee.payer,
+			// The report's period bounds are UTC instants; the day is the report's own, never shifted to local time.
+			period: `${fee.period.kind} from ${fee.period.start.slice(0, 10)}`,
+			value: fee.display,
+		})),
+		references: economy.references.map((row) => ({
+			// The fold keys a reference by tariff row, date and basis; served and requested can share the first two.
+			key: `${row.referenceRowId}:${row.asOf}:${row.basis}`,
+			id: row.referenceRowId,
+			asOf: row.asOf,
+			basis: row.basis === "served-model" ? "served model" : "requested model",
+			contributions: counted(row.contributions, "contribution"),
+		})),
+		sources: `${counted(economy.sources.attempts, "attempt")} · ${counted(economy.sources.runs, "run")} · ${counted(economy.sources.gaps, "gap")}`,
 	};
 }
 
