@@ -781,6 +781,17 @@ export function isCompactPrompt(inputs: SessionPromptInputs): boolean {
 	);
 }
 
+/**
+ * Whether the chat window is known and at least the compact threshold. An unknown window and every worker
+ * (which carries no window) stay on the shorter text.
+ */
+function isFullWindowPrompt(inputs: SessionPromptInputs): boolean {
+	return typeof inputs.contextWindow === "number" && inputs.contextWindow >= COMPACT_CONTEXT_WINDOW_TOKENS;
+}
+
+/** The exact wire model id, case-normalized, the full-window working notes are pinned to. */
+const FULL_WINDOW_NOTES_MODELS: ReadonlySet<string> = new Set(["claude-opus-5.5"]);
+
 function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: string): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
@@ -1312,6 +1323,18 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// call tools gets none, since the notes are about acting between tool calls.
 	const modelNotesId = session.providerSupportsTools === false ? null : modelGuidanceFragmentId(session.model);
 	const modelNotes = modelNotesId === null ? undefined : picker.pick(modelNotesId);
+	// Full-window working notes ride the runtime tail beside the window they depend on, so the cached prefix
+	// stays the same when the window moves. v1 only, pinned models only; an answer or a proposal gets no
+	// implementation pressure.
+	const fullWindow =
+		!v2 &&
+		FULL_WINDOW_NOTES_MODELS.has(session.model?.toLowerCase() ?? "") &&
+		session.providerSupportsTools !== false &&
+		isFullWindowPrompt(session) &&
+		session.turnConstraints?.mode !== "answer" &&
+		session.turnConstraints?.mode !== "proposal"
+			? picker.pick("operating.full-window")
+			: undefined;
 	const userControl = v2 ? undefined : picker.pick("operating.user-control");
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
@@ -1361,7 +1384,12 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 				: "",
 		],
 		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true, session.yoloConfinement, v2)],
-		["runtime", [renderRuntimeBlock(session), v2RuntimePaths, modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
+		[
+			"runtime",
+			[renderRuntimeBlock(session), v2RuntimePaths, modelNotes?.body.trim(), fullWindow?.body.trim()]
+				.filter(Boolean)
+				.join("\n\n"),
+		],
 		["tool-contract", renderToolContractBlock(session, autonomyLevel)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],
 		["memory", renderMemoryBlock(session.memorySection)],
@@ -1401,6 +1429,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(skills && skillInstalls ? [skillInstalls] : []),
 		safety,
 		...(modelNotes ? [modelNotes] : []),
+		...(fullWindow ? [fullWindow] : []),
 	];
 	const fragmentManifest: FragmentManifestEntry[] = [...baseFragments, ...(inputs.additionalFragments ?? [])].map(
 		(fragment) => picker.manifest(fragment),
