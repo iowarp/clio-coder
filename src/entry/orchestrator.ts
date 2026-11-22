@@ -759,7 +759,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					// Scripted runs keep suggestions off stderr; malformed-file warnings still flow.
 					suggest: options.headless === undefined || (options.headless.mode !== "json" && process.stderr.isTTY === true),
 					// TUI and ACP consume the stored hints on their own notice surfaces.
-					...(options.acp === undefined && !muxInteractive ? { sink: (hint) => bootStderr(`${hint.text}\n`) } : {}),
+					...(options.acp === undefined && !muxInteractive
+						? { sink: (hint) => bootStderr(`clio-coder: ${hint.text}\n`) }
+						: {}),
 				},
 			}),
 			// Live probes exercise this session's chat model once the effective view

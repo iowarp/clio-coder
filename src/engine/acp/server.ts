@@ -4745,7 +4745,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	let handoffPreparing = false;
 	/** Counts prompts, so a draft drawn while a request started is known to be stale. */
 	let promptSerial = 0;
-	let startupHintsShown = false;
+	/** The session the startup notices went to; a load of a session that already took a prompt counts as shown. */
+	let startupHintsSessionId: string | null = null;
 	let promptSettled: Promise<void> | null = null;
 	/** The one operator shell line this process runs at a time, as the terminal runs one. */
 	let activeShell: { sessionId: string; abort: AbortController; settled: Promise<void> } | null = null;
@@ -6116,6 +6117,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				...(ceiling !== undefined ? { ceiling } : {}),
 			};
 			sessionCreated = true;
+			// Its first prompt, in whichever process took it, carried the startup notices; a reload does not repeat them.
+			if (entries.some((entry) => entry.kind === "message" && entry.role === "user")) startupHintsSessionId = id;
 			const ceilingEcho = applySessionCeiling(session);
 			// The first usage frame and the ledger read the view the next request would publish, not the saved snapshot.
 			await options.chat.nextRequestReady?.();
@@ -8383,8 +8386,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			// reply carrying only the model's text. They wait for the first prompt
 			// so the client has bound the session id, and they do not count toward
 			// admission: a refused prompt must still fail as prompt_not_admitted.
-			if (!startupHintsShown) {
-				startupHintsShown = true;
+			if (startupHintsSessionId !== session.id) {
+				startupHintsSessionId = session.id;
 				for (const hint of options.startupHints?.() ?? []) {
 					options.transport.notify("session/update", {
 						sessionId: session.id,
