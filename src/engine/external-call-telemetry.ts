@@ -169,12 +169,25 @@ function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): E
 	const counts = Object.fromEntries(
 		keys.map((key) => [key, facts.usage[key].kind === "measured" ? facts.usage[key].value : 0]),
 	) as Record<(typeof keys)[number], number>;
+	// The 1h subset of the writes bills at its own rate, as the catalog prices it. A subset larger than the writes it
+	// belongs to, or beside writes nobody counted, is an inconsistent report, so the price stays unknown.
+	const longWrite = facts.usage.cacheWrite1h;
+	const writes = facts.usage.cacheWrite;
+	if (
+		longWrite.kind === "measured" &&
+		longWrite.value > 0 &&
+		(writes.kind !== "measured" || longWrite.value > writes.value)
+	)
+		return facts;
 	return {
 		...facts,
 		pricing: {
 			usd: {
 				kind: "measured" as const,
-				value: calculatePricingCostUsd(effective, counts),
+				value: calculatePricingCostUsd(effective, {
+					...counts,
+					...(longWrite.kind === "measured" ? { cacheWrite1h: longWrite.value } : {}),
+				}),
 				source: "local-count" as const,
 			},
 			pricedBy: "target-rates" as const,

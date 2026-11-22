@@ -22,7 +22,7 @@ import {
 	buildCodexExecPrompt,
 	startCodexCliWorkerRun,
 } from "../../src/engine/codex/subprocess-runtime.js";
-import { observeExternalWorkerRun } from "../../src/engine/external-call-telemetry.js";
+import { bindExternalUsage, observeExternalWorkerRun } from "../../src/engine/external-call-telemetry.js";
 import { externalCliConnector } from "../../src/engine/external-cli/connectors.js";
 import { startJsonlCliRun } from "../../src/engine/external-cli/jsonl-runner.js";
 import { buildOpenCodeCliArgs, OPENCODE_CLI_CONNECTOR } from "../../src/engine/external-cli/opencode.js";
@@ -257,6 +257,37 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		ok(!observed.args.join(" ").includes("PONG"));
 		equal(observed.env.CODEX_HOME, join(root, "codex-home"));
 		equal(observed.env.FAKE_SECRET, undefined);
+	});
+
+	it("prices a reported 1h cache-write subset at its own rate on declared target rates", async () => {
+		const price = async (usage: Record<string, number>) => {
+			const run = input(tmpdir(), codexCliRuntime);
+			run.telemetryContext = { sessionId: null, runId: "ext-1h", agent: { role: "worker", id: "ext-1h" } };
+			run.target = { ...run.target, pricing: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } };
+			const message = bindExternalUsage(
+				{ role: "assistant", content: [], stopReason: "stop", usage } as unknown as AgentMessage,
+				{ usage, coverage: "complete" },
+			);
+			const frames: WorkerTelemetryFrame[] = [];
+			await observeExternalWorkerRun(
+				run,
+				(event) => {
+					if (event.type === "clio_coder_telemetry") frames.push(event);
+				},
+				(emit) => {
+					emit({ type: "message_end", message } as Parameters<typeof emit>[0]);
+					return { promise: Promise.resolve({ messages: [message], exitCode: 0 }), abort: () => undefined };
+				},
+			).promise;
+			return runUsageFromCallRecords(frames.map(({ record }) => record)).sums.usd;
+		};
+		const usage = { input: 10, output: 3, cacheRead: 0, cacheWrite: 5, cacheWrite1h: 2, totalTokens: 18 };
+		// 10 input x1 + 3 output x2 + 3 short writes x4 + 2 1h writes at twice input (x2).
+		ok(Math.abs(factKnownValue(await price(usage)) - 32 / 1_000_000) < 1e-12);
+		// A 1h subset larger than its writes is an inconsistent report: no price, never a negative or clamped one.
+		const inconsistent = await price({ ...usage, cacheWrite1h: 6 });
+		equal(inconsistent.unknownCount, 1);
+		equal(inconsistent.measured, 0);
 	});
 
 	it("fails Codex turns without a valid terminal JSONL event", async () => {

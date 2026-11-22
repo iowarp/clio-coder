@@ -82,7 +82,7 @@ export const UsageSchema = Type.Object(
 		cacheWrite1h: factSchema(count),
 		output: factSchema(count),
 		reasoning: factSchema(count),
-		/** The provider's total, kept only when it exceeds the breakdown it reported (#434). */
+		/** The provider's total, kept when it exceeds the breakdown it reported or a part of that breakdown is unknown (#434). */
 		total: Type.Optional(factSchema(count)),
 	},
 	closed,
