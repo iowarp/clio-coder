@@ -1520,7 +1520,7 @@ test("ACP replay presents a gateway call under the live title, kind and location
 		const from = peer.updates.length;
 		await peer.call("session/prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "List" }] });
 		const live = shown(from);
-		strictEqual(live[0]?.title, "ls");
+		strictEqual(live[0]?.title, "ls: ws");
 		deepStrictEqual(replayed, live);
 	} finally {
 		await peer.stop();
