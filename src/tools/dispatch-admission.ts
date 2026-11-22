@@ -517,7 +517,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 	): DispatchExecutionSnapshot => ({
 		kind: "dispatch",
 		planView: {
-			...describeDispatchPlan(args),
+			// The snapshot is the view admission reads on the prepared path, so the read-only judgement is made
+			// here, on arguments whose resolved artifact this controller sealed (`markPrepared`).
+			...describeDispatchPlan(args, state.trustedResolvedPlans.has(args)),
 			...(fields.requests.some((request) => request.externalReadRoot !== undefined) &&
 			fields.requests.every((request) =>
 				isReadOnlyExplorer(deps.getAgentSpecs().find((spec) => spec.id === request.agentId)),
@@ -1163,7 +1165,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			const snapshot = state.trustedExecutionSnapshots.get(args);
 			if (snapshot?.kind === "dispatch") return snapshot.planView;
 			const trusted = state.trustedResolvedPlans.get(args);
-			return describeDispatchPlan(trusted === undefined ? args : { ...args, [RESOLVED_DISPATCH_PLAN_ARGUMENT]: trusted });
+			return trusted === undefined
+				? describeDispatchPlan(args)
+				: describeDispatchPlan({ ...args, [RESOLVED_DISPATCH_PLAN_ARGUMENT]: trusted }, true);
 		},
 		hostEffectCalls(args) {
 			// Host verification runs each sealed check as the dispatching agent, so

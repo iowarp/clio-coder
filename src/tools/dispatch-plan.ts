@@ -121,6 +121,11 @@ export interface DispatchPlanView {
 	taskCount: number;
 	/** True when this call requires plan approval at default autonomy. */
 	planScale: boolean;
+	/**
+	 * Set when a plan-scale call is admitted at default autonomy without the plan stop: every task of the
+	 * host-sealed plan is a read-only run on this machine (maintainer 2026-11-21 13:40Z). See `isReadOnlyPlan`.
+	 */
+	readOnlyPlan?: true;
 	tasks: DispatchPlanTaskView[];
 	/**
 	 * Rendered plan artifact, deterministic for identical arguments against an
@@ -1036,7 +1041,68 @@ export function withResolvedDispatchPlan(
  * through the same prepareDispatchArguments the tool itself applies, so the
  * admission-time view and the execution-time view agree.
  */
-export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefined): DispatchPlanView {
+/** Topologies that only fan tasks out or chain them; gates (review, compete, council), detached and fleet runs are not here. */
+const READ_ONLY_PLAN_TOPOLOGIES: ReadonlySet<DispatchPlanTopology> = new Set(["parallel", "sequential", "pipeline"]);
+
+/**
+ * Whether a sealed plan changes nothing and stays on this machine, so default autonomy need not stop for it
+ * (maintainer 2026-11-21 13:40Z; a headless default run could otherwise never fan out, lab L9). Every task must
+ * have resolved to the `explorer` role, which admission derives from the recipe's capability class or a read-only
+ * request and the envelope then enforces, never from the task text. A task that names write roots or expected
+ * outputs, runs in a worktree, sits in a gate, carries an approved failover, an agent selection or an authority
+ * grant, carries a host verification check (the host runs it outside the worker's read-only envelope), or leaves
+ * the local node keeps the approval, as does any plan with a Scout source or a confirmation, or a call that
+ * declared any write scope (`declaredWriteScope`).
+ */
+function isReadOnlyPlan(
+	artifact: ResolvedDispatchPlanArtifact,
+	applyWinner: boolean,
+	declaredWriteScope: boolean,
+): boolean {
+	if (applyWinner || declaredWriteScope || artifact.source !== null || artifact.confirmation !== undefined) return false;
+	if (!READ_ONLY_PLAN_TOPOLOGIES.has(artifact.topology) || artifact.tasks.length === 0) return false;
+	return artifact.tasks.every(
+		(task) =>
+			task.executionRole === "explorer" &&
+			(task.role === undefined || task.role === "task") &&
+			task.nodeKind === "local" &&
+			task.node === "local" &&
+			task.worktree !== true &&
+			task.apply === undefined &&
+			task.failover === "none" &&
+			task.council === undefined &&
+			task.agentSelection === null &&
+			task.authorityGrant === null &&
+			(task.resolvedVerification?.length ?? 0) === 0 &&
+			(task.intent === undefined ||
+				(task.intent.writeRoots.length === 0 &&
+					task.intent.expectedOutputs.length === 0 &&
+					task.intent.verification.length === 0)),
+	);
+}
+
+/**
+ * Whether the call declared a write scope anywhere: write roots or expected outputs on the batch or on a task.
+ * Intent normalization drops a `.` write root (the whole workspace), so the sealed intent alone would read that
+ * declaration as none; admission seals this judgement into the snapshot's plan view, and it can only keep a stop.
+ */
+function declaresWriteScope(args: Record<string, unknown>): boolean {
+	const listed = (value: unknown) => Array.isArray(value) && value.length > 0;
+	const declares = (holder: unknown) =>
+		isRecord(holder) &&
+		(listed(holder.writeRoots) ||
+			(isRecord(holder.intent) && (listed(holder.intent.write_roots) || listed(holder.intent.expected_outputs))));
+	return declares(args) || (Array.isArray(args.tasks) && args.tasks.some(declares));
+}
+
+/**
+ * `hostSealed` says the resolved artifact on the arguments is the one the admission planner holds for this call,
+ * not a value that arrived with the call; only then can the plan be judged read-only.
+ */
+export function describeDispatchPlan(
+	rawArgs: Record<string, unknown> | undefined,
+	hostSealed = false,
+): DispatchPlanView {
 	const args = prepareDispatchArguments(rawArgs ?? {});
 	const preparationFailed = typeof args[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT] === "string";
 	const resolved = resolvedDispatchPlanFromArgs(args);
@@ -1078,6 +1144,12 @@ export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefine
 		topology,
 		taskCount: Math.max(1, tasks.length),
 		planScale,
+		...(planScale &&
+		hostSealed &&
+		resolved !== null &&
+		isReadOnlyPlan(resolved, isRecord(args.apply_winner), declaresWriteScope(rawArgs ?? {}) || declaresWriteScope(args))
+			? { readOnlyPlan: true as const }
+			: {}),
 		tasks,
 		text,
 		hash: createHash("sha256").update(text, "utf8").digest("hex"),

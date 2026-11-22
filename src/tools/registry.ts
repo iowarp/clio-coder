@@ -2112,7 +2112,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// The plan stop only waits for the operator, so the operator's contained
 				// yolo runs a plan as unconfined yolo does. Its workers still meet their
 				// own permits, routes and sandbox.
-				...(planScale && !(deps.principal !== "worker" && deps.unattendedAsks?.() === true)
+				// A sealed plan whose every task is a read-only run on this machine does not stop either (maintainer
+				// 2026-11-21 13:40Z, `isReadOnlyPlan`): there is nothing in it for an operator to refuse that the
+				// workers' own permits do not already hold, and a headless default run could otherwise never fan out.
+				...(planScale &&
+				dispatchPlan?.readOnlyPlan !== true &&
+				!(deps.principal !== "worker" && deps.unattendedAsks?.() === true)
 					? { dispatchPlanScale: true }
 					: {}),
 			},
