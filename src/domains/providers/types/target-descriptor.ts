@@ -1,3 +1,4 @@
+import type { FundingBinding } from "../../../core/funding-config.js";
 import type { CapabilityFlags } from "./capability-flags.js";
 
 export interface TargetAuth {
@@ -112,6 +113,7 @@ export interface TargetDescriptor {
 	lifecycle?: TargetLifecycle;
 	gateway?: boolean;
 	pricing?: TargetPricing | "free";
+	funding?: FundingBinding;
 	cache?: TargetCacheSettings;
 	lmstudio?: LmStudioTargetSettings;
 	litellm?: LiteLLMTargetSettings;

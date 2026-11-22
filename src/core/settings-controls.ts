@@ -122,6 +122,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"integrations.externalAgents.defaults.turnTimeoutMs": "Maximum agent turn time",
 	"integrations.externalAgents.defaults.permissionTimeoutMs": "Time for agent permission",
 	targets: "Configured connections",
+	funding: "Funding pools",
 	"interface.keybindings": "Keybinding overrides",
 	"integrations.externalAgents.entries": "Available agents",
 	"integrations.library.catalog": "Library catalog path",
@@ -233,6 +234,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"integrations.externalAgents.defaults.permissionTimeoutMs":
 		"How long CLIO Coder waits for your answer to an external agent's permission request.",
 	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
+	funding:
+		"Optional user-owned fees, grants, payers and electricity facts for reports. Never grants spending authority.",
 	"interface.keybindings": "Custom key overrides layered on the defaults.",
 	"integrations.externalAgents.entries": "Other coding agents you can call through /run.",
 	"integrations.library.catalog": "Path to the private resource catalog; blank uses the one in your config directory.",
@@ -559,6 +562,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
 const STRUCTURED = new Set([
+	"funding",
 	"models",
 	"context.semantic.inboxes",
 	"fleet.profiles",

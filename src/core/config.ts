@@ -39,6 +39,19 @@ import {
 	WORKSPACE_SNAPSHOT_MODES,
 } from "./defaults.js";
 import { writeDiagnostic } from "./diagnostics.js";
+import type { FundingBinding, FundingPool } from "./funding-config.js";
+import {
+	FUNDING_ID_PATTERN,
+	FUNDING_PAYERS,
+	FUNDING_PERIODS,
+	FUNDING_SCHEMES,
+	FUNDING_SIGNALS,
+	FUNDING_STAMP_PATTERN,
+	FUNDING_UNIT_PATTERN,
+	isFundingCurrency,
+	isFundingInstant,
+	isInstitutionalPool,
+} from "./funding-config.js";
 import { MODEL_TIERS } from "./model-tier.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { LIVE_CHECK_LOGIN_RUNTIMES } from "./sandbox/env-scrub.js";
@@ -759,7 +772,172 @@ function validateLiteLLMSettings(
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function validateTarget(issues: Issues, path: string, value: unknown): ClioSettings["targets"][number] | null {
+function fundingMap(issues: Issues, path: string, value: unknown): Record<string, unknown> | undefined {
+	if (isPlainObject(value)) return value;
+	issues.add(path, "expected a map");
+	return undefined;
+}
+
+function fundingString(
+	issues: Issues,
+	path: string,
+	value: unknown,
+	accept: (text: string) => boolean,
+	expected: string,
+): string | undefined {
+	if (typeof value === "string" && accept(value)) return value;
+	issues.add(path, expected);
+	return undefined;
+}
+
+function validateFundingPool(issues: Issues, path: string, value: unknown): FundingPool | undefined {
+	const raw = fundingMap(issues, path, value);
+	if (!raw) return undefined;
+	issues.unknownKeys(path, raw, ["scheme", "payer", "nativeUnit", "fee", "grant", "local"]);
+	const scheme = expectEnum(issues, `${path}.scheme`, raw.scheme, FUNDING_SCHEMES);
+	if (scheme === undefined) return undefined;
+	const pool: FundingPool = { scheme };
+	if ("payer" in raw) {
+		const payer = expectEnum(issues, `${path}.payer`, raw.payer, FUNDING_PAYERS);
+		if (payer !== undefined) pool.payer = payer;
+	}
+	if ("nativeUnit" in raw) {
+		const nativeUnit = fundingString(
+			issues,
+			`${path}.nativeUnit`,
+			raw.nativeUnit,
+			(v) => FUNDING_UNIT_PATTERN.test(v),
+			"expected a unit identifier",
+		);
+		if (nativeUnit !== undefined) pool.nativeUnit = nativeUnit;
+	}
+	if ("fee" in raw) {
+		const p = `${path}.fee`;
+		const fee = fundingMap(issues, p, raw.fee);
+		if (fee) {
+			issues.unknownKeys(p, fee, ["amount", "currency", "period"]);
+			const amount = expectNumber(issues, `${p}.amount`, fee.amount, { min: 0 });
+			const currency = fundingString(
+				issues,
+				`${p}.currency`,
+				fee.currency,
+				isFundingCurrency,
+				"expected an ISO 4217 currency",
+			);
+			const period = expectEnum(issues, `${p}.period`, fee.period, FUNDING_PERIODS);
+			if (amount !== undefined && currency !== undefined && period !== undefined) pool.fee = { amount, currency, period };
+		}
+	}
+	if ("grant" in raw) {
+		const p = `${path}.grant`;
+		const grant = fundingMap(issues, p, raw.grant);
+		if (grant) {
+			issues.unknownKeys(p, grant, ["amount", "expiresAt"]);
+			const expiresAt = fundingString(
+				issues,
+				`${p}.expiresAt`,
+				grant.expiresAt,
+				isFundingInstant,
+				"expected an ISO UTC timestamp",
+			);
+			const amount = "amount" in grant ? expectNumber(issues, `${p}.amount`, grant.amount, { min: 0 }) : undefined;
+			if (amount !== undefined && pool.nativeUnit === undefined)
+				issues.add(`${path}.nativeUnit`, "required when a grant amount is declared");
+			if (expiresAt !== undefined) pool.grant = { expiresAt, ...(amount !== undefined ? { amount } : {}) };
+		}
+	}
+	if ("local" in raw) {
+		const p = `${path}.local`;
+		const local = fundingMap(issues, p, raw.local);
+		if (local) {
+			issues.unknownKeys(p, local, ["activeWatts", "idleWatts", "tariff"]);
+			const power: NonNullable<FundingPool["local"]> = {};
+			for (const key of ["activeWatts", "idleWatts"] as const) {
+				if (!(key in local)) continue;
+				const watts = expectNumber(issues, `${p}.${key}`, local[key], { min: 0 });
+				if (watts !== undefined) power[key] = watts;
+			}
+			if ("tariff" in local) {
+				const tariff = fundingMap(issues, `${p}.tariff`, local.tariff);
+				if (tariff) {
+					issues.unknownKeys(`${p}.tariff`, tariff, ["ratePerKwh", "currency"]);
+					const ratePerKwh = expectNumber(issues, `${p}.tariff.ratePerKwh`, tariff.ratePerKwh, { min: 0 });
+					const currency = fundingString(
+						issues,
+						`${p}.tariff.currency`,
+						tariff.currency,
+						isFundingCurrency,
+						"expected an ISO 4217 currency",
+					);
+					if (ratePerKwh !== undefined && currency !== undefined) power.tariff = { ratePerKwh, currency };
+				}
+			}
+			pool.local = power;
+		}
+	}
+	return pool;
+}
+
+function validateFundingBinding(
+	issues: Issues,
+	path: string,
+	value: unknown,
+	definitions: ClioSettings["funding"],
+): FundingBinding | undefined {
+	const raw = fundingMap(issues, path, value);
+	if (!raw) return undefined;
+	issues.unknownKeys(path, raw, ["pool", "detection"]);
+	const id = fundingString(
+		issues,
+		`${path}.pool`,
+		raw.pool,
+		(v) => FUNDING_ID_PATTERN.test(v),
+		"expected a funding pool identifier",
+	);
+	if (id === undefined) return undefined;
+	const pool = Object.hasOwn(definitions, id) ? definitions[id] : undefined;
+	if (pool === undefined) {
+		issues.add(`${path}.pool`, `no funding pool '${id}' is defined in user settings`);
+		return undefined;
+	}
+	if (isInstitutionalPool(pool) && (pool.scheme !== "declared" || pool.grant === undefined)) {
+		issues.add(`${path}.pool`, "an institutional binding requires a declared pool with a grant expiry");
+		return undefined;
+	}
+	const binding: FundingBinding = { pool: id };
+	if ("detection" in raw) {
+		const p = `${path}.detection`;
+		const detection = fundingMap(issues, p, raw.detection);
+		if (detection) {
+			issues.unknownKeys(p, detection, ["signal", "loginStamp", "verifiedAt"]);
+			const signal = expectEnum(issues, `${p}.signal`, detection.signal, FUNDING_SIGNALS);
+			const loginStamp = fundingString(
+				issues,
+				`${p}.loginStamp`,
+				detection.loginStamp,
+				(v) => FUNDING_STAMP_PATTERN.test(v),
+				"expected an opaque login stamp",
+			);
+			const verifiedAt = fundingString(
+				issues,
+				`${p}.verifiedAt`,
+				detection.verifiedAt,
+				isFundingInstant,
+				"expected an ISO UTC timestamp",
+			);
+			if (signal !== undefined && loginStamp !== undefined && verifiedAt !== undefined)
+				binding.detection = { signal, loginStamp, verifiedAt };
+		}
+	}
+	return binding;
+}
+
+function validateTarget(
+	issues: Issues,
+	path: string,
+	value: unknown,
+	funding: ClioSettings["funding"],
+): ClioSettings["targets"][number] | null {
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return null;
@@ -775,6 +953,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"lifecycle",
 		"gateway",
 		"pricing",
+		"funding",
 		"cache",
 		"lmstudio",
 		"litellm",
@@ -828,6 +1007,10 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("pricing" in value) {
 		const v = validatePricing(issues, `${path}.pricing`, value.pricing);
 		if (v !== undefined) target.pricing = v;
+	}
+	if ("funding" in value) {
+		const binding = validateFundingBinding(issues, `${path}.funding`, value.funding, funding);
+		if (binding !== undefined) target.funding = binding;
 	}
 	if ("cache" in value) {
 		if (!isPlainObject(value.cache)) issues.add(`${path}.cache`, "expected a map");
@@ -1453,6 +1636,7 @@ const TOP_LEVEL_KEYS = [
 	"version",
 	"turnControl",
 	"targets",
+	"funding",
 	"chat",
 	"fleet",
 	"context",
@@ -1514,13 +1698,30 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		}
 	}
 
+	if ("funding" in raw) {
+		const definitions = fundingMap(issues, "funding", raw.funding);
+		if (definitions) {
+			for (const [id, value] of Object.entries(definitions)) {
+				const path = `funding.${id}`;
+				if (!FUNDING_ID_PATTERN.test(id) || Object.hasOwn(Object.prototype, id)) {
+					issues.add(
+						path,
+						"expected a pool identifier of up to 48 letters, digits, hyphens or underscores, starting with a letter",
+					);
+					continue;
+				}
+				const pool = validateFundingPool(issues, path, value);
+				if (pool !== undefined) settings.funding[id] = pool;
+			}
+		}
+	}
 	if ("targets" in raw) {
 		if (!Array.isArray(raw.targets)) issues.add("targets", `expected a list, got ${describe(raw.targets)}`);
 		else {
 			const seen = new Set<string>();
 			const targets: ClioSettings["targets"] = [];
 			for (let index = 0; index < raw.targets.length; index += 1) {
-				const target = validateTarget(issues, `targets[${index}]`, raw.targets[index]);
+				const target = validateTarget(issues, `targets[${index}]`, raw.targets[index], settings.funding);
 				if (!target) continue;
 				if (seen.has(target.id)) {
 					issues.add(`targets[${index}].id`, `duplicate target id '${target.id}'`);

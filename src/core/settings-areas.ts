@@ -62,7 +62,7 @@ export function resolveSettingsArea(name: string): SettingsAreaId | undefined {
 /** Group labels in display order, per area. A row's group is the one its placement names. */
 export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly string[]>> = {
 	recent: ["Pinned", "Recent", "Suggested"],
-	models: ["Connections", "Chat model", "Reasoning & length", "Speed", "Quick switch", "Model tiers"],
+	models: ["Connections", "Funding", "Chat model", "Reasoning & length", "Speed", "Quick switch", "Model tiers"],
 	chat: ["Replies", "Alerts", "Recovery", "Transcript", "Guidance", "Updates", "Graphical app"],
 	workers: [
 		"Default worker",
@@ -127,6 +127,7 @@ const place = (area: SettingsAreaId, group = ""): SettingsPlacement => ({ area, 
  */
 export function settingsPlacementForRow(id: string, path: string): SettingsPlacement {
 	if (id === "targets" || id === "targets.add-cta" || under(path, "targets")) return place("models", "Connections");
+	if (under(path, "funding")) return place("models", "Funding");
 	if (id.startsWith("maintenance.")) return place("advanced", "Maintenance");
 	if (RAW_COLLECTIONS.has(path) && !GUIDED_ROW_IDS.has(id)) return place("advanced", "Raw collections");
 	switch (path) {

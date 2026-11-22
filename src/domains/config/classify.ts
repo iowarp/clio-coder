@@ -112,6 +112,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	// An engine resolves per call; the use that registers consult at startup is restart-required.
 	"systemOne",
 	"targets",
+	"funding",
 	"chat",
 	"fleet.default",
 	"fleet.profiles",

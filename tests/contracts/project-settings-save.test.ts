@@ -66,6 +66,29 @@ test("project save preserves trusted team bytes and unrelated local keys", async
 	}
 });
 
+test("trusted project layers cannot redefine user-owned funding pools", async () => {
+	const home = await isolateClioEnv("clio-project-funding-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		const config = join(workspace, ".clio-coder");
+		mkdirSync(config, { recursive: true });
+		writeFileSync(
+			settingsPath(),
+			"funding:\n  seat:\n    scheme: declared\n    fee: { amount: 20, currency: USD, period: month }\n",
+		);
+		writeFileSync(join(config, "settings.yaml"), "funding:\n  seat:\n    fee: { amount: 0 }\n");
+		writeFileSync(join(config, "settings.local.yaml"), "funding:\n  another: { scheme: declared }\n");
+		approve(workspace);
+		const result = readLayeredSettings(workspace);
+		strictEqual(result.settings.funding.seat?.fee?.amount, 20);
+		strictEqual(result.settings.funding.another, undefined);
+		strictEqual(result.sources["funding.seat.fee.amount"], "user");
+		strictEqual(result.issues.filter((issue) => issue.path === "funding").length, 2);
+	} finally {
+		home.restore();
+	}
+});
+
 test("project save refuses an untrusted or changed project settings surface", async () => {
 	const home = await isolateClioEnv("clio-project-save-untrusted-");
 	try {
