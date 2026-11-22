@@ -3,7 +3,7 @@
 `seat-stretch` is a shipped example playbook for a subscription seat such as
 Codex or Copilot. Calls the plan covers may carry no extra fee, but every call
 draws on a quota window, a provider that reports `overage: permitted` may
-charge for calls past it, and a charge Clio cannot price reads unknown. The
+charge for calls past it, and a charge CLIO Coder cannot price reads unknown. The
 policy reports overage and unknown charges explicitly. It is content, not a
 harness feature: the reserve (20% is this playbook's default, which you edit;
 the harness has no reserve rule), the one-worker width and the choice between

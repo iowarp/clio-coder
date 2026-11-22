@@ -140,6 +140,10 @@ upgrade migrates your settings.
 - **You get the model you asked for.** A cloud or subscription target that
   does not list the requested model, or answers with a different one, is
   refused with a typed cause instead of running the turn on something else.
+- **Cost that says who pays.** Declare who funds each target, and `/usage`,
+  `clio-coder usage report` and the desktop app keep your extra cost, seat
+  credits and the API price of the same usage apart. An amount nothing
+  measured reads unknown, never zero.
 - **Bring your setup.** `clio-coder interop adopt` ports Claude Code and Codex
   command hooks, stdio MCP servers and user instructions.
 
