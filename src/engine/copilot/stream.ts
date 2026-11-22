@@ -824,23 +824,45 @@ const TOOL_CHANNEL_PREFIX = "to=functions.";
 /** That clause at the start of the text or after whitespace, with the whitespace before it, naming one tool. */
 const TOOL_CHANNEL_MARKER = /\s*(?:^|(?<=\s))to=functions\.([A-Za-z_][\w-]*)/gu;
 const TOOL_NAME_CHAR = /[\w-]/u;
+/**
+ * What makes the clause a call rather than prose that quotes it (M-52): after the name, `, commentary` (the wave-61
+ * frame), a Harmony special token, or a JSON argument object, optionally behind channel and constraint words.
+ */
+const TOOL_CALL_SHAPE = /^\s*(?:,\s*commentary\b|(?:(?:commentary|json|code)\s*)*(?:<\||\{))/u;
+const TOOL_CALL_WORDS = ["commentary", "json", "code"];
+/** How far past the name the text is held while it could still take the call shape. */
+const TOOL_CALL_SHAPE_HOLD = 32;
+
+/** Whether the text after a marker's name is a call, prose, or still too short to say. */
+function toolCallShape(tail: string, final: boolean): "call" | "prose" | "undecided" {
+	if (TOOL_CALL_SHAPE.test(tail)) return "call";
+	if (final || tail.length > TOOL_CALL_SHAPE_HOLD) return "prose";
+	const rest = tail.trimStart();
+	const comma = /^,\s*/u.exec(rest);
+	if (comma !== null) return "commentary".startsWith(rest.slice(comma[0].length)) ? "undecided" : "prose";
+	const word = rest.replace(/^(?:(?:commentary|json|code)\s*)*/u, "");
+	if (word === "" || word === "<" || TOOL_CALL_WORDS.some((candidate) => candidate.startsWith(word))) return "undecided";
+	return "prose";
+}
 
 /**
- * Where a channel marker naming a declared tool starts in `text`, searching from `from`, or null. A name the text has
- * not finished yet is no marker until the text is final.
+ * The first channel marker naming a declared tool in `text` from `from`: a call to drop, or one the text has not yet
+ * shown to be a call or prose, which is held. A name the text has not finished is undecided until the text is final.
  */
 function toolChannelMarker(
 	text: string,
 	from: number,
 	declared: ReadonlySet<string>,
 	final: boolean,
-): { at: number; tool: string } | null {
+): { at: number; tool: string; call: boolean } | null {
 	TOOL_CHANNEL_MARKER.lastIndex = from;
 	for (let match = TOOL_CHANNEL_MARKER.exec(text); match !== null; match = TOOL_CHANNEL_MARKER.exec(text)) {
 		const tool = match[1] as string;
-		const next = text[match.index + match[0].length];
-		if (next === undefined && !final) return null;
-		if (declared.has(tool)) return { at: match.index, tool };
+		const end = match.index + match[0].length;
+		if (end === text.length && !final) return { at: match.index, tool, call: false };
+		if (!declared.has(tool)) continue;
+		const shape = toolCallShape(text.slice(end), final);
+		if (shape !== "prose") return { at: match.index, tool, call: shape === "call" };
 	}
 	return null;
 }
@@ -944,8 +966,9 @@ class Step {
 	/**
 	 * Reply text from Copilot. A model trained on Harmony can write its tool call into the reply as a bare channel
 	 * marker (`to=functions.finish, commentary {"state":"done"}`) that the runtime does not parse into a request, so it
-	 * arrives as text (M-47). A marker naming a declared tool, at the start or after whitespace, and everything after it
-	 * never reach the reply: the runtime ran no call, so none is synthesized, and the drop is stamped on the message.
+	 * arrives as text (M-47). A marker naming a declared tool, at the start or after whitespace and followed by the call
+	 * shape, and everything after it never reach the reply: the runtime ran no call, so none is synthesized, and the
+	 * drop is stamped on the message. Prose that quotes a marker without that shape is kept (M-52).
 	 */
 	private text(delta: string): void {
 		if (delta.length === 0 || this.markerAt !== null) return;
@@ -957,7 +980,7 @@ class Step {
 	private release(final: boolean): void {
 		if (this.markerAt !== null) return;
 		const marker = toolChannelMarker(this.textSeen, this.textShown, this.declaredTools, final);
-		if (marker !== null) {
+		if (marker?.call === true) {
 			this.markerAt = marker.at;
 			this.message.copilotDroppedToolMarkers = [...(this.message.copilotDroppedToolMarkers ?? []), marker.tool];
 		}

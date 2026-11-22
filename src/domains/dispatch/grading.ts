@@ -273,19 +273,31 @@ function checkObligation(facts: WorkFacts, contract: GradeContract): RuleCheck {
 				qualityFail: true,
 			};
 		case "executed-checks":
-			if (!contract.toolLaneObserved) return UNKNOWN;
-			if (facts.ungroundedChecks.length === 0) return PASS;
-			return {
-				status: "fail",
-				code: "obligation_unmet",
-				detail: `obligation executed-checks unmet: the report claims checks this run never executed on the final tree (${facts.ungroundedChecks.join(", ")})`,
-				retry: true,
-				qualityGate: true,
-				qualityFail: true,
-			};
-		case "cited-evidence":
-			return checkCitedEvidence(facts, contract);
+			return checkExecutedChecks(facts, contract);
+		case "cited-evidence": {
+			// A standalone reviewer is still a checker: the checks it claims ran are held to the checker rule first.
+			const executed = contract.role === "checker" ? checkExecutedChecks(facts, contract) : PASS;
+			return executed.status === "fail" ? executed : checkCitedEvidence(facts, contract);
+		}
 	}
+}
+
+function checkExecutedChecks(facts: WorkFacts, contract: GradeContract): RuleCheck {
+	if (!contract.toolLaneObserved) return UNKNOWN;
+	if (facts.ungroundedChecks.length === 0) return PASS;
+	return {
+		status: "fail",
+		code: "obligation_unmet",
+		detail: `obligation executed-checks unmet: the report claims checks this run never executed on the final tree (${facts.ungroundedChecks.join(", ")})`,
+		retry: true,
+		qualityGate: true,
+		qualityFail: true,
+	};
+}
+
+/** Whether the run judges a subject as a reviewer: at a reviewer gate, or a checker returning a review verdict. */
+function reviewsSubject(contract: GradeContract): boolean {
+	return contract.role === "reviewer" || (contract.role === "checker" && contract.contractKind === "review-verdict");
 }
 
 function citedEvidenceUnmet(detail: string): RuleCheck {
@@ -302,14 +314,15 @@ function citedEvidenceUnmet(detail: string): RuleCheck {
 /**
  * A gate's obligation (DESIGN 4.8): every reason cites an item of its evidence packet or an observation it made, and a
  * reviewer's pass cites at least one item about its subject. A verdict that cites none of its packet, or cites an id the
- * packet does not hold, is unmet, and the gate it decides is exhausted. A gate given no packet (a playbook loop's check
- * step) still owes a pass that rests on something it observed. A judge may make zero reads (4.9).
+ * packet does not hold, is unmet, and the gate it decides is exhausted. A reviewer given no packet (a playbook loop's
+ * check step, or a standalone reviewer run) still owes a pass that rests on something it observed. A judge may make
+ * zero reads (4.9).
  */
 function checkCitedEvidence(facts: WorkFacts, contract: GradeContract): RuleCheck {
 	const verdict = facts.gateVerdict;
 	const packet = contract.packet;
 	if (packet === undefined) {
-		if (contract.role !== "reviewer" || verdict?.verdict !== "pass") return PASS;
+		if (!reviewsSubject(contract) || verdict?.verdict !== "pass") return PASS;
 		if (!contract.toolLaneObserved || facts.activity === null) return UNKNOWN;
 		if (facts.activity.observations === 0)
 			return citedEvidenceUnmet("the reviewer passed the work without inspecting it: no tool call succeeded");
@@ -344,7 +357,7 @@ function checkCitedEvidence(facts: WorkFacts, contract: GradeContract): RuleChec
 			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${[...new Set(unearned.map((check) => check.name))].join(", ")})`,
 		);
 	}
-	if (contract.role === "reviewer" && verdict?.verdict === "pass" && facts.ungroundedChecks.length > 0)
+	if (reviewsSubject(contract) && verdict?.verdict === "pass" && facts.ungroundedChecks.length > 0)
 		return citedEvidenceUnmet(
 			`the reviewer passed the work without inspecting it: its report claims checks it never ran (${facts.ungroundedChecks.join(", ")})`,
 		);

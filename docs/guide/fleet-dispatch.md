@@ -669,7 +669,7 @@ Every run owes its result some evidence, resolved once from its role in the work
 | --- | --- |
 | Explorer | `answer`; `observed-evidence` when its contract is `scout-report` or the task declares `read_roots` |
 | Builder | `change-or-declared` |
-| Checker | `executed-checks` |
+| Checker | `executed-checks`; also `cited-evidence` when its contract is `review-verdict` (a standalone reviewer) |
 | Reviewer, judge | `cited-evidence` |
 | Council seat | `answer` |
 
