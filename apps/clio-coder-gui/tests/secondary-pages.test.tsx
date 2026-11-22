@@ -258,7 +258,7 @@ test("Settings search uses the URL and points an overridden control to its effec
 test("effective settings keep masked values and offer a control lookup with workspace context", () => {
 	const cache = queries();
 	cache.setQueryData(["workspaces"], [{ id: "workspace-1", name: "Scratch", path: "/scratch" }]);
-	cache.setQueryData(["workspace-settings", "workspace-1"], {
+	cache.setQueryData(["settings-report", "workspace-1"], {
 		layers: [],
 		issues: [],
 		rows: [{ key: "targets", source: "user", value: "Hidden", redacted: true }],
