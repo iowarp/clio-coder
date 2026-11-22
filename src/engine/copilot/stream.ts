@@ -819,7 +819,6 @@ function narrationOf(reasoningBlocks: unknown): string[] {
  */
 type CopilotSessionOrigin = "new" | "spare" | "continued" | "resumed";
 
-/** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 /** The recipient clause of a Harmony tool call: `to=functions.<name>`. */
 const TOOL_CHANNEL_PREFIX = "to=functions.";
 /** That clause at the start of the text or after whitespace, with the whitespace before it, naming one tool. */
@@ -864,6 +863,7 @@ function shownUntil(text: string, from: number): number {
 	return at;
 }
 
+/** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
 	readonly message: AssistantMessage & {
 		copilotBilling?: CopilotStepBilling;
