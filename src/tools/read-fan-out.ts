@@ -79,7 +79,7 @@ export interface ReadFanOutEntry {
 const NOT_STARTED = "not read: this call's byte cap was used by the files above; read it in another call";
 
 /** The header each path's section opens with, counted against the cap like the body. */
-export function readFanOutHeader(path: string): string {
+function readFanOutHeader(path: string): string {
 	return `== ${path} ==\n`;
 }
 
