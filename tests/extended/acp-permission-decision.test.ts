@@ -153,6 +153,15 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		ok(title.length <= 201, title);
 	});
 
+	it("labels the allow option for the call it approves, kinds unchanged", async () => {
+		const turn = await askOnce(deny, "scancel 999999");
+		const meta = (turn.ask?._meta as Record<string, Record<string, unknown>>)["clio-coder/decision"] ?? {};
+		strictEqual(meta.tier, "outward");
+		const options = turn.ask?.options as Array<{ optionId: string; name: string; kind: string }>;
+		strictEqual(options[0]?.kind, "allow_once");
+		strictEqual(options[0]?.name, "Approve this outward call once");
+	});
+
 	it("denies the whole turn on reject-and-stop instead of only the request in front of the operator", async () => {
 		const turn = await askOnce(() => ({ outcome: { outcome: "selected", optionId: "reject-and-stop" } }));
 		strictEqual(turn.verdictKind, "blocked");
