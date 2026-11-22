@@ -188,10 +188,7 @@ describe("tool boundary contract", () => {
 		deepStrictEqual(parameters.properties?.source?.enum, ["workspace", "clio"]);
 		strictEqual(parameters.properties?.source?.default, "workspace");
 		// The model reads which modes take related before the call, not from a refusal after it.
-		match(
-			parameters.properties?.related?.description ?? "",
-			/^Only with mode=symbol or mode=outline\b.*other mode refuses/u,
-		);
+		match(parameters.properties?.related?.description ?? "", /^symbol\/outline only \(others refuse\):/u);
 
 		const arbitrary = await codeNavTool.run({ source: scratch.dir, mode: "symbol", query: "codeNavTool" });
 		strictEqual(arbitrary.kind, "error");
