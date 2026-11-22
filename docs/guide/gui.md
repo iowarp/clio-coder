@@ -254,12 +254,12 @@ The rail has a header with the brand mark, which turns while any task is working
 
 The Settings panel shows on `/settings` and its subpages. Every other route shows the work panel. The Library, Toolchain, System, Usage, Traces, Fleet and Evidence pages are Settings mode pages that hide the right sidebar, and the rail keeps the work panel on them.
 
-The footer holds a System link to `/system`, a light and dark switch and the Settings gear, which opens `/settings/general`. The System link names the server's platform (`Linux`, `macOS`, `Windows`, the reported platform string otherwise, or `Local`) and one status word. Its tooltip adds a detail line and, once the installation was checked, `Last checked <time>`. The rail never runs the installation checks itself. Opening the System page runs them, and the footer then shows that result.
+The footer holds a System link to `/system`, a light and dark switch and the Settings gear, which opens `/settings/general`. The System link names the server's platform (`Linux`, `macOS`, `Windows`, the reported platform string otherwise, or `Local`) and one status word. Its tooltip adds a detail line and, once the installation was checked, `Last checked <time>`. The rail runs the installation checks itself about a second after the window connects, when the browser is idle, and shares that result with the System page. A reload shows the last check's result at once (the tab keeps its severities and time, no paths or details, in `sessionStorage` as `clio-coder-system-status`) while the new check runs.
 
 | Status word | When |
 | --- | --- |
-| `Connecting`, `Reconnecting`, `Offline` | The event stream is connecting, interrupted, or not connected. |
-| `Not checked` | Connected, and the System page has not checked the installation in this window. The detail line reads `Open System to check CLIO Coder installation diagnostics.` |
+| `Connecting`, `Reconnecting`, `Offline` | The event stream is connecting, interrupted, or not connected. A first connection does not hide a result the tab already holds. |
+| `Checking` | Connected, and the first check in this tab has not answered yet. The detail line reads `Checking CLIO Coder installation diagnostics.` |
 | `Unverified` | Connected, and the system read failed or returned no findings. |
 | `1 issue`, `N issues` | At least one finding has level `error`. The count is the number of errors. |
 | `1 warning`, `N warnings` | No finding has level `error` and at least one has level `warn`. |
@@ -520,7 +520,8 @@ The dialog works through `GET /api/workspaces/:id/reports`, `POST /api/workspace
 | Page | Content |
 | --- | --- |
 | Setup wizard (`/setup`) | Opens full window on a machine with no connection at all, and from Models for adding or repairing one. It runs `clio-coder configure --gui-host` as a child, with prompt replies on stdin. A first run offers the routes CLIO Coder found; adding a connection ends on one short test message and saves when the model answers. The wizard shows that it is waiting on the test. When the model does not answer it reads `The model did not answer the test message.`, saves nothing, and offers `Try again` and the other choices the terminal setup offers. |
-| Home (`/`) | Until a connection and a workspace both exist, two onboarding steps. Afterwards a composer that starts a task in the chosen project. |
+| Home (`/`) | Until a connection and a workspace both exist, two onboarding steps. Afterwards a composer that starts a task in the chosen project. With no workspace open, the onboarding step's `Open workspace` is the only empty state; a recovery notice appears only while the list loads, when it fails, or when the chosen workspace is no longer listed. |
+| Sessions (`/sessions`) | Every open task across projects and what it waits on, under the heading `Your work, in motion`. The rail's Sessions link opens it. |
 | All tasks (`/workspaces/:id/sessions`) | One project's open tasks and saved history, with search, a sort (`Newest activity`, `Oldest activity`, `Name A–Z`) and the filters `All work`, `Open sessions`, `Needs you` and `Saved history`. A saved row offers Rename, and a rename that fails reopens with the typed name for another try. A saved task that has ended and is not open offers Delete, which asks `Delete its saved conversation for good?` and puts focus on `Keep`. |
 | General | Appearance (system, light, dark), a link to connections, keyboard shortcuts, and version and installation details for this browser. |
 | Models | Runtime-registry controls for the default route, plus Connections, Routing and Add a connection. Connections probe, select and remove targets through the fixed CLI table. |
@@ -585,8 +586,8 @@ The application initializes ACP protocol version 1 as client `clio-coder-gui`, w
 
 | Frame | Use |
 | --- | --- |
-| `agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk` | Text only. A message chunk carrying `_meta["clio-coder/notice"]` becomes a notice row. User chunks carry replayed history. |
-| `tool_call`, `tool_call_update` | Tool cards with title, kind, locations, raw input and output, and cumulative partial output replacing the running row. A raw value over 32 KiB is reduced to a truncated snippet. |
+| `agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk` | Text only. A message chunk carrying `_meta["clio-coder/notice"]` becomes a notice row. The yolo continuation notice (key `turn.continued`) is drawn inline in the turn where it happened; other engine notices go to the Session column. User chunks carry replayed history. |
+| `tool_call`, `tool_call_update` | Tool cards with title, kind, locations, raw input and output, and cumulative partial output replacing the running row. A raw value over 32 KiB is reduced to a truncated snippet; image bytes are replaced by an omitted marker first. A settled call's images (png, jpeg, gif or webp, at most 4, 1 MiB each and 1 MiB together) are drawn under the card's body, and a screenshot's `file:` link is listed with them. |
 | `usage_update`, `plan` | Projected into the task's telemetry. See [Live telemetry](#live-telemetry). They are not transcript rows. |
 | `config_option_update` | Updates the task's route and options. |
 | `session_info_update` | Its `_meta["clio-coder/workspace"]`, when present, updates the telemetry's workspace snapshot. Nothing else in it is projected. |
