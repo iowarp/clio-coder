@@ -4,6 +4,7 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { reminderGist } from "../../core/reminder-gist.js";
+import { type ModelRouteRefusal, modelRouteRefusalOf } from "../../core/response-model-id.js";
 import { runOverrides, withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
@@ -310,6 +311,8 @@ interface HeadlessMainAgentResult {
 	 * refused request fit.
 	 */
 	contextOverflow: "guard" | "recovery" | null;
+	/** The last reply was refused because its route names a model the provider does not serve (row 384). */
+	modelRouteRefusal: ModelRouteRefusal | null;
 	/** The latest assistant stop is a length stop that produced only thinking; the chat loop already spent its one recovery. */
 	thinkingOnlyLength: boolean;
 	/**
@@ -547,6 +550,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		admissionRefused: false,
 		harnessStopped: (message as { harnessStopped?: unknown }).harnessStopped === true,
 		contextOverflow: isContextGuardStop(message) ? "guard" : null,
+		modelRouteRefusal: modelRouteRefusalOf(message),
 		thinkingOnlyLength: isThinkingOnlyLengthStop(message),
 	};
 	const entries = [...current.answerEntries, { kind: "message" as const, message }];
@@ -1331,6 +1335,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		admissionRefused: false,
 		harnessStopped: false,
 		contextOverflow: null,
+		modelRouteRefusal: null,
 		thinkingOnlyLength: false,
 		citationCheckedAnswer: null,
 	};
@@ -1871,8 +1876,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// `--max-requests`/`--max-tool-calls` fired: a limit exit, as the cost ceiling is.
 		const runCap = runCapStopCode(result.error);
 		const limitDetail = budgetCeiling ? SESSION_COST_CEILING_REASON : runCap;
-		// The window, not the route, ended the run: its own cause (FX-22a).
-		const detail = limitDetail ?? (result.contextOverflow !== null ? "context_overflow" : undefined);
+		// The window, not the route, ended the run: its own cause (FX-22a). A refused model route names its own (row 384).
+		const detail =
+			limitDetail ?? result.modelRouteRefusal?.code ?? (result.contextOverflow !== null ? "context_overflow" : undefined);
 		terminal = {
 			exitCode: limitDetail !== undefined ? SESSION_COST_CEILING_EXIT_CODE : 1,
 			outcome: "failed",

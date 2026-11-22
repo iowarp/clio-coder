@@ -16,6 +16,7 @@ import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import { EXPLORATION_TOOL_NAMES } from "../core/read-only-calls.js";
 import { systemReminderBlock } from "../core/reminder-framing.js";
+import { modelRouteGuarded } from "../core/response-model-id.js";
 import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
@@ -1543,6 +1544,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const contractReminder =
 		input.resultContract !== undefined && !helperToolAvailable ? resultContractReminder(input.resultContract) : null;
 	const options: EngineAgentOptions = {
+		// Row 384 backstop: a provider that accepts the id and serves another model is refused at its first response.
+		refuseServedModelMismatch: () => modelRouteGuarded(input.runtime),
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
 		beforeStreamRequest: () => {

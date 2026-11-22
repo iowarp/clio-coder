@@ -1,3 +1,4 @@
+import { modelRouteGuarded, sameServedModel } from "../../core/response-model-id.js";
 import type { TargetStatus } from "./contract.js";
 import { listKnownModelsForRuntime } from "./support.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
@@ -218,6 +219,25 @@ export function chatModelCandidatesForStatus(status: TargetStatus): ProviderMode
 
 export function modelIdsForStatus(status: TargetStatus): string[] {
 	return modelCandidatesForStatus(status).map((candidate) => candidate.id);
+}
+
+/** What a target's model list says about one requested id (row 384). */
+export type ModelOffer = { kind: "offered" } | { kind: "not-offered"; available: string[] } | { kind: "unknown" };
+
+/**
+ * Whether a target offers a model, judged on its live list only. A runtime that does not list live, a local engine or
+ * protocol gateway (whose ids are labels its operator configured), a cached list and an empty list all answer
+ * `unknown`, which never refuses. An id the list names after `sameServedModel`'s canonicalization (a dated snapshot,
+ * a `-latest` alias, a provider prefix) is offered.
+ */
+export function modelOfferForStatus(status: TargetStatus | null | undefined, modelId: string): ModelOffer {
+	if (!status?.runtime || !modelRouteGuarded(status.runtime) || !runtimeListsModelsLive(status.runtime))
+		return { kind: "unknown" };
+	const listed = hasLiveModelCatalog(status) ? uniqueModels(status.discoveredModels) : [];
+	if (listed.length === 0) return { kind: "unknown" };
+	const requested = modelId.trim();
+	if (listed.some((id) => id === requested || sameServedModel(requested, id))) return { kind: "offered" };
+	return { kind: "not-offered", available: listed };
 }
 
 export function canonicalizeWireModelId(status: TargetStatus, requested: string): string {

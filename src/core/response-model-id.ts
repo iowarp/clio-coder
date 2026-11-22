@@ -88,6 +88,84 @@ export function differingResponseModelId(requestedModelId: unknown, responseMode
 	return response === null || response === nonEmptyString(requestedModelId) ? null : response;
 }
 
+/**
+ * A route refused because the model it names is not the one the provider will serve. `model_unavailable` is the
+ * pre-call refusal: the target's live model list lacks the requested id. `served_model_mismatch` is the backstop: the
+ * provider accepted the id and reported serving another. Either ends the turn before any tool call of that response.
+ */
+export type ModelRouteRefusal =
+	| { code: "model_unavailable"; target: string; requested: string; available: string[] }
+	| { code: "served_model_mismatch"; requested: string; served: string };
+
+/** The one sentence every surface prints for a refused route. */
+export function modelRouteRefusalMessage(refusal: ModelRouteRefusal): string {
+	if (refusal.code === "served_model_mismatch")
+		return `requested ${refusal.requested}, provider served ${refusal.served}; the turn is refused. Pick another model with /model.`;
+	const shown = refusal.available.slice(0, 24);
+	const more = refusal.available.length > shown.length ? `, and ${refusal.available.length - shown.length} more` : "";
+	return `no model ${refusal.requested} on target ${refusal.target}; available: ${shown.length > 0 ? shown.join(", ") : "none"}${more}. Pick another with /model.`;
+}
+
+/** The typed refusal a refused assistant message carries, or null. */
+export function modelRouteRefusalOf(message: unknown): ModelRouteRefusal | null {
+	if (message === null || typeof message !== "object") return null;
+	const value = (message as { modelRouteRefusal?: unknown }).modelRouteRefusal;
+	if (value === null || typeof value !== "object") return null;
+	const code = (value as { code?: unknown }).code;
+	return code === "model_unavailable" || code === "served_model_mismatch" ? (value as ModelRouteRefusal) : null;
+}
+
+/**
+ * Whether a runtime tier names models the way the guards can judge. A cloud provider and a subscription seat own their
+ * model catalogs; a local engine (llama.cpp reports its alias or GGUF path) and a protocol gateway (LiteLLM maps its
+ * own model names) report labels their operator configured, so neither guard applies to them.
+ */
+export function modelRouteGuarded(runtime: { tier?: string | undefined } | null | undefined): boolean {
+	return runtime?.tier === "cloud" || runtime?.tier === "subscription";
+}
+
+const DATED_SNAPSHOT = /-(?:\d{4}-\d{2}-\d{2}|\d{8}|\d{4})$/u;
+
+/**
+ * A model id as the guards compare it, after the aliasing providers apply to the same model: lower case; a provider or
+ * path prefix dropped (`openai/gpt-4o`, `models/gemini-2.5-pro`); a Vertex `@version` and any `:tag` dropped
+ * (`claude-sonnet-4@20250514`, `llama-3-8b:free`, `qwen3:latest`); a `-latest` suffix and then a dated snapshot
+ * suffix dropped (`-20250514`, `-2024-08-06`, `-0613`); dots read as dashes (`claude-opus-4.5` is
+ * `claude-opus-4-5`).
+ */
+function canonicalModelId(id: string): string {
+	let out = id.trim().toLowerCase();
+	out = out.slice(out.lastIndexOf("/") + 1);
+	out = out.replace(/@.*$/u, "").replace(/:.*$/u, "");
+	out = out.replace(/-latest$/u, "");
+	out = out.replace(DATED_SNAPSHOT, "");
+	return out.replace(/\./gu, "-");
+}
+
+/**
+ * Whether a reported id names the requested model. Equal canonical ids match, and so does one that extends the other by
+ * numeric segments only (`claude-sonnet-4-0` against `claude-sonnet-4-20250514`, `gemini-1.5-pro` against
+ * `gemini-1.5-pro-002`). A word segment is another model (`gpt-4o-mini` is not `gpt-4o`).
+ */
+export function sameServedModel(requested: string, reported: string): boolean {
+	const a = canonicalModelId(requested);
+	const b = canonicalModelId(reported);
+	if (a.length === 0 || b.length === 0 || a === b) return true;
+	const [short, long] = a.length < b.length ? [a, b] : [b, a];
+	return long.startsWith(`${short}-`) && /^[\d-]+$/u.test(long.slice(short.length + 1));
+}
+
+/**
+ * The served id when a provider reported serving a model other than the requested one; null when it reported none,
+ * reported the same model, or the request named a router (`openrouter/auto`) whose job is to choose.
+ */
+export function servedModelMismatch(requestedModelId: string, observation: unknown): string | null {
+	const parsed = parsedObservation(observation);
+	if (parsed?.state !== "reported") return null;
+	if (requestedModelId.trim().toLowerCase().split("/").at(-1) === "auto") return null;
+	return sameServedModel(requestedModelId, parsed.reportedModelId) ? null : parsed.reportedModelId;
+}
+
 /** Model id used for accounting without claiming more than the observation supports. */
 export function attributedModelId(
 	observation: ResponseModelIdObservation,

@@ -28,6 +28,8 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
  * ended: it kept reading after every note and two refused rounds. `no_reply_text` is a main run that `finish` ended
  * with no reply text after its one refusal of a bare finish (CLI-P49): its completion is `partly_done` and there is no
  * answer.
+ * `model_unavailable` is a turn refused before any request because the target's live model list lacks the requested
+ * model; `served_model_mismatch` is a response refused because the provider reported serving another model (row 384).
  * `missing_output` is a run whose session named an output (`output: <path>`, `--output`) that does not exist at the seal
  * (M-4).
  */
@@ -54,6 +56,8 @@ const CAUSE_ORDER = [
 	"autonomous_cap",
 	"max_requests",
 	"max_tool_calls",
+	"model_unavailable",
+	"served_model_mismatch",
 	"provider_error",
 	"context_overflow",
 	"no_answer",

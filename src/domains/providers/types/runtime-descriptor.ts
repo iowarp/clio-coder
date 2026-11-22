@@ -53,6 +53,11 @@ export interface ProbeContext {
 	 * reads the environment itself must check this and send nothing.
 	 */
 	credentialRefused?: true;
+	/**
+	 * Ask the provider now: a runtime that answers from a cached listing (the Copilot SDK snapshot) lists live instead.
+	 * Set when a refusal would rest on the answer, so a stale cache never refuses a model the provider now serves.
+	 */
+	fresh?: true;
 }
 
 /**
@@ -266,7 +271,8 @@ export interface RuntimeDescriptor {
 	 * Set when the provider serves model ids its live listing leaves out (the
 	 * Copilot runtime does not list every model an account can call). An id
 	 * named on this target alone, as `target/model` or under `--target`, then
-	 * resolves as typed, and the provider itself answers an id it does not serve.
+	 * resolves as typed. Resolution only: before a main turn's request the live
+	 * list is asked once and an id it lacks is refused (row 384).
 	 */
 	servesUnlistedModels?: boolean;
 	/**

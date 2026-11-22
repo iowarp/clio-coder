@@ -460,6 +460,8 @@ const LIMIT_CODES: ReadonlyArray<RunCauseCode> = [
 	"max_tool_calls",
 ];
 const WORK_CODES: ReadonlyArray<RunCauseCode> = [
+	"model_unavailable",
+	"served_model_mismatch",
 	"provider_error",
 	"context_overflow",
 	"no_answer",
