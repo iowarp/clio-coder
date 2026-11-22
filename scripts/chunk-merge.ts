@@ -97,6 +97,11 @@ const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray
  * `fleetStatus` keeps `fleet status` off the providers stage: guards alone let
  * src/core/telemetry/pricing.ts share a file with src/domains/providers/ on
  * some builds and not others, since their allowance follows output bytes.
+ * `fleetStatusRows` keeps the ledger rows `fleet status` loads by `import()`
+ * off the plugin domain: guards alone let src/domains/dispatch/ownership.ts,
+ * which src/cli/fleet-project-scope.ts imports, share a file with
+ * src/core/settings-controls.ts, whose import of src/domains/config/classify.ts
+ * sits in the same file as src/domains/plugins/index.ts.
  */
 const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<string>]> = [
 	// The workspace launcher: the launch stage plus what starts the pane host and the session inside it.
@@ -137,6 +142,7 @@ const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<st
 	["runHelp", ["src/cli/index.ts", "src/cli/run-help.ts"]],
 	["help", ["src/cli/index.ts", "src/cli/help-command.ts"]],
 	["fleetStatus", ["src/cli/index.ts", "src/cli/fleet-status.ts"]],
+	["fleetStatusRows", ["src/cli/index.ts", "src/cli/fleet-status.ts", "src/cli/fleet-project-scope.ts"]],
 ];
 
 /**
