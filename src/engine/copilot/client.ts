@@ -269,6 +269,7 @@ export async function copilotClient(): Promise<CopilotClient> {
 			const started = startClient(client).then(() => {
 				watchRuntime(client);
 				setRuntimeReferenced(client, holds > 0);
+				for (const listener of startListeners.splice(0)) queueMicrotask(listener);
 			});
 			shared = { client, started, keychain };
 			started.catch(() => {
@@ -280,6 +281,14 @@ export async function copilotClient(): Promise<CopilotClient> {
 	if (!current) throw new Error("Copilot runtime failed to start");
 	await current.started;
 	return current.client;
+}
+
+const startListeners: Array<() => void> = [];
+
+/** Calls `listener` once a runtime client is connected: now if one is, else when the next one starts. Never starts one. */
+export function onceCopilotClientHeld(listener: () => void): void {
+	if (heldCopilotClient() !== null) queueMicrotask(listener);
+	else startListeners.push(listener);
 }
 
 /** Return the already-started shared client without spawning a runtime; `null` if none is connected. */
@@ -423,6 +432,15 @@ export interface CopilotModelRow {
  * Each row carries the default tier and, when the listing has one, the long-context tier beside it.
  */
 export function listCopilotModels(): Promise<CopilotModelRow[]> {
+	return held(() => listHeld());
+}
+
+/**
+ * The listing of the runtime this process already holds, or `null` when none is connected. It never starts a runtime,
+ * so a telemetry reader can price a settled call from the seat's own tariff without spawning one.
+ */
+export async function listHeldCopilotModels(): Promise<CopilotModelRow[] | null> {
+	if (heldCopilotClient() === null) return null;
 	return held(() => listHeld());
 }
 

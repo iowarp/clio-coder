@@ -264,6 +264,8 @@ export function seedForkCallJournal(
 export async function openCallJournal(options: CallJournalOptions): Promise<CallJournal> {
 	const path = telemetryJournalPath(options.directory);
 	await mkdir(dirname(path), { recursive: true });
+	// Settled attempts carry their economics from the journal that first receives them (token economy S8).
+	const economy = await import("./economy-settlement.js");
 	let ready!: (journal: CallJournal) => void;
 	let reject!: (error: unknown) => void;
 	const opened = new Promise<CallJournal>((resolve, fail) => {
@@ -772,7 +774,11 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						schedule();
 						return false;
 					}
-					ring[(head + count) % capacity] = record;
+					if (record.kind === "call.started") economy.noteCallStarted(record.data);
+					ring[(head + count) % capacity] =
+						record.kind === "call.settled"
+							? { ...record, data: economy.stampCallEconomics(record.data, record.wallMs) }
+							: record;
 					count += 1;
 					schedule();
 					return true;

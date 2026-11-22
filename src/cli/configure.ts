@@ -32,6 +32,7 @@ import {
 	targetRequiresAuth,
 } from "../domains/providers/auth/index.js";
 import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
+import { targetFundingEvidence } from "../domains/providers/funding-evidence.js";
 import {
 	buildProviderSupportEntry,
 	configuredTargetsForRuntime,
@@ -101,7 +102,6 @@ import {
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
 	targetApiKeyRef,
-	targetFundingEvidence,
 	targetUrlProblem,
 	validateContextWindowOverride,
 	validateResolvedModel,

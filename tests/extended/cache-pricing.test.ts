@@ -1,5 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { FundingPool } from "../../src/core/funding-config.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import {
 	calculatePricingCostUsd,
 	compactionBudget,
@@ -11,6 +13,12 @@ import type { TariffTokens } from "../../src/domains/providers/reference-tariff.
 import { auditReferenceTariff, quoteReferenceTariff } from "../../src/domains/providers/reference-tariff.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import openai from "../../src/domains/providers/runtimes/cloud/openai.js";
+import {
+	periodFees,
+	runEconomicsFromCalls,
+	settleCallEconomics,
+	splitGrantCharge,
+} from "../../src/domains/telemetry/economy-settlement.js";
 import { calculateEngineCost } from "../../src/engine/ai.js";
 import type { Usage } from "../../src/engine/types.js";
 
@@ -171,4 +179,146 @@ test("reference tariff quotes the dated list price per request and refuses what 
 		}),
 	);
 	deepStrictEqual(auditReferenceTariff("2026-11-30").errors, [], "the Carbon promotion bridges to its announced row");
+});
+
+test("a seat call and an API call share one list-price equivalent and differ only in what the user pays (S8)", () => {
+	const measured = (value: number) => ({ kind: "measured", value, source: "provider" }) as const;
+	const at = new Date("2026-11-22T12:00:00Z");
+	const call = (requestedModel: string, economics?: CallSettled["economics"]) =>
+		({
+			disposition: "settled",
+			usage: {
+				input: measured(0),
+				output: measured(2_000),
+				cacheRead: measured(45_000),
+				cacheWrite: measured(5_000),
+				cacheWrite1h: measured(0),
+				reasoning: measured(0),
+			},
+			pricing: { usd: { kind: "unknown", reason: "not-observed" }, pricedBy: "none" },
+			target: { requestedModel, reportedModel: { kind: "unknown", reason: "provider-omitted" } },
+			...(economics ? { economics } : {}),
+		}) as unknown as CallSettled;
+	const seatPool: FundingPool = {
+		scheme: "declared",
+		payer: "personal",
+		fee: { amount: 39, currency: "USD", period: "month" },
+	};
+	const seat = {
+		prices: { input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 8 },
+		batchSize: 1_000_000,
+		promo: { discountPercent: 50, endsAt: "2026-12-01T00:00:00Z" },
+		readAt: "2026-11-22T11:59:00Z",
+	};
+	const onSeat = settleCallEconomics(call("gpt-6-luna"), at, {
+		funding: { status: "declared", poolId: "copilot", pool: seatPool },
+		runtime: { id: "copilot-sdk", tier: "subscription" },
+		cacheWriteRetention: "30m",
+		seat,
+	});
+	const charge = { currency: "USD", amount: measured(0.0021) };
+	const empty = { kind: "absent", reason: "not-applicable" } as const;
+	const reported = {
+		additive: {
+			providerCharge: charge,
+			marginalCharge: { amount: empty },
+			seatCredits: { nanoAiu: empty },
+			energy: { kwh: empty, cost: { amount: empty } },
+		},
+		comparison: { apiEquivalent: { amount: empty } },
+		funding: empty,
+	};
+	const onApi = settleCallEconomics(call("gpt-6-luna", reported), at, {
+		funding: { status: "declared", poolId: "api", pool: { scheme: "declared", payer: "personal" } },
+		runtime: { id: "openai", tier: "cloud" },
+		cacheWriteRetention: "30m",
+	});
+	strictEqual(
+		onSeat.comparison.apiEquivalent.amount.kind === "estimated" && onSeat.comparison.apiEquivalent.amount.value,
+		0.002075,
+	);
+	deepStrictEqual(onApi.comparison.apiEquivalent, onSeat.comparison.apiEquivalent);
+	strictEqual(
+		"referenceRowId" in onSeat.comparison.apiEquivalent && onSeat.comparison.apiEquivalent.referenceRowId,
+		"openai/gpt-6-luna@2026-11-22",
+	);
+	deepStrictEqual(onSeat.additive.marginalCharge, {
+		currency: "USD",
+		amount: { kind: "estimated", value: 0, method: "plan-coverage" },
+	});
+	deepStrictEqual(onSeat.additive.seatCredits, {
+		nanoAiu: { kind: "estimated", value: 13_375_000, method: "seat-listing-tariff" },
+		listingAsOf: "2026-11-22T11:59:00.000Z",
+	});
+	deepStrictEqual(onApi.additive.marginalCharge, charge, "only a provider-asserted charge reads as actual");
+	deepStrictEqual(onApi.additive.seatCredits.nanoAiu, empty);
+	const noFee = settleCallEconomics(call("gpt-6-luna"), new Date("2026-12-02T00:00:00Z"), {
+		funding: { status: "declared", poolId: "copilot", pool: { scheme: "declared", payer: "personal" } },
+		runtime: { id: "copilot-sdk", tier: "subscription" },
+		cacheWriteRetention: "30m",
+		seat,
+	});
+	deepStrictEqual(
+		noFee.additive.marginalCharge,
+		{ amount: { kind: "unknown", reason: "not-observed" } },
+		"extra unknown, never zero",
+	);
+	strictEqual(
+		noFee.additive.seatCredits.nanoAiu.kind === "estimated" && noFee.additive.seatCredits.nanoAiu.value,
+		26_750_000,
+	);
+	const longWrite = (fact: unknown) => {
+		const base = call("gpt-6-luna");
+		return { ...base, usage: { ...base.usage, cacheWrite1h: fact } } as unknown as CallSettled;
+	};
+	const seatInputs = {
+		funding: { status: "declared", poolId: "copilot", pool: seatPool },
+		runtime: { id: "copilot-sdk", tier: "subscription" },
+		cacheWriteRetention: "30m",
+		seat,
+	} as const;
+	deepStrictEqual(
+		settleCallEconomics(longWrite({ kind: "unknown", reason: "provider-omitted" }), at, seatInputs),
+		onSeat,
+		"a runtime that never reports the 1h subset splits none out",
+	);
+	deepStrictEqual(
+		settleCallEconomics(longWrite(measured(6_000)), at, seatInputs).comparison.apiEquivalent.amount,
+		{ kind: "unknown", reason: "not-observed" },
+		"cacheWrite includes its 1h subset, so a larger subset is invalid",
+	);
+	const idleless = settleCallEconomics(call("gpt-6-luna"), at, {
+		funding: {
+			status: "declared",
+			poolId: "box",
+			pool: { scheme: "declared", payer: "personal", local: { activeWatts: 300 } },
+		},
+		runtime: { id: "llamacpp", tier: "local-native" },
+		cacheWriteRetention: "unknown",
+		energyIntervals: [{ startMs: 0, endMs: 3_600_000 }],
+	});
+	deepStrictEqual(idleless.additive.energy.kwh, { kind: "unknown", reason: "not-observed" }, "no idle baseline, no kWh");
+	const run = runEconomicsFromCalls([onSeat, onApi], { kind: "absent", reason: "not-applicable" });
+	ok(run.comparison.apiEquivalent.amount.kind === "estimated");
+	ok(Math.abs(run.comparison.apiEquivalent.amount.value - 0.00415) < 1e-12);
+	ok(Array.isArray(run.funding) && run.funding.length === 2);
+	const split = splitGrantCharge({ currency: "USD", amount: 0.3 }, 0.1);
+	ok(split.sponsor.amount.kind === "estimated" && split.personal.amount.kind === "estimated");
+	deepStrictEqual([split.sponsor.amount.value, split.personal.amount.value], [0.1, 0.2]);
+	strictEqual(Math.round(split.sponsor.amount.value * 1e9) + Math.round(split.personal.amount.value * 1e9), 300_000_000);
+	const fees = periodFees(
+		{
+			copilot: seatPool,
+			once: { scheme: "declared", payer: "personal", fee: { amount: 5, currency: "USD", period: "one-time" } },
+		},
+		{ start: new Date("2026-11-20T00:00:00Z"), end: new Date("2026-12-02T00:00:00Z") },
+	);
+	deepStrictEqual(
+		fees.map((fee) => [fee.poolId, fee.amount, fee.period.start]),
+		[
+			["copilot", 39, "2026-11-01T00:00:00.000Z"],
+			["copilot", 39, "2026-12-01T00:00:00.000Z"],
+		],
+		"a period fee stands once per pool and period, with or without calls",
+	);
 });
