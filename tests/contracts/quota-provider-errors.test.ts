@@ -78,6 +78,12 @@ const rows: Row[] = [
 		expect: { status: "error", message: "HTTP 429", retryAfterSeconds: 42 },
 	},
 	{
+		name: "captures Retry-After when the usage endpoint rate limits the read",
+		provider: "codex",
+		fault: "rateLimited",
+		expect: { status: "error", message: "HTTP 429", retryAfterSeconds: 42 },
+	},
+	{
 		name: "times out a body that stalls after the headers",
 		provider: "codex",
 		fault: "stalledBody",

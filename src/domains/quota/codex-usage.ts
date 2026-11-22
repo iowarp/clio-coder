@@ -9,7 +9,7 @@
  */
 
 import type { UsageCredits, UsageSnapshot, UsageWindow } from "./types.js";
-import { formatPlan } from "./types.js";
+import { formatPlan, parseRetryAfterSeconds } from "./types.js";
 
 export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
@@ -29,6 +29,7 @@ export interface CodexUsageOutcome {
 	windows: UsageWindow[];
 	credits: UsageCredits | null;
 	plan: string | null;
+	retryAfterSeconds: number | null;
 }
 
 export interface CodexUsageDependencies {
@@ -43,7 +44,7 @@ function outcome(
 	message: string | null,
 	extra: Partial<CodexUsageOutcome> = {},
 ): CodexUsageOutcome {
-	return { status, message, windows: [], credits: null, plan: null, ...extra };
+	return { status, message, windows: [], credits: null, plan: null, retryAfterSeconds: null, ...extra };
 }
 
 /**
@@ -73,6 +74,12 @@ export async function fetchCodexUsage(
 		if (response.status === 401 || response.status === 403) {
 			await discardBody(response);
 			return outcome("expired", null);
+		}
+		if (response.status === 429) {
+			await discardBody(response);
+			return outcome("error", "HTTP 429", {
+				retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("Retry-After")),
+			});
 		}
 		if (response.status !== 200) {
 			await discardBody(response);
