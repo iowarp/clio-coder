@@ -80,7 +80,9 @@ Accepted without a standalone runtime warning. Policy-bearing scope is resolved 
 `legacyPathScope()`: legacy `writeRoots` become the write boundary with
 provenance `derived`, and path-like tokens in the task (confidence `medium`) and
 briefing (confidence `low`) become working-context paths with provenance
-`inferred`.
+`inferred`. A method call such as `m.add(1, 1)` is masked before path tokens are
+matched, so it never becomes a read root, while a file name such as `m.py` still
+infers ([code-members.ts](../../src/domains/dispatch/code-members.ts)).
 
 Inferred paths select project rules and compile worker context. They never
 become write boundaries and never add a verification requirement. The only path

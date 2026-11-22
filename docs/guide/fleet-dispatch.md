@@ -1318,7 +1318,11 @@ judges another entry by its id, and a `message` sends text of at most 1,000 char
 `main` or `all`, with an optional `replyTo`. Nothing untyped is postable. A run gets 20 posts and a
 ledger holds 200 entries; further posts are refused. Workers on other runtimes (Claude SDK and CLI
 peers) see the board as it stood at spawn, and the host posts a bounded final-report `message` for
-them when they settle.
+them when they settle. Claims block nothing (the scheduler's write-boundary refusal does), so the
+worker's ledger hint asks for a claim only before writing a path a peer may also write, and for a
+`finding` only when a peer needs it before the run ends. The dispatch and collect results print each
+run's answer, so their board section leaves out that run's sealed findings and any ledger finding that
+restates one; `fleet view` and peers still see the run-record findings.
 
 The orchestrator is the sole writer. A post travels up the control lane as a
 body and nothing else, and every attribution field is stamped from the

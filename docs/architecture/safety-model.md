@@ -127,7 +127,7 @@ Recognition decides an uncontained command: a worker's command, the main session
 - **Chains** of up to 16 recognized steps joined by `&&`, `||`, `;` or `|`, with output redirected only to `/dev/null` or merged with `2>&1`. Every step is checked on its own and the chain takes the strictest verdict.
 - **`sh -c '<script>'`** is judged by its script only in its bare form: `sh`, `bash`, `dash` or `zsh` by bare name, options limited to `-c`, `-e`, `-u`, `-f`, `-v`, `--norc` and `--noprofile`, and the script as the last word. An env prefix, a pathful shell, an extra operand, a redirect or another startup option makes the wrapper a whole command of its own, which is unrecognized.
 
-An uncontained command that hides its content asks even when each word looks harmless. An uninspectable shell script, `$VAR` or interpreter source (`python -c`, `node -e`) asks under rule `bash-hidden-content`, command substitution asks under `bash-command-substitution`, and a bash `cwd` outside the workspace is blocked under `bash-cwd-escape`. None of the three applies to a contained call or at `yolo`.
+An uncontained command that hides its content asks even when each word looks harmless. An uninspectable shell script, `$VAR` or interpreter source (`python -c`, `node -e`) asks under rule `bash-hidden-content`, command substitution asks under `bash-command-substitution`, and a bash `cwd` outside the workspace is blocked under `bash-cwd-escape`. None of the three applies to a contained call or at `yolo`. A worker whose OS sandbox confines every write to its own roots skips the `bash-hidden-content` ask the same way, while `bash-cwd-escape` and every other rail still apply to it.
 
 ## Containment at default
 

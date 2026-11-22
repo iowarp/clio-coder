@@ -353,7 +353,7 @@ The values are illustrative. No other settings leaf, URL, auth fact, credential 
 
 `_clio-coder/artifacts/list` and `_clio-coder/artifacts/read` serve the terminal's `/view` artifacts to a client (`src/engine/acp/artifacts.ts`). Both read the providers the overlay reads (`src/domains/session/view-artifacts.ts`), so a client lists the same rows with the same titles and reads the same lines. Titles and subtitles pass through the overlay's sanitizer (control sequences stripped, secrets redacted). Bodies travel as loaded. A protected artifact's load renders its protection record and never the file. The provider module loads on first use.
 
-The `clio-coder/artifacts` capability is `{version: 1, list, read, categories, perCategory: 200}`. `categories` names the 11 categories a client may request: `accountability`, `evidence`, `run`, `dispatch`, `task-ledger`, `workspace`, `tool-output`, `protected-artifact`, `compaction`, `prompt-manifest`, and `audit`. The terminal's `transcript` category is excluded because the client already holds the conversation.
+The `clio-coder/artifacts` capability is `{version: 1, list, read, categories, perCategory: 200}`. `categories` names the 13 categories a client may request: `message-path`, `accountability`, `evidence`, `run`, `dispatch`, `task-ledger`, `workspace`, `tool-output`, `screenshots`, `protected-artifact`, `compaction`, `prompt-manifest`, and `audit`. The terminal's `transcript` category is excluded because the client already holds the conversation.
 
 `list` accepts `{sessionId, categories?}` and returns `{artifacts, truncated}`, newest first, at most 200 rows per category, with `truncated: true` when any category was cut. A provider that fails is omitted from the list. Each row:
 
@@ -364,7 +364,7 @@ The `clio-coder/artifacts` capability is `{version: 1, list, read, categories, p
 | `subtitle` | Optional, at most 1024 bytes. |
 | `at` | ISO time the artifact was produced, when known. |
 | `sizeBytes` | When known. |
-| `format` | `markdown`, `text`, or `json`; the format a read is expected to return. The read's own `format` is authoritative. |
+| `format` | `markdown`, `text`, `json`, or `image` (a `screenshots` row); the format a read is expected to return. The read's own `format` is authoritative. |
 | `protected` | `true` when a read returns the protection record and a refusal. |
 
 `read` accepts `{sessionId, id, offset?, limit?, details?}`. `offset` and `limit` are non-negative integers and `limit` must be positive. `limit` defaults to 2000 lines and is capped at 50000. `details: true` reads the overlay's `i` view, and a request for a view the artifact lacks fails `invalid_params`. The result is a page:
@@ -375,7 +375,7 @@ The `clio-coder/artifacts` capability is `{version: 1, list, read, categories, p
  "clippedLines":1,"details":{"format":"json","lineCount":96},"refused":{"reason":"..."}}
 ```
 
-`nextOffset` is null on the last page. A page holds at most 512 KiB of JSON-encoded lines; a later page takes a line whole, and only a single line larger than a page is cut, to 64 KiB with a trailing `…`, which `clippedLines` counts. Reassembly is exact only when `clippedLines` is absent. `details` summarizes the details view when one exists and was not requested. `refused` is present on a protected artifact. An unknown category, provider, or row fails `artifact_unknown`, and a session other than the bound one fails `session_not_bound`.
+`nextOffset` is null on the last page. A page holds at most 512 KiB of JSON-encoded lines; a later page takes a line whole, and only a single line larger than a page is cut, to 64 KiB with a trailing `…`, which `clippedLines` counts. Reassembly is exact only when `clippedLines` is absent. `details` summarizes the details view when one exists and was not requested. `refused` is present on a protected artifact. A `screenshots` read carries `image` (`{mimeType, data}`, base64) on its first page when the picture and the page's lines fit the 512 KiB page together; otherwise the client reads the file at the path its line names. An unknown category, provider, or row fails `artifact_unknown`, and a session other than the bound one fails `session_not_bound`.
 
 ### Extension method projections
 
