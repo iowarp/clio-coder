@@ -98,6 +98,7 @@ Capabilities that the gateway directory implements itself, and the other gateway
 | `clio_library` | `query`, `kind`, `ref`, `limit`, `offset` | [clio_library](#cliolibrary-inspect-the-component-catalog-through-the-gateway) |
 | `data` | `op` is `inspect`, `select`, `validate` or `stats`, plus the format, window and hyperslab arguments | [data](#data-inspect-structured-files-through-the-gateway) |
 | `store` | `op` is `tags`, `create`, `list`, `stat`, `get`, `put`, `note` or `remove`, with `tag`, `blob` (or `ref: "<tag>:<blob>"`), `path`, `pattern`, `offset`, `limit`, `description`, `class`, `note` and `derived_from` | [store](#store-keep-results-and-datasets-outside-the-working-tree) |
+| `browser` | `op` is `open`, `attach`, `run`, `look`, `serve` or `close`, with `url`, `endpoint`, `page`, `viewport`, `allow_hosts`, `script`, `file`, `timeout_ms`, `target`, `snapshot`, `screenshot`, `full_page`, `command`, `ready`, `cwd`, `stop` and `hermetic` | [browser](#browser-drive-a-headless-browser-session) |
 | `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `vision`, `configure_clio`, `report`, `job`, `memory_recall` | Each tool's own schema | The tool's own section |
 | `extension_<id>__<name>` | The tool's schema, from an extension command tool or an api 2 runtime tool | [Extensions](harness-extensions.md) |
 | `mcp_<id>__<tool>` | The MCP server tool's schema | The MCP paragraphs below |
@@ -196,6 +197,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `git` | gateway | gateway | execute | read; `add` and `commit` are judged as bash | sequential |
 | `verify` | direct | direct | execute | execute | sequential |
 | `run_script` | direct | gateway | execute | execute | sequential |
+| `browser` | gateway (main session only) | gateway | execute | execute; judged as the driver command, or as the dev server command for `serve` | sequential |
 | `dispatch` | direct | direct | orchestrate | dispatch | sequential |
 | `job` | gateway | gateway | orchestrate | dispatch | sequential |
 | `monitor` | direct | gateway | orchestrate | read | parallel |
@@ -219,7 +221,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `artifact` | gateway | gateway | artifact | write | sequential |
 | `gateway` | direct | direct | gateway | read; the inner call keeps its class | sequential |
 
-There are 42 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. Where this page says a call runs at `yolo`, it means unconfined yolo (`safety.yoloConfinement: unconfined`). Contained yolo, the default, admits calls as `default` does and refuses a call that would wait for the operator. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
+There are 44 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. Where this page says a call runs at `yolo`, it means unconfined yolo (`safety.yoloConfinement: unconfined`). Contained yolo, the default, admits calls as `default` does and refuses a call that would wait for the operator. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
@@ -1000,6 +1002,23 @@ code_nav(mode="project")
 ```
 
 For project orientation and current recorded status, use `code_nav mode=project`. It returns bounded declared facts, current Git observations, and durable operator tasks with provenance. Recorded task status does not certify passing verification. Ordinary prompts contain snapshot hints, not the full codemap or wiki bodies. Wiki checkpoint coverage distinguishes validated pages from pending pages; consult current source and evidence before treating wiki claims as true. See [Project context](../architecture/project-context.md) for freshness and legacy filename compatibility.
+
+## browser: drive a headless browser session
+
+The main agent reaches `browser` through the gateway; dispatched workers do not get it. It drives one headless Chromium session that persists across calls, with its pages and their console and network buffers ([surface.ts](../../src/tools/browser/surface.ts)).
+
+| Op | What it does |
+| --- | --- |
+| `open` | Loads `url` in a new page, or in the page `page` names (a page id not yet open names the new page), at `viewport` (default `1280x800`). Returns the page id, final URL, title, HTTP status, new console errors and failed requests, and the first lines of the accessibility snapshot. |
+| `attach` | Drives a browser started with `--remote-debugging-port` (Chrome, Edge, a Tauri debug build's WebView2) instead of the session's own. `endpoint` is a port, `host:port`, or the http or ws DevTools URL. Its tabs become pages; `close` ends the attach and leaves that browser running. Each endpoint asks once per session, because the agent can read and drive every page it has open, signed-in sites included. |
+| `run` | Runs Playwright JavaScript (`script`, or a workspace module in `file`) against the page, with `page`, `context`, `shot`, `snapshot`, `events` and `pages` in scope. `timeout_ms` defaults to 300000. |
+| `look` | The rendered accessibility tree with `[ref=eN]` refs, scoped by `target` (a ref, a CSS selector, or a role or text query). `screenshot: true` attaches an image on vision routes and always gives its path. |
+| `serve` | Starts a dev server (`command`, in `cwd`) inside the session and waits until the loopback URL `ready` answers (`timeout_ms` default 120000). `stop: true` stops it; `serve` with no command lists the servers. |
+| `close` | Closes one page, or the whole session and its servers. |
+
+A call is admitted and contained as the `bash` command it stands for: the driver invocation, or for `serve` the server's own command line in its `cwd`. Pages reach loopback only (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`). A host beyond loopback, from `url` or `allow_hosts`, asks once and is then granted for the rest of the session; a `/new`, fork, resume or session switch drops every host and endpoint grant. A request the grant blocks is named in the result with the grant that would admit it. `hermetic: true` on `open` or `serve` keeps the session loopback-only until it closes, and under the OS sandbox the browser and its servers then share a private loopback with no other network. Page text is untrusted data.
+
+The browser component is provisioned by `clio-coder tools install browser`, and the first call offers the same install with one confirmation. Screenshots are drawn in tool cards where the terminal or client can show images, and a route without image input never receives them.
 
 ## web_read and web_fetch: read web pages or make full HTTP requests
 
