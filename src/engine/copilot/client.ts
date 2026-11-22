@@ -342,6 +342,45 @@ export interface CopilotModelPrices {
 	batchSize: number | undefined;
 }
 
+/** One tier's token prices exactly as the listing states them; each price is per `batchSize` tokens. */
+export interface CopilotListingTierPrices {
+	inputPrice?: number;
+	outputPrice?: number;
+	/** The SDK marks this deprecated in favour of `cacheReadPrice`; carried while the listing still states it. */
+	cachePrice?: number;
+	cacheReadPrice?: number;
+	cacheWritePrice?: number;
+	cacheWrite1hPrice?: number;
+	/** The SDK marks this deprecated in favour of `maxPromptTokens`; carried while the listing still states it. */
+	contextMax?: number;
+	maxPromptTokens?: number;
+}
+
+export interface CopilotListingTokenPrices extends CopilotListingTierPrices {
+	batchSize?: number;
+	longContext?: CopilotListingTierPrices;
+}
+
+/** A server-driven promotion the listing states for the signed-in account. */
+export interface CopilotListingPromo {
+	id?: string;
+	discountPercent?: number;
+	endsAt?: string;
+	message?: string;
+	showBanner?: boolean;
+}
+
+/**
+ * The seat's tariff for one model as the SDK listing (`@experimental`) reports it. A field the listing left
+ * out stays absent; nothing here is defaulted, converted or priced.
+ */
+export interface CopilotListingBilling {
+	multiplier?: number;
+	discountPercent?: number;
+	promo?: CopilotListingPromo;
+	tokenPrices?: CopilotListingTokenPrices;
+}
+
 export interface CopilotModelRow {
 	id: string;
 	label: string;
@@ -364,6 +403,10 @@ export interface CopilotModelRow {
 	 * (`billing.tokenPrices.longContext`). A copilot-sdk target with `contextTier: long_context` reads these.
 	 */
 	longContext?: { contextWindow: number | undefined; prices: CopilotModelPrices | undefined };
+	/** The listing's full billing for this model; absent when the listing states none. */
+	billing?: CopilotListingBilling;
+	/** When the listing was read (ISO 8601), the as-of time of `billing`. */
+	listingReadAt: string;
 }
 
 /**
@@ -426,9 +469,58 @@ function listedReasoning(model: ModelInfo): Pick<CopilotModelRow, "reasoningLeve
 	return { reasoningLevels: levels, ...(preset && levels.includes(preset) ? { reasoningDefaultLevel: preset } : {}) };
 }
 
+const TIER_PRICE_KEYS = [
+	"inputPrice",
+	"outputPrice",
+	"cachePrice",
+	"cacheReadPrice",
+	"cacheWritePrice",
+	"cacheWrite1hPrice",
+	"contextMax",
+	"maxPromptTokens",
+] as const satisfies readonly (keyof CopilotListingTierPrices)[];
+const PROMO_KEYS = [
+	"id",
+	"discountPercent",
+	"endsAt",
+	"message",
+	"showBanner",
+] as const satisfies readonly (keyof CopilotListingPromo)[];
+
+/** The named fields the source states, each copied as is; a field it left out stays out. */
+function stated<T extends object>(source: T, keys: readonly (keyof T)[]): T {
+	const out: Partial<T> = {};
+	for (const key of keys) if (source[key] !== undefined) out[key] = source[key];
+	return out as T;
+}
+
+/** The listing's billing for one model, field for field. The SDK's public `ModelInfo` type omits `promo` and `discountPercent`. */
+function listingBilling(model: ModelInfo): CopilotListingBilling | undefined {
+	const billing = model.billing as CopilotListingBilling | undefined;
+	if (!billing) return undefined;
+	const prices = billing.tokenPrices;
+	return {
+		...stated(billing, ["multiplier", "discountPercent"]),
+		...(billing.promo ? { promo: stated(billing.promo, PROMO_KEYS) } : {}),
+		...(prices
+			? {
+					tokenPrices: {
+						...stated(prices, [...TIER_PRICE_KEYS, "batchSize"]),
+						...(prices.longContext ? { longContext: stated(prices.longContext, TIER_PRICE_KEYS) } : {}),
+					},
+				}
+			: {}),
+	};
+}
+
 /** One listing row read for a tier; the contract test feeds it a faked listing row. */
-export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTier = "default"): CopilotModelRow {
+export function copilotModelRow(
+	model: ModelInfo,
+	contextTier: CopilotContextTier = "default",
+	listingReadAt: string = new Date().toISOString(),
+): CopilotModelRow {
 	const long = model.billing?.tokenPrices?.longContext;
+	const billing = listingBilling(model);
 	return {
 		id: model.id,
 		label: model.name || model.id,
@@ -447,6 +539,8 @@ export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTie
 					},
 				}
 			: {}),
+		...(billing ? { billing } : {}),
+		listingReadAt,
 	};
 }
 
@@ -454,7 +548,8 @@ async function listHeld(): Promise<CopilotModelRow[]> {
 	await copilotAccount();
 	const client = await copilotClient();
 	const models: ModelInfo[] = await client.listModels();
+	const readAt = new Date().toISOString();
 	return models
 		.filter((model) => model.policy === undefined || model.policy.state === "enabled")
-		.map((model) => copilotModelRow(model));
+		.map((model) => copilotModelRow(model, "default", readAt));
 }
