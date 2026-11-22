@@ -11,16 +11,18 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { AUTONOMY_HELP } from "../../src/core/settings-awareness.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
-import { PLAYWRIGHT_CORE_VERSION } from "../../src/domains/lifecycle/browser-component.js";
+import { PLAYWRIGHT_CORE_VERSION, resolveBrowserComponent } from "../../src/domains/lifecycle/browser-component.js";
 import { componentInstallDir } from "../../src/domains/lifecycle/components.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { ActionClass, ClassifierCall } from "../../src/domains/safety/action-classifier.js";
@@ -51,6 +53,7 @@ import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createAskUserTool } from "../../src/tools/ask-user.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { createBrowserTool } from "../../src/tools/browser/index.js";
 import {
 	browserOutwardHosts,
 	browserToolSurface,
@@ -313,6 +316,70 @@ test("a browser attach asks once per CDP endpoint per session, whatever spelling
 			{ endpoint: "9222", asked: "browser-attach-endpoint", kind: "ok" },
 		],
 	);
+});
+
+test("a browser page reaches loopback and granted hosts only: every redirect hop is checked and only http(s) loads", async (t) => {
+	const home = await isolateClioEnv("clio-browser-reach-home-");
+	t.after(() => home.restore());
+	// A real Chromium: the operator's installed component, read-only, named by CLIO_CODER_OPERATOR_COMPONENTS_DIR.
+	if (resolveBrowserComponent() === null) {
+		t.skip("no browser component: set CLIO_CODER_OPERATOR_COMPONENTS_DIR to an installed components directory");
+		return;
+	}
+	// A host that is not loopback but answers here, so an unchecked redirect hop would load it.
+	const outward =
+		Object.values(networkInterfaces())
+			.flat()
+			.find((a) => a?.family === "IPv4" && !a.internal)?.address ?? "ungranted.invalid";
+	let port = 0;
+	let secretHits = 0;
+	const server = createServer((req, res) => {
+		if (req.url === "/hop") {
+			res.writeHead(302, { location: `http://${outward}:${port}/secret` }).end();
+			return;
+		}
+		if (req.url === "/secret") secretHits++;
+		res.writeHead(200, { "content-type": "text/html" });
+		res.end(`<title>${req.url === "/secret" ? "SECRET PAGE" : "home"}</title><p>page</p>`);
+	});
+	await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve));
+	t.after(() => server.close());
+	port = (server.address() as AddressInfo).port;
+	const dir = workspace("clio-browser-reach-");
+	const secretFile = join(dir, "secret.txt");
+	writeFileSync(secretFile, "FILE-SECRET-CONTENT");
+	const tool = createBrowserTool({ getWorkspaceRoot: () => dir });
+	t.after(() => tool.closeSessions());
+	const call = async (args: Record<string, unknown>) => {
+		const result = await tool.run(args, { sessionId: "browser-reach" });
+		return { kind: result.kind, text: result.kind === "ok" ? result.output : "message" in result ? result.message : "" };
+	};
+
+	const hop = await call({ op: "open", url: `http://127.0.0.1:${port}/hop` });
+	strictEqual(hop.kind, "error", hop.text);
+	match(hop.text, new RegExp(`blocked: ${outward.replace(/\./gu, "\\.")} not granted to this browser session`, "u"));
+	ok(!hop.text.includes("SECRET PAGE"), hop.text);
+	strictEqual(secretHits, 0);
+
+	const fileUrl = pathToFileURL(secretFile).href;
+	const opened = await call({ op: "open", url: fileUrl });
+	strictEqual(opened.kind, "error", opened.text);
+	match(opened.text, /only http and https URLs load/u);
+	ok(!opened.text.includes("FILE-SECRET-CONTENT"), opened.text);
+	const page = await call({ op: "open", url: `http://127.0.0.1:${port}/` });
+	strictEqual(page.kind, "ok", page.text);
+	const routed = await call({
+		op: "run",
+		script: `return await page.goto(${JSON.stringify(fileUrl)}).then(() => "loaded", () => "refused");`,
+	});
+	match(routed.text, /value: "refused"[\s\S]*blocked: file: URLs do not load/u);
+	ok(!routed.text.includes("FILE-SECRET-CONTENT"), routed.text);
+
+	if (outward === "ungranted.invalid") return;
+	const granted = await call({ op: "open", url: `http://127.0.0.1:${port}/hop`, allow_hosts: [outward] });
+	strictEqual(granted.kind, "ok", granted.text);
+	match(granted.text, /title: SECRET PAGE/u);
+	strictEqual(secretHits, 1);
 });
 
 // ob-yolo Q7: a recognized command with unsandboxed: true ran unconfined at default with no review.
