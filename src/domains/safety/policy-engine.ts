@@ -395,7 +395,8 @@ export interface SafetyPolicyEngineOptions {
 	/**
 	 * True when every command this worker spawns runs in an OS sandbox that confines its writes to the worker's own
 	 * roots (`workerSandboxConfinesWrites()`). Bash's hidden-content ask (variables, scripts, interpreter source) then
-	 * yields to that sandbox, as main bash's does at default (row 371); every other rail and the floor still apply.
+	 * yields to that sandbox, as main bash's does at default (row 371), and so does an unrecognized command main bash's
+	 * sandbox would hold (M-49); every other rail and the floor still apply.
 	 */
 	workerSandboxConfinesWrites?: boolean;
 	/**
@@ -656,7 +657,7 @@ function matchesRepositoryCommand(command: string): boolean {
  * ahead of this hint and the hint stays under that cut.
  */
 const BASH_RECOGNIZED_FORM_HINT =
-	"Runs without asking: cat, head, tail, grep, rg, find, ls, wc, sed -n and git inspection on workspace paths, joined by &&, ||, ; or |, redirected only to /dev/null, with cwd as the cwd argument.";
+	"Runs without asking: cat, head, tail, grep, rg, find, ls, wc, od, xxd, cmp, sha256sum, sed -n and git inspection on workspace paths, joined by &&, ||, ; or |, redirected only to /dev/null, with cwd as the cwd argument.";
 
 /**
  * A step quoted for a refusal note. Headless guidance keeps 240 characters,
@@ -1576,24 +1577,29 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	 * so, and the registry refuses it when that snapshot cannot be taken.
 	 */
 	/**
-	 * A command whose text hides what it touches, run where this worker's OS sandbox confines its writes, takes the
-	 * verdict main bash's sandbox gives it at default (row 371): it passed every other rail, so autonomy admits it as
-	 * contained. Any other unrecognized command still meets the worker's permission routing.
+	 * A command bash passed but did not recognize, run where this worker's OS sandbox confines its writes, takes the verdict
+	 * main bash's sandbox gives it at default (row 371 for hidden content, M-49 for any other): it passed every other rail,
+	 * so autonomy admits it as contained. A call main bash's sandbox would not hold (`unsandboxed: true`, outward) still
+	 * meets the worker's permission routing, as does every call of a worker with no such sandbox.
 	 */
-	const workerContainedHiddenContent = (
+	const workerContainedUnrecognized = (
 		bash: ReturnType<typeof evaluateBashPolicy>,
+		call: ClassifierCall,
+		classification: Classification,
 		command: string | null,
 		posture: string | undefined,
 	): ReturnType<typeof evaluateBashPolicy> => {
 		if (!workerSandboxContained || command === null || posture === CONFIRMED_POSTURE) return bash;
-		if (bash.kind !== "allow" || bash.execRecognition !== "unrecognized" || !hidesShellContent(command, posture))
-			return bash;
+		if (bash.kind !== "allow" || bash.execRecognition !== "unrecognized") return bash;
+		if (call.tool !== ToolNames.Bash || !containedShellCall(call, classification, null)) return bash;
 		return {
 			...bash,
 			ruleId: WORKER_SANDBOX_CONTAINED_RULE_ID,
 			reasonCode: WORKER_SANDBOX_CONTAINED_RULE_ID,
 			reasons: [
-				"its variables, script or interpreter source hide which paths it touches, and this worker's OS sandbox confines its writes to the worker's own roots, as main bash's sandbox does at default",
+				hidesShellContent(command, posture)
+					? "its variables, script or interpreter source hide which paths it touches, and this worker's OS sandbox confines its writes to the worker's own roots, as main bash's sandbox does at default"
+					: "it is outside the no-prompt set, and this worker's OS sandbox confines its writes to the worker's own roots, as main bash's sandbox does at default",
 				...bash.reasons,
 			],
 			execRecognition: "recognized",
@@ -2050,7 +2056,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// while yolo admits them headlessly.
 			if (bash.kind === "block") return gateDecision("block", base, bash);
 			const scanned =
-				call.projection === "mcp-server" ? mcpExecutePolicy(bash) : workerContainedHiddenContent(bash, command, posture);
+				call.projection === "mcp-server"
+					? mcpExecutePolicy(bash)
+					: workerContainedUnrecognized(bash, call, classification, command, posture);
 			if (scanned.kind === "ask") return settle(gateDecision("ask", base, scanned));
 			return settle(allowDecision(base, scanned));
 		}
@@ -3951,13 +3959,16 @@ export const TASK_GATE_REFUSED_RULE_ID = "verify-task-gate-asks";
  * ask; what it passed as unrecognized becomes recognized only when the worker
  * runs it under bubblewrap confined to its own write roots, as main bash at
  * default runs it contained. Anywhere else a gate gets exactly the admission bash would give the
- * same argv, so task text cannot carry an unrecognized command past an ask.
+ * same argv, so task text cannot carry an unrecognized command past an ask. A gate whose bash verdict a write-confined
+ * worker sandbox already contained (row 371) is the same gate: it keeps the task-gate attribution, with the same
+ * admission (M-48).
  */
-function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecognition" | "reasons">>(
+function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecognition" | "reasons" | "ruleId">>(
 	bash: T,
 	confined: boolean,
 ): T {
-	if (bash.kind !== "allow" || bash.execRecognition !== "unrecognized" || !confined) return bash;
+	const contained = bash.execRecognition === "unrecognized" || bash.ruleId === WORKER_SANDBOX_CONTAINED_RULE_ID;
+	if (bash.kind !== "allow" || !contained || !confined) return bash;
 	return {
 		...bash,
 		ruleId: TASK_GATE_RULE_ID,
@@ -3970,7 +3981,7 @@ function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecog
 	};
 }
 
-/** Rule id of a hidden-content bash command admitted inside a write-confined worker sandbox (row 371). */
+/** Rule id of an unrecognized bash command admitted inside a write-confined worker sandbox (row 371, M-49). */
 const WORKER_SANDBOX_CONTAINED_RULE_ID = "worker-sandbox-contained";
 
 /** Rule id of an execute-class MCP tool call, whose admission the autonomy level decides. */
@@ -5292,11 +5303,14 @@ function isDiscardRedirection(operator: string, target: string | undefined): boo
  * that would make it write, execute, walk a tree, or name an input list or
  * output file. A command outside this table, or one carrying a refused option,
  * leaves the whole compound unrecognized, so the autonomy level decides it as
- * before. The table stays short on purpose: every wider member (jq, diff, cmp,
- * du, file, tree, sort, column) had an option that read a list file, walked a
- * tree, printed the environment or wrote a file, and a per-option denylist over
- * a wide vocabulary kept leaking. awk, xargs, env and the shells stay out
- * because their arguments are programs.
+ * before. The table stays short on purpose: every wider member (jq, diff, du,
+ * tree, sort, column) had an option that read a list file, walked a tree,
+ * printed the environment or wrote a file, and a per-option denylist over a
+ * wide vocabulary kept leaking. The byte and checksum inspectors (M-49) join
+ * with those options refused: `file` compiles a magic file, reads a name list,
+ * follows links and runs decompressors; the checksums read a check list; xxd
+ * writes its second operand ({@link xxdOnlyInspects}). awk, xargs, env and the
+ * shells stay out because their arguments are programs.
  */
 const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
 	["cat", []],
@@ -5354,6 +5368,29 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 			"-fls",
 		],
 	],
+	["od", []],
+	["xxd", []],
+	["hexdump", ["-f", "--format-file"]],
+	["cmp", []],
+	["sha256sum", ["-c", "--check"]],
+	["md5sum", ["-c", "--check"]],
+	[
+		"file",
+		[
+			"-C",
+			"--compile",
+			"-f",
+			"--files-from",
+			"-m",
+			"--magic-file",
+			"-L",
+			"--dereference",
+			"-z",
+			"--uncompress",
+			"-Z",
+			"--uncompress-noreport",
+		],
+	],
 ]);
 
 /**
@@ -5377,7 +5414,53 @@ const SHORT_VALUE_LETTERS: ReadonlyMap<string, string> = new Map([
 	["nl", "bdfhilnsvw"],
 	["basename", "s"],
 	["date", "dfrsI"],
+	["hexdump", "efns"],
+	["file", "eFfmP"],
 ]);
+
+/** xxd option words that take the next word as their value; xxd matches whole words, never clusters. */
+const XXD_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+	"-c",
+	"-cols",
+	"-g",
+	"-groupsize",
+	"-l",
+	"-len",
+	"-n",
+	"-name",
+	"-o",
+	"-offset",
+	"-s",
+	"-seek",
+	"-R",
+]);
+
+/**
+ * True when xxd only prints: no revert (`-r`, `-revert`) and at most one file operand, since `xxd in out` writes `out`
+ * (M-49). A word that may be an option's value is counted as an operand, so a miscount only refuses.
+ */
+function xxdOnlyInspects(args: ReadonlyArray<string>): boolean {
+	let operands = 0;
+	let valueNext = false;
+	let ended = false;
+	for (const arg of args) {
+		if (valueNext) {
+			valueNext = false;
+			continue;
+		}
+		if (!ended && arg === "--") {
+			ended = true;
+			continue;
+		}
+		if (!ended && arg.startsWith("-") && arg !== "-") {
+			if (arg.startsWith("-r")) return false;
+			valueNext = XXD_VALUE_OPTIONS.has(arg);
+			continue;
+		}
+		operands += 1;
+	}
+	return operands <= 1;
+}
 
 /** `sed -n` with a print-only line script (`1,80p`, `5p`, `10,$p`); every other sed program can write or execute. */
 const SED_PRINT_SCRIPT = /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/u;
@@ -5979,6 +6062,7 @@ function readOnlyInspectionRule(
 	}
 	if (command === "rg" && rgConfigRefusal() !== null) return null;
 	if (command === "date" && !dateOperandsOnlyFormat(args)) return null;
+	if (command === "xxd" && !xxdOnlyInspects(args)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;

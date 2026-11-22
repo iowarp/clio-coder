@@ -11,7 +11,11 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStatePath } from "../../src/core/xdg.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
-import { createSafetyPolicyEngine, TASK_GATE_REFUSED_RULE_ID } from "../../src/domains/safety/policy-engine.js";
+import {
+	createSafetyPolicyEngine,
+	TASK_GATE_REFUSED_RULE_ID,
+	TASK_GATE_RULE_ID,
+} from "../../src/domains/safety/policy-engine.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
@@ -120,6 +124,16 @@ describe("verifier task gates", () => {
 		};
 		strictEqual(gateKind(false), "block");
 		strictEqual(gateKind(true), "allow");
+		// A worker whose sandbox confines writes contains its bash's inline source (row 371); the gate it runs through
+		// verify keeps the task-gate attribution, with the same admission (M-48).
+		const workerGate = createSafetyPolicyEngine({ cwd: root, workerSandboxConfinesWrites: true }).evaluate({
+			tool: ToolNames.Verify,
+			args: { check: "gate-1" },
+		});
+		deepStrictEqual(
+			[workerGate.kind, workerGate.ruleId, workerGate.execRecognition],
+			["allow", TASK_GATE_RULE_ID, "recognized"],
+		);
 		const ran = await verify("gate-1");
 		strictEqual(ran.kind, "ok", JSON.stringify(ran));
 		if (ran.kind === "ok") match(ran.output, /\b2\b/u);

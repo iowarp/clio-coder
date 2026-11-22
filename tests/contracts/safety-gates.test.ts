@@ -834,7 +834,7 @@ describe("safety gate boundary", () => {
 		}
 	});
 
-	it("a worker's interpreter readback runs inside its write-confined sandbox as main bash's contained call does; without that sandbox it asks (row 371)", async () => {
+	it("a worker's interpreter readback and unrecognized commands run inside its write-confined sandbox as main bash's contained call does; without that sandbox they ask (row 371, M-49)", async () => {
 		const readback = {
 			tool: ToolNames.Bash,
 			args: {
@@ -843,6 +843,7 @@ describe("safety gate boundary", () => {
 			},
 		};
 		const plain = { tool: ToolNames.Bash, args: { command: "python3 analysis.py", cwd: scratch } };
+		const outward = { tool: ToolNames.Bash, args: { command: "curl -X POST -d x https://example.com", cwd: scratch } };
 		for (const confined of [false, true]) {
 			const safety = createWorkerSafety({ cwd: scratch, ...(confined ? { sandboxConfinesWrites: true } : {}) });
 			const registry = createRegistry({ safety, autonomy: () => "default" });
@@ -859,13 +860,16 @@ describe("safety gate boundary", () => {
 			});
 			strictEqual((await registry.invoke(readback)).kind, confined ? "ok" : "blocked");
 			if (!confined) strictEqual(safety.evaluate(readback).policy?.ruleId, "bash-hidden-content");
-			// Only the hidden-content ask yields: other unrecognized commands, rails and the floor stand.
-			strictEqual((await registry.invoke(plain)).kind, "blocked");
+			// An unrecognized command takes the same contained verdict there (M-49); an outward one, which main bash's
+			// sandbox does not contain, and every rail and the floor stand.
+			strictEqual((await registry.invoke(plain)).kind, confined ? "ok" : "blocked");
+			if (confined) strictEqual(safety.evaluate(plain).policy?.ruleId, "worker-sandbox-contained");
+			strictEqual((await registry.invoke(outward)).kind, "blocked");
 			const escaped = safety.evaluate({ ...readback, args: { ...readback.args, cwd: tmpdir() } });
 			strictEqual(escaped.kind, confined ? "block" : "ask");
 			if (confined) strictEqual(escaped.policy?.ruleId, "bash-cwd-escape");
 			strictEqual(safety.evaluate({ tool: ToolNames.Bash, args: { command: "git reset --hard" } }).kind, "block");
-			strictEqual(executed, confined ? 1 : 0);
+			strictEqual(executed, confined ? 2 : 0);
 		}
 	});
 
@@ -1657,6 +1661,20 @@ describe("safety gate boundary", () => {
 			"date -us now",
 			"date 110610002026",
 			"date -f dates.txt",
+			// M-49: the byte inspectors stay read-only: no second xxd operand (its output file), no revert, no list or magic
+			// file, no compiled magic, no decompressor, no link following, and every operand in the workspace.
+			"xxd a.txt b.txt",
+			"xxd -r a.txt",
+			"xxd -revert a.txt",
+			"od -An -tx1 ../a.txt",
+			"cmp a.txt /etc/hosts",
+			"hexdump -f fmt a.txt",
+			"sha256sum -c sums.txt",
+			"md5sum --check sums.txt",
+			"file -C -m magic",
+			"file -z a.txt",
+			"file -L a.txt",
+			"od -tx1 a.txt > out.txt",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition !== "recognized", true, command);
@@ -1693,6 +1711,17 @@ describe("safety gate boundary", () => {
 			"date -u -Iseconds && date +%Y-%m-%d",
 			"date -d yesterday +%s",
 			"date -r package.json",
+			// M-49: byte and checksum inspection of workspace files, for main and workers alike.
+			"od -An -tx1 -v a.txt",
+			"xxd a.txt",
+			"xxd -p -l 4 a.txt",
+			"hexdump -C a.txt",
+			"cmp a.txt README.md",
+			"wc -c a.txt",
+			"sha256sum a.txt src/a.js",
+			"md5sum a.txt",
+			"file a.txt",
+			"cat a.txt && od -c a.txt | head -2",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition, "recognized", command);
