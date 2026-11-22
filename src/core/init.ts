@@ -77,6 +77,8 @@ interface InstallMetadata {
 	 * by the interactive boot, once per version, so the notice never repeats.
 	 */
 	noticedVersion?: string;
+	/** When the one-time contained-yolo notice was shown (`takeContainedYoloNotice`). */
+	containedYoloNoticedAt?: string;
 	platform: string;
 	nodeVersion: string;
 }
@@ -253,6 +255,9 @@ export function initializeClioHome(): InitReport {
 					? { downgradedFrom: installMetadata.downgradedFrom }
 					: {}),
 				...(installMetadata.noticedVersion !== undefined ? { noticedVersion: installMetadata.noticedVersion } : {}),
+				...(installMetadata.containedYoloNoticedAt !== undefined
+					? { containedYoloNoticedAt: installMetadata.containedYoloNoticedAt }
+					: {}),
 				upgradedAt: new Date().toISOString(),
 				platform: process.platform,
 				nodeVersion: process.version,
@@ -354,6 +359,9 @@ export function recordHomeDowngrade(
 			...(metadata.repairedAt !== undefined ? { repairedAt: metadata.repairedAt } : {}),
 			downgradedFrom: metadata.version,
 			...(metadata.noticedVersion !== undefined ? { noticedVersion: metadata.noticedVersion } : {}),
+			...(metadata.containedYoloNoticedAt !== undefined
+				? { containedYoloNoticedAt: metadata.containedYoloNoticedAt }
+				: {}),
 			platform: process.platform,
 			nodeVersion: process.version,
 		};
@@ -383,6 +391,9 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 				...(typeof parsed.upgradedFrom === "string" ? { upgradedFrom: parsed.upgradedFrom } : {}),
 				...(typeof parsed.downgradedFrom === "string" ? { downgradedFrom: parsed.downgradedFrom } : {}),
 				...(typeof parsed.noticedVersion === "string" ? { noticedVersion: parsed.noticedVersion } : {}),
+				...(typeof parsed.containedYoloNoticedAt === "string"
+					? { containedYoloNoticedAt: parsed.containedYoloNoticedAt }
+					: {}),
 				platform: parsed.platform,
 				nodeVersion: parsed.nodeVersion,
 			};

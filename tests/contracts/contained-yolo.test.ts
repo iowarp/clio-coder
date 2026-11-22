@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readSettings, recordYoloConfinementOnce, settingsPath } from "../../src/core/config.js";
+import { readSettings, settingsPath } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { initializeClioHome } from "../../src/core/init.js";
 import { yoloContainedMigrationNotice } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -12,7 +13,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
-import { hadOldYolo } from "../../src/domains/lifecycle/state.js";
+import { hadOldYolo, takeContainedYoloNotice } from "../../src/domains/lifecycle/state.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
@@ -338,17 +339,27 @@ test("a project layer cannot set yolo confinement or its acceptance", async (t) 
 	deepStrictEqual(paths.sort(), ["safety.yoloConfinement", "safety.yoloUnconfinedAccepted"]);
 });
 
-test("the contained migration records the confinement once and keeps an operator's own choice", async (t) => {
+test("the contained-yolo notice is claimed once in lifecycle state and never rewrites the operator's settings", async (t) => {
 	const home = await isolateClioEnv("clio-yolo-confinement-migration-");
 	t.after(() => home.restore());
-	mkdirSync(join(home.dir, "config"), { recursive: true });
-	writeFileSync(settingsPath(), "version: 2\nsafety:\n  autonomy: yolo\n  yoloAccepted: true\n");
-	strictEqual(recordYoloConfinementOnce(), true);
+	initializeClioHome();
+	const operator = 'version: 2\nsafety: { sandbox: "off", autonomy: yolo }\n';
+	writeFileSync(settingsPath(), operator);
+	const safety = readSettings().safety;
+	match(takeContainedYoloNotice(safety) ?? "", /without an OS sandbox \(safety\.sandbox is off\)/u);
+	strictEqual(readFileSync(settingsPath(), "utf8"), operator);
+	strictEqual(takeContainedYoloNotice(safety), null);
+	// The claim survives the boot that rewrites home.json for a changed node or version.
+	const record = join(clioStateDir(), "home.json");
+	writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, "utf8")), nodeVersion: "v0.0.0" }));
+	initializeClioHome();
+	strictEqual(takeContainedYoloNotice(safety), null);
+	// Settings that already name a confinement chose it and hear nothing, even with no claim on record.
+	const { containedYoloNoticedAt: _claim, ...unclaimed } = JSON.parse(readFileSync(record, "utf8"));
+	writeFileSync(record, JSON.stringify(unclaimed));
+	writeFileSync(settingsPath(), "version: 2\nsafety:\n  yoloConfinement: contained\n");
+	strictEqual(takeContainedYoloNotice(DEFAULT_SETTINGS.safety), null);
 	match(readFileSync(settingsPath(), "utf8"), /yoloConfinement: contained/u);
-	strictEqual(recordYoloConfinementOnce(), false);
-	writeFileSync(settingsPath(), "version: 2\nsafety:\n  yoloConfinement: unconfined\n");
-	strictEqual(recordYoloConfinementOnce(), false);
-	match(readFileSync(settingsPath(), "utf8"), /yoloConfinement: unconfined/u);
 });
 
 test("the contained-yolo notice states the sandbox backend and judge state a yolo run records", async (t) => {

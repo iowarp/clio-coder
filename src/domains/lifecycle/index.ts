@@ -18,6 +18,7 @@ export {
 	hadOldYolo,
 	readStateInfo,
 	type StateInfo,
+	takeContainedYoloNotice,
 	takeUpgradeNotice,
 	type UpgradeTransition,
 } from "./state.js";
