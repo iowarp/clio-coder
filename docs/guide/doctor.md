@@ -60,6 +60,9 @@
 | `session store` | Readable session ledger count; `!!` on unreadable ledgers/dirs. |
 | `telemetry`, `cache telemetry` | Effective capture mode, workspace consent count/grant (`WARN` on unreadable settings/consent), and latest session prompt-cache stats (`INFO` if no cached calls, `WARN` if journal unreadable; `clio-coder telemetry doctor` checks seals). |
 | `state storage`, `home storage`, `install root` | Disk footprint of state (with top subdir), config/data/cache, and installer root (`WARN` when binary runs outside an existing installer root; remove with `clio-coder uninstall --inactive`). |
+| `sandbox cache` | Size of the main-session sandbox's tool cache against `safety.sandboxCacheMaxGiB`; `WARN` when over the cap. `--fix` removes the least recently used tool directories until it fits, and skips while a running process holds the cache. |
+| `dispatch reservations`, `dispatch capacity leases`, `dispatch cache lanes` | Valid records in the dispatch admission store, with the live owners of prompt cache lanes. A live record no current reader accepts is `!!` and refuses dispatch until `--fix` drops it; a settled one is `WARN` and is dropped at the next start (a cache lane at the next store write) or by `--fix`. An unreadable store shows as `dispatch admission store`, which `--fix` resets. |
+| `model catalog overlays`, `model catalog file` | Shown when an overlay directory exists: its entry count and model families. A file that fails to parse is a `WARN` `model catalog file` row naming it; the other overlay files still apply. |
 | `target <id>`, `cache <id>` | `WARN` if OpenAI/Anthropic-compat target behaves like native LM Studio/Ollama (suggests `clio-coder targets convert`) or has cache advisories; `!!` on unknown runtime. |
 | `proxy`, `scheduler commands` | `proxy` shown when `HTTP_PROXY`/`HTTPS_PROXY` set; `scheduler commands` shown when sandbox active and Slurm/PBS/LSF/Flux CLI found on `PATH`. |
 
