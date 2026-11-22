@@ -819,13 +819,66 @@ function narrationOf(reasoningBlocks: unknown): string[] {
  */
 type CopilotSessionOrigin = "new" | "spare" | "continued" | "resumed";
 
+/** The recipient clause of a Harmony tool call: `to=functions.<name>`. */
+const TOOL_CHANNEL_PREFIX = "to=functions.";
+/** That clause at the start of the text or after whitespace, with the whitespace before it, naming one tool. */
+const TOOL_CHANNEL_MARKER = /\s*(?:^|(?<=\s))to=functions\.([A-Za-z_][\w-]*)/gu;
+const TOOL_NAME_CHAR = /[\w-]/u;
+
+/**
+ * Where a channel marker naming a declared tool starts in `text`, searching from `from`, or null. A name the text has
+ * not finished yet is no marker until the text is final.
+ */
+function toolChannelMarker(
+	text: string,
+	from: number,
+	declared: ReadonlySet<string>,
+	final: boolean,
+): { at: number; tool: string } | null {
+	TOOL_CHANNEL_MARKER.lastIndex = from;
+	for (let match = TOOL_CHANNEL_MARKER.exec(text); match !== null; match = TOOL_CHANNEL_MARKER.exec(text)) {
+		const tool = match[1] as string;
+		const next = text[match.index + match[0].length];
+		if (next === undefined && !final) return null;
+		if (declared.has(tool)) return { at: match.index, tool };
+	}
+	return null;
+}
+
+/**
+ * How much of `text` past `from` can be shown before more arrives: a trailing word that could still grow into a
+ * channel marker is held, with the whitespace before it, and so is trailing whitespace a marker may follow.
+ */
+function shownUntil(text: string, from: number): number {
+	let wordStart = text.length;
+	while (wordStart > 0 && !/\s/u.test(text[wordStart - 1] as string)) wordStart -= 1;
+	const word = text.slice(wordStart);
+	const name = word.slice(TOOL_CHANNEL_PREFIX.length);
+	const partial =
+		TOOL_CHANNEL_PREFIX.startsWith(word) ||
+		(word.startsWith(TOOL_CHANNEL_PREFIX) && [...name].every((char) => TOOL_NAME_CHAR.test(char)));
+	// A word that began before `from` was already shown in part, so it is no marker's start.
+	let at = partial && wordStart >= from ? wordStart : text.length;
+	while (at > from && /\s/u.test(text[at - 1] as string)) at -= 1;
+	return at;
+}
+
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
 	readonly message: AssistantMessage & {
 		copilotBilling?: CopilotStepBilling;
 		copilotContinuation?: "delta" | "full";
 		copilotSession?: CopilotSessionOrigin;
+		/** Tools whose Harmony channel marker the reply text carried and this step dropped (M-47). */
+		copilotDroppedToolMarkers?: string[];
 	};
+	/** The tools this step declared, so a channel marker in the reply text that names one is recognized (M-47). */
+	declaredTools: ReadonlySet<string> = new Set();
+	/** The reply text Copilot sent this step, and how much of it reached the stream. */
+	private textSeen = "";
+	private textShown = 0;
+	/** Where a dropped channel marker began; nothing after it is reply text. */
+	private markerAt: number | null = null;
 	private textIndex: number | null = null;
 	private thinkingIndex: number | null = null;
 	/** Tool calls whose input is streaming, by Copilot's tool call id, before the message that requests them. */
@@ -888,7 +941,34 @@ class Step {
 		this.stream.push({ type: "start", partial: this.message });
 	}
 
+	/**
+	 * Reply text from Copilot. A model trained on Harmony can write its tool call into the reply as a bare channel
+	 * marker (`to=functions.finish, commentary {"state":"done"}`) that the runtime does not parse into a request, so it
+	 * arrives as text (M-47). A marker naming a declared tool, at the start or after whitespace, and everything after it
+	 * never reach the reply: the runtime ran no call, so none is synthesized, and the drop is stamped on the message.
+	 */
 	private text(delta: string): void {
+		if (delta.length === 0 || this.markerAt !== null) return;
+		this.textSeen += delta;
+		this.release(false);
+	}
+
+	/** Forwards the reply text no marker can still claim; `final` once Copilot has sent the call's whole text. */
+	private release(final: boolean): void {
+		if (this.markerAt !== null) return;
+		const marker = toolChannelMarker(this.textSeen, this.textShown, this.declaredTools, final);
+		if (marker !== null) {
+			this.markerAt = marker.at;
+			this.message.copilotDroppedToolMarkers = [...(this.message.copilotDroppedToolMarkers ?? []), marker.tool];
+		}
+		const until = marker?.at ?? (final ? this.textSeen.length : shownUntil(this.textSeen, this.textShown));
+		if (until <= this.textShown) return;
+		const shown = this.textSeen.slice(this.textShown, until);
+		this.textShown = until;
+		this.emitText(shown);
+	}
+
+	private emitText(delta: string): void {
 		if (delta.length === 0) return;
 		this.start();
 		if (this.textIndex === null) {
@@ -939,6 +1019,7 @@ class Step {
 	}
 
 	private closeOpenBlocks(): void {
+		this.release(true);
 		if (this.thinkingIndex !== null) {
 			const block = this.message.content[this.thinkingIndex] as ThinkingContent;
 			this.stream.push({
@@ -1074,9 +1155,11 @@ class Step {
 				if (event.data.parentToolCallId) return;
 				this.answered = true;
 				if (typeof event.data.apiCallId === "string") this.callIds.add(event.data.apiCallId);
-				const streamed = this.textIndex === null ? "" : (this.message.content[this.textIndex] as TextContent).text;
+				const streamed = this.textSeen.length > 0;
 				this.narration(event.data.reasoningBlocks);
-				if (streamed.length === 0 && event.data.content) this.text(event.data.content);
+				if (!streamed && event.data.content) this.text(event.data.content);
+				// The message holds the call's whole text, so a held tail is either a marker or reply text now.
+				this.release(true);
 				this.textBeforeStreamedCalls();
 				const requests = event.data.toolRequests ?? [];
 				if (requests.length === 0) return;
@@ -1513,6 +1596,7 @@ async function runStep(
 		context.messages.filter((message) => !isHostPolicyMessage(message as AgentMessage)),
 	);
 	const tools = getCurrentTools(context.messages);
+	step.declaredTools = new Set(tools.map((tool) => tool.name));
 	const systemHash = hash(systemPrompt);
 	const reasoningEffort = reasoningEffortFor(model, options as SimpleStreamOptions | undefined);
 	// This route states its effort at dispatch; the payload seam never infers one from a session request (FX-49).

@@ -126,7 +126,7 @@ test("a council sent as a prompt shows its dispatch call and binds the plan appr
 		assert.equal(result.stopReason, "end_turn");
 		const calls = toolCalls(peer.updates);
 		const opened = calls.find((update) => update.sessionUpdate === "tool_call");
-		assert.equal(opened?.title, "dispatch");
+		assert.equal(opened?.title, "dispatch: council · task=<string 28 bytes> · roster=<string 6 bytes>");
 		assert.deepEqual((opened?.rawInput as Record<string, unknown>)?.mode, "council");
 		assert.equal(peer.asks.length, 1, "the plan-scale council parked for one approval");
 		const ask = peer.asks[0] as { toolCall: { toolCallId: string }; _meta: Record<string, { topology?: string }> };

@@ -16,6 +16,7 @@ type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
 function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
 	const handlers = new Map<string, RequestHandler>();
 	const asks: Array<Record<string, unknown>> = [];
+	const updates: Array<Record<string, unknown>> = [];
 	const closeHandlers: Array<() => void> = [];
 	let closed = false;
 	const transport: AcpJsonRpcPeerTransport = {
@@ -28,7 +29,10 @@ function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
 			asks.push(ask);
 			return answer(ask) as never;
 		},
-		notify: () => {},
+		notify: (method, params) => {
+			const update = (params as { update?: Record<string, unknown> } | undefined)?.update;
+			if (method === "session/update" && update !== undefined) updates.push(update);
+		},
 		onNotification: () => () => {},
 		onRequest: (method, handler) => {
 			handlers.set(method, handler);
@@ -48,7 +52,7 @@ function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
 		if (!handler) throw new Error(`no handler registered for ${method}`);
 		return await handler(params);
 	};
-	return { transport, asks, call };
+	return { transport, asks, updates, call };
 }
 
 /**
@@ -98,7 +102,7 @@ async function askOnce(answer: (params: Record<string, unknown>) => unknown, com
 	})) as { stopReason: string };
 	peer.transport.close();
 	strictEqual(await served, 0);
-	return { init, ask: peer.asks[0], prompt, verdictKind };
+	return { init, ask: peer.asks[0], updates: peer.updates, prompt, verdictKind };
 }
 
 const deny = (): unknown => ({ outcome: { outcome: "selected", optionId: "reject-once" } });
@@ -151,6 +155,13 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		ok(title.startsWith("scancel 999999 && curl"), title);
 		ok(!title.includes(secret), title);
 		ok(title.length <= 201, title);
+		// The tool card the client already drew names the call the same way, so card and ask agree.
+		const cards = turn.updates.filter((update) => String(update.sessionUpdate).startsWith("tool_call"));
+		deepStrictEqual(
+			cards.map((update) => update.title),
+			cards.map(() => title),
+		);
+		ok(cards.length >= 2);
 	});
 
 	it("labels the allow option for the call it approves, kinds unchanged", async () => {

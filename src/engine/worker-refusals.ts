@@ -1,4 +1,5 @@
 import { isAbsolute, sep } from "node:path";
+import { ToolNames } from "../core/tool-names.js";
 import { redactCommandOutputSecrets } from "../domains/evidence/redact.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
@@ -35,7 +36,19 @@ export function outsideWorkspaceHint(args: unknown, cwd: string): string {
  * tools fall back to the call's allowlisted target preview. Empty when the call names nothing.
  */
 export function clippedCallCommand(call: ClassifierCall, decision: SafetyDecision): string {
-	const raw = decision.policy?.command ?? describeCallTarget(call.tool, call.args);
+	return clipped(decision.policy?.command ?? describeCallTarget(call.tool, call.args));
+}
+
+/**
+ * The same wording from the call's own arguments, before any policy has evaluated it: a shell call's command, any
+ * other call's target. An ACP tool card is titled from this so it reads as the permission ask for that call does.
+ */
+export function clippedArgsCommand(tool: string, args: Record<string, unknown> | undefined): string {
+	const command = args?.command;
+	return clipped(tool === ToolNames.Bash && typeof command === "string" ? command : describeCallTarget(tool, args));
+}
+
+function clipped(raw: string): string {
 	const scrubbed = redactCommandOutputSecrets(redactSecretString(raw.trim()));
 	return scrubbed.length <= REFUSED_COMMAND_MAX_CHARS ? scrubbed : `${scrubbed.slice(0, REFUSED_COMMAND_MAX_CHARS)}…`;
 }

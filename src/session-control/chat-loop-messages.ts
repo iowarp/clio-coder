@@ -927,6 +927,7 @@ export function assistantSessionPayload(
 		"clioCoderReasoningNotRetained",
 		"clioCoderReasoningToolMarkup",
 		"clioCoderWrittenCalls",
+		"copilotDroppedToolMarkers",
 	]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}

@@ -153,7 +153,7 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import type { AgentMessage, ImageContent } from "../types.js";
-import { clippedCallCommand } from "../worker-refusals.js";
+import { clippedArgsCommand, clippedCallCommand } from "../worker-refusals.js";
 import {
 	ACP_ARTIFACT_CATEGORIES,
 	ACP_ARTIFACTS_LIST_METHOD,
@@ -1604,9 +1604,15 @@ function toolCallPresentation(
 			? `gateway chain(${chainSteps.map((step) => step.capability).join(", ")})`
 			: (call?.toolName ?? toolName);
 	const locations = toolLocations(capability, call?.viaGateway ? call.args : args, cwd);
+	// The card reads as the permission ask for the call does: a shell call as its command, any other call as its tool
+	// and target, scrubbed and clipped the same way. A chain names its capabilities.
+	const named =
+		chainSteps.length > 0 || call === undefined
+			? (capability ?? "tool")
+			: permissionTitle(call.toolName, clippedArgsCommand(call.toolName, call.args));
 	return {
 		...(locations !== null ? { locations } : {}),
-		title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
+		title: boundString(redactUrlCredentials(named), ACP_MAX_TOOL_TITLE_BYTES),
 		kind: toolKind(chainSteps.length > 0 ? toolName : capability),
 	};
 }
