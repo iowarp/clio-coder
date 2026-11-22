@@ -458,6 +458,13 @@ export interface RouteBreakerView {
 	consecutiveFailures: number;
 }
 
+/** What `dispatch land` did: landed the branch, kept it on the operator's answer, or refused before any card. */
+export interface DispatchLandOutcome {
+	outcome: "landed" | "kept" | "refused";
+	branch?: string;
+	detail: string;
+}
+
 export interface DispatchContract {
 	/** True when the domain event pump publishes DispatchProgress itself. */
 	readonly publishesProgress?: boolean;
@@ -508,6 +515,13 @@ export interface DispatchContract {
 	maxWorkers?(): number;
 	/** Current trusted hard-block state for coordinator-side merge validation. */
 	protectedArtifactState?(): ProtectedArtifactState;
+	/**
+	 * Land a task branch an earlier run kept, as the operator's own action: the
+	 * attached operator answers a Land card and, on Land, the host lands the
+	 * branch with the checks `clio-coder fleet land` runs, outside any agent
+	 * sandbox. Refuses when no operator can answer a card.
+	 */
+	landKeptTask?(input: { ref: string; cwd: string; signal?: AbortSignal }): Promise<DispatchLandOutcome>;
 	/** Validate + admit + spawn a native worker. Returns run id + promise. */
 	dispatch(
 		req: DispatchRequest,

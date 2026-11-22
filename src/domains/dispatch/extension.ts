@@ -140,6 +140,16 @@ import {
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { effectiveToolCall, gatewayChainReceipts, runtimeAttachesGateway } from "../../tools/surface.js";
+import {
+	executeTaskLand,
+	heldLandCardPin,
+	hostLandRefusal,
+	landCardPin,
+	landCardPinDrift,
+	landHeldTaskBranch,
+	planTaskLand,
+	type TaskLandPlan,
+} from "../../tools/task-land.js";
 import type { TaskWorktreePreview } from "../../tools/task-worktree.js";
 import {
 	applyTaskWorktree,
@@ -162,11 +172,15 @@ import {
 	type TaskWorktreeOverlay,
 	taskWorktreeBaseDiff,
 	taskWorktreeHoldsWork,
-	WORKTREE_CHANGED_SINCE_PREVIEW,
 	withStrayWrites,
 } from "../../tools/task-worktree.js";
 import { contractDeclaresTaskGates, extractTaskGates } from "../../tools/verify/task-gates.js";
-import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
+import {
+	allowedWorktreeParents,
+	diskWorktreeParent,
+	prepareWorktreeParent,
+	resolveWorktreeRoot,
+} from "../../tools/worktree-root.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -355,6 +369,7 @@ import type {
 	DispatchAdmissionObserver,
 	DispatchContract,
 	DispatchDerivedGrants,
+	DispatchLandOutcome,
 	DispatchPlanTaskResolution,
 	DispatchPrefixGroup,
 	DispatchPreparationOptions,
@@ -455,6 +470,7 @@ import {
 	resolveJointRoute,
 } from "./joint-route-resolver.js";
 import {
+	askLandCard,
 	askMergeCard,
 	createMergeCardQueue,
 	type MergeCardInput,
@@ -463,6 +479,7 @@ import {
 } from "./merge-card.js";
 import {
 	compromisedReason,
+	landCardClause,
 	mergeGateVerdict,
 	mergeWithheldDetail,
 	partialResultDetail,
@@ -4553,6 +4570,84 @@ export function createDispatchBundle(
 			clearInterval(watch);
 			run.awaitingOperator = false;
 			ledger?.update(run.runId, { pid: workerPid, outcomeDetail: null });
+		}
+	};
+	// `dispatch land`: the agent asks, the operator answers a Land card, and the
+	// host lands the branch with fleet land's checks, so a sandboxed agent never
+	// needs a sandbox escape to land a branch the operator approves.
+	const landKeptTask = async (input: {
+		ref: string;
+		cwd: string;
+		signal?: AbortSignal;
+	}): Promise<DispatchLandOutcome> => {
+		const refused = (why: string): DispatchLandOutcome => ({
+			outcome: "refused",
+			detail: `${why}; nothing landed, and the operator can land it with \`clio-coder fleet land ${input.ref}\``,
+		});
+		const operator = options?.operatorAsk;
+		if (operator === undefined || !operator.available()) return refused("no operator is attached to answer a Land card");
+		if (operatorContainedYolo(withLiveAutonomy(getEffectiveSettings())))
+			return refused("contained yolo never waits on a Land card");
+		const protectedNow = (): string[] => getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
+		const planNow = (): TaskLandPlan =>
+			planTaskLand({
+				root: input.cwd,
+				ref: input.ref,
+				mode: "merge",
+				allowedParents: allowedWorktreeParents(getEffectiveSettings()?.fleet?.worktrees?.root ?? "disk", input.cwd),
+			});
+		let plan: TaskLandPlan;
+		try {
+			plan = planNow();
+			const refusal = hostLandRefusal(plan, protectedNow());
+			if (refusal !== null) return { ...refused(`cannot land: ${refusal}`), branch: plan.branch };
+		} catch (error) {
+			return refused(error instanceof Error ? error.message : String(error));
+		}
+		const shown = landCardPin(plan);
+		let card: MergeCardOutcome;
+		try {
+			card = await mergeCardQueue(() =>
+				askLandCard(
+					{ ask: operator.ask, ...(input.signal !== undefined ? { signal: input.signal } : {}) },
+					{
+						branch: plan.branch,
+						destination: plan.destination,
+						commits: plan.commits,
+						changed: plan.changed,
+						uncommitted: plan.uncommitted,
+					},
+				),
+			);
+		} catch (error) {
+			reportDispatchDiagnostic(`land card for ${plan.runId}`, error);
+			return { ...refused("the Land card could not be shown"), branch: plan.branch };
+		}
+		if (card.choice !== "land")
+			return {
+				outcome: "kept",
+				branch: plan.branch,
+				detail: `the operator kept ${plan.branch} (${mergeCardCauseNote(card.cause)}); nothing landed`,
+			};
+		try {
+			// The card waits as long as the operator takes, so the branch, its worktree, the destination and
+			// protection are all read again here, and Land holds only for what the card showed.
+			const landing = planNow();
+			const moved = landCardPinDrift(landing, shown);
+			if (moved !== null) return { ...refused(`the operator chose Land, but ${moved}`), branch: plan.branch };
+			const refusal = hostLandRefusal(landing, protectedNow());
+			if (refusal !== null) return { ...refused(`the operator chose Land, but ${refusal}`), branch: plan.branch };
+			const result = executeTaskLand(landing);
+			return {
+				outcome: "landed",
+				branch: landing.branch,
+				detail: `${result.landed !== null ? `landed ${result.landed.slice(0, 9)} on ${landing.destination}` : `nothing new to land on ${landing.destination}`} on the operator's Land; ${result.detail}`,
+			};
+		} catch (error) {
+			return {
+				...refused(`the operator chose Land, but ${error instanceof Error ? error.message : String(error)}`),
+				branch: plan.branch,
+			};
 		}
 	};
 	const grantRunFallbacks = new Map<string, "deny" | "fail">();
@@ -10822,7 +10917,7 @@ export function createDispatchBundle(
 						// changed nothing leaves the branch at its base.
 						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
 							detailNotes.push(
-								`its work is committed on the preserved branch ${req.taskWorktree.branch}, \`clio-coder fleet land ${req.taskWorktree.branch}\` previews the merge and \`clio-coder fleet land ${req.taskWorktree.branch} --yes\` lands it if you accept the failed check`,
+								`its work is committed on the preserved branch ${req.taskWorktree.branch}, \`clio-coder fleet land ${req.taskWorktree.branch}\` previews the merge and \`clio-coder fleet land ${req.taskWorktree.branch} --yes\` lands it if you accept the failed check; ${landCardClause(req.taskWorktree.branch)}`,
 							);
 							failureMessage = notedDetail() ?? failureMessage;
 						}
@@ -10865,14 +10960,19 @@ export function createDispatchBundle(
 								reportDispatchDiagnostic(`protected paths of ${req.taskWorktree.runId}`, protectedError);
 							}
 						}
-						const card =
+						// What the card shows is what Land is bound to: this tip, onto this destination at this head.
+						const asksCard =
 							withheldVerdict !== null &&
 							preview !== undefined &&
 							previewedProtected !== null &&
-							(worktreeReceipt.changedPaths?.length ?? 0) > 0
+							(worktreeReceipt.changedPaths?.length ?? 0) > 0;
+						const landPin =
+							asksCard && previewedCommit !== undefined ? heldLandCardPin(req.taskWorktree.root, previewedCommit) : null;
+						const card =
+							asksCard && withheldVerdict !== null && previewedProtected !== null
 								? await askWithheldMerge(activeRun, {
 										branch: req.taskWorktree.branch,
-										destination: mergeDestination(req.taskWorktree.root),
+										destination: landPin?.destination ?? mergeDestination(req.taskWorktree.root),
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
 										workerFailedChecks: mutationReportFailures(mergeGateInput?.contract ?? null, mergeGateInput?.output ?? null),
@@ -10883,57 +10983,53 @@ export function createDispatchBundle(
 						// The card waits as long as the operator takes, once for each card queued
 						// ahead of it, and protection is live state that throws while it is degraded. Merge reads it again here and
 						// withholds when it cannot, never on the list from before the wait.
-						let mergeProtectedPaths: string[] | null = null;
-						if (card?.choice === "merge") {
+						let landProtectedPaths: string[] | null = null;
+						if (card?.choice === "land") {
 							try {
-								mergeProtectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
+								landProtectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 							} catch (protectedError) {
-								reportDispatchDiagnostic(`protected artifacts at merge of ${req.taskWorktree.runId}`, protectedError);
+								reportDispatchDiagnostic(`protected artifacts at land of ${req.taskWorktree.runId}`, protectedError);
 							}
 						}
-						if (card?.choice === "merge" && mergeProtectedPaths === null) {
-							const reason = `protected artifact state could not be read when the operator chose Merge; nothing was merged and branch ${req.taskWorktree.branch} is preserved`;
+						const heldReason = withheldVerdict?.reason ?? "of its report";
+						if (card?.choice === "land" && (landProtectedPaths === null || preview === undefined || landPin === null)) {
+							const reason = `${landProtectedPaths === null ? "protected artifact state" : "the previewed branch and destination"} could not be read when the operator chose Land; nothing was merged and branch ${req.taskWorktree.branch} is preserved`;
 							worktreeReceipt = {
 								...worktreeReceipt,
 								reason: "protected_state_unavailable",
-								detail: `operator merge refused: ${reason}`,
+								detail: `operator land refused: ${reason}`,
 							};
 							landingFailure = {
 								code: "merge_withheld",
-								detail: `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${reason}`,
+								detail: `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator land refused: ${reason}`,
 							};
-						} else if (card?.choice === "merge" && mergeProtectedPaths !== null) {
-							const landed = applyTaskWorktree({
-								worktree: req.taskWorktree,
-								apply: "merge",
-								protectedPaths: mergeProtectedPaths,
-								commitMessage: taskCommitMessage,
-								authoredPaths,
-								...lifecycleMergeRoots(lifecycle.envelope),
-								...(preview !== undefined ? { preview } : {}),
-								onAccounted,
-							});
-							if (landed.reason === WORKTREE_CHANGED_SINCE_PREVIEW) {
-								// The branch is still withheld, so it keeps the withheld outcome
-								// and the operator's Merge is the thing that was refused.
-								worktreeReceipt = { ...landed, detail: `operator merge refused: ${landed.detail ?? landed.reason}` };
-								// Not the withheld detail: its `clio-coder fleet land` command would land work
-								// nobody previewed.
-								landingFailure = {
-									code: "merge_withheld",
-									detail: `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${landed.detail ?? landed.reason} Branch ${req.taskWorktree.branch} or its worktree changed after the preview, so inspect it before merging.`,
-								};
-							} else if (landed.reason !== undefined) {
-								worktreeReceipt = {
-									...landed,
-									detail: `operator merge: ${landed.detail ?? landed.reason}`,
-								};
-								landingFailure = { code: null, detail: landed.detail ?? landed.reason };
-							} else {
+						} else if (card?.choice === "land" && landProtectedPaths !== null && preview !== undefined && landPin !== null) {
+							// Land is the operator's own action, carried out here on the host with
+							// fleet land's checks, so no sandboxed agent ever needs to run it.
+							try {
+								// A live claim reads as a running task to fleet land; the closing settle repeats this harmlessly.
+								settleTaskWorktree(req.taskWorktree, preview);
+								const landed = landHeldTaskBranch({
+									worktree: req.taskWorktree,
+									preview,
+									shown: landPin,
+									protectedPaths: landProtectedPaths,
+								});
+								accounted = preview;
 								operatorMerged = true;
 								worktreeReceipt = {
-									...landed,
-									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
+									...worktreeReceipt,
+									apply: "merge",
+									applied: true,
+									detail: `${landed.landed !== null ? `merged ${landed.landed.slice(0, 7)} onto ${landed.destination}` : `nothing merged: ${landed.destination} already holds it`}; operator land accepted after the gate held it because ${heldReason}`,
+								};
+							} catch (landError) {
+								const refused = landError instanceof Error ? landError.message : String(landError);
+								worktreeReceipt = { ...worktreeReceipt, detail: `operator land refused: ${refused}` };
+								// Not the withheld detail's fleet land command alone: the branch may hold work nobody previewed.
+								landingFailure = {
+									code: "merge_withheld",
+									detail: `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator land refused: ${refused}. Branch ${req.taskWorktree.branch} is preserved; inspect it before landing.`,
 								};
 							}
 						} else if (card?.choice === "discard") {
@@ -10953,7 +11049,7 @@ export function createDispatchBundle(
 								if (discard.outcome === "branch_kept") claimReleased = discard.claimReleased;
 							}
 						}
-						if (card?.choice !== "merge") {
+						if (card?.choice !== "land") {
 							let withheld = withheldDetail ?? notedDetail() ?? "merge withheld";
 							if (worktreeDiscarded) {
 								withheld = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; the operator discarded branch ${req.taskWorktree.branch} and its worktree`;
@@ -13143,6 +13239,7 @@ export function createDispatchBundle(
 		costCeilingUsd: () => scheduling.ceilingUsd(),
 		maxWorkers: () => configuredGlobalCapacity(getEffectiveSettings()),
 		protectedArtifactState: () => getProtectedArtifactState(),
+		landKeptTask,
 		dispatch,
 		dispatchBatch,
 		sealCouncilSynthesis,

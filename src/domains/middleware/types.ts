@@ -199,7 +199,9 @@ export type ToolCallDispatchLanding =
 			candidates?: number;
 	  }
 	| { kind: "list" }
-	| { kind: "apply-winner"; branch: string; cwd: string };
+	| { kind: "apply-winner"; branch: string; cwd: string }
+	/** `ref` is the run id or task branch the call names; the operator lands it from a Land card. */
+	| { kind: "land"; ref: string; cwd: string };
 
 export interface MiddlewareHookInput {
 	hook: MiddlewareHook;

@@ -39,6 +39,7 @@ function ordinaryDispatchAgents(args: Readonly<Record<string, unknown>> | undefi
 		!args ||
 		args.list === true ||
 		args.apply_winner !== undefined ||
+		args.land !== undefined ||
 		(args.review !== undefined && args.review !== false) ||
 		args.mode === "compete"
 	) {

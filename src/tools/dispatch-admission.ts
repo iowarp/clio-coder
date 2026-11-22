@@ -707,6 +707,14 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			const marked = markPrepared(args);
 			return trustExecution(marked, { kind: "list" });
 		}
+		if (args.land !== undefined) {
+			if (typeof args.land !== "string" || args.land.trim().length === 0) {
+				return shapeRejection(args, "dispatch: land must name a kept task branch: a run id or clio-coder/task/<run id>");
+			}
+			// The session's own workspace, never a path the model names: Land lands on the checkout the operator handed over.
+			const cwd = deps.getWorkspaceRoot?.() ?? deps.dispatch.owner?.().cwd ?? process.cwd();
+			return trustExecution(markPrepared(args), { kind: "land", ref: args.land.trim(), cwd });
+		}
 		const continuation = scoutContinuationRefFromArgs(args);
 		if (!continuation.ok) return preparationFailure(args, continuation.message);
 		if (continuation.ref !== null) {

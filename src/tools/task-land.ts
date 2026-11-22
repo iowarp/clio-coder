@@ -32,9 +32,13 @@ import {
 	listPreservedTaskWorktrees,
 	loadKeptTaskWorktree,
 	mergeDestination,
+	protectedPathsChangedBetween,
+	protectedPathsChangedByWorktreeBranch,
 	recordTaskWorktreeAccounted,
 	type TaskWorktree,
+	type TaskWorktreePreview,
 	type TaskWorktreeState,
+	taskWorktreeChangedSincePreview,
 } from "./task-worktree.js";
 
 export type TaskLandMode = "merge" | "squash";
@@ -367,20 +371,111 @@ export function executeTaskLand(
 	if (options.keep) {
 		return { landed, cleaned: false, detail: `kept ${plan.branch}${plan.worktree !== null ? " and its worktree" : ""}` };
 	}
-	if (plan.worktree !== null) {
-		// The landed commit and the files the plan said stay out permit removal; nothing else does.
-		const drift = cleanupAccountedTaskWorktree(plan.worktree, {
-			commit: source,
-			untracked: plan.leftOut,
-			ignored: plan.ignored,
-		});
-		if (drift !== null) return { landed, cleaned: false, detail: keptTaskWorktreeDetail(plan.worktree, source, drift) };
-	} else git(plan.root, ["branch", "-D", plan.branch]);
+	try {
+		if (plan.worktree !== null) {
+			// The landed commit and the files the plan said stay out permit removal; nothing else does.
+			const drift = cleanupAccountedTaskWorktree(plan.worktree, {
+				commit: source,
+				untracked: plan.leftOut,
+				ignored: plan.ignored,
+			});
+			if (drift !== null) return { landed, cleaned: false, detail: keptTaskWorktreeDetail(plan.worktree, source, drift) };
+		} else git(plan.root, ["branch", "-D", plan.branch]);
+	} catch (error) {
+		// The destination has already moved, so a failed cleanup is reported beside the landing, never as no landing.
+		return {
+			landed,
+			cleaned: false,
+			detail: `cleanup failed after the landing, so ${plan.branch}${plan.worktree !== null ? " or its worktree" : ""} may remain: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
 	return {
 		landed,
 		cleaned: true,
 		detail: `removed ${plan.branch}${plan.worktree !== null ? ", its worktree and its claim" : ""}`,
 	};
+}
+
+/**
+ * The checks a Land the host carries out for the operator runs: every refusal
+ * `fleet land` makes, work no commit accounts for, and the protected paths no
+ * merge ever lands, read on the branch and on the exact tree that would land.
+ * Null when the plan may land.
+ */
+export function hostLandRefusal(plan: TaskLandPlan, protectedPaths: ReadonlyArray<string>): string | null {
+	if (plan.refusal !== null) return plan.refusal;
+	if (plan.uncommitted > 0)
+		return `its worktree holds ${plan.uncommitted} uncommitted ${plan.uncommitted === 1 ? "path" : "paths"} no commit accounts for; commit or remove them first`;
+	const blocked = [
+		...new Set([
+			...protectedPathsChangedByWorktreeBranch(plan.root, plan.tip, protectedPaths),
+			...protectedPathsChangedBetween(plan.root, plan.destinationHead, plan.tree, protectedPaths),
+		]),
+	]
+		.sort()
+		.map((path) => relative(plan.root, path) || path);
+	if (blocked.length === 0) return null;
+	return `${plan.branch} changes protected ${blocked.length === 1 ? "path" : "paths"} ${blocked.join(", ")}, which a merge never lands`;
+}
+
+/** What a Land card showed: the branch tip, and the destination branch and its head the operator agreed to. */
+export interface LandCardPin {
+	tip: string;
+	destination: string;
+	destinationHead: string;
+}
+
+export function landCardPin(plan: TaskLandPlan): LandCardPin {
+	return { tip: plan.tip, destination: plan.destination, destinationHead: plan.destinationHead };
+}
+
+/** The pin for a held branch's card, read when the card names its destination; null when Git cannot say. */
+export function heldLandCardPin(root: string, tip: string): LandCardPin | null {
+	const head = run(root, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+	if (head.status !== 0) return null;
+	return { tip, destination: mergeDestination(root), destinationHead: head.stdout.trim() };
+}
+
+/** Why `plan` is no longer what the card showed, or null when it still is. */
+export function landCardPinDrift(plan: TaskLandPlan, shown: LandCardPin): string | null {
+	if (plan.tip !== shown.tip)
+		return `${plan.branch} moved from ${shown.tip.slice(0, 9)} to ${plan.tip.slice(0, 9)} after the card showed it`;
+	if (plan.destination !== shown.destination)
+		return `the checkout is on ${plan.destination}, not ${shown.destination} the card showed`;
+	if (plan.destinationHead !== shown.destinationHead)
+		return `${plan.destination} moved from ${shown.destinationHead.slice(0, 9)} to ${plan.destinationHead.slice(0, 9)} after the card showed it`;
+	return null;
+}
+
+/**
+ * Land a branch the merge gate held, for the operator who chose Land on its
+ * card: fleet land's plan, checks and landing, pinned to the worktree, branch
+ * tip and destination the card showed. Anything the card did not show (a
+ * changed worktree, a moved tip, another destination) refuses rather than
+ * lands. The caller settles the run's claim first, since a live claim reads as
+ * a running task, and removes the worktree when it seals the receipt, so this
+ * keeps it.
+ */
+export function landHeldTaskBranch(input: {
+	worktree: TaskWorktree;
+	preview: TaskWorktreePreview;
+	shown: LandCardPin;
+	protectedPaths: ReadonlyArray<string>;
+}): { landed: string | null; destination: string } {
+	const drift = taskWorktreeChangedSincePreview(input.worktree, input.preview);
+	if (drift !== null) throw new Error(`task worktree ${input.worktree.runId} ${drift} since the card showed it`);
+	const plan = planTaskLand({
+		root: input.worktree.root,
+		ref: input.worktree.runId,
+		mode: "merge",
+		...(input.worktree.parent !== undefined ? { allowedParents: [input.worktree.parent] } : {}),
+	});
+	if (plan.worktree === null) throw new Error(`the claim of task ${plan.runId} could not be read`);
+	const moved = landCardPinDrift(plan, input.shown);
+	if (moved !== null) throw new Error(moved);
+	const refusal = hostLandRefusal(plan, input.protectedPaths);
+	if (refusal !== null) throw new Error(refusal);
+	return { landed: executeTaskLand(plan, { keep: true }).landed, destination: plan.destination };
 }
 
 export interface LandableTask {

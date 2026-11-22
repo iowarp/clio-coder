@@ -5,8 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { resolveReviewSubject, taskBranchRefusal } from "../../src/cli/run-review.js";
-import { executeTaskLand, planTaskLand } from "../../src/tools/task-land.js";
-import { applyTaskWorktree, createTaskWorktree, settleTaskWorktree } from "../../src/tools/task-worktree.js";
+import { executeTaskLand, heldLandCardPin, landHeldTaskBranch, planTaskLand } from "../../src/tools/task-land.js";
+import {
+	applyTaskWorktree,
+	createTaskWorktree,
+	previewTaskWorktree,
+	settleTaskWorktree,
+} from "../../src/tools/task-worktree.js";
 
 describe("fleet land", () => {
 	let root: string;
@@ -61,6 +66,39 @@ describe("fleet land", () => {
 		strictEqual(git(root, "status", "--porcelain"), "M b.txt");
 		strictEqual(existsSync(task.path), false);
 		deepStrictEqual(git(root, "branch", "--list", "clio-coder/task/*"), "");
+	});
+
+	it("lands a held branch for the operator's Land card only on what the card showed", () => {
+		const task = keptTask("t9", "a.txt", "task\n");
+		const cardFor = (tip: string) => {
+			const preview = previewTaskWorktree(task, tip);
+			settleTaskWorktree(task, preview);
+			const shown = heldLandCardPin(root, tip);
+			if (shown === null) throw new Error("no pin");
+			return { worktree: task, preview, shown, protectedPaths: [] };
+		};
+		const first = cardFor(git(root, "rev-parse", task.branch));
+		writeFileSync(join(task.path, "a.txt"), "after the card\n");
+		git(task.path, "commit", "-q", "-am", "moved after the card");
+		throws(() => landHeldTaskBranch(first), /is now at/u);
+		const tip = git(root, "rev-parse", task.branch);
+		writeFileSync(join(task.path, "notes.txt"), "previewed\n");
+		const card = cardFor(tip);
+		git(root, "checkout", "-q", "-b", "twin");
+		throws(() => landHeldTaskBranch(card), /on twin, not main/u);
+		git(root, "checkout", "-q", "main");
+		throws(
+			() => landHeldTaskBranch({ ...card, protectedPaths: [join(root, "a.txt")] }),
+			/changes protected path a\.txt/u,
+		);
+		rmSync(join(task.path, "notes.txt"));
+		throws(() => landHeldTaskBranch(card), /since the card showed it/u);
+		strictEqual(git(root, "show", "HEAD:a.txt"), "a");
+		writeFileSync(join(task.path, "notes.txt"), "kept out\n");
+		const landed = landHeldTaskBranch(cardFor(tip));
+		deepStrictEqual(landed, { landed: git(root, "rev-parse", "HEAD"), destination: "main" });
+		strictEqual(git(root, "show", "HEAD:a.txt"), "after the card");
+		strictEqual(git(root, "ls-tree", "--name-only", "HEAD", "notes.txt"), "");
 	});
 
 	it("refuses a conflicting branch before changing the checkout", () => {

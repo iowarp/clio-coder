@@ -97,6 +97,7 @@ function dispatchHookLanding(
 	if (snapshot.kind === "list") return { dispatch: { kind: "list" } };
 	if (snapshot.kind === "apply-winner")
 		return { dispatch: { kind: "apply-winner", branch: snapshot.branch, cwd: snapshot.cwd } };
+	if (snapshot.kind === "land") return { dispatch: { kind: "land", ref: snapshot.ref, cwd: snapshot.cwd } };
 	const planned = (role: string, position?: number): string | undefined =>
 		plan?.tasks.find((task) => task.role === role && (position === undefined || task.position === position))?.agent;
 	const base = snapshot.requests[0];

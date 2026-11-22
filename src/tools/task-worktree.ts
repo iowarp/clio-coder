@@ -792,6 +792,24 @@ export function protectedPathsChangedByWorktreeBranch(
 	branch: string,
 	protectedPaths: ReadonlyArray<string>,
 ): string[] {
+	return protectedPathsChangedByDiff(root, [`HEAD...${branch}`], protectedPaths);
+}
+
+/** The protected paths a landing from commit `from` to tree or commit `to` changes, for a check on what actually lands. */
+export function protectedPathsChangedBetween(
+	root: string,
+	from: string,
+	to: string,
+	protectedPaths: ReadonlyArray<string>,
+): string[] {
+	return protectedPathsChangedByDiff(root, [from, to], protectedPaths);
+}
+
+function protectedPathsChangedByDiff(
+	root: string,
+	range: ReadonlyArray<string>,
+	protectedPaths: ReadonlyArray<string>,
+): string[] {
 	const canonical = realpathSync(root);
 	const protectedInside = protectedPaths
 		.map((path) => resolve(path))
@@ -800,7 +818,7 @@ export function protectedPathsChangedByWorktreeBranch(
 			return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 		});
 	if (protectedInside.length === 0) return [];
-	const changed = git(canonical, ["diff", "--name-only", "-z", "--no-renames", `HEAD...${branch}`])
+	const changed = git(canonical, ["diff", "--name-only", "-z", "--no-renames", ...range])
 		.split("\0")
 		.filter((path) => path.length > 0)
 		.map((path) => resolve(canonical, path));
@@ -1522,6 +1540,21 @@ function previewDrift(
 	if (drift !== null) return drift.detail;
 	const listed = new Set(paths);
 	return [...preview.untracked.keys()].every((entry) => listed.has(entry)) ? null : "has new or changed untracked files";
+}
+
+/**
+ * How a held worktree no longer holds exactly what its merge card previewed, or null when it does: the check
+ * the gate's own merge makes before it lands a previewed commit.
+ */
+export function taskWorktreeChangedSincePreview(worktree: TaskWorktree, preview: TaskWorktreePreview): string | null {
+	try {
+		if (!existsSync(worktree.path)) return "is gone";
+		const head = checkTaskWorktreeHead(worktree);
+		if (!head.ok) return head.detail;
+		return previewDrift(worktree, preview, head.commit);
+	} catch (error) {
+		return `could not be read: ${error instanceof Error ? error.message : String(error)}`;
+	}
 }
 
 /**

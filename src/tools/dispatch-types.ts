@@ -95,10 +95,18 @@ export interface DispatchListExecutionSnapshot {
 	readonly kind: "list";
 }
 
+/** A kept task branch the operator lands from a Land card (`dispatch land`). */
+export interface DispatchLandExecutionSnapshot {
+	readonly kind: "land";
+	readonly ref: string;
+	readonly cwd: string;
+}
+
 export type DispatchExecutionSnapshot =
 	| DispatchRunExecutionSnapshot
 	| DispatchApplyWinnerExecutionSnapshot
-	| DispatchListExecutionSnapshot;
+	| DispatchListExecutionSnapshot
+	| DispatchLandExecutionSnapshot;
 
 export interface DispatchToolDeps {
 	/** Active session workspace for external Scout admission (#433). */

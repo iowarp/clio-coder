@@ -416,7 +416,9 @@ function landingFields(
 					}
 				: dispatch.kind === "apply-winner"
 					? { kind: "apply-winner", branch: dispatch.branch, cwd: dispatch.cwd }
-					: { kind: "list" };
+					: dispatch.kind === "land"
+						? { kind: "land", ref: dispatch.ref, cwd: dispatch.cwd }
+						: { kind: "list" };
 	}
 	return fields;
 }
