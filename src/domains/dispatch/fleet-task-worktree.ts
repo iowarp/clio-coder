@@ -8,6 +8,7 @@
  */
 
 import {
+	applyTaskWorktree,
 	createTaskWorktree,
 	discardIdleTaskWorktree,
 	gitCheckoutRoot,
@@ -15,6 +16,7 @@ import {
 	reopenTaskWorktree,
 	settleTaskWorktree,
 	type TaskWorktree,
+	type TaskWorktreePreview,
 	taskWorktreeHoldsWork,
 } from "../../tools/task-worktree.js";
 import {
@@ -69,22 +71,74 @@ export function openFleetTaskWorktree(input: FleetTaskWorktreeInput): TaskWorktr
 	return createTaskWorktree(root, input.fleetRootId, undefined, "preserve", resolved.parent);
 }
 
+/** The task worktree a run kept for `fleet land`, as the fleet result document names it. */
+export interface FleetKeptWorktree {
+	path: string;
+	branch: string;
+	/** The task branch tip holding the run's work; null when the settle commit could not be made. */
+	commit: string | null;
+	/** `fleet land` previews it. */
+	preview: string;
+	/** `fleet land --yes` lands it on the checkout's branch. */
+	land: string;
+}
+
 /**
  * Keep the worktree for `fleet land` when it holds work, remove it when the run changed nothing, and say which.
+ * The run's work is committed onto the task branch first, as a preserve-mode dispatch commits its own, so the branch
+ * holds it even if the worktree directory is removed by hand. Returns what was kept, or null when nothing was.
  * Never throws: the run's own outcome stands, and a claim left active is what restart recovery reads as a crash.
  */
-export function keepFleetTaskWorktree(worktree: TaskWorktree, fleetRootId: string, onNotice?: (text: string) => void) {
+export function keepFleetTaskWorktree(
+	worktree: TaskWorktree,
+	run: { fleetRootId: string; playbookName: string },
+	onNotice?: (text: string) => void,
+): FleetKeptWorktree | null {
+	const { fleetRootId } = run;
 	try {
 		if (!taskWorktreeHoldsWork(worktree) && discardIdleTaskWorktree(worktree)) {
 			onNotice?.(`fleet ${fleetRootId} changed nothing; removed its task worktree`);
-			return;
+			return null;
 		}
-		settleTaskWorktree(worktree);
+		let accounted: TaskWorktreePreview | undefined;
+		let commit: string | null = null;
+		try {
+			// The fleet keeps no per-file write record across steps and code steps, so every untracked file is taken,
+			// exactly what `fleet land --yes` commits for a worktree it finds uncommitted.
+			const receipt = applyTaskWorktree({
+				worktree,
+				apply: "preserve",
+				commitMessage: `fleet ${run.playbookName}`,
+				authoredPaths: null,
+				onAccounted: (value) => {
+					accounted = value;
+				},
+			});
+			commit = receipt.reason === undefined ? (receipt.commit ?? null) : null;
+			if (receipt.reason !== undefined) {
+				onNotice?.(
+					`fleet ${fleetRootId} could not commit its work onto ${worktree.branch}: ${receipt.detail ?? receipt.reason}`,
+				);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			onNotice?.(`fleet ${fleetRootId} could not commit its work onto ${worktree.branch}: ${message}`);
+		}
+		settleTaskWorktree(worktree, accounted);
+		const kept: FleetKeptWorktree = {
+			path: worktree.path,
+			branch: worktree.branch,
+			commit,
+			preview: `clio-coder fleet land ${worktree.runId}`,
+			land: `clio-coder fleet land ${worktree.runId} --yes`,
+		};
 		onNotice?.(
-			`fleet ${fleetRootId} kept its work on ${worktree.branch} in ${worktree.path}; the checkout is unchanged. Preview: clio-coder fleet land ${worktree.runId}; land: clio-coder fleet land ${worktree.runId} --yes`,
+			`fleet ${fleetRootId} kept its work on ${worktree.branch}${commit !== null ? ` at ${commit.slice(0, 12)}` : ""} in ${worktree.path}; the checkout is unchanged. Preview: ${kept.preview}; land: ${kept.land}`,
 		);
+		return kept;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		onNotice?.(`fleet ${fleetRootId} could not settle its task worktree ${worktree.path}: ${message}`);
+		return null;
 	}
 }

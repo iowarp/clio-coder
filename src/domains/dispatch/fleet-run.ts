@@ -72,7 +72,7 @@ import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from 
 import { changedCheckFiles, deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
 import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
-import { keepFleetTaskWorktree, openFleetTaskWorktree } from "./fleet-task-worktree.js";
+import { type FleetKeptWorktree, keepFleetTaskWorktree, openFleetTaskWorktree } from "./fleet-task-worktree.js";
 import {
 	decideReviewGate,
 	type GateDecisionCorrelation,
@@ -295,6 +295,8 @@ export interface ExecuteFleetRunInput {
 	onStepSettled?: (outcome: FleetRunStepOutcome) => void;
 	/** Operator-facing lines the caller renders wherever it shows the run. */
 	onNotice?: (text: string, kind?: "gate" | "write-boundary") => void;
+	/** Fires once, after the run settles, when a `worktree` run kept its task worktree with its work committed. */
+	onWorktreeKept?: (kept: FleetKeptWorktree) => void;
 }
 
 export interface FleetRunOutcome {
@@ -451,7 +453,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	try {
 		return await executeFleetRunIn(input, { root: worktree.path, taskWorktree: worktree.runId });
 	} finally {
-		keepFleetTaskWorktree(worktree, input.fleetRootId, (text) => input.onNotice?.(text));
+		const kept = keepFleetTaskWorktree(
+			worktree,
+			{ fleetRootId: input.fleetRootId, playbookName: input.playbookName },
+			(text) => input.onNotice?.(text),
+		);
+		if (kept !== null) input.onWorktreeKept?.(kept);
 	}
 }
 
