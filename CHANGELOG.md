@@ -287,6 +287,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - At the start of a turn whose request enumerates two or more separate parts, the agent is advised once to send them as one parallel `dispatch`, one task per part. On the first substantial request of a fresh session it is advised to map the code with `code_nav` or `context` before its first edit. Neither note appears on answers, proposals, plan-only or read-only turns, or when the request rules out delegation.
 - `claude-opus-5.5` sessions with a window of at least 48,000 tokens carry short working notes on orienting with `code_nav`, using the native file tools instead of the shell, dispatching independent parts and verifying after an edit.
 - A `code_nav` listing too large for its call shows as many rows as fit instead of an empty stub, and saves the complete listing to a file named in `offloadPath` when the byte cap cut it.
+- A malformed `edit` or `ask_user` argument is refused with the accepted shape and a minimal example instead of a bare schema error. `edit` reads `edits`, or one of its entries, sent as a string of JSON in the exact shape, and `ask_user` takes `questions` as an array also for a single question.
 
 **Context**
 
@@ -423,6 +424,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Copilot side calls, the safety judge's included, journal their transport, seat billing and served model.
 - A provider that omits its cache-write count leaves cache writes and fresh input unknown instead of zero, and the provider's own token total is kept beside them.
 - The Codex usage poll times out on a stalled response body, and its quota windows are labelled from the duration the provider reports (`5h`, `3d`, `Weekly`) instead of a fixed pair of names.
+- A call that was aborted or ended in an error keeps its positive token counts as a lower bound and leaves its zeros unknown. A Copilot step or an external run served by more than one model is priced per call, or left unpriced, instead of at one route's rate.
+- A charge that a provider reports on a route declared free or priced at all-zero rates is kept as its own `economics` fact, flagged `free-route`, and the route price stays free.
 
 **Providers and editors**
 

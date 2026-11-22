@@ -315,7 +315,7 @@ Replaces disjoint exact text regions in an existing file. Sources: [edit.ts](../
 | `path` | Required target file. |
 | `edits` | Required array of `{oldText,newText}`; each old text must identify one unique, non-overlapping region. |
 
-Files up to 1 MiB try exact match, then Unicode punctuation/nonbreaking-space/trailing-whitespace normalization, then indentation-relaxed line matching that preserves file indentation. Ambiguous or absent matches error. Above 1 MiB only exact matching applies. NUL, invalid UTF-8, mixed LF/CRLF, and bare CR are refused; BOM and uniform line endings are preserved. JSON-string edits and a legacy top-level old/new pair are normalized.
+Files up to 1 MiB try exact match, then Unicode punctuation/nonbreaking-space/trailing-whitespace normalization, then indentation-relaxed line matching that preserves file indentation. Ambiguous or absent matches error. Above 1 MiB only exact matching applies. NUL, invalid UTF-8, mixed LF/CRLF, and bare CR are refused; BOM and uniform line endings are preserved. JSON-string edits and a legacy top-level old/new pair are normalized. An `edits` entry sent as a string of JSON in the exact shape is read the same way. Any other shape is refused with the accepted shape and an example, `[{"oldText":"...","newText":"..."}]`, and nothing changes.
 
 Edit and write serialize same-target changes and publish through a temporary file, fsync, and rename. Symlink paths update their target; mode bits are preserved. Ownership/ACL/xattrs/timestamps are not copied, external writers are not locked, and the last rename wins. A post-rename directory-fsync failure reports publication with a durability warning.
 
