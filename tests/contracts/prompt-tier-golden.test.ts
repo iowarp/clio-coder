@@ -308,3 +308,134 @@ describe("prompts.profile v2 (S-82)", () => {
 		}
 	});
 });
+
+describe("full-window runtime notes of the v1 profile on the pinned model", () => {
+	const heading = "## Working with this window";
+	const orient = "Before the first edit in a tree you have not read, find the code and what depends on it.";
+	const split = "Parts are independent only when none needs another's result";
+	const session = (name: string, extra: Record<string, unknown> = {}) => {
+		const tier = loadTier(name);
+		if (tier.kind !== "session") throw new Error(`${name} is not a session tier`);
+		const sessionInputs: Record<string, unknown> = { ...tier.inputs.sessionInputs, model: "claude-opus-5.5", ...extra };
+		if (sessionInputs.model === undefined) delete sessionInputs.model;
+		if (sessionInputs.contextWindow === undefined) delete sessionInputs.contextWindow;
+		return compile(loadFragments(), { ...tier.inputs, sessionInputs } as unknown as CompileInputs).systemPrompt;
+	};
+	const sessions = ["acp-unsandboxed", "attended-default", "attended-yolo", "headless-default", "headless-yolo"];
+	const block = (text: string) => {
+		const at = text.indexOf(`\n\n${heading}`);
+		const next = text.indexOf("\n\n#", at + 2);
+		return at < 0 ? "" : text.slice(at, next < 0 ? text.length : next);
+	};
+
+	it("adds one runtime-tail block at a window of 48,000 tokens or more, and nothing below it or when unknown", () => {
+		for (const name of sessions) {
+			const below = session(name, { contextWindow: 47_999 });
+			const at = session(name, { contextWindow: 48_000 });
+			for (const text of [below, session(name, { contextWindow: undefined }), session(name, { contextWindow: 0 })]) {
+				ok(!text.includes(heading) && !text.includes(orient), `${name}: full-window notes below 48,000`);
+			}
+			ok(at.includes(orient) && at.includes(split), `${name}: full-window notes missing at 48,000`);
+			ok(at.indexOf(heading) > at.indexOf("# Runtime"), `${name}: the notes must sit in the runtime tail`);
+			strictEqual(at.replace(block(at), "").replace("Context window: 48000", "Context window: 47999"), below, name);
+			const prefix = (text: string) => text.slice(0, text.indexOf("# Runtime"));
+			strictEqual(prefix(session(name, { contextWindow: 200_000 })), prefix(below), `${name}: prefix moved`);
+		}
+	});
+
+	it("leaves answers, proposals, the v2 profile and every worker without the notes", () => {
+		for (const name of sessions) {
+			for (const extra of [
+				{ promptProfile: "v2" },
+				{ turnConstraints: { mode: "answer" } },
+				{ turnConstraints: { mode: "proposal" } },
+				{ providerSupportsTools: false, toolNames: [] },
+			]) {
+				const text = session(name, { contextWindow: 200_000, ...extra });
+				ok(!text.includes(heading) && !text.includes(orient), `${name} ${JSON.stringify(extra)}`);
+			}
+		}
+		for (const name of ["worker-coder", "worker-scout"]) {
+			const tier = loadTier(name);
+			if (tier.kind !== "worker") throw new Error(`${name} is not a worker tier`);
+			const text = compileWorker(loadFragments(), tier.inputs).systemPrompt;
+			ok(!text.includes(heading) && !text.includes(orient), `${name}: a worker renders the notes`);
+		}
+	});
+
+	it("renders the same block for exactly the pinned model id, and none for any other model", () => {
+		for (const name of sessions) {
+			const pinned = block(session(name, { contextWindow: 200_000 }));
+			ok(pinned.includes(orient) && pinned.includes(split), name);
+			for (const model of ["Claude-Opus-5.5"]) {
+				strictEqual(block(session(name, { contextWindow: 200_000, model })), pinned, `${name} ${model}`);
+			}
+			for (const model of [
+				undefined,
+				"mock-model",
+				"gpt-5.6-luna",
+				"claude-haiku-5.5",
+				"claude-sonnet-5.5",
+				"claude-opus-5",
+				"claude-opus-4.8",
+				"gemini-4-neon-preview",
+				"gemini-4-hydrogen",
+				"anthropic/claude-opus-5.5",
+				"claude-opus-5-5",
+				"claude-opus-5.5-20261101",
+				"google/gemini-4-neon",
+				"gemini-4-neon",
+				"GEMINI-4-NEON",
+			]) {
+				const text = session(name, { contextWindow: 200_000, model });
+				ok(!text.includes(heading) && !text.includes(orient), `${name} ${model}: unpinned model renders the notes`);
+			}
+		}
+	});
+
+	it("names each tool only when the session's map has it", () => {
+		const tier = loadTier("headless-default");
+		if (tier.kind !== "session") throw new Error("not a session tier");
+		const without = (...tools: string[]) => ({
+			contextWindow: 200_000,
+			toolNames: (tier.inputs.sessionInputs.toolNames ?? []).filter((name) => !tools.includes(name)),
+			coordinatorCapabilities: tier.inputs.sessionInputs.coordinatorCapabilities.filter((name) => !tools.includes(name)),
+			...(tier.inputs.sessionInputs.capabilityMap
+				? { capabilityMap: tier.inputs.sessionInputs.capabilityMap.filter((entry) => !tools.includes(entry.tool)) }
+				: {}),
+		});
+		const shell = "The shell is for commands no native tool covers.";
+		const nativeRows = ["with `read`, not cat", "with `grep`, not shell grep", "Change a file with `edit`"];
+		const check = "run `verify` with the check that covers it";
+		const record = "Record such a check with `limitation`.";
+		const full = session("headless-default", { contextWindow: 200_000 });
+		ok(full.includes("keeps its codemap current as it reads") && full.includes("`context` scope=workspace reports"));
+		ok(full.includes("one worker per") && full.includes(shell) && full.includes(check) && full.includes(record));
+		for (const row of nativeRows) ok(full.includes(row), row);
+		for (const [tool, row] of [
+			["read", nativeRows[0]],
+			["grep", nativeRows[1]],
+			["edit", nativeRows[2]],
+		] as const) {
+			const text = session("headless-default", without(tool));
+			ok(text.includes(shell) && !text.includes(row), `${tool} sentence survives`);
+		}
+		const noShell = session("headless-default", without("bash"));
+		ok(noShell.includes(orient) && !noShell.includes(shell) && !noShell.includes(nativeRows[0]), "shell row survives");
+		const noVerify = session("headless-default", without("verify"));
+		ok(noVerify.includes(orient) && !noVerify.includes(check) && !noVerify.includes(record), "verify row survives");
+		const noLimitation = session("headless-default", without("limitation"));
+		ok(noLimitation.includes(check) && !noLimitation.includes(record), "limitation sentence survives");
+		const rows = (text: string) => block(text).slice(block(text).indexOf("\n- "));
+		ok(!rows(noLimitation).includes("\n\n") && rows(noLimitation).endsWith("passed."), "a dropped sentence left a gap");
+		const noNav = session("headless-default", without("code_nav"));
+		ok(noNav.includes(orient) && !noNav.includes("keeps its codemap current as it reads"), "code_nav sentence survives");
+		const noContext = session("headless-default", without("context"));
+		ok(
+			noContext.includes(orient) && !noContext.includes("`context` scope=workspace reports"),
+			"context sentence survives",
+		);
+		const noDispatch = session("headless-default", without("dispatch"));
+		ok(noDispatch.includes(orient) && !noDispatch.includes(split), "dispatch row survives");
+	});
+});
