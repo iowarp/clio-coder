@@ -378,6 +378,57 @@ describe("tool argument generation bounds", () => {
 	});
 });
 
+describe("engine lifecycle: a provider that serves another model than requested (row 384)", () => {
+	const run = async (reportedModelId: string, guarded = true) => {
+		const ran: string[] = [];
+		const turns = [toolTurn("c1", { value: "x" }), finalTurn()];
+		const { agent } = createEngineAgent({
+			initialState: { model: MODEL, tools: [echoTool(ran)] },
+			refuseServedModelMismatch: () => guarded,
+			streamFn: () => {
+				const source = createAssistantMessageEventStream();
+				const message = Object.assign(turns.shift() as AssistantMessage, {
+					responseModelIdObservation: { state: "reported", reportedModelId },
+				});
+				message.usage = { ...message.usage, input: 120, output: 9, totalTokens: 129 };
+				source.push({ type: "done", reason: message.stopReason === "toolUse" ? "toolUse" : "stop", message });
+				return source;
+			},
+		});
+		await agent.prompt("go");
+		return { ran, last: agent.state.messages.at(-1) as AssistantMessage & { modelRouteRefusal?: unknown } };
+	};
+
+	it("refuses the first response, naming both ids, before any of its tool calls runs", async () => {
+		const { ran, last } = await run("claude-opus-5.5");
+		deepStrictEqual(ran, []);
+		strictEqual(last.stopReason, "error");
+		ok(last.errorMessage?.startsWith("requested stub-model, provider served claude-opus-5.5"), last.errorMessage);
+		deepStrictEqual(last.modelRouteRefusal, {
+			code: "served_model_mismatch",
+			requested: "stub-model",
+			served: "claude-opus-5.5",
+		});
+		strictEqual(
+			last.content.some((block) => block.type === "toolCall"),
+			false,
+		);
+		// The call itself completed: it settles with the provider's stop and usage, and only the turn is refused.
+		const settled = callSettlementFromMessage(last, "none");
+		strictEqual(settled.disposition, "settled");
+		deepStrictEqual(settled.stop, { reason: "toolUse" });
+		deepStrictEqual(settled.usage?.output, { kind: "measured", value: 9, source: "provider" });
+	});
+
+	it("runs a dated snapshot or prefixed alias of the requested model, and any unguarded route", async () => {
+		deepStrictEqual((await run("stub-model-20261101")).ran, ["tool:x"]);
+		deepStrictEqual((await run("vendor/stub-model-latest")).ran, ["tool:x"]);
+		deepStrictEqual((await run("claude-opus-5.5", false)).ran, ["tool:x"]);
+		// A later version of the model is another model, not an alias of it.
+		deepStrictEqual((await run("stub-model.1")).ran, []);
+	});
+});
+
 describe("engine lifecycle: a call to a tool with no attached schema", () => {
 	const run = async (attached: string[]) => {
 		const received: unknown[] = [];

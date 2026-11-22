@@ -2,6 +2,8 @@ import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
+import type { ModelRouteRefusal } from "../core/response-model-id.js";
+import { modelRouteGuarded, modelRouteRefusalMessage } from "../core/response-model-id.js";
 import { requestedThinking } from "../core/telemetry/call-effort.js";
 import { mainAgent } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
@@ -57,11 +59,13 @@ import {
 	canonicalEndpointKey,
 	endpointCapacityFor,
 	endpointCapacityForStatus,
+	modelOfferForStatus,
 	modelResidencyForStatus,
 	type ProvidersContract,
 	recordEndpointThroughput,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
+	runtimeListsModelsLive,
 	runtimeResolutionWarningsBesideThinkingNotice,
 	type TargetStatus,
 	targetRequiresAuth,
@@ -668,6 +672,42 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	}, TARGET_PROBE_POLL_MS);
 	selectedRoutePoll.unref();
 
+	/**
+	 * Row 384, before any request: a guarded target whose list lacks the requested model refuses the turn, naming what
+	 * it offers. Only the provider's live answer refuses: a cached or absent list is asked live once (`fresh` passes any
+	 * runtime cache), and an offered or unknown answer is kept for the session so the check costs one listing.
+	 */
+	const settledModelOffers = new Set<string>();
+	const modelOfferRefusal = async (
+		targetId: string,
+		modelId: string,
+		signal: AbortSignal | undefined,
+	): Promise<ModelRouteRefusal | null> => {
+		const key = JSON.stringify([targetId, modelId]);
+		if (settledModelOffers.has(key)) return null;
+		const held = modelOfferForStatus(
+			deps.providers.list().find((status) => status.target.id === targetId),
+			modelId,
+		);
+		const runtime = deps.providers.getRuntime(deps.providers.getTarget(targetId)?.runtime ?? "");
+		if (held.kind === "offered" || !modelRouteGuarded(runtime) || !runtime || !runtimeListsModelsLive(runtime)) {
+			settledModelOffers.add(key);
+			return null;
+		}
+		let live: TargetStatus | null = null;
+		try {
+			live = await deps.providers.probeTarget(targetId, { fresh: true, ...(signal ? { signal } : {}) });
+		} catch {
+			// No answer is no evidence: the request goes as it would have.
+		}
+		const offer = modelOfferForStatus(live, modelId);
+		if (offer.kind !== "not-offered") {
+			settledModelOffers.add(key);
+			return null;
+		}
+		return { code: "model_unavailable", target: targetId, requested: modelId, available: offer.available };
+	};
+
 	/** The last probe's word on the selected model when it was not serving, until the target answers a request on it. */
 	let coldAtProbe: { targetId: string; modelId: string; state: "absent" | "loading" } | null = null;
 	/** One notice per target+model+state, so a repeated probe stays quiet. */
@@ -1213,6 +1253,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			};
 		// Everything below reads the route when it is used: a hot swap or a moved request changes it under this agent.
 		const handle = deps.createAgent({
+			// Row 384 backstop: a provider that accepts the id and serves another model is refused at its first response.
+			refuseServedModelMismatch: () => modelRouteGuarded(localRuntime.runtimeResolution.runtime),
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				const middlewareChoice = middlewareToolChoice.current();
 				const controlled = applyToolRounds(
@@ -1431,6 +1473,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (!currentRun() || state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed before invocation." };
 				}
+				const unavailable = await modelOfferRefusal(localRuntime.targetId, localRuntime.wireModelId, streamOptions?.signal);
+				if (unavailable !== null)
+					return { block: true, reason: modelRouteRefusalMessage(unavailable), modelRouteRefusal: unavailable };
 				const flowViolation =
 					deps.admitFlow?.({
 						targetId: localRuntime.targetId,

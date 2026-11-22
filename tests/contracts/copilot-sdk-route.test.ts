@@ -315,12 +315,12 @@ class FakeSession {
 			// A worker whose one budgeted call locks it into synthesis, and a model that calls again in the locked round.
 			const name = [...this.tools.keys()][0];
 			for (const [index, [toolCallId, path]] of [["call_work", "CHAMPIONS.md"], ["call_locked", "README.md"]].entries()) {
-				this.usage({ model: "fake-model", apiCallId: "lock-" + index, inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+				this.usage({ model: this.config.model, apiCallId: "lock-" + index, inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
 				this.emit("assistant.message", { messageId: "k" + index, apiCallId: "lock-" + index, content: "", toolRequests: [{ toolCallId, name, arguments: { path } }] });
 				const result = await this.tools.get(name).handler({ path }, { toolCallId, sessionId: this.sessionId, toolName: name, arguments: {}, signal: new AbortController().signal });
 				state.toolResults.push({ ...result, injectedBefore: [] });
 			}
-			this.usage({ model: "fake-model", apiCallId: "lock-2", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
+			this.usage({ model: this.config.model, apiCallId: "lock-2", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
 			this.emit("assistant.message", { messageId: "k2", apiCallId: "lock-2", content: "report: known evidence" });
 			this.emit("session.idle", {});
 			return;
@@ -2511,6 +2511,35 @@ test("a locked Copilot worker round keeps the session's reasoning effort and too
 		disposeCopilotConversations("m20-worker");
 		models.splice(0, models.length, ...original);
 	}
+});
+
+// Row 384: a worker targeted at a model the seat does not list is refused before any request, naming what it offers.
+test("a Copilot worker asked for a model the seat does not list is refused before any request (row 384)", async () => {
+	const sessionsBefore = fake().sessions.length;
+	const worker = startWorkerRun(
+		{
+			agentId: "coder",
+			sessionId: "row384-worker",
+			systemPrompt: "Reply OK.",
+			task: "Reply OK.",
+			target: { id: "copilot-worker", runtime: "copilot-sdk" },
+			runtime: copilotSdkRuntime,
+			wireModelId: "gpt-6.2-terra",
+			allowedTools: [],
+			budget: { mode: "enforced", toolCalls: 1, synthesis: true, hardCap: 150 },
+			noSkills: true,
+			cwd: process.cwd(),
+			onPermission: "deny",
+		},
+		() => {},
+	);
+	const { messages } = await worker.promise;
+	const last = messages.at(-1) as AssistantMessage & { modelRouteRefusal?: { code?: string } };
+	strictEqual(last.stopReason, "error");
+	strictEqual(last.modelRouteRefusal?.code, "model_unavailable");
+	match(last.errorMessage ?? "", /^no model gpt-6\.2-terra on target copilot-worker; available: /);
+	strictEqual(fake().sessions.length, sessionsBefore, "no Copilot session opened");
+	disposeCopilotConversations("row384-worker");
 });
 
 // M-31: a scout's locked round on Copilot cannot name its result tool, so it keeps that tool declared rather than drop

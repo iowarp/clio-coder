@@ -248,7 +248,8 @@ export function callSettlementFromMessage(
 	const external = record(usage.clioExternal);
 	const neverSent = raw.callInvoked === false || usage.callInvoked === false || failure.invoked === false;
 	const reported = normalizeTokenUsage(usage).observed;
-	const stop = raw.stopReason;
+	// A response refused for the model it was served by (row 384) still settled as the provider ended it.
+	const stop = typeof raw.settledStopReason === "string" ? raw.settledStopReason : raw.stopReason;
 	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
 	const terminal = (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
 	const providerTotal = amount(usage.totalTokens);

@@ -6,8 +6,10 @@ import {
 	canonicalizeWireModelId,
 	chatModelCandidatesForStatus,
 	hasLiveModelCatalog,
+	modelOfferForStatus,
 } from "../../src/domains/providers/model-discovery.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
+import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 
 function makeStatus(source?: TargetStatus["discoveredModelsSource"], models: string[] = ["model-a"]): TargetStatus {
 	return {
@@ -56,5 +58,32 @@ describe("contracts/model-discovery", () => {
 			["dynamo/qwen3.8-27b", "zbook/nomic-embed-text-GGUF"],
 		);
 		strictEqual(canonicalizeWireModelId(status, "bge-m3"), "bge-m3");
+	});
+
+	it("refuses a model the live list lacks, naming the listed ids; a cached list or a local engine never refuses", () => {
+		const seat = (tier: RuntimeDescriptor["tier"], source: TargetStatus["discoveredModelsSource"]): TargetStatus => ({
+			...makeStatus(source, ["gpt-6.1-terra", "gpt-6.2-sol", "claude-opus-5.5", "claude-sonnet-4-20250514"]),
+			runtime: {
+				id: "copilot-sdk",
+				kind: "http",
+				tier,
+				probe: async () => ({ ok: true }),
+			} as unknown as RuntimeDescriptor,
+		});
+		deepStrictEqual(modelOfferForStatus(seat("subscription", "probe"), "gpt-6.2-terra"), {
+			kind: "not-offered",
+			available: ["gpt-6.1-terra", "gpt-6.2-sol", "claude-opus-5.5", "claude-sonnet-4-20250514"],
+		});
+		deepStrictEqual(modelOfferForStatus(seat("subscription", "probe"), "gpt-6.1-terra"), { kind: "offered" });
+		deepStrictEqual(modelOfferForStatus(seat("cloud", "probe"), "claude-sonnet-4-0"), { kind: "offered" });
+		deepStrictEqual(modelOfferForStatus(seat("subscription", "cache"), "gpt-6.2-terra"), { kind: "unknown" });
+		deepStrictEqual(modelOfferForStatus(seat("local-native", "probe"), "gpt-6.2-terra"), { kind: "unknown" });
+		// Only aliases of one model match: another version or another pinned snapshot is another model.
+		const pinned = (id: string) =>
+			modelOfferForStatus({ ...seat("cloud", "probe"), discoveredModels: ["gpt-5.1", "gpt-4o-2024-05-13"] }, id).kind;
+		strictEqual(pinned("gpt-5"), "not-offered");
+		strictEqual(pinned("gpt-4o-2024-08-06"), "not-offered");
+		strictEqual(pinned("gpt-4o"), "offered");
+		strictEqual(pinned("gpt-5.1-latest"), "offered");
 	});
 });

@@ -373,11 +373,13 @@ export function createProvidersBundle(
 		target: TargetDescriptor,
 		desc: RuntimeDescriptor,
 		signal?: AbortSignal,
+		fresh?: boolean,
 	): Promise<ProbeContext> {
 		const probeCtx: ProbeContext = {
 			credentialsPresent: credentialsPresent(),
 			httpTimeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
 			...(signal ? { signal } : {}),
+			...(fresh === true ? { fresh: true as const } : {}),
 		};
 		const authTarget = resolveAuthTarget(target, desc);
 		// The runtime probes read the environment for any name listed in credentialsPresent; a refused target gets none.
@@ -544,7 +546,7 @@ export function createProvidersBundle(
 		}
 		let probeCtx: ProbeContext;
 		try {
-			probeCtx = await buildProbeContextForTarget(target, desc, options?.signal);
+			probeCtx = await buildProbeContextForTarget(target, desc, options?.signal, options?.fresh);
 		} catch (err) {
 			options?.signal?.throwIfAborted();
 			if (!currentProbeTarget(target)) return null;

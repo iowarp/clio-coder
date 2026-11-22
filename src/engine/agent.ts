@@ -8,6 +8,8 @@ import {
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { createHostPolicyMessage, isHostPolicyMessage } from "../core/host-policy-message.js";
 import { ProviderCompactionError, providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
+import type { ModelRouteRefusal } from "../core/response-model-id.js";
+import { modelRouteRefusalMessage, servedModelMismatch } from "../core/response-model-id.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { compactOpenAI, providerCheckpointCompatibility } from "./apis/openai-compaction.js";
 import { normalizeContext, resolvedRequestContext } from "./context.js";
@@ -58,7 +60,9 @@ export interface EngineStreamRequest {
 	context: Parameters<StreamFn>[1];
 	options: Parameters<StreamFn>[2];
 }
-export type EngineStreamAdmission = { block: true; reason: string } | { block: false; correlationId?: string };
+export type EngineStreamAdmission =
+	| { block: true; reason: string; modelRouteRefusal?: ModelRouteRefusal }
+	| { block: false; correlationId?: string };
 
 export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 	/** Legacy/custom request view. Explicit overrides also replace the native hook in tests. */
@@ -82,6 +86,11 @@ export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 	beforeStreamRequest?: (request: EngineStreamRequest) => EngineStreamAdmission | Promise<EngineStreamAdmission>;
 	/** `getApiKey` resolves through Clio's own auth (env included), so the engine adds no env key of its own. */
 	authResolvedByHost?: boolean;
+	/**
+	 * Whether this route's provider-reported served model id is held against the requested one (row 384). True turns a
+	 * response whose served id names another model into an error before any of its tool calls run.
+	 */
+	refuseServedModelMismatch?: (model: Parameters<StreamFn>[0]) => boolean;
 };
 
 export interface EngineAgentHandle {
@@ -110,7 +119,12 @@ function batchAwareBeforeToolCall(
 	};
 }
 
-function refusedStream(request: EngineStreamRequest, reason: string, aborted = false): ReturnType<StreamFn> {
+function refusedStream(
+	request: EngineStreamRequest,
+	reason: string,
+	aborted = false,
+	modelRouteRefusal?: ModelRouteRefusal,
+): ReturnType<StreamFn> {
 	const stream = createAssistantMessageEventStream();
 	const message: AssistantMessage = {
 		role: "assistant",
@@ -130,6 +144,7 @@ function refusedStream(request: EngineStreamRequest, reason: string, aborted = f
 		errorMessage: reason.slice(0, 1024) || "Request admission refused",
 		timestamp: Date.now(),
 	};
+	if (modelRouteRefusal !== undefined) Object.assign(message, { modelRouteRefusal });
 	stream.push({ type: "error", reason: aborted ? "aborted" : "error", error: message });
 	return stream;
 }
@@ -237,6 +252,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		beforeToolBatch,
 		beforeStreamRequest,
 		authResolvedByHost,
+		refuseServedModelMismatch,
 		...agentOptions
 	} = options;
 	const correlations = new WeakMap<AgentMessage, string>();
@@ -255,15 +271,19 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		const delegate = (guarded: typeof streamOptions) =>
 			streamFn ? streamFn(model, resolvedRequestContext(context), guarded) : transcriptStreamFn(model, context, guarded);
 		const open = async () =>
-			routeUnattachedToolCalls(
-				filterAssistantProseStream(
-					await ((streamFn || transcriptStreamFn !== engineStreamSimple) && !delegateGuardsToolArguments
-						? guardToolArgumentStream(model, context, streamOptions, delegate)
-						: delegate(streamOptions)),
+			refuseOnServedModelMismatch(
+				routeUnattachedToolCalls(
+					filterAssistantProseStream(
+						await ((streamFn || transcriptStreamFn !== engineStreamSimple) && !delegateGuardsToolArguments
+							? guardToolArgumentStream(model, context, streamOptions, delegate)
+							: delegate(streamOptions)),
+						model,
+					),
+					resolvedRequestContext(context).tools,
 					model,
 				),
-				resolvedRequestContext(context).tools,
-				model,
+				model.id,
+				refuseServedModelMismatch?.(model) === true,
 			);
 		const marker = normalizeContext(context)
 			.messages.map(providerCheckpointFromMessage)
@@ -343,7 +363,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		const request: EngineStreamRequest = { model, context, options: streamOptions };
 		const complete = (admission: EngineStreamAdmission): ReturnType<StreamFn> => {
 			if (streamOptions?.signal?.aborted) return refusedStream(request, "Request aborted before invocation", true);
-			if (admission.block) return refusedStream(request, admission.reason);
+			if (admission.block) return refusedStream(request, admission.reason, false, admission.modelRouteRefusal);
 			activeCorrelationId = admission.correlationId;
 			return invoke(model, context, streamOptions);
 		};
@@ -388,6 +408,50 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 }
 
 const PROVIDER_FALLBACK = "clioProviderFallback";
+
+/**
+ * The served-model backstop (row 384): a terminal response whose provider-reported model id names another model than
+ * the one requested ends as an error carrying the typed refusal, with its tool calls removed, so Pi runs none of them
+ * and no surface grades the turn done. Ids are compared after `sameServedModel`'s canonicalization; a response that
+ * reports no id passes unchanged.
+ */
+function refuseOnServedModelMismatch(
+	source: ReturnType<typeof createAssistantMessageEventStream>,
+	requestedModelId: string,
+	guarded: boolean,
+): ReturnType<typeof createAssistantMessageEventStream> {
+	if (!guarded) return source;
+	const output = createAssistantMessageEventStream();
+	void (async () => {
+		// The upstream stream turns its own failures into an error event (`routeUnattachedToolCalls`), so iteration ends.
+		for await (const event of source) {
+			const served =
+				event.type === "done"
+					? servedModelMismatch(
+							requestedModelId,
+							(event.message as { responseModelIdObservation?: unknown }).responseModelIdObservation,
+						)
+					: null;
+			if (event.type !== "done" || served === null) {
+				output.push(event);
+				continue;
+			}
+			const refusal: ModelRouteRefusal = { code: "served_model_mismatch", requested: requestedModelId, served };
+			const error = {
+				...event.message,
+				content: event.message.content.filter((block) => block.type !== "toolCall"),
+				stopReason: "error" as const,
+				errorMessage: modelRouteRefusalMessage(refusal),
+				modelRouteRefusal: refusal,
+				// The call itself completed: its settlement records this stop and the usage kept above, not an unsettled error.
+				settledStopReason: event.message.stopReason,
+			};
+			output.push({ type: "error", reason: "error", error });
+		}
+		output.end();
+	})();
+	return output;
+}
 
 /** The reason the adapter replayed a native checkpoint portably for the request these options send, if it did. */
 export function providerFallbackOf(options: object | undefined): string | undefined {

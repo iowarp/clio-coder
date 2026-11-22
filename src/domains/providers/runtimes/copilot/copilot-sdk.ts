@@ -119,7 +119,9 @@ async function probeCopilotSdk(
 	ctx.signal?.throwIfAborted();
 	const snapshot = readTargetModelSnapshot(target);
 	// The cached listing is used only with the capabilities that go with it: this process's, else the cache's own.
+	// A fresh probe asks the SDK whatever the cache holds, because a refusal rests on its answer (row 384).
 	if (
+		ctx.fresh !== true &&
 		snapshot &&
 		snapshot.models.length > 0 &&
 		(snapshot.models.every((id) => listed.has(id)) || adoptCachedCapabilities(snapshot))

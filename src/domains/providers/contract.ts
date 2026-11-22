@@ -116,6 +116,8 @@ export interface LiveProbeOptions {
 	 */
 	toolsTimeoutMs?: number;
 	signal?: AbortSignal;
+	/** List models from the provider itself, never from a runtime's cached listing (row 384). */
+	fresh?: boolean;
 }
 
 /** How long one target's metadata probe may take; a caller that must not wait longer bounds its wait by this. */
