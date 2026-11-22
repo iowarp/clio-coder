@@ -2,6 +2,7 @@ import { SETTINGS_FIELD_NAMES } from "../../core/settings-fields.js";
 import type { EVENTS, JournalEventName, JournalPayload } from "../../core/telemetry/events.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { BUILTIN_RUNTIME_BOOT_MANIFEST } from "../providers/runtimes/boot-manifest.js";
+import type { EconomyGroup, EconomyProjection, EconomyQuantities } from "./economy-fold.js";
 
 /**
  * What a share below the research profile keeps of each record and structural object (#434). Removing known-bad
@@ -1281,4 +1282,33 @@ export function projectSharedContext<C>(
 	const table =
 		agentKind === null ? projection.context : { ...projection.context, agent: { role: "keep", id: agentKind } as const };
 	return projectField(ctx, table, anonymize, tally) as C;
+}
+
+/**
+ * The economics fold as a share carries it (token economy S10). Funding pools, payers, fees, period cash and every
+ * charge are private funding metadata and stay out; what remains compares, never bills: seat credits, energy in kWh and
+ * the API equivalent with the public rows it was priced from. A model or target key is projected as a record's is.
+ */
+export function shareEconomy(projection: EconomyProjection, anonymize: Anonymize) {
+	const quantities = (row: EconomyQuantities) => ({
+		contributions: row.contributions,
+		seatCredits: row.seatCredits,
+		energyKwh: row.energyKwh,
+		apiEquivalent: row.apiEquivalent,
+		display: { seatCredits: row.display.seatCredits, apiEquivalent: row.display.apiEquivalent },
+	});
+	const cut = (rows: readonly EconomyGroup[], key: (value: string) => string) =>
+		rows.map((row) => ({ key: key(row.key), ...quantities(row) }));
+	const model = (value: string) => projectField(value, "model-id", anonymize) as string;
+	return {
+		version: projection.version,
+		total: quantities(projection.total),
+		groups: {
+			role: cut(projection.groups.role, (value) => value),
+			model: cut(projection.groups.model, model),
+			target: cut(projection.groups.target, model),
+		},
+		references: projection.references,
+		sources: projection.sources,
+	};
 }

@@ -1,4 +1,5 @@
 import { formatFooterTokens } from "../display-units.js";
+import type { UnitTotal, UnitTotalRefusal } from "./economy.js";
 import type { Fact, FactSum } from "./fact.js";
 import type { FreeRule, Pricing, PricingSum } from "./pricing.js";
 
@@ -372,4 +373,86 @@ export function renderCoverage(fact: Fact<number> | FactSum): string {
 		.filter(([value]) => value > 0)
 		.map(([value, label]) => `${renderCount(value)} ${label}`)
 		.join(", ")}`;
+}
+
+// ---- economics (token economy S10) ----
+
+type EconomyTotal = UnitTotal | UnitTotalRefusal;
+const credits = new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 });
+
+/** An amount in its unit: a currency keeps sub-cent digits as USD does, nano-AIU reads as AI credits (1e9 each). */
+function renderUnitAmount(value: number, unit: string): string {
+	if (unit === "USD") return renderUsd(value);
+	if (unit === "nano-aiu") {
+		const shown = value / 1e9;
+		return `${shown > 0 && shown < 0.0001 ? shown.toExponential(2) : credits.format(shown)} credits`;
+	}
+	if (/^[A-Z]{3}$/u.test(unit)) return `${renderUsd(value).slice(1)} ${unit}`;
+	return `${fractional.format(value)} ${unit}`;
+}
+
+/**
+ * A total in its one unit: `~` marks an estimated part and `+?` an unknown one; a total with no known part is
+ * unknown, never zero, and a refused total says why it was not summed (R2).
+ */
+export function renderUnitTotal(total: EconomyTotal): string {
+	if ("refused" in total)
+		return `not summed (${total.refused === "mixed-unit" ? total.units.join(", ") : `${total.refused} ${total.unit}`})`;
+	const sum = total.sum;
+	if (allAbsent(sum)) return renderAbsent("not-applicable");
+	if (!("unit" in total)) return sum.unknownCount > 0 ? "unknown" : "none";
+	const amount = `${sum.coverage.estimated > 0 ? "~" : ""}${renderUnitAmount(sum.measured + sum.estimated, total.unit)}`;
+	return sum.unknownCount > 0 ? `${amount} +?` : amount;
+}
+
+/**
+ * The extra charge to the user (15:12Z ruling 1): an actual amount only when every known part is a provider or
+ * statement assertion; a zero that only a plan's coverage implies is `included (estimate)`; no evidence is
+ * `extra unknown`. A partial sum keeps its known part and `+?`.
+ */
+export function renderExtraCharge(total: EconomyTotal): string {
+	if ("refused" in total) return `extra ${renderUnitTotal(total)}`;
+	const sum = total.sum;
+	if (allAbsent(sum)) return renderAbsent("not-applicable");
+	if (!("unit" in total)) return sum.unknownCount > 0 ? "extra unknown" : "none";
+	const known = sum.measured + sum.estimated;
+	const partial = sum.unknownCount > 0 ? " +?" : "";
+	if (sum.coverage.estimated === 0) return `${renderUnitAmount(sum.measured, total.unit)} extra${partial}`;
+	if (known === 0) return `included (estimate)${partial}`;
+	return `~${renderUnitAmount(known, total.unit)} extra${partial}`;
+}
+
+/** The API equivalent: always an estimate at a public list price, never cash (Q5). */
+export function renderApiEquivalent(total: EconomyTotal): string {
+	return `API equiv ${renderUnitTotal(total)}`;
+}
+
+/** Local energy and its cost; known energy without a tariff says the cost is unknown rather than free. */
+export function renderEnergy(kwh: FactSum, cost: EconomyTotal): string {
+	if (allAbsent(kwh)) return renderAbsent("not-applicable");
+	if (contributions(kwh) === 0) return "none";
+	const known = kwh.measured + kwh.estimated;
+	if (kwh.coverage.measured + kwh.coverage.estimated === 0) return "energy unknown";
+	const energy = `${kwh.coverage.estimated > 0 ? "~" : ""}${credits.format(known)} kWh${kwh.unknownCount > 0 ? " +?" : ""}`;
+	// A cost in two currencies is known but not summed, which differs from no tariff at all.
+	const priced = "refused" in cost || "unit" in cost;
+	return priced ? `${energy}, ${renderUnitTotal(cost)}` : `${energy}, electricity cost unknown`;
+}
+
+/** A pool's fixed fee for one period, with its evidence; a window that covers part of the period says so. */
+export function renderPeriodFee(fee: {
+	amount: number;
+	currency: string;
+	period: string;
+	evidence: string;
+	partial: boolean;
+}): string {
+	return `${renderUnitAmount(fee.amount, fee.currency)}/${fee.period} ${fee.evidence}${fee.partial ? " (partial period)" : ""}`;
+}
+
+/** Period cash per currency, never one sum across currencies; an unknown contribution keeps `+?` on each. */
+export function renderCash(totals: readonly UnitTotal[], unknown: number): string {
+	const known = totals.flatMap((total) => ("unit" in total ? [renderUnitTotal(total)] : []));
+	if (known.length === 0) return unknown > 0 ? "unknown" : "none";
+	return `${known.join(" and ")}${unknown > 0 ? " +?" : ""}`;
 }

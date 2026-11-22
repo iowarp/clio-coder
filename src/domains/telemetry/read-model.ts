@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Value } from "typebox/value";
+import type { FundingDefinitions } from "../../core/funding-config.js";
 import { processIdentityAlive } from "../../core/process-identity.js";
 import type { SurfaceId } from "../../core/side-surfaces.js";
 import { SIDE_SURFACES } from "../../core/side-surfaces.js";
@@ -70,6 +71,8 @@ import { countsAsToolCall, EvidenceFindingsObjectSchema, RunResultObjectSchema }
 import { ToolNames } from "../../core/tool-names.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
+import type { EconomyContribution, EconomyFoldOptions, EconomyProjection } from "./economy-fold.js";
+import { foldEconomy } from "./economy-fold.js";
 import { foldDecisions } from "./fact-folds.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
 import {
@@ -2492,6 +2495,87 @@ export function repoCostReport(
 	};
 }
 
+// ---- economics (token economy S10) ----
+
+const runContribution = (run: Run, economics: EconomyContribution["economics"]): EconomyContribution => ({
+	ref: { kind: "run", runId: run.runId },
+	at: run.settled?.data.endedAt ?? run.lastAt,
+	settled: run.settled !== undefined,
+	economics,
+	cut: { role: "worker", model: runModelKey(run), target: runTargetKey(run) },
+});
+
+/**
+ * The contributions a selection counts, each once: an attempt's settlement; a run folded from its calls as those
+ * calls; a run that reported an aggregate as its settled economics in place of its constituents (so its fees and energy
+ * are not repeated), or, with none recorded or its calls contradicting it, its visible constituents plus one
+ * not-captured share for the rest. A run whose calls were already counted adds nothing; a missing journal or an unreadable stretch of one is an
+ * unobserved share.
+ */
+function economyContributions(parts: readonly Part[]): EconomyContribution[] {
+	const fromAttempt = (attempt: Attempt): EconomyContribution => {
+		const target = attempt.settled?.target ?? attempt.started.target;
+		return {
+			ref: { kind: "attempt", attemptId: attempt.started.attemptId, callId: attempt.started.callId },
+			at: attempt.settledAt ?? attempt.startedAt,
+			settled: attempt.settled !== null,
+			economics: callEconomicsOf(attempt.settled),
+			...(attempt.settled?.billing ? { reportedNanoAiu: attempt.settled.billing.nanoAiu } : {}),
+			cut: { role: attempt.agent.role, model: modelKey(target), target: target.targetId },
+		};
+	};
+	const counted = new Set<string>();
+	for (const part of parts)
+		for (const attempt of part.attempts ?? (part.run?.fold.source === "calls" ? part.run.attempts : []))
+			counted.add(attempt.started.callId);
+	const contributions: EconomyContribution[] = [];
+	parts.forEach((part, index) => {
+		for (let gap = 0; gap < part.gap; gap += 1)
+			contributions.push({
+				ref: { kind: "gap", scope: `${part.run ? `run:${part.run.runId}` : `part:${index}`}:${gap}` },
+				at: null,
+				settled: false,
+				economics: callEconomicsOf(null),
+				cut: { role: "unknown", model: "unknown", target: "unknown" },
+			});
+		const run = part.run;
+		if (!run) {
+			contributions.push(...(part.attempts ?? []).map(fromAttempt));
+			return;
+		}
+		if (!run.source.present) {
+			contributions.push(runContribution(run, callEconomicsOf(null)));
+			return;
+		}
+		if (run.fold.source === "calls") {
+			contributions.push(...run.attempts.map(fromAttempt));
+			return;
+		}
+		// A settlement its own calls contradict is not trusted as an aggregate: its calls count, and the rest is unknown.
+		const recorded = run.fold.source === "conflict" ? undefined : run.settled?.data.economics;
+		const callIds = run.settled?.data.callIds ?? [];
+		if (callIds.length > 0 && callIds.every((callId) => counted.has(callId))) return;
+		if (recorded && !callIds.some((callId) => counted.has(callId))) {
+			contributions.push(runContribution(run, recorded));
+			return;
+		}
+		contributions.push(...run.attempts.map(fromAttempt), runContribution(run, runEconomicsOf({})));
+	});
+	return contributions;
+}
+
+/**
+ * The one economics projection (token economy S10) over a session's own attempts and its runs, or a repository
+ * window's: every surface that shows a charge, credits, energy, an API equivalent or a fee reads it here.
+ */
+export function economyReport(source: SessionSource | RepoSource, options: EconomyFoldOptions = {}): EconomyProjection {
+	const selection =
+		"owner" in source
+			? selectRepo(source, undefined, "repo")
+			: select({ session: source }, { scope: "session", owner: source.sessionId, metric: "usd" });
+	return foldEconomy(economyContributions(selection?.parts ?? []), options);
+}
+
 /** A token field over many runs, each run's calls its contributions (#434 §11.3). */
 export interface RunsTotal {
 	/** The known part. */
@@ -4505,7 +4589,7 @@ export function seal(scope: TelemetryScopeFiles): SealVerdict {
 }
 
 /** Window facts for the usage surface, folded once from the same sources as its spend (#434). */
-export function usageReport(source: RepoSource, from: number, to: number) {
+export function usageReport(source: RepoSource, from: number, to: number, pools?: Readonly<FundingDefinitions>) {
 	const journals = [...source.sessions.flatMap(sessionJournals), ...source.runs.values()];
 	const inWindow = (at: string) => Date.parse(at) >= from && Date.parse(at) <= to + 5_000;
 	const records = accountabilityRecords(journals).filter((record) => inWindow(record.t));
@@ -4561,6 +4645,7 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 		),
 		cache: source.sessions.map((session) => cacheReport(session)),
 		performance: operatorPerformance(source),
+		economy: economyReport(source, { ...(pools ? { pools } : {}), window: { from, to } }),
 	};
 }
 
