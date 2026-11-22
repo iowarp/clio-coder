@@ -2546,15 +2546,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middlewareRegistrar.registerHook(createToolProseRegistration());
 	middlewareRegistrar.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
+	const changesTree = sessionChangesTree(getCurrentSettings);
 	for (const registration of createExplorationNudgeRegistrations({
 		workspaceRoot: memoryWorkspaceRoot,
-		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: sessionChangesTree(getCurrentSettings) },
+		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree },
 		readStreakObserver: turnOutcomeCollector,
 		readStreakStall: (detail) => autonomyWindow.haltFor("exploration", detail),
 	}))
 		middlewareRegistrar.registerHook(registration);
 	// Main session only: a worker's turns run their own bundle and never see the turn-plan cue.
-	middlewareRegistrar.registerHook(createTurnPlanCueRegistration());
+	middlewareRegistrar.registerHook(
+		createTurnPlanCueRegistration((args) => changesTree(ToolNames.Bash, args, memoryWorkspaceRoot())),
+	);
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());
 	middlewareRegistrar.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),

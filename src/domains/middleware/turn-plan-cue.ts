@@ -1,4 +1,6 @@
+import { isPlanOnlyRequest } from "../../core/plan-request.js";
 import { isReadOnlyCall } from "../../core/read-only-calls.js";
+import { requestProse } from "../../core/request-prose.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { forbidsFileWrites } from "../../core/write-prohibition.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
@@ -31,7 +33,7 @@ const NONE: ReadonlyArray<MiddlewareEffect> = [];
 const SEQUEL =
 	/^(?:then|next|after(?:wards|\s+that)?|finally|once|using\s+(?:it|that|the\s+result)|with\s+the\s+result)\b/iu;
 const NO_DELEGATION =
-	/\b(?:(?:do\s+not|don['’]t|never|without)\s+(?:use\s+|using\s+)?(?:any\s+)?(?:delegat\w*|dispatch\w*|workers?|sub-?agents?|scouts?|parallel)|no\s+(?:delegation|dispatch(?:es)?|workers?|sub-?agents?)|(?:do|handle|make|fix|implement)\s+(?:it|this|them|these|all(?:\s+of\s+(?:it|them))?)\s+yourself|by\s+yourself)\b/iu;
+	/\b(?:(?:do\s+not|don['’]t|never|without)\s+(?:(?:use|using|launch(?:ing)?|spawn(?:ing)?|start(?:ing)?)\s+)?(?:(?:any|a|an)\s+)?(?:delegat\w*|dispatch\w*|workers?|sub-?agents?|scouts?|parallel)|no\s+(?:delegation|dispatch(?:es)?|workers?|sub-?agents?)|(?:do|handle|make|fix|implement)\s+(?:it|this|them|these|all(?:\s+of\s+(?:it|them))?)\s+yourself|by\s+yourself)\b/iu;
 
 /** The capability list the host reported for this turn; null when it reported none. */
 function reported(input: MiddlewareHookInput, key: "activeCapabilityNames" | "activeToolNames"): Set<string> | null {
@@ -114,10 +116,14 @@ function primingMessage(capabilities: Set<string>, attached: Set<string> | null)
 }
 
 /** A succeeded call that shows the model this workspace: a read-class call outside other context scopes, or a change. */
-function orients(input: MiddlewareHookInput): boolean {
+function orients(
+	input: MiddlewareHookInput,
+	bashChangesTree: (args: MiddlewareHookInput["toolArgs"]) => boolean,
+): boolean {
 	if (input.metadata?.resultKind !== "ok") return false;
 	const tool = input.toolName ?? "";
 	if (tool === ToolNames.Edit || tool === ToolNames.Write || tool === "apply_patch") return true;
+	if (tool === ToolNames.Bash && bashChangesTree(input.toolArgs)) return true;
 	if (tool === ToolNames.Context) {
 		const scope = input.toolArgs?.scope;
 		return scope === undefined || scope === "workspace";
@@ -125,7 +131,9 @@ function orients(input: MiddlewareHookInput): boolean {
 	return isReadOnlyCall(tool, input.toolArgs);
 }
 
-export function createTurnPlanCueRegistration(): MiddlewareHookRegistration {
+export function createTurnPlanCueRegistration(
+	bashChangesTree: (args: MiddlewareHookInput["toolArgs"]) => boolean,
+): MiddlewareHookRegistration {
 	let lastSeenSessionId: string | null | undefined;
 	let observedAnyTurn = false;
 	let oriented = false;
@@ -138,7 +146,7 @@ export function createTurnPlanCueRegistration(): MiddlewareHookRegistration {
 		evidence: "count:enumerated-parts@operator-request",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "after_tool") {
-				if (input.metadata?.origin !== "harness" && orients(input)) oriented = true;
+				if (!oriented && input.metadata?.origin !== "harness" && orients(input, bashChangesTree)) oriented = true;
 				return NONE;
 			}
 			if (input.hook !== "turn_start") return NONE;
@@ -163,8 +171,8 @@ export function createTurnPlanCueRegistration(): MiddlewareHookRegistration {
 			if (mode === "answer" || mode === "proposal" || input.metadata?.turnReadOnly === true) return NONE;
 			if (input.metadata?.turnStepPolicy === true) return NONE;
 			if ((metadataNumber(input, "pendingSkillRequests") ?? 0) > 0) return NONE;
-			const text = input.text ?? "";
-			if (forbidsFileWrites(text)) return NONE;
+			const text = requestProse(input.text ?? "");
+			if (isPlanOnlyRequest(text) || forbidsFileWrites(text)) return NONE;
 			const capabilities = reported(input, "activeCapabilityNames") ?? reported(input, "activeToolNames");
 			if (capabilities === null) return NONE;
 			const attached = reported(input, "activeToolNames");

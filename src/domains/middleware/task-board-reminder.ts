@@ -1,3 +1,5 @@
+import { isPlanOnlyRequest } from "../../core/plan-request.js";
+import { requestProse } from "../../core/request-prose.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { forbidsFileWrites } from "../../core/write-prohibition.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
@@ -26,9 +28,9 @@ export function taskBoardReminderMessage(steps: number, placement: "direct" | "g
 			: 'tasks action="plan" with a title and one task per authorized step, then ';
 	return (
 		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ${plan}` +
-		"work them one at a time " +
+		"track each step as it starts and finishes, including parts dispatched together " +
 		'("start", then "done" with note="<observed work and check results>", disclosing failed or unrun checks). ' +
-		"Bookkeeping is not a reason to end a model response: when IDs and arguments are known, use gateway op=chain for " +
+		"Bookkeeping is not a reason to end a model response: for dependent steps with known IDs and arguments, use gateway op=chain for " +
 		"done -> start -> next read/work, or decide -> authorized implementation, with each dependent step's after naming its predecessor's step id. " +
 		"Never predict results or prewrite done for work/checks in that chain. Successful returned board and operator-task state is authoritative; " +
 		"list only if it is missing, stale or inconsistent. Failed or partial updates are not completion; reconcile actual state before claiming success. " +
@@ -99,8 +101,9 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 			// is one whose own words forbid writing any file, though no flag scoped it.
 			const mode = input.metadata?.turnMode;
 			if (mode === "answer" || mode === "proposal" || input.metadata?.turnReadOnly === true) return NO_EFFECTS;
-			if (forbidsFileWrites(input.text ?? "")) return NO_EFFECTS;
-			const steps = countEnumeratedSteps(input.text);
+			const text = requestProse(input.text ?? "");
+			if (isPlanOnlyRequest(text) || forbidsFileWrites(text)) return NO_EFFECTS;
+			const steps = countEnumeratedSteps(text);
 			if (steps < 3) return NO_EFFECTS;
 			// The reminder names tasks and gateway op=chain; a turn that cannot call
 			// both would spend its steps hunting. The shot is kept for a later
