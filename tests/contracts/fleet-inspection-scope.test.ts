@@ -153,6 +153,8 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 		strictEqual(hiddenRoot.status, 2);
 		const globalRoot = run("view", "fleet-foreign-root", "--all");
 		strictEqual(globalRoot.status, 0, globalRoot.stderr);
+		// Row 362 (16): the root index names each step's task, not only its id and run.
+		ok(globalRoot.stdout.includes("task foreign-agent private task"), globalRoot.stdout);
 		// Row 362 (14): the list says it lists playbook roots and counts the project's runs fleet status sees.
 		const list = run("list");
 		strictEqual(list.status, 0, list.stderr);
