@@ -74,6 +74,8 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 - `context.memory.observations.enabled` is no longer read. Set `context.memory.surfaces.observe`; `clio-coder doctor` names the old key and `doctor --fix` removes it.
 - CLIO Coder reads only the current memory store. `clio-coder doctor` names an older or partly unreadable store and `doctor --fix` rewrites it at the current version with the records this build reads. An invalid record is dropped at the next store write instead of moving to `records.invalid.json`.
 - A project's `.clio-coder/codewiki.json` index is no longer read; `clio-coder context index` writes `.clio-coder/codemap.json`. A `.clio-coder/fleets/` directory is no longer converted: move its playbooks to `.clio-coder/playbooks/`.
+- A turn on a cloud or subscription target is refused before the call when the target's live model list does not contain the requested model (`no model <id> on target <t>; available: ...`), and refused after it when the provider reports that a different model answered (`requested X, provider served Y; the turn is refused`). Both exit 1 with cause `model_unavailable` or `served_model_mismatch` in `causes[]`, and no tool call from a mismatched response runs. Local and gateway targets are not judged, and a router id ending in `/auto` is exempt.
+- `$0.00 local` is printed only for a local-native target. A free amount with no recorded rule reads `$0.00 free`, and a sum whose parts were free under different rules reads `$0.00 free (mixed)`; pricing sums and per-call usage carry `freeRuleMixed` for that case.
 
 **Run records and telemetry**
 
@@ -231,6 +233,14 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `chat.prewarm` also warms `openai-codex` sessions.
 - Empty `code_nav`, `grep` and `find` results say what was searched and that an empty match does not prove absence.
 - `verify` runs a package manager's call of a declared script (`npm test`, `pnpm run lint`) as that script's check.
+- `read` takes `paths`, an array of up to 16 files, in place of `path`. Each path is admitted and read as its own read, so the safety policy and the workspace boundary apply to it exactly as to a single read, and the sections (`== <path> ==`) share the one per-call byte cap. A refused or missing path carries its own reason in place, and a path the cap left no room for is named as not read.
+
+**Cost and quota**
+
+- A `funding` settings block names who pays for a target's usage: pools with a scheme, a payer, a native unit, an optional fee, a grant with an expiry, or the declared power draw and electricity tariff of a local machine, bound to a target with `targets[].funding.pool`. Funding is set in user settings only (a project value is ignored with a notice), `clio-coder configure` has a "Funding for a target" step, and the facts describe a route without authorizing or capping anything.
+- Call and run records carry an `economics` block with separate facts for the provider's charge, the marginal charge, a seat credit estimate, a local energy estimate and the public API price of the same usage. A fact nothing measured reads unknown with reason `not-captured`, never 0, and shared telemetry omits the block.
+- A signed-in GitHub Copilot target reports its quota in the quota readout, with Premium, Chat and Completions buckets and a percentage only where the provider reports an authoritative count.
+- A dated catalogue of public API list prices ships as `models/economy-rates.json` for comparisons; it never prices a route. `pnpm economy:check [--as-of YYYY-MM-DD]` validates it in a checkout.
 
 **Terminal UI**
 
@@ -274,6 +284,9 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A worker whose OS sandbox confines every write to its write roots runs a `bash` command that passes the scan but is not recognized (a `python3 -c` readback, for one) contained, as main `bash` does at default, unless it asks to leave the sandbox or reaches outward. A worker without such a sandbox still has it refused.
 - An explorer's report owes observed evidence: one sent before any read is refused, and the repair round reads first.
 - A playbook loop's agent check gets a verification task of its own instead of the builder's prompt, and a refused playbook literal names the values it accepts.
+- At the start of a turn whose request enumerates two or more separate parts, the agent is advised once to send them as one parallel `dispatch`, one task per part. On the first substantial request of a fresh session it is advised to map the code with `code_nav` or `context` before its first edit. Neither note appears on answers, proposals, plan-only or read-only turns, or when the request rules out delegation.
+- `claude-opus-5.5` sessions with a window of at least 48,000 tokens carry short working notes on orienting with `code_nav`, using the native file tools instead of the shell, dispatching independent parts and verifying after an edit.
+- A `code_nav` listing too large for its call shows as many rows as fit instead of an empty stub, and saves the complete listing to a file named in `offloadPath` when the byte cap cut it.
 
 **Context**
 
@@ -408,6 +421,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Quota readings and holds are shared across processes, a rate-limited read is held for its Retry-After, and a hold belongs to the credential that earned it.
 - Report archives written by 0.8.4 still verify and import.
 - Copilot side calls, the safety judge's included, journal their transport, seat billing and served model.
+- A provider that omits its cache-write count leaves cache writes and fresh input unknown instead of zero, and the provider's own token total is kept beside them.
+- The Codex usage poll times out on a stalled response body, and its quota windows are labelled from the duration the provider reports (`5h`, `3d`, `Weekly`) instead of a fixed pair of names.
 
 **Providers and editors**
 
@@ -420,6 +435,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A malformed `model-catalog.d` file is skipped alone, named by its path in one line, so the overlays beside it still merge.
 - First-run setup's test request on a signed-in Copilot seat reaches the model.
 - MCP images, such as a Playwright MCP screenshot, reach vision routes within the `read` image budget instead of being dropped, and the `frontend` check's screenshot attaches on vision routes.
+- A Copilot tool call is checked for repetition only once its streamed arguments are complete, so a correct call is no longer stopped as a flood of empty calls.
 
 **Terminal UI**
 

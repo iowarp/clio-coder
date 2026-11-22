@@ -137,6 +137,9 @@ upgrade migrates your settings.
 - **Fleet runs stay out of your checkout.** A playbook step with scope
   `worktree` runs in one kept task worktree, and `clio-coder fleet land`
   previews and lands the result.
+- **You get the model you asked for.** A cloud or subscription target that
+  does not list the requested model, or answers with a different one, is
+  refused with a typed cause instead of running the turn on something else.
 - **Bring your setup.** `clio-coder interop adopt` ports Claude Code and Codex
   command hooks, stdio MCP servers and user instructions.
 
