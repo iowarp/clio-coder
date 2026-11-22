@@ -11,6 +11,7 @@ import type { TargetDescriptor } from "../domains/providers/types/target-descrip
 import type { AutonomyLevel, YoloConfinement } from "../domains/safety/autonomy.js";
 import type { ProfileId } from "../domains/system-one/profiles.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
+import type { FundingDefinitions } from "./funding-config.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 import type { ModelTier } from "./model-tier.js";
 import type { SandboxMode, UnixSocketMode } from "./sandbox/types.js";
@@ -868,6 +869,7 @@ export const DEFAULT_SETTINGS = {
 		workflows: ["detached-collection"],
 	} as TurnControlSettings,
 	targets: [] as TargetDescriptor[],
+	funding: {} as FundingDefinitions,
 	chat: {
 		target: null as string | null,
 		model: null as string | null,
@@ -1099,6 +1101,9 @@ turnControl:
 
 # Configured inference endpoints. Target descriptor leaves are unchanged in v2.
 targets: []
+
+# Optional user-owned funding facts for reports, not spending limits.
+funding: {}
 
 chat:
   target: null

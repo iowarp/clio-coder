@@ -12,6 +12,8 @@ import { createConnection } from "node:net";
 import chalk from "chalk";
 
 import type { ClioSettings } from "../core/config.js";
+import type { FundingObservation, FundingSignal } from "../core/funding-config.js";
+import { makeFundingObservation, resolveFundingBinding } from "../core/funding-config.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
@@ -326,8 +328,13 @@ async function runtimeProbeModels(
 
 export function applyTarget(settings: ClioSettings, descriptor: TargetDescriptor): void {
 	const idx = settings.targets.findIndex((e) => e.id === descriptor.id);
-	if (idx >= 0) settings.targets[idx] = descriptor;
-	else settings.targets.push(descriptor);
+	const previous = settings.targets[idx];
+	if (previous) {
+		settings.targets[idx] = {
+			...descriptor,
+			...(descriptor.funding === undefined && previous.funding !== undefined ? { funding: previous.funding } : {}),
+		};
+	} else settings.targets.push(descriptor);
 }
 
 export function setOrchestratorPointer(
@@ -572,6 +579,78 @@ export function describeAuthStatus(runtime: RuntimeDescriptor, target?: TargetDe
 	if (status.source === "stored-api-key") return "stored api key";
 	if (status.source === "stored-oauth") return "stored oauth";
 	return status.source;
+}
+
+const FUNDING_SIGNAL_LABELS: Record<FundingSignal, string> = {
+	"local-native": "local-native runtime",
+	"oauth-login": "stored OAuth login; billing unverified",
+};
+
+/** Read only the selected target's local route and credential state. Never refresh a login or query a provider. */
+export function targetFundingEvidence(
+	target: TargetDescriptor,
+	runtime = getRuntimeRegistry().get(target.runtime),
+): { hint: string; observation?: FundingObservation } {
+	if (!runtime) return { hint: "unknown runtime" };
+	if (runtime.tier === "local-native") {
+		return {
+			hint: FUNDING_SIGNAL_LABELS["local-native"],
+			observation: makeFundingObservation("local-native", runtime.id, target.url),
+		};
+	}
+	if (runtime.auth === "none" || runtime.auth === "claude-cli") {
+		return { hint: runtime.tier === "subscription" ? "external subscription login; identity unverified" : "unknown" };
+	}
+	const auth = openAuthStorage();
+	const authTarget = resolveAuthTarget(target, runtime);
+	const status = auth.statusForTarget(authTarget, { includeFallback: false });
+	if (status.available && status.source === "stored-oauth") {
+		const ref = status.storedRef ?? authTarget.providerId;
+		const stored = auth.get(ref);
+		// A refreshed credential is also a new local revision. Without account proof, do not carry the old detection.
+		if (auth.damageReason() === null && stored?.type === "oauth" && stored.expires > Date.now()) {
+			return {
+				hint: FUNDING_SIGNAL_LABELS["oauth-login"],
+				observation: makeFundingObservation("oauth-login", runtime.id, target.url, {
+					ref,
+					updatedAt: stored.updatedAt,
+					expires: stored.expires,
+				}),
+			};
+		}
+	}
+	if (runtime.tier === "subscription") return { hint: "subscription runtime; login unverified" };
+	if (runtime.auth === "oauth") return { hint: "OAuth runtime; login unverified" };
+	if (status.available && status.credentialType === "api_key") return { hint: "API credential; payer unverified" };
+	return { hint: "unknown" };
+}
+
+export function describeTargetFunding(target: TargetDescriptor, definitions: ClioSettings["funding"]): string {
+	const observation =
+		target.funding !== undefined && definitions[target.funding.pool]?.scheme === "detected"
+			? targetFundingEvidence(target).observation
+			: undefined;
+	const resolved = resolveFundingBinding(definitions, target.funding, observation);
+	if (resolved.status === "unknown") {
+		if (resolved.reason === "unbound") return "unknown (not bound)";
+		return `unknown (${resolved.reason.replaceAll("-", " ")}; ${target.funding?.pool ?? "not bound"})`;
+	}
+	const { fee, grant, local, nativeUnit, payer } = resolved.pool;
+	const grantAmount = nativeUnit === undefined ? undefined : grant?.amount;
+	return [
+		`${resolved.status}: ${resolved.poolId}`,
+		...(resolved.status === "detected"
+			? [`${FUNDING_SIGNAL_LABELS[resolved.detection.signal]}, checked ${resolved.detection.verifiedAt}`]
+			: []),
+		...(payer === undefined ? [] : [`payer ${payer}`]),
+		...(fee === undefined ? [] : [`${fee.amount} ${fee.currency} / ${fee.period}`]),
+		...(grant === undefined
+			? []
+			: [`grant${grantAmount === undefined ? "" : ` ${grantAmount} ${nativeUnit}`} expires ${grant.expiresAt}`]),
+		...(local?.activeWatts === undefined ? [] : [`${local.activeWatts} W active`]),
+		...(local?.idleWatts === undefined ? [] : [`${local.idleWatts} W idle`]),
+		...(local?.tariff === undefined ? [] : [`${local.tariff.ratePerKwh} ${local.tariff.currency} / kWh`]),
+	].join(" · ");
 }
 
 /**

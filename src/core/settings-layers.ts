@@ -741,6 +741,29 @@ function stripProjectRuntimeTrust(
 	return cleaned;
 }
 
+function stripProjectFunding(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+): Record<string, unknown> {
+	const reject = (path: string) =>
+		issues.push({ origin, path, message: "funding is set only in user settings; project value ignored" });
+	const cleaned = { ...blob };
+	if (Object.hasOwn(blob, "funding")) {
+		reject("funding");
+		delete cleaned.funding;
+	}
+	if (Array.isArray(blob.targets)) {
+		cleaned.targets = blob.targets.map((entry, index) => {
+			if (!isRecord(entry) || !Object.hasOwn(entry, "funding")) return entry;
+			reject(`targets[${index}].funding`);
+			const { funding: _ignored, ...target } = entry;
+			return target;
+		});
+	}
+	return cleaned;
+}
+
 /**
  * Deep-merge raw layer blobs in precedence order, recording the origin that last
  * set each leaf. Objects recurse; arrays and scalars replace.
@@ -830,7 +853,11 @@ function prepareProjectLayers(
 						stripProjectTelemetry(
 							stripProjectWidening(
 								stripProjectOperatorSafety(
-									stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+									stripProjectRuntimeTrust(
+										stripProjectAutonomy(stripProjectFunding(raw.blob, origin, issues), origin, issues, operatorLevel),
+										origin,
+										issues,
+									),
 									origin,
 									issues,
 									userBlob,
@@ -1150,6 +1177,9 @@ export function updateProjectLocalSettings(
 		}
 		const delta = applySettingsDelta(local.blob ?? {}, current, validation.settings);
 		const saved = options.pin !== undefined ? pinSettingsLeaf(delta, validation.settings, options.pin) : delta;
+		const fundingIssues: SettingsLayerIssue[] = [];
+		stripProjectFunding(saved as Record<string, unknown>, "project.local", fundingIssues);
+		if (fundingIssues.length > 0) throw new Error(`funding is set only in user settings: ${fundingIssues[0]?.path}`);
 		const credentialIssues: SettingsLayerIssue[] = [];
 		stripCredentials(saved, "project.local", "", credentialIssues);
 		if (credentialIssues.length > 0) {

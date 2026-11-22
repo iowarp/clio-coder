@@ -10,6 +10,8 @@ import {
 	updateSettings,
 } from "../core/config.js";
 import type { OutputStyle, PanesSettings, SmoothStreaming, TuiMode, WorkerPermissionMode } from "../core/defaults.js";
+import type { FundingBinding, FundingPool } from "../core/funding-config.js";
+import { FUNDING_ID_PATTERN, FUNDING_PAYERS, FUNDING_PERIODS, isInstitutionalPool } from "../core/funding-config.js";
 import { initializeClioHome } from "../core/init.js";
 import { getAtPath, resolveMemoryRoute } from "../core/session-routing.js";
 import {
@@ -82,6 +84,7 @@ import {
 	defaultUrlFor,
 	deriveTargetId,
 	describeAuthStatus,
+	describeTargetFunding,
 	gatewayUrlGuidance,
 	inventoryNote,
 	normalizeUrl,
@@ -98,6 +101,7 @@ import {
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
 	targetApiKeyRef,
+	targetFundingEvidence,
 	targetUrlProblem,
 	validateContextWindowOverride,
 	validateResolvedModel,
@@ -1411,6 +1415,131 @@ async function runTargetWizard(io: SectionIo, options: Parameters<typeof runOnbo
 	if (changed) io.ok(`Target ${changed.id} saved`);
 }
 
+async function askFundingNumber(rl: ConfigurePrompts, label: string): Promise<number | undefined> {
+	const answer = (await rl.text(label)).trim();
+	if (answer === "") return undefined;
+	const value = Number(answer);
+	if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/u.test(answer) || !Number.isFinite(value))
+		throw new Error(`${label}: expected a non-negative decimal number`);
+	return value;
+}
+
+async function declareFundingPool(rl: ConfigurePrompts): Promise<FundingPool> {
+	const pool: FundingPool = { scheme: "declared" };
+	const payer = await rl.choose("Payer", ["unknown", ...FUNDING_PAYERS], "unknown");
+	if (payer !== "unknown") {
+		const known = FUNDING_PAYERS.find((value) => value === payer);
+		if (known === undefined) throw new Error("choose personal, sponsor, employer, none, or unknown");
+		pool.payer = known;
+	}
+	const unit = (await rl.text("Native unit (e.g. credits, tokens, compute-hours; blank to skip)")).trim();
+	if (unit) pool.nativeUnit = unit;
+	const amount = await askFundingNumber(rl, "Fee amount (blank to skip)");
+	if (amount !== undefined) {
+		const currency = (await rl.text("Fee currency (ISO 4217, e.g. USD)")).trim().toUpperCase();
+		const periodChoice = await rl.choose("Fee period", FUNDING_PERIODS, "month");
+		const period = FUNDING_PERIODS.find((value) => value === periodChoice);
+		if (period === undefined) throw new Error("choose a fee period from the list");
+		pool.fee = { amount, currency, period };
+	}
+	if (isInstitutionalPool(pool) || (await askYesNo(rl, "Declare grant or prepaid credit facts?", false))) {
+		const expiresAt = (await rl.text("Grant expiry (UTC, YYYY-MM-DDTHH:MM:SSZ)")).trim();
+		const grantAmount = await askFundingNumber(rl, "Grant amount in the native unit (blank if unknown)");
+		pool.grant = { expiresAt, ...(grantAmount !== undefined ? { amount: grantAmount } : {}) };
+	}
+	if (await askYesNo(rl, "Declare local electricity facts?", false)) {
+		const activeWatts = await askFundingNumber(rl, "Active watts (blank if unknown)");
+		const idleWatts = await askFundingNumber(rl, "Idle watts (blank if unknown)");
+		if (activeWatts !== undefined && idleWatts !== undefined && activeWatts < idleWatts)
+			throw new Error("Active watts must be at least idle watts");
+		const ratePerKwh = await askFundingNumber(rl, "Electricity rate per kWh (blank if unknown)");
+		const tariff =
+			ratePerKwh === undefined
+				? undefined
+				: { ratePerKwh, currency: (await rl.text("Electricity currency (ISO 4217, e.g. USD)")).trim().toUpperCase() };
+		pool.local = {
+			...(activeWatts !== undefined ? { activeWatts } : {}),
+			...(idleWatts !== undefined ? { idleWatts } : {}),
+			...(tariff !== undefined ? { tariff } : {}),
+		};
+	}
+	return pool;
+}
+
+async function configureTargetFunding(io: SectionIo): Promise<void> {
+	const settings = readSettings();
+	const targets = settings.targets.map((target) => target.id);
+	if (targets.length === 0) {
+		io.warn("Add a target before binding a funding pool.");
+		return;
+	}
+	const id = await io.rl.choose("Target for funding", targets, targets[0] ?? "");
+	const target = settings.targets.find((entry) => entry.id === id);
+	if (target === undefined) throw new Error("choose a configured target");
+	const evidence = targetFundingEvidence(target);
+	const declared = Object.keys(settings.funding).filter((key) => settings.funding[key]?.scheme === "declared");
+	const choices = [
+		"unknown / skip",
+		"declare and bind a new pool",
+		...(declared.length > 0 ? ["bind an existing declared pool"] : []),
+		...(evidence.observation !== undefined ? ["record detected scheme in a new pool"] : []),
+		...(target.funding !== undefined ? ["remove binding"] : []),
+	];
+	const action = await io.rl.choose(
+		`Funding for ${id}; hint: ${evidence.hint} (not a billing plan)`,
+		choices,
+		choices[0] ?? "",
+	);
+	let binding: FundingBinding | undefined;
+	let pool: FundingPool | undefined;
+	switch (action) {
+		case "unknown / skip":
+			return;
+		case "remove binding":
+			break;
+		case "bind an existing declared pool":
+			binding = { pool: await io.rl.choose("Declared pool", declared, declared[0] ?? "") };
+			if (!declared.includes(binding.pool)) throw new Error("choose an existing declared funding pool");
+			break;
+		case "declare and bind a new pool":
+		case "record detected scheme in a new pool": {
+			const key = (
+				await io.rl.text("New pool id (letters, digits, hyphens or underscores; no account identifiers)")
+			).trim();
+			if (!FUNDING_ID_PATTERN.test(key) || Object.hasOwn(Object.prototype, key) || Object.hasOwn(settings.funding, key))
+				throw new Error("choose a new pool id starting with a letter");
+			binding = { pool: key };
+			if (action === "declare and bind a new pool") pool = await declareFundingPool(io.rl);
+			else {
+				if (evidence.observation === undefined) throw new Error("the current login does not support detection");
+				pool = { scheme: "detected" };
+				binding.detection = { ...evidence.observation, verifiedAt: new Date().toISOString() };
+			}
+			break;
+		}
+		default:
+			throw new Error("choose a funding action from the list");
+	}
+	updateSettings((draft) => {
+		const current = draft.targets.find((entry) => entry.id === id);
+		if (current === undefined) throw new Error(`target ${id} no longer exists`);
+		if (binding === undefined) {
+			delete current.funding;
+			return;
+		}
+		if (pool !== undefined) {
+			if (Object.hasOwn(draft.funding, binding.pool)) throw new Error(`pool ${binding.pool} already exists`);
+			if (binding.detection && targetFundingEvidence(current).observation?.loginStamp !== binding.detection.loginStamp)
+				throw new Error("the target login or route changed; reopen funding to check it again");
+			draft.funding[binding.pool] = pool;
+		} else if (draft.funding[binding.pool]?.scheme !== "declared") {
+			throw new Error(`pool ${binding.pool} is no longer declared`);
+		}
+		current.funding = binding;
+	});
+	io.ok(binding === undefined ? `Funding binding removed from ${id}` : `Funding pool ${binding.pool} bound to ${id}`);
+}
+
 /**
  * The hand-written parts of the configure screens, named by subject. Each part's summary rows open the area
  * PART_AREA names; each action lands in the area its setting lives in, so the screens follow the shared areas.
@@ -1420,11 +1549,13 @@ const CONTENT_PARTS = {
 		fields: () => {
 			const settings = readSettings();
 			const rows: Array<readonly [string, string]> = [];
-			for (const target of settings.targets)
+			for (const target of settings.targets) {
 				rows.push([
 					target.id,
 					`${target.runtime} · ${target.url ?? "provider default"} · ${target.defaultModel ?? "no default model"}`,
 				]);
+				rows.push([`Funding for ${target.id}`, describeTargetFunding(target, settings.funding)]);
+			}
 			return rows.length ? rows : [["Connections", "No connections yet. Choose Add a target to connect a provider."]];
 		},
 		actions: [
@@ -1501,6 +1632,12 @@ const CONTENT_PARTS = {
 						else io.warn(`Could not remove target ${chosen}`);
 					}
 				},
+			},
+			{
+				label: "Funding for a target",
+				place: "targets[].funding",
+				hint: "optional fee, grant or electricity facts; does not send requests",
+				run: configureTargetFunding,
 			},
 		],
 	},

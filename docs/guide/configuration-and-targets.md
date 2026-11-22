@@ -170,6 +170,8 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `turnControl.workflows` | `["detached-collection"]` | next turn |
 | `targets` | `[]` | next turn for the catalog; next session for saved routing defaults |
 | `targets[].contextTier` | absent (`default`) | next turn |
+| `targets[].funding` | absent | next turn; optional user-only pool binding. A changed or unverified login invalidates detected evidence; declared facts do not authorize spending. |
+| `funding` | `{}` | next turn; user-only pool definitions for reporting. Pools may describe payer, native unit, fee with ISO currency and period, grant with expiry, and active/idle watts and electricity rate per kWh. |
 
 ### Chat
 
