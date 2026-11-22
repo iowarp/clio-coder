@@ -32,7 +32,11 @@ import { type CallVerdict, classifyCall, settleCheckCall } from "../../src/domai
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { extractCommandDeleteTargets, setValidationWrappers } from "../../src/domains/safety/protected-artifacts.js";
-import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import {
+	checkOutputReader,
+	createRunEffectsRecorder,
+	recordToolExecutionEffects,
+} from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
 /** A run with no workspace mutation, where every check ran on the final tree. */
@@ -100,6 +104,38 @@ it("a builder's read claims are inspection prose and need no command evidence, b
 		}),
 		null,
 	);
+});
+it("a reviewer's inspection claim rests on its reads, gateway git included; a command claim still needs a run", () => {
+	// Wave-58 build-review reviewer: read src/math.js, then git status and git diff through the gateway, then passed.
+	const recorder = createRunEffectsRecorder(process.cwd());
+	for (const [id, op] of [
+		["g1", "status"],
+		["g2", "diff"],
+	] as const) {
+		const args = { op: "call", capability: "git", args: { op } };
+		recordToolExecutionEffects(recorder, { type: "tool_execution_start", toolCallId: id, toolName: "gateway", args });
+		recordToolExecutionEffects(recorder, { type: "tool_execution_end", toolCallId: id, toolName: "gateway", args });
+	}
+	const input = {
+		contractKind: "review-verdict" as const,
+		executedCommands: recorder.snapshot().verificationCommands,
+		executedCheckingCalls: 0,
+	};
+	const verdict = (name: string, evidence = "exit 0") =>
+		JSON.stringify({ verdict: "pass", checks: [{ name, passed: true, evidence }] });
+	strictEqual(
+		groundClaimedValidations({
+			...input,
+			output: verdict(
+				"clamp implementation and scope",
+				"Inspected src/math.js and the workspace diff. No verification checks are declared or derivable in the workspace.",
+			),
+		}),
+		null,
+	);
+	strictEqual(groundClaimedValidations({ ...input, output: verdict("git diff") })?.basis, "grounded");
+	for (const name of ["npm test", "tests pass"])
+		strictEqual(groundClaimedValidations({ ...input, output: verdict(name) })?.basis, "no-command-executed", name);
 });
 it("mutation reports accept omitted denied checks as an empty array without asserting validation", () => {
 	const contract = { kind: "mutation-report" as const };

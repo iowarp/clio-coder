@@ -2,6 +2,7 @@ import path from "node:path";
 import { withoutLeadingCdTo } from "../../core/leading-cd.js";
 import { shellJoin } from "../../core/shell-quote.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { checkGitFields } from "../../tools/git-inspect.js";
 import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { isVerifyListing } from "../../tools/verify/surface.js";
@@ -248,6 +249,12 @@ export function validationCommandOf(
 			return target ? `${detected.matched} ${target}` : detected.matched;
 		}
 		return detected.matched;
+	}
+	// The typed git tool, called directly or through the gateway, reads as the bash `git diff`/`git status` it runs.
+	if (toolName === ToolNames.Git && scope === "grounding" && args !== undefined) {
+		const fields = checkGitFields(args);
+		if (fields.ok && (fields.op === "diff" || fields.op === "status")) return `git ${fields.op}`;
+		return null;
 	}
 	return typedValidationSummary(toolName, { args: args ?? {} });
 }
