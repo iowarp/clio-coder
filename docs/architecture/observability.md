@@ -30,7 +30,7 @@ A run whose seal verifies but whose trust is compromised posts a warning; a run 
 
 ## Categories
 
-Directories resolve under platform XDG defaults (on Linux, `~/.config/clio-coder/`, `~/.local/share/clio-coder/` and `~/.local/state/clio-coder/`). `/view` lists thirteen categories in this order (`VIEW_ARTIFACT_CATEGORIES`).
+Directories resolve under platform XDG defaults (on Linux, `~/.config/clio-coder/`, `~/.local/share/clio-coder/` and `~/.local/state/clio-coder/`). `/view` lists fourteen categories in this order (`VIEW_ARTIFACT_CATEGORIES`).
 
 | Category | Description | Backing path |
 | --- | --- | --- |
@@ -43,6 +43,7 @@ Directories resolve under platform XDG defaults (on Linux, `~/.config/clio-coder
 | **Task ledgers** | Per-turn task-board goals, active runs, required validation evidence, and operator-task provenance when present. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
 | **Workspace outputs** | Latest successful `artifact`, `write`, or `edit` result for each normalized path on the active session branch. Missing files remain visible as recorded facts. | Recorded path beneath the session metadata `cwd` |
 | **Tool outputs** | Offloaded large outputs or execution logs. | `<stateDir>/scratch/<sessionId>/<sha256 of the captured text>.txt` |
+| **Screenshots** | One row per screenshot file a session's tool calls named (`details.shots`) and still on disk, newest first. The pane draws the picture (8 MiB cap) above a path and size line where the terminal draws images, and shows that line alone elsewhere. | The screenshot file the tool wrote |
 | **Protected artifacts** | Validation-protected artifact metadata and its absolute artifact path when available. | Session ledger record plus the protected workspace path |
 | **Compaction summaries** | Summaries of compacted history. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
 | **Prompt manifests** | One record per prompt compile from the session journal's `prompt.compiled` records and their `prompt-structure` objects: prompt hash, token estimate, thinking level, sections and fragment content hashes, without prompt text. Unreadable records appear as an explicit read-error artifact. | `<stateDir>/telemetry/sessions/<sessionId>/journal.jsonl` |

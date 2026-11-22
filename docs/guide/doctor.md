@@ -47,7 +47,7 @@
 | Row(s) | Checks and failure conditions |
 | --- | --- |
 | `repair` | `!!` (`--fix could not finish: <reason>`) if `--fix` threw while repairing directories. |
-| `Clio Coder version`, `node version`, `platform`, `engine runtime` | CLI version, Node `>= 22.19.0`, OS/arch, bundled/SDK runtime presence. |
+| `CLIO Coder version`, `node version`, `platform`, `engine runtime` | CLI version, Node `>= 22.19.0`, OS/arch, bundled/SDK runtime presence. |
 | `install method` | Kind (`installer`, `npm`, `pnpm`, `bun`, `homebrew`, `winget`, `source`, `local`, `unknown`), tracking/pin state (`follows <channel>; background updates on` or `off (<blocker>)` where blocker is `env`\|`setting`\|`installer`; `pinned to <version> since <date> (<origin>); release with clio-coder upgrade --channel <channel>`; npm/pnpm/bun `<kind> global; follows latest through <kind>; update after exit on\|off (<reason>)`), last background update / waiting `pid@host` holds. `WARN` on launcher/Node mismatch, failed/waiting update, or `unknown` layout. |
 | `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir` | Absolute, distinct, non-nesting paths (including symlinks). |
 | `settings.yaml*` | `settings.yaml` (`OK` or `!!` invalid keys), `settings.yaml mode` (`WARN` > `0600` POSIX; `--fix` prints `tightened <old> -> 600`; skipped on Windows), `settings.yaml booleans` (`WARN` YAML 1.1 `on`/`off`), `settings.yaml retired values`, `settings.yaml repair` / `repair skipped` (`WARN` when aliases/anchors/tags block rewrite). |
@@ -60,6 +60,9 @@
 | `session store` | Readable session ledger count; `!!` on unreadable ledgers/dirs. |
 | `telemetry`, `cache telemetry` | Effective capture mode, workspace consent count/grant (`WARN` on unreadable settings/consent), and latest session prompt-cache stats (`INFO` if no cached calls, `WARN` if journal unreadable; `clio-coder telemetry doctor` checks seals). |
 | `state storage`, `home storage`, `install root` | Disk footprint of state (with top subdir), config/data/cache, and installer root (`WARN` when binary runs outside an existing installer root; remove with `clio-coder uninstall --inactive`). |
+| `sandbox cache` | Size of the main-session sandbox's tool cache against `safety.sandboxCacheMaxGiB`; `WARN` when over the cap. `--fix` removes the least recently used tool directories until it fits, and skips while a running process holds the cache. |
+| `dispatch reservations`, `dispatch capacity leases`, `dispatch cache lanes` | Valid records in the dispatch admission store, with the live owners of prompt cache lanes. A live record no current reader accepts is `!!` and refuses dispatch until `--fix` drops it; a settled one is `WARN` and is dropped at the next start (a cache lane at the next store write) or by `--fix`. An unreadable store shows as `dispatch admission store`, which `--fix` resets. |
+| `model catalog overlays`, `model catalog file` | Shown when an overlay directory exists: its entry count and model families. A file that fails to parse is a `WARN` `model catalog file` row naming it; the other overlay files still apply. |
 | `target <id>`, `cache <id>` | `WARN` if OpenAI/Anthropic-compat target behaves like native LM Studio/Ollama (suggests `clio-coder targets convert`) or has cache advisories; `!!` on unknown runtime. |
 | `proxy`, `scheduler commands` | `proxy` shown when `HTTP_PROXY`/`HTTPS_PROXY` set; `scheduler commands` shown when sandbox active and Slurm/PBS/LSF/Flux CLI found on `PATH`. |
 
@@ -72,7 +75,7 @@ Conditional rows:
 ## External tools, PDFs, and panes
 
 `external tool <id>` covers `asciinema`, `herdr`, `yazi`, `croc`, `cliamp` (never `error`) ([doctor-toolchain.ts](../../src/cli/doctor-toolchain.ts), [resolve.ts](../../src/domains/toolchain/resolve.ts)):
-- `herdr` uses CLIO Coder's pinned copy only: ``pane host <pin> (Clio's pinned copy) at <path>`` (`OK`), `` pane host <pin> is not installed; run `clio-coder panes install` `` (`WARN`), or `no pinned pane host for this platform; Clio runs without panes` (`INFO`).
+- `herdr` uses CLIO Coder's pinned copy only: ``pane host <pin> (CLIO Coder's pinned copy) at <path>`` (`OK`), `` pane host <pin> is not installed; run `clio-coder panes install` `` (`WARN`), or `no pinned pane host for this platform; CLIO Coder runs without panes` (`INFO`).
 - Other tools prefer `PATH` when version `>= minimumVersion`, else vendored copy (`WARN` on missing `yazi` while files pane enabled; `INFO` on missing `croc`/`cliamp`/`asciinema`):
 
 | Detail | Meaning |

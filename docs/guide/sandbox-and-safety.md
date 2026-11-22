@@ -121,6 +121,30 @@ only when one of your messages mentions leaving the sandbox; otherwise it asks
 you. An `ask_user` answer approves the escape only when its question names
 leaving the sandbox, so "Run it in the sandbox?" answered yes approves nothing.
 
+An escape whose only reason to ask is leaving the sandbox can be approved for
+the rest of the session with `Approve for this session: <scope>`: `Alt+P` on
+the approval card, `allow-session-scope` over ACP, and at contained `yolo` the
+option CLIO Coder appends to an `ask_user` question that names leaving the
+sandbox. The scope is exactly the script files the call runs (canonical path
+and SHA-256 of their content), its working directory and its environment
+assignments. A rerun of those unchanged files from that directory with that
+environment runs without a card or the judge; an edited or other script,
+another directory or other environment asks again. Only your own pick grants
+a scope, never typed text, a steer or a default taken while you were away.
+The grant is kept in the session, so a resumed session keeps it, with
+environment values stored only as digests.
+
+When the judge reviews a command that runs a script file inside the workspace
+or the scratch roots, it reads the script's first 4 KiB, with secrets
+redacted, as data, and it sees `$TMPDIR` and the scratch roots resolved beside
+your messages. A message naming the script's directory, spelled out, as
+`~/...` or as `$TMPDIR`, counts as naming that scope.
+
+`safety.liveCheckTargets` (user settings only) names Copilot targets whose
+runtime login file the main session's contained commands may read, read-only,
+so a live check of such a target runs inside the sandbox. Only `copilot-sdk`
+targets qualify; dispatched workers and host verification keep every mask.
+
 Scheduler clients authenticate through a local daemon socket that the sandbox
 refuses, so a script that calls `sbatch` itself fails inside the sandbox.
 Submit from the command the agent runs rather than from a wrapper script. See

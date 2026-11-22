@@ -257,7 +257,7 @@ parameter, no workspace parameter, no unofficial Node mirror and no forced Node 
 `install.cmd` has no options of its own. It passes its arguments to
 `install.ps1`, so a CMD user writes PowerShell parameter names such as
 `-Version 0.6.0`. Both installers end with the next step for this home, then `Desktop app: clio-coder gui`.
-The next step is `Clio Coder <version> is installed.`, `Next:  cd <your project> && clio-coder` and one line
+The next step is `CLIO Coder <version> is installed.`, `Next:  cd <your project> && clio-coder` and one line
 about the first launch, such as `The first launch sets up a model. Found: ANTHROPIC_API_KEY.` or
 `Chat uses <target> / <model>.` A package older than 0.7.1 gets `Run: clio-coder` instead. While the launcher
 directory is not on `PATH`, a closing line names the launcher's full path to run until it is.
@@ -342,7 +342,7 @@ When none resolves:
   or a failure.
 - **Any other case.** A headless `clio-coder run --agent`, `clio-coder configure --runtime claude-sdk`
   with flags, and a declined offer have nobody to ask. The run or command fails with
-  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.292. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.292; it does not change Clio's installation.`
+  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.292. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.292; it does not change CLIO Coder's installation.`
   (error code `CLAUDE_AGENT_SDK_UNAVAILABLE`). When `CLIO_CODER_CLAUDE_SDK_DIR` is set
   and holds no SDK, the message names that prefix instead.
 
@@ -360,7 +360,7 @@ After a successful install of a package at 0.6.0 or later, `install.sh` offers
 skipped when the background app already reports `installed`. The default is to
 ask, and only when stdout is a terminal and `/dev/tty` is readable, so a pipe
 from `curl` with no terminal skips it. The prompt reads
-`Add the Clio Coder desktop app? It starts at login and appears in your app menu. [Y/n]`.
+`Add the CLIO Coder desktop app? It starts at login and appears in your app menu. [Y/n]`.
 Enter or `y` installs; anything else skips. `--gui` installs without asking and
 `--no-gui` skips; `CLIO_CODER_INSTALL_GUI` sets the same choice. A failed
 install is a warning, not an installer failure:
@@ -368,10 +368,10 @@ install is a warning, not an installer failure:
 
 The installer does not echo the command's JSON report. After a successful
 install it states the outcome in two lines. The first is
-`desktop app installed; it starts at login and is in your app menu as Clio Coder, or run: clio-coder gui`,
+`desktop app installed; it starts at login and is in your app menu as CLIO Coder, or run: clio-coder gui`,
 or, when the report shows the Windows shortcut installed under WSL,
-`desktop app installed; open Clio Coder from the Windows Start Menu or your app menu, or run: clio-coder gui`.
-The second is `the desktop app uses Clio Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>`.
+`desktop app installed; open CLIO Coder from the Windows Start Menu or your app menu, or run: clio-coder gui`.
+The second is `the desktop app uses CLIO Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>`.
 The `origin` in the report from `gui background install` names the port the app
 actually listens on, which is `7373` while another program holds `4343`.
 
@@ -416,7 +416,7 @@ what an npm, pnpm or Bun install sees on its first launch. Bare `clio-coder` run
 the plain terminal without a launch notice until you run `clio-coder panes install`;
 `/panes`, `/files`, Alt+E and `clio-coder doctor` name that command meanwhile.
 When an upgrade moves the pane host pin in a home that had panes, the next launch
-installs the new pin once (`Clio Coder: setting up terminal panes (one time)...`).
+installs the new pin once (`CLIO Coder: setting up terminal panes (one time)...`).
 If that fails, it says so once, continues in the terminal, and does not try again
 for 24 hours; `clio-coder panes install` retries at any time.
 
@@ -483,7 +483,7 @@ The tables above cover the per-user roots. A repository CLIO Coder works in also
 | `.clio-coder/hooks.yaml`, `.clio-coder/hooks.local.yaml` | Operator input | Project-declared hooks. | Yes. | Kept |
 | `.clio-coder/rules/**/*.md` | Operator input | Path-scoped project rules injected into the prompt. | Yes. | Kept |
 | `.clio-coder/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
-| `.clio-coder/playbooks/*.md`, `.clio-coder/playbooks/commands.yaml` | Overlay | Playbooks the fleet runs and their command registry. Adds to the builtin playbooks that ship in the package. A workspace that still has `.clio-coder/fleets/` is converted once, the first time CLIO Coder opens it. | Yes; builtin playbooks remain. | Kept |
+| `.clio-coder/playbooks/*.md`, `.clio-coder/playbooks/commands.yaml` | Overlay | Playbooks the fleet runs and their command registry. Adds to the builtin playbooks that ship in the package. A `.clio-coder/fleets/` directory is not read or converted; move its playbooks into `.clio-coder/playbooks/`. | Yes; builtin playbooks remain. | Kept |
 | `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
 | `.clio-coder/skills/**` | Overlay | Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below. | Yes; loose skills must be restored by the operator. | Kept, and named |
 | `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Installed plugin, skill, agent, prompt and playbook packages and their scoped state. `clio-coder library install skill:<name> --project` installs here. They load only while their package identities are approved. An operator install into new or trusted state can approve its written identities; identical reinstalls, disables and removals preserve consent ([resource-library.md](resource-library.md)). The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
@@ -520,8 +520,8 @@ The core files are created automatically during the first run. `settings.yaml`, 
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **Config** | `workspace-trust/` | Project approvals from `clio-coder config trust`, one record per workspace. Operator decisions rather than disposable state, so they survive `reset --state` and `uninstall --keep-config`. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
 | **Config** | `migrations.json` | Log of successfully applied schema/state migrations. It sits beside the settings whose shape it records, so it survives `reset --state` and `uninstall --keep-config`. A home created by this run starts with every registered migration recorded. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
-| **State** | `home.json` | Install metadata: CLIO Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
-| **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. At the cap a write evicts undecided proposals first; an invalid record moves to `memory/records.invalid.json`. | `0o600` (rw-------) | Removed by uninstall / `reset --data`. |
+| **State** | `home.json` | Install metadata: CLIO Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown), and `containedYoloNoticedAt` (when the one-time contained-yolo notice was shown; the notice never writes `settings.yaml`). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
+| **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. At the cap a write evicts undecided proposals first; a record this build cannot read is dropped at the next store write. `doctor` names an older or partly unreadable store, and `doctor --fix` rewrites it at the current version. | `0o600` (rw-------) | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program CLIO Coder downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `telemetry/{process,sessions,runs}/<id>/` | One telemetry scope per process, session and run: its hash-chained `journal.jsonl` segments (safety decisions, approvals and tool facts included), content-addressed `objects/`, and `bundle.json` once sealed. Beside them, `telemetry/consent.json` (research content consent) and `telemetry/install.json` (this installation's random id). See [Layout](../architecture/telemetry.md#layout). | `0o600` (rw-------) for journals, objects, seals and consent | `clio-coder telemetry prune --apply` applies retention; removed by uninstall / `reset --state`. |
 | **State** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`, with spilled tool output beside them. | `0o700` directories, `0o600` files | Removed by uninstall / `reset --state`. |
@@ -818,7 +818,7 @@ checked. A desktop app the previous version installed is therefore accepted by
 `clio-coder gui`, `gui background restart` (which also re-pins the app's launch
 paths to the running version), `reset` and `uninstall`. An app that belongs to a
 different installation is refused: `reset` and `uninstall` stop with
-`Background service belongs to another installation; Clio state was left unchanged.`
+`Background service belongs to another installation; CLIO Coder state was left unchanged.`
 and exit 1, and `gui` will not take it over.
 
 An incomplete post-install step makes the bootstrap installer exit nonzero and
@@ -1052,13 +1052,13 @@ Selective recovery wipes:
 ```bash
 clio-coder reset --state|--data|--cache|--auth|--settings|--all [--dry-run] [--force] [--json]
 ```
-Levels are combinable except `--all`, which exits 2 with `--all cannot be combined with --state, --data, --cache, --auth, or --settings`. With no level, reset exits 2 without touching anything, because a default would delete every transcript. Each level clears exactly the root or file it names and nothing else, then recreates the empty structure unless `--dry-run` is present. `--force` (`-f`) skips the confirmation prompt and is required when there is no terminal to confirm on; without a terminal, `--force` or `--dry-run`, the command exits 2 with `` `clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt ``. A dry run never needs it. An unknown flag and an unsafe directory layout also exit 2. A declined confirmation exits 0; a failure to delete exits 1.
+Levels are combinable except `--all`, which exits 2 with `--all cannot be combined with --state, --data, --cache, --auth, or --settings`. With no level, reset exits 2 without touching anything, because a default would delete every transcript. Each level clears exactly the root or file it names and nothing else, then recreates the empty structure unless `--dry-run` is present. `--yes` (`-y`) skips the confirmation prompt and is required when there is no terminal to confirm on; without a terminal, `--yes` or `--dry-run`, the command exits 2 with `` `clio-coder reset` needs a terminal to confirm; pass --yes to skip the prompt ``. A dry run never needs it. An unknown flag and an unsafe directory layout also exit 2. A declined confirmation exits 0; a failure to delete exits 1.
 
 Before clearing state, reset stops and removes an owned background app service through its
 ownership checks, and lists `Removed Background service` among the completed steps.
 Independent desktop launchers remain installed. If this build has no
 graphical application to verify the service with, or the service cannot be stopped, reset
-exits 1 with `Clio state was preserved` before deleting any user root; a dry run reports
+exits 1 with `CLIO Coder state was preserved` before deleting any user root; a dry run reports
 the same limit and exits 0. Previews never stop processes. Reinstall the optional
 background service explicitly if needed after a state reset. Reset and uninstall also stop
 a legacy documentation process only when its ownership can be verified, before removing
@@ -1099,8 +1099,8 @@ hash -r
 
 `--keep-config` preserves the whole config root (`settings.yaml`, `credentials.yaml` and anything else
 in it) and `--keep-data` preserves the data root (memory, the project store and vendored tools). The cache and
-state roots always go. `--force` (`-f`) skips the confirmation prompt. Without a terminal, `--force` or
-`--dry-run`, the command exits 2 with `` `clio-coder uninstall` needs a terminal to confirm; pass --force to skip the prompt ``.
+state roots always go. `--yes` (`-y`) skips the confirmation prompt. Without a terminal, `--yes` or
+`--dry-run`, the command exits 2 with `` `clio-coder uninstall` needs a terminal to confirm; pass --yes to skip the prompt ``.
 An unknown flag and an unsafe directory layout exit 2. A declined confirmation exits 0. A lock held by an installer,
 another running session, an unverifiable graphical installation or a failed delete exits 1.
 `uninstall`, and `reset` with `--state`, `--data` or `--all`, stop with exit 1 while a session is still open on this state

@@ -11,7 +11,7 @@ Music plays only when all three of these hold. `/music` reports each one that is
 | Requirement | How to satisfy it | Reason `/music` reports when missing |
 | --- | --- | --- |
 | The setting is on | Set `integrations.music.enabled: true` in `settings.yaml`, or in `/settings` under Workspace, Panes (the row is named `Music pane`). | `it is off; turn on Music pane in /settings (Workspace, Panes) or set integrations.music.enabled: true` |
-| A pane host answers | Run CLIO Coder in a Herdr pane with the pane layer active. Bare `clio-coder` opens its own private pane host, and `clio-coder --with-panes` started inside a Herdr pane joins that host. Herdr must set `HERDR_ENV=1` and answer a ping on its socket within one second. | `herdr panes are not available (<detection reason>)`, for example `HERDR_ENV is not 1, so Clio is not running inside a pane host` or `no herdr socket answered a ping: tried <socket paths>` |
+| A pane host answers | Run CLIO Coder in a Herdr pane with the pane layer active. Bare `clio-coder` opens its own private pane host, and `clio-coder --with-panes` started inside a Herdr pane joins that host. Herdr must set `HERDR_ENV=1` and answer a ping on its socket within one second. | `herdr panes are not available (<detection reason>)`, for example `HERDR_ENV is not 1, so CLIO Coder is not running inside a pane host` or `no herdr socket answered a ping: tried <socket paths>` |
 | cliamp resolves | A `cliamp` on `PATH` at version 1.63.2 or newer, or the vendored copy from `clio-coder tools install cliamp`. | `cliamp <resolution>; install it yourself with ...`, naming the install commands below |
 
 [Panes and the Files Pane](panes-and-files.md) covers how a session joins its pane host, the pane flags and the `interface.panes.*` settings.
@@ -120,7 +120,7 @@ A first tap acts at once, as the bare `/music` row above. A second tap of the sa
 | --- | --- | --- | --- |
 | `integrations.music.enabled` | `false` | At the next `/music` or `Alt+A`. The hidden-at-boot preparation reads it once, after the first frame. | Allows `/music` and `Alt+A` to open cliamp. Row name `Music pane`. |
 | `integrations.music.station` | `http://radio.cliamp.stream/lofi/stream` | At the next `/music`. | The station `/music on` starts. Must be a non-empty string; it is trimmed. Row name `Music station`. |
-| `integrations.music.agentControl` | `false` | After a restart. | Registers the `music` tool so the model can drive the pane. Row name `Clio controls music`. |
+| `integrations.music.agentControl` | `false` | After a restart. | Registers the `music` tool so the model can drive the pane. Row name `CLIO Coder controls music`. |
 
 `integrations.music` accepts only these three keys, and the two switches must be booleans. Hiding, pausing and the key bindings add no settings. [Configuration Reference](configuration-reference.md) lists them with every other key.
 

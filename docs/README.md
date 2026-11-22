@@ -97,6 +97,8 @@ the [GUI guide](guide/gui.md) covers the browser interface.
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
 | Focus radio in a Herdr dock: `/music`, cliamp install, the `integrations.music.*` settings, and the opt-in `music` tool | [Music Pane](guide/music.md) |
+| The agent's `browser` tool: pages, Playwright scripts, dev servers, screenshots, host grants and attaching to a running browser | [Browser](guide/tool-usage.md#browser-drive-a-headless-browser-session) |
+| A second terminal on a running session: `/attach observe\|approve\|pair` and `clio-coder session attach` | [Interactive slash commands](guide/commands-and-modes.md#interactive-slash-commands) |
 | The browser interface: starting it, the background app, the installer option, shell layout, approvals, and what the local server exposes | [Graphical Application](guide/gui.md) |
 
 ### Extend CLIO Coder: which page

@@ -101,9 +101,9 @@ session runs in the plain terminal without a launch notice, a pane feature such
 as `/panes`, `/files` or `Alt+E` answers ``terminal panes are not installed. Run
 `clio-coder panes install`, then restart `clio-coder` ``, and `clio-coder doctor`
 warns; `clio-coder panes install` adds them. A home that already
-has panes updates them when the pinned version moves: the launch prints `Clio
+has panes updates them when the pinned version moves: the launch prints `CLIO
 Coder: setting up terminal panes (one time)...` and downloads the new pin,
-waiting at most 30 seconds. If that fails, it prints ``Clio Coder: terminal
+waiting at most 30 seconds. If that fails, it prints ``CLIO Coder: terminal
 panes unavailable (<reason>). Continuing in this terminal; run `clio-coder
 panes install` to retry.`` and the session runs in the plain terminal. Later
 launches skip that update for a day, or until the pinned version changes, and
@@ -158,13 +158,13 @@ private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 ### A second terminal in the same folder gets its own panes
 
-Opening CLIO Coder in a folder whose pane host another open terminal still shows never joins that terminal's session. The second launch prints `Clio Coder: this folder already has a Clio in another terminal; this one has its own panes.` and starts its own private host with its own session and full panes. A folder has up to four hosts. A launch takes them in slot order and rejoins the first one whose session no open terminal shows, which is a host you detached from. When all four are shown in other terminals, the launch prints ``Clio Coder: terminal panes unavailable (this folder's pane host is in use by another terminal, pid N, so this terminal starts its own session). Continuing in this terminal.`` and runs without panes, with its own session, until one of the four exits (#420). A pane host per launch is verified on Linux only.
+Opening CLIO Coder in a folder whose pane host another open terminal still shows never joins that terminal's session. The second launch prints `CLIO Coder: this folder already has a CLIO Coder in another terminal; this one has its own panes.` and starts its own private host with its own session and full panes. A folder has up to four hosts. A launch takes them in slot order and rejoins the first one whose session no open terminal shows, which is a host you detached from. When all four are shown in other terminals, the launch prints ``CLIO Coder: terminal panes unavailable (this folder's pane host is in use by another terminal, pid N, so this terminal starts its own session). Continuing in this terminal.`` and runs without panes, with its own session, until one of the four exits (#420). A pane host per launch is verified on Linux only.
 
 The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate CLIO Coder roots and separate git worktrees get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Non-terminal stdin or `TERM=dumb` skips hosting. This is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
 
 When the creator launcher receives SIGTERM, or SIGHUP because its terminal closed, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running. The launcher then exits 129 after SIGHUP and 143 after SIGTERM. A closed terminal therefore ends that terminal's session and leaves no host behind, as it would in a plain terminal; leave CLIO Coder running by detaching from herdr instead.
 
-When CLIO Coder inside the pane crashes or ends on a signal, it still records its exit status. The launcher disposes of the workspace, prints `Clio workspace ended with exit code N.` on stderr, and exits with that status (for example 1 or 143), so the outer terminal and any script around it see the failure ([workspace-launch.ts](../../src/cli/workspace-launch.ts)).
+When CLIO Coder inside the pane crashes or ends on a signal, it still records its exit status. The launcher disposes of the workspace, prints `CLIO Coder workspace ended with exit code N.` on stderr, and exits with that status (for example 1 or 143), so the outer terminal and any script around it see the failure ([workspace-launch.ts](../../src/cli/workspace-launch.ts)).
 
 ## What doctor says
 
@@ -181,7 +181,7 @@ INFO external tool cliamp   not found (install with `clio-coder tools install cl
 INFO files pane profile     /home/you/.cache/clio-coder/yazi/profile (missing); user config /home/you/.config/yazi is separate and untouched
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
-OK   naming panes           no legacy Clio Coder pane ownership tokens or watch titles found
+OK   naming panes           no legacy CLIO Coder pane ownership tokens or watch titles found
 OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is writable
 ```
 
@@ -193,9 +193,9 @@ otherwise `files pane profile` reads `disabled by settings`. A missing croc or c
 doctor prints only `panes mode` and `panes layout` and does not probe a socket. Run inside a pane host, it adds
 `panes socket`, `panes protocol` and `panes binary`. `panes binary` names the pinned herdr the private host runs, as the `external tool herdr` row does; a herdr on PATH is never that binary.
 The `panes mode` row reports what a bare `clio-coder` would do from where doctor runs, by the same rule the launcher uses.
-From a pane of your own herdr it reads ``nested; bare `clio-coder` opens Clio's private pane host inside this herdr pane ...``
+From a pane of your own herdr it reads ``nested; bare `clio-coder` opens CLIO Coder's private pane host inside this herdr pane ...``
 and names `clio-coder --with-panes` as the way to join that herdr as a guest; this row is OK even when your herdr does not answer.
-Inside CLIO Coder's own host, or under tmux, zellij, screen or `TERM=dumb`, it says the launch stays in the terminal and why. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
+Inside CLIO Coder's own host, or under tmux, zellij, screen or `TERM=dumb`, it says the launch stays in the terminal and why. When a host answers, `panes protocol` reads `server <version>, protocol <n>; CLIO Coder's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
 The `panes journal dir` row reads `has no run journal yet` when `<state>/telemetry/runs` does not exist and warns when it is not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
 `clio_owner=clio:mux` token or the stale `clio watch` title; quit and cleanup recognize both token schemes.
 
@@ -299,7 +299,7 @@ When Herdr declines a move, the notice names the reason (`the files pane did not
   terminal is restored:
 
   ```text
-  Clio left 1 pane open in herdr: shell (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.
+  CLIO Coder left 1 pane open in herdr: shell (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.
   ```
 
   Nothing is printed when only docks were open.

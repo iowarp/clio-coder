@@ -540,6 +540,8 @@ placement does not read it; use `fleet.defaultNode` or a profile pin.
 
 Each native worker response has a host deadline of `safety.limits.workerResponseSeconds` (default 600 seconds), starting after local residency waits and model loading complete. After tools lock or during synthesis, a round keeps that deadline and the same output budget as any other round: the model's own output limit, bounded by the remaining context window and any tighter budget the request sets. Those rounds also request thinking off wherever the model and runtime support it, except on Codex, where the reasoning level leads the cached prompt and a locked round keeps the run's level. Reaching a response deadline, or a locked round stopping on its output limit, fails the run with `worker_turn_timeout` or `worker_output_cap_exhausted` and keeps unfinished output partial. The `worker_output_cap_exhausted` detail names the limit and where it came from. Both codes are sealed in the run record and suppress automatic dispatch retry and failover without penalizing the target breaker; the fleet step settles as failed and follows its `onFailure` policy. Unlocked output truncation retains the normal provider and tool-call recovery behavior. Usage is retained only when the provider reported it; otherwise the interrupted call records usage as unknown (`observed: false`), since compatible providers may send usage only in their final chunk.
 
+Each dispatched run also has a wall clock, `fleet.limits.runTimeoutMs` (default 1,800,000 ms, 30 minutes). At 85% of it the worker's next round is its handback round (`WALL_HANDBACK_SHARE` in [handback.ts](../../src/domains/dispatch/handback.ts)). A run that reaches the limit is stopped by the host and seals `timed_out` with outcome code `worker_run_timeout`, which never retries; a stopped builder's result names the paths it changed. A recipe's `budget.timeoutMs` or the call's `timeout_ms` can only lower the wall clock, and the time a writer spends queued for the writer set counts against it ([Writer set](#writer-set)).
+
 `fleet.concurrency` sets the global worker pool and the implicit local node's
 limit. SSH nodes always use their own `maxWorkers`. A number means exactly that
 many workers for both. The default is `auto`. An explicit value in
@@ -615,7 +617,13 @@ A file-scoped edit worker whose reply ends with no tool call gets one more repai
 before the run settles. It is told that nothing was done and which edit tools it was
 admitted. The round applies to a mutation-report contract on a run that is not
 read-only, has an advisory budget, admits `edit` or `write`, and is not already in its
-synthesis lock. A second reply with no tool call ends the run as `worker_no_work`.
+synthesis lock. A second reply with no tool call leaves the builder obligation unmet and the grader settles the run as `obligation_unmet` ([grading.ts](../../src/domains/dispatch/grading.ts)). The old outcome code `worker_no_work` is retired and survives only so old journals still read ([run-vocabulary.ts](../../src/core/telemetry/run-vocabulary.ts)).
+
+### Worker capability envelope
+
+Each dispatched run gets one sealed capability envelope that decides what it may touch: its tools (direct and behind the gateway), bound skills, read and write scope, shell and check reach, network, approval route and sandbox facts ([envelope.ts](../../src/domains/dispatch/envelope.ts)). Admission, the plan card, the worker spec, the worker's prompt and the receipt all read that one envelope, and the worker refuses a spec whose envelope wraps a permit with another digest. Layers only subtract, in a fixed order: the run's role in the work graph (not its recipe id), which also adds the tools every run in that role holds, such as `code_nav`; the request's tool profile and deny list; what the selected runtime offers; and the host facts of the placement (network, shell, write confinement). A tool beyond the dispatching turn's own ceiling is not subtracted: dispatch refuses the request and names the recipes that fit.
+
+The write mode is `none`, `roots` (writes only under its write roots), `worktree` (its own task worktree, merging back only its roots when it has any) or `workspace`. Each capability a layer took away that the caller could act on is a `withheld` entry with its reason (`role`, `tool-profile`, `denied`, `runtime`, `no-network`, `no-shell`, `write-roots-unconfined`, `judge-unseated` or `main-route-unavailable`) and, where one exists, a remedy; the plan card prints one `withheld:` line per entry and the receipt keeps them. Orchestrator-only tools such as `ask_user` and `consult` never reach a worker and get no entry. `clio-coder run` reports each run's sealed envelope at `run_end.dispatch.runs[].safety.envelope`.
 
 ### Worker permission refusals
 
@@ -654,7 +662,7 @@ The native worker reports the last provider HTTP status on stderr, and a provide
 or 403 retries on another target. A 429 retries on another target after at least
 one second. A 408 is not deterministic and retries. Cancellation, policy denials,
 permission failures and the deterministic outcome codes (`worker_tool_call_cap_exhausted`,
-`worker_no_work`, `merge_withheld`, `result_contract_exhausted` and the others in
+`obligation_unmet`, `worker_not_done`, `worker_partial_work`, `assurance_compromised`, `worker_run_timeout`, `merge_withheld`, `result_contract_exhausted` and the others in
 `isDeterministicOutcomeCode`) never retry, unless the attempt left its [evidence obligation](#evidence-obligations-and-the-one-retry) unmet. `result_contract_invalid` is the exception: the host's validator found an otherwise successful worker's final result nonconforming, so the failure is classed `model-quality` and the retry avoids that agent and model without penalizing the target. No automatic retry follows a failed attempt
 that ran a state-changing call or whose tool telemetry cannot prove the checkout
 unchanged. Backoff starts at 500 ms, doubles per attempt and stops at 60 seconds.
@@ -663,20 +671,20 @@ The full class table is in
 
 #### Evidence obligations and the one retry
 
-Every run owes its result some evidence, resolved once from its role in the work graph and not from its recipe id ([obligation.ts](../../src/domains/dispatch/obligation.ts)). A gate position decides first (reviewer, judge, council seat), then a verification recipe is a checker, then a run that may write is a builder, and any other run is an explorer.
+Every run owes its result some evidence, resolved once from its role in the work graph and not from its recipe id ([obligation.ts](../../src/domains/dispatch/obligation.ts)). A gate position decides first (reviewer, judge, council seat), then a recipe of the checker capability class (the verifier and the debugger) is a checker, then a run that may write is a builder, and any other run is an explorer (`resolveRunRole`).
 
 | Role | Obligation |
 | --- | --- |
-| Explorer | `answer`; `observed-evidence` when its contract is `scout-report` or the task declares `read_roots` |
+| Explorer | `answer`; `observed-evidence` when its report kind is `scout-report`, `provenance-report`, `research-report` or `context-handbook`, or the task declares `read_roots` |
 | Builder | `change-or-declared` |
 | Checker | `executed-checks`; also `cited-evidence` when its contract is `review-verdict` (a standalone reviewer) |
 | Reviewer, judge | `cited-evidence` |
 | Council seat | `answer` |
 
-A gate's read roots are what it may read, not what it was asked to read, so they never make a reviewer or judge owe `observed-evidence`; a compete judge that ranks from the evidence in its task without a tool call settles normally. In this release two obligations are checked at settlement:
+A gate's read roots are what it may read, not what it was asked to read, so they never make a reviewer or judge owe `observed-evidence`; a compete judge that ranks from the evidence in its task without a tool call settles normally. In this release these obligations are checked at settlement:
 
 - A run that owes `observed-evidence` and executed no tool settles `failed`, with the detail `obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited`.
-- A native builder that ends `worker_no_work` with no tool call and an unchanged tree leaves `change-or-declared` unmet. A builder that asked for wider write roots has declared, so it meets it.
+- A builder leaves `change-or-declared` unmet, settling `obligation_unmet`, when it executed no tools, when policy refused or denied its state-changing calls and nothing changed, or when a permission ask went unanswered or denied and nothing changed. A builder that declares its assignment `partly_done` or `not_done` and changed nothing, or recorded a limitation and changed nothing, or asked for wider write roots, settles `worker_not_done`; one that declared it partly done after changing files settles `worker_partial_work`. A builder whose assurance is compromised settles `assurance_compromised`. One rule table in `src/domains/dispatch/grading.ts` decides these, and the verdict is sealed on the receipt. Unanswered asks, and unmet observed-evidence, executed-checks or cited-evidence obligations, are `obligation_unmet` too. `worker_not_done`, `worker_partial_work` and `assurance_compromised` are deterministic and never retry; an unmet obligation retries once as described below.
 
 An unmet obligation is the model's failure, classed `model-quality` even under a deterministic code, and it is retried once, only on another model, within `fleet.retry.maxRetries`. A route the caller pinned is not retried, and the run settles with `obligation <name> unmet, not retried because the route is explicitly pinned to <target>/<model>`. Under `approved` failover the retry moves only to an envelope candidate with another model; otherwise it takes the first eligible route with another wire model on any target. When no such route exists the run settles failed and the detail names why. A builder in a task worktree keeps that worktree for its retry, and it is discarded only when no retry follows.
 
@@ -1182,7 +1190,7 @@ on macOS does not count as covering the run for this purpose
 
 A write worker whose change needs a path outside its write roots stops before editing
 and calls `limitation` with reason `write-root`, the paths it needs (relative to the
-run's working directory) and a scope. That attempt ends `worker_no_work`, and its detail
+run's working directory) and a scope. That attempt ends `worker_not_done`, and its detail
 names the paths. When the dispatch came from a main session that answers worker
 requests, the assignment stays open on a main-authority request whose `tool` is
 `write_roots`. The request is pushed like any worker ask (the `approval.requested` event
@@ -1316,7 +1324,11 @@ judges another entry by its id, and a `message` sends text of at most 1,000 char
 `main` or `all`, with an optional `replyTo`. Nothing untyped is postable. A run gets 20 posts and a
 ledger holds 200 entries; further posts are refused. Workers on other runtimes (Claude SDK and CLI
 peers) see the board as it stood at spawn, and the host posts a bounded final-report `message` for
-them when they settle.
+them when they settle. Claims block nothing (the scheduler's write-boundary refusal does), so the
+worker's ledger hint asks for a claim only before writing a path a peer may also write, and for a
+`finding` only when a peer needs it before the run ends. The dispatch and collect results print each
+run's answer, so their board section leaves out that run's sealed findings and any ledger finding that
+restates one; `fleet view` and peers still see the run-record findings.
 
 The orchestrator is the sole writer. A post travels up the control lane as a
 body and nothing else, and every attribution field is stamped from the
@@ -1423,6 +1435,17 @@ prose (the `review-verdict` contract on `reviewer`, `verifier-report` on `verifi
 ```json
 {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}
 ```
+
+The host gives the reviewer an evidence packet inline
+([evidence-packet.ts](../../src/domains/dispatch/evidence-packet.ts)): the
+builder's handback (the first 8 KiB, with the run result path for the rest),
+the diff the host measured for the change (from the task worktree, the observed
+delta or the paths the builder's write record names, never the whole checkout;
+24,000 bytes shared across subjects) and the host's own run of each declared
+check, each under an id such as `s1.diff`. Every check in the verdict lists in
+`cites` the packet ids it rests on. A verdict whose checks cite none of them
+gets one repair round and then settles `exhausted` for the operator to decide.
+A compete judge receives the same packet for every candidate.
 
 `revise` is not a verdict a model authors. The reviewer answers `pass` or
 `fail`, and `decideReviewGate` in
@@ -1591,7 +1614,7 @@ Each task on the plan card carries a `limits:` line with the bounds that stop th
 
 - A priced route names its estimate: `cost <estimate> per model call at a <N>-token output bound`. The estimate prices output at the route's output bound, which is `chat.maxOutputTokens` when set, else the model's output cap, never above the model's cap or window.
 - An unpriced route has no cost bound, so the line names what does stop it. A native worker's line starts `unpriced route: each response stops at <S> s` from `safety.limits.workerResponseSeconds`, then says `the run has no wall-clock bound unless timeout_ms is set`, or, when the call sets `timeout_ms`, `the call's timeout_ms stops the run within <ms> ms`.
-- Both end with the tool bound, such as `Clio stops it at 300 tool calls` or `planned for about 40 tool calls; Clio stops it at 300`, with `lowered to Clio's overall limit` added when admission held the estimate at `fleet.limits.toolCallsPerRun`. An external one-shot worker, whose calls CLIO Coder cannot count, is promised no tool ceiling: `one launch whose tool calls Clio cannot count, so no tool ceiling applies`.
+- Both end with the tool bound, such as `CLIO Coder stops it at 300 tool calls` or `planned for about 40 tool calls; CLIO Coder stops it at 300`, with `lowered to CLIO Coder's overall limit` added when admission held the estimate at `fleet.limits.toolCallsPerRun`. An external one-shot worker, whose calls CLIO Coder cannot count, is promised no tool ceiling: `one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies`.
 
 ### Shipped playbooks and playbook versions
 
@@ -1640,7 +1663,7 @@ When `proposals: true`, every roster member first runs with a read-only dispatch
 - `clio-coder playbook commands init` discovers declared package scripts, just recipes, Makefile targets, and supported `pyproject.toml` script and tool entries. It writes a fully commented `.clio-coder/playbooks/commands.yaml` draft. Uncommenting an entry confirms its exact argument vector, and an existing registry is never replaced.
 - `clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--output-format text|json|stream-json] [--cwd <dir>] [--timeout <duration>] [--max-cost-usd <usd>] [--detach]` runs a playbook ([fleet.ts](../../src/cli/fleet.ts)). Preflight resolves every agent, target and profile, requires each step scope to fit inside the orchestrator scope, checks that the session budget is open and can hold `budgetUsd` (a session ceiling of `0` is always open and holds any `budgetUsd`), binds routes, and checks the write boundaries; a preflight failure exits 2 before anything dispatches. The run prints `fleet <name>: root=fleet-<hex> plan=<hash> steps=<n> loops=<m>` on stderr, one line per settled step on stdout, and a summary on stdout with each loop's terminal reason, staleness re-runs, steps that need an operator decision, and write-boundary violations. Exit code 0 means every required step succeeded, no step was skipped, and every loop resolved; any other finished run exits 1, and an error thrown by the scheduler exits 2 like a preflight failure. `fleet view <fleetRootId>` lists the steps and the run id of each.
 
-`--output-format json` prints one `fleet_end` result document on stdout and nothing else there. `--output-format stream-json` prints one JSON line per event (`fleet_started`, `step_dispatched`, `step_settled`) and ends with the same `fleet_end` line. The document carries `schemaVersion: 1`, `rootId`, `playbook`, `planHash`, `exitCode`, `completion` (`state` of `completed`, `stopped` or `refused`, with a `stopReason`), `verdict` (an `aggregate` of `pass`, `partial` or `fail` and each step's outcome), `usage`, `cost`, typed `causes[]` and the `limits` in force; `clio-coder schema fleet-result` prints its JSON Schema. With `--output-format`, a reader that closes stdout turns the exit code into 141 once the fleet has sealed, and the fleet is never canceled for that.
+`--output-format json` prints one `fleet_end` result document on stdout and nothing else there. `--output-format stream-json` prints one JSON line per event (`fleet_started`, `step_dispatched`, `step_settled`) and ends with the same `fleet_end` line. The document carries `schemaVersion: 1`, `rootId`, `playbook`, `planHash`, `exitCode`, `completion` (`state` of `completed`, `stopped` or `refused`, with a `stopReason`), `verdict` (an `aggregate` of `pass`, `partial` or `fail` and each step's outcome), `usage`, `cost`, typed `causes[]` and the `limits` in force; a run that kept a task worktree adds `worktree` (`path`, `branch`, `commit`, the `preview` command and the `land` command), absent when the run used no task worktree or changed nothing in it. `clio-coder schema fleet-result` prints its JSON Schema. With `--output-format`, a reader that closes stdout turns the exit code into 141 once the fleet has sealed, and the fleet is never canceled for that.
 
 `--cwd <dir>` runs the playbook as if started in that directory. `--timeout <duration>` (`90s`, `15m`; a bare number is seconds) counts from process start, stops the fleet at the deadline and exits 124. `--max-cost-usd <usd>` stops the fleet once its settled steps have spent that much and exits 4; the cap in force is the lower of the flag and the playbook's `budgetUsd`, and a step already in flight finishes its spend before the stop lands. A playbook `budgetUsd` without the flag stays a preflight check.
 
@@ -1874,7 +1897,7 @@ Independent quality evidence arrives late or never, so every entry also carries 
 | `settled` | Meaning for the operator |
 | --- | --- |
 | `success` | The run's outcome is `succeeded`. |
-| An outcome code | The run's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_partial_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
+| An outcome code | The run's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `obligation_unmet`, `worker_not_done`, `worker_partial_work`, `assurance_compromised`, `worker_run_timeout`, `exploration_stalled`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
 | `permission_required` | No outcome code, and the outcome detail opens with `permission_required`: the worker ended on its refusal limit or the `fail` posture. |
 | `failure` | The outcome is `failed` with neither of the above. |
 | An outcome | Any other run outcome, unchanged: `timed_out`, `stalled`, `canceled`, `denied_by_policy` or `spawn_failed`. |
@@ -2037,9 +2060,11 @@ A finished run's record is its own telemetry scope at `<stateDir>/telemetry/runs
   `worker_final_output_missing` (an otherwise
   successful worker exited without a nonempty final answer),
   `host_verification_rejected` (a declared host check rejected the settled tree),
-  `worker_no_work` (an edit worker finished without doing its assignment),
-  `worker_partial_work` (an edit worker changed files but its report opens by saying
-  it could not finish),
+  `obligation_unmet` (the run left its evidence obligation unmet),
+  `worker_not_done` (an edit worker declared it did not finish and changed nothing),
+  `worker_partial_work` (an edit worker changed files but declared its assignment
+  partly done or not done),
+  `assurance_compromised` (a builder's own validation failed or a check it claimed never ran),
   `worker_mutation_blocked`, `merge_withheld` (a task worktree was preserved instead
   of merged because of one of the five gate cases above), `worker_removed_tests` (a
   run in the current checkout removed existing test cases that the task did not ask to
@@ -2315,6 +2340,8 @@ Run by hand without `--dock-taps`, `q` quits the dashboard. Without a TTY, `flee
 The board has one card per worker of this CLIO Coder session: runs stamped with the session's id, plus runs with no session stamp that started after this CLIO Coder booted. Started by hand with no request, it lists every run in the inspection scope (this project, or all projects with `--all`). A failed attempt that a retry or failover attempt replaced gives way to the replacement's card, which carries `↻<n>`. Live runs (queued, running, stale) come first, newest start first. A `finished` group follows with up to 24 runs, newest end first.
 
 The board's header counts running, done, cancelled and failed runs, with cancelled runs kept apart from failures. A board taller than the dock keeps the selected card whole and shows its position as `<first>-<last> / <total> rows`.
+
+A second CLIO Coder process on the same state directory also shows the live workers another process owns in this project, read from their run feeds, and draws their held approval asks as its own permission cards. An answer given there is written to the run's directory, bound to the ask's attempt and arguments, and the owning process applies it and records which process answered; the owner's open card closes. A run whose owning process is gone ends as dead and its asks are withdrawn. Cancelling a followed run records a durable cancel request, which its owner takes and seals as `canceled`. Nothing about another process's runs is journaled by the viewer ([cross-process-fleet.ts](../../src/domains/dispatch/cross-process-fleet.ts)).
 
 A card follows the session's output detail: three rows in Detailed, rows 1 and 3 in Default, and in Minimal one row that joins row 1's glyph, agent and clock to row 3. The rows are:
 
