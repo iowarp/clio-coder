@@ -11,6 +11,7 @@ import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execu
 import { withRunRole } from "../domains/dispatch/execution-role.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import { candidateForecastLines } from "../domains/dispatch/route-policy.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -262,6 +263,9 @@ export function prepareScoutContinuation(input: {
 			routeApproval: null,
 			...(proposal.resolution.checkedAtRun === undefined ? {} : { checkedAtRun: [...proposal.resolution.checkedAtRun] }),
 			...(proposal.resolution.limits === undefined ? {} : { limits: proposal.resolution.limits }),
+			...(proposal.resolution.forecasts === undefined
+				? {}
+				: { forecasts: candidateForecastLines(proposal.resolution.forecasts) }),
 			agentSelection: selection,
 			stepId: step.id,
 			dependencies: [...step.dependencies],

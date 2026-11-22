@@ -278,6 +278,7 @@ import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
 import { DEFAULT_QUOTA_CACHE_TTL_MS } from "../quota/cache.js";
 import { buildQuotaProviders, quotaProviderIdForRuntime } from "../quota/registry.js";
 import { quotaSharedStatePath, readSharedQuotaState } from "../quota/shared-state.js";
+import type { UsageSnapshot } from "../quota/types.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import { type AutonomyLevel, admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -380,6 +381,7 @@ import {
 } from "./capacity-lease.js";
 import type {
 	AbortReason,
+	BudgetEconomicsView,
 	DispatchAdmissionObserver,
 	DispatchContract,
 	DispatchDerivedGrants,
@@ -393,6 +395,7 @@ import type {
 	WorkerGrantView,
 } from "./contract.js";
 import { createCrossProcessFleet, type ForeignAnswerOrigin } from "./cross-process-fleet.js";
+import { budgetPoolView } from "./economics-view.js";
 import {
 	type EnvelopeInput,
 	envelopeApproval,
@@ -423,6 +426,7 @@ import {
 	requestRunRole,
 	routeCorrelationFactsForRun,
 	withAttemptRole,
+	withRunRole,
 } from "./execution-role.js";
 import {
 	affectsTargetBreaker,
@@ -569,6 +573,7 @@ import {
 	toRouteCandidate,
 } from "./route-decision.js";
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
+import { candidateForecastLines, type RouteCandidateForecast } from "./route-policy.js";
 import { reduceRouteQuality, routeQualityRun } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
 import type { RunCallUsage, RunUsageFacts } from "./run-call-usage.js";
@@ -725,6 +730,10 @@ interface RunTokenMeter {
 
 /** How long after a long-lived surface asks for it route history warming begins. */
 const ROUTE_HISTORY_WARM_DELAY_MS = 1_500;
+/** Candidate forecasts a plan card shows per task, the route that runs included. */
+const PREVIEW_FORECAST_LIMIT = 6;
+/** Candidate forecasts `context(scope="budget")` shows across every dispatchable agent. */
+const SESSION_FORECAST_LIMIT = 12;
 
 /** The level a worker's permit and ask routing take from the operator's settings: contained yolo is default. */
 function operatorAdmissionAutonomy(
@@ -5191,6 +5200,111 @@ export function createDispatchBundle(
 			if (usd.unknownCount > 0) pricing.unpriced = true;
 		}
 		return pricing;
+	}
+
+	/**
+	 * The cached quota snapshot a route's pool was last read under, made with the credential that route spends now. The
+	 * quota adapter reads the runtime's own login, so a target naming another credential has no reading, and an unknown
+	 * identity on either side matches nothing. Reads the shared cache file only, never the network.
+	 */
+	async function cachedRouteQuota(
+		target: TargetDescriptor,
+		runtime: RuntimeDescriptor,
+		nowMs: number,
+	): Promise<UsageSnapshot | string> {
+		const providerId = quotaProviderIdForRuntime(runtime.id);
+		if (providerId === null) return `runtime ${runtime.id} reports no quota`;
+		if (resolveAuthTarget(target, runtime).providerId !== resolveRuntimeAuthTarget(runtime).providerId)
+			return "the route spends a credential the quota reader does not read";
+		const shared = readSharedQuotaState(quotaSharedStatePath(), nowMs);
+		const entry = shared.entries.get(providerId);
+		if (entry === undefined || entry.storedAtMs <= (shared.cleared.get(providerId) ?? Number.NEGATIVE_INFINITY))
+			return "no cached quota reading";
+		const provider = buildQuotaProviders().find((candidate) => candidate.id === providerId);
+		const scope = provider?.credentialScope === undefined ? null : await provider.credentialScope().catch(() => null);
+		if (scope === null || entry.scope !== scope) return "no quota reading for the route's current credential";
+		return entry.snapshot;
+	}
+
+	/**
+	 * S16: the session's economics view. Spend is what admission counts, settled journals plus workers still metering,
+	 * read after every queued settlement is written, so the model call that asked is counted and priced as the usage
+	 * report counts it; unobserved without a telemetry read model rather than a measured zero. The pool is the chat
+	 * route's cached quota reading; forecasts are the plan card's lines for every dispatchable agent's routes, so a
+	 * caller reads them before it dispatches, asked or not.
+	 */
+	async function budgetEconomics(): Promise<BudgetEconomicsView> {
+		const preflight = scheduling.preflight();
+		const telemetry = context.getContract("telemetry");
+		const settled = telemetry === undefined ? undefined : await telemetry.settledSessionSpend();
+		const pricing = combineBudgetPricing(
+			settled === undefined ? preflight.pricing : { estimated: settled.estimated, unpriced: settled.unpriced },
+			inFlightPricing(),
+		);
+		const usd = (settled?.usd ?? preflight.currentUsd) + inFlightSpendUsd();
+		const ceilingUsd = preflight.ceilingUsd > 0 ? preflight.ceilingUsd : null;
+		const nowMs = now();
+		const settings = getEffectiveSettings();
+		const target = providers.getTarget(settings?.chat?.target ?? "");
+		const runtime = target === null ? null : providers.getRuntime(target.runtime);
+		const quota = target === null || runtime === null ? "no chat route" : await cachedRouteQuota(target, runtime, nowMs);
+		const observed = telemetry !== undefined;
+		return {
+			scope: "session",
+			spend: observed
+				? {
+						usd,
+						basis:
+							pricing === undefined
+								? "unstated"
+								: pricing.unpriced
+									? "lower-bound"
+									: pricing.estimated
+										? "estimated"
+										: "measured",
+						ceilingUsd,
+						headroomUsd: ceilingUsd === null ? null : Math.max(0, ceilingUsd - usd),
+					}
+				: { usd: null, basis: "unobserved", ceilingUsd, headroomUsd: null },
+			pool:
+				typeof quota === "string"
+					? { status: "none", reason: quota }
+					: budgetPoolView(quota, nowMs, DEFAULT_QUOTA_CACHE_TTL_MS),
+			forecasts: sessionForecasts(settings),
+		};
+	}
+
+	/**
+	 * Every dispatchable agent's candidate forecasts as plan-card lines (R4): first the route each agent runs on now, then
+	 * the alternatives its router weighs, deduplicated and bounded. Reads route history and settings only; an agent whose
+	 * route cannot be previewed is skipped, as its dispatch would report.
+	 */
+	function sessionForecasts(settings: EffectiveSettings): string[] {
+		const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
+		const runs: RouteCandidateForecast[] = [];
+		const alternatives: RouteCandidateForecast[] = [];
+		for (const spec of agents.listSpecs()) {
+			if (spec.audience === "internal") continue;
+			// Routing reads the agent and intent, never the task text; dispatch requires a non-empty task.
+			const req = withRunRole({ agentId: spec.id, task: "forecast preview" }, roleFacts);
+			let forecasts: ReturnType<typeof previewForecasts>;
+			try {
+				forecasts = previewForecasts(req, previewFixed(req, settings), settings);
+			} catch {
+				continue;
+			}
+			for (const candidate of forecasts?.candidates ?? []) (candidate.executed ? runs : alternatives).push(candidate);
+		}
+		const seen = new Set<string>();
+		const unique = [...runs, ...alternatives].filter((candidate) => {
+			if (seen.has(candidate.route)) return false;
+			seen.add(candidate.route);
+			return true;
+		});
+		return candidateForecastLines({
+			candidates: unique.slice(0, SESSION_FORECAST_LIMIT),
+			omitted: Math.max(0, unique.length - SESSION_FORECAST_LIMIT),
+		});
 	}
 
 	/**
@@ -12230,7 +12344,53 @@ export function createDispatchBundle(
 				checkedAtRun.push("session cost ceiling reached: the run waits for a raise");
 			}
 		}
-		return checkedAtRun.length === 0 ? resolution : { ...resolution, checkedAtRun };
+		const forecasts = previewForecasts(routed, resolution, settings);
+		return {
+			...resolution,
+			...(checkedAtRun.length === 0 ? {} : { checkedAtRun }),
+			...(forecasts === null ? {} : { forecasts }),
+		};
+	}
+
+	/**
+	 * The plan card's per-candidate forecasts (R4): the decision this task runs on, or the shadow one the router would
+	 * make, each candidate read from the same readiness window the ranking reads. The route that runs comes first, then
+	 * eligible candidates in rank order, then excluded ones with their reason. Reads route history only; null when the
+	 * route universe cannot be enumerated, which the run itself reports.
+	 */
+	function previewForecasts(
+		req: DispatchRequest,
+		resolution: DispatchPlanTaskResolution,
+		settings: EffectiveSettings,
+	): NonNullable<DispatchPlanTaskResolution["forecasts"]> | null {
+		let decision: RouteDecisionV1;
+		try {
+			decision =
+				resolution.routeApproval?.decision ??
+				resolveJointRoute(jointRouteInput(req, undefined, settings, "shadow").input).decision;
+		} catch {
+			return null;
+		}
+		const readiness = routeObserver.readinessWindow();
+		const executed = routeCandidateKey(decision.executedRoute);
+		const rank = (entry: { rejection: string | null; score: number | null }) =>
+			entry.rejection === null ? -(entry.score ?? Number.NEGATIVE_INFINITY) : Number.POSITIVE_INFINITY;
+		const others = decision.candidateEvaluations
+			.filter((entry) => routeCandidateKey(entry.candidate) !== executed)
+			.sort((left, right) => rank(left) - rank(right));
+		const executedEntry = decision.candidateEvaluations.find((entry) => routeCandidateKey(entry.candidate) === executed);
+		const ordered = [{ candidate: decision.executedRoute, rejection: executedEntry?.rejection ?? null }, ...others];
+		return {
+			candidates: ordered.slice(0, PREVIEW_FORECAST_LIMIT).map(({ candidate, rejection }) => ({
+				route: `${candidate.agentId} ${candidate.targetId}/${candidate.modelId}@${candidate.nodeId}`,
+				executed: routeCandidateKey(candidate) === executed,
+				forecast: {
+					...readiness.forRoute(candidate, { costUpperBoundUsd: null, factsFresh: true }).forecast,
+					exclusion: rejection,
+				},
+			})),
+			omitted: Math.max(0, ordered.length - PREVIEW_FORECAST_LIMIT),
+		};
 	}
 
 	const planAgentSelection: DispatchContract["planAgentSelection"] = (input) => {
@@ -13290,6 +13450,7 @@ export function createDispatchBundle(
 		publishesProgress: true,
 		ownsProgressBus: (bus) => bus === context.bus,
 		preview: previewAdmission,
+		budgetEconomics,
 		derivedGrants: (req) => previewFixedStages(req, getEffectiveSettings()).grants,
 		planAgentSelection,
 		routeCandidates,

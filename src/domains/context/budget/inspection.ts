@@ -15,8 +15,8 @@ export type BudgetInspection =
 			 * and the last request passes the live-prefix request checks. The fold still weighs price and fit (MD9).
 			 */
 			livePrefixSummary?: () => boolean;
-			/** The compiled system prompt's sections and their estimated sizes, in prompt order (S-87). */
-			promptSections?: Array<{ id: string; tokens: number }>;
+			/** The compiled system prompt's sections and the compiler's token estimate of each, in prompt order (S-87). */
+			promptSections?: Array<{ id: string; tokenEstimate: number }>;
 	  }
 	| { status: "unavailable" | "unsupported"; reason: string };
 

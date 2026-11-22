@@ -1,10 +1,11 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import fs, { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import type { RunEconomics } from "../../src/core/telemetry/economy.js";
 import {
 	gateDecisionsDirectory,
 	materializePendingGateDecision,
@@ -13,10 +14,21 @@ import {
 } from "../../src/domains/dispatch/gate-decisions.js";
 import { fixedRouteDecision, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
 import { createRouteObserver, type RouteObserver } from "../../src/domains/dispatch/route-observer.js";
+import {
+	compareRankedRoutes,
+	estimateRoute,
+	forecastRoute,
+	ROUTE_POSTURES,
+	type RouteAttemptEvidence,
+	type RoutingPosture,
+	routeScoreScale,
+	scoreRoute,
+} from "../../src/domains/dispatch/route-policy.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
+import { foldEconomy } from "../../src/domains/telemetry/economy-fold.js";
 import { createRouteHistoryFold, routeSettledLabel, telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { fixtureEnvelope, fixtureReceiptDraft, measuredSpend } from "../harness/receipt.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 
 function hash(seed: string): string {
@@ -315,5 +327,170 @@ describe("contracts/route readiness reads", () => {
 		const evidence = window(observer);
 		strictEqual(evidence.observations[0]?.qualityLabel, "unmeasured");
 		strictEqual(evidence.readiness.integrityFailures, 1);
+	});
+
+	it("forecasts cost per accepted job with paid failures beside the estimate, never ranking on it (R4)", async () => {
+		const ROUTE_B: RouteCandidate = { ...ROUTE, modelId: "model-b" };
+		const history = async (failureUsd: number) => {
+			const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-forecast-"));
+			const runs: Array<[string, RouteCandidate, boolean, number]> = [
+				...[0, 1, 2].map((index): [string, RouteCandidate, boolean, number] => [`a-ok-${index}`, ROUTE, true, 0.1]),
+				...[0, 1, 2].map((index): [string, RouteCandidate, boolean, number] => [
+					`a-fail-${index}`,
+					ROUTE,
+					false,
+					failureUsd,
+				]),
+				...[0, 1, 2, 3, 4, 5].map((index): [string, RouteCandidate, boolean, number] => [
+					`b-ok-${index}`,
+					ROUTE_B,
+					true,
+					0.15,
+				]),
+			];
+			for (const [runId, route, succeeded, usd] of runs) {
+				const draft = fixtureReceiptDraft(fixtureEnvelope(runId));
+				draft.routeDecision = fixedRouteDecision(route, "test-fixed-route");
+				if (succeeded)
+					draft.quality.typedValidations = [{ sourceId: "typed", validatorDigest: hash("validator"), passed: true }];
+				else draft.outcome = "failed";
+				await writeSettledRun(stateDir, draft, measuredSpend({ input: 100, output: 10 }, usd));
+			}
+			const read = createRouteObserver({ stateDir }).readinessWindow();
+			const current = { costUpperBoundUsd: null, factsFresh: true };
+			return { a: read.forRoute(ROUTE, current), b: read.forRoute(ROUTE_B, current) };
+		};
+		const ranking = (evidence: Awaited<ReturnType<typeof history>>) =>
+			(Object.keys(ROUTE_POSTURES) as RoutingPosture[]).map((posture) => {
+				const estimates = [estimateRoute(evidence.a.observations), estimateRoute(evidence.b.observations)];
+				const scale = routeScoreScale(estimates);
+				return estimates
+					.map((estimate, order) => ({ key: `${order}`, order, estimate, score: scoreRoute(estimate, posture, scale) }))
+					.sort(compareRankedRoutes)
+					.map((route) => route.key)
+					.join(">");
+			});
+		const cheapFailures = await history(0.1);
+		const dearFailures = await history(5);
+		// What failed attempts cost moves the forecast only: every posture ranks the two routes as it did before.
+		deepStrictEqual(ranking(dearFailures), ranking(cheapFailures));
+		deepStrictEqual(estimateRoute(dearFailures.a.observations), estimateRoute(cheapFailures.a.observations));
+		const a = cheapFailures.a.forecast;
+		strictEqual(a.attempts, 6);
+		strictEqual(a.acceptedJobs, 3);
+		deepStrictEqual(a.qualityEvidence, { labeled: 3, samples: 6, coverage: 0.5 });
+		strictEqual(a.exclusion, null);
+		// The forecast reads each run through the economics fold: a charge settled without known funding is unknown,
+		// never free, whatever its route price, and a route with no seat has no quota debit to forecast.
+		deepStrictEqual(a.costPerAcceptedJob, { status: "unknown", unpricedAttempts: 6 });
+		deepStrictEqual(a.quotaPerAcceptedJob, { status: "not-applicable" });
+
+		const missing = { kind: "unknown", reason: "not-captured" } as const;
+		const local = { kind: "absent", reason: "not-applicable" } as const;
+		const economics = (
+			charge: number | "local",
+			kind: "measured" | "estimated" = "measured",
+			seatEstimate?: number,
+		): RunEconomics => ({
+			additive: {
+				providerCharge: { amount: missing },
+				marginalCharge:
+					charge === "local"
+						? { amount: local }
+						: {
+								currency: "USD",
+								amount:
+									kind === "measured" ? { kind, value: charge, source: "provider" } : { kind, value: charge, method: "catalog" },
+							},
+				seatCredits:
+					seatEstimate === undefined
+						? { nanoAiu: local }
+						: {
+								nanoAiu: { kind: "estimated", value: seatEstimate, method: "seat-listing-tariff" },
+								listingAsOf: "2030-01-01",
+							},
+				energy: { kwh: local, cost: { amount: local } },
+			},
+			comparison: { apiEquivalent: { amount: missing } },
+			funding: missing,
+		});
+		const attempt = (
+			accepted: boolean,
+			run: RunEconomics,
+			reportedNanoAiu?: { kind: "measured"; value: number; source: "provider" },
+		): RouteAttemptEvidence => {
+			const { marginalCharge, seatCredits } = foldEconomy([
+				{
+					ref: { kind: "run", runId: `run-${Math.random()}` },
+					at: null,
+					economics: run,
+					settled: true,
+					...(reportedNanoAiu ? { reportedNanoAiu } : {}),
+					cut: { role: "worker", model: "m", target: "t" },
+				},
+			]).total;
+			return { accepted, marginalCharge, seatCredits };
+		};
+		const charged = (attempts: RouteAttemptEvidence[]) => {
+			const forecast = forecastRoute({ observations: [], attempts }).costPerAcceptedJob;
+			if (forecast.status !== "forecast") throw new Error(`expected a forecast, got ${forecast.status}`);
+			ok(forecast.range.low <= forecast.expected && forecast.expected <= (forecast.range.high ?? Infinity));
+			return forecast;
+		};
+		// Cheaper per attempt, yet its paid failures make each accepted job dearer than the reliable route's.
+		const retryHeavy = charged([
+			...[0, 1, 2].map(() => attempt(true, economics(0.1))),
+			...[0, 1, 2].map(() => attempt(false, economics(0.1))),
+		]);
+		const reliable = charged([0, 1, 2, 3, 4, 5].map(() => attempt(true, economics(0.15))));
+		ok(Math.abs(retryHeavy.expected - 0.2) < 1e-9);
+		ok(retryHeavy.expected > reliable.expected);
+		deepStrictEqual([retryHeavy.currency, retryHeavy.basis], ["USD", "measured"]);
+		// A skewed sample keeps its expectation inside the range, and one estimated charge marks the whole figure.
+		charged([...Array.from({ length: 20 }, () => attempt(true, economics(0.1))), attempt(true, economics(100))]);
+		charged([attempt(false, economics(0.01)), ...Array.from({ length: 20 }, () => attempt(true, economics(1)))]);
+		const mixed = charged([
+			...Array.from({ length: 6 }, () => attempt(true, economics(0.1))),
+			attempt(true, economics(0.1, "estimated")),
+		]);
+		strictEqual(mixed.basis, "estimated");
+		// A local route carries no extra charge at all; one unknown charge among priced ones is unknown, not free.
+		const localRoute = forecastRoute({
+			observations: [],
+			attempts: Array.from({ length: 6 }, () => attempt(true, economics("local"))),
+		});
+		deepStrictEqual(localRoute.costPerAcceptedJob, { status: "not-applicable" });
+		deepStrictEqual(localRoute.quotaPerAcceptedJob, { status: "not-applicable" });
+		const unpriced: RunEconomics = {
+			...economics(0.1),
+			additive: { ...economics(0.1).additive, marginalCharge: { amount: missing } },
+		};
+		deepStrictEqual(
+			forecastRoute({
+				observations: [],
+				attempts: [...Array.from({ length: 6 }, () => attempt(true, economics(0.1))), attempt(true, unpriced)],
+			}).costPerAcceptedJob,
+			{ status: "unknown", unpricedAttempts: 1 },
+		);
+		// The seat's reported debit wins over its listing estimate, so a measured quota forecast is reachable.
+		const seat = (reported: boolean) =>
+			forecastRoute({
+				observations: [],
+				attempts: Array.from({ length: 6 }, () =>
+					attempt(
+						true,
+						economics(0, "measured", 2e9),
+						reported ? { kind: "measured", value: 1e9, source: "provider" } : undefined,
+					),
+				),
+			}).quotaPerAcceptedJob;
+		deepStrictEqual(seat(true), { status: "forecast", unit: "nano-aiu", expected: 1e9, basis: "measured" });
+		deepStrictEqual(seat(false), { status: "forecast", unit: "nano-aiu", expected: 2e9, basis: "estimated" });
+
+		const cold = mkdtempSync(join(tmpdir(), "clio-coder-readiness-forecast-cold-"));
+		await ledger(cold, [sealed("cold-1", true), sealed("cold-2", true)]);
+		const coldForecast = window(createRouteObserver({ stateDir: cold })).forecast;
+		deepStrictEqual(coldForecast.costPerAcceptedJob, { status: "insufficient", reason: "cold" });
+		deepStrictEqual(coldForecast.quotaPerAcceptedJob, { status: "insufficient", reason: "cold" });
 	});
 });

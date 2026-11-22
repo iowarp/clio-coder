@@ -21,6 +21,7 @@ import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { withTelemetryContext } from "../../core/telemetry/context.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { workerEconomicsView } from "../../domains/dispatch/economics-view.js";
 import { resolveClaudeLaunchCredential } from "../../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../../domains/providers/catalog.js";
 import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
@@ -961,6 +962,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 					allowedTools: allowedToolSet,
 					safety,
 					emit,
+					budgetEconomics: async () => workerEconomicsView(input.limits),
 					agentId: input.agentId,
 					task: input.task,
 					...(skillPolicy !== undefined ? { pendingSkillPolicy: skillPolicy } : {}),

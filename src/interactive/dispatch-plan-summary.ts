@@ -6,7 +6,8 @@
  * exact thing an approval covers, so it stays reachable behind the inspect key,
  * but a council card that led with `task_sha256=…` and `roster=<string 7 bytes>`
  * asked the operator to decide by reading an audit record. This reads the same
- * text back into who runs, on what, for which task, and against what limit.
+ * text back into who runs, on what, for which task, against what limit, and
+ * what each route is forecast to cost.
  * Anything it cannot read leaves the card showing the plan text as before.
  */
 
@@ -19,6 +20,8 @@ export interface PlanMember {
 	task: string | null;
 	/** The bounds the plan signs for this worker's run, in the plan's own words; null when it states none. */
 	limits: string | null;
+	/** The forecast lines the plan prints beside this worker's route, the one it runs on first; empty when it prints none. */
+	forecasts: string[];
 }
 
 export interface PlanSummary {
@@ -37,6 +40,7 @@ const TASK =
 	/^\s+\d+\.(?: role=(\S+))? agent=(\S+)(?: target=(\S+))?(?: model=(\S+))?.*? task_preview=("(?:[^"\\]|\\.)*")/u;
 const COUNCIL = /^\s+council label=(\S+)/u;
 const LIMITS = /^\s+limits: (.+)$/u;
+const FORECAST = /^\s+forecast: (.+)$/u;
 const COST = /^advisory session cost baseline: (.+)$/u;
 const DEADLINE = /^deadline: (.+)$/u;
 
@@ -73,6 +77,7 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 				model: task[4] ?? null,
 				task: preview(task[5] ?? ""),
 				limits: null,
+				forecasts: [],
 			});
 			continue;
 		}
@@ -85,6 +90,11 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 		const limits = LIMITS.exec(line);
 		if (limits && last) {
 			last.limits = limits[1] ?? null;
+			continue;
+		}
+		const forecast = FORECAST.exec(line);
+		if (forecast?.[1] && last) {
+			last.forecasts.push(forecast[1]);
 			continue;
 		}
 		const costLine = COST.exec(line);
@@ -167,6 +177,8 @@ export function planFacts(summary: PlanSummary): Array<{ label: string; value: s
 				].join(": "),
 			},
 			...(sharedLimits === null && member.limits !== null ? [{ label: "limits", value: member.limits }] : []),
+			// Each route's forecast stays beside the worker it was made for, as the plan prints it.
+			...member.forecasts.map((value) => ({ label: "forecast", value })),
 		]),
 		...(sharedLimits !== null ? [{ label: "limits", value: sharedLimits }] : []),
 		...(summary.cost !== null ? [{ label: "cost", value: summary.cost }] : []),

@@ -13,6 +13,7 @@
 import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import type { PendingSkillToolPolicy } from "../../core/skill-activation.js";
 import type { ToolName } from "../../core/tool-names.js";
+import type { BudgetEconomicsPort } from "../../domains/dispatch/contract.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import { resolveAgentTools } from "../../tools/agent-tools.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../../tools/registry.js";
@@ -86,6 +87,8 @@ export interface ClioToolBridgeInput {
 	pendingSkillPolicy?: PendingSkillToolPolicy;
 	invokeOptions?: Partial<ToolInvokeOptions>;
 	signal?: AbortSignal;
+	/** The run's own economics view for context(scope=budget), as a native worker gets it (S16). */
+	budgetEconomics?: BudgetEconomicsPort;
 }
 
 const TOOL_USE_ID_META = "claudecode/toolUseId";
@@ -180,6 +183,11 @@ function createBridgeRegistry(input: ClioToolBridgeInput): ToolRegistry {
 		undefined,
 		undefined,
 		input.executeAutonomy,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		input.budgetEconomics,
 	);
 }
 

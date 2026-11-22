@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
+import type { BudgetEconomicsPort } from "../domains/dispatch/contract.js";
 /**
  * Worker-subprocess tool construction.
  *
@@ -194,6 +195,8 @@ export function createWorkerToolRegistry(
 	absorbAwaitedEffects?: RegistryDeps["absorbAwaitedEffects"],
 	/** The dispatch's store tag grant (M-31); absent leaves the store read-only. */
 	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string },
+	/** The run's own economics view for context(scope=budget): its envelope, the session's facts withheld (S16). */
+	budgetEconomics?: BudgetEconomicsPort,
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -229,6 +232,7 @@ export function createWorkerToolRegistry(
 		...(readOnly === true ? { readOnly: true } : {}),
 		...(storeGrant !== undefined && storeGrant.tags.length > 0 ? { storeGrant } : {}),
 		...(workerRecall ? { workerRecall } : {}),
+		...(budgetEconomics ? { getBudgetEconomics: budgetEconomics } : {}),
 		// A fresh probe of the worker's own cwd; nothing is saved into the dispatching session.
 		workerWorkspace: () => probeWorkspace(process.cwd()),
 		...(agentLedger ? { agentLedger } : {}),

@@ -2284,6 +2284,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		getContextBudget: () => chat.inspectLiveBudget(),
+		...(dispatch?.budgetEconomics ? { getBudgetEconomics: dispatch.budgetEconomics } : {}),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		// Read-only recall over the stores the main prompt draws from, under the
 		// same repository and runtime gates; the agent scope stays with workers.

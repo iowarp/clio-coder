@@ -31,6 +31,7 @@ import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../doma
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { operatorNamedChecks } from "../domains/dispatch/operator-checks.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
+import { candidateForecastLines } from "../domains/dispatch/route-policy.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { planCardLimitsUnderTimeout } from "../domains/dispatch/run-limits.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
@@ -610,6 +611,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			...(resolution.limits !== undefined ? { limits: resolution.limits } : {}),
 			...(resolution.writes !== undefined ? { writes: resolution.writes } : {}),
 			...(resolution.withheld !== undefined ? { withheld: [...resolution.withheld] } : {}),
+			...(resolution.forecasts !== undefined ? { forecasts: candidateForecastLines(resolution.forecasts) } : {}),
 			agentSelection: request.agentSelection === undefined ? null : structuredClone(request.agentSelection),
 			stepId: null,
 			dependencies: [],

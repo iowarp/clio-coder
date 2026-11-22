@@ -455,6 +455,15 @@ describe("dispatch admission boundary", () => {
 		strictEqual(cardLimits.length, 1, unpriced);
 		ok(unpriced.split("\n").includes(`    limits: ${cardLimits[0]?.value}`), unpriced);
 		match(cardLimits[0]?.value ?? "", /CLIO Coder stops it at 300 tool calls/u);
+		// And every forecast line the plan prints beside a route, in order, so the visible card shows them too.
+		const signedForecasts = unpriced.split("\n").flatMap((line) => /^\s+forecast: (.+)$/u.exec(line)?.[1] ?? []);
+		ok(signedForecasts.length > 0, unpriced);
+		deepStrictEqual(
+			planFacts(card)
+				.filter((fact) => fact.label === "forecast")
+				.map((fact) => fact.value),
+			signedForecasts,
+		);
 		match(
 			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
 			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; CLIO Coder stops it at 300 tool calls/u,

@@ -20,10 +20,12 @@
  */
 
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { runEconomicsOf } from "../../core/telemetry/economy.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import { ROUTE_HARD_FILTERS, ROUTE_REASONS } from "../../core/telemetry/schemas.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { foldEconomy } from "../telemetry/economy-fold.js";
 import type { RouteHistoryEntry, RouteHistoryFold } from "../telemetry/index.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import {
@@ -44,7 +46,7 @@ import {
 	routeDriftGuard,
 	routeDriftInvalidates,
 } from "./route-decision.js";
-import type { RouteObservation } from "./route-policy.js";
+import { forecastRoute, type RouteAttemptEvidence, type RouteForecast, type RouteObservation } from "./route-policy.js";
 import { type RouteQualityLabel, type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
 import type { RunResult } from "./types.js";
 
@@ -83,6 +85,37 @@ function routeObservationFromEntry(entry: RouteHistoryEntry, qualityLabel: Route
 		cacheRead: entry.cacheRead,
 		queueWaitMs: completed ? entry.phaseTiming.queueWaitMs : null,
 	};
+}
+
+/**
+ * The forecast's evidence from one history entry (R4): every verified attempt that says something about the route,
+ * failures included; null for a canceled, policy-denied or unverified run.
+ */
+function routeAttemptFromEntry(entry: RouteHistoryEntry, qualityLabel: RouteQualityLabel): RouteAttemptEvidence | null {
+	if (!entry.sealVerified || entry.reliability === "neutral") return null;
+	return { accepted: entry.reliability === "success" && qualityLabel !== "fail", ...attemptEconomics(entry) };
+}
+
+/** History entries are immutable and held by the fold, so each run's economics folds once. */
+const foldedAttempts = new WeakMap<RouteHistoryEntry, Omit<RouteAttemptEvidence, "accepted">>();
+
+/** One run as the one economics fold (S10) settles it, so a forecast never prices a run its own way. */
+function attemptEconomics(entry: RouteHistoryEntry): Omit<RouteAttemptEvidence, "accepted"> {
+	const cached = foldedAttempts.get(entry);
+	if (cached) return cached;
+	const { marginalCharge, seatCredits } = foldEconomy([
+		{
+			ref: { kind: "run", runId: entry.runId },
+			at: entry.settledAt,
+			economics: runEconomicsOf(entry.facts),
+			settled: true,
+			...(entry.reportedNanoAiu ? { reportedNanoAiu: entry.reportedNanoAiu } : {}),
+			cut: { role: entry.route.executionRole, model: entry.route.modelId, target: entry.route.targetId },
+		},
+	]).total;
+	const folded = { marginalCharge, seatCredits };
+	foldedAttempts.set(entry, folded);
+	return folded;
 }
 
 /**
@@ -227,6 +260,8 @@ export interface RouteObserver {
 
 export interface RouteReadinessEvidence {
 	observations: ReadonlyArray<RouteObservation>;
+	/** The route's forecast vector, beside the estimate and never ranked on (R4); no exclusion is known here. */
+	forecast: RouteForecast;
 	readiness: {
 		hardConstraintValidity: number;
 		integrityFailures: number;
@@ -398,8 +433,12 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				let validConstraints = 0;
 				const durations: number[] = [];
 				const observations: RouteObservation[] = [];
+				const attempts: RouteAttemptEvidence[] = [];
 				for (const entry of entries) {
-					observations.push(routeObservationFromEntry(entry, qualityOf(entry, sources, gateKey)));
+					const label = qualityOf(entry, sources, gateKey);
+					observations.push(routeObservationFromEntry(entry, label));
+					const attempt = routeAttemptFromEntry(entry, label);
+					if (attempt !== null) attempts.push(attempt);
 					if (!entry.sealVerified) {
 						integrityFailures += 1;
 						continue;
@@ -409,6 +448,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				}
 				return {
 					observations,
+					forecast: forecastRoute({ observations, attempts }),
 					readiness: {
 						hardConstraintValidity: entries.length === 0 ? 0 : validConstraints / entries.length,
 						integrityFailures,

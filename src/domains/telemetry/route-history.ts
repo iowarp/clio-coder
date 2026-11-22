@@ -13,6 +13,7 @@
 import { lstatSync, readdirSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { listStateDirectorySync, withinStateRoot } from "../../core/state-boundary.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { RecordedRunSettled, RunSettled } from "../../core/telemetry/schemas.js";
 import {
@@ -22,7 +23,7 @@ import {
 	telemetryRunDirectory,
 	telemetryRunsDirectory,
 } from "./paths.js";
-import { readRunRecord, type SettledRunRecord } from "./run-record.js";
+import { readRunRecordWithSealedRecords, type SettledRunRecord } from "./run-record.js";
 
 /**
  * The run's settled outcome as its record states it: `success`, or the most specific failure class it carries (an
@@ -75,6 +76,11 @@ export interface RouteHistoryEntry extends SettledRunFacts {
 	/** Whether the run read cache tokens, as measured; null when not measured. */
 	cacheRead: boolean | null;
 	phaseTiming: RunSettled["phaseTiming"];
+	/**
+	 * The seat debit the run's runtime reported, summed over its sealed `call.settled` billing when every call reported
+	 * a measured one; absent otherwise, so the economics fold falls back to its estimate and never mixes the two.
+	 */
+	reportedNanoAiu?: Fact<number>;
 }
 
 function reliabilityOf(settled: SettledRunRecord["settled"]): RouteReliabilityOutcome {
@@ -107,7 +113,22 @@ function settledRunFacts(record: SettledRunRecord): SettledRunFacts {
 	};
 }
 
-function routeEntryOf(run: SettledRunFacts): RouteHistoryEntry | null {
+/** The run's reported seat debit, read only from the records its verified seal vouches for. */
+function reportedSeatDebit(run: SettledRunFacts, sealed: readonly TelemetryRecord[] | null): Fact<number> | undefined {
+	if (!run.sealVerified || sealed === null || run.facts.routeDecision === null) return undefined;
+	const calls = sealed.flatMap((record) => (record.k === "call.settled" ? [record.data] : []));
+	let total = 0;
+	for (const call of calls) {
+		const debit = call.billing?.nanoAiu;
+		if (debit?.kind !== "measured") return undefined;
+		total += debit.value;
+	}
+	return calls.length > 0 && Number.isSafeInteger(total)
+		? { kind: "measured", value: total, source: "provider" }
+		: undefined;
+}
+
+function routeEntryOf(run: SettledRunFacts, reportedNanoAiu?: Fact<number>): RouteHistoryEntry | null {
 	const settled = run.facts;
 	const decision = settled.routeDecision;
 	if (decision === null) return null;
@@ -128,6 +149,7 @@ function routeEntryOf(run: SettledRunFacts): RouteHistoryEntry | null {
 		pricedCostUsd: pricedCostOf(settled),
 		cacheRead: cacheRead.kind === "measured" ? cacheRead.value > 0 : null,
 		phaseTiming: settled.phaseTiming,
+		...(reportedNanoAiu ? { reportedNanoAiu } : {}),
 	};
 }
 
@@ -272,14 +294,16 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 		const dir = statOrNull(directory);
 		const sealed = dir === null ? null : sealedScopeOf(directory, dir);
 		let run: SettledRunFacts | null = null;
+		let reported: Fact<number> | undefined;
 		try {
-			const record = readRunRecord(options.stateDir, runId);
-			run = record?.settled ? settledRunFacts(record as SettledRunRecord) : null;
+			const read = readRunRecordWithSealedRecords(options.stateDir, runId);
+			run = read?.run.settled ? settledRunFacts(read.run as SettledRunRecord) : null;
+			reported = run && read ? reportedSeatDebit(run, read.sealed) : undefined;
 		} catch {
 			// An unreadable run scope contributes no history.
 			run = null;
 		}
-		const folded = { identity, sealed, run, entry: run === null ? null : routeEntryOf(run) };
+		const folded = { identity, sealed, run, entry: run === null ? null : routeEntryOf(run, reported) };
 		cache.set(runId, folded);
 		return folded;
 	};

@@ -18,6 +18,7 @@ import {
 	resolveRecall,
 	resolveRecallByPath,
 } from "../../domains/context/working-set/recall.js";
+import type { BudgetEconomicsPort } from "../../domains/dispatch/contract.js";
 import { withPluginDiscoveryPass } from "../../domains/plugins/index.js";
 import { guidanceForSettings } from "../../domains/prompts/runtime-guidance.js";
 import {
@@ -96,6 +97,8 @@ export interface ContextToolDeps {
 	semantic?: ContextSemanticDeps;
 	/** Refreshes this run's native budget; absent for external/worker registries. */
 	getContextBudget?: BudgetProvider;
+	/** The caller's own economics view (S16): the session's, or a worker's envelope; absent reads unavailable. */
+	getBudgetEconomics?: BudgetEconomicsPort;
 	/** Live session view, including overrides. Omit when no authoritative settings snapshot exists. */
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Source of each active and saved route, recomputed per read (DF-7). */
@@ -961,16 +964,23 @@ function runRecallScope(
 }
 
 /** A byte-fitted JSON observation. Inspection never spills to disk. */
-function runBudgetScope(
+async function runBudgetScope(
 	deps: ContextToolDeps,
 	reservation: ObservationReservation,
 	options?: ToolInvokeOptions,
-): ToolResult {
+): Promise<ToolResult> {
 	const inspection = deps.getContextBudget?.() ?? {
 		status: "unavailable",
 		reason:
 			"This run has no native session budget port. Worker and external-agent budgets are not the parent session's budget.",
 	};
+	const economics =
+		deps.getBudgetEconomics === undefined
+			? { status: "unavailable", reason: "This registry has no economics port." }
+			: await deps.getBudgetEconomics().catch((error: unknown) => ({
+					status: "unavailable",
+					reason: `economics read failed: ${error instanceof Error ? error.message : String(error)}`,
+				}));
 	const payload =
 		inspection.status === "available"
 			? {
@@ -978,8 +988,9 @@ function runBudgetScope(
 					mode: "enforced",
 					admissionNote:
 						"Submission and continuation enforce input plus reserved output against the effective window. Counts are estimates unless provider-attested; pressure advice remains advisory.",
+					economics,
 				}
-			: inspection;
+			: { ...inspection, economics };
 	const full = JSON.stringify(payload);
 	const fits = Buffer.byteLength(full, "utf8") <= reservation.callCapBytes;
 	// Do not pass fullOutput to finalizeObservation: an inspection must not

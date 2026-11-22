@@ -3460,7 +3460,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						}
 					: {}),
 				...(sessionPrompt
-					? { promptSections: sessionPrompt.sections.map((section) => ({ id: section.id, tokens: section.tokenEstimate })) }
+					? {
+							promptSections: sessionPrompt.sections.map((section) => ({
+								id: section.id,
+								tokenEstimate: section.tokenEstimate,
+							})),
+						}
 					: {}),
 			};
 		},

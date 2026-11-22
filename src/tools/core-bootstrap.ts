@@ -8,6 +8,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
+import type { BudgetEconomicsPort } from "../domains/dispatch/contract.js";
 import type { VisionSidecar } from "../domains/providers/vision-sidecar.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -61,6 +62,8 @@ export interface CoreToolBootstrapDeps {
 	semantic?: ContextSemanticDeps;
 	/** Native session accounting only. Worker registries do not inherit it. */
 	getContextBudget?: BudgetProvider;
+	/** The caller's own economics view for context(scope=budget) (S16). */
+	getBudgetEconomics?: BudgetEconomicsPort;
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Live source of each active and saved route; absent where no saved layers exist. */
 	getRouteProvenance?: () => RouteProvenance;
@@ -272,6 +275,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	const skillToolDeps = {
 		semantic,
 		...(deps.getContextBudget ? { getContextBudget: deps.getContextBudget } : {}),
+		...(deps.getBudgetEconomics ? { getBudgetEconomics: deps.getBudgetEconomics } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.getRouteProvenance ? { getRouteProvenance: deps.getRouteProvenance } : {}),
 		...(deps.workerRecall ? { workerRecall: deps.workerRecall } : {}),
