@@ -296,7 +296,74 @@ function navNoMatch(index: NavIndex, query: string, searched: string): string {
 	return emptySearchText(`${searched}${spaced}`, listedDirectory(index, query));
 }
 
-function runSymbol(index: NavIndex, query: string, limit: number): NavPayload {
+/** Whether a result, as the call would return it, fits the call's observation cap. */
+type NavFits = (nav: NavPayload) => boolean;
+
+/**
+ * The most rows, up to `rows`, whose result fits the call's byte cap. Bytes grow with the row count, so a binary search
+ * finds it. When even zero rows overflow, the zero-row result goes out and the observation's oversize stub replaces it
+ * whole; that stub is kept for a payload nothing can shrink.
+ */
+function largestFit(
+	build: (rows: number) => NavPayload,
+	rows: number,
+	fits: NavFits,
+): { rows: number; nav: NavPayload } {
+	const full = build(rows);
+	if (fits(full)) return { rows, nav: full };
+	let low = 0;
+	let high = rows - 1;
+	let best = { rows: 0, nav: build(0) };
+	while (low <= high) {
+		const mid = Math.floor((low + high) / 2);
+		const candidate = build(mid);
+		if (fits(candidate)) {
+			best = { rows: mid, nav: candidate };
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+	return best;
+}
+
+interface ListMore {
+	next?: string;
+	byteLimited?: true;
+}
+
+/**
+ * A row-bounded listing fitted to the call cap (field F3: 134 same-named definitions overflowed it, and the stub
+ * showed none and offered a larger limit that could not fit either). It shows the most rows up to `limit` that fit,
+ * marks an answer the bytes cut short with byteLimited, and continues with a row count that fits too: up to twice the
+ * limit, never past the matches or MAX_LIMIT. `size` is the row dimension, so `rows === size` shows everything.
+ */
+function fitList(
+	size: number,
+	limit: number,
+	fits: NavFits,
+	build: (rows: number, more: ListMore) => NavPayload,
+): NavPayload {
+	const wanted = Math.min(limit, size);
+	const ceiling = Math.max(wanted, Math.min(limit * 2, MAX_LIMIT, size));
+	// Probe with the widest continuation and the marker, so the rows chosen still fit once the real ones are attached.
+	const probe = (rows: number): NavPayload =>
+		build(rows, rows < size ? { next: `limit=${ceiling}`, byteLimited: true } : {});
+	const shown = largestFit(probe, wanted, fits).rows;
+	if (shown === size) return build(shown, {});
+	const reach = shown < wanted ? shown : largestFit(probe, ceiling, fits).rows;
+	return build(shown, {
+		...(shown > 0 ? { next: `limit=${Math.max(reach, shown)}` } : {}),
+		...(shown < wanted ? { byteLimited: true } : {}),
+	});
+}
+
+function listTail(more: ListMore, missNext?: string): Record<string, unknown> {
+	const next = more.next ?? missNext;
+	return { ...(more.byteLimited ? { byteLimited: true } : {}), ...(next !== undefined ? { next } : {}) };
+}
+
+function runSymbol(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload {
 	const ids = index.symbolToFileIds.get(query) ?? [];
 	const files = ids.map((id) => index.filesById.get(id)).filter((file): file is CodewikiFile => Boolean(file));
 	// Return the matching symbol records with their path, line, and signature so the model
@@ -313,52 +380,56 @@ function runSymbol(index: NavIndex, query: string, limit: number): NavPayload {
 			a.symbol.line - b.symbol.line ||
 			a.symbol.kind.localeCompare(b.symbol.kind),
 	);
-	const shown = matched.slice(0, limit);
-	const omitted = matched.length - shown.length;
-	const symbols = shown.map(({ file, symbol }) => ({ ...symbolSummary(symbol), path: file.path }));
-	const next = matched.length === 0 ? `mode=path query=${query}` : omitted > 0 ? `limit=${limit * 2}` : undefined;
-	return {
-		payload: {
-			symbols,
-			files: files.sort(comparePath).slice(0, limit).map(fileSummary),
-			omitted,
-			...(next !== undefined ? { next } : {}),
-			...(matched.length === 0
-				? { noMatch: navNoMatch(index, query, `the code map's symbols for the exact name "${query}"`) }
-				: {}),
-		},
-		shownCount: shown.length,
-		totalCount: matched.length,
-		...(next !== undefined ? { next } : {}),
-	};
+	files.sort(comparePath);
+	const missNext = matched.length === 0 ? `mode=path query=${query}` : undefined;
+	return fitList(matched.length, limit, fits, (rows, more) => {
+		const shown = matched.slice(0, rows);
+		const tail = listTail(more, missNext);
+		return {
+			payload: {
+				symbols: shown.map(({ file, symbol }) => ({ ...symbolSummary(symbol), path: file.path })),
+				files: files.slice(0, rows).map(fileSummary),
+				omitted: matched.length - shown.length,
+				...tail,
+				...(matched.length === 0
+					? { noMatch: navNoMatch(index, query, `the code map's symbols for the exact name "${query}"`) }
+					: {}),
+			},
+			shownCount: shown.length,
+			totalCount: matched.length,
+			...(typeof tail.next === "string" ? { next: tail.next } : {}),
+		};
+	});
 }
 
-function runPath(index: NavIndex, query: string, limit: number): NavPayload {
+function runPath(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload {
 	const regex = regexFromPattern(query);
 	const matches = index.paths
 		.filter((path) => (regex ? regex.test(path) : path.includes(query)))
 		.map((path) => index.filesByPath.get(path))
 		.filter((file): file is CodewikiFile => Boolean(file));
-	const shown = matches.slice(0, limit);
-	const omitted = matches.length - shown.length;
-	const next = matches.length === 0 ? "mode=entries" : omitted > 0 ? `limit=${limit * 2}` : undefined;
+	const missNext = matches.length === 0 ? "mode=entries" : undefined;
 	const how = regex ? `the pattern ${query}` : `the substring "${query}"`;
-	return {
-		payload: {
-			files: shown.map(fileSummary),
-			omitted,
-			...(next !== undefined ? { next } : {}),
-			...(matches.length === 0
-				? { noMatch: navNoMatch(index, query, `the code map's ${index.paths.length} indexed paths for ${how}`) }
-				: {}),
-		},
-		shownCount: shown.length,
-		totalCount: matches.length,
-		...(next !== undefined ? { next } : {}),
-	};
+	return fitList(matches.length, limit, fits, (rows, more) => {
+		const shown = matches.slice(0, rows);
+		const tail = listTail(more, missNext);
+		return {
+			payload: {
+				files: shown.map(fileSummary),
+				omitted: matches.length - shown.length,
+				...tail,
+				...(matches.length === 0
+					? { noMatch: navNoMatch(index, query, `the code map's ${index.paths.length} indexed paths for ${how}`) }
+					: {}),
+			},
+			shownCount: shown.length,
+			totalCount: matches.length,
+			...(typeof tail.next === "string" ? { next: tail.next } : {}),
+		};
+	});
 }
 
-function runEntries(index: NavIndex, limit: number, entryRoot: string | null): NavPayload {
+function runEntries(index: NavIndex, limit: number, entryRoot: string | null, fits: NavFits): NavPayload {
 	const cwd = entryRoot ?? process.cwd();
 	const packageEntries = readPackageEntryPaths(cwd, entryRoot !== null);
 	const candidates = [...index.filesByPath.values()].filter(
@@ -369,15 +440,17 @@ function runEntries(index: NavIndex, limit: number, entryRoot: string | null): N
 		const bPkg = packageEntries.has(b.path) ? 0 : 1;
 		return aPkg === bPkg ? a.path.localeCompare(b.path) : aPkg - bPkg;
 	});
-	const shown = ranked.slice(0, limit);
-	const omitted = ranked.length - shown.length;
-	const next = ranked.length === 0 ? "mode=path query=src/" : omitted > 0 ? `limit=${limit * 2}` : undefined;
-	return {
-		payload: { files: shown.map(fileSummary), omitted, ...(next !== undefined ? { next } : {}) },
-		shownCount: shown.length,
-		totalCount: ranked.length,
-		...(next !== undefined ? { next } : {}),
-	};
+	const missNext = ranked.length === 0 ? "mode=path query=src/" : undefined;
+	return fitList(ranked.length, limit, fits, (rows, more) => {
+		const shown = ranked.slice(0, rows);
+		const tail = listTail(more, missNext);
+		return {
+			payload: { files: shown.map(fileSummary), omitted: ranked.length - shown.length, ...tail },
+			shownCount: shown.length,
+			totalCount: ranked.length,
+			...(typeof tail.next === "string" ? { next: tail.next } : {}),
+		};
+	});
 }
 
 function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: string } {
@@ -410,67 +483,61 @@ function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: st
 	};
 }
 
-function runOutline(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
+function runOutline(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const symbols = index.symbolsByFileId.get(file.id) ?? [];
-	const shown = symbols.slice(0, limit);
-	const omitted = symbols.length - shown.length;
-	const next = omitted > 0 ? `limit=${limit * 2}` : undefined;
-	return {
-		payload: {
-			file: fileSummary(file),
-			symbols: shown.map(symbolSummary),
-			omitted,
-			...(next !== undefined ? { next } : {}),
-		},
-		shownCount: shown.length,
-		totalCount: symbols.length,
-		...(next !== undefined ? { next } : {}),
-	};
+	return fitList(symbols.length, limit, fits, (rows, more) => {
+		const shown = symbols.slice(0, rows);
+		const tail = listTail(more);
+		return {
+			payload: {
+				file: fileSummary(file),
+				symbols: shown.map(symbolSummary),
+				omitted: symbols.length - shown.length,
+				...tail,
+			},
+			shownCount: shown.length,
+			totalCount: symbols.length,
+			...(typeof tail.next === "string" ? { next: tail.next } : {}),
+		};
+	});
 }
 
-function runDeps(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
+function runDeps(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const deps = index.depsByFileId.get(file.id) ?? { internal: [], external: [] };
-	const internal = deps.internal.slice(0, limit);
-	const external = deps.external.slice(0, limit);
 	const total = deps.internal.length + deps.external.length;
-	const shown = internal.length + external.length;
-	const omitted = total - shown;
-	const next = omitted > 0 ? `limit=${limit * 2}` : undefined;
-	return {
-		payload: {
-			file: fileSummary(file),
-			deps: { internal, external },
-			omitted,
-			...(next !== undefined ? { next } : {}),
-		},
-		shownCount: shown,
-		totalCount: total,
-		...(next !== undefined ? { next } : {}),
-	};
+	// The limit bounds each list, so the row dimension is the longer one.
+	return fitList(Math.max(deps.internal.length, deps.external.length), limit, fits, (rows, more) => {
+		const internal = deps.internal.slice(0, rows);
+		const external = deps.external.slice(0, rows);
+		const shown = internal.length + external.length;
+		const tail = listTail(more);
+		return {
+			payload: { file: fileSummary(file), deps: { internal, external }, omitted: total - shown, ...tail },
+			shownCount: shown,
+			totalCount: total,
+			...(typeof tail.next === "string" ? { next: tail.next } : {}),
+		};
+	});
 }
 
-function runDependents(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
+function runDependents(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const dependents = index.dependentsByFileId.get(file.id) ?? [];
-	const shown = dependents.slice(0, limit);
-	const omitted = dependents.length - shown.length;
-	const next = omitted > 0 ? `limit=${limit * 2}` : undefined;
-	return {
-		payload: {
-			file: fileSummary(file),
-			dependents: shown,
-			omitted,
-			...(next !== undefined ? { next } : {}),
-		},
-		shownCount: shown.length,
-		totalCount: dependents.length,
-		...(next !== undefined ? { next } : {}),
-	};
+	return fitList(dependents.length, limit, fits, (rows, more) => {
+		const shown = dependents.slice(0, rows);
+		const tail = listTail(more);
+		return {
+			payload: { file: fileSummary(file), dependents: shown, omitted: dependents.length - shown.length, ...tail },
+			shownCount: shown.length,
+			totalCount: dependents.length,
+			...(typeof tail.next === "string" ? { next: tail.next } : {}),
+		};
+	});
 }
 
 // The related bundle answers "what surrounds this definition" from the same
@@ -520,7 +587,7 @@ function relatedBundle(
 	head: Record<string, unknown>,
 	definitionsMore: string,
 	budget: number,
-	capBytes: number,
+	fits: NavFits,
 	sourcePrefix: string,
 ): NavPayload {
 	const deps = index.depsByFileId.get(file.id) ?? { internal: [], external: [] };
@@ -585,30 +652,14 @@ function relatedBundle(
 	// bytes. Shrink the item budget until the JSON fits so a pool-limited or
 	// signature-heavy bundle degrades to fewer facts with honest omitted counts
 	// instead of the all-or-nothing oversize stub.
-	const fits = (nav: NavPayload): boolean => byteLength(renderJson(nav.payload)) <= capBytes;
-	const full = build(budget);
-	if (fits(full)) return full;
-	let low = 0;
-	let high = budget - 1;
-	let best = build(0);
-	while (low <= high) {
-		const mid = Math.floor((low + high) / 2);
-		const candidate = build(mid);
-		if (fits(candidate)) {
-			best = candidate;
-			low = mid + 1;
-		} else {
-			high = mid - 1;
-		}
-	}
-	return best;
+	return largestFit(build, budget, fits).nav;
 }
 
 function runSymbolRelated(
 	index: NavIndex,
 	query: string,
 	budget: number,
-	capBytes: number,
+	fits: NavFits,
 	sourcePrefix: string,
 ): NavPayload {
 	const files = (index.symbolToFileIds.get(query) ?? [])
@@ -635,7 +686,7 @@ function runSymbolRelated(
 			{ symbol: query },
 			`mode=symbol query=${query} limit=${relatedLimit(definitionsIn(only).length)}`,
 			budget,
-			capBytes,
+			fits,
 			sourcePrefix,
 		);
 	}
@@ -673,7 +724,7 @@ function runOutlineRelated(
 	index: NavIndex,
 	query: string,
 	budget: number,
-	capBytes: number,
+	fits: NavFits,
 	sourcePrefix: string,
 ): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
@@ -692,7 +743,7 @@ function runOutlineRelated(
 		{},
 		`mode=outline query=${file.path} limit=${relatedLimit(symbols.length)}`,
 		budget,
-		capBytes,
+		fits,
 		sourcePrefix,
 	);
 }
@@ -876,11 +927,16 @@ export const codeNavTool: ToolSpec = {
 		commitObservationReservation(reservation);
 		try {
 			let grammarNote: string | undefined;
-			const close = (nav: NavPayload | ToolResult): ToolResult => {
-				if ("kind" in nav) return nav;
+			const present = (nav: NavPayload): { payload: Record<string, unknown>; next: string | undefined } => {
 				const next = source === "clio" && nav.next !== undefined ? `source=clio ${nav.next}` : nav.next;
 				const paged = next === nav.next ? nav.payload : { ...nav.payload, next };
-				const payload = grammarNote !== undefined ? { ...paged, grammarNote } : paged;
+				return { payload: grammarNote !== undefined ? { ...paged, grammarNote } : paged, next };
+			};
+			// Builders shrink to the payload as returned, grammar note and source prefix included.
+			const fits: NavFits = (nav) => byteLength(renderJson(present(nav).payload)) <= reservation.callCapBytes;
+			const close = (nav: NavPayload | ToolResult): ToolResult => {
+				if ("kind" in nav) return nav;
+				const { payload, next } = present(nav);
 				return finalizeObservation({
 					tool: ToolNames.CodeNav,
 					unit: "results",
@@ -928,26 +984,26 @@ export const codeNavTool: ToolSpec = {
 			const sourcePrefix = source === "clio" ? "source=clio " : "";
 			if (mode === "symbol") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
-				if (related) return close(runSymbolRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
-				return close(runSymbol(index, query, limit));
+				if (related) return close(runSymbolRelated(index, query, limit, fits, sourcePrefix));
+				return close(runSymbol(index, query, limit, fits));
 			}
 			if (mode === "path") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=path requires query" };
-				return close(runPath(index, query, limit));
+				return close(runPath(index, query, limit, fits));
 			}
-			if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot));
+			if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot, fits));
 			if (mode === "outline") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
-				if (related) return close(runOutlineRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
-				return close(runOutline(index, query, limit));
+				if (related) return close(runOutlineRelated(index, query, limit, fits, sourcePrefix));
+				return close(runOutline(index, query, limit, fits));
 			}
 			if (mode === "deps") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=deps requires query path" };
-				return close(runDeps(index, query, limit));
+				return close(runDeps(index, query, limit, fits));
 			}
 			if (mode === "dependents") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
-				return close(runDependents(index, query, limit));
+				return close(runDependents(index, query, limit, fits));
 			}
 			return {
 				kind: "error",

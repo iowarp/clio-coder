@@ -100,6 +100,31 @@ describe("code_nav tool", () => {
 		strictEqual((await payload({ mode: "path", query: "docs/" })).next, "mode=entries");
 	});
 
+	it("fits a list over the call cap to the rows that fit instead of an empty oversize stub", async () => {
+		// Field F3: 134 same-named definitions overflowed the cap, and the stub showed zero rows and suggested a
+		// larger limit that could not fit either.
+		for (let i = 0; i < 12; i++) {
+			writeFileSync(
+				join(workspace, `src/record-guard-${String(i).padStart(2, "0")}.ts`),
+				'export function isRecord(value: unknown): value is Record<string, unknown> {\n\treturn typeof value === "object" && value !== null;\n}\n',
+			);
+		}
+		const capBytes = 2048;
+		const result = await call(
+			{ mode: "symbol", query: "isRecord" },
+			{ observationRunPool: { limitBytes: 1024 * 1024, resultCapBytes: capBytes } },
+		);
+		if (result.kind !== "ok") throw new Error(JSON.stringify(result));
+		const observation = (result.details as { observation: { shownCount: number; totalCount: number } }).observation;
+		const fitted = JSON.parse(result.output) as { symbols?: unknown[]; omitted?: number; next?: string };
+		strictEqual(observation.totalCount, 12);
+		strictEqual((fitted.symbols ?? []).length > 0, true, result.output);
+		strictEqual(Buffer.byteLength(result.output) <= capBytes, true);
+		strictEqual(observation.shownCount, fitted.symbols?.length);
+		strictEqual((fitted.omitted ?? 0) + observation.shownCount, observation.totalCount);
+		strictEqual(fitted.next, `limit=${observation.shownCount}`, "the continuation names a row count that fits");
+	});
+
 	it("says what an empty search covered, that it proves no file absent, and the call that lists them", async () => {
 		// M-39: a worker read one empty code_nav search as "the workspace has no src/ tree".
 		const miss = await payload({ mode: "path", query: "src grid index" });
