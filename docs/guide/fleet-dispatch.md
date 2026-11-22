@@ -1426,6 +1426,17 @@ prose (the `review-verdict` contract on `reviewer`, `verifier-report` on `verifi
 {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}
 ```
 
+The host gives the reviewer an evidence packet inline
+([evidence-packet.ts](../../src/domains/dispatch/evidence-packet.ts)): the
+builder's handback (the first 8 KiB, with the run result path for the rest),
+the diff the host measured for the change (from the task worktree, the observed
+delta or the paths the builder's write record names, never the whole checkout;
+24,000 bytes shared across subjects) and the host's own run of each declared
+check, each under an id such as `s1.diff`. Every check in the verdict lists in
+`cites` the packet ids it rests on. A verdict whose checks cite none of them
+gets one repair round and then settles `exhausted` for the operator to decide.
+A compete judge receives the same packet for every candidate.
+
 `revise` is not a verdict a model authors. The reviewer answers `pass` or
 `fail`, and `decideReviewGate` in
 [gate-decisions.ts](../../src/domains/dispatch/gate-decisions.ts) owns the continuation policy: a
