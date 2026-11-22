@@ -15,6 +15,7 @@ export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
 const WINDOW_ORDER: Record<string, number> = { session: 0, weekly: 1 };
 const WEEKLY_THRESHOLD_SECONDS = 86_400;
+const WEEK_SECONDS = 604_800;
 
 /** The token and account a usage read sends. */
 export interface CodexAccountToken {
@@ -134,15 +135,35 @@ function usageWindows(raw: unknown): UsageWindow[] {
 	});
 }
 
-/** One `rate_limit` window slot, with the key defaulting when `limit_window_seconds` is absent. */
+/**
+ * One `rate_limit` window slot. The key defaults by slot when `limit_window_seconds` is absent; the label always comes
+ * from the reported duration, and names the slot rather than a guessed duration when none is reported.
+ */
 function buildWindow(raw: unknown, defaultKey: "session" | "weekly"): UsageWindow | null {
 	if (!isRecord(raw)) return null;
 	const usedPct = asNumber(raw.used_percent);
 	if (usedPct === null) return null;
 	const key = windowKey(raw.limit_window_seconds, defaultKey);
-	const label = key === "weekly" ? "Weekly" : "5h";
-	const short = key === "weekly" ? "wk" : "5h";
+	const { label, short } = windowLabel(raw.limit_window_seconds, defaultKey);
 	return { key, label, short, usedPct, resetsAt: epochSecondsToIso(raw.reset_at) };
+}
+
+/** "Weekly" for exactly seven days, otherwise the largest whole unit of the reported duration, such as "3h". */
+function windowLabel(limitWindowSeconds: unknown, slot: "session" | "weekly"): { label: string; short: string } {
+	const reported = asNumber(limitWindowSeconds);
+	const seconds = reported === null ? 0 : Math.round(reported);
+	if (seconds <= 0)
+		return slot === "session" ? { label: "Primary", short: "pri" } : { label: "Secondary", short: "sec" };
+	if (seconds === WEEK_SECONDS) return { label: "Weekly", short: "wk" };
+	const compact =
+		seconds % 86_400 === 0
+			? `${seconds / 86_400}d`
+			: seconds % 3_600 === 0
+				? `${seconds / 3_600}h`
+				: seconds % 60 === 0
+					? `${seconds / 60}m`
+					: `${seconds}s`;
+	return { label: compact, short: compact };
 }
 
 function windowKey(limitWindowSeconds: unknown, defaultKey: "session" | "weekly"): "session" | "weekly" {
