@@ -34,7 +34,12 @@ import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
-import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
+import {
+	isBuiltinClaudeAcp,
+	resolveAuthTarget,
+	resolveClaudeLaunchCredential,
+	resolveRuntimeAuthTarget,
+} from "../providers/auth/index.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
 	compileWorkerFlowPolicy,
@@ -256,6 +261,9 @@ import {
 	targetRequiresAuth,
 } from "../providers/index.js";
 import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
+import { DEFAULT_QUOTA_CACHE_TTL_MS } from "../quota/cache.js";
+import { buildQuotaProviders, quotaProviderIdForRuntime } from "../quota/registry.js";
+import { quotaSharedStatePath, readSharedQuotaState } from "../quota/shared-state.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import { type AutonomyLevel, admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -302,7 +310,13 @@ import {
 	planActiveRoute,
 	routeValidationProjection,
 } from "./active-route-planner.js";
-import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
+import {
+	admit,
+	createCapacityAdmissionController,
+	createLeaseSlotGuard,
+	describeProviderQuotaDenial,
+	PROVIDER_QUOTA_DENIED_REASON,
+} from "./admission.js";
 import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-error.js";
 import { agentRouteCandidates } from "./agent-candidates.js";
 import type { LedgerAssignment } from "./agent-ledger.js";
@@ -505,6 +519,7 @@ import {
 	startAfterPrefixHold,
 	waitForPrefixLeader,
 } from "./prefix-stagger.js";
+import { freshQuotaDenial } from "./quota-denial.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -4991,6 +5006,40 @@ export function createDispatchBundle(
 		throw new Error(message);
 	}
 
+	/**
+	 * R3: refuse a route whose quota pool the provider freshly and explicitly denied. Reads only the shared quota cache
+	 * file, never the network, and only the reading made with the credential this route would spend now: the quota
+	 * adapter reads the runtime's own login, so a target that names another credential is not bound by it, and an
+	 * unknown identity on either side never binds. A route with no quota adapter, or with no fresh reading, admits
+	 * unchanged.
+	 */
+	async function assertNoFreshQuotaDenial(
+		target: TargetDescriptor,
+		runtime: RuntimeDescriptor,
+		route: string,
+	): Promise<void> {
+		const providerId = quotaProviderIdForRuntime(runtime.id);
+		if (providerId === null) return;
+		if (resolveAuthTarget(target, runtime).providerId !== resolveRuntimeAuthTarget(runtime).providerId) return;
+		const nowMs = now();
+		const shared = readSharedQuotaState(quotaSharedStatePath(), nowMs);
+		const entry = shared.entries.get(providerId);
+		if (entry === undefined || entry.storedAtMs <= (shared.cleared.get(providerId) ?? Number.NEGATIVE_INFINITY)) return;
+		const denial = freshQuotaDenial(entry.snapshot, nowMs, DEFAULT_QUOTA_CACHE_TTL_MS);
+		if (denial === null) return;
+		const provider = buildQuotaProviders().find((candidate) => candidate.id === providerId);
+		if (provider === undefined) return;
+		const scope = provider.credentialScope === undefined ? null : await provider.credentialScope().catch(() => null);
+		if (scope === null || entry.scope !== scope) return;
+		safety.decisions.recordToolCall?.({
+			tool: "dispatch",
+			classification: { actionClass: "dispatch" },
+			decision: "denied",
+			reasonCode: PROVIDER_QUOTA_DENIED_REASON,
+		});
+		throw new Error(describeProviderQuotaDenial(denial, route));
+	}
+
 	function budgetDenialMessage(
 		preflight: { currentUsd: number; ceilingUsd: number; pricing?: BudgetSpendPricing },
 		routeEstimateUsd: number,
@@ -8543,6 +8592,11 @@ export function createDispatchBundle(
 			`${lifecycle.target.target.id}/${lifecycle.target.wireModelId}`,
 		);
 		if (routeUnpriced !== undefined) throw new Error(`dispatch: admission denied: ${routeUnpriced}`);
+		await assertNoFreshQuotaDenial(
+			lifecycle.target.target,
+			lifecycle.target.runtime,
+			`${lifecycle.target.target.id}/${lifecycle.target.wireModelId}`,
+		);
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, lifecycle, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;

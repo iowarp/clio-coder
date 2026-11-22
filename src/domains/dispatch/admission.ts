@@ -24,6 +24,7 @@ import {
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
 import { LEASE_HEARTBEAT_MS } from "./lease-clock.js";
+import type { FreshQuotaDenial } from "./quota-denial.js";
 import {
 	ownsActiveReservations,
 	refreshOwnedReservationsUnsafe,
@@ -124,6 +125,29 @@ export function createLeaseSlotGuard(
 }
 
 const URL_SLOT_REMEDY = "raise this target's maxConcurrentRequests to the server's actual slot count";
+
+/** Reason code a dispatch refused for a fresh provider quota denial records on its denied `tool.decided` row. */
+export const PROVIDER_QUOTA_DENIED_REASON = "provider-quota-denied";
+
+/**
+ * A route whose quota pool the provider freshly and explicitly denied (R3): name the provider, the binding window, its
+ * reset and the evidence age. The route is refused as asked, never moved to another one.
+ */
+export function describeProviderQuotaDenial(denial: FreshQuotaDenial, route: string): string {
+	const window =
+		denial.window === null
+			? "without naming a window"
+			: `on its ${denial.window} window${denial.usedPct === null ? "" : ` at ${Math.round(denial.usedPct)}% used`}`;
+	const state = `${denial.displayName} denies further use ${window}`;
+	const reset = denial.resetsAt === null ? "no reset time reported" : `resets ${denial.resetsAt}`;
+	const ageSeconds = Math.round(denial.ageMs / 1000);
+	const age = ageSeconds < 60 ? `${ageSeconds}s` : `${Math.floor(ageSeconds / 60)}m ${ageSeconds % 60}s`;
+	return [
+		`dispatch: admission denied: ${PROVIDER_QUOTA_DENIED_REASON}: ${state} (${reset};`,
+		` evidence ${age} old, fetched ${denial.fetchedAt}).`,
+		` Route ${route} was not moved; dispatch again after the reset or name another route.`,
+	].join("");
+}
 
 /** Retry cadence while queued requests are blocked behind live capacity. */
 const PUMP_MIN_MS = 10;

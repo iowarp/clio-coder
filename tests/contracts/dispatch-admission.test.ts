@@ -49,6 +49,7 @@ import {
 } from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { writerSetConflict } from "../../src/domains/dispatch/writer-set.js";
+import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -58,6 +59,8 @@ import {
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
+import { quotaSharedStatePath } from "../../src/domains/quota/shared-state.js";
+import { credentialFingerprint } from "../../src/domains/quota/types.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { planFacts, readDispatchPlan } from "../../src/interactive/dispatch-plan-summary.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -283,6 +286,117 @@ describe("dispatch admission boundary", () => {
 		releaseMainCacheLanes(undefined);
 		strictEqual(claimMainCacheLane({ key: "head", conversation: "ours", probe }), 1);
 		strictEqual(claimMainCacheLane({ key: "head", conversation: "fresh", probe }), 0);
+	});
+
+	it("refuses a pinned route only on a fresh, explicit provider quota denial, naming window, reset and evidence age (R3)", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: "codex", runtime: "openai-codex", defaultModel: "gpt-6-luna" }];
+		settings.fleet.default.target = "codex";
+		settings.fleet.default.model = "gpt-6-luna";
+		let starts = 0;
+		const options = {
+			spawnWorker: (): never => {
+				starts += 1;
+				throw new Error("fixture: route admitted");
+			},
+		};
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), options);
+		// The stub's default openai target has no quota adapter.
+		const unmetered = makeDispatchBundle(dispatchStubContext(), options);
+		// A target that names its own Codex login spends a credential the quota adapter never read.
+		const ownLoginSettings = structuredClone(settings);
+		ownLoginSettings.targets = [
+			{ id: "codex", runtime: "openai-codex", defaultModel: "gpt-6-luna", auth: { oauthProfile: "codex-work" } },
+		];
+		const ownLogin = makeDispatchBundle(dispatchStubContext({ settings: ownLoginSettings }), options);
+		await bundle.extension.start();
+		await unmetered.extension.start();
+		await ownLogin.extension.start();
+		const nowMs = Date.now();
+		const resetsAt = new Date(nowMs + 3_600_000).toISOString();
+		const login = (access: string) => ({
+			type: "oauth" as const,
+			access,
+			refresh: "r",
+			expires: nowMs + 3_600_000,
+			updatedAt: new Date(nowMs).toISOString(),
+		});
+		openAuthStorage().set("openai-codex", login("codex-login"));
+		openAuthStorage().set("codex-work", login("codex-work-login"));
+		const routeScope = credentialFingerprint("codex", "codex-login");
+		const writeReading = (snapshot: Record<string, unknown>, scope: string | null = routeScope) => {
+			const reading = {
+				providerId: "codex",
+				displayName: "Codex",
+				status: "ok",
+				fetchedAt: new Date(nowMs - 30_000).toISOString(),
+				access: "denied",
+				overage: "refused",
+				windows: [
+					{ key: "session", label: "5h", usedPct: 100, resetsAt },
+					{ key: "weekly", label: "Weekly", usedPct: 40, resetsAt },
+				],
+				...snapshot,
+			};
+			const path = quotaSharedStatePath();
+			mkdirSync(dirname(path), { recursive: true });
+			const entries = { codex: { snapshot: reading, storedAtMs: nowMs - 30_000, scope } };
+			writeFileSync(path, `${JSON.stringify({ version: 2, entries, misses: {}, cleared: {} })}\n`);
+		};
+		const task = "Inspect the source without editing files";
+		const pinned = (through = bundle) =>
+			through.contract.dispatch({
+				agentId: "scout",
+				task,
+				executionRole: "explorer",
+				target: "codex",
+				model: "gpt-6-luna",
+			});
+		try {
+			writeReading({});
+			await rejects(pinned(), (error: Error) => {
+				match(
+					error.message,
+					/^dispatch: admission denied: provider-quota-denied: Codex denies further use on its 5h window at 100% used/u,
+				);
+				ok(error.message.includes(`resets ${resetsAt}`), error.message);
+				match(error.message, /evidence 3\ds old.*Route codex\/gpt-6-luna was not moved/u);
+				return true;
+			});
+			strictEqual(starts, 0, "a denied route is neither spawned nor moved");
+			// A full window the provider did not deny (credits or overage still pay, or no stated status) admits, as does
+			// a denial that is stale, past the cache TTL, past its reset (canonical or not) or another or an unknown credential's.
+			const admitted: Array<[Record<string, unknown>, string | null]> = [
+				[{ access: "allowed", overage: "permitted", credits: { display: "120", usedPct: null } }, routeScope],
+				[{ access: "unknown", overage: "unknown" }, routeScope],
+				[{ access: undefined, overage: undefined }, routeScope],
+				[{ stale: true }, routeScope],
+				[{ fetchedAt: new Date(nowMs - 6 * 60_000).toISOString() }, routeScope],
+				[
+					{ windows: [{ key: "session", label: "5h", usedPct: 100, resetsAt: new Date(nowMs - 1_000).toISOString() }] },
+					routeScope,
+				],
+				[{ windows: [{ key: "session", label: "5h", usedPct: 100, resetsAt: "2020-01-01T00:00:00Z" }] }, routeScope],
+				[{ status: "error" }, routeScope],
+				[{}, "another-login"],
+				[{}, null],
+			];
+			for (const [snapshot, scope] of admitted) {
+				writeReading(snapshot, scope);
+				await rejects(pinned(), { message: "fixture: route admitted" });
+			}
+			// A route with no quota adapter, or one spending its own named login, admits unchanged beside a fresh denial.
+			writeReading({});
+			await rejects(unmetered.contract.dispatch({ agentId: "scout", task, executionRole: "explorer" }), {
+				message: "fixture: route admitted",
+			});
+			await rejects(pinned(ownLogin), { message: "fixture: route admitted" });
+			strictEqual(starts, admitted.length + 2);
+		} finally {
+			await bundle.extension.stop?.();
+			await unmetered.extension.stop?.();
+			await ownLogin.extension.stop?.();
+		}
 	});
 
 	it("states each run's bounds on the plan card: a priced estimate at the output bound, else only the timers and tool ceiling it has (M6)", async () => {
