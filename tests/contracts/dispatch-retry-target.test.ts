@@ -264,7 +264,7 @@ describe("retry target selection", () => {
 		}
 	});
 
-	it("moves a free obligation retry sealed at failover none to another model, past a refused one; a sealed route stays", async () => {
+	it("moves a free obligation retry sealed at failover none to another model, past a refused one; a sealed route or a model pin stays", async () => {
 		// Tool admission stamps the resolved route and seals failover none on every request; only `routeFree` says it moved.
 		const models: string[] = [];
 		const fleet = await retryFleet(["default"], new Set(), new Set(), {
@@ -302,6 +302,17 @@ describe("retry target selection", () => {
 			const sealed = await settle({}, false);
 			deepStrictEqual(models, ["gpt-4o"], "a plan-sealed route never moves");
 			strictEqual(sealed?.outcomeDetail, stays);
+			// `run --agent --model`: a caller model pin with no failover field, which reads as automatic failover.
+			models.length = 0;
+			const cli = await fleet.bundle.contract.dispatch({
+				...REQUEST,
+				cwd: scratch.dir,
+				intent: scope.intent,
+				model: "gpt-4o",
+			});
+			await fleet.bundle.contract.assignments?.get(cli.runId)?.terminal;
+			deepStrictEqual(models, ["gpt-4o"], "a model pin never moves");
+			strictEqual(fleet.bundle.contract.assignments?.get(cli.runId)?.outcomeDetail, stays);
 			await settle({}, true);
 			deepStrictEqual(models, ["gpt-4o", "gpt-4o-mini", "gpt-4.1"], "one retry, on the next other model");
 		} finally {
