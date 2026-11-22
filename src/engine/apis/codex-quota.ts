@@ -42,7 +42,9 @@ export function parseCodexQuotaEvent(
 			resetsAt: Number.isFinite(date.getTime()) ? date.toISOString() : null,
 		});
 	}
-	if (windows.length === 0) return null;
+	// A limit-only event (allowed or limit_reached without a window) still says whether the account can send.
+	if (windows.length === 0 && typeof limits.allowed !== "boolean" && typeof limits.limit_reached !== "boolean")
+		return null;
 	const credits = record(data.credits);
 	const balance = credits?.balance;
 	return {

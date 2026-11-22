@@ -1,6 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
-import { CallEconomicsSchema, RunEconomicsSchema } from "./economy.js";
+import { CallEconomicsSchema, EconomyUnitSchema, OpaqueIdSchema, RunEconomicsSchema } from "./economy.js";
 import {
 	AgentRole,
 	ConfigChangeSource,
@@ -33,6 +33,9 @@ import {
 	MIDDLEWARE_EFFECTS,
 	ObjectRefSchema,
 	PricingSchema,
+	QUOTA_ACCESS,
+	QUOTA_OVERAGE,
+	QUOTA_QUALIFICATION,
 	RecordedRunSettledSchema,
 	RunFeedBodySchema,
 	RunResultObjectSchema,
@@ -1460,12 +1463,24 @@ export const QuotaStateSchema = Type.Object(
 									{ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() },
 									closed,
 								),
+								/** The balance's unit as the provider named it; null when it named none, and never currency then. */
+								unit: Type.Union([EconomyUnitSchema, Type.Null()]),
 							},
 							closed,
 						),
 						Type.Null(),
 					]),
 					message: Type.Union([text, Type.Null()]),
+					/** The funding pool: a local pseudonym of the account's billing identity, null without a verified one. */
+					pool: Type.Union([OpaqueIdSchema, Type.Null()]),
+					/** The provider's deny status for the pool; `denied` only on its own signal, never on a full window. */
+					access: vocabulary(QUOTA_ACCESS),
+					/** Whether the provider will bill past the included allowance, where it states so. */
+					overage: vocabulary(QUOTA_OVERAGE),
+					/** The pool-wide reset the provider reported, apart from any window's own. */
+					resetsAt: Type.Union([UtcSchema, Type.Null()]),
+					/** Until when the reading counts as fresh; null for a stale, failed or older reading. */
+					validUntil: Type.Union([UtcSchema, Type.Null()]),
 					retryAfter: Type.Union([
 						Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed),
 						Type.Null(),
@@ -1484,6 +1499,16 @@ export const QuotaStateSchema = Type.Object(
 									closed,
 								),
 								resetsAt: Type.Union([UtcSchema, Type.Null()]),
+								/** The native unit the window counts, as reported; null when the provider named none. */
+								unit: Type.Union([EconomyUnitSchema, Type.Null()]),
+								/** The window's reported length in seconds; null when the provider reported none. */
+								durationSeconds: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+								/** The provider's deny status for this window; `unknown` when it states none per window. */
+								access: vocabulary(QUOTA_ACCESS),
+								/** The provider reported no limit: the window keeps its unit and has no percentage. */
+								unlimited: Type.Optional(Type.Literal(true)),
+								/** How far the provider qualified the window's quantities; absent when it did not say. */
+								qualification: Type.Optional(vocabulary(QUOTA_QUALIFICATION)),
 								/**
 								 * What the shared account window gained between its two newest journaled readings, estimated
 								 * because other devices draw from the same window (#434 §12.5).

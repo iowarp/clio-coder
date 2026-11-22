@@ -8,6 +8,9 @@
  * the request and the parsing; each adapter owns its credential (#434).
  */
 
+import { createHash } from "node:crypto";
+import { codexAccountScope } from "../../core/codex-account.js";
+import { accountPseudonym, codexAccess } from "./pool-reading.js";
 import type { UsageCredits, UsageSnapshot, UsageWindow } from "./types.js";
 import { formatPlan, parseRetryAfterSeconds } from "./types.js";
 
@@ -31,6 +34,8 @@ export interface CodexUsageOutcome {
 	credits: UsageCredits | null;
 	plan: string | null;
 	retryAfterSeconds: number | null;
+	/** The pool evidence of a successful read: the account's pool, its deny status and its overage. */
+	pool: Pick<UsageSnapshot, "accountPseudonym" | "access" | "overage">;
 }
 
 export interface CodexUsageDependencies {
@@ -45,7 +50,17 @@ function outcome(
 	message: string | null,
 	extra: Partial<CodexUsageOutcome> = {},
 ): CodexUsageOutcome {
-	return { status, message, windows: [], credits: null, plan: null, retryAfterSeconds: null, ...extra };
+	return { status, message, windows: [], credits: null, plan: null, retryAfterSeconds: null, pool: {}, ...extra };
+}
+
+/**
+ * The scope of the account the poll queried: the token's own ChatGPT account, unless an explicit ChatGPT-Account-Id
+ * selected another one, which the token cannot vouch for, so that poll names no pool.
+ */
+function queriedAccountScope(token: CodexAccountToken): string | null {
+	const scope = codexAccountScope(token.accessToken);
+	if (token.accountId === null) return scope;
+	return scope === createHash("sha256").update(token.accountId).digest("hex") ? scope : null;
 }
 
 /**
@@ -100,10 +115,12 @@ export async function fetchCodexUsage(
 			return outcome("error", "Unexpected usage response");
 		}
 
+		const pool = accountPseudonym("chatgpt", queriedAccountScope(token));
 		return outcome("ok", null, {
 			windows: usageWindows(body.rate_limit),
 			credits: usageCredits(body.credits),
 			plan: formatPlan(typeof body.plan_type === "string" ? body.plan_type : null),
+			pool: { ...codexAccess(limitSignal(body)), ...(pool === undefined ? {} : { accountPseudonym: pool }) },
 		});
 	} finally {
 		clearTimeout(timer);
@@ -145,7 +162,36 @@ function buildWindow(raw: unknown, defaultKey: "session" | "weekly"): UsageWindo
 	if (usedPct === null) return null;
 	const key = windowKey(raw.limit_window_seconds, defaultKey);
 	const { label, short } = windowLabel(raw.limit_window_seconds, defaultKey);
-	return { key, label, short, usedPct, resetsAt: epochSecondsToIso(raw.reset_at) };
+	const reported = asNumber(raw.limit_window_seconds);
+	const seconds = reported === null ? 0 : Math.round(reported);
+	return {
+		key,
+		label,
+		short,
+		usedPct,
+		resetsAt: epochSecondsToIso(raw.reset_at),
+		unit: "percent",
+		...(seconds >= 1 ? { durationSeconds: seconds } : {}),
+	};
+}
+
+/** The poll's `rate_limit.allowed`/`limit_reached` and `credits`, as the stream event carries them too. */
+function limitSignal(body: Record<string, unknown>): Parameters<typeof codexAccess>[0] {
+	const limit = isRecord(body.rate_limit) ? body.rate_limit : {};
+	const credits = isRecord(body.credits) ? body.credits : null;
+	const flag = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
+	return {
+		allowed: flag(limit.allowed),
+		limitReached: flag(limit.limit_reached),
+		credits:
+			credits === null
+				? null
+				: {
+						hasCredits: flag(credits.has_credits),
+						unlimited: flag(credits.unlimited),
+						balance: typeof credits.balance === "string" && /^\d+(?:\.\d+)?$/.test(credits.balance) ? credits.balance : null,
+					},
+	};
 }
 
 /** "Weekly" for exactly seven days, otherwise the largest whole unit of the reported duration, such as "3h". */
@@ -175,9 +221,9 @@ function windowKey(limitWindowSeconds: unknown, defaultKey: "session" | "weekly"
 /** Credit balance from the `credits` block, present only for credit-billed plans. */
 function usageCredits(raw: unknown): UsageCredits | null {
 	if (!isRecord(raw)) return null;
-	if (raw.unlimited === true) return { display: "Unlimited", usedPct: null };
+	if (raw.unlimited === true) return { display: "Unlimited", usedPct: null, unit: "provider-credits" };
 	if (raw.has_credits === true && typeof raw.balance === "string" && raw.balance.length > 0) {
-		return { display: raw.balance, usedPct: null };
+		return { display: raw.balance, usedPct: null, unit: "provider-credits" };
 	}
 	return null;
 }

@@ -172,6 +172,7 @@ test("copilot quota adapter maps finite requests, nano_aiu credits, per-bucket u
 		readQuota: async () => ({
 			kind: "ok",
 			account: { login: "octocat", host: "https://github.com" },
+			accountScope: "scope-octocat",
 			entries: finiteEntries,
 		}),
 		now: () => NOW,
@@ -189,6 +190,9 @@ test("copilot quota adapter maps finite requests, nano_aiu credits, per-bucket u
 			short: "prem",
 			usedPct: 40,
 			resetsAt: "2026-11-22T14:34:34.688Z",
+			unit: "premium-requests",
+			access: "allowed",
+			qualification: "authoritative",
 		},
 	]);
 	assert.equal(snapshot.credits?.usedPct, 40);
@@ -238,6 +242,9 @@ test("copilot quota adapter maps finite requests, nano_aiu credits, per-bucket u
 			short: "prem",
 			usedPct: 25,
 			resetsAt: "2026-12-01T00:00:00.000Z",
+			unit: "nano-aiu",
+			access: "allowed",
+			qualification: "authoritative",
 		},
 	]);
 	assert.match(mappedCredits.credits?.display ?? "", /125\/500 AI credits used, 375 remaining \(authoritative/);
@@ -498,7 +505,12 @@ test("copilot quota detect/credentialScope avoid spawning daemons, skip unconfig
 			hasConfiguredTarget: () => false,
 			readQuota: async () => {
 				unconfiguredReads += 1;
-				return { kind: "ok", account: { login: "octocat", host: "https://github.com" }, entries: [] };
+				return {
+					kind: "ok",
+					account: { login: "octocat", host: "https://github.com" },
+					accountScope: "scope-octocat",
+					entries: [],
+				};
 			},
 			now: () => NOW,
 		});
@@ -518,6 +530,7 @@ test("copilot quota detect/credentialScope avoid spawning daemons, skip unconfig
 				return {
 					kind: "ok",
 					account: { login: "octocat", host: "https://github.com" },
+					accountScope: "scope-octocat",
 					entries: [
 						{
 							key: "premium_interactions",
@@ -536,6 +549,10 @@ test("copilot quota detect/credentialScope avoid spawning daemons, skip unconfig
 							overageAllowedWhenExhausted: null,
 							resetsAt: "2026-02-01T00:00:00.000Z",
 							reason: null,
+							accessState: null,
+							hasQuota: null,
+							acquisition: null,
+							periodSeconds: null,
 						},
 					],
 				};

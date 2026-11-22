@@ -20,6 +20,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
+import { accountPseudonym, namedWindowSeconds } from "./pool-reading.js";
 import type { QuotaProvider, UsageSnapshot, UsageWindow } from "./types.js";
 import { credentialFingerprint, formatPlan } from "./types.js";
 
@@ -95,7 +96,7 @@ async function readCredentialsFile(path: string): Promise<AntigravityCredentials
 type PostResult = { kind: "ok"; data: Record<string, unknown> } | { kind: "auth" } | { kind: "error"; message: string };
 
 type CollectResult =
-	| { kind: "ok"; windows: UsageWindow[]; plan: string | null }
+	| { kind: "ok"; windows: UsageWindow[]; plan: string | null; project: string | null }
 	| { kind: "auth" }
 	| { kind: "error"; message: string };
 
@@ -173,13 +174,13 @@ export function createAntigravityQuotaProvider(options: AntigravityQuotaOptions 
 			if (summary.kind === "auth") return summary;
 			if (summary.kind === "ok") {
 				const windows = windowsFromSummary(summary.data);
-				if (windows.length > 0) return { kind: "ok", windows, plan };
+				if (windows.length > 0) return { kind: "ok", windows, plan, project };
 			}
 		}
 
 		const models = await post(`${base}/v1internal:fetchAvailableModels`, token, project === null ? {} : { project });
 		if (models.kind !== "ok") return models;
-		return { kind: "ok", windows: modelWindows(models.data), plan };
+		return { kind: "ok", windows: modelWindows(models.data), plan, project };
 	};
 
 	return {
@@ -217,7 +218,14 @@ export function createAntigravityQuotaProvider(options: AntigravityQuotaOptions 
 					continue;
 				}
 				if (result.windows.length > 0) {
-					return snapshot("ok", null, { windows: result.windows, plan: result.plan });
+					// The Cloud Code project is the billing entity a pool is keyed on; Antigravity states no deny status.
+					const pool = accountPseudonym("antigravity", result.project);
+					return snapshot("ok", null, {
+						windows: result.windows,
+						plan: result.plan,
+						access: "unknown",
+						...(pool === undefined ? {} : { accountPseudonym: pool }),
+					});
 				}
 			}
 
@@ -260,10 +268,26 @@ function windowsFromGroup(group: Record<string, unknown>): UsageWindow[] {
 		const window = typeof bucket.window === "string" ? bucket.window.toLowerCase() : null;
 		const usedPct = usedFromRemaining(bucket.remainingFraction);
 		if (usedPct === null) continue;
+		const seconds = namedWindowSeconds(window ?? "");
+		const evidence = { unit: "percent" as const, ...(seconds === undefined ? {} : { durationSeconds: seconds }) };
 		if (window === "5h") {
-			windows.push({ key: "session", label: "5h", short: "5h", usedPct, resetsAt: asIsoString(bucket.resetTime) });
+			windows.push({
+				key: "session",
+				label: "5h",
+				short: "5h",
+				usedPct,
+				resetsAt: asIsoString(bucket.resetTime),
+				...evidence,
+			});
 		} else if (window === "weekly") {
-			windows.push({ key: "weekly", label: "Weekly", short: "wk", usedPct, resetsAt: asIsoString(bucket.resetTime) });
+			windows.push({
+				key: "weekly",
+				label: "Weekly",
+				short: "wk",
+				usedPct,
+				resetsAt: asIsoString(bucket.resetTime),
+				...evidence,
+			});
 		}
 	}
 	return windows.sort((left, right) => (WINDOW_ORDER[left.key] ?? 2) - (WINDOW_ORDER[right.key] ?? 2));
@@ -299,6 +323,7 @@ function modelWindows(data: Record<string, unknown>): UsageWindow[] {
 			scope: name,
 			usedPct,
 			resetsAt: asIsoString(info.quotaInfo.resetTime),
+			unit: "percent",
 		});
 	}
 	return windows;

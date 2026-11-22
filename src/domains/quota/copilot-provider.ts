@@ -8,6 +8,10 @@
  * - marks unlimited only per bucket when the provider explicitly reports unlimited or `-1`
  * - computes percentage only from an authoritative numerator and positive denominator
  * - keeps advisory vs authoritative explicit in the rendered display
+ * - journals a bucket without an authoritative pair (unlimited, advisory, admission) as an allowance: unit, reset and
+ *   status, never a percent
+ * - states access only from the SDK's own verdict, else from an authoritative budget and its exhaustion policy, scoped
+ *   to the bucket; a failed acquisition states nothing
  */
 
 import { statSync } from "node:fs";
@@ -15,6 +19,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readSettings } from "../../core/config.js";
 import { copilotKeychainAllowed } from "../../core/copilot-keychain.js";
+import type { EconomyUnit } from "../../core/telemetry/economy.js";
 import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 import {
 	type CopilotQuotaAccount,
@@ -24,9 +29,14 @@ import {
 	copilotSdkSignedInAccount,
 	readCopilotSdkQuota,
 } from "../../engine/ai.js";
+import { accountPseudonym } from "./pool-reading.js";
 import {
 	credentialFingerprint,
+	type QuotaAccess,
+	type QuotaOverage,
 	type QuotaProvider,
+	type QuotaQualification,
+	type UsageAllowance,
 	type UsageCredits,
 	type UsageSnapshot,
 	type UsageWindow,
@@ -46,6 +56,7 @@ export interface CopilotQuotaOptions {
 
 export interface MappedCopilotQuota {
 	windows: UsageWindow[];
+	allowances: UsageAllowance[];
 	credits: UsageCredits | null;
 	message: string | null;
 }
@@ -110,6 +121,92 @@ function roundPct(numerator: number, denominator: number): number {
 	return Math.min(100, Math.max(0, Math.round((numerator / denominator) * 10_000) / 100));
 }
 
+/** The native unit a bucket counts, as the SDK named it. */
+function nativeUnit(entry: CopilotQuotaEntry): EconomyUnit {
+	switch (entry.unit) {
+		case "requests":
+			return entry.key === "premium_interactions" ? "premium-requests" : "requests";
+		case "ai_credits":
+			return "provider-credits";
+		case "nano_aiu":
+			return "nano-aiu";
+		case "tokens":
+			return "tokens";
+		case "unknown":
+			return "unknown";
+	}
+}
+
+function qualificationOf(entry: CopilotQuotaEntry): QuotaQualification | undefined {
+	if (entry.observationKind === "admission_state") return "admission";
+	switch (entry.quantityKind) {
+		case "authoritative_budget":
+			return "authoritative";
+		case "advisory_balance":
+			return "advisory";
+		case "none":
+			return "none";
+		default:
+			return undefined;
+	}
+}
+
+/** The SDK received a service observation for the bucket (the legacy shape reports no acquisition status). */
+function acquired(entry: CopilotQuotaEntry): boolean {
+	return entry.acquisition !== "failed" && entry.acquisition !== "unavailable";
+}
+
+/**
+ * One bucket's admission evidence. The SDK's own verdict (access state, then the service's admission flag) stands as
+ * stated, whatever the balance. Without one, only an authoritative budget speaks: allowed when unlimited, when its
+ * policy lets usage or overage continue, or when something remains; denied when exhausted (capacity exhausted or
+ * nothing remaining) with usage and overage both refused past exhaustion. A failed acquisition states nothing.
+ */
+function copilotEntryAccess(entry: CopilotQuotaEntry): { access: QuotaAccess; overage: QuotaOverage } {
+	if (!acquired(entry)) return { access: "unknown", overage: "unknown" };
+	const overage: QuotaOverage =
+		entry.overageAllowedWhenExhausted === true
+			? "permitted"
+			: entry.overageAllowedWhenExhausted === false
+				? "refused"
+				: "unknown";
+	if (entry.accessState === "denied") return { access: "denied", overage };
+	if (entry.accessState === "allowed" || entry.accessState === "not_required" || entry.hasQuota === true)
+		return { access: "allowed", overage };
+	if (entry.quantityKind !== "authoritative_budget") return { access: "unknown", overage };
+	if (entry.unlimited || entry.usageAllowedWhenExhausted === true || entry.overageAllowedWhenExhausted === true)
+		return { access: "allowed", overage };
+	const remaining =
+		entry.remaining ??
+		(entry.entitlement !== null && entry.used !== null ? Math.max(0, entry.entitlement - entry.used) : null);
+	if ((entry.exhausted || remaining === 0) && entry.overageAllowedWhenExhausted === false)
+		return { access: "denied", overage };
+	return { access: remaining !== null && remaining > 0 ? "allowed" : "unknown", overage };
+}
+
+/**
+ * Account-wide evidence over the buckets. A bucket's verdict stays on its own window: the account is denied only when
+ * every acquired bucket is, and allowed when any is. Overage holds where every bucket that states one agrees.
+ */
+function copilotPoolEvidence(
+	entries: ReadonlyArray<CopilotQuotaEntry>,
+): Pick<UsageSnapshot, "access" | "overage" | "resetsAt"> {
+	const judged = entries.filter(acquired).map((entry) => ({ entry, ...copilotEntryAccess(entry) }));
+	const overages = [...new Set(judged.map((bucket) => bucket.overage).filter((stated) => stated !== "unknown"))];
+	const overage: QuotaOverage = overages.length === 1 ? (overages[0] ?? "unknown") : "unknown";
+	if (judged.length > 0 && judged.every((bucket) => bucket.access === "denied")) {
+		const resets = judged.flatMap((bucket) => (bucket.entry.resetsAt ? [bucket.entry.resetsAt] : [])).sort();
+		return { access: "denied", overage, ...(resets.length > 0 ? { resetsAt: resets[resets.length - 1] ?? null } : {}) };
+	}
+	return { access: judged.some((bucket) => bucket.access === "allowed") ? "allowed" : "unknown", overage };
+}
+
+/** The pool of the GitHub account a reading belongs to: model-independent, and none without a known account. */
+function copilotPool(accountScope: string | null | undefined): Pick<UsageSnapshot, "accountPseudonym"> {
+	const pool = accountPseudonym("github-copilot", accountScope);
+	return pool === undefined ? {} : { accountPseudonym: pool };
+}
+
 function isAuthoritativeEntry(entry: CopilotQuotaEntry): boolean {
 	return entry.quantityKind === "authoritative_budget" && entry.observationKind !== "admission_state";
 }
@@ -146,6 +243,8 @@ function formatBucketSegment(
 		if (entitlement !== null) parts.push(`${formatQuantity(entitlement)}${unitSuffix} entitlement`);
 		if (remaining !== null) parts.push(`${formatQuantity(remaining)}${unitSuffix} remaining`);
 		core = parts.join(", ");
+	} else if (!acquired(entry)) {
+		core = "not acquired";
 	} else if (entry.exhausted) {
 		core = "exhausted";
 	} else {
@@ -194,6 +293,7 @@ export function mapCopilotQuotaEntries(entries: ReadonlyArray<CopilotQuotaEntry>
 	if (entries.length === 0) {
 		return {
 			windows: [],
+			allowances: [],
 			credits: null,
 			message: "GitHub Copilot reported no quota buckets (quota unknown)",
 		};
@@ -210,6 +310,7 @@ export function mapCopilotQuotaEntries(entries: ReadonlyArray<CopilotQuotaEntry>
 	for (const entry of sorted) keyCounts.set(entry.key, (keyCounts.get(entry.key) ?? 0) + 1);
 
 	const windows: UsageWindow[] = [];
+	const allowances: UsageAllowance[] = [];
 	const segments: string[] = [];
 
 	for (const entry of sorted) {
@@ -232,23 +333,33 @@ export function mapCopilotQuotaEntries(entries: ReadonlyArray<CopilotQuotaEntry>
 					: null;
 		const overage = scaleNativeQuantity(entry.overage, entry.unit);
 
-		if (authoritative && !entry.unlimited && entitlement !== null && entitlement > 0) {
-			const numerator =
-				used !== null
+		const qualification = qualificationOf(entry);
+		const evidence = {
+			key: windowKey,
+			label,
+			short,
+			resetsAt: entry.resetsAt,
+			unit: nativeUnit(entry),
+			...(entry.periodSeconds === null ? {} : { durationSeconds: entry.periodSeconds }),
+			access: copilotEntryAccess(entry).access,
+			...(qualification === undefined ? {} : { qualification }),
+		};
+		const numerator =
+			authoritative && !entry.unlimited && entitlement !== null && entitlement > 0
+				? used !== null
 					? used
 					: explicitRemaining !== null && explicitRemaining <= entitlement
 						? entitlement - explicitRemaining
-						: null;
-			if (numerator !== null) {
-				windows.push({
-					key: windowKey,
-					label,
-					short,
-					usedPct: roundPct(numerator, entitlement),
-					resetsAt: entry.resetsAt,
-					...(entry.exhausted ? { severity: "critical" } : {}),
-				});
-			}
+						: null
+				: null;
+		if (numerator !== null && entitlement !== null) {
+			windows.push({
+				...evidence,
+				usedPct: roundPct(numerator, entitlement),
+				...(entry.exhausted ? { severity: "critical" } : {}),
+			});
+		} else if (acquired(entry)) {
+			allowances.push({ ...evidence, ...(entry.unlimited ? { unlimited: true as const } : {}) });
 		}
 
 		segments.push(formatBucketSegment(entry, label, unit, entitlement, used, remaining, overage));
@@ -257,6 +368,7 @@ export function mapCopilotQuotaEntries(entries: ReadonlyArray<CopilotQuotaEntry>
 	const singleWindow = windows.length === 1 ? windows[0] : undefined;
 	return {
 		windows,
+		allowances,
 		credits: {
 			display: segments.join(" · "),
 			usedPct: singleWindow ? singleWindow.usedPct : null,
@@ -397,11 +509,20 @@ export function createCopilotQuotaProvider(options: CopilotQuotaOptions = {}): Q
 			if (result.kind === "unsupported") return snapshot("error", result.message);
 			if (result.kind === "error") return snapshot("error", result.message);
 			const mapped = mapCopilotQuotaEntries(result.entries);
-			return snapshot("ok", mapped.message, {
-				plan: null,
-				windows: mapped.windows,
-				credits: mapped.credits,
-			});
+			// Buckets whose acquisition failed are no observation: no verdict, and no freshness.
+			const observed = result.entries.length === 0 || result.entries.some(acquired);
+			return snapshot(
+				observed ? "ok" : "error",
+				observed ? mapped.message : "GitHub Copilot acquired no quota observation (quota unknown)",
+				{
+					plan: null,
+					windows: mapped.windows,
+					allowances: mapped.allowances,
+					credits: mapped.credits,
+					...copilotPoolEvidence(result.entries),
+					...copilotPool(result.accountScope),
+				},
+			);
 		},
 	};
 }

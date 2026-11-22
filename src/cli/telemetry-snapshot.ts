@@ -113,7 +113,9 @@ function printQuota(dto: QuotaStateV1): string {
 		if (row.credits) lines.push(`  credits ${row.credits.display} · ${row.credits.usedPct.display} used`);
 		for (const window of row.windows)
 			lines.push(
-				`  ${window.label ?? window.key}  ${window.usedPct.display} used${
+				`  ${window.label ?? window.key}  ${window.unlimited ? "unlimited" : `${window.usedPct.display} used`}${
+					window.unit && window.unit !== "percent" ? ` (${window.unit})` : ""
+				}${
 					window.consumedPct ? ` (+${window.consumedPct.display} between the last two readings)` : ""
 				}${window.resetsAt ? ` · resets ${window.resetsAt}` : ""}`,
 			);

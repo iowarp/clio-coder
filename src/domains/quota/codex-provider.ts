@@ -129,7 +129,7 @@ export function createCodexQuotaProvider(options: CodexQuotaOptions = {}): Quota
 			if (usage.status !== "ok") {
 				return snapshot(usage.status, usage.message ?? LOGIN_AGAIN, { retryAfterSeconds: usage.retryAfterSeconds });
 			}
-			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits, plan: usage.plan });
+			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits, plan: usage.plan, ...usage.pool });
 		},
 	};
 }

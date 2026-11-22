@@ -162,6 +162,7 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 					}
 				: snapshot,
 			now(),
+			ttlMs,
 		);
 		let answer: UsageSnapshot;
 		if (snapshot.status === "ok") {

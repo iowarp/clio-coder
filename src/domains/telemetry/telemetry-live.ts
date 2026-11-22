@@ -7,11 +7,13 @@ import type {
 	TelemetryUpdateV1,
 } from "../../core/telemetry/dto.js";
 import { parseFactRef, TELEMETRY_DTO_VERSION, TELEMETRY_TOPICS } from "../../core/telemetry/dto.js";
+import type { EconomyUnit } from "../../core/telemetry/economy.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryProducerHealth } from "../../core/telemetry/producer.js";
 import { renderFact } from "../../core/telemetry/render.js";
+import type { QuotaAccess, QuotaQualification } from "../../core/telemetry/schemas.js";
 import { observedQuotaReadings, STREAM_QUOTA_TTL_MS } from "../quota/observed.js";
 import { quotaReadingFingerprint, quotaReadingFromSnapshot } from "../quota/reading.js";
 import type { CallJournalRead, PersistedTelemetry } from "./call-journal.js";
@@ -870,6 +872,11 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 					scope?: string;
 					usedPct: Fact<number>;
 					resetsAt?: string | null;
+					unit?: EconomyUnit;
+					durationSeconds?: number;
+					access?: QuotaAccess;
+					unlimited?: true;
+					qualification?: QuotaQualification;
 				}>,
 				labels: ReadonlyMap<string, string>,
 				consumed: ReadonlyMap<string, Fact<number>> | undefined,
@@ -887,34 +894,31 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 						scope: window.scope ?? null,
 						usedPct: { fact, display: renderFact(fact, "percent") },
 						resetsAt: utc(window.resetsAt),
+						unit: window.unit ?? null,
+						durationSeconds: window.durationSeconds ?? null,
+						access: window.access ?? "unknown",
+						...(window.unlimited ? { unlimited: true as const } : {}),
+						...(window.qualification === undefined ? {} : { qualification: window.qualification }),
 						...(delta ? { consumedPct: { fact: delta, display: renderFact(delta, "percent") } } : {}),
 					};
 				});
 			// The process's own readings: every quota cache reports here, and stream observations land here (#423).
-			let rows: QuotaRow[] = observedQuotaReadings(now).map(({ snapshot, stale, source }) => ({
-				provider: snapshot.providerId,
-				...quotaAccountDetails(quotaReadingFromSnapshot(snapshot, utc(snapshot.fetchedAt) ?? new Date(now).toISOString())),
-				source,
-				observedAt: utc(snapshot.fetchedAt),
-				stale,
-				windows: windows(
-					snapshot.windows.map((window) => ({
-						key: window.key,
-						...(window.scope ? { scope: window.scope } : {}),
-						usedPct: Number.isFinite(window.usedPct)
-							? { kind: "measured", value: window.usedPct, source: "provider" }
-							: { kind: "unknown", reason: "unsupported" },
-						resetsAt: window.resetsAt,
-					})),
-					// One provider's per-model windows can share a label, so a scoped window names its scope (#434).
-					new Map(
-						snapshot.windows.flatMap((window) =>
-							window.label.length > 0 ? [[window.key, scopedQuotaLabel(window.label, window.scope)]] : [],
-						),
-					),
-					accounts.get(snapshot.providerId)?.consumed,
-				),
-			}));
+			let rows: QuotaRow[] = observedQuotaReadings(now).map(({ snapshot, stale, source, validForMs }) => {
+				const reading = quotaReadingFromSnapshot(
+					stale ? { ...snapshot, stale } : snapshot,
+					utc(snapshot.fetchedAt) ?? new Date(now).toISOString(),
+					validForMs,
+				);
+				return {
+					provider: snapshot.providerId,
+					...quotaAccountDetails(reading),
+					source,
+					observedAt: utc(snapshot.fetchedAt),
+					stale,
+					// The journaled shape, so a percent-less allowance reads here as it does from the journal.
+					windows: windows(reading.windows, new Map(), accounts.get(snapshot.providerId)?.consumed),
+				};
+			});
 			// This host's journaled readings: an earlier process's last sight of an account, and any reading newer than
 			// what this process holds. The newer observation of an account wins (#434).
 			for (const [account, { reading, consumed }] of accounts) {

@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { renderCredit } from "../../core/telemetry/render.js";
+import { accountPseudonym } from "./pool-reading.js";
 /**
  * Shared reader for Anthropic's OAuth usage endpoint.
  *
@@ -28,6 +30,8 @@ export interface AnthropicUsageOutcome {
 	windows: UsageWindow[];
 	credits: UsageCredits | null;
 	retryAfterSeconds: number | null;
+	/** The pool of the organization the response named (`anthropic-organization-id`); absent when it named none. */
+	accountPseudonym?: string;
 }
 
 export interface AnthropicUsageDependencies {
@@ -97,7 +101,17 @@ export async function fetchAnthropicUsage(
 			return outcome("error", "Unexpected usage response");
 		}
 
-		return outcome("ok", null, { windows: usageWindows(body), credits: usageCredits(body.spend) });
+		const organization = response.headers.get("anthropic-organization-id");
+		// The same scope the inference stream derives from this header, so poll and stream name one pool.
+		const pool = accountPseudonym(
+			"anthropic",
+			organization ? createHash("sha256").update(organization).digest("hex").slice(0, 12) : null,
+		);
+		return outcome("ok", null, {
+			windows: usageWindows(body),
+			credits: usageCredits(body.spend),
+			...(pool === undefined ? {} : { accountPseudonym: pool }),
+		});
 	} finally {
 		clearTimeout(timer);
 	}
