@@ -3,11 +3,13 @@ import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
+import { shellJoin } from "../../core/shell-quote.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { captureProofSnapshot, readObservedProof } from "../../tools/verify/proof.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
+import { prepareVerifyArguments } from "../../tools/verify/surface.js";
 import {
 	type CallClassification,
 	type CheckOutputReader,
@@ -77,6 +79,13 @@ export interface RunEffects {
 	 * latest verify seals fail; typed facts keep reading `validationOutcomes`, since verify calls seal their own (bt-27).
 	 */
 	checkOutcomes: ReadonlyMap<string, boolean>;
+	/**
+	 * Checks whose latest `verify` receipt sealed could-not-run (`unresolved`: refused, unavailable, or its runner's usage
+	 * error), under the receipt's identities: its check id, the call as spelled (`<id> <args...>`, each argument one shell
+	 * word), each of those as `verify ...`, and the command it resolved to. Nothing ran, so a worker's own `passed:false` for
+	 * one is not a failed validation; a later settled run of the check retires every identity its refusals left (L10).
+	 */
+	notRunChecks: ReadonlySet<string>;
 	/** True once a call counted as a workspace mutation ran, so no standing outcome predates every change. */
 	mutationObserved: boolean;
 	/** True only when every observed checking call has an authoritative blocked outcome. */
@@ -201,6 +210,8 @@ interface PendingEffects {
 	verificationCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
 	outcome: "ok" | "error" | "blocked" | null;
+	/** The admission's typed could-not-run marker, for a host whose engine drops an error result's details. */
+	unresolved?: true;
 }
 
 /**
@@ -440,6 +451,30 @@ export function sessionChangesTree(
 }
 
 /**
+ * The verify calls among {@link RunEffects.notRunChecks} whose latest receipt sealed could-not-run, each named as spelled
+ * (`<id> <args...>`) when it carried arguments, so a bare id that one of its spellings already names is left out.
+ */
+export function notRunCheckIds(effects: Pick<RunEffects, "notRunChecks">): string[] {
+	const prefix = `${ToolNames.Verify} `;
+	const calls = [...effects.notRunChecks].flatMap((key) =>
+		key.startsWith(prefix) && effects.notRunChecks.has(key.slice(prefix.length)) ? [key.slice(prefix.length)] : [],
+	);
+	return calls.filter((call) => !calls.some((other) => other.startsWith(`${call} `)));
+}
+
+/** A verify call as its caller spelled it, `<id> <args...>` with each argument one shell word, or null with no arguments. */
+function verifyCallSpelling(check: string, args: Record<string, unknown> | undefined): string | null {
+	const argv = prepareVerifyArguments(args ?? {}).args;
+	if (!Array.isArray(argv) || argv.length === 0 || !argv.every((arg) => typeof arg === "string")) return null;
+	return `${check} ${shellJoin(argv)}`;
+}
+
+function resultDetails(result: unknown): Record<string, unknown> | undefined {
+	const details = result !== null && typeof result === "object" && "details" in result ? result.details : undefined;
+	return details !== null && typeof details === "object" ? (details as Record<string, unknown>) : undefined;
+}
+
+/**
  * Fold a run's tool calls into its observed effects. A call's effects land only
  * when its result comes back clean: a blocked write and a red command are not
  * evidence that the workspace changed or that a check passed.
@@ -454,6 +489,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const validationCommands = new Set<string>();
 	const validationOutcomes = new Map<string, boolean>();
 	const checkOutcomes = new Map<string, boolean>();
+	const notRunChecks = new Set<string>();
+	// Every identity each check's refusals filed in `notRunChecks`, so one settled run of the check retires them together.
+	const notRunAliases = new Map<string, Set<string>>();
 	let mutationRevision = 0;
 	let passRetired = false;
 	// Every call in flight, with the revision it started on, so finish can tell whether it ran on the final tree.
@@ -573,9 +611,18 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			sequence += 1;
 			// One run of a check settles every name it stands under: the outcomes earlier spellings of it left are re-filed, so a
 			// green `npm test` settles a red `verify test` and a red `npm test` replaces `npm run test`'s green.
+			const spelling =
+				effects.proofCheck !== null && effects.proofCheck.length > 0
+					? verifyCallSpelling(effects.proofCheck, effects.args)
+					: null;
 			const settleOutcomes = (keys: ReadonlyArray<string>) => {
 				const identity = reading.identity ?? keys[0];
 				const names = [...keys, ...[...outcomeIdentity].flatMap(([key, ran]) => (ran === identity ? [key] : []))];
+				for (const [check, aliases] of notRunAliases) {
+					if (!names.some((key) => aliases.has(key) || aliases.has(`${ToolNames.Verify} ${key}`))) continue;
+					for (const alias of aliases) notRunChecks.delete(alias);
+					notRunAliases.delete(check);
+				}
 				for (const key of names) {
 					checkOutcomes.set(key, !failed);
 					outcomeSequence.set(key, sequence);
@@ -587,6 +634,17 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (effects.validationName !== null && settled && statusAttributable()) {
 				settleOutcomes([effects.validationName]);
 				validationOutcomes.set(effects.validationName, !failed);
+			}
+			const unresolved = effects.unresolved === true || resultDetails(result)?.unresolved === true;
+			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && unresolved) {
+				const aliases = notRunAliases.get(effects.proofCheck) ?? new Set<string>();
+				for (const key of [effects.proofCheck, ...(spelling !== null ? [spelling] : [])]) {
+					aliases.add(key);
+					aliases.add(`${ToolNames.Verify} ${key}`);
+				}
+				if (reading.shellCommand !== null) aliases.add(observedValidationCommand(reading.shellCommand));
+				notRunAliases.set(effects.proofCheck, aliases);
+				for (const alias of aliases) notRunChecks.add(alias);
 			}
 			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && settled)
 				settleOutcomes([
@@ -664,7 +722,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 		checkOutcome(toolCallId, reported, unresolved) {
 			const outcome = reported === "error" && unresolved === true ? "blocked" : reported;
 			const effects = pending.get(toolCallId);
-			if (effects !== undefined) effects.outcome = outcome;
+			if (effects !== undefined) {
+				effects.outcome = outcome;
+				if (reported === "error" && unresolved === true) effects.unresolved = true;
+			}
 			const call = inFlight.get(toolCallId);
 			if (call !== undefined) call.outcome = outcome;
 			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
@@ -688,6 +749,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				validationCommands: new Set(validationCommands),
 				validationOutcomes: new Map(validationOutcomes),
 				checkOutcomes: new Map(checkOutcomes),
+				notRunChecks: new Set(notRunChecks),
 				mutationObserved: mutationRevision > 0,
 				checksAllBlocked: checkingCalls.size > 0 && [...checkingCalls.values()].every((outcome) => outcome === "blocked"),
 				verificationCommands: new Set(verificationCommands),

@@ -8,6 +8,7 @@ import { mapExitCode } from "../../src/cli/run.js";
 import { validateSettings } from "../../src/core/config.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import {
+	mutationReportFailures,
 	parseVerifierResult,
 	resultContractShape,
 	validateResultContract,
@@ -301,6 +302,69 @@ it("a verify that resolved to no check ran nothing, so a later pass under the de
 		};
 		strictEqual(quality(true), "pass");
 		strictEqual(quality(false), "fail");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+it("a worker's own failure on a verify call refused up front holds nothing; a red one still does (L10)", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-verify-usage-"));
+	try {
+		mkdirSync(join(root, ".clio-coder"));
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			"version: 2\nchecks:\n  - id: python-unittest\n    description: unittest\n    command: [python3, -m, unittest, discover, -s, tests]\n    cwd: .\n    timeoutMs: 60000\n    tags: [test]\n",
+		);
+		const contract = { kind: "mutation-report" as const };
+		const output = JSON.stringify({
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: [],
+			validations: [
+				{ name: "python-unittest -p test_x.py '| tee log'", passed: false, evidence: "refused -p" },
+				{ name: "verify python-unittest", passed: false, evidence: "refused -p" },
+			],
+		});
+		const judge = (laterRed: boolean) => {
+			const recorder = createRunEffectsRecorder(root);
+			// The engine drops an error result's details, so only the admission's typed marker says nothing ran.
+			recorder.start("usage", "verify", { check: "python-unittest", args: ["-p", "test_x.py", "| tee log"] });
+			recorder.checkOutcome("usage", "error", true);
+			recorder.finish("usage", true, { details: {} });
+			if (laterRed) {
+				recorder.start("red", "verify", { check: "python-unittest" });
+				recorder.checkOutcome("red", "error");
+				recorder.finish("red", true, { details: { check: "python-unittest" } });
+			}
+			const effects = recorder.snapshot();
+			const branch = "clio-coder/task/check";
+			return {
+				quality: validateResultContract({
+					contract,
+					output,
+					cwd: root,
+					networkAllowed: false,
+					filesystem: { readFile: () => null },
+					observedRunEffects: effects,
+				}).quality,
+				failures: mutationReportFailures(contract, output, effects.notRunChecks),
+				detail: mergeWithheldDetail({
+					assurance: "compromised",
+					contract,
+					output,
+					branch,
+					notRunChecks: effects.notRunChecks,
+				}),
+			};
+		};
+		const usage = judge(false);
+		notStrictEqual(usage.quality, "fail");
+		deepStrictEqual(usage.failures, []);
+		doesNotMatch(usage.detail ?? "", /own report lists a failing validation/u);
+		const red = judge(true);
+		strictEqual(red.quality, "fail");
+		// The settled red retires every identity the refusal left, so both reported failures count again.
+		deepStrictEqual(red.failures, ["python-unittest -p test_x.py '| tee log'", "verify python-unittest"]);
+		match(red.detail ?? "", /own report lists a failing validation/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

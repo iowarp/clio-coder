@@ -55,7 +55,12 @@ import {
 	parsePackageJson,
 	readRegularFileText,
 } from "./toolchain.js";
-import { NO_CHECKS_DECLARED_NOTE, TOOLCHAIN_DISCOVERY_SOURCES, type ToolchainCheck } from "./toolchain-checks.js";
+import {
+	NO_CHECKS_DECLARED_NOTE,
+	TOOLCHAIN_DISCOVERY_SOURCES,
+	type ToolchainCheck,
+	unsupportedRunnerArgs,
+} from "./toolchain-checks.js";
 
 /** The structured verdict a numeric-compare, perf-budget or reproduce check records beside the command facts. */
 export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport | ReproduceReport;
@@ -252,6 +257,10 @@ export async function runToolchainCheck(
 	if (check.availability) return unavailableCheck(check);
 	const [file, ...vector] = argv;
 	if (file === undefined) return { kind: "error", message: `verify: derived check '${check.id}' has empty argv` };
+	// Refused before spawning, so like a name that resolved to no check it ran nothing and settles nothing (L10).
+	const refused = unsupportedRunnerArgs(check, argv);
+	if (refused !== null)
+		return { kind: "error", message: `verify: ${refused}`, details: { check: check.id, unresolved: true } };
 	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
 	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
 	const result = await runVectorTool(
@@ -261,7 +270,10 @@ export async function runToolchainCheck(
 		{ ...args, cwd, timeout_ms: typeof args.timeout_ms === "number" ? args.timeout_ms : check.timeoutMs },
 		{ ...options, env: verifyCheckEnv(), truncateOutputOnly: true },
 	);
-	return withDeclaredEvidence(result, { ...check, command: [...argv] });
+	return withDeclaredEvidence(await withRunnerUsageEvidence(result, argv, cwd, options), {
+		...check,
+		command: [...argv],
+	});
 }
 
 /**
@@ -284,7 +296,10 @@ export async function runTaskGateCheck(
 		{ cwd: process.cwd(), ...bounds },
 		{ ...options, env: verifyCheckEnv(), truncateOutputOnly: true },
 	);
-	return withDeclaredEvidence(result, { ...check, timeoutMs: bounds.timeout_ms });
+	return withDeclaredEvidence(await withRunnerUsageEvidence(result, check.command, process.cwd(), options), {
+		...check,
+		timeoutMs: bounds.timeout_ms,
+	});
 }
 
 /**
@@ -414,24 +429,104 @@ function launchedCommandIndex(argv: ReadonlyArray<string>): number {
 }
 
 /**
- * Whether an argv runs pytest or unittest, read from its start: an optional `uv run`, `poetry run` or `pipenv run`
- * launcher, then a Python interpreter with `-m pytest|unittest`, or a `pytest` / `py.test` executable. A `-m pytest`
- * handed to anything else (`npm run pytest`, a script given `-m pytest`) is not a Python test runner.
+ * Which Python test runner an argv runs, pytest or unittest, read from its start: an optional `uv run`, `poetry run` or
+ * `pipenv run` launcher, then a Python interpreter with `-m pytest|unittest`, or a `pytest` / `py.test` executable. A
+ * `-m pytest` handed to anything else (`npm run pytest`, a script given `-m pytest`) is not a Python test runner.
+ * `module` is the index of `-m`, absent for a pytest executable.
  */
-function pythonTestRunnerArgv(argv: ReadonlyArray<string>): boolean {
+function pythonTestRunnerAt(argv: ReadonlyArray<string>): { runner: "pytest" | "unittest"; module?: number } | null {
 	let index = launchedCommandIndex(argv);
 	const executable = executableName(argv[index]);
-	if (/^py\.?test$/u.test(executable)) return true;
-	if (!/^python(?:\d+(?:\.\d+)?)?$/u.test(executable)) return false;
+	if (/^py\.?test$/u.test(executable)) return { runner: "pytest" };
+	if (!/^python(?:\d+(?:\.\d+)?)?$/u.test(executable)) return null;
 	index += 1;
 	while (index < argv.length && argv[index] !== "-m") {
 		const option = argv[index] ?? "";
 		// A script path or `-c` code before `-m` means the interpreter runs that instead.
-		if (!option.startsWith("-") || option === "-c" || option === "-") return false;
+		if (!option.startsWith("-") || option === "-c" || option === "-") return null;
 		index += PYTHON_VALUE_OPTIONS.has(option) ? 2 : 1;
 	}
 	const module = argv[index + 1];
-	return argv[index] === "-m" && (module === "pytest" || module === "unittest");
+	return argv[index] === "-m" && (module === "pytest" || module === "unittest")
+		? { runner: module, module: index }
+		: null;
+}
+
+function pythonTestRunner(argv: ReadonlyArray<string>): "pytest" | "unittest" | null {
+	return pythonTestRunnerAt(argv)?.runner ?? null;
+}
+
+/**
+ * The exit status a runner reserves for rejecting its own invocation. `python -m unittest` exits 2 from argparse, but
+ * so does a project's `load_tests` hook raising `SystemExit(2)`, so the status alone is not evidence: the parser probe
+ * must confirm it. pytest's usage status 4 is left out: a conftest that fails to import also exits 4, and that may be
+ * the change under test.
+ */
+const USAGE_ERROR_EXIT: Partial<Record<"pytest" | "unittest", number>> = { unittest: 2 };
+
+/**
+ * Parses the arguments with `python -m unittest`'s own argparse parsers and imports no test or project code beyond
+ * the stdlib: it exits 2 only when the parser rejects them and 0 when it accepts them; a Python whose private parser
+ * API differs fails some other way, which is no evidence.
+ */
+const UNITTEST_PARSER_PROBE = [
+	"import sys",
+	"from unittest.main import TestProgram as T",
+	"p = T.__new__(T)",
+	"p.failfast = p.catchbreak = p.buffer = p.testNamePatterns = None",
+	'p.progName = "python -m unittest"',
+	"p._initArgParsers()",
+	"a = sys.argv[1:]",
+	'd = bool(a) and a[0].lower() == "discover"',
+	"(p._discovery_parser if d else p._main_parser).parse_args(a[1:] if d else a, p)",
+].join("\n");
+const PARSER_PROBE_TIMEOUT_MS = 30_000;
+
+/**
+ * Confirm a unittest run's usage-error status with the runner's own parser, run by the same interpreter, launcher
+ * and sandbox as the check: the probe's exit status, never the run's output, marks `parserRejected`. Without that
+ * evidence the exit stays a failed run (L10).
+ */
+async function withRunnerUsageEvidence(
+	result: ToolResult,
+	argv: ReadonlyArray<string>,
+	cwd: string,
+	options: VerifyRunOptions | undefined,
+): Promise<ToolResult> {
+	const at = pythonTestRunnerAt(argv);
+	if (
+		result.kind !== "error" ||
+		at?.runner !== "unittest" ||
+		at.module === undefined ||
+		result.details?.exitCode !== USAGE_ERROR_EXIT.unittest ||
+		result.details?.timedOut ||
+		result.details?.aborted ||
+		options?.signal?.aborted
+	)
+		return result;
+	const [file, ...vector] = [...argv.slice(0, at.module), "-c", UNITTEST_PARSER_PROBE, ...argv.slice(at.module + 2)];
+	if (file === undefined) return result;
+	const probe = await runVectorTool(
+		"verify",
+		file,
+		vector,
+		{ cwd, timeout_ms: PARSER_PROBE_TIMEOUT_MS },
+		{ ...options, env: verifyCheckEnv(), truncateOutputOnly: true },
+	);
+	return probe.details?.exitCode === USAGE_ERROR_EXIT.unittest
+		? { ...result, details: { ...result.details, parserRejected: true } }
+		: result;
+}
+
+/** Whether the run ended on its runner's usage-error status and the runner's parser confirmed the rejection (L10). */
+function rejectedInvocation(result: ToolResult, argv: ReadonlyArray<string>, exitCode: number | null): boolean {
+	const runner = pythonTestRunner(argv);
+	return (
+		runner !== null &&
+		exitCode !== null &&
+		USAGE_ERROR_EXIT[runner] === exitCode &&
+		result.details?.parserRejected === true
+	);
 }
 
 /**
@@ -451,7 +546,7 @@ function reportsNoTests(output: string): boolean {
  * run as not run.
  */
 export function collectedNoTests(argv: ReadonlyArray<string>, exitCode: number | null, output: string): boolean {
-	return exitCode === NO_TESTS_COLLECTED_EXIT && pythonTestRunnerArgv(argv) && reportsNoTests(output);
+	return exitCode === NO_TESTS_COLLECTED_EXIT && pythonTestRunner(argv) !== null && reportsNoTests(output);
 }
 
 /** Startup diagnostics only: a test assertion mentioning permissions is still a failed test. */
@@ -477,6 +572,20 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 			...result,
 			message: `verify: unavailable '${check}': no tests collected (${command.join(" ")} exited with code ${NO_TESTS_COLLECTED_EXIT}), so it judged nothing. Rerunning this entry cannot help; run the project's own test command instead (a script-style test file runs as its own script), or report the limitation and stop.`,
 			details: { ...result.details, check, noTestsCollected: true, judgement: judgement("unavailable", "not-run") },
+		};
+	}
+	const exitCode = typeof result.details?.exitCode === "number" ? result.details.exitCode : null;
+	if (
+		rejectedInvocation(result, command, exitCode) &&
+		!result.details?.timedOut &&
+		!result.details?.aborted &&
+		!result.details?.outputCapped
+	) {
+		// Not a startup failure of the entry: other arguments can run it, so `usageError` keeps the loop guard open.
+		return {
+			...result,
+			message: `verify: could not run '${check}': ${command.join(" ")} exited with code ${exitCode}, its runner's usage error, so it rejected these arguments and ran no test. This is not a failed validation, so it does not belong in validations; retry with arguments the runner accepts (or none for the whole suite), and if it never runs, list '${check}' under declaredChecks. Runner output: ${result.message.replace(/^verify: (?:exited with code [^:]+:\s*)?/u, "")}`,
+			details: { ...result.details, check, usageError: true, judgement: judgement("unavailable", "not-run") },
 		};
 	}
 	const message = result.message;
@@ -903,7 +1012,7 @@ export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunO
 		{ cwd, timeout_ms: check.timeoutMs },
 		{ ...options, env: verifyCheckEnv() },
 	);
-	return withDeclaredEvidence(result, check);
+	return withDeclaredEvidence(await withRunnerUsageEvidence(result, check.command, cwd, options), check);
 }
 
 /**
