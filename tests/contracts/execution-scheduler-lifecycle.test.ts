@@ -1,6 +1,7 @@
-import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { runPlaybookGraph } from "../../src/cli/playbook-graph.js";
 import { parsePlaybook, renderPlaybookPrompt } from "../../src/domains/agents/playbook.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
@@ -9,6 +10,9 @@ import type { ExecutionSchedulerAdapter, ExecutionStepResult } from "../../src/d
 import { executePlan } from "../../src/domains/dispatch/execution-scheduler.js";
 import { fleetNodeTaskBrief } from "../../src/domains/dispatch/fleet-node-prompt.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
+import type { FleetRunPreview } from "../../src/domains/dispatch/fleet-run-preview.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { formatFleetRunApprovalBody } from "../../src/interactive/overlays/fleet-run-approval.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -490,6 +494,55 @@ describe("execution scheduler lifecycle", () => {
 		ok(task("build").startsWith("Implement this change"));
 		// The whole chain runs in one kept task worktree, so `fleet land <root>` lands it.
 		strictEqual(p.isolation, "worktree");
+		// The approval card says where the run writes and how it lands; a writing step reads `worktree`.
+		const byId = new Map(p.steps.map((entry) => [entry.id, entry]));
+		const preview = {
+			name: "build-review",
+			planHash: "approval",
+			plan: p,
+			waves: p.waves.map((ids, index) => ({
+				index,
+				steps: ids.flatMap((id) => {
+					const entry = byId.get(id);
+					if (entry?.kind !== "agent") return [];
+					return [{ kind: "agent", stepId: id, agentId: entry.agentId, scope: entry.scope, writes: entry.writes }];
+				}),
+			})),
+			budget: { playbookUsd: null, ceilingUsd: 0, currentUsd: 0 },
+		} as unknown as FleetRunPreview;
+		const card = formatFleetRunApprovalBody({ ok: true, preview }, 200, 0, 400).map(stripTerminalSequences);
+		match(
+			card.join(" ").replace(/\s+/g, " "),
+			/one task worktree cut from HEAD on clio-coder\/task\/<root>, kept after the run; this checkout does not change until clio-coder fleet land <root> lands it/,
+		);
+		ok(
+			card.some((line) => line.includes("build") && line.includes("worktree ·")),
+			card.join("\n"),
+		);
+		ok(card.some((line) => line.includes("review.check.1") && line.includes("readonly ·")));
+		// `playbook graph` says the same: plan isolation, and the writing steps' scope.
+		const printed: string[] = [];
+		const write = process.stdout.write;
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			printed.push(String(chunk));
+			return true;
+		}) as typeof process.stdout.write;
+		let exit: number;
+		try {
+			exit = runPlaybookGraph(["build-review", "--json"]);
+		} finally {
+			process.stdout.write = write;
+		}
+		strictEqual(exit, 0, printed.join(""));
+		const graph = JSON.parse(printed.join("")) as {
+			isolation?: string;
+			waves: Array<{ steps: Array<{ id: string; scope: string }> }>;
+			loops: Array<{ check: Array<{ scope: string }>; repair: Array<{ scope: string }> }>;
+		};
+		strictEqual(graph.isolation, "worktree");
+		strictEqual(graph.waves[0]?.steps[0]?.scope, "worktree");
+		strictEqual(graph.loops[0]?.check[0]?.scope, "readonly");
+		strictEqual(graph.loops[0]?.repair[0]?.scope, "worktree");
 		ok(task("review.repair.1").startsWith("Implement this change"));
 		for (const [id, authors] of [
 			["review.check.1", "`build` (coder)"],

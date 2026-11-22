@@ -144,6 +144,19 @@ export type ExecutionPlanInput = Omit<ExecutionPlan, "version" | "waves" | "hash
 	loops?: ReadonlyArray<ExecutionPlanLoop>;
 };
 
+/** A step's scope as the operator reads it: in a worktree-isolated plan a writing step writes the run's task worktree. */
+export function executionPlanStepScope(
+	plan: Pick<ExecutionPlan, "isolation">,
+	scope: ExecutionPlanScope,
+): ExecutionPlanScope | "worktree" {
+	return plan.isolation === "worktree" && scope === "workspace" ? "worktree" : scope;
+}
+
+/** Where a worktree-isolated plan writes, in the words the approval card and `playbook graph` print. */
+export function executionPlanIsolationText(rootId = "<root>"): string {
+	return `every step runs in one task worktree cut from HEAD on clio-coder/task/${rootId}, kept after the run; this checkout does not change until clio-coder fleet land ${rootId} lands it`;
+}
+
 /**
  * Narrow a plan to agent steps, refusing one that carries a code node. Callers
  * that model every step as a route (Scout continuation, the dispatch tool's
