@@ -236,8 +236,17 @@ describe("gateway correction contracts", () => {
 		});
 		registry.register(createGatewayTool({ registry }));
 		const call = (capability: string, args: Record<string, unknown>) =>
-			registry.invoke({ tool: ToolNames.Gateway, args: { op: "call", capability, args } });
+			registry.invoke(
+				{ tool: ToolNames.Gateway, args: { op: "call", capability, args } },
+				{ sessionId: "gateway-corrections-382" },
+			);
 
+		// The first prose reason in a session is refused with the reason list (row 382, the wave-69 h4 path); the
+		// refusal records nothing, and the next prose reason in that session is filed.
+		const refused = await call(ToolNames.Limitation, { scope: "H100 run", reason: "no NVIDIA GPU on this host" });
+		ok(refused.kind === "ok" && refused.result.kind === "error", JSON.stringify(refused));
+		match(refused.result.message, /no-runner \(no runner exists or no project check applies to this change\)/);
+		strictEqual(refused.result.details?.limitation, undefined);
 		const limitation = await call(ToolNames.Limitation, { scope: "H100 run", reason: "no NVIDIA GPU on this host" });
 		ok(limitation.kind === "ok" && limitation.result.kind === "ok", JSON.stringify(limitation));
 		deepStrictEqual(limitation.result.details?.limitation, {
