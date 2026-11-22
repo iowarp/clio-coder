@@ -185,16 +185,16 @@ function collectStartupHints(
 	if (compiled) {
 		hints.push({
 			level: "info",
-			text: `clio-coder: No project handbook; using ${compiled.rules} rule${compiled.rules === 1 ? "" : "s"} compiled from ${compiled.sources.join(", ")}. Run ${initCommand} to write one.`,
+			text: `No project handbook; using ${compiled.rules} rule${compiled.rules === 1 ? "" : "s"} compiled from ${compiled.sources.join(", ")}. Run ${initCommand} to write one.`,
 		});
 	} else if (absent && projectType !== "unknown") {
 		hints.push({
 			level: "info",
-			text: `clio-coder: No CLIO-CODER.md detected. Run ${initCommand} to explore the repo and bootstrap context.`,
+			text: `No CLIO-CODER.md detected. Run ${initCommand} to explore the repo and bootstrap context.`,
 		});
 	}
 	for (const issue of clio.errors) {
-		hints.push({ level: "warning", text: `clio-coder: malformed ${issue.path} ignored: ${issue.error}` });
+		hints.push({ level: "warning", text: `malformed ${issue.path} ignored: ${issue.error}` });
 	}
 	if (suggest && clio.files.length > 0) {
 		const { attention } = readHandbookFreshness(cwd);
@@ -211,7 +211,7 @@ function collectStartupHints(
 	if (!contract.ok) {
 		hints.push({
 			level: "warning",
-			text: `clio-coder: validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`,
+			text: `validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`,
 		});
 	}
 	if (!state) return hints;
@@ -220,7 +220,7 @@ function collectStartupHints(
 		if (changed) {
 			hints.push({
 				level: "warning",
-				text: `clio-coder: Imported agent context changed. Run ${initCommand} --adopt to refresh.`,
+				text: `Imported agent context changed. Run ${initCommand} --adopt to refresh.`,
 			});
 		}
 	}

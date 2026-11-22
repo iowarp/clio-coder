@@ -1480,7 +1480,7 @@ export type AcpExtensionReloadOutcome =
 export type AcpFleetStep = {
 	stepId: string;
 	kind: "agent" | "code";
-	scope: "readonly" | "workspace";
+	scope: "readonly" | "workspace" | "worktree";
 	agentId?: string;
 	commandId?: string;
 	argv?: string[];
@@ -1501,6 +1501,8 @@ export type AcpFleetPreview =
 			name: string;
 			planHash: string;
 			stepCount: number;
+			/** Where the run writes: one task worktree cut from HEAD, or the operator's checkout. */
+			isolation: "worktree" | "workspace";
 			waves: Array<{ index: number; steps: AcpFleetStep[] }>;
 			budget: {
 				ceilingUsd: number;
@@ -2359,7 +2361,7 @@ const wireFleetRunStep = Type.Object(
 	{
 		stepId: wireFleetRunText,
 		kind: Type.Union([Type.Literal("agent"), Type.Literal("code")]),
-		scope: Type.Union([Type.Literal("readonly"), Type.Literal("workspace")]),
+		scope: Type.Union([Type.Literal("readonly"), Type.Literal("workspace"), Type.Literal("worktree")]),
 		agentId: Type.Optional(wireFleetRunText),
 		commandId: Type.Optional(wireFleetRunText),
 		argv: Type.Optional(Type.Array(wireFleetRunText, { maxItems: 16 })),
@@ -2409,6 +2411,7 @@ export const AcpFleetPreviewSchema = Type.Union([
 			name: wireFleetRunText,
 			planHash: wireFleetRunHash,
 			stepCount: Type.Integer({ minimum: 0 }),
+			isolation: Type.Union([Type.Literal("worktree"), Type.Literal("workspace")]),
 			waves: Type.Array(
 				Type.Object({ index: Type.Integer({ minimum: 0 }), steps: Type.Array(wireFleetRunStep, { maxItems: 64 }) }, closed),
 				{

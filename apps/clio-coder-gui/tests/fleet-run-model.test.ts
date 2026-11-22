@@ -16,6 +16,7 @@ test("a compiled plan reads as waves of steps with placement, scope and declared
 		name: "survey",
 		planHash: "b".repeat(64),
 		stepCount: 2,
+		isolation: "workspace",
 		truncated: false,
 		budget: {
 			ceilingUsd: 5,

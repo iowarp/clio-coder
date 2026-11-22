@@ -659,6 +659,7 @@ const fleetPreview = (name, vars) =>
 				name,
 				planHash: fleetHash(vars),
 				stepCount: 2,
+				isolation: "workspace",
 				waves: [
 					{
 						index: 0,

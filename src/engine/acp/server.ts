@@ -153,6 +153,7 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import type { AgentMessage, ImageContent } from "../types.js";
+import { clippedCallCommand } from "../worker-refusals.js";
 import {
 	ACP_ARTIFACT_CATEGORIES,
 	ACP_ARTIFACTS_LIST_METHOD,
@@ -1557,6 +1558,15 @@ function boundRawRecord(value: unknown): Record<string, unknown> {
 	// The bounded size is the fallback: an unserializable original has no size of
 	// its own, and reporting the copy's is closer than reporting nothing.
 	return { truncated: true, bytes: originalRawRecordBytes(value) ?? boundedBytes };
+}
+
+/**
+ * The title of a main-session permission ask: a shell call reads as its command, any other call as its tool and
+ * target, and a call that names nothing as its tool.
+ */
+function permissionTitle(tool: string, command: string): string {
+	if (command.length === 0) return tool;
+	return tool === ToolNames.Bash ? command : `${tool}: ${command}`;
 }
 
 /** Built-in tools whose first positional argument names a workspace path. */
@@ -3722,11 +3732,13 @@ function installPermissionBridge(input: {
 								sessionId,
 								toolCall: {
 									toolCallId,
+									// A generic client shows only the title, so it names the call: the clipped, scrubbed command for a
+									// shell call as refusals word it, the tool and its target otherwise.
 									title: boundString(
 										redactUrlCredentials(
 											decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
 												? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
-												: call.tool,
+												: permissionTitle(call.tool, clippedCallCommand(call, decision)),
 										),
 										ACP_MAX_TOOL_TITLE_BYTES,
 									),
@@ -4733,7 +4745,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	let handoffPreparing = false;
 	/** Counts prompts, so a draft drawn while a request started is known to be stale. */
 	let promptSerial = 0;
-	let startupHintsShown = false;
+	/** The session the startup notices went to; a load of a session that already took a prompt counts as shown. */
+	let startupHintsSessionId: string | null = null;
 	let promptSettled: Promise<void> | null = null;
 	/** The one operator shell line this process runs at a time, as the terminal runs one. */
 	let activeShell: { sessionId: string; abort: AbortController; settled: Promise<void> } | null = null;
@@ -6104,6 +6117,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				...(ceiling !== undefined ? { ceiling } : {}),
 			};
 			sessionCreated = true;
+			// Its first prompt, in whichever process took it, carried the startup notices; a reload does not repeat them.
+			if (entries.some((entry) => entry.kind === "message" && entry.role === "user")) startupHintsSessionId = id;
 			const ceilingEcho = applySessionCeiling(session);
 			// The first usage frame and the ledger read the view the next request would publish, not the saved snapshot.
 			await options.chat.nextRequestReady?.();
@@ -8371,8 +8386,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			// reply carrying only the model's text. They wait for the first prompt
 			// so the client has bound the session id, and they do not count toward
 			// admission: a refused prompt must still fail as prompt_not_admitted.
-			if (!startupHintsShown) {
-				startupHintsShown = true;
+			if (startupHintsSessionId !== session.id) {
+				startupHintsSessionId = session.id;
 				for (const hint of options.startupHints?.() ?? []) {
 					options.transport.notify("session/update", {
 						sessionId: session.id,

@@ -35,7 +35,7 @@ const Step = Type.Object(
 	{
 		stepId: text,
 		kind: Type.Union([Type.Literal("agent"), Type.Literal("code")]),
-		scope: Type.Union([Type.Literal("readonly"), Type.Literal("workspace")]),
+		scope: Type.Union([Type.Literal("readonly"), Type.Literal("workspace"), Type.Literal("worktree")]),
 		agentId: Type.Optional(text),
 		commandId: Type.Optional(text),
 		argv: Type.Optional(Type.Array(text, { maxItems: 16 })),

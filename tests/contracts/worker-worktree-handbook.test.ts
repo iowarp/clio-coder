@@ -276,6 +276,11 @@ test("a repository without a handbook gets one compiled off the prompt path from
 			),
 			JSON.stringify(hints),
 		);
+		// Hint text names no program; a headless stderr sink adds the CLI's own prefix.
+		ok(
+			hints.every(({ text }) => !text.startsWith("clio-coder:")),
+			JSON.stringify(hints),
+		);
 		const unattended = await sessionStartHints(repo, { initCommand: "x", suggest: false });
 		ok(!unattended.some(({ text }) => text.includes("No project handbook")), JSON.stringify(unattended));
 

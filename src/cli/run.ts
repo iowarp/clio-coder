@@ -864,7 +864,7 @@ async function runDispatch(
 			startupHintHost: {
 				initCommand: "clio-coder context init",
 				suggest: !parsed.json && process.stderr.isTTY === true,
-				sink: (hint) => process.stderr.write(`${hint.text}\n`),
+				sink: (hint) => process.stderr.write(`clio-coder: ${hint.text}\n`),
 			},
 		}),
 		ProvidersDomainModule,

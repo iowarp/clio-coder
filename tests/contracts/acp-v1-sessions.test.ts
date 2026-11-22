@@ -10,6 +10,7 @@ import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import type { StartupHint } from "../../src/domains/context/contract.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
@@ -47,6 +48,7 @@ function fixture(
 	bus?: TelemetryHub,
 	/** The session's journal as the read model folds it, for a test that reads the usage block (#434 §11.3). */
 	telemetry?: () => readonly TelemetryRecord[],
+	startupHints?: () => ReadonlyArray<StartupHint>,
 ) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
@@ -156,6 +158,7 @@ function fixture(
 		},
 		...(commands ? { commands } : {}),
 		...(bus ? { bus } : {}),
+		...(startupHints ? { startupHints } : {}),
 		...(telemetry
 			? { usage: { quota: async () => [] }, telemetryReadModel: readModelOf(() => current?.id ?? null, telemetry) }
 			: {}),
@@ -1315,6 +1318,46 @@ test("a reloaded session replays a finished run's token facts as the live frame 
 		);
 	} finally {
 		await loaded.stop();
+	}
+});
+
+test("ACP startup notices cross once per session: a load of a prompted session in a new process sends none", async () => {
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const hints = () => [{ level: "info" as const, text: "No CLIO-CODER.md detected." }];
+	const notices = (updates: ReadonlyArray<Record<string, unknown>>) =>
+		updates.filter((frame) => {
+			const update = frame.update as Record<string, unknown>;
+			return (
+				update.sessionUpdate === "session_info_update" &&
+				(update._meta as Record<string, unknown> | undefined)?.["clio-coder/notice"] !== undefined
+			);
+		}).length;
+	const prompted = fixture(
+		[{ kind: "message", role: "user", turnId: "ask", parentTurnId: null, timestamp, payload: "one" }],
+		() => {},
+		undefined,
+		false,
+		undefined,
+		undefined,
+		undefined,
+		hints,
+	);
+	const unprompted = fixture([], () => {}, undefined, false, undefined, undefined, undefined, hints);
+	try {
+		for (const [peer, method, sessionId] of [
+			[prompted, "session/load", "session-1"],
+			[unprompted, "session/resume", "session-2"],
+		] as const) {
+			await peer.call("initialize", { protocolVersion: 1 });
+			await peer.call(method, { sessionId, cwd: peer.cwd, mcpServers: [] });
+			await peer.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "two" }] });
+		}
+		strictEqual(notices(prompted.updates), 0);
+		// A session that never took a prompt never showed them, so its first prompt does.
+		strictEqual(notices(unprompted.updates), 1);
+	} finally {
+		await prompted.stop();
+		await unprompted.stop();
 	}
 });
 

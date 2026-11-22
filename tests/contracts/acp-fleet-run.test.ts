@@ -616,6 +616,36 @@ test("the fleet projection caps steps and diagnostics and strips control charact
 	ok(refused.diagnostics.every((line) => Buffer.byteLength(line) <= 1024));
 });
 
+test("a worktree-isolated fleet preview reports its writing steps as worktree and carries the isolation", () => {
+	const steps = [
+		{ stepId: "build", kind: "agent" as const, scope: "workspace" as const, agentId: "coder", writes: undefined },
+		{ stepId: "review", kind: "agent" as const, scope: "readonly" as const, agentId: "reviewer", writes: undefined },
+	];
+	const preview = (isolation: "worktree" | undefined) =>
+		({
+			name: "build-review",
+			vars: {},
+			planHash: "a".repeat(64),
+			waves: [{ index: 0, steps }],
+			budget: { ceilingUsd: 0, currentUsd: 0, playbookUsd: null },
+			plan: { steps, ...(isolation !== undefined ? { isolation } : {}) },
+		}) as unknown as FleetRunPreview;
+	const isolated = projectFleetPreview({ ok: true, preview: preview("worktree") });
+	const shared = projectFleetPreview({ ok: true, preview: preview(undefined) });
+	if (isolated.status !== "ready" || shared.status !== "ready") throw new Error("preview not ready");
+	deepStrictEqual(
+		isolated.waves[0]?.steps.map((step) => step.scope),
+		["worktree", "readonly"],
+	);
+	strictEqual(isolated.isolation, "worktree");
+	deepStrictEqual(
+		shared.waves[0]?.steps.map((step) => step.scope),
+		["workspace", "readonly"],
+	);
+	strictEqual(shared.isolation, "workspace");
+	ok(Value.Check(AcpFleetPreviewSchema, isolated), JSON.stringify([...Value.Errors(AcpFleetPreviewSchema, isolated)]));
+});
+
 test("a bounded fleet argument or write-path list marks the approval preview as incomplete", () => {
 	for (const field of ["argv", "writes"] as const) {
 		const steps = [
