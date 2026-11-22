@@ -6401,8 +6401,10 @@ export function createDispatchBundle(
 	 * Admission seals failover none on every request, so only `routeFree`,
 	 * recorded before admission stamped the tuple, lets that default move the
 	 * one retry to the first eligible route with a different wire model on any
-	 * target. An approved plan moves only inside its envelope, in envelope
-	 * order.
+	 * target. A model the caller named is a pin too, though only a target or
+	 * node pin turns the request's failover to none; a route the domain moved
+	 * around a cooling target is not. An approved plan moves only inside its
+	 * envelope, in envelope order.
 	 */
 	function planObligationRetry(
 		run: ActiveRun,
@@ -6414,7 +6416,8 @@ export function createDispatchBundle(
 		});
 		const failedRoute = `${run.targetId}/${run.wireModelId}`;
 		const mode = failoverModeFor(run.req);
-		if (mode === "none" && run.req.routeFree !== true) {
+		const callerPin = mode === "automatic" && run.req.routeMove === undefined && run.req.model !== undefined;
+		if ((mode === "none" && run.req.routeFree !== true) || callerPin) {
 			return unmet(`the route is explicitly pinned to ${failedRoute}`);
 		}
 		const node = run.node?.id ?? "local";
