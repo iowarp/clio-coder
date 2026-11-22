@@ -1,5 +1,7 @@
 /**
- * `clio-coder fleet list`: the fleet roots this project ran, newest first, from the durable root records.
+ * `clio-coder fleet list`: the fleet roots (playbook runs) this project ran, newest first, from the durable root records.
+ * A run dispatched outside a playbook has no root; `fleet status` and `fleet view <run id>` see it, so an empty list
+ * counts those runs instead of claiming the project ran nothing (row 362).
  *
  * Each row is read from disk alone, so the list answers from any terminal. A root's state comes from its event
  * journal and its assignment row: `sealed` once the journal carries `fleet_sealed`, `ended` when the record has an end
@@ -91,7 +93,8 @@ export function runFleetList(args: ReadonlyArray<string>): number {
 	}
 	const scope = fleetInspectionScope(parsed.flags["all-projects"] === true || parsed.flags.all === true);
 	const ledger = openLedger();
-	const roots = listFleetRuns(MAX_LIMIT)
+	const records = listFleetRuns(MAX_LIMIT);
+	const roots = records
 		.filter((record) => scope.seesRoot(record, (id) => ledger.get(id)))
 		.slice(0, limit)
 		.map(rootRow);
@@ -100,9 +103,21 @@ export function runFleetList(args: ReadonlyArray<string>): number {
 		return EXIT_CODES.success;
 	}
 	if (roots.length === 0) {
-		process.stdout.write(
-			scope.all ? "no fleet runs\n" : "no fleet runs in this project (pass --all-projects for every project)\n",
+		const stepRuns = new Set(
+			records.flatMap((record) => (record.steps ?? []).map((entry) => entry?.result?.terminalRunId)),
 		);
+		const loose = ledger.list().filter((run) => scope.seesRun(run) && !stepRuns.has(run.id)).length;
+		const where = scope.all ? "" : " in this project";
+		process.stdout.write(
+			scope.all
+				? "no fleet roots (a fleet root is one playbook run)\n"
+				: "no fleet roots in this project (a fleet root is one playbook run; pass --all-projects for every project)\n",
+		);
+		if (loose > 0) {
+			process.stdout.write(
+				`${loose} dispatched run${loose === 1 ? "" : "s"}${where} ran outside a playbook; fleet status and fleet view <run id> show them\n`,
+			);
+		}
 		return EXIT_CODES.success;
 	}
 	process.stdout.write(

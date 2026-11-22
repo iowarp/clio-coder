@@ -153,6 +153,11 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 		strictEqual(hiddenRoot.status, 2);
 		const globalRoot = run("view", "fleet-foreign-root", "--all");
 		strictEqual(globalRoot.status, 0, globalRoot.stderr);
+		// Row 362 (14): the list says it lists playbook roots and counts the project's runs fleet status sees.
+		const list = run("list");
+		strictEqual(list.status, 0, list.stderr);
+		ok(list.stdout.includes("no fleet roots in this project"), list.stdout);
+		ok(list.stdout.includes("1 dispatched run in this project ran outside a playbook"), list.stdout);
 	} finally {
 		home.restore();
 	}
