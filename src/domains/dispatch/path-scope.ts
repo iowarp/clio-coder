@@ -7,6 +7,7 @@ import {
 	pathBoundaryCovers,
 	resolvePathBoundary,
 } from "../../core/path-boundary.js";
+import { maskCodeMembers } from "./code-members.js";
 import type { DispatchRequest } from "./contract.js";
 import type { WithheldCapability } from "./envelope.js";
 import type { RunLedgerProjection } from "./types.js";
@@ -191,10 +192,12 @@ function inferredPaths(
 ): { paths: string[]; droppedTokens: string[] } {
 	const paths = new Set<string>();
 	const droppedTokens = new Set<string>();
-	const text = `${req.task}\n${req.briefing ?? ""}`
-		.replace(/^```json[^\n]*\n[\s\S]*?^```[ \t]*$/gmu, "")
-		.replace(SCHEME_URI_RE, "")
-		.replace(HOME_PATH_RE, "");
+	const text = withoutMemberCalls(
+		`${req.task}\n${req.briefing ?? ""}`
+			.replace(/^```json[^\n]*\n[\s\S]*?^```[ \t]*$/gmu, "")
+			.replace(SCHEME_URI_RE, "")
+			.replace(HOME_PATH_RE, ""),
+	);
 	for (const match of text.matchAll(DISPATCH_PATH_TOKEN_RE)) {
 		const inferred = inferredPathToken(match[0], root);
 		if (inferred.kind === "dropped") {
@@ -254,6 +257,11 @@ function inferredPathToken(raw: string, root: string): InferredPathToken {
 	return existsSync(resolvePathBoundary(root, rest))
 		? { kind: "anchored", token, resolved: rest }
 		: { kind: "dropped", token };
+}
+
+/** A method call (`m.add(1,1)`, `x.name()`) names code, not a file: its member is blanked so `m.add` is no path (M-42). */
+function withoutMemberCalls(text: string): string {
+	return maskCodeMembers(text, { verbs: false }, (name) => " ".repeat(name.length));
 }
 
 function withoutNonWorkspaceTokens(text: string): string {
@@ -350,7 +358,7 @@ function strictInferredPaths(
 	parentTokens: DispatchInferredParentToken[];
 } {
 	failMalformedText(text, source);
-	const withoutUrls = withoutNonWorkspaceTokens(text);
+	const withoutUrls = withoutMemberCalls(withoutNonWorkspaceTokens(text));
 	const evidence: DispatchPathProvenanceEvidence =
 		source === "task"
 			? { provenance: "inferred", source, confidence: "medium", reason: "task_path_token" }

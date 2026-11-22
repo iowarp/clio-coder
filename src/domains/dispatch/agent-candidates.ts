@@ -13,6 +13,7 @@ import {
 } from "../agents/spec.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
 import { createCapabilityGate } from "../middleware/capability-gate.js";
+import { maskCodeMembers } from "./code-members.js";
 import type { DispatchRequest } from "./contract.js";
 import { type ExecutionRole, requestRunRole } from "./execution-role.js";
 import type { RouteCandidate } from "./route-decision.js";
@@ -117,15 +118,10 @@ const MUTATION_PROHIBITION =
 
 /**
  * A member name in code (`m.add(1,1)`, `cache.update`) is an identifier, not a verb: its dot would otherwise
- * open a clause for IMPERATIVE_MUTATION and its name would win the ordered `code_write` scan, so "verify
- * m.add(1,1)==2" read as a request to add something (M-40). Masked are a method call of any name and a
- * mutation verb reached through a dot; a file extension (`m.py`, `app.config.ts`) is neither and stays.
+ * open a clause for IMPERATIVE_MUTATION and its name would win the ordered `code_write` scan (M-40).
  */
-const CODE_MEMBER =
-	/(?<=[\w$)\]]\.)(?:[A-Za-z_$][\w$]*(?=\()|(?:write|implement|add|create|build|develop|fix|repair|resolve|patch|address|correct|edit|change|modify|refactor|update)\b)/gi;
-
 function withoutCodeMembers(task: string): string {
-	return task.replace(CODE_MEMBER, "member");
+	return maskCodeMembers(task, { verbs: true }, () => "member");
 }
 
 /**
