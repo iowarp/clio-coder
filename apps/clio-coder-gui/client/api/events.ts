@@ -107,8 +107,10 @@ export function subscribe(
 	const telemetryRefreshed = new Map<string, number>();
 	const telemetryPending = new Map<string, Set<string>>();
 	const telemetryTimers = new Map<string, () => void>();
-	/** Invalidates the keys given and any held for the session; true when the operator window moved too. */
-	/** `settled` is the snapshot's settle key at a turn's end; a read keyed by the key it retired is left alone. */
+	/**
+	 * Invalidates the keys given and any held for the session; true when the operator window moved too. `settled` is
+	 * the snapshot's settle key at a turn's end; a read keyed by the key it retired is left alone.
+	 */
 	const refreshTelemetry = (id: string, keys: ReadonlySet<string>, settled?: string) => {
 		telemetryTimers.get(id)?.();
 		telemetryTimers.delete(id);
