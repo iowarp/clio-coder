@@ -13,7 +13,7 @@ import { Explained } from "../telemetry/Explained.js";
 import { sessionTitle } from "./metrics-scope-model.js";
 import { OperatorMetrics, useScopeTasks } from "./operator-metrics.js";
 import { usageCacheEvidence } from "./usage-insights-model.js";
-import { costReportOf, filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
+import { costReportOf, economyView, filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "./usage.css";
 
@@ -29,6 +29,7 @@ export function UsagePage({ client }: { client: Client }) {
 	const view = query.data ? usageView(query.data) : null;
 	const facts = query.data ? filterUsageFacts(query.data.facts, factQuery) : [];
 	const cache = query.data ? usageCacheEvidence(query.data) : null;
+	const economy = query.data ? economyView(query.data) : null;
 	const { titles } = useScopeTasks(client, selection.id);
 	const cost = (["model", "target"] as const).flatMap((by) => {
 		const report = query.data ? costReportOf(query.data, by) : null;
@@ -78,7 +79,11 @@ export function UsagePage({ client }: { client: Client }) {
 							<article key={figure.label}>
 								<p className="usage-total-label">
 									<Icon name={index === 0 ? "layers" : index === 1 ? "usage" : index === 2 ? "sessions" : "fleet"} />
-									{figure.label === "Tokens" ? "Recorded tokens" : figure.label === "Cost" ? "Known cost · USD" : figure.label}
+									{figure.label === "Tokens"
+										? "Recorded tokens"
+										: figure.label === "Route price"
+											? "Route price · USD"
+											: figure.label}
 								</p>
 								<div className="usage-total-value">
 									<Explained client={client} {...figure} />
@@ -177,6 +182,77 @@ export function UsagePage({ client }: { client: Client }) {
 								{cache.rows.length} of {cache.total} session observations shown.
 								{cache.omitted > 0 ? ` ${cache.omitted} further observations remain in recorded facts below.` : ""} Not recorded
 								means missing evidence; a recorded zero remains zero. Counts cover recorded verdicts only.
+							</p>
+						</section>
+					)}
+					{economy && (
+						<section className="usage-cache-evidence usage-economy" aria-labelledby="usage-economy-title">
+							<p className="usage-kicker">06 / Economics</p>
+							<h2 id="usage-economy-title">What this window cost</h2>
+							<dl className="usage-origins">
+								{economy.headline.map((figure) => (
+									<div key={figure.label} data-tone={figure.tone}>
+										<dt>
+											{figure.label}
+											{figure.tone === "estimate" && <small> · estimate</small>}
+										</dt>
+										<dd>{figure.value}</dd>
+										<dd>
+											<small>{figure.note}</small>
+										</dd>
+									</div>
+								))}
+							</dl>
+							{!!economy.pools.length && (
+								// biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need focus to scroll the pool table horizontally.
+								<section className="usage-cache-scroll" aria-label="Funding pools" tabIndex={0}>
+									<table className="usage-cache-table">
+										<thead>
+											<tr>
+												<th scope="col">Pool</th>
+												<th scope="col">Contributions</th>
+												<th scope="col">Extra charge</th>
+												<th scope="col">Provider charge</th>
+												<th scope="col">API equivalent · estimate</th>
+												<th scope="col">Seat credits</th>
+											</tr>
+										</thead>
+										<tbody>
+											{economy.pools.map((pool) => (
+												<tr key={pool.pool} data-tone={pool.tone}>
+													<th scope="row">{pool.pool}</th>
+													<td>{pool.contributions}</td>
+													<td>{pool.extra}</td>
+													<td>{pool.providerCharge}</td>
+													<td>{pool.apiEquivalent}</td>
+													<td>{pool.seatCredits}</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</section>
+							)}
+							{!!economy.fees.length && (
+								<ul className="usage-economy-list" aria-label="Declared fees">
+									{economy.fees.map((fee) => (
+										<li key={fee.key}>
+											Fee · {fee.pool} ({fee.payer}) · {fee.period}: {fee.value}
+										</li>
+									))}
+								</ul>
+							)}
+							{!!economy.references.length && (
+								<ul className="usage-economy-list" aria-label="API-equivalent reference rows">
+									{economy.references.map((row) => (
+										<li key={row.key}>
+											Reference {row.id} as of {row.asOf} · {row.basis} · {row.contributions}
+										</li>
+									))}
+								</ul>
+							)}
+							<p className="usage-chart-footnote">
+								Folded once over {economy.sources}. Pools are an alternate cut of the same calls, not addends; fees count once
+								per pool and period; unknown is not zero.
 							</p>
 						</section>
 					)}

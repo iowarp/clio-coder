@@ -66,6 +66,12 @@ export const UsageReport = Type.Object(
 		to: Type.String(),
 		facts: Type.Array(Type.Object({ name: Type.String(), values: record }, closed)),
 		performance: Type.Optional(UsagePerformance),
+		/**
+		 * The window's economics as the CLI's `usage report` folded them (token economy S13): extra charge, API
+		 * equivalent, seat credits, energy, per-currency cash, pools, each declared fee once per period and the reference
+		 * rows, every figure with its own display. The browser renders those displays and never prices.
+		 */
+		economy: Type.Optional(TELEMETRY_DTO_SCHEMAS.cost.properties.economy),
 		opportunities: Type.Array(
 			Type.Object({ kind: Type.String(), suggestion: Type.String(), evidence: Type.String() }, closed),
 		),

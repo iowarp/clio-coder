@@ -3446,6 +3446,9 @@
 										"performance": {
 											"$ref": "#/components/schemas/Object_compactionOutcomes_compactions_coverage_0a32223c"
 										},
+										"economy": {
+											"$ref": "#/components/schemas/Object_cash_fees_groups_c8211a24"
+										},
 										"opportunities": {
 											"type": "array",
 											"items": {

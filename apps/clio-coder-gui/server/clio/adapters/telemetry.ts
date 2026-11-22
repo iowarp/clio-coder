@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { validateSettingsFile } from "../../../../../src/core/config.js";
 import { cwdHash } from "../../../../../src/core/cwd-hash.js";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import type { RunListCursor } from "../../../../../src/domains/session/index.js";
@@ -50,7 +51,8 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 		const scope = input.cwd === null ? null : { hash: cwdHash(input.cwd), inRepo: (cwd: string) => cwd === input.cwd };
 		const { repo } = await usageWindow(state, scope, 30, to, diagnostics);
 		if (diagnostics.notes.length) throw new AppProblem("unavailable", diagnostics.notes.join("; "));
-		const report = usageReport(repo, from, to);
+		// The window lists the operator's declared pools' fees once per period, as `usage report` does; one session or run carries none.
+		const report = usageReport(repo, from, to, validateSettingsFile().settings.funding);
 		return {
 			from: new Date(from).toISOString(),
 			to: new Date(to).toISOString(),

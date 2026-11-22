@@ -37,6 +37,8 @@ export class ReportsService {
 		const now = Date.now();
 		const report = await this.runner.run({ kind: "usage.report" }, workspace.path);
 		if (!Value.Check(UsageDto, report)) throw new AppProblem("unavailable", "Usage returned an invalid report DTO.");
+		// Every group-by folds the same window, so each cost report carries the same economy; the role cut's is the one.
+		const economy = (report.cost.find((cost) => cost.groupBy === "role") ?? report.cost[0])?.economy;
 		return {
 			schema: "experimental",
 			workspaceId,
@@ -58,6 +60,7 @@ export class ReportsService {
 			],
 			opportunities: [],
 			...(report.performance ? { performance: report.performance } : {}),
+			...(economy ? { economy } : {}),
 		};
 	}
 }
