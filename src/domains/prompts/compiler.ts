@@ -31,6 +31,8 @@ import type { ProjectPreloadClass } from "./preload.js";
 export interface ToolPromptHint {
 	tool: string;
 	hint: string;
+	/** Written for workers (a role variant), so it also renders for a capability a worker reaches through the gateway. */
+	forWorkers?: boolean;
 }
 
 export interface ToolDiscoveryHint extends ToolPromptHint {
@@ -969,13 +971,15 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 				]
 			: []),
 	];
+	const gatewayHinted = new Set(
+		inputs.toolPromptHints.filter((entry) => entry.forWorkers === true).map((entry) => entry.tool.trim()),
+	);
 	const hints = canonicalToolPromptHints(
 		inputs.toolPromptHints,
 		new Set(
 			names.filter(
 				(name) =>
-					direct.has(name) &&
-					name !== "gateway" &&
+					((direct.has(name) && name !== "gateway") || (viaGateway.includes(name) && gatewayHinted.has(name))) &&
 					turnAllowsTool(inputs.turnConstraints, name) &&
 					(name !== "context" || inputs.turnConstraints?.skills !== "disabled"),
 			),

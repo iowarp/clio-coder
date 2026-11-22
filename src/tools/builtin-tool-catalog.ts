@@ -259,6 +259,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		objective:
 			'Typed git, not argv: inspect with {op:"log",limit,stat}, {op:"diff",rev,path}, {op:"show",rev} or status; stage and record with add or commit.',
 		uiLabel: "Git",
+		// A worker's contract names git as reachable without its arguments; without this it searched for them first.
+		promptHint: {
+			worker:
+				'Inspect the checkout with gateway(op="call",capability="git",args={op:"status"}) or args={op:"diff",path:"<path>"}; args={op:"log",limit:5} and args={op:"show",rev:"<rev>"} read history.',
+		},
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
 		examples: [
 			{ goal: "Inspect workspace status", args: { op: "status" } },
@@ -600,17 +605,19 @@ export function gatewayPromptHint(withVision = false): string {
 export function toolPromptHintsForNames(
 	names: ReadonlyArray<ToolName>,
 	role: ToolPromptHintRole = "session",
-): ReadonlyArray<{ tool: string; hint: string }> {
+): ReadonlyArray<{ tool: string; hint: string; forWorkers?: boolean }> {
 	const seenTools = new Set<string>();
 	const seenHints = new Set<string>();
-	const hints: Array<{ tool: string; hint: string }> = [];
+	const hints: Array<{ tool: string; hint: string; forWorkers?: boolean }> = [];
 	for (const name of [...names].sort()) {
 		if (seenTools.has(name)) continue;
 		seenTools.add(name);
-		const hint = resolveToolPromptHint(TOOL_METADATA[name]?.promptHint, role);
+		const metadata = TOOL_METADATA[name]?.promptHint;
+		const hint = resolveToolPromptHint(metadata, role);
 		if (!hint || seenHints.has(hint)) continue;
 		seenHints.add(hint);
-		hints.push({ tool: name, hint });
+		const forWorkers = role !== "session" && typeof metadata === "object";
+		hints.push({ tool: name, hint, ...(forWorkers ? { forWorkers } : {}) });
 	}
 	return hints;
 }
