@@ -78,7 +78,7 @@ export const limitationTool: ToolSpec = {
 		scope: Type.String({ description: "What could not be verified, in one sentence." }),
 		reason: StringEnum(LIMITATION_REASONS, {
 			description:
-				"no-runner: no runner exists; blocked: a gate or denial stopped the check; out-of-scope: the task excluded it; environment: it cannot run here; write-root: the change needs the listed paths, which lie outside your write roots, so stop before editing and the coordinator can widen the roots and continue; other.",
+				"no-runner: no runner exists or no project check applies to this change; blocked: a gate or denial stopped the check; out-of-scope: the task excluded it; environment: it cannot run here; write-root: the change needs the listed paths, which lie outside your write roots, so stop before editing and the coordinator can widen the roots and continue; other.",
 		}),
 		paths: Type.Optional(
 			Type.Array(Type.String(), {
