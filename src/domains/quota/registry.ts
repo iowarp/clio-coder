@@ -13,6 +13,7 @@ import { ANTIGRAVITY_QUOTA_PROVIDER_ID, createAntigravityQuotaProvider } from ".
 import { CLAUDE_CODE_QUOTA_PROVIDER_ID, createClaudeCodeQuotaProvider } from "./claude-code-provider.js";
 import { CODEX_CLI_QUOTA_PROVIDER_ID, createCodexCliQuotaProvider } from "./codex-cli-provider.js";
 import { CODEX_QUOTA_PROVIDER_ID, createCodexQuotaProvider } from "./codex-provider.js";
+import { COPILOT_QUOTA_PROVIDER_ID, createCopilotQuotaProvider } from "./copilot-provider.js";
 import type { QuotaProvider } from "./types.js";
 
 export function buildQuotaProviders(): QuotaProvider[] {
@@ -24,7 +25,7 @@ export function buildQuotaProviders(): QuotaProvider[] {
 		createCodexQuotaProvider(),
 		...(implicit || explicitAgentHome("CODEX_HOME") ? [createCodexCliQuotaProvider()] : []),
 		...(implicit || explicitAgentHome("ANTIGRAVITY_HOME") ? [createAntigravityQuotaProvider()] : []),
-		// The copilot adapter attaches here once its credential shape is confirmed.
+		...(implicit || explicitAgentHome("COPILOT_HOME") ? [createCopilotQuotaProvider()] : []),
 	];
 }
 
@@ -32,7 +33,8 @@ export function buildQuotaProviders(): QuotaProvider[] {
  * Quota adapter identity for each runtime. Native Codex spends Clio's own
  * `openai-codex` login, which can differ from the sibling CLI's, so the two
  * runtimes read separate adapters (#423, #434). Claude Code and the SDK use
- * Claude Code credentials.
+ * Claude Code credentials; Copilot SDK polls account quota via the signed-in
+ * Copilot runtime.
  */
 const QUOTA_PROVIDER_BY_RUNTIME: ReadonlyMap<string, string> = new Map([
 	["anthropic-max", ANTHROPIC_MAX_QUOTA_PROVIDER_ID],
@@ -41,6 +43,7 @@ const QUOTA_PROVIDER_BY_RUNTIME: ReadonlyMap<string, string> = new Map([
 	["openai-codex", CODEX_QUOTA_PROVIDER_ID],
 	["codex-cli", CODEX_CLI_QUOTA_PROVIDER_ID],
 	["antigravity-code", ANTIGRAVITY_QUOTA_PROVIDER_ID],
+	["copilot-sdk", COPILOT_QUOTA_PROVIDER_ID],
 ]);
 
 export function quotaProviderIdForRuntime(runtimeId: string): string | null {

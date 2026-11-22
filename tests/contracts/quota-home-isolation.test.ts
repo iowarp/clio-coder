@@ -8,6 +8,7 @@ import { createAntigravityQuotaProvider } from "../../src/domains/quota/antigrav
 import { createClaudeCodeQuotaProvider } from "../../src/domains/quota/claude-code-provider.js";
 import { createCodexCliQuotaProvider } from "../../src/domains/quota/codex-cli-provider.js";
 import { createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
+import { createCopilotQuotaProvider } from "../../src/domains/quota/copilot-provider.js";
 import { buildQuotaProviders } from "../../src/domains/quota/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -15,7 +16,7 @@ test("BT-006 relocated homes exclude implicit sibling credentials before detecti
 	const env = await isolateClioEnv();
 	try {
 		process.env.HOME = env.dir;
-		for (const key of ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTIGRAVITY_HOME"]) delete process.env[key];
+		for (const key of ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTIGRAVITY_HOME", "COPILOT_HOME"]) delete process.env[key];
 		const fixtures = [
 			[".codex/auth.json", { tokens: { access_token: "scratch" } }],
 			[".claude/.credentials.json", { claudeAiOauth: { accessToken: "scratch" } }],
@@ -35,6 +36,7 @@ test("BT-006 relocated homes exclude implicit sibling credentials before detecti
 			createCodexCliQuotaProvider({ fetch }),
 			createClaudeCodeQuotaProvider({ fetch }),
 			createAntigravityQuotaProvider({ fetch }),
+			createCopilotQuotaProvider(),
 		]) {
 			strictEqual(await provider.detect(), false);
 			strictEqual((await provider.fetch()).status, "no_credentials");
@@ -60,7 +62,7 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 		process.env.XDG_CACHE_HOME = join(env.dir, "xdg-cache");
 		process.env.APPDATA = join(env.dir, "appdata");
 		process.env.LOCALAPPDATA = join(env.dir, "localappdata");
-		for (const key of ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTIGRAVITY_HOME"]) delete process.env[key];
+		for (const key of ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTIGRAVITY_HOME", "COPILOT_HOME"]) delete process.env[key];
 		const homes = ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTIGRAVITY_HOME"] as const;
 		const leaves = ["auth.json", ".credentials.json", "antigravity-oauth-token"];
 		const records = [
@@ -76,6 +78,10 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 			strictEqual(buildQuotaProviders().length, 3);
 			delete process.env[key];
 		}
+		process.env.COPILOT_HOME = env.dir;
+		strictEqual(buildQuotaProviders().length, 3);
+		strictEqual(buildQuotaProviders().at(-1)?.id, "copilot");
+		delete process.env.COPILOT_HOME;
 		for (const key of [
 			"CLIO_CODER_HOME",
 			"CLIO_CODER_CONFIG_DIR",
@@ -87,7 +93,7 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 		strictEqual(isClioHomeRelocated(), false);
 		deepStrictEqual(
 			buildQuotaProviders().map((p) => p.id),
-			["anthropic-max", "claude-code", "codex", "codex-cli", "antigravity"],
+			["anthropic-max", "claude-code", "codex", "codex-cli", "antigravity", "copilot"],
 		);
 		process.env.CLIO_CODER_CONFIG_DIR = resolveClioDirs().config;
 		strictEqual(isClioHomeRelocated(), false);

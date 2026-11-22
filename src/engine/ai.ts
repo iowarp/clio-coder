@@ -46,6 +46,7 @@ import {
 	registerEngineFauxProvider,
 } from "./api-registry.js";
 import { sideCallCacheFamilyId } from "./apis/cache-family.js";
+import type { CopilotQuotaReadOptions } from "./copilot/quota.js";
 import { engineModels } from "./models.js";
 import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
@@ -87,6 +88,29 @@ export async function copilotSdkAccount() {
 export async function copilotSdkRestartIdle(): Promise<void> {
 	const client = await import("./copilot/client.js");
 	client.restartIdleCopilotClient();
+}
+
+export type {
+	CopilotQuotaAccount,
+	CopilotQuotaEntry,
+	CopilotQuotaObservationKind,
+	CopilotQuotaQuantityKind,
+	CopilotQuotaReadOptions,
+	CopilotQuotaReadResult,
+	CopilotQuotaRpcClient,
+	CopilotQuotaUnit,
+} from "./copilot/quota.js";
+
+/** Read-only Copilot account quota poll; loads the optional SDK only when called. */
+export async function readCopilotSdkQuota(options?: CopilotQuotaReadOptions) {
+	const quota = await import("./copilot/quota.js");
+	return quota.readCopilotQuota(options);
+}
+
+/** Signed-in Copilot account identity for quota scope/detection; loads the optional SDK only when called. */
+export async function copilotSdkSignedInAccount(options?: CopilotQuotaReadOptions) {
+	const quota = await import("./copilot/quota.js");
+	return quota.readCopilotSignedInAccount(options);
 }
 
 export const stream = engineStream;

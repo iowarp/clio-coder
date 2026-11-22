@@ -306,15 +306,16 @@ it("registers explicitly connected adapters in display order", async () => {
 		process.env.CODEX_HOME = env.dir;
 		process.env.CLAUDE_CONFIG_DIR = env.dir;
 		process.env.ANTIGRAVITY_HOME = env.dir;
+		process.env.COPILOT_HOME = env.dir;
 		delete process.env.CLIO_CODER_INTEROP_HOME;
 		const providers = buildQuotaProviders();
 		assert.deepEqual(
 			providers.map((entry) => entry.id),
-			["anthropic-max", "claude-code", "codex", "codex-cli", "antigravity"],
+			["anthropic-max", "claude-code", "codex", "codex-cli", "antigravity", "copilot"],
 		);
 		assert.deepEqual(
 			providers.map((entry) => entry.displayName),
-			["Anthropic Max", "Claude Code", "OpenAI Codex", "Codex CLI", "Antigravity"],
+			["Anthropic Max", "Claude Code", "OpenAI Codex", "Codex CLI", "Antigravity", "GitHub Copilot"],
 		);
 	} finally {
 		env.restore();
