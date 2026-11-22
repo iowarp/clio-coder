@@ -111,6 +111,7 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 		parsed.agentProfile !== undefined ||
 		parsed.agentRuntime !== undefined ||
 		parsed.toolProfile !== undefined ||
+		parsed.review !== undefined ||
 		parsed.required.length > 0
 	);
 }
@@ -546,6 +547,8 @@ async function executeRunCommand(
 						return 2;
 					}
 				}
+				const reviewSubject = parsed.agentId === undefined ? undefined : await enterReviewSubject(parsed, parsed.agentId);
+				if (typeof reviewSubject === "number") return reviewSubject;
 
 				const noSkills = options.noSkills === true || parsed.noSkills === true;
 				const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
@@ -721,10 +724,11 @@ async function executeRunCommand(
 				if (parsed.json) takeOverStdout();
 				try {
 					// The worker is told the shape in its task text; its request never carries the caller's schema (6.8).
+					const prompt = reviewSubject !== undefined ? `${reviewSubject}\n\n${assembled.prompt}` : assembled.prompt;
 					const task =
 						structured !== undefined && outputSchema !== undefined
-							? `${assembled.prompt}\n\n${structured.outputSchemaInstruction(outputSchema)}`
-							: assembled.prompt;
+							? `${prompt}\n\n${structured.outputSchemaInstruction(outputSchema)}`
+							: prompt;
 					const code = await runDispatch(parsed as RunCliArgs & { agentId: string }, task, {
 						...options,
 						noSkills,
@@ -743,6 +747,49 @@ async function executeRunCommand(
 			}
 		},
 	);
+}
+
+/**
+ * `--review <run>`: enter the run's kept task worktree, read-only, and return the subject to prepend to the task. An
+ * `--agent` task naming a task branch this directory does not have checked out is refused naming `--review`. Both
+ * refusals are exit 2 before boot. Undefined when there is no subject to prepend.
+ */
+async function enterReviewSubject(parsed: RunCliArgs, agentId: string): Promise<string | number | undefined> {
+	let subject: string | undefined;
+	if (parsed.review !== undefined) {
+		const [{ resolveReviewSubject }, { parentsFor }] = await Promise.all([
+			import("./run-review.js"),
+			import("./fleet-land.js"),
+		]);
+		const parents = parentsFor(process.cwd());
+		const resolved = resolveReviewSubject({
+			root: process.cwd(),
+			ref: parsed.review,
+			agentId,
+			...(parents !== undefined ? { allowedParents: parents } : {}),
+		});
+		if ("refusal" in resolved) {
+			writeRunDiagnostic(`clio-coder run: ${resolved.refusal}\n`);
+			return 2;
+		}
+		const unusable = enterRunCwd(resolved.worktree);
+		if (unusable !== null) {
+			writeRunDiagnostic(`clio-coder run: --review cannot enter the task worktree ${unusable}\n`);
+			return 2;
+		}
+		parsed.readOnly = true;
+		subject = resolved.task;
+	}
+	const text = parsed.messages.join(" ");
+	if (text.includes("clio-coder/task/")) {
+		const { taskBranchRefusal } = await import("./run-review.js");
+		const refusal = taskBranchRefusal(text, process.cwd(), agentId);
+		if (refusal !== null) {
+			writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+			return 2;
+		}
+	}
+	return subject;
 }
 
 const DEFAULT_VERIFY_TIMEOUT_SECONDS = 300;
@@ -1225,6 +1272,7 @@ function shadowStandInCommand(parsed: RunCliArgs, standIn: string): string {
 	const quote = (value: string): string => (/^[\w./@:=+-]+$/u.test(value) ? value : JSON.stringify(value));
 	const parts = ["clio-coder run", "--agent", standIn, "--read-only"];
 	if (parsed.cwd !== undefined) parts.push("--cwd", quote(parsed.cwd));
+	if (parsed.review !== undefined) parts.push("--review", quote(parsed.review));
 	if (parsed.target !== undefined) parts.push("--target", quote(parsed.target));
 	if (parsed.model !== undefined) parts.push("--model", quote(parsed.model));
 	if (parsed.thinking !== undefined) parts.push("--thinking", parsed.thinking);
