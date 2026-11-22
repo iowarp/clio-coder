@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { runBrowserConfigure } from "../../src/cli/configure-browser.js";
 import { parseSetupFile, planImport, runConfigureImport } from "../../src/cli/configure-import.js";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { initializeClioHome } from "../../src/core/init.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
+import {
+	migrationManifestPath,
+	REGISTERED_MIGRATION_IDS,
+} from "../../src/domains/lifecycle/migrations/registry-ids.js";
 import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -54,6 +60,28 @@ safety:
 	const errors = refused.errors.join("\n");
 	for (const key of ["targets[0].auth.apiKey", "targets[0].trustedUnmediated", "safety"])
 		assert.ok(errors.includes(key), errors);
+});
+
+test("the app's setup makes a fresh home before any step can write settings, as the terminal start does", async (t) => {
+	const home = await isolateClioEnv("clio-gui-setup-");
+	t.after(() => home.restore());
+	registerBuiltinRuntimes(getRuntimeRegistry());
+	const input = new PassThrough();
+	const output = capture();
+	const done = runBrowserConfigure(input, output.out);
+	// A setup-file import saves from its own step, never through the wizard's save, so the home is made at the start.
+	input.write(`${JSON.stringify({ kind: "start" })}\n${JSON.stringify({ kind: "cancel" })}\n`);
+	await done;
+	input.end();
+	const dirs = resolveClioDirs();
+	for (const path of [
+		join(dirs.config, "credentials.yaml"),
+		join(dirs.state, "home.json"),
+		join(dirs.state, "sessions"),
+	])
+		assert.equal(existsSync(path), true, path);
+	const manifest = JSON.parse(readFileSync(migrationManifestPath(), "utf8")) as { applied: string[] };
+	assert.deepEqual(manifest.applied, [...REGISTERED_MIGRATION_IDS], "a new home has no migration pending");
 });
 
 test("importing adds the target and both defaults, re-importing is a no-op, and a different id is refused", async (t) => {

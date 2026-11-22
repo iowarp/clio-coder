@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { stripVTControlCharacters } from "node:util";
 import { readSettings } from "../core/config.js";
+import { initializeClioHome } from "../core/init.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { type ConfigureWizardHost, runHostedTargetWizard } from "./configure-host.js";
 import { classifyDefaultTarget, homeIsReturning } from "./default-target.js";
@@ -154,6 +155,9 @@ export async function runBrowserConfigure(
 				started = true;
 				// Read before any step can write the settings file, the moment the terminal's start reads it.
 				const returning = homeIsReturning();
+				// The terminal start makes the home before setup, and so does the app: a setup-file import saves from its
+				// own step, never through the wizard's save, and settings written first leave every migration pending.
+				initializeClioHome();
 				const settings = readSettings();
 				const target =
 					typeof answer.targetId === "string" ? settings.targets.find((entry) => entry.id === answer.targetId) : undefined;
