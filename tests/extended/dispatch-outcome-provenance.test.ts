@@ -7,8 +7,8 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { resolveDispatchFailureStatus } from "../../src/core/dispatch-outcome.js";
-import { pricedUsd } from "../../src/core/telemetry/pricing.js";
-import { renderPricing } from "../../src/core/telemetry/render.js";
+import { pricedUsd, sumPricing } from "../../src/core/telemetry/pricing.js";
+import { renderPricing, renderPricingSum } from "../../src/core/telemetry/render.js";
 import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
 import inception from "../../src/domains/providers/runtimes/cloud/inception.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
@@ -82,7 +82,17 @@ describe("resolveEffectivePricing", () => {
 			(["local-native", "declared", "zero-rates", undefined] as const).map((rule) =>
 				renderPricing(pricedUsd("free", 0, rule)),
 			),
-			["$0.00 local", "$0.00 free (declared)", "$0.00 free (zero-rates)", "$0.00 local"],
+			["$0.00 local", "$0.00 free (declared)", "$0.00 free (zero-rates)", "$0.00 free"],
+		);
+		deepStrictEqual(
+			[
+				renderPricingSum(sumPricing([pricedUsd("free", 0, "local-native"), pricedUsd("free", 0, "local-native")])),
+				renderPricingSum(sumPricing([pricedUsd("free", 0, "local-native"), pricedUsd("free", 0, "declared")])),
+				renderPricingSum(sumPricing([pricedUsd("free", 0, "declared"), pricedUsd("free", 0, "zero-rates")])),
+				renderPricingSum(sumPricing([pricedUsd("free", 0, undefined)])),
+				renderPricingSum(sumPricing([pricedUsd("free", 0, "local-native"), pricedUsd("free", 0, undefined)])),
+			],
+			["$0.00 local", "$0.00 free (mixed)", "$0.00 free (mixed)", "$0.00 free", "$0.00 free"],
 		);
 	});
 

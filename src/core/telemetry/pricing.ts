@@ -87,38 +87,67 @@ export function sumFacts(facts: Iterable<Fact<number>>): FactSum {
 }
 
 /**
- * Several priced amounts as one sum; `free` holds only when every amount was a free target's measured zero, and
- * `freeRule` names the rule only when every one of them states the same one.
+ * Several priced amounts as one sum; `free` holds only when every amount was a free target's measured zero,
+ * `freeRule` names the rule only when every one of them states the same one, and `freeRuleMixed` holds only when the
+ * parts carry two or more different recorded rules.
  */
 export interface PricingSum {
 	usd: FactSum;
 	free: boolean;
 	freeRule?: FreeRule;
+	freeRuleMixed?: boolean;
 }
 
-/** The free rule every part states, or undefined when any part is not free, states none, or states another. */
-export function agreedFreeRule(
+/**
+ * Agreement across free parts' recorded rules: `rule` when every part is free and states the same recorded rule;
+ * `mixed: true` only when two or more different recorded rules appear; `mixed: false` with no `rule` when no rule was
+ * recorded or only one rule appeared beside rule-less parts.
+ */
+export interface FreeRuleAgreement {
+	rule?: FreeRule;
+	mixed: boolean;
+}
+
+export function freeRuleAgreement(
 	parts: Iterable<Pick<Pricing, "pricedBy" | "freeRule"> | undefined>,
-): FreeRule | undefined {
-	let agreed: FreeRule | undefined;
+): FreeRuleAgreement {
+	let seen: FreeRule | undefined;
+	let sawMissing = false;
+	let sawDifferent = false;
 	for (const part of parts) {
-		if (part?.pricedBy !== "free" || part.freeRule === undefined) return undefined;
-		if (agreed !== undefined && agreed !== part.freeRule) return undefined;
-		agreed = part.freeRule;
+		if (part?.pricedBy !== "free") return { mixed: false };
+		if (part.freeRule === undefined) {
+			sawMissing = true;
+			continue;
+		}
+		if (seen !== undefined && seen !== part.freeRule) {
+			sawDifferent = true;
+			continue;
+		}
+		seen = part.freeRule;
 	}
-	return agreed;
+	if (sawDifferent) return { mixed: true };
+	if (!sawMissing && seen !== undefined) return { rule: seen, mixed: false };
+	return { mixed: false };
 }
 
-/** A free sum's claim: `free`, plus the agreed rule when there is one. */
-export function freeClaim(free: boolean, freeRule: FreeRule | undefined): Pick<PricingSum, "free" | "freeRule"> {
-	return free && freeRule !== undefined ? { free, freeRule } : { free };
+/** A free sum's claim: `free`, plus the agreed rule when every part states one, or `freeRuleMixed` when recorded rules disagree. */
+export function freeClaim(
+	free: boolean,
+	agreement: FreeRule | FreeRuleAgreement | undefined,
+): Pick<PricingSum, "free" | "freeRule" | "freeRuleMixed"> {
+	if (!free) return { free };
+	if (typeof agreement === "string") return { free, freeRule: agreement };
+	if (agreement?.mixed) return { free, freeRuleMixed: true };
+	if (agreement?.rule !== undefined) return { free, freeRule: agreement.rule };
+	return { free };
 }
 
 export function sumPricing(pricings: Iterable<Pricing>): PricingSum {
 	const list = [...pricings];
 	return {
 		usd: sumFacts(list.map((pricing) => pricing.usd)),
-		...freeClaim(list.length > 0 && list.every((pricing) => pricing.pricedBy === "free"), agreedFreeRule(list)),
+		...freeClaim(list.length > 0 && list.every((pricing) => pricing.pricedBy === "free"), freeRuleAgreement(list)),
 	};
 }
 
@@ -147,7 +176,7 @@ export function sumRunSpend(runs: Iterable<{ spend: RunUsageFacts; spendSums: Ru
 		usd: sumFactSums(list.map((run) => run.spendSums.usd)),
 		...freeClaim(
 			list.length > 0 && list.every((run) => run.spend.pricing.pricedBy === "free"),
-			agreedFreeRule(list.map((run) => run.spend.pricing)),
+			freeRuleAgreement(list.map((run) => run.spend.pricing)),
 		),
 	};
 }

@@ -32,7 +32,7 @@ test("usage Activity preserves unpriced, estimated and measured session cost fro
 	const cases: Array<{ calls: ReturnType<typeof call>; expected: RegExp; unpriced?: boolean }> = [
 		{ calls: [], expected: /Session\s+0 tokens/, unpriced: true },
 		{ calls: call(null), expected: /Session\s+110 tokens · cost not measured/, unpriced: true },
-		{ calls: call(0, "free"), expected: /Session\s+\$0\.00 local/ },
+		{ calls: call(0, "free"), expected: /Session\s+\$0\.00 free/ },
 		{ calls: call(0.25, "catalog"), expected: /Session\s+~\$0\.25 est/ },
 		{ calls: [...call(0.25), ...call(null)], expected: /Session\s+\$0\.25 \+\?/ },
 	];

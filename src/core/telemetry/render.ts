@@ -83,21 +83,29 @@ function renderUnknown(reason: Extract<Fact<unknown>, { kind: "unknown" }>["reas
  * estimates say so (L5); a sum nobody priced has no claim and reads as not measured, never `$0.00`.
  */
 /**
- * A free amount names the rule that made it free. Only a local-native runtime is "local"; a target that declared
- * itself free or declared all-zero rates may be a cloud endpoint. A record from before the rule was kept reads as it
- * always did.
+ * A free amount names the rule that made it free. Only `local-native` renders `$0.00 local`; a target that declared
+ * itself free or declared all-zero rates may be a cloud endpoint. `$0.00 free (mixed)` renders only when the parts
+ * carry two or more different recorded rules; a free amount without a recorded rule renders `$0.00 free`, never
+ * `$0.00 local`.
  */
-function renderFreeUsd(freeRule: FreeRule | undefined): string {
+function renderFreeUsd(freeRule: FreeRule | undefined, mixed = false): string {
+	if (freeRule === "local-native") return "$0.00 local";
 	if (freeRule === "declared") return "$0.00 free (declared)";
 	if (freeRule === "zero-rates") return "$0.00 free (zero-rates)";
-	return "$0.00 local";
+	return mixed ? "$0.00 free (mixed)" : "$0.00 free";
 }
 
 function renderUsdParts(
 	known: number,
-	parts: { estimated: boolean; unpriced: boolean; free: boolean; freeRule?: FreeRule | undefined },
+	parts: {
+		estimated: boolean;
+		unpriced: boolean;
+		free: boolean;
+		freeRule?: FreeRule | undefined;
+		freeRuleMixed?: boolean | undefined;
+	},
 ): string {
-	if (parts.free && !parts.unpriced && !parts.estimated) return renderFreeUsd(parts.freeRule);
+	if (parts.free && !parts.unpriced && !parts.estimated) return renderFreeUsd(parts.freeRule, parts.freeRuleMixed);
 	if (parts.unpriced) return known > 0 ? `${parts.estimated ? "~" : ""}${renderUsd(known)} +?` : COST_NOT_MEASURED;
 	if (parts.estimated) return `~${renderUsd(known)} est`;
 	return renderUsd(known);
@@ -203,10 +211,10 @@ export function renderCompactCount(fact: Fact<number> | FactSum): string {
 }
 
 /**
- * A folded USD sum; `free` is true when every priced call was a free target's measured zero, and `freeRule` is the
- * rule they all agree on.
+ * A folded USD sum; `free` is true when every priced call was a free target's measured zero, `freeRule` is the rule
+ * they all agree on, and `freeRuleMixed` is true only when two or more different recorded rules appeared.
  */
-export function renderUsdSum(sum: FactSum, free: boolean, freeRule?: FreeRule): string {
+export function renderUsdSum(sum: FactSum, free: boolean, freeRule?: FreeRule, freeRuleMixed?: boolean): string {
 	if (allAbsent(sum)) return renderAbsent("not-applicable");
 	if (contributions(sum) === 0) return COST_NOT_MEASURED;
 	return renderUsdParts(sum.measured + sum.estimated, {
@@ -214,6 +222,7 @@ export function renderUsdSum(sum: FactSum, free: boolean, freeRule?: FreeRule): 
 		unpriced: sum.unknownCount > 0,
 		free,
 		freeRule,
+		freeRuleMixed,
 	});
 }
 
@@ -318,7 +327,7 @@ export function renderPricedBy(pricing: Pick<Pricing, "pricedBy" | "freeRule">):
 
 /** Several priced amounts folded; `+?` and `~` mark the unpriced and estimated parts as on any sum. */
 export function renderPricingSum(sum: PricingSum): string {
-	return renderUsdSum(sum.usd, sum.free, sum.freeRule);
+	return renderUsdSum(sum.usd, sum.free, sum.freeRule, sum.freeRuleMixed);
 }
 
 export function renderTextFact(fact: Fact<string | boolean | null>): string {

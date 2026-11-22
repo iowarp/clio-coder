@@ -36,9 +36,10 @@ import type { EventPayload, JournalEventName } from "../../core/telemetry/events
 import type { Fact, FactSum, UnknownReason } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
-	agreedFreeRule,
 	type FreeRule,
+	type FreeRuleAgreement,
 	freeClaim,
+	freeRuleAgreement,
 	type Pricing,
 	type PricingSum,
 	sumFactSums,
@@ -1633,20 +1634,32 @@ function allFree(parts: readonly Part[]): boolean {
 	return any;
 }
 
-/** The free rule every priced contribution of the parts states, which a free cost's wording names. */
-function partsFreeRule(parts: readonly Part[]): FreeRule | undefined {
+/** The free-rule agreement across every priced contribution of the parts, which a free cost's wording names. */
+function partsFreeRule(parts: readonly Part[]): FreeRuleAgreement {
 	const pricings: Array<Pick<Pricing, "pricedBy" | "freeRule">> = [];
 	const add = (attempts: readonly Attempt[]) => {
 		for (const attempt of attempts) if (invoked(attempt) && attempt.settled) pricings.push(attempt.settled.pricing);
 	};
 	for (const part of parts) {
 		if (part.run) {
-			if (part.run.fold.source === "aggregate" && part.run.fold.aggregate) pricings.push(part.run.fold.aggregate.pricing);
-			add(part.run.attempts);
+			if (part.run.fold.source === "aggregate") {
+				const pricing = part.run.fold.aggregate?.pricing ?? part.run.settled?.data.pricing;
+				if (pricing) pricings.push(pricing);
+			} else if (part.run.fold.source === "parts") {
+				const latestByPart = new Map<string, TelemetryRecord<"run.usage_reported">["data"]>();
+				for (const record of part.run.source.records) {
+					if (record.k !== "run.usage_reported" || record.data.partId === undefined) continue;
+					const prior = latestByPart.get(record.data.partId);
+					if (!prior || record.data.revision >= prior.revision) latestByPart.set(record.data.partId, record.data);
+				}
+				for (const entry of latestByPart.values()) pricings.push(entry.pricing);
+			} else {
+				add(part.run.attempts);
+			}
 		}
 		add(part.attempts ?? []);
 	}
-	return agreedFreeRule(pricings);
+	return freeRuleAgreement(pricings);
 }
 
 function display(
@@ -1655,13 +1668,14 @@ function display(
 	free: boolean,
 	pricedBy = "none",
 	freeRule?: FreeRule,
+	freeRuleMixed?: boolean,
 ): string {
 	const family = FAMILY[metric];
 	if ("kind" in fact) {
 		if (family === "usd") return renderUsdFact(fact, pricedBy, freeRule);
 		return renderFact(fact, family === "duration" ? "duration" : family === "percent" ? "percent" : "count");
 	}
-	if (family === "usd") return renderUsdSum(fact, free, freeRule);
+	if (family === "usd") return renderUsdSum(fact, free, freeRule, freeRuleMixed);
 	if (family === "duration") return renderDurationSum(fact);
 	if (family === "percent") return renderShareSum(fact);
 	return renderCountSum(fact);
@@ -1851,8 +1865,15 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 	const sums = selection.parts.map((part) => partSum(part, ref.metric));
 	const fact = sums.length === 1 && sums[0] ? sums[0] : sumFactSums(sums);
 	const free = allFree(selection.parts);
-	const freeRule = free ? partsFreeRule(selection.parts) : undefined;
-	return { quantity: { fact, display: display(ref.metric, fact, free, "none", freeRule), ref: encoded }, selection };
+	const agreement = free ? partsFreeRule(selection.parts) : undefined;
+	return {
+		quantity: {
+			fact,
+			display: display(ref.metric, fact, free, "none", agreement?.rule, agreement?.mixed),
+			ref: encoded,
+		},
+		selection,
+	};
 }
 
 /**
@@ -1887,6 +1908,8 @@ export interface TurnsSum {
 	free: boolean;
 	/** The free rule every one of those calls states, when they agree. */
 	freeRule?: FreeRule;
+	/** True only when two or more different recorded free rules appeared among the turns. */
+	freeRuleMixed?: boolean;
 }
 
 /**
@@ -1905,8 +1928,12 @@ export function turnsSum(source: SessionSource, turnIds: readonly string[], metr
 	for (const run of analysis.runs.values()) if (keys.has(run.turnId ?? "-")) parts.push({ run, gap: runGap(run) });
 	const fact = withGap(sumFactSums(parts.map((part) => partSum(part, metric))), keys.size > 0 ? analysis.gap : 0);
 	const free = allFree(parts);
-	const freeRule = free ? partsFreeRule(parts) : undefined;
-	return { fact, display: display(metric, fact, free, "none", freeRule), ...freeClaim(free, freeRule) };
+	const agreement = free ? partsFreeRule(parts) : undefined;
+	return {
+		fact,
+		display: display(metric, fact, free, "none", agreement?.rule, agreement?.mixed),
+		...freeClaim(free, agreement),
+	};
 }
 
 /**
@@ -1934,8 +1961,12 @@ export function attemptsTotal(source: SessionSource, attemptIds: readonly string
 	const fact = withGap(attemptsSum(attempts, metric), missing + runsGap + (wanted.size > 0 ? analysis.gap : 0));
 	const part: Part = { attempts, gap: 0 };
 	const free = allFree([part]);
-	const freeRule = free ? partsFreeRule([part]) : undefined;
-	return { fact, display: display(metric, fact, free, "none", freeRule), ...freeClaim(free, freeRule) };
+	const agreement = free ? partsFreeRule([part]) : undefined;
+	return {
+		fact,
+		display: display(metric, fact, free, "none", agreement?.rule, agreement?.mixed),
+		...freeClaim(free, agreement),
+	};
 }
 
 function quantity(view: View, ref: ParsedFactRef): Quantity {
@@ -2485,9 +2516,32 @@ export function runsTotal(sums: readonly FactSum[]): RunsTotal {
  */
 export function runsCost(pricings: readonly PricingSum[]): { fact: FactSum; display: string } {
 	const free = pricings.length > 0 && pricings.every((pricing) => pricing.free);
-	const rules = new Set(pricings.map((pricing) => pricing.freeRule));
-	const freeRule = rules.size === 1 ? [...rules][0] : undefined;
-	const sum: PricingSum = { usd: sumFactSums(pricings.map((pricing) => pricing.usd)), ...freeClaim(free, freeRule) };
+	let seen: FreeRule | undefined;
+	let sawMissing = false;
+	let sawDifferent = false;
+	if (free) {
+		for (const pricing of pricings) {
+			if (pricing.freeRuleMixed) {
+				sawDifferent = true;
+				continue;
+			}
+			if (pricing.freeRule === undefined) {
+				sawMissing = true;
+				continue;
+			}
+			if (seen !== undefined && seen !== pricing.freeRule) {
+				sawDifferent = true;
+				continue;
+			}
+			seen = pricing.freeRule;
+		}
+	}
+	const agreement: FreeRuleAgreement = sawDifferent
+		? { mixed: true }
+		: !sawMissing && seen !== undefined
+			? { rule: seen, mixed: false }
+			: { mixed: false };
+	const sum: PricingSum = { usd: sumFactSums(pricings.map((pricing) => pricing.usd)), ...freeClaim(free, agreement) };
 	return { fact: sum.usd, display: renderPricingSum(sum) };
 }
 
@@ -4638,13 +4692,15 @@ export function sessionOperatorMetrics(source: SessionSource) {
 
 /** Fleet totals over run DTOs, preserving unknown contributions from unreadable runs (#434). */
 export function fleetTotals(runs: readonly RunTelemetryV1[]) {
+	const free = runs.length > 0 && runs.every((run) => run.settled?.pricing.pricedBy === "free");
+	const agreement = free ? freeRuleAgreement(runs.map((run) => run.settled?.pricing)) : undefined;
 	const sum = (facts: Array<Fact<number> | FactSum>, unit: "count" | "usd" | "duration") => {
 		const fact = sumFactSums(facts.map((fact) => ("kind" in fact ? foldFacts([fact]) : fact)));
 		return {
 			fact,
 			display:
 				unit === "usd"
-					? renderUsdSum(fact, runs.length > 0 && runs.every((run) => run.settled?.pricing.pricedBy === "free"))
+					? renderUsdSum(fact, free, agreement?.rule, agreement?.mixed)
 					: unit === "duration"
 						? renderDurationSum(fact)
 						: renderCountSum(fact),

@@ -134,7 +134,7 @@ function costNote(total: CostReportV1["total"]): string {
 		return usd.unknown > 0 ? "No call in this window was priced" : "No priced calls recorded in this window";
 	if (usd.unknown > 0) return "Known subtotal; some calls are unpriced";
 	if (usd.estimated > 0) return "Includes estimated prices";
-	// Which free rule applied (local, declared or zero-rates) is in the amount's own display, shown beside this.
+	// Which free rule applied (local, declared, zero-rates or mixed) is in the amount's own display, shown beside this.
 	return free > 0 && Object.values(priced).every((count) => count === 0) ? "Recorded as free" : "Recorded prices";
 }
 
