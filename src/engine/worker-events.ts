@@ -182,7 +182,7 @@ export interface ClioHelperResultRejectedEvent {
  * its request goes out. Only this loop can count them; run.settled records the last one it reported.
  */
 export interface ClioResultContractRepairEvent {
-	type: "clio_coder_result_contract_repair";
+	type: "clio_coder_repair_rounds_started";
 	payload: { started: number };
 }
 

@@ -9390,7 +9390,7 @@ export function createDispatchBundle(
 				const reported = (event.payload as { set?: unknown } | undefined)?.set;
 				if (isFlowRestrictionSet(reported)) trustedFlow = mergeFlowRestrictions(trustedFlow, reported);
 			}
-			if (event.type === "clio_coder_result_contract_repair" && lifecycle.runtimeKind === "http") {
+			if (event.type === "clio_coder_repair_rounds_started" && lifecycle.runtimeKind === "http") {
 				const started = (event.payload as { started?: unknown } | undefined)?.started;
 				if (typeof started === "number" && Number.isSafeInteger(started) && started >= 0)
 					reportedRepairRounds = Math.max(reportedRepairRounds ?? 0, started);
