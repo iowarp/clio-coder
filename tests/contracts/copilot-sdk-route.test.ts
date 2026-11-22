@@ -732,6 +732,46 @@ test("the default tier's billed prompt budget bounds the window when the limits 
 	}
 });
 
+test("the listing's full billing reaches the seam as stated, with the time it was read", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	const billing = {
+		multiplier: 0.5,
+		discountPercent: 10,
+		promo: { id: "spring", discountPercent: 12.5, message: "Spring pricing" },
+		tokenPrices: {
+			inputPrice: 300,
+			outputPrice: 1_500,
+			cacheReadPrice: 30,
+			cacheWrite1hPrice: 600,
+			batchSize: 1_000_000,
+			maxPromptTokens: 200_000,
+			longContext: { inputPrice: 600, outputPrice: 2_250, maxPromptTokens: 1_000_000 },
+		},
+	};
+	models.push({ ...original[0], id: "billed", billing });
+	const before = Date.now();
+	try {
+		const rows = await listCopilotSdkModels();
+		const row = rows.find((entry) => entry.id === "billed");
+		deepStrictEqual(row?.billing, billing);
+		const readAt = Date.parse(row?.listingReadAt ?? "");
+		ok(readAt >= before && readAt <= Date.now(), "the read time is when this listing was read");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		const cached = (await listCopilotSdkModels()).find((entry) => entry.id === "billed");
+		strictEqual(cached?.listingReadAt, row?.listingReadAt, "a cache hit keeps the time its listing was fetched");
+		models[models.findIndex((entry) => entry.id === "billed")] = { ...original[0], id: "billed", billing };
+		const refetched = (await listCopilotSdkModels()).find((entry) => entry.id === "billed");
+		ok(Date.parse(refetched?.listingReadAt ?? "") > readAt, "a refetched listing carries its own read time");
+		ok(
+			!("billing" in (rows.find((entry) => entry.id === "fake-model") ?? {})),
+			"a model listed without billing has none",
+		);
+	} finally {
+		models.splice(0, models.length, ...original);
+	}
+});
+
 test("a later process reads each context tier's window from the cached listing, whichever tier wrote it", async () => {
 	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
 	const original = [...models];
