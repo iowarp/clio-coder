@@ -153,7 +153,14 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 		const settings = await plantObject("config", {
 			providers: { local: { password: PASSWORD } },
 			workspace: PRIVATE_PATH,
-			targets: [{ id: "local", lmstudio: { models: { [CONFIG_KEY]: { load: { contextLength: 4096 } } } } }],
+			funding: { team: { scheme: "declared", payer: "employer", fee: { amount: 1234.5678, currency: "USD" } } },
+			targets: [
+				{
+					id: "local",
+					funding: { pool: "team" },
+					lmstudio: { models: { [CONFIG_KEY]: { load: { contextLength: 4096 } } } },
+				},
+			],
 		});
 		const toolSchemas = await plantObject("tool-schemas", [
 			{
@@ -291,6 +298,11 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			"confidential-operator",
 		])
 			ok(!structuralBytes.includes(leak), `${leak} left in the structural archive`);
+		// Funding pools and each target's binding are private funding metadata under every profile (S10).
+		const reportPath = join(root, "report.tar.gz");
+		await writeShare(planShare({ scopes, skipped, profile: "report", source: freshShareSource(), writer }), reportPath);
+		for (const shared of [structuralBytes, gunzipSync(await readFile(reportPath)).toString("utf8")])
+			ok(!shared.includes("1234.5678") && !shared.includes('"funding"'), "funding left in a share");
 		strictEqual(verifyShareArchive(structuralArchive).failure, null);
 		await importShareArchive(join(root, "structural-maintainer"), structuralArchive);
 

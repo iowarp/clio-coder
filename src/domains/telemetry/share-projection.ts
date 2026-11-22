@@ -848,6 +848,24 @@ function mapStrings(value: unknown, map: (text: string) => string): unknown {
 }
 
 /** Like {@link mapStrings}, and an object's keys are mapped too unless `fixedKey` names them. */
+/**
+ * A settings document without its funding: the pools (scheme, payer, fee, grant, local tariff) and each target's
+ * pool binding are private funding metadata, so no share carries them under any profile.
+ */
+function withoutFunding(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const { funding: _funding, ...rest } = value as Record<string, unknown>;
+	if (!Array.isArray(rest.targets)) return rest;
+	return {
+		...rest,
+		targets: rest.targets.map((target: unknown) => {
+			if (target === null || typeof target !== "object" || Array.isArray(target)) return target;
+			const { funding: _binding, ...kept } = target as Record<string, unknown>;
+			return kept;
+		}),
+	};
+}
+
 function mapStringsAndKeys(value: unknown, map: (text: string) => string, fixedKey: (key: string) => boolean): unknown {
 	if (typeof value === "string") return map(value);
 	if (Array.isArray(value)) return value.map((item) => mapStringsAndKeys(item, map, fixedKey));
@@ -1083,7 +1101,8 @@ function projectField(
 			carriesPath(text) || !PLAIN_MODEL_ID.test(text) ? anonymize("model", text) : readable("model", text),
 		);
 	if (projection === "json-schema") return projectJsonSchema(value, anonymize);
-	if (projection === "settings") return mapStringsAndKeys(value, (text) => anonymize("config", text), isSettingsField);
+	if (projection === "settings")
+		return mapStringsAndKeys(withoutFunding(value), (text) => anonymize("config", text), isSettingsField);
 	if (projection === "settings-path") return mapStrings(value, (text) => projectSettingsPath(text, anonymize));
 	if (projection === "id") return mapStrings(value, (text) => (MINTED_ID.test(text) ? text : anonymize("id", text)));
 	if (projection === "token")
