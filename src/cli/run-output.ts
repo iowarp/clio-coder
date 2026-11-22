@@ -230,7 +230,11 @@ export function dispatchAnswerText(streamedAnswer: string, receipt: RunResult): 
 	return redactUrlCredentials(cutOff ? holdCutOffText(whole) : whole);
 }
 
-export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
+export function formatDispatchHumanOutput(
+	streamedAnswer: string,
+	receipt: RunResult,
+	notRetried?: string | null,
+): string {
 	const answer = dispatchAnswerText(streamedAnswer, receipt);
 	const limitations = sealedResultLimitations(receipt);
 	const verifier = verifierVerdict(receipt);
@@ -242,6 +246,8 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	// A person reading the run learns what went wrong in words before the machine line repeats the record's own detail.
 	const headline = receipt.exitCode !== 0 ? workerFailureHeadline(receipt.failureMessage) : null;
 	const failed = headline === null ? "" : `\nFailed: ${headline}\n`;
+	// Why the host ran no further attempt, which the sealed receipt cannot say: the decision follows its seal (row 371).
+	const notRetriedLine = notRetried ? `Not retried: ${limitationLine(notRetried)}\n` : "";
 	// A run that finished with a refused call or a wrong-format answer says so in the words its worker card and board
 	// row use, so a script reading exit 0 and a person reading the card are told the same thing.
 	// A run that called no tools is only a hint on the card, and an answer-only worker legitimately calls none, so the
@@ -250,7 +256,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const caveat = found?.kind === "no-tools" ? null : found;
 	const finishedWith = caveat === null ? "" : `\nFinished with a caveat: ${caveat.words}\n`;
 	return redactUrlCredentials(
-		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length, verifier, executed.length)}\n`,
+		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${notRetriedLine}${finishedWith}${formatResultLine(receipt, limitations.length, verifier, executed.length)}\n`,
 	);
 }
 
@@ -262,21 +268,39 @@ function refusedExecuteCalls(receipt: RunResult): SafetyBlockedAttempt[] {
 	);
 }
 
+/** The completion vocabulary's word for each `limitation` tool reason a worker recorded. */
+const RECORDED_LIMITATION_WHY: Readonly<Record<string, string>> = {
+	"no-runner": "tool_unavailable",
+	blocked: "blocked_by_policy",
+	"out-of-scope": "out_of_scope",
+	environment: "tool_unavailable",
+	"write-root": "missing_access",
+	other: "other",
+};
+
 /**
  * `run --agent`'s completion in the shape a main run's takes (CLI-P58), read only from the sealed receipt, never from
  * its prose. A worker declares through its sealed final answer: exit 0 claims `done`, any other exit `not_done`. A
  * `done` is assessed `partly_done` when a check failed (a failed result-contract quality or a rejected host
  * verification) or when an execute call was refused and nothing verified the run, which is how a refused run of the
- * operator's named check reads. `unverified` holds the checks the sealed report names as not run.
+ * operator's named check reads. `unverified` holds the checks the sealed report names as not run. `limitations` also
+ * holds each limitation the worker recorded through its tool, which its report can leave out (row 371).
  */
 export function agentRunCompletion(receipt: RunResult): RunCompletionV2 {
 	const refused = refusedExecuteCalls(receipt);
-	const limitations = refused.map((attempt) => {
-		const why =
-			attempt.reason ?? (attempt.permissionRequired === true ? "needed an approval this run could not give" : undefined);
-		const what = `${attempt.tool} call refused${why !== undefined ? `: ${why}` : ""}`;
-		return { what: limitationLine(redactUrlCredentials(what)), why: "blocked_by_policy" };
-	});
+	const limitations = [
+		...refused.map((attempt) => {
+			const why =
+				attempt.reason ?? (attempt.permissionRequired === true ? "needed an approval this run could not give" : undefined);
+			const what = `${attempt.tool} call refused${why !== undefined ? `: ${why}` : ""}`;
+			return { what: limitationLine(redactUrlCredentials(what)), why: "blocked_by_policy" };
+		}),
+		// A limitation the worker recorded is its declaration whether or not its report repeated it (row 371).
+		...(receipt.recordedLimitations ?? []).map((item) => ({
+			what: limitationLine(redactUrlCredentials(item.scope)),
+			why: RECORDED_LIMITATION_WHY[item.reason] ?? "other",
+		})),
+	];
 	const unverified = sealedResultLimitations(receipt).map((item) => limitationLine(redactUrlCredentials(item)));
 	if (receipt.output?.state !== "final")
 		return { declared: false, claimed: null, assessed: "unknown", state: "unknown", limitations, unverified };

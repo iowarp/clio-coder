@@ -393,6 +393,12 @@ export interface SafetyPolicyEngineOptions {
 	 */
 	writeRootsOsConfined?: boolean;
 	/**
+	 * True when every command this worker spawns runs in an OS sandbox that confines its writes to the worker's own
+	 * roots (`workerSandboxConfinesWrites()`). Bash's hidden-content ask (variables, scripts, interpreter source) then
+	 * yields to that sandbox, as main bash's does at default (row 371); every other rail and the floor still apply.
+	 */
+	workerSandboxConfinesWrites?: boolean;
+	/**
 	 * Extra trees read-class tools may read outside the workspace, judged by
 	 * real path like the built-in exempt roots. A sandboxed worker passes its
 	 * sandbox's readable roots, which its own shell can already read.
@@ -825,6 +831,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const writeRootsOsConfined = options.writeRootsOsConfined === true;
+	const workerSandboxContained = options.workerSandboxConfinesWrites === true;
 	// The cwd repository's git control paths (the shell sandbox's read-only
 	// set, the core.hooksPath directories included) are resolved when the
 	// engine is built and again only after a call that may have rewritten a
@@ -1568,6 +1575,31 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	 * whose discards or deletes only the snapshot taken before it undoes says
 	 * so, and the registry refuses it when that snapshot cannot be taken.
 	 */
+	/**
+	 * A command whose text hides what it touches, run where this worker's OS sandbox confines its writes, takes the
+	 * verdict main bash's sandbox gives it at default (row 371): it passed every other rail, so autonomy admits it as
+	 * contained. Any other unrecognized command still meets the worker's permission routing.
+	 */
+	const workerContainedHiddenContent = (
+		bash: ReturnType<typeof evaluateBashPolicy>,
+		command: string | null,
+		posture: string | undefined,
+	): ReturnType<typeof evaluateBashPolicy> => {
+		if (!workerSandboxContained || command === null || posture === CONFIRMED_POSTURE) return bash;
+		if (bash.kind !== "allow" || bash.execRecognition !== "unrecognized" || !hidesShellContent(command, posture))
+			return bash;
+		return {
+			...bash,
+			ruleId: WORKER_SANDBOX_CONTAINED_RULE_ID,
+			reasonCode: WORKER_SANDBOX_CONTAINED_RULE_ID,
+			reasons: [
+				"its variables, script or interpreter source hide which paths it touches, and this worker's OS sandbox confines its writes to the worker's own roots, as main bash's sandbox does at default",
+				...bash.reasons,
+			],
+			execRecognition: "recognized",
+		};
+	};
+
 	const settleDefault = (
 		decision: SafetyPolicyDecision,
 		base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
@@ -2011,12 +2043,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					notes: [],
 				},
 				resort?.contained === true,
+				workerSandboxContained && call.projection !== "mcp-server",
 			);
 			// A typed verifier still runs through the same command safety scan.
 			// Unrecognized checks are left to the autonomy mapping: default asks,
 			// while yolo admits them headlessly.
 			if (bash.kind === "block") return gateDecision("block", base, bash);
-			const scanned = call.projection === "mcp-server" ? mcpExecutePolicy(bash) : bash;
+			const scanned =
+				call.projection === "mcp-server" ? mcpExecutePolicy(bash) : workerContainedHiddenContent(bash, command, posture);
 			if (scanned.kind === "ask") return settle(gateDecision("ask", base, scanned));
 			return settle(allowDecision(base, scanned));
 		}
@@ -3587,6 +3621,16 @@ function operatorAuthorityTargets(
 	});
 }
 
+/** Shell variables, an unparsed shell script or interpreter source: what the net cannot see a command touch. */
+function hidesShellContent(command: string, posture: string | undefined): boolean {
+	return (
+		hasUnparsedShellScript(command) ||
+		(posture !== "yolo" &&
+			(/\$(?:[A-Za-z_{0-9@*#?!-])/.test(maskPrintedExitStatus(command)) ||
+				/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command)))
+	);
+}
+
 /**
  * Bash net evaluation (sd-01 §2.2). Net blocks: empty commands and cwd
  * escapes. Net confirms: project policy `requireConfirmation` and command
@@ -3607,6 +3651,8 @@ function evaluateBashPolicy(
 	policy: LoadedProjectSafetyPolicy,
 	readScope: ReadScopeInputs,
 	contained: boolean,
+	/** A write-confined worker sandbox: only the hidden-content ask yields to it (row 371). */
+	hiddenContentContained = false,
 ): Omit<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"> {
 	// Catalog commands execute as argv, never as shell source. Only bare words
 	// have an unambiguous representation in the canonical command matcher.
@@ -3637,10 +3683,8 @@ function evaluateBashPolicy(
 		typeof input === "string" &&
 		posture !== "confirmed" &&
 		!contained &&
-		(hasUnparsedShellScript(command) ||
-			(posture !== "yolo" &&
-				(/\$(?:[A-Za-z_{0-9@*#?!-])/.test(maskPrintedExitStatus(command)) ||
-					/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command))))
+		!hiddenContentContained &&
+		hidesShellContent(command, posture)
 	) {
 		return {
 			kind: "ask",
@@ -3925,6 +3969,9 @@ function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecog
 		execRecognition: "recognized",
 	};
 }
+
+/** Rule id of a hidden-content bash command admitted inside a write-confined worker sandbox (row 371). */
+const WORKER_SANDBOX_CONTAINED_RULE_ID = "worker-sandbox-contained";
 
 /** Rule id of an execute-class MCP tool call, whose admission the autonomy level decides. */
 export const MCP_EXECUTE_RULE_ID = "mcp-execute";

@@ -423,6 +423,12 @@ export interface RunResultEnvelopeV2 {
 	outcomeDetail?: RunCauseCode;
 	causes: RunCause[];
 	/**
+	 * `--agent` only: why the failed run's assignment ran no further attempt, such as a retry suppressed or a route
+	 * explicitly pinned (row 371). The sealed receipt cannot say it, since that decision follows its seal; absent when the
+	 * run succeeded.
+	 */
+	notRetried?: string;
+	/**
 	 * Fleet design 4.3: how the main agent declared the run ended through its `finish` tool, never read from the
 	 * answer text. `declared: false` with state `unknown` when it declared nothing. `run --exit-code` maps a declared
 	 * `partly_done` or `not_done` on an exit-0 run to 1. Present once a main run settles. A `run --agent` run carries

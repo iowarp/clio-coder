@@ -672,6 +672,7 @@ import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from
 import {
 	createWriteRootPark,
 	evaluateWriteRootGrant,
+	recordedLimitationsFromEntries,
 	resolveWriteRootRequest,
 	WRITE_ROOTS_GRANT_TOOL,
 	type WriteRootContinuation,
@@ -5406,7 +5407,7 @@ export function createDispatchBundle(
 				// A failed write is reported, never swapped for the worker's real
 				// outcome, and never left holding the capacity slot (#428).
 				try {
-					await settleStoredAssignment(assignmentId, receipt.runId, status);
+					await settleStoredAssignment(assignmentId, receipt.runId, status, undefined, outcomeDetail);
 				} catch (error) {
 					reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error);
 				}
@@ -11041,6 +11042,9 @@ export function createDispatchBundle(
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
 				receiptDraft.verdict = runVerdict;
+				// What the run's limitation calls recorded, which its own report can leave out (row 371).
+				const recordedLimitationCalls = recordedLimitationsFromEntries(finishContractEntries);
+				if (recordedLimitationCalls.length > 0) receiptDraft.recordedLimitations = recordedLimitationCalls;
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));

@@ -325,6 +325,8 @@ export interface RunJsonResultFrame {
 	verdict?: string;
 	/** The verifier's checks that ran and failed, as `name: evidence`. */
 	failedChecks?: string[];
+	/** Why a failed run's assignment ran no further attempt (a suppressed or pinned retry); absent for a run that succeeded. */
+	notRetried?: string;
 }
 
 // ---------------------------------------------------------------------------

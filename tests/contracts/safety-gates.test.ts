@@ -834,6 +834,41 @@ describe("safety gate boundary", () => {
 		}
 	});
 
+	it("a worker's interpreter readback runs inside its write-confined sandbox as main bash's contained call does; without that sandbox it asks (row 371)", async () => {
+		const readback = {
+			tool: ToolNames.Bash,
+			args: {
+				command: `python3 -B -c 'from pathlib import Path; assert Path("a.txt").read_bytes() == b"aaaa"'`,
+				cwd: scratch,
+			},
+		};
+		const plain = { tool: ToolNames.Bash, args: { command: "python3 analysis.py", cwd: scratch } };
+		for (const confined of [false, true]) {
+			const safety = createWorkerSafety({ cwd: scratch, ...(confined ? { sandboxConfinesWrites: true } : {}) });
+			const registry = createRegistry({ safety, autonomy: () => "default" });
+			let executed = 0;
+			registry.register({
+				...bashTool,
+				async run() {
+					executed++;
+					return { kind: "ok", output: "admitted" };
+				},
+			});
+			registry.onPermissionRequired((_call, _decision, meta) => {
+				registry.cancelParkedCall(meta.requestId, "workers run non-interactively");
+			});
+			strictEqual((await registry.invoke(readback)).kind, confined ? "ok" : "blocked");
+			if (!confined) strictEqual(safety.evaluate(readback).policy?.ruleId, "bash-hidden-content");
+			// Only the hidden-content ask yields: other unrecognized commands, rails and the floor stand.
+			strictEqual((await registry.invoke(plain)).kind, "blocked");
+			const escaped = safety.evaluate({ ...readback, args: { ...readback.args, cwd: tmpdir() } });
+			strictEqual(escaped.kind, confined ? "block" : "ask");
+			if (confined) strictEqual(escaped.policy?.ruleId, "bash-cwd-escape");
+			strictEqual(safety.evaluate({ tool: ToolNames.Bash, args: { command: "git reset --hard" } }).kind, "block");
+			strictEqual(executed, confined ? 1 : 0);
+		}
+	});
+
 	it("blocks project and user skill writes and redirects in worker and orchestrator admissions", () => {
 		const main = engine();
 		const worker = createWorkerSafety({ cwd: scratch });

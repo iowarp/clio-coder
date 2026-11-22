@@ -64,7 +64,7 @@ import {
 	responseSchemaDialectFor,
 	runtimeSpeaksResponseSchemaDialect,
 } from "../core/response-schema.js";
-import { workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
+import { workerSandboxConfinesWrites, workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../core/tool-names.js";
@@ -903,6 +903,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// The host decided once whether the run's commands are bound to its roots: an OS sandbox, or its own
 		// worktree whose merge-back takes only the roots (fleet M7). The worker does not probe it again.
 		...(input.writeRoots !== undefined && input.writeRootsCommandsBounded === true ? { writeRootsOsConfined: true } : {}),
+		// Its bash meets main bash's contained verdict for hidden content inside that sandbox (row 371).
+		...(workerSandboxConfinesWrites() ? { sandboxConfinesWrites: true } : {}),
 		readExemptRoots: workerSandboxReadableRoots(),
 		...(input.protectedArtifactState !== undefined
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }

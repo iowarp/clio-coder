@@ -14,6 +14,7 @@ import { setRunDeadline } from "../core/termination-phase.js";
 import { clioDataDir } from "../core/xdg.js";
 import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import type { isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
+import { assignmentNotRetried } from "../domains/dispatch/assignment.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunResult } from "../domains/dispatch/types.js";
@@ -1142,6 +1143,9 @@ async function runDispatch(
 			cleanupSteer = undefined;
 		}
 		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
+		// A failed run says why its assignment ran no further attempt; settlement lands with the durable writes (row 371).
+		if (receipt.exitCode !== 0) await dispatch.assignments?.flushWrites?.();
+		const notRetried = assignmentNotRetried(dispatch.assignments?.get(receipt.runId), receipt);
 		// SPEC 6.8 (review H02): the host validates the sealed receipt's final answer once. A worker that already failed
 		// keeps its own cause; a mismatch is exit 1 schema_mismatch and the receipt stays the one attempt.
 		const schemaCheck = options.outputSchema;
@@ -1170,6 +1174,7 @@ async function runDispatch(
 				type: "result",
 				result: receipt,
 				...(verifier !== null ? { verdict: verifier.verdict, failedChecks: verifier.failedChecks } : {}),
+				...(notRetried !== null ? { notRetried: redactUrlCredentials(notRetried) } : {}),
 				...(recording !== undefined ? { recording } : {}),
 			}))
 				writeAgentFrame(frame);
@@ -1179,7 +1184,7 @@ async function runDispatch(
 			if (structuredVerdict?.ok === true) process.stdout.write(`${structuredVerdict.json}\n`);
 			else if (schemaCheck !== undefined && structuredVerdict !== null && !structuredVerdict.ok)
 				process.stderr.write(`${schemaCheck.finish.schemaMismatchMessage(structuredVerdict.errors)}\n`);
-			else process.stdout.write(formatDispatchHumanOutput(answer, receipt));
+			else process.stdout.write(formatDispatchHumanOutput(answer, receipt, notRetried));
 			if (recording)
 				process.stderr.write(`Recording manifest (relative to CLIO Coder state): ${recording.manifestPath}\n`);
 		}

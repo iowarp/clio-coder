@@ -950,7 +950,7 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 		let code: number;
 		try {
 			code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
-				writeFrame({ type: "result", result: receipt } as never);
+				writeFrame({ type: "result", result: receipt, notRetried: "the host did not retry this failed run" } as never);
 				noteAgentRunCompletion(agentRunCompletion(receipt));
 				return exit;
 			});
@@ -961,11 +961,14 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 		const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}") as {
 			exitCode?: number;
 			outcome?: string;
+			notRetried?: string;
 			causes?: Array<{ code?: string; exitCode?: number; message?: string }>;
 			dispatch?: { runs?: Array<{ outcome?: string; outcomeCode?: string; exitCode?: number; outcomeDetail?: string }> };
 		};
 		strictEqual(end.exitCode, 1);
 		strictEqual(end.outcome, "failed");
+		// Row 371: why the assignment ran no further attempt rides run_end.
+		strictEqual(end.notRetried, "the host did not retry this failed run");
 		strictEqual(end.causes?.[0]?.code, "worker_failed");
 		match(end.causes?.[0]?.message ?? "", cause);
 		strictEqual(end.dispatch?.runs?.[0]?.outcome, "failed");
@@ -973,4 +976,22 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 		strictEqual(end.dispatch?.runs?.[0]?.exitCode, 1);
 		match(end.dispatch?.runs?.[0]?.outcomeDetail ?? "", cause);
 	}
+	// Row 371: a limitation the worker recorded through its tool reaches completion.limitations, though its report's
+	// own completion listed none.
+	const limitedRoot = join(env.dir, "limited");
+	mkdirSync(limitedRoot, { recursive: true });
+	const limitation = { scope: "test/b.test.js only covers one case", reason: "environment" };
+	const { receipt: limited } = await settleStubBuilder({
+		cwd: limitedRoot,
+		report: { mutatedPaths: [], validations: [], completion: { state: "done", limitations: [], unverified: [] } },
+		events: [
+			{ type: "tool_execution_start", toolCallId: "lim-1", toolName: "limitation", args: limitation },
+			{ type: "tool_execution_end", toolCallId: "lim-1", toolName: "limitation", isError: false, result: {} },
+			{ type: "clio_coder_tool_finish", payload: { tool: "limitation", outcome: "ok", durationMs: 1 } },
+		],
+	});
+	deepStrictEqual(limited.recordedLimitations, [limitation]);
+	deepStrictEqual(agentRunCompletion(limited).limitations, [
+		{ what: "test/b.test.js only covers one case", why: "tool_unavailable" },
+	]);
 });

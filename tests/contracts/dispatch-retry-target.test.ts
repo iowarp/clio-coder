@@ -252,6 +252,9 @@ describe("retry target selection", () => {
 				pinned?.outcomeDetail,
 				"obligation observed-evidence unmet, not retried because the route is explicitly pinned to default/gpt-4o",
 			);
+			// Row 371: the cause outlives the process on the sealed assignment record.
+			await fleet.bundle.contract.assignments?.flushWrites?.();
+			strictEqual(fleet.bundle.contract.assignments?.getStored(pinned?.id ?? "")?.outcomeDetail, pinned?.outcomeDetail);
 			const automatic = await settle({});
 			deepStrictEqual(fleet.spawned, ["default", "default"], "one attempt, no second spawn");
 			strictEqual(automatic?.status, "failed");

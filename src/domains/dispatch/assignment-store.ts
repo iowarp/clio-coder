@@ -65,6 +65,11 @@ export interface DurableAssignmentRecord {
 	verdictOwner?: AssignmentVerdictOwner;
 	/** Process lease held only while this record is running. */
 	processOwner?: AssignmentProcessOwner;
+	/**
+	 * Why the assignment settled on its terminal attempt with no further attempt (a suppressed or pinned retry), which
+	 * the terminal receipt cannot say: that decision follows its seal. Absent when settlement named no cause.
+	 */
+	outcomeDetail?: string;
 }
 
 interface AssignmentStoreFile {
@@ -98,6 +103,7 @@ function validRecord(value: unknown): value is DurableAssignmentRecord {
 		(record.terminalRunId === null || typeof record.terminalRunId === "string") &&
 		(record.verdictOwner === undefined || record.verdictOwner === "fleet") &&
 		(record.processOwner === undefined || validProcessOwner(record.processOwner)) &&
+		(record.outcomeDetail === undefined || typeof record.outcomeDetail === "string") &&
 		(record.status === "running" ||
 			record.status === "succeeded" ||
 			record.status === "failed" ||
@@ -340,11 +346,18 @@ export function settleStoredAssignment(
 	terminalRunId: string,
 	status: Exclude<AssignmentStatus, "running">,
 	owner?: AssignmentVerdictOwner,
+	outcomeDetail?: string,
 ): Promise<DurableAssignmentRecord> {
 	return updateRecord(assignmentId, (current) => {
 		const base = current ?? openRecord(assignmentId);
 		const attempts = base.attempts.includes(terminalRunId) ? base.attempts : [...base.attempts, terminalRunId];
 		if (base.verdictOwner !== owner) return { ...base, attempts };
-		return clearProcessOwner({ ...base, attempts, terminalRunId, status });
+		return clearProcessOwner({
+			...base,
+			attempts,
+			terminalRunId,
+			status,
+			...(outcomeDetail !== undefined ? { outcomeDetail } : {}),
+		});
 	});
 }
