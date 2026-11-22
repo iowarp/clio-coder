@@ -73,6 +73,8 @@ import { isMcpToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import {
 	gateCitationViolation,
 	internalHelperResultSchema,
+	MUTATION_FAILURE_RULE,
+	nonBooleanBaselineReason,
 	type ObservedReadRanges,
 	type ObservedRunEffects,
 	parseWorkerResultContract,
@@ -1234,8 +1236,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		scratchRoots: workerSettings.safety.scratchRoots,
 		onWorkspaceChange: (toolCallId) => thrashOutcome.changed(toolCallId),
 	});
-	const acceptHelperResult = (data: unknown): string | null => {
+	// A tool route hands execute a schema-coerced copy; the arguments the model sent, by call id, keep a baseline honest.
+	const submittedHelperArguments = new Map<string, unknown>();
+	const acceptHelperResult = (data: unknown, submitted: unknown = data): string | null => {
 		if (!input.resultContract) return "missing helper result contract";
+		const coerced = mutationResult ? nonBooleanBaselineReason(submitted) : null;
+		if (coerced !== null) {
+			helperSemanticFailure = false;
+			return coerced;
+		}
 		const validationInput = {
 			contract: input.resultContract,
 			data,
@@ -1489,9 +1498,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			name: INTERNAL_HELPER_RESULT_TOOL,
 			label: "Submit helper result",
 			description:
-				"Submit the final internal result as this tool's arguments. Call alone, after gathering evidence. A validated submission finishes the run; no prose response follows.",
+				"Submit the final internal result as this tool's arguments. Call alone, after gathering evidence. A validated submission finishes the run; no prose response follows." +
+				(mutationResult ? ` ${MUTATION_FAILURE_RULE}` : ""),
 			parameters: Type.Unsafe<Record<string, unknown>>(helperSchema),
-			async execute(_id, args) {
+			async execute(id, args) {
 				if (acceptedHelperResult !== null || phase.sealedBy !== null) {
 					return {
 						content: [{ type: "text", text: "The terminal result is already sealed." }],
@@ -1502,7 +1512,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				phase.forceResult("result");
 				phase.lockTools("result");
-				helperTurnFailure = acceptHelperResult(args);
+				const submitted = submittedHelperArguments.has(id) ? submittedHelperArguments.get(id) : args;
+				submittedHelperArguments.delete(id);
+				helperTurnFailure = acceptHelperResult(args, submitted);
 				if (helperTurnFailure !== null) {
 					return { content: [{ type: "text", text: helperTurnFailure }], details: { kind: "error" }, isError: true };
 				}
@@ -1603,6 +1615,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			return { block: true, reason };
 		},
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
+			if (toolCall.name === INTERNAL_HELPER_RESULT_TOOL) submittedHelperArguments.set(toolCall.id, toolCall.arguments);
 			if (phase.lastRound !== null && toolCall.name !== INTERNAL_HELPER_RESULT_TOOL)
 				return { block: true, reason: WORKER_REFUSAL_REPORT_BLOCK };
 			// The evidence repair reopened reading, not the whole work surface (M-31).

@@ -176,6 +176,14 @@ const COMPLETION_SCHEMA: Record<string, unknown> = {
 	additionalProperties: false,
 };
 
+/**
+ * A failing mutation validation says which red it reports, with one example of each, wherever the worker reads the
+ * report's shape: the instruction, the bound schema and every repair of a report that left it out.
+ */
+export const MUTATION_FAILURE_RULE =
+	'Every passed:false entry must carry "baseline": true for a deliberate run before the change, such as a red test-first baseline, e.g. {"name":"npm test","passed":false,"evidence":"exit 1 before the fix","baseline":true}; false for a failure on the changed tree, e.g. {"name":"npm test","passed":false,"evidence":"exit 1","baseline":false}. Report the run after the change as its own entry.';
+const BASELINE_SCHEMA = { type: "boolean", description: MUTATION_FAILURE_RULE };
+
 /** Generation schemas guide serialization; the semantic validators below remain authoritative. */
 export function internalHelperResultSchema(contract: ResultContract): Record<string, unknown> | null {
 	const text = { type: "string", minLength: 1 };
@@ -193,9 +201,18 @@ export function internalHelperResultSchema(contract: ResultContract): Record<str
 				...object({
 					mutatedPaths: strings,
 					validations: list({
-						...object({ name: text, passed: { type: "boolean" }, evidence: text }),
-						// Optional: a deliberate red run before the change, which quality does not judge.
-						properties: { name: text, passed: { type: "boolean" }, evidence: text, baseline: { type: "boolean" } },
+						anyOf: [
+							{
+								...object({ name: text, passed: { type: "boolean", enum: [true] }, evidence: text }),
+								properties: {
+									name: text,
+									passed: { type: "boolean", enum: [true] },
+									evidence: text,
+									baseline: { type: "boolean" },
+								},
+							},
+							object({ name: text, passed: { type: "boolean", enum: [false] }, evidence: text, baseline: BASELINE_SCHEMA }),
+						],
 					}),
 					observations: strings,
 					declaredChecks: strings,
@@ -945,7 +962,8 @@ export interface CodeReportCheck {
 	ran?: boolean;
 	/**
 	 * Mutation reports only: a deliberate run before the change (a red TDD baseline). It is reported evidence, but
-	 * quality judges the checks run after the change, so a baseline failure is not a failure of the work.
+	 * quality judges the checks run after the change, so a baseline failure is not a failure of the work. A failing
+	 * entry must state it either way: the report cannot be read until the worker says which red it reports.
 	 */
 	baseline?: boolean;
 }
@@ -2198,7 +2216,40 @@ const MUTATION_VALIDATION_EXAMPLE = '{"name":"npm test","passed":true,"evidence"
  * says which one happened and shows the entry that would have passed.
  */
 function mutationValidationsReason(): string {
-	return `Mutation result must carry executed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, an optional "baseline":true on a deliberate run before the change, and no other keys. Use validations:[] when no check executed. Put source reads and edit observations in observations, and checks not run in declaredChecks; neither carries passed.`;
+	return `Mutation result must carry executed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, a boolean baseline on every passed:false entry (optional on a pass), and no other keys. ${MUTATION_FAILURE_RULE} Use validations:[] when no check executed. Put source reads and edit observations in observations, and checks not run in declaredChecks; neither carries passed.`;
+}
+
+/**
+ * The first failing validation that does not say whether it is a baseline. Quality cannot tell a deliberate red run
+ * before the change from a failure of the changed tree without the worker's word, and guessing either way is wrong:
+ * one fails finished work, the other clears a real red. So the report is refused and repaired instead.
+ */
+function unmarkedFailureReason(validations: ReadonlyArray<unknown>): string | null {
+	// parseChecks already admitted every entry as an object, so each reads as a record here.
+	const entry = (validations as ReadonlyArray<Record<string, unknown>>).find(
+		(check) => check.passed === false && check.baseline === undefined,
+	);
+	if (entry === undefined) return null;
+	const name = string(entry.name) ? ` ${JSON.stringify((entry.name as string).slice(0, 120))}` : "";
+	return `Mutation result validations entry${name} has passed:false without baseline. ${MUTATION_FAILURE_RULE}`;
+}
+
+/**
+ * A tool route validates a schema-coerced copy of its arguments, so a "true", 1 or null baseline would reach the
+ * contract as a boolean and could clear a real red. The submitted arguments must carry a JSON boolean; anything else
+ * is refused with the same rule, so the bounded repair asks again.
+ */
+export function nonBooleanBaselineReason(submitted: unknown): string | null {
+	if (submitted === null || typeof submitted !== "object" || Array.isArray(submitted)) return null;
+	const validations = (submitted as Record<string, unknown>).validations;
+	if (!Array.isArray(validations)) return null;
+	const entry = validations.find(
+		(check): check is Record<string, unknown> =>
+			check !== null && typeof check === "object" && "baseline" in check && typeof check.baseline !== "boolean",
+	);
+	if (entry === undefined) return null;
+	const name = string(entry.name) ? ` ${JSON.stringify((entry.name as string).slice(0, 120))}` : "";
+	return `Mutation result validations entry${name} has a baseline that is not a JSON boolean. ${MUTATION_FAILURE_RULE}`;
 }
 
 /**
@@ -2370,6 +2421,8 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	const reported =
 		Array.isArray(value.validations) && value.validations.length === 0 ? [] : parseChecks(value.validations);
 	if (reported === null) return failure(contract, "unmeasured", mutationValidationsReason());
+	const unmarked = unmarkedFailureReason(value.validations as ReadonlyArray<unknown>);
+	if (unmarked !== null) return failure(contract, "unmeasured", unmarked);
 	// A baseline ran before the change, so quality judges only the checks run on the changed tree (bt-17).
 	const validations = reported.filter((check) => !isBaselineValidation(check));
 	// Settle a historical failure only with a matching observed final pass.
@@ -2631,7 +2684,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "world-knowledge-report":
 			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
-			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional","completion":{"state":"done|partly_done|not_done","limitations":[{"what":"...","why":"blocked_by_policy|missing_access|needs_decision|out_of_scope|out_of_budget|not_reproducible|tool_unavailable|other"}],"unverified":["claims made without a check behind them"],"remaining":["optional, for partly_done"]}}. completion is required: done when the assignment is finished, including a finding that nothing needed to change; partly_done or not_done with each limitation that stopped you. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. Mark a deliberate run before the change, such as a red test-first baseline, with "baseline":true; quality judges only the checks run after the change. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
+			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional","completion":{"state":"done|partly_done|not_done","limitations":[{"what":"...","why":"blocked_by_policy|missing_access|needs_decision|out_of_scope|out_of_budget|not_reproducible|tool_unavailable|other"}],"unverified":["claims made without a check behind them"],"remaining":["optional, for partly_done"]}}. completion is required: done when the assignment is finished, including a finding that nothing needed to change; partly_done or not_done with each limitation that stopped you. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. ${MUTATION_FAILURE_RULE} Quality judges only the checks run after the change. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "delegation-plan":

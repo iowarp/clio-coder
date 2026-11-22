@@ -1010,7 +1010,7 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 	for (const [validation, cause] of [
 		// Wave-42 m9-1: the worker's own validation failed and no host check ran.
 		[
-			{ name: "python3 extra.py", passed: false, evidence: "exit 1" },
+			{ name: "python3 extra.py", passed: false, evidence: "exit 1", baseline: false },
 			/^assurance compromised: the worker's own report lists a failing validation \(python3 extra\.py\)/u,
 		],
 		// A command claimed as passed that the run never executed is ungrounded, and that compromises a builder too.

@@ -320,8 +320,8 @@ it("a worker's own failure on a verify call refused up front holds nothing; a re
 			completion: { state: "done", limitations: [], unverified: [] },
 			mutatedPaths: [],
 			validations: [
-				{ name: "python-unittest -p test_x.py '| tee log'", passed: false, evidence: "refused -p" },
-				{ name: "verify python-unittest", passed: false, evidence: "refused -p" },
+				{ name: "python-unittest -p test_x.py '| tee log'", passed: false, evidence: "refused -p", baseline: false },
+				{ name: "verify python-unittest", passed: false, evidence: "refused -p", baseline: false },
 			],
 		});
 		const judge = (laterRed: boolean) => {
@@ -544,8 +544,8 @@ it("observed command outcomes preserve full failures and invalidate passes after
 });
 
 it("requires observed final outcomes to settle mutation-report failures", () => {
-	const failed = { name: "npm test", passed: false, evidence: "exit 1" };
-	const passed = { ...failed, passed: true, evidence: "claimed exit 0" };
+	const failed = { name: "npm test", passed: false, evidence: "exit 1", baseline: false };
+	const passed = { name: "npm test", passed: true, evidence: "claimed exit 0" };
 	for (const validations of [
 		[failed, passed],
 		[passed, failed],
