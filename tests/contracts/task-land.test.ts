@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -84,6 +84,24 @@ describe("fleet land", () => {
 		strictEqual(git(root, "log", "-1", "--format=%s"), "land the crashed run");
 		strictEqual(git(root, "rev-list", "--count", "HEAD"), "2");
 		strictEqual(git(root, "show", "HEAD:c.txt"), "crashed run");
+	});
+
+	it("lands a same-size edit made in the second the worktree's index was written", () => {
+		// Fixed stamps make the entry racily clean: its mtime equals the index's, and ctime is not compared.
+		git(root, "config", "core.trustctime", "false");
+		const task = keptTask("t6", "a.txt", "a\n", false);
+		const file = join(task.path, "a.txt");
+		const stamp = 1_700_000_000;
+		utimesSync(file, stamp, stamp);
+		git(task.path, "update-index", "--refresh");
+		utimesSync(git(task.path, "rev-parse", "--path-format=absolute", "--git-path", "index"), stamp, stamp);
+		writeFileSync(file, "z\n");
+		utimesSync(file, stamp, stamp);
+		const plan = planTaskLand({ root, ref: "t6", mode: "squash" });
+		strictEqual(plan.uncommitted, 1);
+		strictEqual(plan.changed, "1 file changed, 1 insertion(+), 1 deletion(-)");
+		executeTaskLand(plan, { message: "land the racy edit" });
+		strictEqual(git(root, "show", "HEAD:a.txt"), "z");
 	});
 
 	it("resolves a kept task branch for run --review in its worktree and refuses a branch the reviewer cannot see", () => {

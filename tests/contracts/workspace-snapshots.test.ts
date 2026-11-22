@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
@@ -73,6 +73,21 @@ describe("workspace snapshots", () => {
 		ok(again.kind === "taken" && again.reused && again.record.n === 1, JSON.stringify(again));
 		deepStrictEqual(operatorIndex(), index);
 		strictEqual(git(repo, "rev-parse", "HEAD"), head);
+	});
+
+	it("captures a same-size edit made in the second the operator's index was written", async () => {
+		// Fixed stamps make the entry racily clean: its mtime equals the index's, and ctime is not compared.
+		git(repo, "config", "core.trustctime", "false");
+		const file = path.join(repo, "a.txt");
+		const stamp = 1_700_000_000;
+		utimesSync(file, stamp, stamp);
+		git(repo, "update-index", "--refresh");
+		utimesSync(path.join(repo, ".git", "index"), stamp, stamp);
+		writeFileSync(file, "TRACKED\n");
+		utimesSync(file, stamp, stamp);
+		const taken = await store().snapshot({ reason: "turn-start" });
+		ok(taken.kind === "taken", JSON.stringify(taken));
+		strictEqual(git(repo, "show", `${taken.record.commit}:a.txt`), "TRACKED");
 	});
 
 	it("rewinds by overwriting, recreating and removing files, never touching ignored or oversized ones", async () => {
