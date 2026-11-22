@@ -299,7 +299,7 @@ class FakeSession {
 		}
 		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
 		if (prompt.includes("op:usage-wait")) {
-			this.usage({ model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 });
+			this.usage({ model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
 			// The report has been delivered to every subscriber; the test interrupts only after this point.
 			globalThis.__clioCopilotUsageReported?.();
 			return;
@@ -1515,6 +1515,7 @@ test("usage facts keep per-field presence and billing coverage", async () => {
 	strictEqual(partial.billing?.nanoAiu.kind, "unknown", "one of two calls reported credits");
 	strictEqual(partial.billing?.premiumRequests.kind, "unknown", "no accounting answer is not zero");
 	strictEqual(partial.usage?.cacheWrite.kind, "unknown", "one of two calls omitted cache writes");
+	strictEqual(partial.usage?.input.kind, "unknown", "an uncached input that may still hold cache writes");
 	strictEqual(partial.usage?.reasoning.kind, "unknown", "one of two calls omitted reasoning");
 	deepStrictEqual(partial.usage?.output, { kind: "measured", value: 2, source: "provider" });
 	// PV-4: the requested model served the step, so no response model is stamped; reasoning needs every call's count.
@@ -2205,8 +2206,8 @@ test("an interrupted call keeps the positive counts its provider reported", asyn
 	const facts = callSettlementFromMessage(interrupted, "none");
 	deepStrictEqual(facts.usage?.input, { kind: "measured", value: 100, source: "provider" });
 	deepStrictEqual(facts.usage?.output, { kind: "measured", value: 10, source: "provider" });
-	strictEqual(facts.usage?.cacheRead.kind, "unknown", "a reported zero on an interrupted call is not a measurement");
-	strictEqual(facts.usage?.cacheWrite.kind, "unknown", "an omitted count stays unknown");
+	for (const field of ["cacheRead", "cacheWrite"] as const)
+		strictEqual(facts.usage?.[field].kind, "unknown", "a reported zero on an interrupted call is not a measurement");
 	strictEqual(facts.interruptedEstimate, undefined, "measured counts are not replaced by an estimate");
 	disposeCopilotConversations("interrupt-session");
 });

@@ -1147,9 +1147,10 @@ class Step {
 		usage.cacheWrite += cacheWrite ?? 0;
 		usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 		// A field counts as reported only when every call of the step sent it; an omitted field is never zero.
-		// The uncached input needs the cached part too, so it is reported only beside a cache-read count.
+		// The uncached input needs both cached parts too, so it is reported only beside a cache-read and a
+		// cache-write count. Without the write count the split may still hold writes; the prompt total stays.
 		this.usageEvents += 1;
-		if (inputTokens !== undefined && cacheRead !== undefined) this.fieldReports.input += 1;
+		if (inputTokens !== undefined && cacheRead !== undefined && cacheWrite !== undefined) this.fieldReports.input += 1;
 		if (outputTokens !== undefined) this.fieldReports.output += 1;
 		if (cacheRead !== undefined) this.fieldReports.cacheRead += 1;
 		if (cacheWrite !== undefined) this.fieldReports.cacheWrite += 1;
