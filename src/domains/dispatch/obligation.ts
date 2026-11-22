@@ -73,5 +73,7 @@ export function resolveObligation(
 	if (role === "explorer" && (OBSERVED_REPORT_KINDS.has(contractKind ?? "") || declaredReadScope.length > 0)) {
 		return "observed-evidence";
 	}
+	// A checker that returns a review verdict is a reviewer outside any gate (M-50): its pass owes cited evidence.
+	if (role === "checker" && contractKind === "review-verdict") return "cited-evidence";
 	return OBLIGATIONS[role];
 }
