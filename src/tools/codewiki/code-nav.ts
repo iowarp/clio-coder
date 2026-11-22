@@ -20,6 +20,7 @@ import {
 	reserveObservation,
 } from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
+import { writeToolOffload } from "../result-shaping.js";
 import { byteLength } from "../truncate-utf8.js";
 import {
 	codeNavToolSurface,
@@ -66,6 +67,8 @@ interface NavPayload {
 	shownCount: number;
 	totalCount: number;
 	next?: string;
+	/** The complete listing a byte-cut answer offloaded, handed to the observation as its offload source. */
+	fullOutput?: string;
 }
 
 const navIndexCache = new WeakMap<Codewiki, NavIndex>();
@@ -299,6 +302,12 @@ function navNoMatch(index: NavIndex, query: string, searched: string): string {
 /** Whether a result, as the call would return it, fits the call's observation cap. */
 type NavFits = (nav: NavPayload) => boolean;
 
+/** The call's byte fit, and the writer that offloads a complete listing as the call would render it. */
+interface NavFit {
+	fits: NavFits;
+	offload: (nav: NavPayload) => { text: string; path: string | null };
+}
+
 /**
  * The most rows, up to `rows`, whose result fits the call's byte cap. Bytes grow with the row count, so a binary search
  * finds it. When even zero rows overflow, the zero-row result goes out and the observation's oversize stub replaces it
@@ -330,40 +339,60 @@ function largestFit(
 interface ListMore {
 	next?: string;
 	byteLimited?: true;
+	offloadPath?: string;
+	rest?: string;
 }
+
+const LIST_REST_OFFLOADED =
+	"every row is in offloadPath: read it, or narrow the query (mode=path with a subdirectory, mode=outline for one file)";
+const LIST_REST_NARROW =
+	"the omitted rows did not fit this call: narrow the query (mode=path with a subdirectory, mode=outline for one file)";
 
 /**
  * A row-bounded listing fitted to the call cap (field F3: 134 same-named definitions overflowed it, and the stub
- * showed none and offered a larger limit that could not fit either). It shows the most rows up to `limit` that fit,
- * marks an answer the bytes cut short with byteLimited, and continues with a row count that fits too: up to twice the
- * limit, never past the matches or MAX_LIMIT. `size` is the row dimension, so `rows === size` shows everything.
+ * showed none and offered a larger limit that could not fit either). It shows the most rows up to `limit` that fit.
+ * When a larger limit fits more, `next` names it: up to twice the limit, never past the matches or MAX_LIMIT. When no
+ * limit can show more, because the bytes cut the answer (byteLimited) or nothing past it fits, the complete listing is
+ * offloaded and the payload names offloadPath, since a limit continuation would only repeat the rows shown. `size` is
+ * the row dimension, so `rows === size` shows everything.
  */
 function fitList(
 	size: number,
 	limit: number,
-	fits: NavFits,
+	fit: NavFit,
 	build: (rows: number, more: ListMore) => NavPayload,
 ): NavPayload {
 	const wanted = Math.min(limit, size);
 	const ceiling = Math.max(wanted, Math.min(limit * 2, MAX_LIMIT, size));
-	// Probe with the widest continuation and the marker, so the rows chosen still fit once the real ones are attached.
-	const probe = (rows: number): NavPayload =>
-		build(rows, rows < size ? { next: `limit=${ceiling}`, byteLimited: true } : {});
-	const shown = largestFit(probe, wanted, fits).rows;
+	// Probe with the widest continuation, so the rows chosen still fit once the real one is attached.
+	const probe = (rows: number): NavPayload => build(rows, rows < size ? { next: `limit=${ceiling}` } : {});
+	const shown = largestFit(probe, wanted, fit.fits).rows;
 	if (shown === size) return build(shown, {});
-	const reach = shown < wanted ? shown : largestFit(probe, ceiling, fits).rows;
-	return build(shown, {
-		...(shown > 0 ? { next: `limit=${Math.max(reach, shown)}` } : {}),
+	if (shown === wanted) {
+		const reach = largestFit(probe, ceiling, fit.fits).rows;
+		if (reach > shown) return build(shown, { next: `limit=${reach}` });
+	}
+	const { text, path } = fit.offload(build(size, {}));
+	const cut: ListMore = {
 		...(shown < wanted ? { byteLimited: true } : {}),
-	});
+		...(path !== null ? { offloadPath: path, rest: LIST_REST_OFFLOADED } : { rest: LIST_REST_NARROW }),
+	};
+	// The offload pointer is longer than the probed continuation, so fit the rows again with it attached.
+	const fitted = largestFit((rows) => build(rows, cut), shown, fit.fits).nav;
+	return path !== null ? { ...fitted, fullOutput: text } : fitted;
 }
 
 function listTail(more: ListMore, missNext?: string): Record<string, unknown> {
 	const next = more.next ?? missNext;
-	return { ...(more.byteLimited ? { byteLimited: true } : {}), ...(next !== undefined ? { next } : {}) };
+	return {
+		...(more.byteLimited ? { byteLimited: true } : {}),
+		...(more.offloadPath !== undefined ? { offloadPath: more.offloadPath } : {}),
+		...(more.rest !== undefined ? { rest: more.rest } : {}),
+		...(next !== undefined ? { next } : {}),
+	};
 }
 
-function runSymbol(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload {
+function runSymbol(index: NavIndex, query: string, limit: number, fit: NavFit): NavPayload {
 	const ids = index.symbolToFileIds.get(query) ?? [];
 	const files = ids.map((id) => index.filesById.get(id)).filter((file): file is CodewikiFile => Boolean(file));
 	// Return the matching symbol records with their path, line, and signature so the model
@@ -382,7 +411,7 @@ function runSymbol(index: NavIndex, query: string, limit: number, fits: NavFits)
 	);
 	files.sort(comparePath);
 	const missNext = matched.length === 0 ? `mode=path query=${query}` : undefined;
-	return fitList(matched.length, limit, fits, (rows, more) => {
+	return fitList(matched.length, limit, fit, (rows, more) => {
 		const shown = matched.slice(0, rows);
 		const tail = listTail(more, missNext);
 		return {
@@ -402,7 +431,7 @@ function runSymbol(index: NavIndex, query: string, limit: number, fits: NavFits)
 	});
 }
 
-function runPath(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload {
+function runPath(index: NavIndex, query: string, limit: number, fit: NavFit): NavPayload {
 	const regex = regexFromPattern(query);
 	const matches = index.paths
 		.filter((path) => (regex ? regex.test(path) : path.includes(query)))
@@ -410,7 +439,7 @@ function runPath(index: NavIndex, query: string, limit: number, fits: NavFits): 
 		.filter((file): file is CodewikiFile => Boolean(file));
 	const missNext = matches.length === 0 ? "mode=entries" : undefined;
 	const how = regex ? `the pattern ${query}` : `the substring "${query}"`;
-	return fitList(matches.length, limit, fits, (rows, more) => {
+	return fitList(matches.length, limit, fit, (rows, more) => {
 		const shown = matches.slice(0, rows);
 		const tail = listTail(more, missNext);
 		return {
@@ -429,7 +458,7 @@ function runPath(index: NavIndex, query: string, limit: number, fits: NavFits): 
 	});
 }
 
-function runEntries(index: NavIndex, limit: number, entryRoot: string | null, fits: NavFits): NavPayload {
+function runEntries(index: NavIndex, limit: number, entryRoot: string | null, fit: NavFit): NavPayload {
 	const cwd = entryRoot ?? process.cwd();
 	const packageEntries = readPackageEntryPaths(cwd, entryRoot !== null);
 	const candidates = [...index.filesByPath.values()].filter(
@@ -441,7 +470,7 @@ function runEntries(index: NavIndex, limit: number, entryRoot: string | null, fi
 		return aPkg === bPkg ? a.path.localeCompare(b.path) : aPkg - bPkg;
 	});
 	const missNext = ranked.length === 0 ? "mode=path query=src/" : undefined;
-	return fitList(ranked.length, limit, fits, (rows, more) => {
+	return fitList(ranked.length, limit, fit, (rows, more) => {
 		const shown = ranked.slice(0, rows);
 		const tail = listTail(more, missNext);
 		return {
@@ -483,11 +512,11 @@ function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: st
 	};
 }
 
-function runOutline(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload | ToolResult {
+function runOutline(index: NavIndex, query: string, limit: number, fit: NavFit): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const symbols = index.symbolsByFileId.get(file.id) ?? [];
-	return fitList(symbols.length, limit, fits, (rows, more) => {
+	return fitList(symbols.length, limit, fit, (rows, more) => {
 		const shown = symbols.slice(0, rows);
 		const tail = listTail(more);
 		return {
@@ -504,13 +533,13 @@ function runOutline(index: NavIndex, query: string, limit: number, fits: NavFits
 	});
 }
 
-function runDeps(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload | ToolResult {
+function runDeps(index: NavIndex, query: string, limit: number, fit: NavFit): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const deps = index.depsByFileId.get(file.id) ?? { internal: [], external: [] };
 	const total = deps.internal.length + deps.external.length;
 	// The limit bounds each list, so the row dimension is the longer one.
-	return fitList(Math.max(deps.internal.length, deps.external.length), limit, fits, (rows, more) => {
+	return fitList(Math.max(deps.internal.length, deps.external.length), limit, fit, (rows, more) => {
 		const internal = deps.internal.slice(0, rows);
 		const external = deps.external.slice(0, rows);
 		const shown = internal.length + external.length;
@@ -524,11 +553,11 @@ function runDeps(index: NavIndex, query: string, limit: number, fits: NavFits): 
 	});
 }
 
-function runDependents(index: NavIndex, query: string, limit: number, fits: NavFits): NavPayload | ToolResult {
+function runDependents(index: NavIndex, query: string, limit: number, fit: NavFit): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const dependents = index.dependentsByFileId.get(file.id) ?? [];
-	return fitList(dependents.length, limit, fits, (rows, more) => {
+	return fitList(dependents.length, limit, fit, (rows, more) => {
 		const shown = dependents.slice(0, rows);
 		const tail = listTail(more);
 		return {
@@ -934,6 +963,14 @@ export const codeNavTool: ToolSpec = {
 			};
 			// Builders shrink to the payload as returned, grammar note and source prefix included.
 			const fits: NavFits = (nav) => byteLength(renderJson(present(nav).payload)) <= reservation.callCapBytes;
+			// The offload is named by its text's digest, so finalize, given the same text, records this very path.
+			const fit: NavFit = {
+				fits,
+				offload: (nav) => {
+					const text = renderJson(present(nav).payload);
+					return { text, path: writeToolOffload(text, options) };
+				},
+			};
 			const close = (nav: NavPayload | ToolResult): ToolResult => {
 				if ("kind" in nav) return nav;
 				const { payload, next } = present(nav);
@@ -942,6 +979,7 @@ export const codeNavTool: ToolSpec = {
 					unit: "results",
 					format: "json",
 					output: renderJson(payload),
+					...(nav.fullOutput !== undefined ? { fullOutput: nav.fullOutput } : {}),
 					shownCount: nav.shownCount,
 					totalCount: nav.totalCount,
 					truncated: nav.shownCount < nav.totalCount,
@@ -985,25 +1023,25 @@ export const codeNavTool: ToolSpec = {
 			if (mode === "symbol") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
 				if (related) return close(runSymbolRelated(index, query, limit, fits, sourcePrefix));
-				return close(runSymbol(index, query, limit, fits));
+				return close(runSymbol(index, query, limit, fit));
 			}
 			if (mode === "path") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=path requires query" };
-				return close(runPath(index, query, limit, fits));
+				return close(runPath(index, query, limit, fit));
 			}
-			if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot, fits));
+			if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot, fit));
 			if (mode === "outline") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
 				if (related) return close(runOutlineRelated(index, query, limit, fits, sourcePrefix));
-				return close(runOutline(index, query, limit, fits));
+				return close(runOutline(index, query, limit, fit));
 			}
 			if (mode === "deps") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=deps requires query path" };
-				return close(runDeps(index, query, limit, fits));
+				return close(runDeps(index, query, limit, fit));
 			}
 			if (mode === "dependents") {
 				if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
-				return close(runDependents(index, query, limit, fits));
+				return close(runDependents(index, query, limit, fit));
 			}
 			return {
 				kind: "error",

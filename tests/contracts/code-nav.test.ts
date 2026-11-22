@@ -115,14 +115,30 @@ describe("code_nav tool", () => {
 			{ observationRunPool: { limitBytes: 1024 * 1024, resultCapBytes: capBytes } },
 		);
 		if (result.kind !== "ok") throw new Error(JSON.stringify(result));
-		const observation = (result.details as { observation: { shownCount: number; totalCount: number } }).observation;
-		const fitted = JSON.parse(result.output) as { symbols?: unknown[]; omitted?: number; next?: string };
+		const observation = (
+			result.details as { observation: { shownCount: number; totalCount: number; offloadPath?: string } }
+		).observation;
+		const fitted = JSON.parse(result.output) as {
+			symbols?: unknown[];
+			omitted?: number;
+			next?: string;
+			byteLimited?: boolean;
+			offloadPath?: string;
+			rest?: string;
+		};
 		strictEqual(observation.totalCount, 12);
 		strictEqual((fitted.symbols ?? []).length > 0, true, result.output);
 		strictEqual(Buffer.byteLength(result.output) <= capBytes, true);
 		strictEqual(observation.shownCount, fitted.symbols?.length);
 		strictEqual((fitted.omitted ?? 0) + observation.shownCount, observation.totalCount);
-		strictEqual(fitted.next, `limit=${observation.shownCount}`, "the continuation names a row count that fits");
+		// A limit continuation would return the same rows, so the cut names the offloaded full listing instead.
+		strictEqual(fitted.byteLimited, true);
+		strictEqual(fitted.next, undefined, "no limit continuation that repeats the shown rows");
+		match(String(fitted.rest), /offloadPath/);
+		if (fitted.offloadPath === undefined) throw new Error(`no offloadPath in ${result.output}`);
+		strictEqual(observation.offloadPath, fitted.offloadPath);
+		const offloaded = JSON.parse(readFileSync(fitted.offloadPath, "utf8")) as { symbols: unknown[]; omitted: number };
+		deepStrictEqual([offloaded.symbols.length, offloaded.omitted], [12, 0]);
 	});
 
 	it("says what an empty search covered, that it proves no file absent, and the call that lists them", async () => {
