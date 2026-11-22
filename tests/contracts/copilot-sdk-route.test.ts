@@ -39,6 +39,8 @@ import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copi
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "../../src/domains/providers/target-model-cache.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
+import { quotaDenial } from "../../src/domains/quota/pool-reading.js";
+import { copilotStreamReading, type QuotaReading } from "../../src/domains/quota/reading.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
@@ -48,7 +50,12 @@ import { createSessionJournals } from "../../src/domains/telemetry/session-journ
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
-import { copilotSdkAccount, copilotSdkRestartIdle, listCopilotSdkModels } from "../../src/engine/ai.js";
+import {
+	copilotSdkAccount,
+	copilotSdkRestartIdle,
+	listCopilotSdkModels,
+	onCopilotSdkQuotaObservations,
+} from "../../src/engine/ai.js";
 import { engineMainStreamSimple, engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
@@ -195,6 +202,21 @@ class FakeSession {
 			return;
 		}
 		if (prompt.includes("park forever")) { await this.callTool("call_parked"); return; }
+		if (prompt.includes("op:quota")) {
+			// As the runtime does: account quota rides the stream, during the step and after it went idle.
+			const at = (minutes) => new Date(Date.parse("2026-01-01T00:00:00.000Z") + minutes * 60_000).toISOString();
+			const bucket = (quotaId, minutes, accessState, extra) => ({ observation: { quotaId, compatibilityKey: quotaId, provider: { id: "github" }, unit: "requests", quantityKind: "authoritative_budget", observationKind: "account_snapshot", acquisitionStatus: "succeeded", accessState, capacityState: accessState === "denied" ? "exhausted" : "available", entitledQuantity: 300, observedAt: at(minutes), ...extra } });
+			const premium = { availableQuantity: 0, budgetMetadata: { consumed: 300, entitlement: 300, overageAllowedWhenExhausted: false, resetAtEpochMs: Date.parse("2026-02-01T00:00:00.000Z") } };
+			this.emit("session.quota_observation", bucket("premium_interactions", 0, "denied", premium));
+			this.emit("assistant.message", { messageId: "q1", content: "hello" });
+			this.emit("session.idle", {});
+			setTimeout(() => {
+				this.emit("session.quota_observation", bucket("chat", 1, "allowed", { availableQuantity: 200 }));
+				this.emit("session.quota_observation", bucket("premium_interactions", -1, "allowed", { availableQuantity: 300 }));
+				this.emit("session.quota_observation", bucket("chat", 7, "allowed", { availableQuantity: 150 }));
+			}, 0);
+			return;
+		}
 		if (prompt.includes("op:usage-first")) {
 			// As the live runtime did: the call's usage, under the provider's own message id, before the tool request.
 			const name = [...this.tools.keys()][0];
@@ -2629,5 +2651,58 @@ test("a locked Copilot scout round keeps clio_submit_result declared, so the ses
 		strictEqual(events.filter((event) => event.type === "clio_coder_helper_result").length, 1);
 	} finally {
 		disposeCopilotConversations("m31-scout");
+	}
+});
+
+test("stream quota observations are journaled as they arrive, after idle too, each bucket as of its own time (S6b)", async () => {
+	const readings: QuotaReading[] = [];
+	const stop = onCopilotSdkQuotaObservations((observations) => {
+		const reading = copilotStreamReading(observations);
+		if (reading) readings.push(reading);
+	});
+	try {
+		strictEqual((await step({ messages: [user("op:quota")] }, "quota-session")).stopReason, "stop");
+		ok(await eventually(() => readings.length === 3), "observations after session.idle arrive without another call");
+		const [denied, renewed, lapsed] = readings.map((reading) => ({
+			...reading,
+			buckets: reading.windows.map((window) => [window.key, window.unit, window.access]),
+		}));
+		deepStrictEqual(
+			[denied?.source, denied?.observedAt, denied?.validUntil, denied?.access, denied?.buckets],
+			[
+				"stream-event",
+				"2026-01-01T00:00:00.000Z",
+				"2026-01-01T00:05:00.000Z",
+				"denied",
+				[["premium_interactions", "premium-requests", "denied"]],
+			],
+		);
+		deepStrictEqual(
+			quotaDenial(denied as QuotaReading, Date.parse("2026-01-01T00:01:00.000Z"))?.resetsAt,
+			"2026-02-01T00:00:00.000Z",
+		);
+		// A fresh chat bucket neither renews the premium denial's freshness nor lets the late, older allow replace it.
+		deepStrictEqual(
+			[renewed?.observedAt, renewed?.validUntil, renewed?.buckets],
+			[
+				"2026-01-01T00:00:00.000Z",
+				"2026-01-01T00:05:00.000Z",
+				[
+					["premium_interactions", "premium-requests", "denied"],
+					["chat", "requests", "allowed"],
+				],
+			],
+		);
+		// Past the stream's validity the stale denial drops out; the account reading is as of the live bucket alone.
+		deepStrictEqual(
+			[lapsed?.observedAt, lapsed?.access, lapsed?.buckets],
+			["2026-01-01T00:07:00.000Z", "allowed", [["chat", "requests", "allowed"]]],
+		);
+		match(denied?.accountPseudonym ?? "", /^[0-9a-f]{32}$/);
+		strictEqual(lapsed?.accountPseudonym, denied?.accountPseudonym);
+		ok(!JSON.stringify(readings).includes("octo"));
+	} finally {
+		stop();
+		disposeCopilotConversations("quota-session");
 	}
 });

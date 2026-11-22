@@ -100,6 +100,7 @@ export async function copilotSdkRestartIdle(): Promise<void> {
 export type {
 	CopilotQuotaAccount,
 	CopilotQuotaEntry,
+	CopilotQuotaObservation,
 	CopilotQuotaObservationKind,
 	CopilotQuotaQuantityKind,
 	CopilotQuotaReadOptions,
@@ -107,6 +108,9 @@ export type {
 	CopilotQuotaRpcClient,
 	CopilotQuotaUnit,
 } from "./copilot/quota.js";
+
+/** Copilot account quota observations the live stream delivers, as they arrive; loads no SDK. */
+export { onCopilotQuotaObservations as onCopilotSdkQuotaObservations } from "./copilot/quota-feed.js";
 
 /** Read-only Copilot account quota poll; loads the optional SDK only when called. */
 export async function readCopilotSdkQuota(options?: CopilotQuotaReadOptions) {

@@ -55,6 +55,8 @@ import {
 	listCopilotModels,
 	onCopilotRuntimeGone,
 } from "./client.js";
+import { copilotAccountScope, parseCopilotQuotaObservation } from "./quota.js";
+import { publishCopilotQuotaObservation } from "./quota-feed.js";
 import {
 	type CopilotConversationRecord,
 	copilotConversationResumeAllowed,
@@ -186,6 +188,8 @@ class Conversation {
 	model: string;
 	reasoningEffort: string | undefined;
 	contextTier: ContextTier;
+	/** `copilotAccountScope` of the account this session was opened under. */
+	readonly accountScope: string;
 	synced: string[] = [];
 	state: ConversationState = "idle";
 	pendingToolCallIds: string[] = [];
@@ -228,6 +232,7 @@ class Conversation {
 		model: string;
 		reasoningEffort: string | undefined;
 		contextTier: ContextTier;
+		accountScope: string;
 	}) {
 		this.key = input.key;
 		this.session = input.session;
@@ -237,6 +242,7 @@ class Conversation {
 		this.model = input.model;
 		this.reasoningEffort = input.reasoningEffort;
 		this.contextTier = input.contextTier;
+		this.accountScope = input.accountScope;
 		this.unsubscribe = this.session.on((event) => this.route(event));
 	}
 
@@ -249,6 +255,12 @@ class Conversation {
 	 * whether the report carried an id or not.
 	 */
 	private route(event: SessionEvent): void {
+		if (event.type === "session.quota_observation") {
+			// Account evidence from any agent, published as it arrives: it needs no open step and no later call.
+			const observation = parseCopilotQuotaObservation(event.data.observation, this.accountScope, event.timestamp);
+			if (observation) publishCopilotQuotaObservation(observation);
+			return;
+		}
 		if (event.type === "assistant.usage" && !(event as { agentId?: string }).agentId && !event.data.parentToolCallId) {
 			const id = event.data.apiCallId;
 			if (id !== undefined && this.retiredCalls.has(id)) {
@@ -1444,7 +1456,7 @@ async function openConversationHeld(input: {
 	resume?: CopilotConversationRecord;
 }): Promise<Conversation> {
 	// The signed-in account is the authorization; a missing login fails here with `copilot login` named.
-	await copilotAccount();
+	const account = await copilotAccount();
 	const client = await copilotClient();
 	let conversation: Conversation | null = null;
 	const sessionId = input.resume?.sessionId ?? randomUUID();
@@ -1497,6 +1509,7 @@ async function openConversationHeld(input: {
 		model: input.model.id,
 		reasoningEffort: input.reasoningEffort,
 		contextTier: input.contextTier,
+		accountScope: copilotAccountScope(account),
 	});
 	conversation = opened;
 	if (input.resume) {

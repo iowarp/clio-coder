@@ -24,6 +24,7 @@ import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../c
 import {
 	type CopilotQuotaAccount,
 	type CopilotQuotaEntry,
+	type CopilotQuotaObservation,
 	type CopilotQuotaReadOptions,
 	type CopilotQuotaReadResult,
 	copilotSdkSignedInAccount,
@@ -205,6 +206,39 @@ function copilotPoolEvidence(
 function copilotPool(accountScope: string | null | undefined): Pick<UsageSnapshot, "accountPseudonym"> {
 	const pool = accountPseudonym("github-copilot", accountScope);
 	return pool === undefined ? {} : { accountPseudonym: pool };
+}
+
+/**
+ * The account quota the live stream reported (`session.quota_observation`), mapped as a poll is: native units,
+ * bucket-scoped verdicts, the same GitHub pool. Each bucket stays as of its own observation: one older than
+ * `validForMs` before the newest has lapsed and is dropped, and the snapshot is as of its oldest kept bucket, so a
+ * fresh bucket never renews a stale one's freshness or denial. `null` without an acquired observation.
+ */
+export function copilotStreamSnapshot(
+	observations: ReadonlyArray<CopilotQuotaObservation>,
+	validForMs: number,
+): UsageSnapshot | null {
+	const newest = Math.max(...observations.map((observation) => Date.parse(observation.observedAt)));
+	const kept = observations
+		.filter((observation) => Date.parse(observation.observedAt) >= newest - validForMs)
+		.sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt));
+	const oldest = kept[0];
+	if (oldest === undefined || !kept.some(acquired)) return null;
+	const scopes = new Set(kept.map((observation) => observation.accountScope));
+	const mapped = mapCopilotQuotaEntries(kept);
+	return {
+		providerId: COPILOT_QUOTA_PROVIDER_ID,
+		displayName: "GitHub Copilot",
+		status: "ok",
+		plan: null,
+		windows: mapped.windows,
+		allowances: mapped.allowances,
+		credits: mapped.credits,
+		fetchedAt: oldest.observedAt,
+		...(mapped.message ? { message: mapped.message } : {}),
+		...copilotPoolEvidence(kept),
+		...(scopes.size === 1 ? copilotPool(oldest.accountScope) : {}),
+	};
 }
 
 function isAuthoritativeEntry(entry: CopilotQuotaEntry): boolean {
