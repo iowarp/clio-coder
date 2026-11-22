@@ -4,6 +4,7 @@
  * admission property for a better score.
  */
 
+import type { UnitTotal, UnitTotalRefusal } from "../../core/telemetry/economy.js";
 import type { AgentLatencyClass } from "../agents/spec.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
@@ -195,6 +196,160 @@ export function estimateRoute(
 		queueWaitMs: shrink(mean(queueWaits, prior.queueWaitMs), prior.queueWaitMs, completedCount),
 		sampleCount: samples.length,
 		confidence: labeled.length / (labeled.length + ROUTE_ESTIMATE_SHRINKAGE),
+	};
+}
+
+/** Fewest counted attempts a forecast stands on; fewer is cold evidence and reads insufficient. */
+export const MINIMUM_FORECAST_ATTEMPTS = 6;
+
+/**
+ * One sent attempt as the route forecast reads it (R4), kept apart from `RouteObservation` so the ranking input never
+ * changes. Only attempts that say something about the route count: a canceled, policy-denied or unverified run is left
+ * out by the feed. A failed or quality-failed attempt still counts, because it was paid for.
+ */
+export interface RouteAttemptEvidence {
+	/** Accepted work: succeeded and not quality-failed. */
+	accepted: boolean;
+	/**
+	 * The attempt's totals as the one economics fold (S10) settles them: the extra money the user paid, and the seat's
+	 * nano-AIU debit (the runtime's reported debit over the seat-listing estimate). An unknown is never read as free.
+	 */
+	marginalCharge: UnitTotal | UnitTotalRefusal;
+	seatCredits: UnitTotal | UnitTotalRefusal;
+}
+
+export type RouteForecastInsufficient = {
+	status: "insufficient";
+	/** Fewer than `MINIMUM_FORECAST_ATTEMPTS` counted attempts, or none of them accepted. */
+	reason: "cold" | "no-accepted-job";
+};
+
+/**
+ * The forecast vector of one candidate route: data for the user's composition, never a ranking input (R4). Every
+ * per-job figure divides what all counted attempts drew, failures included, by the accepted jobs among them, so a
+ * retry-heavy route never looks cheaper for dropping its failures. A run journal names no assignment, so attempts are
+ * pooled across jobs.
+ */
+export interface RouteForecast {
+	/** Counted attempts and the accepted jobs among them. */
+	attempts: number;
+	acceptedJobs: number;
+	/**
+	 * Expected extra money per accepted job (the fold's marginal charge) and its range: the mean attempt charge's 95%
+	 * normal interval over the 95% Wilson upper and lower acceptance rates, so the range always holds the expectation. A
+	 * forecast, not a bound; `high` is null while the acceptance lower bound is zero. `basis` is estimated when any
+	 * attempt's charge was. Not applicable when no attempt can carry one (a local route); unknown when any attempt's
+	 * charge is, or attempts were charged in more than one currency.
+	 */
+	costPerAcceptedJob:
+		| {
+				status: "forecast";
+				currency: string;
+				expected: number;
+				range: { low: number; high: number | null };
+				basis: "measured" | "estimated";
+		  }
+		| RouteForecastInsufficient
+		| { status: "unknown"; unpricedAttempts: number }
+		| { status: "not-applicable" };
+	/** Native quota units per accepted job; not applicable when no attempt drew on a metered seat. */
+	quotaPerAcceptedJob:
+		| { status: "forecast"; unit: "nano-aiu"; expected: number; basis: "measured" | "estimated" }
+		| RouteForecastInsufficient
+		| { status: "unknown"; unknownAttempts: number }
+		| { status: "not-applicable" };
+	/** The route's samples carrying a pass/fail quality label, of all its samples. */
+	qualityEvidence: { labeled: number; samples: number; coverage: number };
+	/** Why the candidate cannot run, as its hard filter or routing intent named it; null while it is eligible. */
+	exclusion: string | null;
+}
+
+/** A total some contribution named a unit for and none left unknown: an amount to forecast with. */
+function knownTotal(total: UnitTotal | UnitTotalRefusal): Extract<UnitTotal, { unit: string }> | null {
+	return !("refused" in total) && "unit" in total && total.sum.unknownCount === 0 ? total : null;
+}
+
+function insufficient(attempts: number, accepted: number): RouteForecastInsufficient | null {
+	if (attempts < MINIMUM_FORECAST_ATTEMPTS) return { status: "insufficient", reason: "cold" };
+	return accepted === 0 ? { status: "insufficient", reason: "no-accepted-job" } : null;
+}
+
+/** The forecast vector beside `estimateRoute`: the same samples, plus each counted attempt's draw. */
+export function forecastRoute(input: {
+	observations: ReadonlyArray<RouteObservation>;
+	attempts: ReadonlyArray<RouteAttemptEvidence>;
+	exclusion?: string | null;
+}): RouteForecast {
+	const { observations, attempts } = input;
+	const accepted = attempts.filter((attempt) => attempt.accepted).length;
+	const labeled = observations.filter((sample) => sample.qualityLabel !== "unmeasured").length;
+	const cold = insufficient(attempts.length, accepted);
+	const charges = attempts.map(({ marginalCharge }) => marginalCharge);
+	const priced = charges.flatMap((charge) => {
+		const total = knownTotal(charge);
+		return total === null
+			? []
+			: [
+					{
+						currency: total.unit,
+						value: total.sum.measured + total.sum.estimated,
+						estimated: total.sum.coverage.estimated > 0,
+					},
+				];
+	});
+	const unpriced = attempts.length - priced.length;
+	const currencies = new Set(priced.map(({ currency }) => currency));
+	let cost: RouteForecast["costPerAcceptedJob"];
+	if (cold !== null) cost = cold;
+	else if (charges.every((total) => !("refused" in total) && !("unit" in total) && total.sum.unknownCount === 0))
+		cost = { status: "not-applicable" };
+	else if (unpriced > 0 || currencies.size > 1)
+		cost = { status: "unknown", unpricedAttempts: currencies.size > 1 ? attempts.length : unpriced };
+	else {
+		const n = priced.length;
+		const mean = priced.reduce((sum, { value }) => sum + value, 0) / n;
+		const variance = priced.reduce((sum, { value }) => sum + (value - mean) ** 2, 0) / (n - 1);
+		const margin = 1.96 * Math.sqrt(variance / n);
+		const lower = wilsonLowerBound(accepted, n);
+		const upper = 1 - wilsonLowerBound(n - accepted, n);
+		cost = {
+			status: "forecast",
+			currency: [...currencies][0] ?? "USD",
+			expected: (mean * n) / accepted,
+			range: { low: Math.max(0, mean - margin) / upper, high: lower > 0 ? (mean + margin) / lower : null },
+			basis: priced.some(({ estimated }) => estimated) ? "estimated" : "measured",
+		};
+	}
+	let quota: RouteForecast["quotaPerAcceptedJob"];
+	const debits = attempts.map(({ seatCredits }) => seatCredits);
+	const unknownDebits = debits.reduce(
+		(count, total) => count + ("refused" in total ? 1 : total.sum.unknownCount > 0 ? 1 : 0),
+		0,
+	);
+	const known = debits.flatMap((debit) => knownTotal(debit) ?? []);
+	if (cold !== null) quota = cold;
+	else if (unknownDebits > 0) quota = { status: "unknown", unknownAttempts: unknownDebits };
+	else if (known.length === 0) quota = { status: "not-applicable" };
+	else if (known.some(({ unit }) => unit !== "nano-aiu"))
+		quota = { status: "unknown", unknownAttempts: known.filter(({ unit }) => unit !== "nano-aiu").length };
+	else
+		quota = {
+			status: "forecast",
+			unit: "nano-aiu",
+			expected: known.reduce((sum, total) => sum + total.sum.measured + total.sum.estimated, 0) / accepted,
+			basis: known.some((total) => total.sum.coverage.estimated > 0) ? "estimated" : "measured",
+		};
+	return {
+		attempts: attempts.length,
+		acceptedJobs: accepted,
+		costPerAcceptedJob: cost,
+		quotaPerAcceptedJob: quota,
+		qualityEvidence: {
+			labeled,
+			samples: observations.length,
+			coverage: observations.length === 0 ? 0 : labeled / observations.length,
+		},
+		exclusion: input.exclusion ?? null,
 	};
 }
 

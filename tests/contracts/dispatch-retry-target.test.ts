@@ -13,6 +13,7 @@ import {
 	type RouteObserver,
 	type RouteReadinessEvidence,
 } from "../../src/domains/dispatch/route-observer.js";
+import { forecastRoute } from "../../src/domains/dispatch/route-policy.js";
 import { defaultRoutingIntent } from "../../src/domains/dispatch/routing-intent.js";
 import { endpointIdentityHash } from "../../src/domains/dispatch/worker-protocol.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
@@ -35,16 +36,18 @@ const OVERFLOW =
 /** Route evidence every candidate passes active readiness with, so the resolver can approve an envelope. */
 function readyRouteObserver(): RouteObserver {
 	const real = createRouteObserver({});
+	const observations = Array.from({ length: 40 }, () => ({
+		qualityLabel: "pass" as const,
+		reliability: "success" as const,
+		firstPass: true,
+		completedCostUsd: 0.01,
+		completedEndToEndMs: 1000,
+		cacheRead: null,
+		queueWaitMs: 0,
+	}));
 	const evidence: RouteReadinessEvidence = {
-		observations: Array.from({ length: 40 }, () => ({
-			qualityLabel: "pass" as const,
-			reliability: "success" as const,
-			firstPass: true,
-			completedCostUsd: 0.01,
-			completedEndToEndMs: 1000,
-			cacheRead: null,
-			queueWaitMs: 0,
-		})),
+		observations,
+		forecast: forecastRoute({ observations, attempts: [] }),
 		readiness: {
 			hardConstraintValidity: 1,
 			integrityFailures: 0,

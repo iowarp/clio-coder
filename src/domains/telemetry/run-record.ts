@@ -51,6 +51,17 @@ function sealedRead(
  * state root.
  */
 export function readRunRecord(stateDir: string, runId: string): RunTelemetryV1 | null {
+	return readRunRecordWithSealedRecords(stateDir, runId)?.run ?? null;
+}
+
+/**
+ * The run's DTO, as `readRunRecord`, beside the records its verified seal authenticates from that same read; `sealed`
+ * is null unless the seal verifies. A reader needing both reads the scope once.
+ */
+export function readRunRecordWithSealedRecords(
+	stateDir: string,
+	runId: string,
+): { run: RunTelemetryV1; sealed: readonly TelemetryRecord[] | null } | null {
 	assertSafeId(runId, "run");
 	const directory = telemetryRunDirectory(stateDir, runId);
 	if (!withinStateRoot(stateDir, directory)) return null;
@@ -62,7 +73,11 @@ export function readRunRecord(stateDir: string, runId: string): RunTelemetryV1 |
 		return null;
 	}
 	const sealed = sealedRead(directory, scope);
-	return sealed ? record(runId, sealed.read, scope, sealed.seal) : record(runId, readCallJournalSync(directory), scope);
+	if (sealed === null) return { run: record(runId, readCallJournalSync(directory), scope), sealed: null };
+	return {
+		run: record(runId, sealed.read, scope, sealed.seal),
+		sealed: sealed.seal.status === "verified" ? sealed.read.records.map(({ record }) => record) : null,
+	};
 }
 
 export async function readRunRecordAsync(stateDir: string, runId: string): Promise<RunTelemetryV1 | null> {
