@@ -1,14 +1,18 @@
-import type { FundingDefinitions, FundingPayer, FundingPeriod } from "../../core/funding-config.js";
+import type { FundingDefinitions } from "../../core/funding-config.js";
 import type {
 	CallEconomics,
+	EconomyFee,
+	EconomyGroup,
+	EconomyPoolRow,
+	EconomyProjection,
+	EconomyQuantities,
+	EconomyReference,
 	FundingEvidence,
 	RunEconomics,
 	UnitQuantity,
-	UnitTotal,
-	UnitTotalRefusal,
 } from "../../core/telemetry/economy.js";
 import { moneyQuantities, sumInUnit } from "../../core/telemetry/economy.js";
-import type { Fact, FactSum } from "../../core/telemetry/fact.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import {
 	renderApiEquivalent,
 	renderCash,
@@ -48,71 +52,6 @@ export interface EconomyContribution {
 	/** The seat's debit its runtime reported (`call.settled` `billing.nanoAiu`); a known one wins over the estimate. */
 	reportedNanoAiu?: Fact<number>;
 	cut: { role: string; model: string; target: string };
-}
-
-type Total = UnitTotal | UnitTotalRefusal;
-
-/** The additive and comparison quantities of a set of contributions, each in its one unit. */
-export interface EconomyQuantities {
-	contributions: number;
-	providerCharge: Total;
-	marginalCharge: Total;
-	/** The seat's estimated debit, in nano-AIU. */
-	seatCredits: Total;
-	energyKwh: FactSum;
-	energyCost: Total;
-	apiEquivalent: Total;
-	display: { extra: string; providerCharge: string; seatCredits: string; energy: string; apiEquivalent: string };
-}
-
-/**
- * A declared fixed fee for one pool and one billing period, as S8's `periodFees` places it: once, whatever the calls in
- * it. A one-time fee has no period, so no window repeats it.
- */
-export interface EconomyFee {
-	poolId: string;
-	payer: FundingPayer | "unknown";
-	period: { kind: Exclude<FundingPeriod, "one-time">; start: string; end: string };
-	amount: Fact<number>;
-	currency: string;
-	evidence: "declared";
-	/** The window covers only part of the period. */
-	partial: boolean;
-	display: string;
-}
-
-export interface EconomyGroup extends EconomyQuantities {
-	key: string;
-}
-export interface EconomyPeriodRow extends EconomyQuantities {
-	key: string;
-	fees: EconomyFee[];
-}
-export interface EconomyPoolRow extends EconomyQuantities {
-	key: string;
-	periods: EconomyPeriodRow[];
-}
-
-/** The API-equivalent rows the contributions were priced from, so an update never reprices what they show (Q5). */
-export interface EconomyReference {
-	referenceRowId: string;
-	asOf: string;
-	basis: "served-model" | "requested-model";
-	contributions: number;
-}
-
-export interface EconomyProjection {
-	version: typeof ECONOMY_FOLD_VERSION;
-	total: EconomyQuantities;
-	fees: EconomyFee[];
-	/**
-	 * Period cash: personal fees, marginal charges and attributable electricity, per currency and never summed across
-	 * currencies; a fee another payer covers stays out, and so does any comparison.
-	 */
-	cash: { currencies: UnitTotal[]; unknownCount: number; display: string };
-	groups: { role: EconomyGroup[]; model: EconomyGroup[]; target: EconomyGroup[]; pool: EconomyPoolRow[] };
-	references: EconomyReference[];
-	sources: { attempts: number; runs: number; gaps: number };
 }
 
 export interface EconomyFoldOptions {

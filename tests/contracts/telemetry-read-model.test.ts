@@ -24,7 +24,7 @@ import {
 	TimelineSchema,
 	WhyStoppedSchema,
 } from "../../src/core/telemetry/dto.js";
-import type { CallEconomics } from "../../src/core/telemetry/economy.js";
+import type { CallEconomics, EconomyGroup } from "../../src/core/telemetry/economy.js";
 import { callEconomicsOf } from "../../src/core/telemetry/economy.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
@@ -1147,8 +1147,11 @@ test("economics fold once: unknown history survives, cuts reconcile, a run's agg
 	};
 	const from = Date.parse("2026-10-01T00:00:00.000Z");
 	const to = Date.parse("2026-11-01T00:00:00.000Z") - 1;
-	const economy = usageReport(repo, from, to, pools).economy;
-	deepStrictEqual(usageReport(repo, from, to, pools).economy, economy, "two reads fold identically");
+	const reports = usageReport(repo, from, to, pools).cost;
+	const economy = reports[0]?.economy;
+	ok(economy);
+	for (const report of reports) deepStrictEqual(report.economy, economy, "every cost cut carries the one projection");
+	deepStrictEqual(usageReport(repo, from, to, pools).cost[0]?.economy, economy, "two reads fold identically");
 	deepStrictEqual(economy.sources, { attempts: 2, runs: 1, gaps: 0 });
 	const { total } = economy;
 	const sum = (value: unknown) => {
@@ -1167,7 +1170,7 @@ test("economics fold once: unknown history survives, cuts reconcile, a run's agg
 	strictEqual(betaRow?.display.extra, "extra unknown");
 	strictEqual(betaRow?.display.apiEquivalent, "API equiv unknown");
 	for (const cut of ["role", "model", "target", "pool"] as const) {
-		const rows = economy.groups[cut];
+		const rows: ReadonlyArray<EconomyGroup> = economy.groups[cut];
 		strictEqual(
 			rows.reduce((n, row) => n + row.contributions, 0),
 			total.contributions,

@@ -211,14 +211,21 @@ export function sessionUsageTotals(view: TelemetryView): SessionTotals {
 	};
 }
 
-/** ACP's `cost` is a plain amount, so it is sent only when the session's whole spend is known: nothing unpriced. */
-function plainCost(session: SessionTotals | null): number | null {
-	if (session === null) return null;
-	const fact = session.quantities.usd.fact;
-	if ("kind" in fact) return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
-	const contributions = fact.coverage.measured + fact.coverage.estimated + fact.unknownCount;
-	return contributions > 0 && fact.unknownCount === 0 ? fact.measured + fact.estimated : null;
+/**
+ * ACP's `cost` is a plain amount the client reads as money the user paid, so it is sent only for a confirmed personal
+ * charge: the session's extra user cost in one currency, every contribution measured (a provider or statement
+ * assertion on a personal pool). A route-price estimate, an included seat call or an unknown keeps it absent (R1).
+ */
+function plainCost(view: TelemetryView | null): { amount: number; currency: string } | null {
+	if (view === null) return null;
+	const charge = view.economy().total.marginalCharge;
+	if ("refused" in charge || !("unit" in charge) || !CURRENCY_CODE.test(charge.unit)) return null;
+	const { sum } = charge;
+	return sum.coverage.measured > 0 && sum.coverage.estimated === 0 && sum.unknownCount === 0
+		? { amount: sum.measured, currency: charge.unit }
+		: null;
 }
+const CURRENCY_CODE = /^[A-Z]{3}$/;
 
 export interface AcpLiveTelemetryDeps {
 	subscribeUsage?: (listener: () => void) => () => void;
@@ -295,13 +302,13 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		const sessionView = view?.session() ?? null;
 		accountingSignature = usageSignatureOf(sessionView);
 		accountingRevision = view?.revision?.();
-		// ACP `cost` is a plain amount, so an unknown or partly unpriced spend stays absent rather than reading as zero.
-		const amount = plainCost(session);
+		// ACP `cost` is a plain amount, so anything but a confirmed personal charge stays absent rather than reading as one.
+		const cost = plainCost(view);
 		return {
 			sessionUpdate: "usage_update",
 			used: context.usedTokens,
 			size: context.contextWindow,
-			...(amount !== null ? { cost: { amount, currency: "USD" } } : {}),
+			...(cost !== null ? { cost } : {}),
 			_meta: {
 				[ACP_CONTEXT_META_KEY]: context,
 				[ACP_USAGE_META_KEY]: {

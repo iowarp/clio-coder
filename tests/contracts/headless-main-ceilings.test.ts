@@ -41,7 +41,7 @@ async function terminalFrame(t: TestContext, toolCall: OpenAICompatToolCallScrip
 		.filter((line) => line.startsWith("{"))
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	const end = frames.at(-1);
-	ok(end && end.type === "run_end" && end.schemaVersion === 2, run.stdout);
+	ok(end && end.type === "run_end" && end.schemaVersion === 3, run.stdout);
 	return { code: run.code, end, dir: scratch.dir, receipt: sealedReceipt(join(scratch.dir, "state")).receipt };
 }
 

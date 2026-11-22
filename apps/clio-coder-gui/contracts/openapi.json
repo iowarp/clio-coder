@@ -25004,12 +25004,24 @@
 				},
 				"maxItems": 16
 			},
+			"Array_571bba38": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_asOf_basis_contributions_a1f0dea5"
+				}
+			},
 			"Array_605e9bdc": {
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_hint_id_label_812eb7c1"
 				},
 				"maxItems": 2000
+			},
+			"Array_61cc197e": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_contributions_display_f081e403"
+				}
 			},
 			"Array_620f3d68": {
 				"type": "array",
@@ -25116,6 +25128,12 @@
 				},
 				"maxItems": 64
 			},
+			"Array_8c587473": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Union_0ff92656"
+				}
+			},
 			"Array_8f8a4dec": {
 				"type": "array",
 				"items": {
@@ -25179,6 +25197,12 @@
 					"$ref": "#/components/schemas/Object_name_requestSource_5b64c715"
 				},
 				"maxItems": 256
+			},
+			"Array_a6b75956": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_contributions_display_b258a5a1"
+				}
 			},
 			"Array_ac23550c": {
 				"type": "array",
@@ -25342,6 +25366,12 @@
 				},
 				"maxItems": 64
 			},
+			"Array_e6963b34": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_amount_currency_display_e73022ed"
+				}
+			},
 			"Array_e6974835": {
 				"type": "array",
 				"items": {
@@ -25373,6 +25403,12 @@
 					"$ref": "#/components/schemas/Object_fill_key_label_85b68f62"
 				},
 				"maxItems": 4
+			},
+			"Array_f95fe9cf": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_contributions_display_7c8892a4"
+				}
 			},
 			"Array_fabe31a2": {
 				"type": "array",
@@ -25663,9 +25699,9 @@
 			},
 			"CostReportV1": {
 				"type": "object",
-				"required": ["v", "foldVersion", "generatedAt", "kind", "scope", "groupBy", "total", "groups"],
+				"required": ["v", "foldVersion", "generatedAt", "kind", "scope", "groupBy", "total", "groups", "economy"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_067a9f0d"
+					"$ref": "#/components/schemas/Shape_e8dc3edc"
 				},
 				"additionalProperties": false
 			},
@@ -27745,6 +27781,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_absentCount_coverage_estimated_a35fdbc3": {
+				"type": "object",
+				"required": ["measured", "estimated", "unknownCount", "absentCount", "coverage"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_ccfea046"
+				},
+				"additionalProperties": false
+			},
 			"Object_absentCount_coverage_estimated_ae225c75": {
 				"type": "object",
 				"required": ["measured", "estimated", "unknownCount", "absentCount", "coverage"],
@@ -28589,6 +28633,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_amount_currency_display_e73022ed": {
+				"type": "object",
+				"required": ["poolId", "payer", "period", "amount", "currency", "evidence", "partial", "display"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_cc850031"
+				},
+				"additionalProperties": false
+			},
 			"Object_amount_d5cd2e22": {
 				"type": "object",
 				"required": ["amount"],
@@ -28641,6 +28693,101 @@
 				"required": ["apiEquivalent"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_a589796c"
+				},
+				"additionalProperties": false
+			},
+			"Object_apiEquivalent_contributions_display_7c8892a4": {
+				"type": "object",
+				"required": [
+					"contributions",
+					"providerCharge",
+					"marginalCharge",
+					"seatCredits",
+					"energyKwh",
+					"energyCost",
+					"apiEquivalent",
+					"display",
+					"key",
+					"fees"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_6cb3eb59"
+				},
+				"additionalProperties": false
+			},
+			"Object_apiEquivalent_contributions_display_b258a5a1": {
+				"type": "object",
+				"required": [
+					"contributions",
+					"providerCharge",
+					"marginalCharge",
+					"seatCredits",
+					"energyKwh",
+					"energyCost",
+					"apiEquivalent",
+					"display",
+					"key"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_8389efa5"
+				},
+				"additionalProperties": false
+			},
+			"Object_apiEquivalent_contributions_display_f081e403": {
+				"type": "object",
+				"required": [
+					"contributions",
+					"providerCharge",
+					"marginalCharge",
+					"seatCredits",
+					"energyKwh",
+					"energyCost",
+					"apiEquivalent",
+					"display",
+					"key",
+					"periods"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_54cdd7f3"
+				},
+				"additionalProperties": false
+			},
+			"Object_apiEquivalent_contributions_display_fa67844e": {
+				"type": "object",
+				"required": [
+					"contributions",
+					"providerCharge",
+					"marginalCharge",
+					"seatCredits",
+					"energyKwh",
+					"energyCost",
+					"apiEquivalent",
+					"display"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_a56ede57"
+				},
+				"additionalProperties": false
+			},
+			"Object_apiEquivalent_energy_extra_994ceeec": {
+				"type": "object",
+				"required": ["extra", "providerCharge", "seatCredits", "energy", "apiEquivalent"],
+				"properties": {
+					"extra": {
+						"type": "string"
+					},
+					"providerCharge": {
+						"type": "string"
+					},
+					"seatCredits": {
+						"type": "string"
+					},
+					"energy": {
+						"type": "string"
+					},
+					"apiEquivalent": {
+						"type": "string"
+					}
 				},
 				"additionalProperties": false
 			},
@@ -28816,6 +28963,27 @@
 				],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_40d2c059"
+				},
+				"additionalProperties": false
+			},
+			"Object_asOf_basis_contributions_a1f0dea5": {
+				"type": "object",
+				"required": ["referenceRowId", "asOf", "basis", "contributions"],
+				"properties": {
+					"referenceRowId": {
+						"type": "string"
+					},
+					"asOf": {
+						"type": "string"
+					},
+					"basis": {
+						"enum": ["served-model", "requested-model"]
+					},
+					"contributions": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740991
+					}
 				},
 				"additionalProperties": false
 			},
@@ -29121,6 +29289,28 @@
 				"required": ["calls", "attempts", "dispositions"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_4aeb643d"
+				},
+				"additionalProperties": false
+			},
+			"Object_attempts_gaps_runs_75a5be51": {
+				"type": "object",
+				"required": ["attempts", "runs", "gaps"],
+				"properties": {
+					"attempts": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740991
+					},
+					"runs": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740991
+					},
+					"gaps": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740991
+					}
 				},
 				"additionalProperties": false
 			},
@@ -30236,6 +30426,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_cash_fees_groups_c8211a24": {
+				"type": "object",
+				"required": ["version", "total", "fees", "cash", "groups", "references", "sources"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_671a9686"
+				},
+				"additionalProperties": false
+			},
 			"Object_catalog_free_none_6f8359dd": {
 				"type": "object",
 				"required": ["provider", "target-rates", "catalog", "free", "none"],
@@ -30922,6 +31120,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_currencies_display_unknownCount_67c9789c": {
+				"type": "object",
+				"required": ["currencies", "unknownCount", "display"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_ec387842"
+				},
+				"additionalProperties": false
+			},
 			"Object_currentValue_id_notice_a206921e": {
 				"type": "object",
 				"required": ["id", "currentValue", "options"],
@@ -31397,6 +31603,22 @@
 					"end": {
 						"type": "string",
 						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_end_kind_start_b8bf6fad": {
+				"type": "object",
+				"required": ["kind", "start", "end"],
+				"properties": {
+					"kind": {
+						"enum": ["day", "week", "month", "year"]
+					},
+					"start": {
+						"type": "string"
+					},
+					"end": {
+						"type": "string"
 					}
 				},
 				"additionalProperties": false
@@ -32217,6 +32439,23 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_kind_method_value_62213f1d": {
+				"type": "object",
+				"required": ["kind", "value", "method"],
+				"properties": {
+					"kind": {
+						"type": "string",
+						"const": "estimated"
+					},
+					"value": {
+						"type": "number"
+					},
+					"method": {
+						"$ref": "#/components/schemas/Enum_ce95d54a"
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_kind_method_value_867f57d8": {
 				"type": "object",
 				"required": ["kind", "value", "method"],
@@ -32476,6 +32715,23 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_kind_source_value_98467391": {
+				"type": "object",
+				"required": ["kind", "value", "source"],
+				"properties": {
+					"kind": {
+						"type": "string",
+						"const": "measured"
+					},
+					"value": {
+						"type": "number"
+					},
+					"source": {
+						"enum": ["provider", "local-clock", "local-count"]
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_kind_source_value_b44fa42b": {
 				"type": "object",
 				"required": ["kind", "value", "source"],
@@ -32611,6 +32867,14 @@
 						"type": "number",
 						"minimum": 0
 					}
+				},
+				"additionalProperties": false
+			},
+			"Object_model_pool_role_0c099801": {
+				"type": "object",
+				"required": ["role", "model", "target", "pool"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_863e1321"
 				},
 				"additionalProperties": false
 			},
@@ -33069,6 +33333,36 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_refused_unit_c3a9ff6c": {
+				"type": "object",
+				"required": ["refused", "unit"],
+				"properties": {
+					"refused": {
+						"enum": ["non-additive-unit", "out-of-range"]
+					},
+					"unit": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_refused_units_a7b75d21": {
+				"type": "object",
+				"required": ["refused", "units"],
+				"properties": {
+					"refused": {
+						"type": "string",
+						"const": "mixed-unit"
+					},
+					"units": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_responseSchema_resultContract_typedValidations_d79bf9d1": {
 				"type": "object",
 				"required": ["typedValidations", "responseSchema", "resultContract"],
@@ -33256,6 +33550,22 @@
 				"required": ["state", "value"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_1a6ebc77"
+				},
+				"additionalProperties": false
+			},
+			"Object_sum_479b787b": {
+				"type": "object",
+				"required": ["sum"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_65151b40"
+				},
+				"additionalProperties": false
+			},
+			"Object_sum_unit_e0b670f1": {
+				"type": "object",
+				"required": ["unit", "sum"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_1c1cf5c6"
 				},
 				"additionalProperties": false
 			},
@@ -34260,36 +34570,6 @@
 					"$ref": "#/components/schemas/Union_171a208a"
 				}
 			},
-			"Shape_067a9f0d": {
-				"v": {
-					"type": "number",
-					"const": 1
-				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"kind": {
-					"type": "string",
-					"const": "cost"
-				},
-				"scope": {
-					"$ref": "#/components/schemas/Union_dd57b145"
-				},
-				"groupBy": {
-					"enum": ["role", "model", "target", "turn"]
-				},
-				"total": {
-					"$ref": "#/components/schemas/Object_calls_pricedBy_tokens_becd86ce"
-				},
-				"groups": {
-					"$ref": "#/components/schemas/Array_2066e3fa"
-				}
-			},
 			"Shape_0886a51c": {
 				"type": {
 					"type": "string",
@@ -34450,6 +34730,14 @@
 				},
 				"value": {
 					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_e44f0777"
+				}
+			},
+			"Shape_1c1cf5c6": {
+				"unit": {
+					"$ref": "#/components/schemas/Union_010c668d"
+				},
+				"sum": {
+					"$ref": "#/components/schemas/Object_absentCount_coverage_estimated_ae225c75"
 				}
 			},
 			"Shape_233bb951": {
@@ -35060,6 +35348,40 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_ae685bfe"
 				}
 			},
+			"Shape_54cdd7f3": {
+				"contributions": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9007199254740991
+				},
+				"providerCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"marginalCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"seatCredits": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"energyKwh": {
+					"$ref": "#/components/schemas/Object_absentCount_coverage_estimated_ae225c75"
+				},
+				"energyCost": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"apiEquivalent": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"display": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_energy_extra_994ceeec"
+				},
+				"key": {
+					"type": "string"
+				},
+				"periods": {
+					"$ref": "#/components/schemas/Array_f95fe9cf"
+				}
+			},
 			"Shape_55a7b810": {
 				"typedValidations": {
 					"$ref": "#/components/schemas/Array_7d9a8cde"
@@ -35455,6 +35777,35 @@
 					"type": "boolean"
 				}
 			},
+			"Shape_65151b40": {
+				"sum": {
+					"$ref": "#/components/schemas/Object_absentCount_coverage_estimated_a35fdbc3"
+				}
+			},
+			"Shape_671a9686": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"total": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_contributions_display_fa67844e"
+				},
+				"fees": {
+					"$ref": "#/components/schemas/Array_e6963b34"
+				},
+				"cash": {
+					"$ref": "#/components/schemas/Object_currencies_display_unknownCount_67c9789c"
+				},
+				"groups": {
+					"$ref": "#/components/schemas/Object_model_pool_role_0c099801"
+				},
+				"references": {
+					"$ref": "#/components/schemas/Array_571bba38"
+				},
+				"sources": {
+					"$ref": "#/components/schemas/Object_attempts_gaps_runs_75a5be51"
+				}
+			},
 			"Shape_6a5716ff": {
 				"key": {
 					"type": "string",
@@ -35534,6 +35885,40 @@
 				},
 				"cache": {
 					"$ref": "#/components/schemas/Union_5e8ad8cd"
+				}
+			},
+			"Shape_6cb3eb59": {
+				"contributions": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9007199254740991
+				},
+				"providerCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"marginalCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"seatCredits": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"energyKwh": {
+					"$ref": "#/components/schemas/Object_absentCount_coverage_estimated_ae225c75"
+				},
+				"energyCost": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"apiEquivalent": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"display": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_energy_extra_994ceeec"
+				},
+				"key": {
+					"type": "string"
+				},
+				"fees": {
+					"$ref": "#/components/schemas/Array_e6963b34"
 				}
 			},
 			"Shape_6d9726b2": {
@@ -35861,6 +36246,37 @@
 					"$ref": "#/components/schemas/Array_d853a408"
 				}
 			},
+			"Shape_8389efa5": {
+				"contributions": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9007199254740991
+				},
+				"providerCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"marginalCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"seatCredits": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"energyKwh": {
+					"$ref": "#/components/schemas/Object_absentCount_coverage_estimated_ae225c75"
+				},
+				"energyCost": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"apiEquivalent": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"display": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_energy_extra_994ceeec"
+				},
+				"key": {
+					"type": "string"
+				}
+			},
 			"Shape_844db96d": {
 				"id": {
 					"type": "string",
@@ -35919,6 +36335,20 @@
 				},
 				"jobs": {
 					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
+			"Shape_863e1321": {
+				"role": {
+					"$ref": "#/components/schemas/Array_a6b75956"
+				},
+				"model": {
+					"$ref": "#/components/schemas/Array_a6b75956"
+				},
+				"target": {
+					"$ref": "#/components/schemas/Array_a6b75956"
+				},
+				"pool": {
+					"$ref": "#/components/schemas/Array_61cc197e"
 				}
 			},
 			"Shape_8b9f5e83": {
@@ -36085,6 +36515,34 @@
 				},
 				"tree": {
 					"$ref": "#/components/schemas/Object_fingerprint_head_untracked_95c13d90"
+				}
+			},
+			"Shape_a56ede57": {
+				"contributions": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9007199254740991
+				},
+				"providerCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"marginalCharge": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"seatCredits": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"energyKwh": {
+					"$ref": "#/components/schemas/Object_absentCount_coverage_estimated_ae225c75"
+				},
+				"energyCost": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"apiEquivalent": {
+					"$ref": "#/components/schemas/Union_a23cac85"
+				},
+				"display": {
+					"$ref": "#/components/schemas/Object_apiEquivalent_energy_extra_994ceeec"
 				}
 			},
 			"Shape_a5713d5b": {
@@ -37376,6 +37834,54 @@
 					"$ref": "#/components/schemas/Union_4bf0a9b3"
 				}
 			},
+			"Shape_cc850031": {
+				"poolId": {
+					"type": "string"
+				},
+				"payer": {
+					"enum": ["personal", "sponsor", "employer", "none", "unknown"]
+				},
+				"period": {
+					"$ref": "#/components/schemas/Object_end_kind_start_b8bf6fad"
+				},
+				"amount": {
+					"$ref": "#/components/schemas/Union_1629306c"
+				},
+				"currency": {
+					"type": "string"
+				},
+				"evidence": {
+					"type": "string",
+					"const": "declared"
+				},
+				"partial": {
+					"type": "boolean"
+				},
+				"display": {
+					"type": "string"
+				}
+			},
+			"Shape_ccfea046": {
+				"measured": {
+					"type": "number",
+					"const": 0
+				},
+				"estimated": {
+					"type": "number",
+					"const": 0
+				},
+				"unknownCount": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"absentCount": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"coverage": {
+					"$ref": "#/components/schemas/Object_estimated_measured_unknown_4c605d35"
+				}
+			},
 			"Shape_cd5c508e": {
 				"status": {
 					"enum": ["verified", "rejected", "skipped", "not_implicated"]
@@ -37654,6 +38160,39 @@
 					"$ref": "#/components/schemas/Object_catalog_free_none_6f8359dd"
 				}
 			},
+			"Shape_e8dc3edc": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "cost"
+				},
+				"scope": {
+					"$ref": "#/components/schemas/Union_dd57b145"
+				},
+				"groupBy": {
+					"enum": ["role", "model", "target", "turn"]
+				},
+				"total": {
+					"$ref": "#/components/schemas/Object_calls_pricedBy_tokens_becd86ce"
+				},
+				"groups": {
+					"$ref": "#/components/schemas/Array_2066e3fa"
+				},
+				"economy": {
+					"$ref": "#/components/schemas/Object_cash_fees_groups_c8211a24"
+				}
+			},
 			"Shape_e908a932": {
 				"rows": {
 					"$ref": "#/components/schemas/Array_296ec6ce"
@@ -37731,6 +38270,19 @@
 				"queued": {
 					"type": "boolean",
 					"const": true
+				}
+			},
+			"Shape_ec387842": {
+				"currencies": {
+					"$ref": "#/components/schemas/Array_8c587473"
+				},
+				"unknownCount": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9007199254740991
+				},
+				"display": {
+					"type": "string"
 				}
 			},
 			"Shape_ef070bee": {
@@ -39264,6 +39816,16 @@
 					}
 				]
 			},
+			"Union_0ff92656": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_sum_unit_e0b670f1"
+					},
+					{
+						"$ref": "#/components/schemas/Object_sum_479b787b"
+					}
+				]
+			},
 			"Union_1025c694": {
 				"anyOf": [
 					{
@@ -39305,6 +39867,22 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_1629306c": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_kind_source_value_98467391"
+					},
+					{
+						"$ref": "#/components/schemas/Object_kind_method_value_62213f1d"
+					},
+					{
+						"$ref": "#/components/schemas/Object_kind_reason_20b1f976"
+					},
+					{
+						"$ref": "#/components/schemas/Object_kind_reason_43e7de9e"
 					}
 				]
 			},
@@ -40842,6 +41420,16 @@
 					}
 				]
 			},
+			"Union_a23cac85": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Union_0ff92656"
+					},
+					{
+						"$ref": "#/components/schemas/Union_f355ac83"
+					}
+				]
+			},
 			"Union_a2cec452": {
 				"anyOf": [
 					{
@@ -41722,6 +42310,16 @@
 					{
 						"type": "string",
 						"const": "ssh"
+					}
+				]
+			},
+			"Union_f355ac83": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_refused_units_a7b75d21"
+					},
+					{
+						"$ref": "#/components/schemas/Object_refused_unit_c3a9ff6c"
 					}
 				]
 			},

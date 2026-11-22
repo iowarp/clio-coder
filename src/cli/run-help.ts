@@ -34,9 +34,9 @@ Flags:
   --frequency-penalty <N>   one-run frequency penalty override
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
-  --output-format <format>  text|json|stream-json: schema v2 output. json writes one {"type":"run_end",
-                            "schemaVersion":2,...} envelope with exitCode, outcome and causes[]; stream-json
-                            writes a v2 session frame, the event frames, then that envelope
+  --output-format <format>  text|json|stream-json: schema v3 output. json writes one {"type":"run_end",
+                            "schemaVersion":3,...} envelope with exitCode, outcome and causes[]; stream-json
+                            writes a v3 session frame, the event frames, then that envelope
   -o, --output-last-message <path>
                             with --output-format json|stream-json, write the final answer there on exit 0
   --output <path>           repeatable: a file the run must write; the prompt gets an "output: <path>" line,

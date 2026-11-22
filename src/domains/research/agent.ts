@@ -1,6 +1,6 @@
 /**
  * PLAN+EDIT: one headless main-agent run of this same build in the iteration's worktree, through `run --output-format
- * stream-json` (schema v2). Clio's own agent both plans and edits. The run inherits the operator's environment so its
+ * stream-json` (schema v3). Clio's own agent both plans and edits. The run inherits the operator's environment so its
  * targets and credentials resolve as an interactive run's would; it runs at the campaign's autonomy (`default`, or
  * contained `yolo` with the operator's autonomous caps) with dispatch off, and the campaign's remaining wall time and
  * spend are passed down as `--timeout` and `--max-cost-usd`. A yolo run's audit comes back on the `autonomy` frame.
@@ -85,7 +85,7 @@ export function parseAgentRunFrames(stdout: string, exitCode: number | null, std
 			costs.push(usage?.cost);
 		}
 		if (frame.type === "autonomy") autonomy = readAutonomyAudit(frame) ?? autonomy;
-		if (frame.type === "run_end" && frame.schemaVersion === 2) {
+		if (frame.type === "run_end" && frame.schemaVersion === 3) {
 			if (typeof frame.sessionId === "string") sessionId = frame.sessionId;
 			const result: Record<string, unknown> = isRecord(frame.result) ? frame.result : {};
 			if (typeof result.text === "string") text = result.text;

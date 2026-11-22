@@ -486,7 +486,7 @@ function runOne({ arm, task, round, options, scratch }) {
 			}
 		})
 		.filter((frame) => frame !== null);
-	const end = frames.findLast((frame) => frame.type === "run_end" && frame.schemaVersion === 2) ?? {};
+	const end = frames.findLast((frame) => frame.type === "run_end" && frame.schemaVersion === 3) ?? {};
 	const answer =
 		options.tier === "worker" ? String(end.dispatch?.runs?.[0]?.output?.text ?? "") : String(end.result?.text ?? "");
 	const toolCalls =

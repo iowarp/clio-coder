@@ -16,7 +16,7 @@ const HELP = `clio-coder schema <name>
 
 Print the JSON Schema (draft 2020-12) of one machine-readable document on stdout:
 
-  run-result     the run_end document of run --output-format json|stream-json (schema v2)
+  run-result     the run_end document of run --output-format json|stream-json (schema v3)
   run-events     one line of run --output-format stream-json
   task           the run --task-file envelope (version 1)
   help           the help --json manifest, with the closed set of error slugs

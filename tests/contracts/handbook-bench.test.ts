@@ -58,13 +58,13 @@ it("counts duplicate pairs, invalid citations and tree contradictions in a handb
 it("counts a v2 main stream's tool calls as the harness does: chains by their steps, cut-off calls as none", () => {
 	strictEqual(
 		mainToolCalls([
-			{ type: "session", schemaVersion: 2, id: "s" },
+			{ type: "session", schemaVersion: 3, id: "s" },
 			{ type: "tool_execution_end", toolCallId: "a" },
 			{ type: "tool_execution_end", toolCallId: "chain" },
 			{ type: "tool_execution_end", toolCallId: "chain:1", parentToolCallId: "chain" },
 			{ type: "tool_execution_end", toolCallId: "chain:2", parentToolCallId: "chain" },
 			{ type: "tool_execution_end", toolCallId: "cut", notRun: "output_limit" },
-			{ type: "run_end", schemaVersion: 2, result: { text: "done", artifacts: [] } },
+			{ type: "run_end", schemaVersion: 3, result: { text: "done", artifacts: [] } },
 		]),
 		3,
 	);

@@ -1,8 +1,8 @@
 import { SETTINGS_FIELD_NAMES } from "../../core/settings-fields.js";
+import type { EconomyGroup, EconomyProjection, EconomyQuantities } from "../../core/telemetry/economy.js";
 import type { EVENTS, JournalEventName, JournalPayload } from "../../core/telemetry/events.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { BUILTIN_RUNTIME_BOOT_MANIFEST } from "../providers/runtimes/boot-manifest.js";
-import type { EconomyGroup, EconomyProjection, EconomyQuantities } from "./economy-fold.js";
 
 /**
  * What a share below the research profile keeps of each record and structural object (#434). Removing known-bad

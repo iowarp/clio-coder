@@ -30,6 +30,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
+import type { EconomyProjection } from "../../core/telemetry/economy.js";
 import { callEconomicsOf, runEconomicsOf } from "../../core/telemetry/economy.js";
 import type { AgentRole, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
@@ -71,7 +72,7 @@ import { countsAsToolCall, EvidenceFindingsObjectSchema, RunResultObjectSchema }
 import { ToolNames } from "../../core/tool-names.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
-import type { EconomyContribution, EconomyFoldOptions, EconomyProjection } from "./economy-fold.js";
+import type { EconomyContribution, EconomyFoldOptions } from "./economy-fold.js";
 import { foldEconomy } from "./economy-fold.js";
 import { foldDecisions } from "./fact-folds.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
@@ -2447,7 +2448,14 @@ function costGroups(view: View, base: Omit<ParsedFactRef, "metric">, keys: reado
 	});
 }
 
-export function costReport(source: SessionSource, groupBy: GroupBy = "role", options: ReadOptions = {}): CostReportV1 {
+/** A cost report's read options: the header's clock and the declared funding pools its economy adds fees for. */
+export type CostReadOptions = ReadOptions & EconomyFoldOptions;
+
+export function costReport(
+	source: SessionSource,
+	groupBy: GroupBy = "role",
+	options: CostReadOptions = {},
+): CostReportV1 {
 	const view: View = { session: source };
 	const analysis = analyze(source);
 	const base = { scope: "session" as const, owner: source.sessionId };
@@ -2463,15 +2471,21 @@ export function costReport(source: SessionSource, groupBy: GroupBy = "role", opt
 			pricedBy: pricedByCounts(select(view, { ...base, metric: "usd" })?.parts ?? []),
 		},
 		groups: costGroups(view, base, groupKeys([...analysis.runs.values()], analysis.attempts, groupBy), groupBy),
+		economy: economyReport(source, economyOptions(options)),
 	};
 }
+
+const economyOptions = (options: CostReadOptions): EconomyFoldOptions => ({
+	...(options.pools ? { pools: options.pools } : {}),
+	...(options.window ? { window: options.window } : {}),
+});
 
 /** One cost report across a repository's sessions and runs over a window (#434 §11.1); refs use the `repo` scope. */
 export function repoCostReport(
 	repo: RepoSource,
 	scope: { repo: string; days: number },
 	groupBy: GroupBy = "role",
-	options: ReadOptions = {},
+	options: CostReadOptions = {},
 ): CostReportV1 {
 	const view: View = { repo };
 	const base = { scope: "repo" as const, owner: repo.owner };
@@ -2492,6 +2506,7 @@ export function repoCostReport(
 			pricedBy: pricedByCounts(select(view, { ...base, metric: "usd" })?.parts ?? []),
 		},
 		groups: costGroups(view, base, groupKeys([...runs.values()], attempts, groupBy), groupBy),
+		economy: economyReport(repo, economyOptions(options)),
 	};
 }
 
@@ -2505,6 +2520,18 @@ const runContribution = (run: Run, economics: EconomyContribution["economics"]):
 	cut: { role: "worker", model: runModelKey(run), target: runTargetKey(run) },
 });
 
+function attemptContribution(attempt: Attempt): EconomyContribution {
+	const target = attempt.settled?.target ?? attempt.started.target;
+	return {
+		ref: { kind: "attempt", attemptId: attempt.started.attemptId, callId: attempt.started.callId },
+		at: attempt.settledAt ?? attempt.startedAt,
+		settled: attempt.settled !== null,
+		economics: callEconomicsOf(attempt.settled),
+		...(attempt.settled?.billing ? { reportedNanoAiu: attempt.settled.billing.nanoAiu } : {}),
+		cut: { role: attempt.agent.role, model: modelKey(target), target: target.targetId },
+	};
+}
+
 /**
  * The contributions a selection counts, each once: an attempt's settlement; a run folded from its calls as those
  * calls; a run that reported an aggregate as its settled economics in place of its constituents (so its fees and energy
@@ -2513,17 +2540,6 @@ const runContribution = (run: Run, economics: EconomyContribution["economics"]):
  * unobserved share.
  */
 function economyContributions(parts: readonly Part[]): EconomyContribution[] {
-	const fromAttempt = (attempt: Attempt): EconomyContribution => {
-		const target = attempt.settled?.target ?? attempt.started.target;
-		return {
-			ref: { kind: "attempt", attemptId: attempt.started.attemptId, callId: attempt.started.callId },
-			at: attempt.settledAt ?? attempt.startedAt,
-			settled: attempt.settled !== null,
-			economics: callEconomicsOf(attempt.settled),
-			...(attempt.settled?.billing ? { reportedNanoAiu: attempt.settled.billing.nanoAiu } : {}),
-			cut: { role: attempt.agent.role, model: modelKey(target), target: target.targetId },
-		};
-	};
 	const counted = new Set<string>();
 	for (const part of parts)
 		for (const attempt of part.attempts ?? (part.run?.fold.source === "calls" ? part.run.attempts : []))
@@ -2540,7 +2556,7 @@ function economyContributions(parts: readonly Part[]): EconomyContribution[] {
 			});
 		const run = part.run;
 		if (!run) {
-			contributions.push(...(part.attempts ?? []).map(fromAttempt));
+			contributions.push(...(part.attempts ?? []).map(attemptContribution));
 			return;
 		}
 		if (!run.source.present) {
@@ -2548,7 +2564,7 @@ function economyContributions(parts: readonly Part[]): EconomyContribution[] {
 			return;
 		}
 		if (run.fold.source === "calls") {
-			contributions.push(...run.attempts.map(fromAttempt));
+			contributions.push(...run.attempts.map(attemptContribution));
 			return;
 		}
 		// A settlement its own calls contradict is not trusted as an aggregate: its calls count, and the rest is unknown.
@@ -2559,7 +2575,7 @@ function economyContributions(parts: readonly Part[]): EconomyContribution[] {
 			contributions.push(runContribution(run, recorded));
 			return;
 		}
-		contributions.push(...run.attempts.map(fromAttempt), runContribution(run, runEconomicsOf({})));
+		contributions.push(...run.attempts.map(attemptContribution), runContribution(run, runEconomicsOf({})));
 	});
 	return contributions;
 }
@@ -2568,7 +2584,19 @@ function economyContributions(parts: readonly Part[]): EconomyContribution[] {
  * The one economics projection (token economy S10) over a session's own attempts and its runs, or a repository
  * window's: every surface that shows a charge, credits, energy, an API equivalent or a fee reads it here.
  */
-export function economyReport(source: SessionSource | RepoSource, options: EconomyFoldOptions = {}): EconomyProjection {
+export function economyReport(
+	source: SessionSource | RepoSource,
+	options: EconomyFoldOptions = {},
+	filter?: CallFilter,
+): EconomyProjection {
+	// A call filter reads the session's own attempts, as `callRecords` does, so a run's usage and economics fold one set.
+	if (filter !== undefined && !("owner" in source))
+		return foldEconomy(
+			analyze(source)
+				.attempts.filter((attempt) => matches(attempt, filter))
+				.map(attemptContribution),
+			options,
+		);
 	const selection =
 		"owner" in source
 			? selectRepo(source, undefined, "repo")
@@ -2647,7 +2675,7 @@ export function runCostReport(
 	runId: string,
 	source: JournalSource,
 	groupBy: GroupBy = "model",
-	options: ReadOptions = {},
+	options: CostReadOptions = {},
 ): CostReportV1 {
 	const run = analyzeRun(runId, source);
 	const view: View = { run };
@@ -2673,6 +2701,7 @@ export function runCostReport(
 			pricedBy: pricedByCounts([{ run, gap: runGap(run) }]),
 		},
 		groups: costGroups(view, base, [...keys].sort(), groupBy),
+		economy: foldEconomy(economyContributions([{ run, gap: runGap(run) }]), economyOptions(options)),
 	};
 }
 
@@ -4641,11 +4670,11 @@ export function usageReport(source: RepoSource, from: number, to: number, pools?
 				source,
 				{ repo: parseRepoOwner(source.owner)?.cwdHash ?? "all", days: parseRepoOwner(source.owner)?.days ?? 30 },
 				groupBy,
+				{ ...(pools ? { pools } : {}), window: { from, to } },
 			),
 		),
 		cache: source.sessions.map((session) => cacheReport(session)),
 		performance: operatorPerformance(source),
-		economy: economyReport(source, { ...(pools ? { pools } : {}), window: { from, to } }),
 	};
 }
 

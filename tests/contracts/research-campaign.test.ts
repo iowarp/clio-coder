@@ -371,7 +371,7 @@ describe("research yolo", () => {
 		const entry = join(dir, "fake-run.cjs");
 		writeFileSync(
 			entry,
-			`process.stdout.write(JSON.stringify({ type: "run_end", schemaVersion: 2, exitCode: 0, outcome: "succeeded", causes: [], result: { text: process.env.${YOLO_CONFINEMENT_PIN_ENV} ?? "unpinned", artifacts: [] } }) + "\\n");\n`,
+			`process.stdout.write(JSON.stringify({ type: "run_end", schemaVersion: 3, exitCode: 0, outcome: "succeeded", causes: [], result: { text: process.env.${YOLO_CONFINEMENT_PIN_ENV} ?? "unpinned", artifacts: [] } }) + "\\n");\n`,
 		);
 		const runner = createSpawnAgentRunner(entry, []);
 		strictEqual((await runner({ worktree: dir, prompt: "p", autonomy: "yolo" })).summary, "contained");
@@ -411,7 +411,7 @@ describe("research yolo", () => {
 		ok(!argv.includes("--json-events") && !argv.includes("--json"), argv.join(" "));
 		// The frames a contained yolo `run --output-format stream-json` writes: its audit frame, then the v2 envelope.
 		const stream = [
-			JSON.stringify({ type: "session", schemaVersion: 2, id: "s1" }),
+			JSON.stringify({ type: "session", schemaVersion: 3, id: "s1" }),
 			JSON.stringify({
 				type: "autonomy",
 				confinement: "contained",
@@ -422,7 +422,7 @@ describe("research yolo", () => {
 			}),
 			JSON.stringify({
 				type: "run_end",
-				schemaVersion: 2,
+				schemaVersion: 3,
 				sessionId: "s1",
 				exitCode: 0,
 				outcome: "succeeded",

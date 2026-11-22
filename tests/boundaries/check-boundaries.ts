@@ -464,11 +464,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason: "an ACP prompt's output tokens over its generation time make its tok/s rate, a division over measured facts",
 	},
 	{
-		file: "src/engine/acp/live-telemetry.ts",
-		functions: ["plainCost"],
-		reason: "ACP's spec `cost` field is a plain amount; it is sent only when the session's spend has no unknown part",
-	},
-	{
 		file: "src/interactive/context-bar.ts",
 		functions: ["buildSegmentedContextBar"],
 		reason:

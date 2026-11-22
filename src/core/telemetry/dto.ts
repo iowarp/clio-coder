@@ -1,6 +1,12 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
-import { CallEconomicsSchema, EconomyUnitSchema, OpaqueIdSchema, RunEconomicsSchema } from "./economy.js";
+import {
+	CallEconomicsSchema,
+	EconomyProjectionSchema,
+	EconomyUnitSchema,
+	OpaqueIdSchema,
+	RunEconomicsSchema,
+} from "./economy.js";
 import {
 	AgentRole,
 	ConfigChangeSource,
@@ -625,6 +631,11 @@ export const CostReportSchema = Type.Object(
 		groupBy: vocabulary(["role", "model", "target", "turn"]),
 		total: Type.Object({ calls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema, pricedBy }, closed),
 		groups: Type.Array(costGroup),
+		/**
+		 * The scope's economics beside its route price (R1): extra user cost, API equivalent, seat credits, energy and
+		 * each declared fee once per pool and period, with the reference rows they were priced from (token economy S11).
+		 */
+		economy: EconomyProjectionSchema,
 	},
 	closed,
 );
