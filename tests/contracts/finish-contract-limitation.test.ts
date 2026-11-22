@@ -31,8 +31,9 @@ import {
 	sealCompletion,
 	withoutReplyLimitation,
 } from "../../src/tools/finish.js";
-import { limitationTool } from "../../src/tools/limitation.js";
+import { LIMITATION_REASONS, limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
+import { prepareToolArgs } from "../../src/tools/registry.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 
 const SOURCE = { source: "builtin" } as never;
@@ -1058,6 +1059,30 @@ describe("the limitation tool", () => {
 		const result = await limitationTool.run({ scope: "tests could not run", reason: "because" });
 		strictEqual(result.kind, "error");
 		ok(result.kind === "error" && result.message.includes("reason must be one of"), JSON.stringify(result));
+	});
+
+	it("refuses the first off-enum reason in a session with every reason listed, then files later ones (row 382)", async () => {
+		// The wave-69 luna h4 shape: prose in reason. The registry prepares the args before run, as both call paths do.
+		const call = (args: Record<string, unknown>, sessionId: string) =>
+			limitationTool.run(prepareToolArgs(limitationTool, args), { sessionId });
+		const prose = { scope: "hello.txt check", reason: "checks are not applicable to this task" };
+		const refused = await call(prose, "s382-a");
+		ok(refused.kind === "error", JSON.stringify(refused));
+		if (refused.kind !== "error") return;
+		for (const reason of LIMITATION_REASONS) ok(refused.message.includes(reason), refused.message);
+		ok(refused.message.includes("no runner exists or no project check applies to this change"), refused.message);
+		strictEqual(refused.details?.limitation, undefined);
+		// The second off-enum reason in that session is filed as before, never as no-runner.
+		const filed = await call({ scope: "hello.txt check", reason: "not applicable" }, "s382-a");
+		ok(filed.kind === "ok", JSON.stringify(filed));
+		deepStrictEqual(filed.details?.limitation, { scope: "hello.txt check (not applicable)", reason: "other", paths: [] });
+		// A padded exact value is no off-enum reason, and the refusal counts per session.
+		const typed = await call({ scope: "no checks", reason: " no-runner " }, "s382-b");
+		ok(
+			typed.kind === "ok" && (typed.details?.limitation as { reason?: string } | undefined)?.reason === "no-runner",
+			JSON.stringify(typed),
+		);
+		strictEqual((await call(prose, "s382-b")).kind, "error");
 	});
 
 	it("rejects an empty scope", async () => {
