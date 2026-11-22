@@ -23,7 +23,7 @@ import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../doma
 import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { isToolProfileName } from "../tools/profiles.js";
-import { type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
+import { dispatchOnlyFlagConflict, type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
 import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { writeFrame } from "./modes/jsonl.js";
@@ -104,17 +104,6 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		},
 		remainingMs: () => Math.max(0, endsAt - performance.now()),
 	};
-}
-
-function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
-	return (
-		parsed.record === true ||
-		parsed.agentProfile !== undefined ||
-		parsed.agentRuntime !== undefined ||
-		parsed.toolProfile !== undefined ||
-		parsed.review !== undefined ||
-		parsed.required.length > 0
-	);
 }
 
 /**
@@ -456,8 +445,9 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
-			if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
-				writeRunDiagnostic("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n", "flag_conflict");
+			const dispatchOnly = parsed.agentId === undefined ? dispatchOnlyFlagConflict(parsed) : null;
+			if (dispatchOnly !== null) {
+				writeRunDiagnostic(`clio-coder run: ${dispatchOnly}\n`, "flag_conflict");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -1160,10 +1150,8 @@ async function runDispatch(
 				? null
 				: await schemaCheck.finish.validateStructuredAnswer(
 						schemaCheck.schema,
-		const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 						redactUrlCredentials(receipt.output?.state === "final" ? receipt.output.text : ""),
 					);
-			noteAgentAnswer(dispatchAnswerText(answer, receipt));
 		const schemaMismatch = structuredVerdict !== null && !structuredVerdict.ok;
 		if (schemaCheck !== undefined) {
 			noteStructuredV2({
@@ -1172,8 +1160,10 @@ async function runDispatch(
 				...(structuredVerdict !== null && !structuredVerdict.ok ? { errors: structuredVerdict.errors } : {}),
 			});
 		}
+		const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 		if (parsed.json) {
 			noteAgentRunCompletion(agentRunCompletion(receipt));
+			noteAgentAnswer(dispatchAnswerText(answer, receipt));
 			for (const frame of credentials.finish<RunJsonAgentFrame>(receipt.exitCode === 0)) writeAgentFrame(frame);
 			const verifier = verifierVerdict(receipt);
 			for (const frame of credentials.scrub<RunJsonAgentFrame>({

@@ -45,7 +45,16 @@ test("clio-coder run --max-cost-usd bounds what the run adds, under any lower co
 	deepStrictEqual(parseRunCliArgs(["--agent", "scout", "--max-cost-usd", "0.01", "--worktree", "x"]).diagnostics, []);
 	deepStrictEqual(
 		parseRunCliArgs(["--worktree", "x"]).diagnostics.map((entry) => entry.message),
-		["fleet dispatch flags require --agent <recipe-id>"],
+		["--worktree is a fleet dispatch flag and requires --agent <recipe-id>"],
+	);
+	// Row 362 (17): the message names the flag the operator passed.
+	deepStrictEqual(
+		parseRunCliArgs(["--review", "abc123", "x"]).diagnostics.map((entry) => entry.message),
+		["--review is a fleet dispatch flag and requires --agent <recipe-id>"],
+	);
+	deepStrictEqual(
+		parseRunCliArgs(["--review", "abc123", "--record", "x"]).diagnostics.map((entry) => entry.message),
+		["--record and --review are fleet dispatch flags and require --agent <recipe-id>"],
 	);
 	// A continued session already spent $2; the run may add $1.50 more.
 	const ceiling = runCostCeilingUsd({ spentUsd: 2, runMaxUsd: 1.5, configuredUsd: 0 });
@@ -55,15 +64,6 @@ test("clio-coder run --max-cost-usd bounds what the run adds, under any lower co
 	strictEqual(runCostCeilingUsd({ spentUsd: 2, runMaxUsd: 1.5, configuredUsd: 3 }), 3);
 });
 
-describe("--max-cost-usd and parallel dispatches", () => {
-	beforeEach(() => isolateDispatchState());
-	afterEach(() => restoreDispatchState());
-
-	it("stops running workers at the cap, so two together pass it by at most one call each", async () => {
-		const capUsd = 1;
-		const callUsd = 0.3;
-		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.fleet.retry.maxRetries = 0;
 test("a step's cost is its known USD, or the unknown fact when nothing priced it, never a measured 0 (row 362)", () => {
 	const empty = { measured: 0, estimated: 0, unknownCount: 0, absentCount: 0 };
 	const none = { measured: 0, estimated: 0, unknown: 0 };
@@ -90,6 +90,15 @@ test("a step's cost is its known USD, or the unknown fact when nothing priced it
 	);
 });
 
+describe("--max-cost-usd and parallel dispatches", () => {
+	beforeEach(() => isolateDispatchState());
+	afterEach(() => restoreDispatchState());
+
+	it("stops running workers at the cap, so two together pass it by at most one call each", async () => {
+		const capUsd = 1;
+		const callUsd = 0.3;
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
 		settings.safety.limits.sessionCostUsd = capUsd;
 		// Each worker would spend $3 over ten calls if nothing stopped it.
 		const pricedWorker = (spec: WorkerSpec): SpawnedWorker => {

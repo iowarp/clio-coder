@@ -138,6 +138,23 @@ const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
 
 const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
 
+/** The fleet dispatch flags a run without `--agent` was given, named in the refusal, or null when there are none. */
+export function dispatchOnlyFlagConflict(parsed: RunCliArgs): string | null {
+	const flags = [
+		parsed.record === true ? "--record" : null,
+		parsed.agentProfile !== undefined ? "--agent-profile" : null,
+		parsed.agentRuntime !== undefined ? "--agent-runtime" : null,
+		parsed.toolProfile !== undefined ? "--tool-profile" : null,
+		parsed.worktree === true ? "--worktree" : null,
+		parsed.review !== undefined ? "--review" : null,
+		parsed.required.length > 0 ? "--require" : null,
+	].filter((flag): flag is string => flag !== null);
+	const last = flags.at(-1);
+	if (last === undefined) return null;
+	if (flags.length === 1) return `${last} is a fleet dispatch flag and requires --agent <recipe-id>`;
+	return `${flags.slice(0, -1).join(", ")} and ${last} are fleet dispatch flags and require --agent <recipe-id>`;
+}
+
 /**
  * The run leaf/mode matrix, checked by the light parser so a refusal exits 2 before `run.js` loads.
  * Main mode is no `--agent`; agent mode is `--agent <recipe>` dispatch to a worker.
@@ -156,6 +173,7 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  * | --resume with --continue                                       | usage | usage |
  * | --fork without --resume or --continue                          | usage | usage |
  */
+
 function runModeMatrixErrors(parsed: RunCliArgs): CliArgDiagnostic[] {
 	const errors: CliArgDiagnostic[] = [];
 	const conflict = (message: string): void => {
@@ -171,15 +189,8 @@ function runModeMatrixErrors(parsed: RunCliArgs): CliArgDiagnostic[] {
 		});
 	}
 	if (parsed.agentId === undefined) {
-		const dispatchOnly =
-			parsed.record === true ||
-			parsed.agentProfile !== undefined ||
-			parsed.agentRuntime !== undefined ||
-			parsed.toolProfile !== undefined ||
-			parsed.worktree === true ||
-			parsed.review !== undefined ||
-			parsed.required.length > 0;
-		if (dispatchOnly) conflict("fleet dispatch flags require --agent <recipe-id>");
+		const dispatchOnly = dispatchOnlyFlagConflict(parsed);
+		if (dispatchOnly !== null) conflict(dispatchOnly);
 		return errors;
 	}
 	if (parsed.review !== undefined && parsed.worktree === true) {
