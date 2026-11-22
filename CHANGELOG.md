@@ -169,6 +169,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A second CLIO Coder process on the same state directory follows another process's live workers on its board and can answer their held approval asks; the owner records which process answered.
 - `fleet view <fleetRootId>` shows each step's task.
 - Every worker role holds `code_nav`, and the plan card and receipt name each capability withheld from a run with its reason and remedy.
+- The card for a held task merge offers Land, and `dispatch` takes `land` with a kept branch's run id to reopen that card. CLIO Coder lands the branch on the host as the operator's own action, with the checks `clio-coder fleet land` runs, so a sandboxed session needs no sandbox escape to land work the operator approved. Land is bound to the branch tip and destination the card showed, and refuses uncommitted work and protected paths.
 
 **Delegation to other agents**
 
@@ -390,6 +391,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - On a shared state directory, another host's lapsed capacity lease or plan reservation is released 60 seconds after its expiry instead of 5 or 15 minutes, and a plan whose next member is still queued stays current for other hosts.
 - Checks no longer write Python bytecode caches into the checkout, and a `verify` call that only lists checks keeps the run's write record complete.
 - A `limitation` call's reason and scope reach the run feed, and the trust line names a compromised run's deciding axis once.
+- A worker's request that a contained-yolo session refuses says so: the text names contained yolo and points at an attended operator or unconfined yolo, instead of saying the session runs at autonomy default.
 
 **Checks and safety classification**
 
