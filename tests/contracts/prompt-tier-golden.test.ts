@@ -405,7 +405,7 @@ describe("full-window runtime notes of the v1 profile on the pinned model", () =
 				: {}),
 		});
 		const shell = "The shell is for commands no native tool covers.";
-		const nativeRows = ["with `read`, not cat", "with `grep`, not shell grep", "Change a file with `edit`"];
+		const nativeRows = ["with `read`, not cat", "with `grep`, not shell grep", "Change a file with `edit`"] as const;
 		const check = "run `verify` with the check that covers it";
 		const record = "Record such a check with `limitation`.";
 		const full = session("headless-default", { contextWindow: 200_000 });
