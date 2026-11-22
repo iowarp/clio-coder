@@ -53,7 +53,20 @@ export interface TariffTokens {
 }
 
 export type ReferenceQuote =
-	| { kind: "quoted"; usd: number; rowId: string; source: string; verifiedAt: string; tier: string }
+	| {
+			kind: "quoted";
+			usd: number;
+			rowId: string;
+			source: string;
+			verifiedAt: string;
+			tier: string;
+			/**
+			 * `effective`: the row is in force on the day. `announced-list`: a promotion is in force and this is the
+			 * standard list row the publisher announced to follow it, starting `effectiveFrom`.
+			 */
+			basis: "effective" | "announced-list";
+			effectiveFrom: string;
+	  }
 	| { kind: "unknown"; reason: string };
 
 interface LoadedCatalog {
@@ -303,6 +316,8 @@ function writeRate(row: TariffRow, rates: TariffRates, retention: string): bigin
  * Prices one request at the dated public list price of `model` (exact provider id; no family or alias substitution).
  * Writes are priced in place of fresh input, so `fresh` excludes them. The standard row applies unless the caller
  * names a promotional scenario (catalog.ts prices at list, not a launch discount, so a cap never under-counts).
+ * While a promotion runs ahead of its first list price, the list row that starts where the promotion ends is the
+ * standard price, quoted with basis `announced-list`.
  */
 export function quoteReferenceTariff(
 	model: string,
@@ -329,13 +344,23 @@ export function quoteReferenceTariff(
 	const scenario = options.scenario;
 	const pool = forModel.filter((row) => (scenario === undefined ? row.kind === "standard" : row.scenario === scenario));
 	if (scenario !== undefined && pool.length === 0) return unknown(`scenario ${scenario} has no row for ${model}`);
-	const effective = pool.filter((row) => effectiveOn(row, day));
+	let effective = pool.filter((row) => effectiveOn(row, day));
+	let basis: "effective" | "announced-list" = "effective";
+	if (effective.length === 0 && scenario === undefined) {
+		const promoEnds = new Set(
+			forModel.filter((row) => row.kind === "promo" && effectiveOn(row, day)).map((row) => row.effectiveTo),
+		);
+		effective = pool.filter((row) => promoEnds.has(row.effectiveFrom));
+		basis = "announced-list";
+	}
 	if (effective.length === 0) {
 		if (scenario !== undefined)
 			return unknown(`scenario ${scenario} is not effective for ${model} on ${day}: ${pool.map(interval).join(", ")}`);
 		const promos = forModel.filter((row) => row.kind === "promo" && effectiveOn(row, day));
 		const hint =
-			promos.length > 0 ? `; promo scenario ${promos.map((row) => row.scenario).join(", ")} is effective that day` : "";
+			promos.length > 0
+				? `; promo scenario ${promos.map((row) => row.scenario).join(", ")} is effective that day with no announced list price after it`
+				: "";
 		const rows = pool.length > 0 ? ` (rows: ${pool.map(interval).join(", ")})` : "";
 		return unknown(`no standard list price for ${model} effective on ${day}${rows}${hint}`);
 	}
@@ -373,6 +398,8 @@ export function quoteReferenceTariff(
 		source: row.source,
 		verifiedAt: row.verifiedAt,
 		tier,
+		basis,
+		effectiveFrom: row.effectiveFrom,
 	};
 }
 

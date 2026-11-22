@@ -57,7 +57,7 @@ for (const [label, model, day, tokens, scenario] of quotes) {
 	console.log(`  ${label}: ${model} on ${day}${scenario ? ` scenario ${scenario}` : ""}, ${describe(tokens)}`);
 	console.log(
 		quote.kind === "quoted"
-			? `    = $${quote.usd}  row ${quote.rowId}  tier ${quote.tier}  verified ${quote.verifiedAt}  ${quote.source}`
+			? `    = $${quote.usd}  ${quote.basis} ${quote.effectiveFrom}  row ${quote.rowId}  tier ${quote.tier}  verified ${quote.verifiedAt}  ${quote.source}`
 			: `    = unknown: ${quote.reason}`,
 	);
 }

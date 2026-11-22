@@ -127,17 +127,18 @@ test("reference tariff quotes the dated list price per request and refuses what 
 	const witness: TariffTokens = { fresh: 0, read: 45_000, write: { "30m": 5_000 }, output: 2_000 };
 	const usd = (tokens: TariffTokens, day = "2026-11-22", model = "gpt-6-luna", scenario?: string) => {
 		const quote = quoteReferenceTariff(model, day, tokens, scenario !== undefined ? { scenario } : {});
-		return quote.kind === "quoted" ? [quote.usd, quote.tier] : quote.kind;
+		return quote.kind === "quoted" ? [quote.usd, quote.tier, quote.basis, quote.effectiveFrom] : quote.kind;
 	};
-	deepStrictEqual(usd(witness), [0.002075, "base"]);
-	deepStrictEqual(usd({ ...witness, fresh: 222_000 }), [0.024275, "base"]);
-	deepStrictEqual(usd({ ...witness, fresh: 222_001 }), [0.0480502, "prompt>272000"]);
+	deepStrictEqual(usd(witness), [0.002075, "base", "effective", "2026-11-22"]);
+	deepStrictEqual(usd({ ...witness, fresh: 222_000 }), [0.024275, "base", "effective", "2026-11-22"]);
+	deepStrictEqual(usd({ ...witness, fresh: 222_001 }), [0.0480502, "prompt>272000", "effective", "2026-11-22"]);
 	deepStrictEqual(usd({ ...witness, write: { unknown: 5_000 } }), "unknown", "30m and 12h write rates differ");
 	const carbon: TariffTokens = { fresh: 5_000, read: 45_000, write: {}, output: 2_000 };
 	const promo = "gemini-4-carbon-introductory";
-	deepStrictEqual(usd(carbon, "2026-11-30", "gemini-4-carbon"), "unknown", "list price starts 2026-12-01");
-	deepStrictEqual(usd(carbon, "2026-11-30", "gemini-4-carbon", promo), [0.0345, "base"]);
-	deepStrictEqual(usd(carbon, "2026-12-01", "gemini-4-carbon"), [0.069, "base"]);
+	deepStrictEqual(usd(carbon, "2026-11-30", "gemini-4-carbon"), [0.069, "base", "announced-list", "2026-12-01"]);
+	deepStrictEqual(usd(carbon, "2026-11-21", "gemini-4-carbon"), "unknown", "no promotion bridges to the list row");
+	deepStrictEqual(usd(carbon, "2026-11-30", "gemini-4-carbon", promo), [0.0345, "base", "effective", "2026-11-22"]);
+	deepStrictEqual(usd(carbon, "2026-12-01", "gemini-4-carbon"), [0.069, "base", "effective", "2026-12-01"]);
 	deepStrictEqual(usd(carbon, "2026-12-01", "gemini-4-carbon", promo), "unknown");
 	deepStrictEqual(usd(witness, "2026-11-22", "gpt-6.2-terra"), "unknown");
 });
