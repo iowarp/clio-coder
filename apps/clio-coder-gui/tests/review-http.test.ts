@@ -63,7 +63,7 @@ test("pending lessons list only unapproved records and an approval removes one",
 		await writeFile(
 			join(dataDir, "memory/records.json"),
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				records: [
 					record("mem-00000000000000a1", false),
 					record("mem-00000000000000a2", true),
