@@ -117,12 +117,35 @@ function parseEditsArray(value: unknown): Edit[] | null {
 	return edits as Edit[];
 }
 
+/** The one shape `edits` takes, shown in every refusal of another shape. */
+const EDITS_SHAPE_REFUSAL =
+	'edit: nothing changed. edits must be an array of objects, each with exactly two string fields: [{"oldText":"<exact text now in the file>","newText":"<replacement>"}]. Example: {"path":"src/app.py","edits":[{"oldText":"retries = 3","newText":"retries = 5"}]}. Send the array itself, with every oldText and newText inside its own object.';
+
+/** Marks arguments whose `edits` could not be read as the expected shape; `run` refuses them. */
+const UNREADABLE_EDITS = "unreadableEdits";
+
+/** A value that is, or is a string that parses as JSON into, the exact entry shape. */
+function readEditEntry(value: unknown): Edit | null {
+	if (typeof value !== "string") return parseEditEntry(value);
+	try {
+		return parseEditEntry(JSON.parse(value) as unknown);
+	} catch {
+		return null;
+	}
+}
+
 /**
- * Normalize the weak-model argument shapes edit still sees in the wild, ported
- * from pi's prepareEditArguments:
- *  - `edits` sent as a JSON string (Opus 4.6, GLM-5.1) -> parsed to an array.
+ * Normalize the argument shapes edit still sees in the wild:
+ *  - `edits`, or one of its entries, sent as a string that parses as JSON into
+ *    the exact expected shape (Opus 4.6, GLM-5.1) -> the parsed value.
  *  - legacy top-level `{oldText, newText}` (pre-`edits[]` callers) -> appended
  *    to `edits[]` instead of erroring the turn.
+ * Any other `edits` is never guessed at: Haiku sends `"[{\"oldText\">text"`
+ * with `newText` beside it, which has no lossless reading, and the schema
+ * error it used to get ("edits.0: expected object, got string") named no
+ * shape, so the same call came back 7 to 8 times in a 12-task run. Such
+ * arguments pass the schema with an empty list and a marker, and `run`
+ * refuses them with the shape and an example (maintainer 2026-11-22).
  * Pure and idempotent: already-normalized args pass through unchanged. Wired as
  * the registry `prepareArguments` hook and also called at the top of `run` so
  * direct callers get the same normalization.
@@ -130,13 +153,21 @@ function parseEditsArray(value: unknown): Edit[] | null {
 function prepareEditArguments(args: Record<string, unknown>): Record<string, unknown> {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
 	const next: Record<string, unknown> = { ...args };
+	if (next[UNREADABLE_EDITS] === true) return next;
 	if (typeof next.edits === "string") {
 		try {
-			const parsed = JSON.parse(next.edits) as unknown;
-			if (Array.isArray(parsed)) next.edits = parsed;
+			next.edits = JSON.parse(next.edits) as unknown;
 		} catch {
-			// Leave the malformed string in place; run() reports the shape error.
+			// Not JSON: refused below with the shape, never repaired.
 		}
+	}
+	if (next.edits !== undefined) {
+		const entries = Array.isArray(next.edits) ? next.edits.map(readEditEntry) : null;
+		if (entries === null || entries.some((entry) => entry === null)) {
+			const { oldText: _oldText, newText: _newText, ...rest } = next;
+			return { ...rest, edits: [], [UNREADABLE_EDITS]: true };
+		}
+		next.edits = entries;
 	}
 	if (typeof next.oldText === "string" && typeof next.newText === "string") {
 		const edits = Array.isArray(next.edits) ? [...next.edits] : [];
@@ -165,8 +196,8 @@ export const editTool: ToolSpec = {
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "edit: missing path argument" };
 		const edits = parseEditsArray(args.edits);
-		if (!edits || edits.length === 0) {
-			return { kind: "error", message: 'edit: provide edits as [{"oldText":"...","newText":"..."}, ...]' };
+		if (args[UNREADABLE_EDITS] === true || !edits || edits.length === 0) {
+			return { kind: "error", message: EDITS_SHAPE_REFUSAL };
 		}
 		const { path: filePath, physical } = resolveMutationTarget(pathArg);
 		const moved = hookLandingRefusal("edit", options?.hookLanding, filePath);

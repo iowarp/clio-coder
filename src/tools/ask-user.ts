@@ -210,7 +210,10 @@ export const askUserParameters: TSchema = Type.Object({
 					}),
 				),
 			}),
-			{ description: "For action=ask: 1 to 4 questions, or exactly 1 when mode=single_question." },
+			{
+				description:
+					"For action=ask: an array of 1 to 4 question objects; exactly 1, still in the array, when mode=single_question.",
+			},
 		),
 	),
 	max_rounds: Type.Optional(Type.Integer({ description: "Round limit for this turn (default 6, max 24)." })),
@@ -308,7 +311,14 @@ export function normalizeAskUserQuestions(args: Record<string, unknown>): {
 	error?: string;
 } {
 	const rawQuestions = args.questions;
-	if (!Array.isArray(rawQuestions)) return { error: "questions must be an array" };
+	// The accepted shape and a minimal example ride the refusal, as edit's does: Haiku sent a top-level `question`
+	// with mode single_question twice in one wave and learned the shape only from this text (lab L11).
+	if (!Array.isArray(rawQuestions)) {
+		return {
+			error:
+				'questions must be an array of question objects, also for a single question; nothing was asked. Example: {"action":"ask","mode":"single_question","questions":[{"question":"<your question>"}]}',
+		};
+	}
 	if (rawQuestions.length < 1) return { error: "questions must contain at least 1 item" };
 	if (rawQuestions.length > 4) return { error: "questions must contain at most 4 items" };
 	const questions: AskUserQuestion[] = [];
