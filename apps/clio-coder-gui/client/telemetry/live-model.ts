@@ -1,4 +1,3 @@
-import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { TelemetryUpdateV1 } from "../../contracts/wire.js";
 
 /**
@@ -22,27 +21,6 @@ export function telemetryInvalidations(update: Pick<TelemetryUpdateV1, "topics">
 	const keys: string[] = [];
 	for (const topic of update.topics) for (const key of TOPIC_READS[topic] ?? []) if (!keys.includes(key)) keys.push(key);
 	return keys;
-}
-
-/**
- * Changes on every settle, which is when the ledger and the accounting can have moved, and has no ceiling: the id
- * of the newest settled turn. A count of settled turns stops moving once the projection drops its oldest turns.
- */
-export function settledKey(turns: SessionSnapshot["turns"]): string {
-	for (let index = turns.length - 1; index >= 0; index--) {
-		const turn = turns[index];
-		if (turn && turn.status !== "running") return turn.id;
-	}
-	return "none";
-}
-
-/**
- * Whether a turn's end re-reads this cached query. The usage read is keyed by the settle key, so the finished turn
- * moves its view to a new key that reads on its own; refreshing the retired key started a read that the move aborted
- * a moment later (GET /usage net::ERR_ABORTED at every turn end).
- */
-export function refreshesAtSettle(queryKey: readonly unknown[], settled: string): boolean {
-	return queryKey[0] !== "session-usage" || queryKey.length < 3 || queryKey[2] === settled;
 }
 
 /** A session's telemetry reads refresh at most this often while its turn streams pushes. */

@@ -1,12 +1,11 @@
 // Pushed context and totals share the session snapshot; settled accounting still supplies model and quota details.
 
-import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContextLedger } from "../../contracts/context-ledger.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { sessionReadScope } from "../api/sessions.js";
-import { settledKey } from "../telemetry/live-model.js";
 
 import { type Spend, tokensText, usageReadable } from "./session-usage-model.js";
 
@@ -16,6 +15,18 @@ const contextReadBasis = new WeakMap<ContextLedger, number>();
 
 /** How many of the retained turns have settled. The projection keeps only the newest turns, so this stops at its cap. */
 export const settledTurns = (turns: Turns): number => turns.filter((turn) => turn.status !== "running").length;
+
+/**
+ * Changes on every settle, which is when the ledger and the accounting can have moved, and has no ceiling: the id
+ * of the newest settled turn. A count of settled turns stops moving once the projection drops its oldest turns.
+ */
+export function settledKey(turns: Turns): string {
+	for (let index = turns.length - 1; index >= 0; index--) {
+		const turn = turns[index];
+		if (turn && turn.status !== "running") return turn.id;
+	}
+	return "none";
+}
 
 /** The settle key of the session snapshot every view of this task reads, so each read of a session keys alike. */
 function useSettledKey(client: Client, sessionId: string): string {
@@ -115,12 +126,19 @@ export function useSessionUsage(client: Client, sessionId: string, _settled: num
 			enabled: false,
 			select: usageReadable,
 		}).data ?? false;
-	return useQuery({
+	return useQuery({ ...sessionUsageQuery(client, sessionId, settled, scope), enabled: enabled && readable });
+}
+
+/**
+ * The usage read under one settle key. It takes no abort signal: the key moves at every turn's end, and TanStack
+ * aborts a read that consumed its signal once the last observer leaves, so a read in flight across the settle failed
+ * net::ERR_ABORTED. Unaborted, the retired read completes into its own cache entry and the new key reads on its own.
+ */
+export function sessionUsageQuery(client: Client, sessionId: string, settled: string, scope: number) {
+	return queryOptions({
 		meta: { errorSurface: "inline" },
 		queryKey: ["session-usage", sessionId, settled, scope],
-		queryFn: ({ signal }) =>
-			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
-		enabled: enabled && readable,
+		queryFn: () => client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }),
 		retry: false,
 		retryOnMount: false,
 		placeholderData: (previous, previousQuery) =>

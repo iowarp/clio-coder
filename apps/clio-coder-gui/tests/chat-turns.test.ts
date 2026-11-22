@@ -21,7 +21,7 @@ import {
 	savedRoutePatch,
 } from "../client/chat/route-picker-model.js";
 import { sessionFacts } from "../client/chat/session-facts-model.js";
-import { settledTurns } from "../client/chat/session-telemetry.js";
+import { settledKey, settledTurns } from "../client/chat/session-telemetry.js";
 import { presentTool } from "../client/chat/tool-presentation.js";
 import {
 	activeTurn,
@@ -32,7 +32,6 @@ import {
 	turnEnding,
 	turnStatuses,
 } from "../client/chat/turns.js";
-import { settledKey } from "../client/telemetry/live-model.js";
 import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
 import { applySessionDelta, emptySession } from "../contracts/session-projection.js";
