@@ -4,7 +4,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-CLIO Coder 0.8.5 is one large release with breaking changes, built so that a script, a CI job or another agent can depend on CLIO Coder the way a person at the terminal does. `clio-coder run` has one versioned result, a typed cause behind every exit code, per-run limits, a dry run and host-validated structured answers. A run states whether it finished, and CLIO Coder seals that claim beside its own assessment of the work. Fleet dispatch routes each job to a role that owes evidence, and proactive memory keeps only what has been demonstrated. The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering and quota reporting. Every command and flag now has one spelling: earlier spellings are removed, and `clio-coder upgrade` migrates your settings and prints each change. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
+CLIO Coder 0.8.5 is one large release with breaking changes, built so that a script, a CI job or another agent can depend on CLIO Coder the way a person at the terminal does. `clio-coder run` has one versioned result, a typed cause behind every exit code, per-run limits, a dry run and host-validated structured answers. A run states whether it finished, and CLIO Coder seals that claim beside its own assessment of the work. Fleet dispatch routes each job to a role that owes evidence, and proactive memory keeps only what has been demonstrated. The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering and quota reporting. The agent gains a browser, a second terminal can watch, approve or pair with a running session, and the hooks, MCP servers and instructions you set up for other coding agents can be adopted. Every command and flag now has one spelling: earlier spellings are removed, and `clio-coder upgrade` migrates your settings and prints each change. A long run of fixes covers compaction on small windows, safety classification of shell commands, worker grading and telemetry accounting.
 
 ### Highlights
 
@@ -17,6 +17,10 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 - **Memory that has to earn its place.** Notes are claims bound to a command that succeeded or a file that was read. A stored lesson is checked against the repository before it is delivered, automatic memory spending is capped at a share of the session, and mining earlier sessions is off unless you turn it on.
 - **The Antigravity CLI over ACP.** The Antigravity CLI is now also an ACP delegation target, with model and thinking selection, steering, operator-answered questions and quota reporting.
 - **Zarr and ADIOS2.** The `data` tool reads Zarr v2 and v3 stores and inspects ADIOS2 BP4 and BP5 directories.
+- **A browser for the agent.** The `browser` tool loads pages, runs Playwright scripts, reads the accessibility tree, starts dev servers and takes screenshots inside the same sandbox as `bash`. Pages reach loopback until you grant a host, and a `kind: browser` verifier check gates a page on its console errors and failed requests.
+- **A second terminal on a running session.** `/attach observe|approve|pair` lets `clio-coder session attach <id>`, on the same host or over ssh, watch the session, answer its approval cards or steer it.
+- **Fleet runs that stay out of your checkout.** A playbook step with scope `worktree` runs the whole chain in one kept task worktree, the builtin `build-review` builds there, and `clio-coder fleet land` previews and lands the result. Every dispatched run has a wall clock, reviewers judge an evidence packet of the builder's diff and checks, and a plan wider than a concurrency limit runs in waves.
+- **Your setup from other agents.** `clio-coder interop adopt` ports Claude Code and Codex command hooks, stdio MCP servers and user instructions, and a hook can speak either agent's dialect.
 
 ### Breaking changes
 
@@ -51,17 +55,36 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 | `semantic inbox-add`, `inbox-list`, `inbox-remove`, `inbox-preview` | `semantic inbox add`, `list`, `remove`, `preview` |
 | `clio-coder dev share`, `clio-coder dev gui` | `clio-coder share`, `clio-coder gui` |
 | `/loop list`, `/loop cancel` | `/loop`, `/loop stop <id> --now` |
+| `configure --section targets`, `fleet`, `interface`, `integrations` and every other section word | `configure --section models`, `chat`, `workers`, `context`, `safety`, `workspace` or `advanced` |
+| `configure --section diagnostics`, `doctor`, `diag` | `clio-coder doctor`; the version, directories and raw settings rows are under `advanced` |
+| `/settings` words that are not an area id (`connections`, `agents`, `panes`, `skills` and the like) | `/settings <area id>`; `/login` and `/config` open `/settings models` |
+| `CLIO_CODER_NO_NETWORK_TOOLS` | `CLIO_CODER_DISABLE_RETRIEVE_TOOLS=1` |
 
 **Changed behaviour**
 
-- `clio-coder playbook validate` exits 2 for an invalid playbook, in text and `--json`, matching `fleet run`. Check for 2 where a script checked for 1.
+- `clio-coder playbook validate` and `playbook graph` exit 2 for an invalid playbook, in text and `--json`, matching `fleet run`. Check for 2 where a script checked for 1.
 - `clio-coder fleet verify` prints a text verdict by default. Pass `--json` for the document.
 - `clio-coder report status`, `report show` and `telemetry share list` no longer contact GitHub or delete expired gists. Use `report status --refresh`, `report sweep` and `telemetry share sweep`.
 - Reviewing earlier sessions for memory is off by default. Set `context.memory.surfaces.history: on` to turn it on.
+- Every dispatched worker run has a wall clock: `fleet.limits.runTimeoutMs`, default 30 minutes, counted from the dispatch call with time queued for a slot included. A recipe's budget or a call's `timeout_ms` can only lower it. Raise the setting for workers that need longer.
+- A command hook receives its event as one JSON object on stdin, and exit code 2 now blocks: at `before_tool` it refuses the call and at `turn_start` the turn, with the hook's stderr as the reason, at `after_tool` it warns on the result, and at `turn_end` it continues the turn. Any other exit code still turns the hook's output into an annotation or reminder. Change a hook that exits 2 for another reason.
+- An agent recipe that declares `budget.readReserve` fails to load with `budget.readReserve is unknown`. Remove the key. The enforced 36-call phase for research recipes is gone; every recipe budget is advisory under `fleet.limits.toolCallsPerRun` and the run's handback.
+- `fleet.adaptiveRouting.roles` and `agentRoles` name the roles `explorer`, `seat`, `checker`, `reviewer` and `judge` (and `builder` in `agentRoles`). A settings file naming `researcher` or `verifier` fails to load, naming the roles that replace each, and `clio-coder doctor --fix` rewrites them.
+- A version 1 `settings.yaml` is no longer converted. It fails validation; move it aside and the next run writes a version 2 file with the defaults. A shared archive carrying a version 1 settings fragment is refused.
+- `context.memory.observations.enabled` is no longer read. Set `context.memory.surfaces.observe`; `clio-coder doctor` names the old key and `doctor --fix` removes it.
+- CLIO Coder reads only the current memory store. `clio-coder doctor` names an older or partly unreadable store and `doctor --fix` rewrites it at the current version with the records this build reads. An invalid record is dropped at the next store write instead of moving to `records.invalid.json`.
+- A project's `.clio-coder/codewiki.json` index is no longer read; `clio-coder context index` writes `.clio-coder/codemap.json`. A `.clio-coder/fleets/` directory is no longer converted: move its playbooks to `.clio-coder/playbooks/`.
+
+**Run records and telemetry**
+
+- The outcome code `worker_no_work` is retired. A run that did none of its assignment settles `obligation_unmet`, one that declared itself unfinished or recorded a limitation without changing anything settles `worker_not_done`, and a builder whose own validation failed or whose claimed check never ran settles `assurance_compromised`.
+- `parallel_writer_conflict` is now `writer_set_conflict`, and a writer that waits past its run's deadline fails `writer_set_busy`.
+- Execution roles in `run.settled` and `route.decided` (both now version 2), in `runs.json` and on receipts use `builder`, `explorer`, `seat`, `checker`, `reviewer`, `judge` and `recovery`: a council member is `seat`, a read-only run `explorer`, and a verifier or debugger run `checker`. A `runs.json` row that records a retired role is dropped. Sealed journals keep the names they were written with.
+- The run feed events `clio_coder_write_record_downgraded` and `clio_coder_result_contract_repair` are now `clio_coder_write_record_partial` and `clio_coder_repair_rounds_started`, with the same payloads.
 
 #### Upgrading
 
-Run `clio-coder upgrade`, or run the installer again. After an update made with a package manager directly, run `clio-coder upgrade --post-install`. The first launch also applies pending migrations. Then run `clio-coder doctor`.
+Run `clio-coder upgrade`, or run the installer again. After an update made with a package manager directly, run `clio-coder upgrade --post-install`. The first launch also applies pending migrations. Then run `clio-coder doctor`. On an existing home the upgrade also runs the new version's `clio-coder doctor --fix` and prints each repair as `[install] home repair: ...`; a failed repair leaves the previous version active.
 
 **What the upgrade rewrites.** The migration edits your user `settings.yaml` in place, keeps the previous file as `settings.yaml.retired.bak` beside it, and prints each change under "What changed for you in settings.yaml". A project's `.clio-coder/settings.yaml` is the repository's and is left for you to edit.
 
@@ -79,9 +102,9 @@ Run `clio-coder upgrade`, or run the installer again. After an update made with 
 | `identity`, `theme`, `telemetry.research.systemOneDataset` | Removed; nothing read them |
 | `permissionTimeoutMs` and `labels` on an external agent entry | Removed |
 
-A key written through a YAML anchor, alias or merge key is left as written, and the upgrade asks you to edit it by hand. While the migration is still pending, a settings file that names a retired key fails to load with a message naming `clio-coder upgrade`. Once it has run, a retired key is an ordinary unknown key, and `clio-coder doctor --fix` removes it.
+A key written through a YAML anchor, alias or merge key is left as written, and the upgrade asks you to edit it by hand. While the migration is still pending, a settings file that names a retired key fails to load with a message naming `clio-coder upgrade --post-install`. Once it has run, a retired key is an ordinary unknown key, and `clio-coder doctor --fix` removes it.
 
-**What you retype.** The upgrade cannot reach scripts, CI jobs, shell aliases or editor configuration. Add `-` where a task is piped into `clio-coder run`, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, read the result from the `run_end` envelope, and replace every spelling in the removed commands table above.
+**What you retype.** The upgrade cannot reach scripts, CI jobs, shell aliases or editor configuration. Add `-` where a task is piped into `clio-coder run`, replace `--json` with `--output-format stream-json` and `--session` with `--resume`, read the result from the `run_end` envelope, and replace every spelling in the removed commands table above. Remove `budget.readReserve` from your own agent recipes, check the hooks you wrote for exit code 2, and read the new outcome codes, role names and feed event names wherever a script parses run records.
 
 ### Added
 
@@ -100,6 +123,13 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `--task-file <path|->` reads a version 1 JSON task envelope. A file that adds `verify`, yolo autonomy or `cwd` needs `--trust-task-file`.
 - `run --agent` accepts `--max-cost-usd` and `--worktree`. Its `run_end` envelope carries the worker's sealed `completion`. `--timeout` and `--verify-timeout` accept durations (`90s`, `15m`, `2h`, `500ms`), and a bare number is still seconds.
 - `clio-coder schema <name>` prints the shipped JSON Schema for `run-result`, `run-events`, `task`, `help` and `fleet-result`. `clio-coder help --json` prints a manifest of every command leaf with its flags, value choices, stdin use, effects and exit codes.
+- `run --output <path>` (repeatable) names a file the run must write. An `output: <path>` line in any operator prompt does the same on every surface, for the rest of the session: `finish(done)` is refused once while the file is absent, a later `finish` is sealed `partly_done` with `missing output: <path>` listed as unverified, and a headless run exits 1 with cause `missing_output`. `--output` is refused with `--agent`.
+- A headless run whose final turn ends on `finish` without writing a reply exits 1 with cause `no_reply_text`.
+- A failing `--verify` check is replayed on the commit the run started from. When that base fails the same way, its `verify[]` entry reads `not_implicated` with the base's result, and `--fail-on-verify` does not count it.
+- A read streak of 80 calls on a turn nobody is watching (a yolo continuation or a writer worker) stops at a decision gate, and a headless run that stalls there ends with cause `exploration_stalled` (exit 1).
+- `run --agent <recipe> --review <run id|clio-coder/task/<run id>>` runs the worker read-only in a fleet run's kept task worktree, with the branch, base, commits and uncommitted count ahead of the task. `run --agent <agent> --continue <runId>` continues an earlier ACP delegation in its peer's own session.
+- `run --agent` says why a failed assignment was not retried (`notRetried` in JSON, a `Not retried:` line in text), and its `completion.limitations` lists the limitations the worker recorded.
+- `run_end.dispatch.runs[].safety.envelope` carries each dispatched run's sealed capability envelope.
 
 **Completion**
 
@@ -127,6 +157,16 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `--exit-code` on `fleet verify` (0 verified, 1 failed or unavailable, 75 pending), `evidence inspect` and `campaign run`.
 - A person at a fleet worker's approval card can keep it open past 15 minutes: each key renews the hold for 15 minutes, up to one hour after the ask opened.
 - The coordinator has `grep` and `code_nav` attached directly. Running fleet rows show each worker's context fill, and the Turn ended row states detached worker spend apart from the turn's own.
+- A playbook step may declare scope `worktree`. The fleet then cuts one task worktree from HEAD on `clio-coder/task/<fleet root id>`, runs every step there, commits the work to that branch when it settles and keeps it, so `clio-coder fleet land <root>` previews it and `--yes` lands it. The approval card and `playbook graph` state the isolation, and `fleet_end.worktree` names the path, branch, commit and land commands. A playbook that mixes `workspace` and `worktree` steps is refused.
+- At 85% of a run's wall clock its tools are withdrawn and it is asked for its report. At the wall the host stops it and the run seals `timed_out`; a stopped builder's result names the paths it changed, and a worktree run's edits stay committed on its unmerged task branch.
+- A plan wider than a global, node or endpoint limit runs as consecutive waves with a "dispatch waves" notice instead of being refused, and its members queue for busy slots until their run's deadline.
+- Each checkout has one writer set. A writer from another dispatch, another process or a second fleet waits for the live set and joins when it empties.
+- A run that exhausted its context is retried once on a route with a strictly larger window, and each dispatched run charges its own observation pool, sized from its share of the window.
+- Reviewers and compete judges receive an evidence packet: the builder's handback, its diff from the host's record of the change and its host checks, each under an id the verdict must cite. A verdict that cites none of it gets one repair round and then settles exhausted for you to decide. A reviewer's passing check that names a command needs a run the reviewer made or a verified host check.
+- A task line `check: <command>` gives a verifier or debugger a gate it runs as a `verify` check inside its write-confined sandbox. Task prose is never scanned for commands.
+- A second CLIO Coder process on the same state directory follows another process's live workers on its board and can answer their held approval asks; the owner records which process answered.
+- `fleet view <fleetRootId>` shows each step's task.
+- Every worker role holds `code_nav`, and the plan card and receipt name each capability withheld from a run with its reason and remedy.
 
 **Delegation to other agents**
 
@@ -135,6 +175,30 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Questions from the delegated agent reach the operator as a card headed "Delegated agent", and are cancelled when no operator is attached. A steer goes to the agent as its own prompt.
 - Quota exhaustion fails the run as `usage_limit_reached` with the reset time and the retry moves to another target. The agent's `run_command` and `run_workflow` calls are judged by the command they run.
 - ACP delegation failures settle under their own codes (`acp_auth_required`, `acp_model_unavailable`, `acp_thinking_unavailable`, `acp_transport_error`), and a sign-in failure is retried on another target.
+- A delegation can continue in its peer's own session, through `continue_run` on the dispatch tool or `run --agent <id> --continue <runId>`. The adapter reopens the session with `session/resume` or `session/load`; a session the peer marked non-resumable gets a new one, and the receipt says why.
+- When the peer answers a prompt while it still reports work in progress, the session stays open and its later updates join the same run, until the peer reports idle or 120 seconds pass.
+
+**Browser**
+
+- The `browser` tool, reached through the gateway, opens pages (`open`), runs Playwright scripts against them (`run`), reads the accessibility tree with element refs (`look`), starts dev servers (`serve`) and drives a browser started with `--remote-debugging-port` (`attach`). It runs inside the session's sandbox as `bash` does.
+- Pages reach loopback only. A host beyond it asks and is granted for the session, each blocked host is named with the grant that admits it, and `hermetic: true` keeps a session loopback-only.
+- `clio-coder tools install browser` provisions playwright-core and the Chromium headless shell under CLIO Coder's data directory, and the tool installs it on first use after one confirmation. Windows uses the installed Edge.
+- A `kind: browser` check in `.clio-coder/verifiers.yaml` starts the dev server, loads its page in a hermetic session and fails on console errors, uncaught exceptions, failed requests or an `axe` audit. `verifiers add|edit --kind browser` takes `--url`, `--ready`, `--steps` and `--assert`.
+- Screenshots draw inline in tool cards on terminals that speak the Kitty or iTerm2 graphics protocol, reach ACP clients as image blocks in `tool_call_update` and show in the desktop app's tool cards, and `/view` has a screenshots category. On a route without image input the model sees none of them.
+- The bundled `web-debug` skill loads a page headless and reports its exceptions, console errors and failed requests as one JSON document.
+
+**Hooks and other agents' setup**
+
+- `clio-coder interop adopt <host>` also ports Claude Code and Codex command hooks into your `hooks.yaml`, stdio MCP servers into `mcp.yaml`, and `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` into your user handbook, each shown in full before it is written. Content adopted from your home installs as trusted. `clio-coder configure` has an "Adopt from Claude Code, Codex and other agents" row.
+- `<config>/CLIO-CODER.md` is your user handbook, loaded ahead of project handbooks in every session, and `<config>/hooks.yaml` holds your own hooks.
+- A command hook may declare `dialect: claude-code` or `dialect: codex`, so a ported script reads tool names and input as that agent sends them and may answer in that agent's JSON. `as: none`, `eventName`, `toolNameMap` and `once: session` are new hook keys, and a hook that asks parks the call on the approval card.
+
+**Safety**
+
+- An approval card for a sandbox escape whose only reason is leaving the sandbox offers "Approve for this session" (Alt+P, or Ctrl+G P), scoped to the exact script files by content hash, the cwd and the env assignments. ACP offers it as `allow-session-scope`, and contained yolo offers it on the agent's `ask_user` question that names leaving the sandbox.
+- `safety.liveCheckTargets` names Copilot targets whose login file the session's contained commands may read, so a live check runs without leaving the sandbox. When a judged command runs a script in the workspace or scratch roots, the safety judge reads its first 4 KiB.
+- `safety.sandboxCacheMaxGiB` (default 4) caps the sandbox cache, which is pruned daily and by `doctor --fix`.
+- `decide` with `operator_words`, a verbatim quote of what the operator typed, supersedes an operator decision without another interview.
 
 **Memory**
 
@@ -153,6 +217,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `doctor --fix --yes`, `reset --yes` and `uninstall --yes`. `tools reset-profile <id>` and `agents list` are new verbs, and `verifiers add|edit --check-cwd <path>` names a check's directory.
 - `clio-coder --help` is a grouped page of about 45 lines, `--help --all` lists every command path, and `help run --topics` prints the long-form run notes.
 - `clio-coder report sweep` and `telemetry share sweep` delete expired shares.
+- `telemetry calls` shows each call's seat billing (premium requests and nano-AIU) in a billing column and in `--json`.
+- `clio-coder doctor` lists the loaded `model-catalog.d` overlays and warns on each skipped file, and reports the dispatch store's reservations, capacity leases and cache lanes and the sandbox cache size. `/doctor` names a settings reload the running session rejected.
 
 **Tools and settings**
 
@@ -161,12 +227,24 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `safety.limits.bashIdleSeconds` (default `0`, off) stops a command that prints nothing and uses no CPU for that long.
 - `safety.validationWrappers` names wrapper scripts whose wrapped check counts as validation for the finish gate.
 - `tasks` accepts `ids=[...]` for `done`, `block` and `drop`, and typed `git` accepts `range`, `ref` and `max_count`.
+- A trusted project target may name its key variable with `auth.apiKeyEnvVar`. The trust card names the variable and the URL it is sent to, and an unset variable is refused before any request, naming the variable.
+- `chat.prewarm` also warms `openai-codex` sessions.
+- Empty `code_nav`, `grep` and `find` results say what was searched and that an empty match does not prove absence.
+- `verify` runs a package manager's call of a declared script (`npm test`, `pnpm run lint`) as that script's check.
 
 **Terminal UI**
 
 - Ctrl+X clears the whole draft in one press and Ctrl+_ restores it.
 - The arcade steps aside when CLIO Coder needs an approval or an `ask_user` answer and resumes where it stopped.
 - A hook that stalls a turn for 10 times its budget shows a one-time warning.
+- `/attach observe|approve|pair` opens a private socket for the session, and `clio-coder session attach <id> [--role observer|approver|pair]` in another terminal on the host, or over ssh, watches the transcript, answers the approval card on screen or steers the run. Each attached action is shown on the host naming the client, and `/attach off` closes the socket.
+
+**Desktop app and ACP**
+
+- The desktop app's background service runs as a launchd agent on macOS and a logon task on Windows.
+- Settings pages show and edit your user settings with no workspace open.
+- A task another process holds is shown read-only with Take over, which asks the holder to end and then resumes the task in the app. The terminal that was taken over says who took it and why.
+- ACP serves `session/resume` and `session/load` of the session the server already hosts, and a session open sent while a close is in flight waits for that close.
 
 ### Changed
 
@@ -179,6 +257,9 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Telemetry text words re-prefilled tokens and the cache-break bill as an upper bound ("up to N"). JSON values are unchanged.
 - "Add a target" in `clio-coder configure` opens the same "What do you have?" screen as first-run setup. The sign-in step says what each provider's flow asks of you and promises a browser only where one can open.
 - Sessions and run journals record the build commit and build time that wrote them.
+- A settings failure leads with the failing key and its cause, and advises `clio-coder upgrade --post-install` only when a pending migration rewrites that key. Every surface that advises a pending migration names that one command.
+- `fleet list` says it lists playbook runs and counts the project's dispatched runs outside a playbook.
+- Version and help probes and a `doctor` without `--fix` create nothing in the CLIO Coder home, and launch receipts live in the state root, so an install root that is read-only still launches.
 
 **Agent behaviour**
 
@@ -189,6 +270,10 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - The turn tool budget scales with how many calls per round the route makes, a continued turn that crosses its budget rolls into a fresh turn, and `finish` stays admissible after the budget is spent.
 - An answered `ask_user` interview closes when the next reply asks nothing more, and a question sent as a bare string is accepted.
 - A scheduled job command that bash would run contained is admitted contained.
+- A dispatch result gives each worker finding once, and workers post a claim only before writing a path a peer may also write.
+- A worker command whose source hides its paths, such as a `python3 -c` readback, runs when the worker's sandbox confines every write to its write roots, as main `bash` does at default.
+- An explorer's report owes observed evidence: one sent before any read is refused, and the repair round reads first.
+- A playbook loop's agent check gets a verification task of its own instead of the builder's prompt, and a refused playbook literal names the values it accepts.
 
 **Context**
 
@@ -197,12 +282,20 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - On routes that resend the whole context after every fold, an automatic eviction that would free too little is held.
 - On hosted routes the first-token limit adapts to the route: after five first tokens it is ten times their 95th percentile, at least 30 seconds, capped at `chat.retry.streamStallMs`.
 - Memory observations are prepared only as context nears the fold trigger, and never when automatic compaction is off.
+- A code read too long for a summary goes in as its signatures (TypeScript, JavaScript, Python, Go, Rust, C, C++, Java) instead of a head and tail clip, and the prior checkpoint keeps every read the summarizer's window can hold whole.
+- An automatic pass on a native compaction route skips a checkpoint that would gain nothing, and an LLM checkpoint appears in `/tree` after the turns it kept.
 
 **Terminal UI and naming**
 
 - The welcome screen keeps one hints page, and the rows above the composer leave the transcript a third of the terminal.
 - "Reply from <target> · <model>" appears only when the replying route changes.
 - The version banner, notices, installer output, desktop app messages and prompts name the product CLIO Coder. The `clio-coder` command, package and paths are unchanged.
+- Every remaining notice, doctor row, error, help line and desktop app message names the product CLIO Coder, and autonomous commits are authored `CLIO Coder` with the same bot email.
+- The desktop app names its transcript detail tiers Compact, Standard and Detailed, as `interface.outputDetail` does.
+- ACP tool cards and permission asks title a shell call by its command and any other call as its tool and target. The outward allow option reads "Approve this outward call once".
+- ACP sends host status notices, runtime notices and the thinking clamp as `session_info_update`, not as reply text, and sends startup notices once per session.
+- Yolo notices state the real sandbox backend and whether the safety judge reviews, and a home that never ran unconfined yolo is told how yolo runs instead of that it changed.
+- Yazi's `;` and `:` prompts in the files pane redirect what they run away from the pane's event stream.
 
 **Performance**
 
@@ -211,6 +304,10 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Fullscreen scrolling writes about 15 times fewer bytes, the terminal UI repaints only rows that changed, and a fleet board costs about a tenth as much per poll.
 - The bash tool masks output as it arrives, so a 16 MiB output no longer stalls the session.
 - On the `openai-codex` runtime, fleet workers with the same model, tools and system prompt reuse one prompt cache when they run one after another.
+- On `openai-codex` and the public Responses API, CLIO Coder keeps a WebSocket per session and replays the Codex turn state within a turn. Main sessions route to the cache of their pinned prompt head, with a lane of their own per live conversation across processes, and side calls share one cache identity per head. On GPT-5.6 and later the pinned prompt layer is a cache breakpoint, kept 12 hours under long retention, and a cache miss is explained by the provider's diagnostic.
+- On Copilot, main sessions send the pinned prompt layer as a static cached system block, side calls reuse a spare session, a locked worker round keeps the session's effort and tools, and a reply that is only a tool call streams.
+- In a long transcript a streamed token behind a running worker card costs about 0.2 to 0.4 ms instead of 3 ms at 1,600 turns, and a resize lays out only the rows near the viewport, about 29 ms instead of 294 ms.
+- `clio-coder fleet status` over a populated ledger answers in about 150 to 190 ms instead of 670 to 800 ms.
 
 ### Fixed
 
@@ -225,6 +322,14 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A headless turn that calls `finish` without writing a reply is asked for the reply first, and the declaration is never printed as the answer.
 - `run --max-context-tokens=N` is accepted like `--max-context-tokens N`.
 - `fleet run` no longer reports its own redirected stdout or stderr file as an outside change.
+- `run --agent --output-format json` puts the worker's answer in words in `result.text`; the structured contract stays in `dispatch.runs[0].output.structured`.
+- A fleet run refused at admission no longer streams `fleet_started` before its `fleet_end`, `fleet wait` on an orphaned root reports the plan hash its run bound, and an unpriced step reports its cost as unknown instead of 0.
+- A headless run prints an unscripted question once, and piped stdin cannot close its own `<stdin>` block.
+- `help --json` reads parenthesized flag groups and top-level alternatives in a synopsis.
+- At yolo an overloaded provider is retried on the capped ladder instead of for up to an hour.
+- `run` without `--agent` names the fleet dispatch flags it was given.
+- `session show --transcript` and `/export` place each tool result after its own call, and `session export --format jsonl` writes owner-only and git-ignored like the other formats.
+- `config get` refuses a user settings file that failed validation instead of showing defaults.
 
 **Context and compaction**
 
@@ -235,6 +340,10 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A resumed session on another endpoint serving the same model id no longer reuses the old endpoint's measured usage.
 - A stalled request's late completion is dropped instead of landing in the next turn, and a provider retry that answers is recorded as recovered.
 - At the turn tool budget, a parallel batch is admitted or refused whole, and the footer shows the turn's calls against the budget.
+- A live-prefix summary that stalls fails the fold at once instead of retrying the same route.
+- A resumed session compiles its next request once, after its route is restored, and no longer reports `prompt_recompiled` on turns that resend the recorded prompt.
+- A continued session's continuity note sits at its commit, so `continuity verify` agrees with the restore.
+- A raised steering-triage thinking level keeps room for the verdict.
 
 **Fleet and workers**
 
@@ -250,6 +359,20 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Restart recovery settles an abandoned run at the spend its journal recorded.
 - On a shared state directory, the dispatch concurrency cap counts per host.
 - A turn that collected detached workers' results no longer gets the "No dispatch ran this turn" line.
+- A builder that recorded a limitation and changed nothing settles not done instead of succeeded.
+- A reviewer that read the change and ran `git diff` through the gateway is credited with inspecting it, and a validation a Codex, OpenCode or Pi subprocess builder reports reads as unobserved, not compromised.
+- A read-only worker's withheld write is refused as read-only, without running, instead of as a dispatch tool scope.
+- An architect's plan stays at `.clio-coder/artifacts/PLAN.md`, a worker that ends on an artifact hands it back as its answer, and a dispatch result names declared expected outputs a run left unwritten.
+- A task naming a method call such as `m.add(1,1)` is no longer read as a change or as a read root.
+- After `/fork` the fork adopts its parent's pending worker ask and can answer it through `steer`.
+- A caller's model pin is kept on an obligation retry.
+- A Copilot worker on a playbook step lists the account's models before its route is chosen.
+- Boot no longer waits on, or fails for, a held dispatch admission lock, and invalid settled admission records are dropped instead of refusing boot.
+- A vote seat answers under a bounded voter prompt, verdict spellings that differ only by separators count as one answer, and a member's object answer previews as one line.
+- `fleet land` and the workspace snapshot `/rewind` restores capture a same-size edit made in the second the git index was written.
+- On a shared state directory, another host's lapsed capacity lease or plan reservation is released 60 seconds after its expiry instead of 5 or 15 minutes, and a plan whose next member is still queued stays current for other hosts.
+- Checks no longer write Python bytecode caches into the checkout, and a `verify` call that only lists checks keeps the run's write record complete.
+- A `limitation` call's reason and scope reach the run feed, and the trust line names a compromised run's deciding axis once.
 
 **Checks and safety classification**
 
@@ -270,6 +393,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - The observations of deleted sessions are swept daily.
 - A passed `verify` run vouches for its command as `memory_note` evidence, and lessons about a repository's checks reach every turn the finish gate covers.
 - `memory consolidate` leaves operator decisions and other repositories' records alone.
+- A task that ends on `finish` counts as a lesson source, and lesson extraction settles once, with its outcome.
+- `claims compact --prune-superseded-before` keeps the edge that marks a superseded claim.
 
 **Telemetry and quota**
 
@@ -279,6 +404,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Performance totals count only the model's own tool calls.
 - Quota readings and holds are shared across processes, a rate-limited read is held for its Retry-After, and a hold belongs to the credential that earned it.
 - Report archives written by 0.8.4 still verify and import.
+- Copilot side calls, the safety judge's included, journal their transport, seat billing and served model.
 
 **Providers and editors**
 
@@ -287,6 +413,10 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Inception `mercury-3` is priced at list rates, so `--require-priced` admits it and `--max-cost-usd` bounds it.
 - ACP re-runs the thinking probe when `set_config_option` changes the target or model, and a standard `session/fork` attaches the MCP servers the client names.
 - Settings load when a project `targets` list drops a target only the user settings define.
+- On Copilot, Claude's narration before a tool call reads as reply text instead of reasoning, and a tool-call channel marker the runtime returns as text is dropped.
+- A malformed `model-catalog.d` file is skipped alone, named by its path in one line, so the overlays beside it still merge.
+- First-run setup's test request on a signed-in Copilot seat reaches the model.
+- MCP images, such as a Playwright MCP screenshot, reach vision routes within the `read` image budget instead of being dropped, and the `frontend` check's screenshot attaches on vision routes.
 
 **Terminal UI**
 
@@ -298,6 +428,16 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `/context` keeps the Agent fleet and Project rows after compaction.
 - A `/compact` that changes nothing says why and names the turns it protects.
 - `/report` bundles drop image base64 and ignore a forged report block.
+- A repetition stop reads "Generation stopped" instead of "Cancelled".
+- Tool commands no longer inherit the terminal multiplexer variables of the pane CLIO Coder runs in, so a nested `clio-coder` or `tmux` no longer closes that pane.
+- The phrase that resumes the paused arcade is no longer recorded as an `ask_user` answer.
+- A rejected settings reload names the failing key first.
+- Claiming a conversation's prompt cache lane waits at most a second for the shared admission store, so a busy store no longer freezes the terminal UI; the turn runs on a lane of its own and says so once.
+- The loop guard counts `cd <cwd> && x` and `x` as the same call.
+- A session taken over by `clio-coder session terminate` says who took it and why, and the launcher prints a hosted pane's last error lines when it exits.
+- The contained-yolo notice is remembered in `home.json` and no longer writes `safety.yoloConfinement` into your `settings.yaml`.
+- ACP replay keeps a drained steer in its turn, ends a turn at its own last entry and shows a tool card with the title and locations it streamed live. ACP answers always carry `agentInfo.version`, as ACP v1 requires.
+- The desktop app draws the yolo continuation notice in its turn, shows a reopened request as asked with its recorded time, shows the last System check at once on reload, and repairs a background unit an earlier version installed instead of refusing it.
 
 ### Security
 
@@ -313,6 +453,12 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Init closes the memory directories to the owner, and `/export` transcripts are written owner-only. On Windows, `doctor --fix` removes extra grants from the credentials file.
 - The desktop app's launcher trusts a held credential's answer only from the app that issued it.
 - Reset and uninstall keep an unmarked data root that holds files CLIO Coder does not write.
+- A here-document body the parsed command proves is data is judged as content, and a command bash reads differently from its text (a line continuation, a `$"..."` string, a spelled delimiter, a duplicated descriptor) keeps the stricter reading.
+- The yolo floor judges a write into CLIO Coder's own trees where bash lands it, through `cd` chains, copies, links, aliases and `/proc/self/cwd`, and judges a scratch CLIO Coder home a command creates by the path it holds.
+- A hard reset is refused only where it rewrites a tracked protected path, and `git clean -x` or `-X` that reaches a protected path is refused.
+- The safety judge sees `$TMPDIR` and the scratch roots resolved, and an unsandboxed rerun the operator approved on an `ask_user` card.
+- On Windows the secret directory is made owner-only before a credential is written, and `doctor` reads its ACL by SID.
+- The desktop app signs its launch challenges, so an unauthenticated request cannot evict a launcher's challenge.
 
 ## 0.8.4 - 2026-11-19
 
