@@ -128,7 +128,7 @@ Refused tool calls start with `Refused by CLIO Coder policy`, `Refused by operat
 - **`clio-coder run: output token limit reached (stopReason=length)`** (exit `1`) — Narrow task, lower reasoning effort, or raise output limit.
 - **`clio-coder run: [CLIO Coder] the model spent its whole output budget thinking and stopped before acting or answering, twice in this turn.`** (exit `1`) — The first such stop in a turn is retried once with a reminder and thinking one step lower where the route controls thinking. Lower `--thinking` or raise `chat.maxOutputTokens`.
 - **`clio-coder run: provider stream ended without an assistant response or terminal tool result`** (exit `1`) — Probe target (`clio-coder targets --probe`) and retry.
-- **`clio-coder run: the agent recorded an explicit limitation; the task is incomplete`** (exit `1`) — Read reported limitation and supply missing input/permissions.
+- **`clio-coder run: the agent recorded an explicit limitation; the task is incomplete`** (exit `1`) — Read reported limitation and supply missing input/permissions. A `no-runner` limitation never raises it.
 - **`clio-coder run: no-op: <N> tool calls were blocked without recovery and no write succeeded`** / **`no-op under --fail-on-noop`** (exit `1`) — Resolve blocked call or pass `--turn-mode answer` for read-only Q&A tasks.
 - **`clio-coder run: <N> dispatched worker(s) did not deliver: <runId> (<agent>, <outcome>): <detail>`** (exit `1`, detail clipped to 600 chars) — Inspect full settled record with `clio-coder fleet view <runId>` or `monitor(run_id="<id>", mode="record")`.
 - **`clio-coder run: timed out after <N>s (--timeout)`** (exit `124`) — Increase `--timeout` or split the task.

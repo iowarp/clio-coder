@@ -1259,12 +1259,12 @@ Records a typed limitation receipt for the finish contract. Source: [limitation.
 Arguments:
 
 - `scope` (required). What could not be verified, in one sentence.
-- `reason` (required). `no-runner`, `blocked`, `out-of-scope`, `environment`, `write-root`, or `other`.
+- `reason` (required). `no-runner` (no runner exists or no project check applies to this change), `blocked` (a gate or denial stopped the check), `out-of-scope` (the task excluded it), `environment` (it cannot run here), `write-root` (the change needs paths outside the write roots), or `other`.
 - `paths` (optional). Repository-relative paths left unverified, or for `write-root` the paths the change needs to write.
 
 A dispatched write worker uses `write-root` when the change needs paths outside its write roots: it stops before editing, and the coordinator can widen the roots and continue the assignment as a new attempt ([fleet-dispatch.md](fleet-dispatch.md#asking-for-wider-write-roots)).
 
-A `reason` written as prose is filed under the closest category (`blocked` when it mentions a block, denial, permission, policy, safety or approval, otherwise `other`) and its text joins `scope`, so the call still lands. Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. See [the safety model](../architecture/safety-model.md) for the finish gate.
+The first `reason` in a session that is not one of these values, such as one written as prose, is refused: the error lists each value with its meaning and nothing is recorded, so the model retries with a typed value. A later off-list reason in that session is filed under the closest category (`blocked` when it mentions a block, denial, permission, policy, safety or approval, otherwise `other`, never `no-runner`) and its text joins `scope`, so a model that repeats it still lands the call. In `clio-coder run` a recorded limitation fails the run with cause `limitation` unless its reason is `no-runner`. Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. See [the safety model](../architecture/safety-model.md) for the finish gate.
 
 ```text
 limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])

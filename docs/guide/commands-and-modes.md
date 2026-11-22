@@ -461,7 +461,9 @@ An unresolved block, or a delegated task that never started, with no successful
 write exits 1 and seals `failed` with `outcomeDetail: "noop"`, even without
 `--fail-on-noop`; stderr reads `clio-coder run: no-op: the delegated task never
 started (<reason>) and no write succeeded` for the second. A successful `limitation`
-call likewise records failure with detail `limitation`. The flag additionally
+call likewise records failure with detail `limitation`, unless its reason is
+`no-runner`: a limitation that says only that no runner exists or no project check
+applies to the change fails nothing. The flag additionally
 fails runs whose attempted tools all failed without a block. Existing errors,
 interruptions, and timeouts retain their outcomes. The model's final prose is
 still available; a normal provider stop alone does not prove task completion.
