@@ -476,8 +476,9 @@ export interface DispatchLandOutcome {
 
 /**
  * The money and quota facts `context(scope="budget")` shows its caller (S16), bounded to the caller's own scope and
- * read from cached state only, never the network. A field the caller may not see reads withheld, never zero; no
- * credential, account identity, plan or pool the caller's route does not draw on appears.
+ * read from held state; only a pool with no fresh reading spends one bounded usage poll, never a model call. A field
+ * the caller may not see reads withheld, never zero; no credential, account identity, plan or pool the caller's route
+ * does not draw on appears.
  */
 export type BudgetEconomicsView =
 	| {
@@ -494,7 +495,10 @@ export type BudgetEconomicsView =
 				  }
 				/** No telemetry read model observes this session's spend: unknown, never a measured zero. */
 				| { usd: null; basis: "unobserved"; ceilingUsd: number | null; headroomUsd: null };
-			/** The chat route's quota pool as last read, or why there is no reading to show. */
+			/**
+			 * The chat route's quota pool: the fresh shared poll reading, else this process's own newest in-band reading, else
+			 * one bounded usage poll; with none fresh, the newest held reading marked not fresh, or why there is none.
+			 */
 			pool: BudgetPoolView | { status: "none"; reason: string };
 			/**
 			 * Per-candidate forecasts (R4), the plan card's own lines for every dispatchable agent: the route each runs on
@@ -516,6 +520,9 @@ export type BudgetEconomicsView =
 			pool: "withheld";
 	  };
 
+/** The scale of every `usedPct` and `creditsUsedPct` in a pool view, as the provider reports them. */
+export const BUDGET_USED_PCT_UNIT = "percent used, 0 to 100: 1 means 1% used, 100 means full";
+
 /** One quota pool as the provider last reported it; its own verdict, not Clio's guess. */
 export interface BudgetPoolView {
 	status: "reading";
@@ -524,6 +531,8 @@ export interface BudgetPoolView {
 	access: QuotaAccess;
 	/** Whether credits or overage can pay past a full window; permission, not authority to grant it. */
 	overage: QuotaOverage;
+	/** States the scale before the numbers a model reads: a reader once took `usedPct: 1` for a full window. */
+	usedPctUnit: typeof BUDGET_USED_PCT_UNIT;
 	/** Each window as reported; `usedPct` is null when the provider gave no percentage, as for an unlimited allowance. */
 	windows: ReadonlyArray<{
 		label: string;
@@ -534,9 +543,18 @@ export interface BudgetPoolView {
 	}>;
 	/** Credit pool use as a percentage; null when the provider reported none. */
 	creditsUsedPct: number | null;
+	/**
+	 * How the reading arrived: a usage poll (the shared cache or this call's own bounded poll), or the quota this
+	 * process's own requests on the route reported in band (a Codex stream event, Anthropic response headers).
+	 */
+	source: "poll" | "stream-event" | "response-headers";
+	/** The instant the provider reported the reading; `ageMs` and `fresh` are measured from it, never from the read. */
 	observedAt: string;
 	ageMs: number;
-	/** Inside the reading's freshness window and not served stale. A stale reading is shown, never acted on. */
+	/**
+	 * Inside the reading's freshness window, not served stale and not stamped after the read. A stale reading is shown,
+	 * never acted on.
+	 */
 	fresh: boolean;
 }
 
@@ -562,7 +580,7 @@ export interface DispatchContract {
 	 * failure aborts rather than choosing a different unapproved node.
 	 */
 	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
-	/** The session's economics view for `context(scope="budget")`; cached reads only (S16). */
+	/** The session's economics view for `context(scope="budget")`; held reads and at most one bounded usage poll (S16). */
 	budgetEconomics?: BudgetEconomicsPort;
 	/**
 	 * The grants preview derives for a request on its fixed route, refusing
@@ -794,6 +812,13 @@ export interface DispatchContract {
 	 * CPU while its own turn runs and exits before any dispatch could reuse it.
 	 */
 	warmRouteHistory?(): void;
+
+	/**
+	 * Start the chat route's one bounded no-inference usage poll off the turn path when the shared quota reading is
+	 * stale, so a headless run's first `context(scope="budget")` read finds it done or waits only out the rest of its
+	 * bound (S16). A one-shot run asks at run start; nothing else polls on the run's behalf.
+	 */
+	primeRouteQuota?(): void;
 
 	/** Local cleanup and event-drain allowance; accepted durable writes follow settlement. */
 	drainAllowanceMs?(): number;

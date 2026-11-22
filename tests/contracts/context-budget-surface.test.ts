@@ -3,6 +3,7 @@ import fs, { readdirSync, readFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { codexAccountScope } from "../../src/core/codex-account.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -14,7 +15,9 @@ import { budgetPoolView, workerEconomicsView } from "../../src/domains/dispatch/
 import { candidateForecastLines, type RouteForecast } from "../../src/domains/dispatch/route-policy.js";
 import type { RunLimits } from "../../src/domains/dispatch/run-limits.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
-import type { UsageSnapshot } from "../../src/domains/quota/types.js";
+import type { RuntimeDescriptor } from "../../src/domains/providers/index.js";
+import { noteCodexStreamQuota } from "../../src/domains/quota/observed.js";
+import type { QuotaProvider, UsageSnapshot } from "../../src/domains/quota/types.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
@@ -617,7 +620,7 @@ describe("native budget inspection through the registered context tool", () => {
 			overage: "permitted",
 			fetchedAt: "2030-01-01T00:00:00.000Z",
 		};
-		const pool = budgetPoolView(snapshot, now, 5 * 60_000);
+		const pool = budgetPoolView(snapshot, now, 5 * 60_000, "poll");
 		const forecast: RouteForecast = {
 			attempts: 8,
 			acceptedJobs: 6,
@@ -674,6 +677,8 @@ describe("native budget inspection through the registered context tool", () => {
 				{ label: "review", usedPct: null, resetsAt: "2030-01-02T00:00:00.000Z", access: "denied" },
 			],
 			creditsUsedPct: 40,
+			usedPctUnit: "percent used, 0 to 100: 1 means 1% used, 100 means full",
+			source: "poll",
 			observedAt: "2030-01-01T00:00:00.000Z",
 			ageMs: 60_000,
 			fresh: true,
@@ -681,13 +686,34 @@ describe("native budget inspection through the registered context tool", () => {
 		for (const absent of ["pro-plan", "$12.00", "balance note", "pool-pseudonym"]) {
 			ok(!session.result.output.includes(absent), `${absent} stays out of the view`);
 		}
-		const stale = budgetPoolView({ ...snapshot, stale: true }, now, 5 * 60_000);
+		const output = session.result.output;
+		ok(
+			output.indexOf('"usedPctUnit"') < output.indexOf('"windows":[{"label":"5h"'),
+			"the model reads the percent scale before the first usedPct",
+		);
+		const stale = budgetPoolView({ ...snapshot, stale: true }, now, 5 * 60_000, "poll");
 		strictEqual(stale.status === "reading" && stale.fresh, false);
-		const expired = budgetPoolView(snapshot, now + 10 * 60_000, 5 * 60_000);
+		const expired = budgetPoolView(snapshot, now + 10 * 60_000, 5 * 60_000, "poll");
 		strictEqual(expired.status === "reading" && expired.fresh, false, "past the cache TTL reads not fresh");
-		deepStrictEqual(budgetPoolView({ ...snapshot, status: "no_credentials" }, now, 5 * 60_000), {
+		deepStrictEqual(budgetPoolView({ ...snapshot, status: "no_credentials" }, now, 5 * 60_000, "poll"), {
 			status: "none",
 			reason: "last quota read: no_credentials",
+		});
+		const ahead = budgetPoolView(snapshot, Date.parse(snapshot.fetchedAt ?? "") - 1_000, 5 * 60_000, "poll");
+		ok(ahead.status === "reading");
+		deepStrictEqual([ahead.ageMs, ahead.fresh], [0, false], "a reading stamped after the read never clears a reserve");
+		// A rejection the provider stated is fresh quota evidence; a failed read with no verdict still shows none.
+		const rejected = budgetPoolView(
+			{ ...snapshot, providerId: "anthropic-max", status: "error", access: "denied" },
+			now,
+			5 * 60_000,
+			"response-headers",
+		);
+		ok(rejected.status === "reading", JSON.stringify(rejected));
+		deepStrictEqual([rejected.access, rejected.source, rejected.fresh], ["denied", "response-headers", true]);
+		deepStrictEqual(budgetPoolView({ ...snapshot, status: "error" }, now, 5 * 60_000, "poll"), {
+			status: "none",
+			reason: "last quota read: error",
 		});
 
 		// The real session port lists a forecast for each dispatchable agent's route, and reads spend after the queued
@@ -726,6 +752,191 @@ describe("native budget inspection through the registered context tool", () => {
 		match(lines[0] ?? "", /^runs worker openai-codex\/gpt-6-luna: .*6\/8 attempts accepted/);
 		match(lines[1] ?? "", /^alternative worker copilot\/gpt-6-luna: .*insufficient.*excluded=breaker open/);
 		strictEqual(lines[2], "+2 more candidates");
+	});
+
+	/** A dispatch bundle whose chat route is a Codex target spending a stored ChatGPT login. */
+	async function codexRouteBundle(
+		targetId: string,
+		nowMs: () => number,
+		options: Parameters<typeof makeDispatchBundle>[1] = {},
+	) {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: targetId, runtime: "openai-codex", defaultModel: "gpt-6-luna" }];
+		settings.chat.target = targetId;
+		const runtime = {
+			id: "openai-codex",
+			displayName: "OpenAI Codex",
+			kind: "http",
+			apiFamily: "openai-codex-responses",
+			auth: "oauth",
+			defaultCapabilities: { chat: true, tools: true },
+			synthesizeModel: () => ({}) as never,
+		} as unknown as RuntimeDescriptor;
+		const claims = { "https://api.openai.com/auth": { chatgpt_account_id: "acct-headless" } };
+		const access = `h.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+		const accountScope = codexAccountScope(access) ?? "";
+		const ctx = dispatchStubContext({ settings, runtime });
+		const getContract = ctx.getContract.bind(ctx);
+		ctx.getContract = ((name: string) => {
+			const contract = getContract(name as never) as unknown as ProvidersContract;
+			if (name !== "providers") return contract;
+			return {
+				...contract,
+				auth: {
+					...contract.auth,
+					statusForTarget: () => ({
+						providerId: "openai-codex",
+						available: true,
+						credentialType: "oauth",
+						source: "stored-oauth",
+						detail: null,
+					}),
+					getStored: () => ({ type: "oauth", access, refresh: "r", expires: 0 }) as never,
+				},
+			};
+		}) as typeof ctx.getContract;
+		const dispatch = makeDispatchBundle(ctx, { heartbeatIntervalMs: 3_600_000, now: nowMs, ...options });
+		await dispatch.extension.start();
+		const observe = (agoMs: number, usedPercent = 12, account = accountScope) =>
+			noteCodexStreamQuota(targetId, {
+				accountScope: account,
+				observedAt: new Date(nowMs() - agoMs).toISOString(),
+				windows: [{ windowMinutes: 300, usedPercent, resetsAt: "2030-01-01T04:00:00.000Z" }],
+				plan: "pro",
+				credits: null,
+				allowed: true,
+				limitReached: null,
+			});
+		const pool = async () => {
+			const view = await dispatch.contract.budgetEconomics?.();
+			ok(view?.scope === "session");
+			return view.pool;
+		};
+		return { dispatch, observe, pool };
+	}
+
+	it("shows a headless session its own route's newest quota, polling only when nothing held is fresh", async () => {
+		const nowMs = Date.parse("2030-01-01T01:00:00.000Z");
+		const { dispatch, observe, pool } = await codexRouteBundle("codex-headless", () => nowMs);
+		try {
+			// Nothing held: one no-inference usage poll answers, and the scratch home holds no Codex login.
+			deepStrictEqual(await pool(), { status: "none", reason: "last quota read: no_credentials" });
+			observe(30_000, 12, "another-account");
+			deepStrictEqual(await pool(), { status: "none", reason: "last quota read: no_credentials" });
+			// The run's own stream event, aged from its own as-of time: stale past the stream window, fresh inside it.
+			observe(10 * 60_000);
+			const stale = await pool();
+			ok(stale.status === "reading", JSON.stringify(stale));
+			deepStrictEqual([stale.source, stale.ageMs, stale.fresh], ["stream-event", 600_000, false]);
+			observe(30_000);
+			const fresh = await pool();
+			ok(fresh.status === "reading", JSON.stringify(fresh));
+			deepStrictEqual(
+				[fresh.source, fresh.observedAt, fresh.ageMs, fresh.fresh, fresh.access, fresh.windows[0]?.usedPct],
+				["stream-event", "2030-01-01T00:59:30.000Z", 30_000, true, "allowed", 12],
+			);
+		} finally {
+			await dispatch.extension.stop?.();
+		}
+	});
+
+	it("primes one bounded poll per credential off the turn path and lets a fresh shared poll outrank in-band quota", async () => {
+		let clock = Date.parse("2030-01-01T02:00:00.000Z");
+		let scope = "scope-a";
+		const fetches: Array<{ scope: string; answer: (usedPct: number) => void }> = [];
+		const provider: QuotaProvider = {
+			id: "codex",
+			displayName: "Codex",
+			credentialScope: async () => scope,
+			detect: async () => true,
+			fetch: () =>
+				new Promise<UsageSnapshot>((resolve) => {
+					fetches.push({
+						scope,
+						answer: (usedPct) =>
+							resolve({
+								providerId: "codex",
+								displayName: "Codex",
+								status: "ok",
+								windows: [{ key: "session", label: "5h", usedPct, resetsAt: null }],
+								fetchedAt: new Date(clock).toISOString(),
+							}),
+					});
+				}),
+		};
+		const { dispatch, observe, pool } = await codexRouteBundle("codex-primed", () => clock, {
+			quotaProviders: () => [provider],
+		});
+		const settle = async (count: number) => {
+			for (let turn = 0; turn < 100 && fetches.length < count; turn++)
+				await new Promise((resolve) => setImmediate(resolve));
+			strictEqual(fetches.length, count);
+		};
+		const reading = async () => {
+			const view = await pool();
+			ok(view.status === "reading", JSON.stringify(view));
+			return view;
+		};
+		try {
+			// Run start primes the poll before any budget read; a read waits only the rest of that one 3s bound.
+			dispatch.contract.primeRouteQuota?.();
+			await settle(1);
+			clock += 2_900;
+			const startedAt = performance.now();
+			deepStrictEqual(await pool(), { status: "none", reason: "the quota poll did not answer within 3s" });
+			ok(performance.now() - startedAt < 1_500, "the read waited the primed bound's remainder, not a new bound");
+			strictEqual(fetches.length, 1, "the read joined the primed poll");
+
+			// A login change never joins the previous credential's poll.
+			scope = "scope-b";
+			const changed = pool();
+			await settle(2);
+			fetches[0]?.answer(7);
+			fetches[1]?.answer(9);
+			const own = await changed;
+			ok(own.status === "reading", JSON.stringify(own));
+			deepStrictEqual([own.source, own.fresh, own.windows[0]?.usedPct], ["poll", true, 9]);
+
+			// An answer for a credential the route no longer spends is discarded.
+			clock += 5 * 60_000 + 1;
+			const moved = pool();
+			await settle(3);
+			scope = "scope-c";
+			fetches[2]?.answer(11);
+			const discarded = await moved;
+			ok(discarded.status !== "reading" || (!discarded.fresh && discarded.windows[0]?.usedPct !== 11));
+
+			// A fresh shared poll outranks a newer in-band reading, which stands in only once the shared one is stale.
+			scope = "scope-d";
+			clock += 5 * 60_000 + 1;
+			const polled = pool();
+			await settle(4);
+			fetches[3]?.answer(7);
+			const first = await polled;
+			ok(first.status === "reading", JSON.stringify(first));
+			deepStrictEqual([first.source, first.fresh], ["poll", true]);
+			clock += 1_000;
+			observe(0, 50);
+			const shared = await reading();
+			deepStrictEqual([shared.source, shared.windows[0]?.usedPct, shared.fresh], ["poll", 7, true]);
+			clock += 5 * 60_000;
+			observe(0, 50);
+			const inBand = await reading();
+			deepStrictEqual([inBand.source, inBand.windows[0]?.usedPct, inBand.fresh], ["stream-event", 50, true]);
+			strictEqual(fetches.length, 4, "a fresh in-band reading spares starting a poll");
+			// Nor does a running poll hold the read when the run's own fresh reading already answers it.
+			clock += 5 * 60_000;
+			dispatch.contract.primeRouteQuota?.();
+			await settle(5);
+			observe(0, 60);
+			const heldAt = performance.now();
+			const unblocked = await reading();
+			deepStrictEqual([unblocked.source, unblocked.windows[0]?.usedPct], ["stream-event", 60]);
+			ok(performance.now() - heldAt < 1_500, "a fresh in-band reading never waits on the running poll");
+			fetches[4]?.answer(8);
+		} finally {
+			await dispatch.extension.stop?.();
+		}
 	});
 });
 

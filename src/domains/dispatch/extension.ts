@@ -1,5 +1,6 @@
 import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
+import { codexAccountScope } from "../../core/codex-account.js";
 import { writeDiagnostic, writeHeadlessDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { routeOutputBound } from "../../core/output-bound.js";
@@ -275,10 +276,11 @@ import {
 	targetRequiresAuth,
 } from "../providers/index.js";
 import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
-import { DEFAULT_QUOTA_CACHE_TTL_MS } from "../quota/cache.js";
+import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS, type QuotaCache } from "../quota/cache.js";
+import { observedAnthropicQuota, observedCodexQuota, STREAM_QUOTA_TTL_MS } from "../quota/observed.js";
 import { buildQuotaProviders, quotaProviderIdForRuntime } from "../quota/registry.js";
 import { quotaSharedStatePath, readSharedQuotaState } from "../quota/shared-state.js";
-import type { UsageSnapshot } from "../quota/types.js";
+import type { QuotaProvider, UsageSnapshot } from "../quota/types.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import { type AutonomyLevel, admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -382,6 +384,7 @@ import {
 import type {
 	AbortReason,
 	BudgetEconomicsView,
+	BudgetPoolView,
 	DispatchAdmissionObserver,
 	DispatchContract,
 	DispatchDerivedGrants,
@@ -734,6 +737,8 @@ const ROUTE_HISTORY_WARM_DELAY_MS = 1_500;
 const PREVIEW_FORECAST_LIMIT = 6;
 /** Candidate forecasts `context(scope="budget")` shows across every dispatchable agent. */
 const SESSION_FORECAST_LIMIT = 12;
+/** The longest a budget read waits on a usage poll for a pool with no fresh reading; the poll itself runs on. */
+const ROUTE_QUOTA_POLL_WAIT_MS = 3_000;
 
 /** The level a worker's permit and ask routing take from the operator's settings: contained yolo is default. */
 function operatorAdmissionAutonomy(
@@ -976,6 +981,8 @@ export interface DispatchBundleOptions {
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/** Observer injection seam. Production constructs the durable observer. */
 	routeObserver?: RouteObserver;
+	/** Quota adapter injection seam for the budget view's pool. Production builds the registry's adapters. */
+	quotaProviders?: () => ReadonlyArray<QuotaProvider>;
 	/**
 	 * Write the durable run event journal for every run this bundle dispatches.
 	 * Off by default and turned on by the three composition roots
@@ -5202,36 +5209,191 @@ export function createDispatchBundle(
 		return pricing;
 	}
 
-	/**
-	 * The cached quota snapshot a route's pool was last read under, made with the credential that route spends now. The
-	 * quota adapter reads the runtime's own login, so a target naming another credential has no reading, and an unknown
-	 * identity on either side matches nothing. Reads the shared cache file only, never the network.
-	 */
-	async function cachedRouteQuota(
-		target: TargetDescriptor,
-		runtime: RuntimeDescriptor,
-		nowMs: number,
-	): Promise<UsageSnapshot | string> {
+	/** The quota adapter that reads the credential a route spends now, or why none does. */
+	function routeQuotaProvider(target: TargetDescriptor, runtime: RuntimeDescriptor): QuotaProvider | string {
 		const providerId = quotaProviderIdForRuntime(runtime.id);
 		if (providerId === null) return `runtime ${runtime.id} reports no quota`;
 		if (resolveAuthTarget(target, runtime).providerId !== resolveRuntimeAuthTarget(runtime).providerId)
 			return "the route spends a credential the quota reader does not read";
+		return (
+			(options?.quotaProviders ?? buildQuotaProviders)().find((candidate) => candidate.id === providerId) ??
+			`no quota reader for ${providerId} here`
+		);
+	}
+
+	/** The credential a quota adapter reads now: undefined when it names none, null when it cannot be read. */
+	async function quotaCredentialScope(provider: QuotaProvider): Promise<string | null | undefined> {
+		return provider.credentialScope === undefined ? undefined : await provider.credentialScope().catch(() => null);
+	}
+
+	/**
+	 * The shared poll reading of a route's pool, made with the credential that route spends now. The quota adapter reads
+	 * the runtime's own login, so a target naming another credential has no reading, and an unknown identity on either
+	 * side matches nothing. Reads the shared cache file only, never the network.
+	 */
+	function sharedRouteQuota(
+		provider: QuotaProvider,
+		scope: string | null | undefined,
+		nowMs: number,
+	): BudgetPoolView | string {
 		const shared = readSharedQuotaState(quotaSharedStatePath(), nowMs);
-		const entry = shared.entries.get(providerId);
-		if (entry === undefined || entry.storedAtMs <= (shared.cleared.get(providerId) ?? Number.NEGATIVE_INFINITY))
+		const entry = shared.entries.get(provider.id);
+		if (entry === undefined || entry.storedAtMs <= (shared.cleared.get(provider.id) ?? Number.NEGATIVE_INFINITY))
 			return "no cached quota reading";
-		const provider = buildQuotaProviders().find((candidate) => candidate.id === providerId);
-		const scope = provider?.credentialScope === undefined ? null : await provider.credentialScope().catch(() => null);
-		if (scope === null || entry.scope !== scope) return "no quota reading for the route's current credential";
-		return entry.snapshot;
+		if (scope === null || scope === undefined || entry.scope !== scope)
+			return "no quota reading for the route's current credential";
+		const view = budgetPoolView(entry.snapshot, nowMs, DEFAULT_QUOTA_CACHE_TTL_MS, "poll");
+		return view.status === "reading" ? view : view.reason;
+	}
+
+	/**
+	 * The newest quota this process's own requests on the route reported in band, under the credential the route spends
+	 * now: a Codex stream event for the request's ChatGPT account, Anthropic headers for the OAuth profile (#423).
+	 */
+	function streamedRouteQuota(
+		target: TargetDescriptor,
+		runtime: RuntimeDescriptor,
+		nowMs: number,
+	): { snapshot: UsageSnapshot; source: BudgetPoolView["source"] } | null {
+		if (runtime.id !== "openai-codex" && runtime.id !== "anthropic-max") return null;
+		const status = providers.auth.statusForTarget(target, runtime);
+		if (runtime.id === "anthropic-max") {
+			const profile = status.source === "stored-oauth" ? status.providerId : null;
+			const snapshot = observedAnthropicQuota(target.id, nowMs, profile)?.snapshot;
+			return snapshot ? { snapshot, source: "response-headers" } : null;
+		}
+		const stored = status.source === "stored-oauth" ? providers.auth.getStored(status.providerId) : null;
+		const scope = stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
+		const snapshot = observedCodexQuota(target.id, scope, nowMs)?.snapshot;
+		return snapshot ? { snapshot, source: "stream-event" } : null;
+	}
+
+	/** The running usage poll per quota adapter and credential, and when it began: its wait bound runs from there. */
+	const routeQuotaPolls = new Map<string, { startedAtMs: number; answer: Promise<UsageSnapshot | null> }>();
+	let routeQuotaCache: QuotaCache | null = null;
+	const routeQuotaPollKey = (provider: QuotaProvider, scope: string | null | undefined): string =>
+		JSON.stringify([provider.id, scope ?? null]);
+
+	/**
+	 * The usage poll for the credential a route spends now: the one already running for that credential, else one new
+	 * read through the shared quota cache, which honours its holds and publishes the reading to every process. Keyed by
+	 * credential, so a caller after a login change never joins the previous account's poll.
+	 */
+	function routeQuotaPoll(
+		provider: QuotaProvider,
+		scope: string | null | undefined,
+	): { startedAtMs: number; answer: Promise<UsageSnapshot | null> } {
+		const key = routeQuotaPollKey(provider, scope);
+		const running = routeQuotaPolls.get(key);
+		if (running !== undefined) return running;
+		routeQuotaCache ??= createQuotaCache({
+			ttlMs: DEFAULT_QUOTA_CACHE_TTL_MS,
+			now,
+			sharedStatePath: quotaSharedStatePath(),
+		});
+		const poll = { startedAtMs: now(), answer: routeQuotaCache.resolve(provider).catch(() => null) };
+		routeQuotaPolls.set(key, poll);
+		void poll.answer.then(() => {
+			if (routeQuotaPolls.get(key) === poll) routeQuotaPolls.delete(key);
+		});
+		return poll;
+	}
+
+	/**
+	 * The route's poll answer, waiting only out the rest of its ROUTE_QUOTA_POLL_WAIT_MS bound counted from the poll's
+	 * own start, so a poll primed at run start costs a later read nothing and no read waits a second full bound. The
+	 * answer counts only while the route still spends the credential the poll read for; the poll runs on past the bound.
+	 */
+	async function awaitRouteQuotaPoll(
+		provider: QuotaProvider,
+		scope: string | null | undefined,
+	): Promise<UsageSnapshot | string> {
+		const poll = routeQuotaPoll(provider, scope);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<"late">((resolve) => {
+			timer = setTimeout(() => resolve("late"), Math.max(0, poll.startedAtMs + ROUTE_QUOTA_POLL_WAIT_MS - now()));
+			timer.unref?.();
+		});
+		let answer: UsageSnapshot | null | "late";
+		try {
+			answer = await Promise.race([poll.answer, late]);
+		} finally {
+			clearTimeout(timer);
+		}
+		if (answer === "late") return `the quota poll did not answer within ${ROUTE_QUOTA_POLL_WAIT_MS / 1000}s`;
+		if (answer === null) return "the quota poll failed";
+		if ((await quotaCredentialScope(provider)) !== scope) return "the route's credential changed during the quota poll";
+		return answer;
+	}
+
+	/** The chat route by the effective settings, or null when there is none. */
+	function chatQuotaRoute(): { target: TargetDescriptor; runtime: RuntimeDescriptor } | null {
+		const target = providers.getTarget(getEffectiveSettings()?.chat?.target ?? "");
+		const runtime = target === null ? null : providers.getRuntime(target.runtime);
+		return target === null || runtime === null ? null : { target, runtime };
+	}
+
+	/**
+	 * S16: start the chat route's one bounded usage poll off the turn path when its shared reading is not fresh, so a
+	 * headless run's first budget read finds the answer held or waits only out the rest of the bound. Never a model call.
+	 */
+	function primeRouteQuota(): void {
+		const route = chatQuotaRoute();
+		const provider = route === null ? "no chat route" : routeQuotaProvider(route.target, route.runtime);
+		if (typeof provider === "string") return;
+		void quotaCredentialScope(provider).then((scope) => {
+			const shared = sharedRouteQuota(provider, scope, now());
+			if (typeof shared === "string" || !shared.fresh) routeQuotaPoll(provider, scope);
+		});
+	}
+
+	/**
+	 * The chat route's pool as `context(scope="budget")` shows it: a fresh shared poll reading first, else this
+	 * process's own fresh in-band reading (a headless run that just heard from the provider, a denial included), and
+	 * only with neither the route's usage poll (the one primed at run start, else one started here) within the rest of
+	 * its bound. With none fresh, the newest held reading marked not fresh. Age and freshness come from each reading's
+	 * own as-of time, never from this read.
+	 */
+	async function routeQuotaPool(
+		target: TargetDescriptor,
+		runtime: RuntimeDescriptor,
+	): Promise<BudgetPoolView | { status: "none"; reason: string }> {
+		const provider = routeQuotaProvider(target, runtime);
+		const held: BudgetPoolView[] = [];
+		let reason = typeof provider === "string" ? provider : "no quota reading";
+		const hold = (view: BudgetPoolView | string): BudgetPoolView | null => {
+			if (typeof view === "string") reason = view;
+			else if (view.fresh) return view;
+			else held.push(view);
+			return null;
+		};
+		const scope = typeof provider === "string" ? undefined : await quotaCredentialScope(provider);
+		if (typeof provider !== "string") {
+			const shared = hold(sharedRouteQuota(provider, scope, now()));
+			if (shared !== null) return shared;
+		}
+		const streamed = streamedRouteQuota(target, runtime, now());
+		if (streamed !== null) {
+			const view = budgetPoolView(streamed.snapshot, now(), STREAM_QUOTA_TTL_MS, streamed.source);
+			const fresh = hold(view.status === "reading" ? view : view.reason);
+			if (fresh !== null) return fresh;
+		}
+		if (typeof provider !== "string") {
+			const answer = await awaitRouteQuotaPoll(provider, scope);
+			const view = typeof answer === "string" ? answer : budgetPoolView(answer, now(), DEFAULT_QUOTA_CACHE_TTL_MS, "poll");
+			const polled = hold(typeof view === "string" || view.status === "reading" ? view : view.reason);
+			if (polled !== null) return polled;
+		}
+		held.sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt));
+		return held[0] ?? { status: "none", reason };
 	}
 
 	/**
 	 * S16: the session's economics view. Spend is what admission counts, settled journals plus workers still metering,
 	 * read after every queued settlement is written, so the model call that asked is counted and priced as the usage
 	 * report counts it; unobserved without a telemetry read model rather than a measured zero. The pool is the chat
-	 * route's cached quota reading; forecasts are the plan card's lines for every dispatchable agent's routes, so a
-	 * caller reads them before it dispatches, asked or not.
+	 * route's newest fresh quota reading (routeQuotaPool); forecasts are the plan card's lines for every dispatchable
+	 * agent's routes, so a caller reads them before it dispatches, asked or not.
 	 */
 	async function budgetEconomics(): Promise<BudgetEconomicsView> {
 		const preflight = scheduling.preflight();
@@ -5243,11 +5405,12 @@ export function createDispatchBundle(
 		);
 		const usd = (settled?.usd ?? preflight.currentUsd) + inFlightSpendUsd();
 		const ceilingUsd = preflight.ceilingUsd > 0 ? preflight.ceilingUsd : null;
-		const nowMs = now();
 		const settings = getEffectiveSettings();
-		const target = providers.getTarget(settings?.chat?.target ?? "");
-		const runtime = target === null ? null : providers.getRuntime(target.runtime);
-		const quota = target === null || runtime === null ? "no chat route" : await cachedRouteQuota(target, runtime, nowMs);
+		const route = chatQuotaRoute();
+		const pool =
+			route === null
+				? { status: "none" as const, reason: "no chat route" }
+				: await routeQuotaPool(route.target, route.runtime);
 		const observed = telemetry !== undefined;
 		return {
 			scope: "session",
@@ -5266,10 +5429,7 @@ export function createDispatchBundle(
 						headroomUsd: ceilingUsd === null ? null : Math.max(0, ceilingUsd - usd),
 					}
 				: { usd: null, basis: "unobserved", ceilingUsd, headroomUsd: null },
-			pool:
-				typeof quota === "string"
-					? { status: "none", reason: quota }
-					: budgetPoolView(quota, nowMs, DEFAULT_QUOTA_CACHE_TTL_MS),
+			pool,
 			forecasts: sessionForecasts(settings),
 		};
 	}
@@ -13451,6 +13611,7 @@ export function createDispatchBundle(
 		ownsProgressBus: (bus) => bus === context.bus,
 		preview: previewAdmission,
 		budgetEconomics,
+		primeRouteQuota,
 		derivedGrants: (req) => previewFixedStages(req, getEffectiveSettings()).grants,
 		planAgentSelection,
 		routeCandidates,
