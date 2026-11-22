@@ -16,21 +16,35 @@ export function platformLabel(platform: string | undefined): string {
 
 /**
  * What a tab keeps of its last installation check, so a reload states that result at once instead of
- * "Connecting" and "Checking" until the idle recheck lands. Severities and the time only: no path or detail.
+ * "Connecting" and "Checking" until the idle recheck lands. Severities, the time and the runtime's platform only: no
+ * path or detail. The platform is kept so the recalled status does not read "System Local" until the runtime reports.
  */
-export function rememberedSystem(report: { checkedAt: string; findings: readonly Severity[] }): string {
-	return JSON.stringify({ checkedAt: report.checkedAt, levels: report.findings.map((finding) => finding.level) });
+export function rememberedSystem(
+	report: { checkedAt: string; findings: readonly Severity[] },
+	platform: string | undefined,
+): string {
+	return JSON.stringify({
+		checkedAt: report.checkedAt,
+		levels: report.findings.map((finding) => finding.level),
+		...(platform !== undefined ? { platform } : {}),
+	});
 }
 
-export function recalledSystem(raw: string | null): { checkedAt: string; findings: Severity[] } | undefined {
+export function recalledSystem(
+	raw: string | null,
+): { checkedAt: string; findings: Severity[]; platform?: string } | undefined {
 	if (!raw) return undefined;
 	try {
 		const value: unknown = JSON.parse(raw);
 		if (!value || typeof value !== "object") return undefined;
-		const { checkedAt, levels } = value as { checkedAt?: unknown; levels?: unknown };
+		const { checkedAt, levels, platform } = value as { checkedAt?: unknown; levels?: unknown; platform?: unknown };
 		if (typeof checkedAt !== "string" || !Array.isArray(levels)) return undefined;
 		if (!levels.every((level) => (LEVELS as readonly unknown[]).includes(level))) return undefined;
-		return { checkedAt, findings: (levels as Finding["level"][]).map((level) => ({ level })) };
+		return {
+			checkedAt,
+			findings: (levels as Finding["level"][]).map((level) => ({ level })),
+			...(typeof platform === "string" ? { platform } : {}),
+		};
 	} catch {
 		return undefined;
 	}

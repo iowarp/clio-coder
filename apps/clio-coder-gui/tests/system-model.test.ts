@@ -5,6 +5,7 @@ import { ACTIVITY, activityLabel } from "../client/pages/mission-control-model.j
 import {
 	findingAction,
 	healthGroups,
+	platformLabel,
 	recalledSystem,
 	rememberedSystem,
 	systemStatus,
@@ -68,7 +69,7 @@ test("a scheduled idle check reads as checking, not as never checked", () => {
 });
 
 test("a reload draws the tab's last check at once, while the stream connects, without keeping paths or details", () => {
-	const kept = rememberedSystem(report);
+	const kept = rememberedSystem(report, undefined);
 	assert.equal(kept.includes("Withheld") || kept.includes("/config"), false);
 	const recalled = recalledSystem(kept);
 	assert.equal(recalled?.checkedAt, report.checkedAt);
@@ -77,6 +78,13 @@ test("a reload draws the tab's last check at once, while the stream connects, wi
 	assert.equal(systemStatus("Reconnecting…", recalled?.findings, false, true).label, "Reconnecting");
 	for (const raw of [null, "", "{", '{"checkedAt":1,"levels":[]}', '{"checkedAt":"x","levels":["bad"]}'])
 		assert.equal(recalledSystem(raw), undefined, String(raw));
+});
+
+test("a reload names the runtime's platform with the recalled result, not Local until the runtime reports", () => {
+	const recalled = recalledSystem(rememberedSystem(report, "linux-x64"));
+	assert.equal(platformLabel(recalled?.platform), "Linux");
+	assert.equal(recalledSystem(rememberedSystem(report, undefined))?.platform, undefined);
+	assert.equal(recalledSystem('{"checkedAt":"x","levels":[],"platform":7}')?.platform, undefined);
 });
 
 test("Sessions cards use the sidebar's state words", () => {
