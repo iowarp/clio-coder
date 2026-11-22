@@ -141,6 +141,7 @@
 		"hooks:install": "node scripts/git-guard.mjs install",
 		"library:pin": "node --import tsx scripts/pin-library.ts",
 		"library:check": "node --import tsx scripts/pin-library.ts --check",
+		"economy:check": "node --import tsx scripts/check-economy-rates.ts",
 		"pretest:full": "node scripts/check-dist.mjs",
 		"test:full": "node scripts/ci-tests.mjs full",
 		"test:package": "node scripts/ci-tests.mjs package",

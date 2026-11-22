@@ -1,0 +1,347 @@
+{
+	"version": 1,
+	"currency": "USD",
+	"perTokens": 1000000,
+	"rows": [
+		{
+			"id": "anthropic/claude-opus-5-5@2026-11-22",
+			"publisher": "anthropic",
+			"model": "claude-opus-5-5",
+			"kind": "standard",
+			"source": "https://platform.claude.com/docs/en/about-claude/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 4,
+				"output": 20,
+				"cacheRead": 0.2,
+				"cacheWrite": {
+					"5m": 5,
+					"1h": 8
+				}
+			},
+			"tiering": {
+				"source": "https://platform.claude.com/docs/en/about-claude/pricing",
+				"basis": "None. The full 1M context window is billed at standard rates.",
+				"counts": ["fresh", "read", "write"],
+				"tiers": []
+			},
+			"notes": ["Cache reads cost 0.05x the input price; 5-minute writes 1.25x and 1-hour writes 2x."]
+		},
+		{
+			"id": "anthropic/claude-sonnet-5-5@2026-11-22",
+			"publisher": "anthropic",
+			"model": "claude-sonnet-5-5",
+			"kind": "standard",
+			"source": "https://platform.claude.com/docs/en/about-claude/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 2,
+				"output": 10,
+				"cacheRead": 0.1,
+				"cacheWrite": {
+					"5m": 2.5,
+					"1h": 4
+				}
+			},
+			"tiering": {
+				"source": "https://platform.claude.com/docs/en/about-claude/pricing",
+				"basis": "None. The full 1M context window is billed at standard rates.",
+				"counts": ["fresh", "read", "write"],
+				"tiers": []
+			},
+			"notes": ["Cache reads cost 0.05x the input price; 5-minute writes 1.25x and 1-hour writes 2x."]
+		},
+		{
+			"id": "anthropic/claude-haiku-5-5@2026-11-22",
+			"publisher": "anthropic",
+			"model": "claude-haiku-5-5",
+			"kind": "standard",
+			"source": "https://platform.claude.com/docs/en/about-claude/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 0.1,
+				"output": 0.5,
+				"cacheRead": 0.01,
+				"cacheWrite": {
+					"5m": 0.125,
+					"1h": 0.2
+				}
+			},
+			"tiering": {
+				"source": "https://platform.claude.com/docs/en/about-claude/pricing",
+				"basis": "Prompt >100,000 tokens. The prompt length includes cache reads and writes, and each request is priced on its own.",
+				"counts": ["fresh", "read", "write"],
+				"tiers": [
+					{
+						"above": 100000,
+						"rates": {
+							"input": 0.5,
+							"output": 2.5,
+							"cacheRead": 0.05,
+							"cacheWrite": {
+								"5m": 0.625,
+								"1h": 1
+							}
+						}
+					}
+				]
+			},
+			"notes": ["Cache reads cost 0.1x the input price; 5-minute writes 1.25x and 1-hour writes 2x."]
+		},
+		{
+			"id": "openai/gpt-6.2-sol@2026-11-22",
+			"publisher": "openai",
+			"model": "gpt-6.2-sol",
+			"kind": "standard",
+			"source": "https://developers.openai.com/api/docs/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 2,
+				"output": 10,
+				"cacheRead": 0.1,
+				"cacheWrite": {
+					"30m": 2.5,
+					"12h": 5
+				}
+			},
+			"tiering": {
+				"source": "https://developers.openai.com/api/docs/pricing",
+				"basis": "Short context is <=272K input tokens and long context is >272K; OpenAI input tokens include cached input.",
+				"counts": ["fresh", "read", "write"],
+				"tiers": [
+					{
+						"above": 272000,
+						"rates": {
+							"input": 4,
+							"output": 15,
+							"cacheRead": 0.2,
+							"cacheWrite": {
+								"30m": 5,
+								"12h": 10
+							}
+						}
+					}
+				]
+			},
+			"notes": [
+				"Written tokens bill at the write rate instead of the input rate, not as an added fee; 12-hour writes are available in the Responses API (https://developers.openai.com/api/docs/guides/prompt-caching)."
+			]
+		},
+		{
+			"id": "openai/gpt-6.1-terra@2026-11-22",
+			"publisher": "openai",
+			"model": "gpt-6.1-terra",
+			"kind": "standard",
+			"source": "https://developers.openai.com/api/docs/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 1,
+				"output": 5,
+				"cacheRead": 0.05,
+				"cacheWrite": {
+					"30m": 1.25,
+					"12h": 2.5
+				}
+			},
+			"tiering": {
+				"source": "https://developers.openai.com/api/docs/pricing",
+				"basis": "Short context is <=272K input tokens and long context is >272K; OpenAI input tokens include cached input.",
+				"counts": ["fresh", "read", "write"],
+				"tiers": [
+					{
+						"above": 272000,
+						"rates": {
+							"input": 2,
+							"output": 7.5,
+							"cacheRead": 0.1,
+							"cacheWrite": {
+								"30m": 2.5,
+								"12h": 5
+							}
+						}
+					}
+				]
+			},
+			"notes": [
+				"Written tokens bill at the write rate instead of the input rate, not as an added fee; 12-hour writes are available in the Responses API (https://developers.openai.com/api/docs/guides/prompt-caching)."
+			]
+		},
+		{
+			"id": "openai/gpt-6-luna@2026-11-22",
+			"publisher": "openai",
+			"model": "gpt-6-luna",
+			"kind": "standard",
+			"source": "https://developers.openai.com/api/docs/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 0.1,
+				"output": 0.5,
+				"cacheRead": 0.01,
+				"cacheWrite": {
+					"30m": 0.125,
+					"12h": 0.25
+				}
+			},
+			"tiering": {
+				"source": "https://developers.openai.com/api/docs/pricing",
+				"basis": "Short context is <=272K input tokens and long context is >272K; OpenAI input tokens include cached input.",
+				"counts": ["fresh", "read", "write"],
+				"tiers": [
+					{
+						"above": 272000,
+						"rates": {
+							"input": 0.2,
+							"output": 0.75,
+							"cacheRead": 0.02,
+							"cacheWrite": {
+								"30m": 0.25,
+								"12h": 0.5
+							}
+						}
+					}
+				]
+			},
+			"notes": [
+				"Written tokens bill at the write rate instead of the input rate, not as an added fee; 12-hour writes are available in the Responses API (https://developers.openai.com/api/docs/guides/prompt-caching)."
+			]
+		},
+		{
+			"id": "google/gemini-4-carbon/introductory@2026-11-22",
+			"publisher": "google",
+			"model": "gemini-4-carbon",
+			"kind": "promo",
+			"scenario": "gemini-4-carbon-introductory",
+			"source": "https://aistudio.google.com/docs/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": "2026-12-01",
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 2,
+				"output": 10,
+				"cacheRead": 0.1,
+				"cacheWrite": null
+			},
+			"tiering": {
+				"source": "https://aistudio.google.com/docs/pricing",
+				"basis": "None published (single rate).",
+				"counts": ["fresh", "read", "write"],
+				"tiers": []
+			},
+			"notApplicable": {
+				"cacheWrite": {
+					"source": "https://aistudio.google.com/docs/caching",
+					"basis": "Gemini 4 supports implicit caching only; the price list publishes no write or storage charge."
+				}
+			},
+			"notes": ["Introductory rate, valid through 2026-11-30."]
+		},
+		{
+			"id": "google/gemini-4-carbon@2026-12-01",
+			"publisher": "google",
+			"model": "gemini-4-carbon",
+			"kind": "standard",
+			"source": "https://aistudio.google.com/docs/pricing",
+			"effectiveFrom": "2026-12-01",
+			"effectiveFromBasis": "published",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 4,
+				"output": 20,
+				"cacheRead": 0.2,
+				"cacheWrite": null
+			},
+			"tiering": {
+				"source": "https://aistudio.google.com/docs/pricing",
+				"basis": "None published (single rate).",
+				"counts": ["fresh", "read", "write"],
+				"tiers": []
+			},
+			"notApplicable": {
+				"cacheWrite": {
+					"source": "https://aistudio.google.com/docs/caching",
+					"basis": "Gemini 4 supports implicit caching only; the price list publishes no write or storage charge."
+				}
+			},
+			"notes": ["Standard price, starting 2026-12-01."]
+		},
+		{
+			"id": "google/gemini-4-neon@2026-11-22",
+			"publisher": "google",
+			"model": "gemini-4-neon",
+			"kind": "standard",
+			"source": "https://aistudio.google.com/docs/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 3,
+				"output": 15,
+				"cacheRead": 0.15,
+				"cacheWrite": null
+			},
+			"tiering": {
+				"source": "https://aistudio.google.com/docs/pricing",
+				"basis": "None published (single rate).",
+				"counts": ["fresh", "read", "write"],
+				"tiers": []
+			},
+			"notApplicable": {
+				"cacheWrite": {
+					"source": "https://aistudio.google.com/docs/caching",
+					"basis": "Gemini 4 supports implicit caching only; the price list publishes no write or storage charge."
+				}
+			}
+		},
+		{
+			"id": "google/gemini-4-hydrogen@2026-11-22",
+			"publisher": "google",
+			"model": "gemini-4-hydrogen",
+			"kind": "standard",
+			"source": "https://aistudio.google.com/docs/pricing",
+			"effectiveFrom": "2026-11-22",
+			"effectiveFromBasis": "verified",
+			"effectiveTo": null,
+			"verifiedAt": "2026-11-22",
+			"rates": {
+				"input": 1.5,
+				"output": 7.5,
+				"cacheRead": 0.075,
+				"cacheWrite": null
+			},
+			"tiering": {
+				"source": "https://aistudio.google.com/docs/pricing",
+				"basis": "None published (single rate).",
+				"counts": ["fresh", "read", "write"],
+				"tiers": []
+			},
+			"notApplicable": {
+				"cacheWrite": {
+					"source": "https://aistudio.google.com/docs/caching",
+					"basis": "Gemini 4 supports implicit caching only; the price list publishes no write or storage charge."
+				}
+			},
+			"notes": ["Paid tier; the free tier is excluded."]
+		}
+	]
+}
