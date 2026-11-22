@@ -33,7 +33,8 @@ function githubBotNoreplyEmail(userId: number | null, slug: string): string | nu
 export const CLIO_COMMIT_EMAIL =
 	githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? IOWARP_COMMIT_EMAIL;
 
-export const CLIO_COMMIT_NAME = "Clio Coder";
+/** The author name of an autonomous commit; it changes the managed hook script, so bump `MANAGED_HOOK_VERSION` with it. */
+export const CLIO_COMMIT_NAME = "CLIO Coder";
 
 export const CLIO_COMMIT_IDENTITY = `${CLIO_COMMIT_NAME} <${CLIO_COMMIT_EMAIL}>`;
 
@@ -137,7 +138,7 @@ const KNOWN_CLIO_TRAILERS = new Set(
  * mapped to the same role under the bot identity. Empty while no bot id is set.
  */
 const IOWARP_ROLE_TRAILER_UPGRADES: ReadonlyMap<string, string> = (() => {
-	const legacy = roleTrailers(`Clio Coder <${IOWARP_COMMIT_EMAIL}>`);
+	const legacy = roleTrailers(`${CLIO_COMMIT_NAME} <${IOWARP_COMMIT_EMAIL}>`);
 	const upgrades = new Map<string, string>();
 	for (const role of Object.keys(legacy) as Array<keyof typeof legacy>) {
 		const key = normalizedTrailer(legacy[role]);
