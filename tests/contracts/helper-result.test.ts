@@ -133,27 +133,52 @@ test("typed mutation reports retain semantic grounding and their authorship and 
 	strictEqual(gradeWork({ activity: idle }).outcomeCode, "obligation_unmet");
 });
 
-// bt-17: a deliberate red baseline before the change is not a failure of the work; an unmarked failure still is.
-test("a mutation report's baseline failure does not fail quality, and an unmarked failure still does", () => {
+// bt-17: a deliberate red baseline before the change is not a failure of the work. A failing entry must say which red
+// it reports: a test-first worker that left baseline out on its red-green check was sealed assurance_compromised.
+test("a mutation report's failing entry states its baseline: a red-green baseline settles, a red final tree still fails", () => {
 	const contract = { kind: "mutation-report" as const };
 	const passed = { name: "python3 -m unittest", passed: true, evidence: "OK" };
 	const red = { name: "python3 -m unittest", passed: false, evidence: "FAILED (failures=1)" };
-	const baseline = {
+	const report = (first: Record<string, unknown>) => ({
 		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [],
-		validations: [{ ...red, baseline: true }, passed],
-	};
-	const result = validateStructuredHelperResult({ ...evidence, contract, data: baseline });
-	strictEqual(result.validation.quality, "pass");
-	deepStrictEqual(result.structured?.data, baseline);
+		validations: [first, passed],
+	});
+	// The host's own receipts: the check ran red after the test edit, then green on the final tree.
+	const receipts = (latest: boolean) => ({
+		mutatedPaths: new Set<string>(),
+		failedMutationPaths: new Set<string>(),
+		validationCommands: new Set(["python3 -m unittest"]),
+		checkOutcomes: new Map([["python3 -m unittest", latest]]),
+		mutationObserved: true,
+	});
+	const unmarked = validateStructuredHelperResult({ ...evidence, contract, data: report(red) });
+	strictEqual(unmarked.structured, null);
+	strictEqual(unmarked.validation.conformance, "fail");
+	ok(unmarked.validation.reason?.includes('"python3 -m unittest" has passed:false without baseline'));
+	ok(
+		unmarked.validation.reason?.includes('"baseline":true}') && unmarked.validation.reason.includes('"baseline":false}'),
+	);
+	const baseline = report({ ...red, baseline: true });
+	const settled = validateStructuredHelperResult({
+		...evidence,
+		contract,
+		data: baseline,
+		observedRunEffects: receipts(true),
+	});
+	strictEqual(settled.validation.quality, "pass");
+	deepStrictEqual(settled.structured?.data, baseline);
 	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(baseline)), []);
-	const unmarked = {
-		completion: { state: "done", limitations: [], unverified: [] },
-		mutatedPaths: [],
-		validations: [red, passed],
-	};
-	strictEqual(validateStructuredHelperResult({ ...evidence, contract, data: unmarked }).validation.quality, "fail");
-	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(unmarked)), ["python3 -m unittest"]);
+	const stillRed = validateStructuredHelperResult({
+		...evidence,
+		contract,
+		data: baseline,
+		observedRunEffects: receipts(false),
+	});
+	strictEqual(stillRed.validation.quality, "fail");
+	const real = report({ ...red, baseline: false });
+	strictEqual(validateStructuredHelperResult({ ...evidence, contract, data: real }).validation.quality, "fail");
+	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(real)), ["python3 -m unittest"]);
 });
 
 test("typed Scout submission cannot ground unread lines or smuggle continuation through degraded claims", () => {

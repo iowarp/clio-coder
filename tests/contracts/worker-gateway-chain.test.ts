@@ -406,6 +406,45 @@ test("zero-tool recovery leaves both result-contract repairs available", { timeo
 	strictEqual(requests, 5, "recovery plus two independent terminal repairs");
 });
 
+test("a tool-route baseline the schema would coerce is refused and repaired, never read as a boolean", {
+	timeout: 20_000,
+}, async () => {
+	const handoff = (baseline: unknown): Call => ({
+		name: "clio_submit_result",
+		arguments: JSON.stringify({
+			completion: { state: "done", limitations: [], unverified: [] },
+			mutatedPaths: ["fixed.ts"],
+			validations: [{ name: "npm test", passed: false, evidence: "exit 1", baseline }],
+		}),
+	});
+	const { result, events, requests, bodies } = await runWorker(
+		[
+			[{ name: "write", arguments: JSON.stringify({ path: "fixed.ts", content: "export const fixed = true;\n" }) }],
+			{ text: "The edit is done." },
+			[handoff("true")],
+			[handoff(false)],
+		],
+		{
+			agentId: "coder",
+			helperResult: true,
+			allowedTools: ["write", "read"],
+			resultContract: { kind: "mutation-report" },
+		},
+	);
+	strictEqual(requests, 4, JSON.stringify(outcomes(events)));
+	ok(JSON.stringify(bodies[3]).includes("has a baseline that is not a JSON boolean"));
+	const tool = (bodies[2]?.tools as Array<{ function: { name: string; description: string } }>).find(
+		(entry) => entry.function.name === "clio_submit_result",
+	);
+	ok(tool?.function.description.includes('"baseline":false}'), tool?.function.description);
+	const accepted = events.flatMap((event) => (event.type === "clio_coder_helper_result" ? [event.payload.data] : []));
+	deepStrictEqual(
+		(accepted as Array<{ validations: unknown[] }>).map((data) => data.validations),
+		[[{ name: "npm test", passed: false, evidence: "exit 1", baseline: false }]],
+	);
+	strictEqual(result.exitCode, 0);
+});
+
 test("a second zero-tool reply ends without repairing its malformed report", { timeout: 20_000 }, async () => {
 	const { result, events, requests } = await runWorker(
 		[{ text: "I cannot edit this file." }, { text: "Still cannot edit." }],

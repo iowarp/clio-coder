@@ -29,7 +29,14 @@ const report = (summary?: string, passed = true) =>
 	JSON.stringify({
 		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [],
-		validations: [{ name: "source review", passed, evidence: "Read the supplied task evidence; no command ran." }],
+		validations: [
+			{
+				name: "source review",
+				passed,
+				evidence: "Read the supplied task evidence; no command ran.",
+				...(passed ? {} : { baseline: false }),
+			},
+		],
 		...(summary === undefined ? {} : { summary }),
 	});
 

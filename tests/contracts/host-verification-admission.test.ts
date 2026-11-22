@@ -472,7 +472,10 @@ it("a builder's two verdicts disagreeing seal one grade: outcome, exit code, rul
 
 	// Host verified, the worker's own `python3 extra.py` failed (wave-42 m9-3): compromised, so not delivered.
 	const cause = /assurance compromised: the worker's own report lists a failing validation \(python3 extra\.py\)/u;
-	const own = await settle([{ name: "python3 extra.py", passed: false, evidence: "exit 1" }], "process.exit(0)");
+	const own = await settle(
+		[{ name: "python3 extra.py", passed: false, evidence: "exit 1", baseline: false }],
+		"process.exit(0)",
+	);
 	strictEqual(own.receipt.hostVerification?.status, "verified");
 	strictEqual(own.receipt.verdict?.assurance, "compromised");
 	strictEqual(own.receipt.outcome, "failed");

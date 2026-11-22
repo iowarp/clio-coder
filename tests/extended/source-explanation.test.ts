@@ -27,7 +27,14 @@ const coderReport = (summary: string, passed = true) =>
 	JSON.stringify({
 		completion: { state: "done", limitations: [], unverified: [] },
 		mutatedPaths: [],
-		validations: [{ name: "source read", passed, evidence: "Read only the four requested files; no tests ran." }],
+		validations: [
+			{
+				name: "source read",
+				passed,
+				evidence: "Read only the four requested files; no tests ran.",
+				...(passed ? {} : { baseline: false }),
+			},
+		],
 		summary,
 	});
 
