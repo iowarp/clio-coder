@@ -1640,8 +1640,20 @@ function partsFreeRule(parts: readonly Part[]): FreeRule | undefined {
 	};
 	for (const part of parts) {
 		if (part.run) {
-			if (part.run.fold.source === "aggregate" && part.run.fold.aggregate) pricings.push(part.run.fold.aggregate.pricing);
-			add(part.run.attempts);
+			if (part.run.fold.source === "aggregate") {
+				const pricing = part.run.fold.aggregate?.pricing ?? part.run.settled?.data.pricing;
+				if (pricing) pricings.push(pricing);
+			} else if (part.run.fold.source === "parts") {
+				const latestByPart = new Map<string, TelemetryRecord<"run.usage_reported">["data"]>();
+				for (const record of part.run.source.records) {
+					if (record.k !== "run.usage_reported" || record.data.partId === undefined) continue;
+					const prior = latestByPart.get(record.data.partId);
+					if (!prior || record.data.revision >= prior.revision) latestByPart.set(record.data.partId, record.data);
+				}
+				for (const entry of latestByPart.values()) pricings.push(entry.pricing);
+			} else {
+				add(part.run.attempts);
+			}
 		}
 		add(part.attempts ?? []);
 	}
@@ -4635,13 +4647,15 @@ export function sessionOperatorMetrics(source: SessionSource) {
 
 /** Fleet totals over run DTOs, preserving unknown contributions from unreadable runs (#434). */
 export function fleetTotals(runs: readonly RunTelemetryV1[]) {
+	const free = runs.length > 0 && runs.every((run) => run.settled?.pricing.pricedBy === "free");
+	const freeRule = free ? agreedFreeRule(runs.map((run) => run.settled?.pricing)) : undefined;
 	const sum = (facts: Array<Fact<number> | FactSum>, unit: "count" | "usd" | "duration") => {
 		const fact = sumFactSums(facts.map((fact) => ("kind" in fact ? foldFacts([fact]) : fact)));
 		return {
 			fact,
 			display:
 				unit === "usd"
-					? renderUsdSum(fact, runs.length > 0 && runs.every((run) => run.settled?.pricing.pricedBy === "free"))
+					? renderUsdSum(fact, free, freeRule)
 					: unit === "duration"
 						? renderDurationSum(fact)
 						: renderCountSum(fact),

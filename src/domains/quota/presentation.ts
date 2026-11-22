@@ -159,7 +159,7 @@ export function localQuotaSnapshot(options: { runtimeLabel?: string; fetchedAt?:
 		displayName: options.runtimeLabel ?? "Local AI",
 		status: "ok",
 		windows: [],
-		credits: { display: renderPricing(pricedUsd("free", 0)), usedPct: null },
+		credits: { display: renderPricing(pricedUsd("free", 0, "local-native")), usedPct: null },
 		plan: "Local",
 		message: "no subscription window consumed",
 		fetchedAt: options.fetchedAt ?? null,

@@ -83,21 +83,22 @@ function renderUnknown(reason: Extract<Fact<unknown>, { kind: "unknown" }>["reas
  * estimates say so (L5); a sum nobody priced has no claim and reads as not measured, never `$0.00`.
  */
 /**
- * A free amount names the rule that made it free. Only a local-native runtime is "local"; a target that declared
- * itself free or declared all-zero rates may be a cloud endpoint. A record from before the rule was kept reads as it
- * always did.
+ * A free amount names the rule that made it free. Only `local-native` renders `$0.00 local`; a target that declared
+ * itself free or declared all-zero rates may be a cloud endpoint. A free sum with no agreeing rule renders
+ * `$0.00 free (mixed)`; a single free fact without a recorded rule renders `$0.00 free`, never `$0.00 local`.
  */
-function renderFreeUsd(freeRule: FreeRule | undefined): string {
+function renderFreeUsd(freeRule: FreeRule | undefined, scope: "fact" | "sum"): string {
+	if (freeRule === "local-native") return "$0.00 local";
 	if (freeRule === "declared") return "$0.00 free (declared)";
 	if (freeRule === "zero-rates") return "$0.00 free (zero-rates)";
-	return "$0.00 local";
+	return scope === "sum" ? "$0.00 free (mixed)" : "$0.00 free";
 }
 
 function renderUsdParts(
 	known: number,
 	parts: { estimated: boolean; unpriced: boolean; free: boolean; freeRule?: FreeRule | undefined },
 ): string {
-	if (parts.free && !parts.unpriced && !parts.estimated) return renderFreeUsd(parts.freeRule);
+	if (parts.free && !parts.unpriced && !parts.estimated) return renderFreeUsd(parts.freeRule, "sum");
 	if (parts.unpriced) return known > 0 ? `${parts.estimated ? "~" : ""}${renderUsd(known)} +?` : COST_NOT_MEASURED;
 	if (parts.estimated) return `~${renderUsd(known)} est`;
 	return renderUsd(known);
@@ -283,7 +284,7 @@ export function renderFact(fact: Fact<number>, as: Scalar = "count"): string {
 
 /** A priced fact. `pricedBy: free` is a measured zero under a named free rule, not a provider's `$0.00`. */
 export function renderUsdFact(fact: Fact<number>, pricedBy: string, freeRule?: FreeRule): string {
-	if (fact.kind === "measured" && pricedBy === "free") return renderFreeUsd(freeRule);
+	if (fact.kind === "measured" && pricedBy === "free") return renderFreeUsd(freeRule, "fact");
 	if (fact.kind === "estimated") return `~${renderUsd(fact.value)} est`;
 	if (fact.kind === "unknown") return COST_NOT_MEASURED;
 	return renderFact(fact, "usd");

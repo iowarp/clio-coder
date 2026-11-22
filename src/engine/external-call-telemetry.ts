@@ -127,7 +127,11 @@ export function reportedUsageSums(
 		totalTokens: one(facts.totalTokens),
 		apiCalls: counted(facts.apiCalls),
 		unmeteredCalls: counted(facts.unmeteredCalls),
-		pricing: { usd: one(facts.pricing.usd), pricedBy: facts.pricing.pricedBy },
+		pricing: {
+			usd: one(facts.pricing.usd),
+			pricedBy: facts.pricing.pricedBy,
+			...(facts.pricing.freeRule !== undefined ? { freeRule: facts.pricing.freeRule } : {}),
+		},
 		coverage: facts.coverage,
 	};
 }
