@@ -180,7 +180,9 @@ test("fleet status answers from a module that does not load the fleet command, l
 	ok(seen.size <= 8, `fleet status chunks: ${seen.size} > 8`);
 	// Ledger rows add the ledger, the project scope and the light run-journal reader, never a domain module, the
 	// session loader or the fleet command. 0.8.5 measured 48 chunks in this closure and 49 / 1,862,408 B loaded over five
-	// ledger rows (CLI-P11), against 142 / 9,363,218 B loaded when per-run telemetry came through fleet.ts.
+	// ledger rows (CLI-P11), against 142 / 9,363,218 B loaded when per-run telemetry came through fleet.ts. Row 363 measured
+	// 50 after the ledger stopped value-importing execution-role.ts, whose recipe rules (agent spec, result contracts,
+	// safety classifier) had grown it to 62.
 	const rows = new Set(seen);
 	const rowsForbidden =
 		/^src\/(?:cli\/fleet\.ts|entry\/|session-control\/|interactive\/|domains\/[^/]+\/(?:extension|index)\.ts|domains\/session\/telemetry-source\.ts)$/u;

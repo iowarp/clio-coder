@@ -111,6 +111,7 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 		parsed.agentProfile !== undefined ||
 		parsed.agentRuntime !== undefined ||
 		parsed.toolProfile !== undefined ||
+		parsed.review !== undefined ||
 		parsed.required.length > 0
 	);
 }
@@ -546,6 +547,8 @@ async function executeRunCommand(
 						return 2;
 					}
 				}
+				const reviewSubject = parsed.agentId === undefined ? undefined : await enterReviewSubject(parsed, parsed.agentId);
+				if (typeof reviewSubject === "number") return reviewSubject;
 
 				const noSkills = options.noSkills === true || parsed.noSkills === true;
 				const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
@@ -721,10 +724,11 @@ async function executeRunCommand(
 				if (parsed.json) takeOverStdout();
 				try {
 					// The worker is told the shape in its task text; its request never carries the caller's schema (6.8).
+					const prompt = reviewSubject !== undefined ? `${reviewSubject}\n\n${assembled.prompt}` : assembled.prompt;
 					const task =
 						structured !== undefined && outputSchema !== undefined
-							? `${assembled.prompt}\n\n${structured.outputSchemaInstruction(outputSchema)}`
-							: assembled.prompt;
+							? `${prompt}\n\n${structured.outputSchemaInstruction(outputSchema)}`
+							: prompt;
 					const code = await runDispatch(parsed as RunCliArgs & { agentId: string }, task, {
 						...options,
 						noSkills,
@@ -743,6 +747,49 @@ async function executeRunCommand(
 			}
 		},
 	);
+}
+
+/**
+ * `--review <run>`: enter the run's kept task worktree, read-only, and return the subject to prepend to the task. An
+ * `--agent` task naming a task branch this directory does not have checked out is refused naming `--review`. Both
+ * refusals are exit 2 before boot. Undefined when there is no subject to prepend.
+ */
+async function enterReviewSubject(parsed: RunCliArgs, agentId: string): Promise<string | number | undefined> {
+	let subject: string | undefined;
+	if (parsed.review !== undefined) {
+		const [{ resolveReviewSubject }, { parentsFor }] = await Promise.all([
+			import("./run-review.js"),
+			import("./fleet-land.js"),
+		]);
+		const parents = parentsFor(process.cwd());
+		const resolved = resolveReviewSubject({
+			root: process.cwd(),
+			ref: parsed.review,
+			agentId,
+			...(parents !== undefined ? { allowedParents: parents } : {}),
+		});
+		if ("refusal" in resolved) {
+			writeRunDiagnostic(`clio-coder run: ${resolved.refusal}\n`);
+			return 2;
+		}
+		const unusable = enterRunCwd(resolved.worktree);
+		if (unusable !== null) {
+			writeRunDiagnostic(`clio-coder run: --review cannot enter the task worktree ${unusable}\n`);
+			return 2;
+		}
+		parsed.readOnly = true;
+		subject = resolved.task;
+	}
+	const text = parsed.messages.join(" ");
+	if (text.includes("clio-coder/task/")) {
+		const { taskBranchRefusal } = await import("./run-review.js");
+		const refusal = taskBranchRefusal(text, process.cwd(), agentId);
+		if (refusal !== null) {
+			writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+			return 2;
+		}
+	}
+	return subject;
 }
 
 const DEFAULT_VERIFY_TIMEOUT_SECONDS = 300;
@@ -800,7 +847,6 @@ async function runDispatch(
 	const { ensureClioState } = await import("../domains/lifecycle/index.js");
 	const { buildDispatchMemorySection } = await import("../domains/memory/index.js");
 	const { createPromptsDomainModule } = await import("../domains/prompts/index.js");
-	const { prepareListedModelCapabilities } = await import("../domains/providers/background-model-metadata.js");
 	const { resolveEffectivePricing } = await import("../domains/providers/catalog.js");
 	const { ProvidersDomainModule } = await import("../domains/providers/index.js");
 	const { ResourcesDomainModule } = await import("../domains/resources/index.js");
@@ -961,16 +1007,13 @@ async function runDispatch(
 	}
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
 
-	// A worker resolves its model's thinking levels and budgets from the provider
-	// status, which a fresh process builds from the listing cache. A runtime that
-	// lists per-model capabilities lists live first when that cache has none.
+	// --require-priced (SPEC 6.9): refuse before the worker starts. Dispatch lists a cold
+	// Copilot cache itself, as it does for every worker route.
 	const runProviders = loaded.getContract("providers");
 	if (runProviders) {
-		let workerTargetId = dispatchReq.target;
 		try {
 			const preview = dispatch.preview?.(dispatchReq);
-			workerTargetId = preview?.targetId ?? workerTargetId;
-			// --require-priced (SPEC 6.9): the one previewed route; admission rechecks the route it resolves.
+			// The one previewed route; admission rechecks the route it resolves.
 			const target = preview !== undefined ? runProviders.getTarget(preview.targetId) : null;
 			const runtime = target ? runProviders.getRuntime(target.runtime) : null;
 			const refusal =
@@ -988,7 +1031,6 @@ async function runDispatch(
 		} catch {
 			// Admission reports the refusal itself when the run starts.
 		}
-		if (workerTargetId !== undefined) await prepareListedModelCapabilities(runProviders, workerTargetId);
 	}
 
 	// Narrower than the writer's parameter so a frame built here is checked
@@ -1225,6 +1267,7 @@ function shadowStandInCommand(parsed: RunCliArgs, standIn: string): string {
 	const quote = (value: string): string => (/^[\w./@:=+-]+$/u.test(value) ? value : JSON.stringify(value));
 	const parts = ["clio-coder run", "--agent", standIn, "--read-only"];
 	if (parsed.cwd !== undefined) parts.push("--cwd", quote(parsed.cwd));
+	if (parsed.review !== undefined) parts.push("--review", quote(parsed.review));
 	if (parsed.target !== undefined) parts.push("--target", quote(parsed.target));
 	if (parsed.model !== undefined) parts.push("--model", quote(parsed.model));
 	if (parsed.thinking !== undefined) parts.push("--thinking", parsed.thinking);

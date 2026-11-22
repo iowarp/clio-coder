@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
 	closeSync,
-	copyFileSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -15,6 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { copyGitIndex } from "../../core/git-index-copy.js";
 import { relativePathEscapes } from "../../core/path-containment.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { recordedSessionIds } from "../../engine/session.js";
@@ -459,10 +459,13 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		}
 	};
 
-	/** Copy the operator's index so the first snapshot inherits its stat cache instead of rehashing every file. */
+	/**
+	 * Copy the operator's index so the first snapshot inherits its stat cache instead of rehashing every file,
+	 * keeping its racily clean entries racy so a same-size edit in the index's second is still captured.
+	 */
 	const seedIndex = async (repo: Repository, deadline: number): Promise<"copy" | "head" | "empty"> => {
 		try {
-			copyFileSync(repo.realIndex, indexFile);
+			copyGitIndex(repo.realIndex, indexFile);
 			return "copy";
 		} catch {
 			// No index yet (a fresh repository): fall back to HEAD's tree.

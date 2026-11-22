@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--output-format text|json|stream-json] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id> [--continue <runId>]] [--] "<task>" [-]\n   or: clio-coder run [flags] -\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--output-format text|json|stream-json] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id> [--continue <runId>] [--review <runId|clio-coder/task/<runId>>]] [--] "<task>" [-]\n   or: clio-coder run [flags] -\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -101,6 +101,9 @@ Flags:
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
   --worktree                run the --agent worker in a CLIO Coder-created task worktree, kept on its branch for review
+  --review <run>            review a fleet run's kept task branch (run id or clio-coder/task/<run id>): the --agent
+                            worker runs read-only in that branch's worktree, with branch, base, destination and
+                            commits prepended to the task; a branch with no kept worktree or a running run is exit 2
   --skill <path>            make one explicit skill available for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 

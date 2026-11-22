@@ -1,9 +1,10 @@
 import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { resolveReviewSubject, taskBranchRefusal } from "../../src/cli/run-review.js";
 import { executeTaskLand, planTaskLand } from "../../src/tools/task-land.js";
 import { applyTaskWorktree, createTaskWorktree, settleTaskWorktree } from "../../src/tools/task-worktree.js";
 
@@ -83,5 +84,40 @@ describe("fleet land", () => {
 		strictEqual(git(root, "log", "-1", "--format=%s"), "land the crashed run");
 		strictEqual(git(root, "rev-list", "--count", "HEAD"), "2");
 		strictEqual(git(root, "show", "HEAD:c.txt"), "crashed run");
+	});
+
+	it("lands a same-size edit made in the second the worktree's index was written", () => {
+		// Fixed stamps make the entry racily clean: its mtime equals the index's, and ctime is not compared.
+		git(root, "config", "core.trustctime", "false");
+		const task = keptTask("t6", "a.txt", "a\n", false);
+		const file = join(task.path, "a.txt");
+		const stamp = 1_700_000_000;
+		utimesSync(file, stamp, stamp);
+		git(task.path, "update-index", "--refresh");
+		utimesSync(git(task.path, "rev-parse", "--path-format=absolute", "--git-path", "index"), stamp, stamp);
+		writeFileSync(file, "z\n");
+		utimesSync(file, stamp, stamp);
+		const plan = planTaskLand({ root, ref: "t6", mode: "squash" });
+		strictEqual(plan.uncommitted, 1);
+		strictEqual(plan.changed, "1 file changed, 1 insertion(+), 1 deletion(-)");
+		executeTaskLand(plan, { message: "land the racy edit" });
+		strictEqual(git(root, "show", "HEAD:a.txt"), "z");
+	});
+
+	it("resolves a kept task branch for run --review in its worktree and refuses a branch the reviewer cannot see", () => {
+		const base = git(root, "rev-parse", "HEAD");
+		const task = keptTask("t4", "a.txt", "task\n");
+		const subject = resolveReviewSubject({ root, ref: "clio-coder/task/t4", agentId: "reviewer" });
+		if ("refusal" in subject) throw new Error(subject.refusal);
+		strictEqual(subject.worktree, task.path);
+		match(subject.task, /task branch clio-coder\/task\/t4 of run t4/u);
+		match(subject.task, new RegExp(`Base: ${base}`, "u"));
+		match(subject.task, /Destination: main/u);
+		match(subject.task, /edit a\.txt/u);
+		git(root, "branch", "clio-coder/task/t5");
+		const gone = resolveReviewSubject({ root, ref: "t5", agentId: "reviewer" });
+		match("refusal" in gone ? gone.refusal : "", /no kept worktree.*git worktree add/u);
+		match(taskBranchRefusal("review clio-coder/task/t4 against main", root, "reviewer") ?? "", /--review t4 /u);
+		strictEqual(taskBranchRefusal("review clio-coder/task/t4.", task.path, "reviewer"), null);
 	});
 });

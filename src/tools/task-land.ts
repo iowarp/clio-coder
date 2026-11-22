@@ -10,11 +10,12 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
+import { copyGitIndex } from "../core/git-index-copy.js";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { SAFE_TASK_RUN_ID } from "../core/task-worktree-claim.js";
 import { dropHostTerminalEnv, TOOL_SESSION_SPAWN } from "../core/tool-env-controls.js";
@@ -144,7 +145,9 @@ function runIdOf(ref: string): string {
  * The tree the kept worktree would commit, written through a copy of its index
  * so neither the worktree's index nor its HEAD changes while only previewing.
  * The copy keeps what the worker staged, and the adds take tracked changes and
- * `untracked`, what `commitWorktreePath` takes for the same list.
+ * `untracked`, what `commitWorktreePath` takes for the same list. The copy
+ * keeps the index's racily clean entries racy, so a same-size edit made in the
+ * second the index was written is rehashed, not skipped.
  */
 function snapshotTree(path: string, tip: string, untracked: ReadonlyArray<string>): string {
 	const directory = mkdtempSync(join(tmpdir(), "clio-coder-land-index-"));
@@ -152,7 +155,7 @@ function snapshotTree(path: string, tip: string, untracked: ReadonlyArray<string
 		const env = { GIT_INDEX_FILE: join(directory, "index") };
 		const gitPathIndex = git(path, ["rev-parse", "--git-path", "index"]);
 		const index = isAbsolute(gitPathIndex) ? gitPathIndex : join(path, gitPathIndex);
-		if (existsSync(index)) copyFileSync(index, env.GIT_INDEX_FILE);
+		if (existsSync(index)) copyGitIndex(index, env.GIT_INDEX_FILE);
 		else git(path, ["read-tree", tip], env);
 		git(path, ["add", "-u", "--", "."], env);
 		for (let index = 0; index < untracked.length; index += PATHSPEC_BATCH) {

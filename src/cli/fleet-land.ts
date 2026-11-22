@@ -21,7 +21,7 @@ change. Uncommitted work in a kept worktree is committed onto its task branch
 first, and only with --yes.
 `;
 
-function parentsFor(root: string): string[] | undefined {
+export function parentsFor(root: string): string[] | undefined {
 	try {
 		return allowedWorktreeParents(readSettings().fleet.worktrees.root, root);
 	} catch {

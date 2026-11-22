@@ -98,6 +98,8 @@ export interface RunCliArgs {
 	maxToolCalls?: number;
 	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
 	worktree?: boolean;
+	/** `--review <run>` (`--agent` only): run the worker read-only in that run's kept task worktree, its subject prepended. */
+	review?: string;
 	/** Wall-clock limit for the whole run, in seconds. */
 	timeoutSeconds?: number;
 	/** `--verify`: shell commands the run declares as its acceptance checks, in flag order. */
@@ -142,7 +144,8 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  *
  * | input                                                          | main  | agent |
  * | -------------------------------------------------------------- | ----- | ----- |
- * | --record, --agent-profile, --agent-runtime, --tool-profile, --require, --worktree | usage | ok |
+ * | --record, --agent-profile, --agent-runtime, --tool-profile, --require, --worktree, --review | usage | ok |
+ * | --review with --worktree                                       | usage | usage |
  * | --turn-mode, --allow-tools, --deny-tools, --delegate-tools, --no-delegate | ok | usage |
  * | --resume, --continue, --fork, --name                           | ok    | usage |
  * | --continue <runId> (an ACP delegation run to continue)         | text  | ok    |
@@ -174,9 +177,13 @@ function runModeMatrixErrors(parsed: RunCliArgs): CliArgDiagnostic[] {
 			parsed.agentRuntime !== undefined ||
 			parsed.toolProfile !== undefined ||
 			parsed.worktree === true ||
+			parsed.review !== undefined ||
 			parsed.required.length > 0;
 		if (dispatchOnly) conflict("fleet dispatch flags require --agent <recipe-id>");
 		return errors;
+	}
+	if (parsed.review !== undefined && parsed.worktree === true) {
+		conflict("--review runs in the run's kept task worktree; --worktree would create a new one, so pass one of them");
 	}
 	if (parsed.constraints) {
 		conflict(
@@ -307,6 +314,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--worktree") {
 			parsed.worktree = true;
+			continue;
+		}
+		if (arg === "--review") {
+			const value = need(arg);
+			if (value !== null) parsed.review = value;
 			continue;
 		}
 		// Read where it stands, before any other flag is judged, so a run whose other flags fail still frames that

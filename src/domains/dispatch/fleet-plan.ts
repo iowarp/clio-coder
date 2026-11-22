@@ -22,15 +22,16 @@ import {
 	playbookCodeSteps,
 	playbookLoopCheckStepId,
 	playbookLoopRepairStepId,
+	playbookRunsInTaskWorktree,
 	playbookStepWriteBoundary,
 	validatePlaybookCommands,
 } from "../agents/playbook.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../agents/spec.js";
-import type { ExecutionPlan, ExecutionPlanLoop, ExecutionPlanStepInput } from "./execution-plan.js";
+import type { ExecutionPlan, ExecutionPlanLoop, ExecutionPlanScope, ExecutionPlanStepInput } from "./execution-plan.js";
 import { compileExecutionPlan } from "./execution-plan.js";
 import type { ExecutionRole } from "./execution-role.js";
-import { renderFleetNodeTask } from "./fleet-node-prompt.js";
+import { renderFleetCheckTask, renderFleetNodeTask } from "./fleet-node-prompt.js";
 
 /** Where an agent node sits, so the caller can resolve its role and authority. */
 export interface FleetPlanAgentContext {
@@ -61,9 +62,11 @@ export interface CompileFleetPlanInput {
 	vars?: Readonly<Record<string, string>>;
 	playbook: Playbook;
 	/**
-	 * Rendered prompt body. It describes the whole chain, so every agent node
-	 * carries it, followed by that node's own answer directive: the nodes hold
-	 * different result contracts and the body can only ever name one of them.
+	 * Rendered prompt body. It describes the work, so every agent node that
+	 * builds, plans or authors carries it, followed by that node's own answer
+	 * directive: the nodes hold different result contracts and the body can
+	 * only ever name one of them. A loop's agent check gets its own
+	 * verification task instead (`renderFleetCheckTask`).
 	 */
 	task: string;
 	resolveAgent(context: FleetPlanAgentContext): FleetPlanAgentResolution;
@@ -139,6 +142,41 @@ function loopCheckCommandNote(
 	return lines.join("\n");
 }
 
+/** A playbook body that quotes the operator's request through `{{task}}`. */
+const TASK_PLACEHOLDER_RE = /\{\{\s*task\s*\}\}/u;
+
+/**
+ * A node's scope inside the run. `worktree` is where the run writes, carried once on the plan as `isolation`; inside
+ * that worktree a `worktree` step edits exactly as a `workspace` step edits the checkout.
+ */
+function nodeScope(scope: PlaybookStepScope): ExecutionPlanScope {
+	return scope === "readonly" ? "readonly" : "workspace";
+}
+
+/**
+ * The agent steps that changed the workspace before a node, in plan order: the
+ * transitive workspace-scope agent ancestors of its dependencies. A check names
+ * them as the authors of the change it reviews.
+ */
+function workspaceAuthors(
+	steps: ReadonlyArray<ExecutionPlanStepInput>,
+	dependencies: ReadonlyArray<string>,
+): Array<{ stepId: string; agentId: string; repair: boolean }> {
+	const byId = new Map(steps.map((step) => [step.id, step]));
+	const seen = new Set<string>();
+	const pending = [...dependencies];
+	for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+		if (seen.has(id)) continue;
+		seen.add(id);
+		pending.push(...(byId.get(id)?.dependencies ?? []));
+	}
+	return steps.flatMap((step) =>
+		seen.has(step.id) && step.kind !== "code" && step.scope === "workspace"
+			? [{ stepId: step.id, agentId: step.agentId, repair: step.loop?.role === "repair" }]
+			: [],
+	);
+}
+
 export function compileFleetExecutionPlan(input: CompileFleetPlanInput): ExecutionPlan {
 	const { playbook, resolveAgent } = input;
 	if (input.commands !== undefined) validatePlaybookCommands(playbook, input.commands, input.vars ?? {});
@@ -146,6 +184,11 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		throw new Error("fleet code args: admission requires the operator command registry");
 	const checkNote = loopCheckCommandNote(playbook, input.commands, input.vars ?? {});
 	const task = checkNote.length > 0 ? `${input.task}\n\n${checkNote}` : input.task;
+	// What a loop's agent check is asked to verify: the operator's request when
+	// the body quotes it, otherwise the rendered body, which is then the only
+	// statement of the change.
+	const requestVar = input.vars?.task;
+	const request = requestVar !== undefined && TASK_PLACEHOLDER_RE.test(playbook.body) ? requestVar : input.task;
 	const loops = declaredLoops(playbook.steps);
 	const steps: ExecutionPlanStepInput[] = [];
 
@@ -171,13 +214,19 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		},
 	): ExecutionPlanStepInput => {
 		const resolved = resolveAgent(context);
+		// A loop's check verifies the change; the playbook body tells a builder
+		// how to make it, so the check gets its own task and never that body.
+		const body =
+			loop?.role === "check"
+				? renderFleetCheckTask({ request, authors: workspaceAuthors(steps, dependencies), note: checkNote })
+				: task;
 		return {
 			kind: "agent",
 			id: context.stepId,
 			agentId: context.agentId,
 			scope: context.scope,
 			dependencies: [...dependencies],
-			task: renderFleetNodeTask(task, resolved.expectedResultContract, context.stepId, resolved.resultContract),
+			task: renderFleetNodeTask(body, resolved.expectedResultContract, context.stepId, resolved.resultContract),
 			expectedResultContract: resolved.expectedResultContract,
 			requestedAuthority: resolved.requestedAuthority,
 			approvedAuthority: resolved.approvedAuthority,
@@ -199,7 +248,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		if (step.kind === "agent") {
 			steps.push(
 				agentNode(
-					{ stepId: step.id, agentId: step.agent, scope: step.scope, attempt: 0, ...routeOf(step) },
+					{ stepId: step.id, agentId: step.agent, scope: nodeScope(step.scope), attempt: 0, ...routeOf(step) },
 					dependencies,
 					step.writes,
 				),
@@ -221,7 +270,14 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		if (step.kind === "plan") {
 			steps.push(
 				agentNode(
-					{ stepId: step.id, agentId: step.agent, scope: step.scope, attempt: 0, planRole: true, ...routeOf(step) },
+					{
+						stepId: step.id,
+						agentId: step.agent,
+						scope: nodeScope(step.scope),
+						attempt: 0,
+						planRole: true,
+						...routeOf(step),
+					},
 					dependencies,
 					step.writes,
 					undefined,
@@ -236,7 +292,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 				id: step.id,
 				commandId: step.command,
 				...(step.args ? { args: resolvePlaybookCommandArgs(step.args, input.vars) } : {}),
-				scope: step.scope,
+				scope: nodeScope(step.scope),
 				dependencies,
 				...boundary(step.scope, step.writes),
 				...(step.commitFrom !== undefined ? { commitFrom: expandCommitSources(step.commitFrom, loops) } : {}),
@@ -256,7 +312,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 					id: checkId,
 					commandId: step.check.command,
 					...(step.check.args ? { args: resolvePlaybookCommandArgs(step.check.args, input.vars) } : {}),
-					scope: step.check.scope,
+					scope: nodeScope(step.check.scope),
 					dependencies: checkDependencies,
 					...boundary(step.check.scope, step.check.writes),
 					loop: membership,
@@ -285,7 +341,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 						{
 							stepId: checkId,
 							agentId: step.check.agent,
-							scope: step.check.scope,
+							scope: nodeScope(step.check.scope),
 							attempt: 0,
 							gateRole: "reviewer",
 							...routeOf(step.check),
@@ -300,7 +356,13 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			const repairId = loop.repairStepIds[attempt - 1] ?? "";
 			steps.push(
 				agentNode(
-					{ stepId: repairId, agentId: step.repair.agent, scope: step.repair.scope, attempt, ...routeOf(step.repair) },
+					{
+						stepId: repairId,
+						agentId: step.repair.agent,
+						scope: nodeScope(step.repair.scope),
+						attempt,
+						...routeOf(step.repair),
+					},
 					[checkId, ...checkDependencies],
 					step.repair.writes,
 					{ loopId: loop.id, role: "repair", attempt },
@@ -314,6 +376,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		rootTask: input.task,
 		maxWorkers: playbook.maxWorkers,
 		...(playbook.writers === 1 ? { writers: 1 as const } : {}),
+		...(playbookRunsInTaskWorktree(playbook) ? { isolation: "worktree" as const } : {}),
 		onFailure: playbook.onFailure,
 		steps,
 		loops: [...loops.values()],

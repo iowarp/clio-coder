@@ -1,4 +1,9 @@
-import type { ExecutionPlanStep } from "../domains/dispatch/execution-plan.js";
+import {
+	type ExecutionPlan,
+	type ExecutionPlanStep,
+	executionPlanIsolationText,
+	executionPlanStepScope,
+} from "../domains/dispatch/execution-plan.js";
 import { writeCliFailure } from "./kit/json-out.js";
 import { inspectPlaybook } from "./playbook-preflight.js";
 import { parsePlaybookVars, playbookVarsOrUndefined } from "./playbook-vars.js";
@@ -16,7 +21,7 @@ function playbookKind(step: ExecutionPlanStep): "agent" | "code" | "gate" | "pla
 	return "agent";
 }
 
-function projectedStep(step: ExecutionPlanStep): Record<string, unknown> {
+function projectedStep(step: ExecutionPlanStep, plan: Pick<ExecutionPlan, "isolation">): Record<string, unknown> {
 	return {
 		id: step.id,
 		kind: playbookKind(step),
@@ -29,7 +34,7 @@ function projectedStep(step: ExecutionPlanStep): Record<string, unknown> {
 			: {}),
 		...(step.kind === "agent" && step.target !== undefined ? { target: step.target } : {}),
 		...(step.kind === "agent" && step.profile !== undefined ? { profile: step.profile } : {}),
-		scope: step.scope,
+		scope: executionPlanStepScope(plan, step.scope),
 		writes: [...(step.writes ?? [])],
 		dependencies: [...step.dependencies],
 	};
@@ -63,18 +68,22 @@ export function runPlaybookGraph(args: ReadonlyArray<string>): number {
 			wave: index + 1,
 			steps: ids.flatMap((id) => {
 				const step = byId.get(id);
-				return step === undefined ? [] : [projectedStep(step)];
+				return step === undefined ? [] : [projectedStep(step, plan)];
 			}),
 		}));
 		const loops = plan.loops.map((loop) => ({
 			id: loop.id,
-			check: loop.checkStepIds.map((id) => projectedStep(byId.get(id) as ExecutionPlanStep)),
-			repair: loop.repairStepIds.map((id) => projectedStep(byId.get(id) as ExecutionPlanStep)),
+			check: loop.checkStepIds.map((id) => projectedStep(byId.get(id) as ExecutionPlanStep, plan)),
+			repair: loop.repairStepIds.map((id) => projectedStep(byId.get(id) as ExecutionPlanStep, plan)),
 		}));
+		const isolation = plan.isolation === "worktree" ? { isolation: "worktree" as const } : {};
 		if (json) {
-			process.stdout.write(`${JSON.stringify({ playbook: name, planHash: plan.hash, waves, loops }, null, 2)}\n`);
+			process.stdout.write(
+				`${JSON.stringify({ playbook: name, planHash: plan.hash, ...isolation, waves, loops }, null, 2)}\n`,
+			);
 			return 0;
 		}
+		if (plan.isolation === "worktree") process.stdout.write(`isolation worktree: ${executionPlanIsolationText()}\n`);
 		for (const wave of waves) {
 			process.stdout.write(`wave ${wave.wave}\n`);
 			for (const step of wave.steps) {
