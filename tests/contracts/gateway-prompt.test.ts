@@ -133,7 +133,9 @@ describe("gateway in the session prompt", () => {
 			);
 			// 13,127 (fleet DESIGN open question 10): grep and code_nav (row 145) and dispatch's job table, plus the 751-byte finish
 			// declaration, whose measured description (CLI-P49) says the reply text comes first; it was 648 bytes and 13,024.
-			ok(total <= 13_127, `ten attached tools must stay within 13,127 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
+			// 13,441: read takes several paths in one call (maintainer 2026-11-22 15:34Z) and its description says so;
+			// schema size is not a lab constraint (maintainer 13:10Z), so the ceiling follows the ruled description.
+			ok(total <= 13_441, `ten attached tools must stay within 13,441 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(
