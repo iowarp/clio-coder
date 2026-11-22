@@ -880,7 +880,7 @@ transcript, headless `run` prints it to stderr as `clio-coder run: ...`, `run --
 preserved, conflicted, withheld or refused application, and a merge whose branch held no
 change, produce no notice.
 
-Five cases withhold the merge: a worker whose own report lists a failing validation,
+Five cases withhold the merge: a worker whose own report lists a failing validation (a check whose latest `verify` receipt says it could not run is not one),
 a worker whose task requested validation but which executed no check, a worker that
 names a check it did not run (`declaredChecks`) with no validation that passed, a task
 that names its check as an exact command the worker never ran to a clean exit, through the
@@ -1587,7 +1587,7 @@ handoffs bound to run digests. The scheduler performs whole-plan preflight and r
 the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call maps to an approval ask at the `default` autonomy
-level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`, contained or unconfined. A `/council` or `/poll` typed in the composer is admitted the same way, so it shows that card at `default` too. A call is plan-scale when it fans out more than one task, continues a
+level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`, contained or unconfined. One kind of plan does not stop at `default` either: a parallel, sequential or pipeline plan that admission sealed and in which every task is a read-only run on this machine. Each task must resolve to the `explorer` role, which comes from the recipe's capability class or a read-only request and never from the task text, with no write roots, expected outputs, verification, worktree, approved failover, agent selection or authority grant, and the plan must have no Scout source, confirmation or `apply_winner` ([dispatch-plan.ts](../../src/tools/dispatch-plan.ts)). Such a plan runs the route it showed, so a headless run at `default` can fan out read-only scouts, and its run records carry `approval: "read-only"`. Any writer task, gate, remote node or other condition above keeps the ask. A `/council` or `/poll` typed in the composer is admitted the same way, so it shows that card at `default` too. A call is plan-scale when it fans out more than one task, continues a
 Scout split, runs compete or council, places work on a remote node, carries a task
 with approved failover, or applies a compete winner with `apply_winner`
 ([dispatch-plan.ts](../../src/tools/dispatch-plan.ts)). Before asking, CLIO Coder resolves the effective agent, target,

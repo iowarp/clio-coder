@@ -345,7 +345,7 @@ The ACP child pushes session telemetry and the server forwards it to every windo
 
 | Source | Frame | Feeds |
 | --- | --- | --- |
-| Usage | `usage_update` with `used` and `size`, an optional cost, `_meta["clio-coder/context"]` (the context ledger) and `_meta["clio-coder/usage"].session` (token totals and cost) | The context ring and Context section, which prefer the pushed ledger over `_clio-coder/context/ledger`. The spend chip and Usage section show the pushed totals while a turn runs and until the settled read model figures arrive. The Usage drill-in labels them `Live totals`. |
+| Usage | `usage_update` with `used` and `size`, a cost only for a measured personal charge, `_meta["clio-coder/context"]` (the context ledger) and `_meta["clio-coder/usage"].session` (token totals and cost) | The context ring and Context section, which prefer the pushed ledger over `_clio-coder/context/ledger`. The spend chip and Usage section show the pushed totals while a turn runs and until the settled read model figures arrive. The Usage drill-in labels them `Live totals`. |
 | Plan | `plan` with up to 100 entries (`pending`, `in_progress`, `completed`, `blocked`, each with an optional reason) and a truncation flag | The Plan section and the Plan drill-in's plan. A truncated plan shows `The plan shows its first 100 steps.` Without a pushed plan, both read the plan from `_clio-coder/session/board`. |
 | Workspace | `_meta["clio-coder/workspace"]` on the `session/new`, `session/load` and `session/resume` results and on `session_info_update` | The Workspace section. |
 | Trust | `_meta["clio-coder/trust"]` on the same results | The notice under [Untrusted project files](#untrusted-project-files). |

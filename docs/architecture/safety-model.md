@@ -80,7 +80,7 @@ In this table "judge" means the safety judge decides first and the operator is a
 | Worktree discard or workspace delete a snapshot undoes | runs after a snapshot | runs | blocked or asks |
 | Other former damage-control block, `delete-outside-workspace`, destructive git | judge | runs | blocked |
 | Damage-control confirmation rule no snapshot undoes, or a tool confirmation such as `slurm-allocation` | judge | runs | asks |
-| Model edit of project settings (`project-settings-confirm`), a shell library change (`library-confirm`), a `configure_clio` apply on fleet routing (`fleet-routing-settings`) or any other setting (`clio-settings`; at `yolo` the tool only proposes), plan-scale dispatch | operator | runs | asks |
+| Model edit of project settings (`project-settings-confirm`), a shell library change (`library-confirm`), a `configure_clio` apply on fleet routing (`fleet-routing-settings`) or any other setting (`clio-settings`; at `yolo` the tool only proposes), plan-scale dispatch other than a sealed plan whose every task is a read-only run on this machine | operator | runs | asks |
 | Zero-access, read-only, no-write or no-delete path; operator authority rail | blocked | only operator-authored entries block | blocked |
 | Yolo floor | blocked | blocked | blocked |
 
@@ -376,7 +376,7 @@ Workers inherit the main session's mode inside their own permit and OS sandbox.
 
 A headless `clio-coder run` has nobody attached.
 
-- At `default` the main session gets containment, snapshots and the safety judge like any other surface. An ask the judge blocks returns the judge's refusal. Every operator-only ask (plan-scale dispatch included), and every ask the judge leaves without a verdict, is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`, followed by the rule, the cause, `This call was denied; no approval is pending.` and, for an unrecognized command, the recognized form to use. The session prompt says approval-required calls are denied. `ask_user` is not registered.
+- At `default` the main session gets containment, snapshots and the safety judge like any other surface. An ask the judge blocks returns the judge's refusal. Every operator-only ask (plan-scale dispatch included, except a sealed plan whose every task is a read-only run on this machine, which raises no ask and runs), and every ask the judge leaves without a verdict, is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`, followed by the rule, the cause, `This call was denied; no approval is pending.` and, for an unrecognized command, the recognized form to use. The session prompt says approval-required calls are denied. `ask_user` is not registered.
 - `yolo` comes only from the run's own `--autonomy yolo`. A `settings.yaml` that sets `yolo` does not carry over; the run starts at `default` and says so on stderr. A contained yolo run admits as `default` does and refuses what `default` would deny, with the contained-yolo reason instead of the headless one; unconfined needs `safety.yoloUnconfinedAccepted` in the user settings.
 - Workers it dispatches at `default` keep the `judge` route, because the judge answers without an operator; their operator-authority asks are denied.
 

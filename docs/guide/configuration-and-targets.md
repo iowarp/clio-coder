@@ -653,7 +653,7 @@ The pricing rule also decides what the cost ceiling sees. `safety.limits.session
 
 ### Funding facts
 
-`funding` records who pays for a target's usage, as facts for reports. It prices nothing, authorizes nothing and feeds no cap; route pricing stays `targets[].pricing` ([`src/core/funding-config.ts`](../../src/core/funding-config.ts)).
+`funding` records who pays for a target's usage. Reports use it for the marginal charge, the energy estimate and period fees; it prices nothing, authorizes nothing, feeds no cap and is never included in shared telemetry; route pricing stays `targets[].pricing` ([`src/core/funding-config.ts`](../../src/core/funding-config.ts)).
 
 ```yaml
 funding:
