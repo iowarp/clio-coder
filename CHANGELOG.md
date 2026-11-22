@@ -8,7 +8,7 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 
 ### Highlights
 
-- **One output contract for headless runs.** `clio-coder run --output-format json` prints a single `run_end` envelope (`schemaVersion: 2`) with the answer, exit code, outcome, typed `causes[]`, timings, checks and usage. `stream-json` streams the events and ends with the same envelope, and `clio-coder schema run-result` prints its JSON Schema.
+- **One output contract for headless runs.** `clio-coder run --output-format json` prints a single `run_end` envelope (`schemaVersion: 3`) with the answer, exit code, outcome, typed `causes[]`, timings, checks and usage. `stream-json` streams the events and ends with the same envelope, and `clio-coder schema run-result` prints its JSON Schema.
 - **Runs that state how they ended.** The new `finish` tool lets the agent declare `done`, `partly_done` or `not_done` with its limitations. CLIO Coder seals the claim beside its own assessment, lowers a `done` that left unvalidated changes or a failing check, and `run --exit-code` turns anything short of done into exit 1.
 - **Limits and previews per run.** `--max-requests`, `--max-tool-calls`, `--max-cost-usd`, `--timeout 15m`, `--sandbox required`, `--require-priced`, `--deny-tools` and `--on-permission fail` bound one run, and `--dry-run` prints the route, tools, sandbox and limits without calling a model.
 - **Structured answers and task files.** `run --output-schema schema.json` makes the answer one JSON object that the host validates, and `run --task-file task.json` carries a whole task envelope.
@@ -76,6 +76,7 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 - A project's `.clio-coder/codewiki.json` index is no longer read; `clio-coder context index` writes `.clio-coder/codemap.json`. A `.clio-coder/fleets/` directory is no longer converted: move its playbooks to `.clio-coder/playbooks/`.
 - A turn on a cloud or subscription target is refused before the call when the target's live model list does not contain the requested model (`no model <id> on target <t>; available: ...`), and refused after it when the provider reports that a different model answered (`requested X, provider served Y; the turn is refused`). Both exit 1 with cause `model_unavailable` or `served_model_mismatch` in `causes[]`, and no tool call from a mismatched response runs. Local and gateway targets are not judged, and a router id ending in `/auto` is exempt.
 - `$0.00 local` is printed only for a local-native target. A free amount with no recorded rule reads `$0.00 free`, and a sum whose parts were free under different rules reads `$0.00 free (mixed)`; pricing sums and per-call usage carry `freeRuleMixed` for that case.
+- ACP `usage_update` carries `cost` only for a measured personal charge: the session's extra user cost in one currency, every contribution reported by the provider on a target bound to a personal pay-per-token funding pool. A route-price estimate, a seat or subscription call, a local call or an unknown leaves `cost` out, so a session with no funding binding sends none. `_meta["clio-coder/usage"].session` still carries the route-price figures.
 
 **Run records and telemetry**
 
@@ -112,7 +113,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Headless `run`**
 
-- `--output-format text|json|stream-json` selects schema v2 output. The `run_end` envelope carries `sessionId`, `runId`, `result.text`, `exitCode`, `outcome`, `causes[]`, `timings`, `verify`, `completion`, `dispatch.runs` (every child run, retries included) and usage split into `main`, compaction, `side`, workers and `total`. `text` ends with one stderr line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`.
+- `--output-format text|json|stream-json` selects schema v3 output. The `run_end` envelope carries `sessionId`, `runId`, `result.text`, `exitCode`, `outcome`, `causes[]`, `timings`, `verify`, `completion`, `dispatch.runs` (every child run, retries included) and usage split into `main`, compaction, `side`, workers and `total`. `text` ends with one stderr line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`.
 - `stream-json` tool frames carry a stable `toolCallId` (`tc_<turn>_<n>`) with the provider's id in `providerToolCallId`, and each `--steer-channel` line is acknowledged with a `steer` frame (`queued`, then `accepted` or refused with a reason).
 - `-o`/`--output-last-message <path>` writes the final answer to a file when the run exits 0.
 - `--resume <id|prefix|name>` (`-r`), `--fork` and `--name <text>`. `--fork` branches a new session from the last committed turn and never writes the parent. Resuming a session another process holds exits 2 with cause `session_live`.
@@ -132,6 +133,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `run --agent <recipe> --review <run id|clio-coder/task/<run id>>` runs the worker read-only in a fleet run's kept task worktree, with the branch, base, commits and uncommitted count ahead of the task. `run --agent <agent> --continue <runId>` continues an earlier ACP delegation in its peer's own session.
 - `run --agent` says why a failed assignment was not retried (`notRetried` in JSON, a `Not retried:` line in text), and its `completion.limitations` lists the limitations the worker recorded.
 - `run_end.dispatch.runs[].safety.envelope` carries each dispatched run's sealed capability envelope.
+- A `max_cost_usd` or `session_cost_ceiling` cause carries `refusal`, with the reason, the basis (the route-price ceiling, its scope and what this run spent), the calls and routes that could not be priced, and the flag or setting that raises the limit.
 
 **Completion**
 
@@ -170,6 +172,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `fleet view <fleetRootId>` shows each step's task.
 - Every worker role holds `code_nav`, and the plan card and receipt name each capability withheld from a run with its reason and remedy.
 - The card for a held task merge offers Land, and `dispatch` takes `land` with a kept branch's run id to reopen that card. CLIO Coder lands the branch on the host as the operator's own action, with the checks `clio-coder fleet land` runs, so a sandboxed session needs no sandbox escape to land work the operator approved. Land is bound to the branch tip and destination the card showed, and refuses uncommitted work and protected paths.
+- A dispatch plan in which every task is a read-only run on this machine no longer stops for plan approval at default autonomy, so a headless run can fan out read-only scouts. The judgement is made on the plan admission sealed: every task must resolve to a read-only recipe or a read-only request, with no write roots, expected outputs, verification, worktree, gate, approved failover or remote node. Any other plan asks as before.
 
 **Delegation to other agents**
 
@@ -238,8 +241,9 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Cost and quota**
 
-- A `funding` settings block names who pays for a target's usage: pools with a scheme, a payer, a native unit, an optional fee, a grant with an expiry, or the declared power draw and electricity tariff of a local machine, bound to a target with `targets[].funding.pool`. Funding is set in user settings only (a project value is ignored with a notice), `clio-coder configure` has a "Funding for a target" step, and the facts describe a route without authorizing or capping anything.
-- Call and run records carry an `economics` block with separate facts for the provider's charge, the marginal charge, a seat credit estimate, a local energy estimate and the public API price of the same usage. A fact nothing measured reads unknown with reason `not-captured`, never 0, and shared telemetry omits the block.
+- A `funding` settings block names who pays for a target's usage: pools with a scheme, a payer, a native unit, an optional fee, a grant with an expiry, or the declared power draw and electricity tariff of a local machine, bound to a target with `targets[].funding.pool`. Funding is set in user settings only (a project value is ignored with a notice), `clio-coder configure` has a "Funding for a target" step, and the facts describe a route without authorizing or capping anything. Reports use them for the marginal charge, the energy estimate and period fees.
+- Every settled call and run carries an `economics` block that keeps amounts of different kinds apart: the provider's charge, the marginal charge to the user, a seat credit estimate, a local energy estimate and the public API price of the same usage. The marginal charge is measured only for a personal pay-per-token pool with a provider-reported charge, and a pool that someone else pays for, or a personal seat, subscription or prepaid pool with a declared fee, estimates it at 0 as covered by the plan. A fact nothing measured reads unknown, never 0, and none of these facts feeds a cost cap.
+- `clio-coder telemetry cost` and `clio-coder usage report` print the economy under their tables: the extra user cost beside the API equivalent, seat credits, energy and cash, in total and per funding pool, with the reference price rows used. A window report also lists each declared fee once per period. The JSON reports carry the same projection as `economy`, and each `usage` scope of a `run_end` envelope carries it as `economics`, without period fees.
 - A signed-in GitHub Copilot target reports its quota in the quota readout, with Premium, Chat and Completions buckets and a percentage only where the provider reports an authoritative count.
 - A dated catalogue of public API list prices ships as `models/economy-rates.json` for comparisons; it never prices a route. `pnpm economy:check [--as-of YYYY-MM-DD]` validates it in a checkout.
 - A dispatched worker is refused its route when the provider has explicitly denied that route's quota pool, with reason `provider-quota-denied` naming the provider, the window, its reset and the age of the evidence; the pinned route is never moved to another. Only a fresh denial for the credential the route spends binds: a window at 100% that the provider did not deny, or a stale, failed or unknown reading, admits.
@@ -406,6 +410,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - When a check ran after the last edit and failed, the finish advisory names it.
 - A safety-judge refusal of a compound bash command names the sub-command the block is about.
 - A sandbox launched inside another no longer masks `/dev/null` read-only. Contained pnpm gets its own store and an empty npm user config when `~/.npmrc` is masked, and a worker holding `web_read` gets the shell network `web_fetch` gets.
+- A check that could not run is not a failed validation. `verify` refuses a `python -m unittest` argument the runner would reject before starting anything, a unittest run that exits on its own usage error is sealed not-run and may be retried with corrected arguments, and a worker's report of such a check no longer holds its merge or marks the run compromised. A headless run lists it under `unverified` as `not run: verify <id> <args>`.
 
 **Memory**
 
@@ -491,6 +496,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - On Windows the secret directory is made owner-only before a credential is written, and `doctor` reads its ACL by SID.
 - The desktop app signs its launch challenges, so an unauthenticated request cannot evict a launcher's challenge.
 - An ACP permission request scrubs credentials from the task line it quotes and from the call's `rawInput`, so a token typed in the prompt or a command reaches the client as `[redacted]`, as the title already did.
+- A shared settings document never contains the `funding` block or a `targets[].funding` binding, under any share profile, so pool names, fees, grants and tariffs stay on the machine.
 
 ## 0.8.4 - 2026-11-19
 
