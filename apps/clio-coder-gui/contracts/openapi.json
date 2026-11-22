@@ -33652,6 +33652,7 @@
 																"clio_coder_helper_result",
 																"clio_coder_helper_result_rejected",
 																"clio_coder_write_record_downgraded",
+																"clio_coder_write_record_partial",
 																"unknown"
 															]
 														},

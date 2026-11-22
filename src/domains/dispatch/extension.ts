@@ -9211,7 +9211,7 @@ export function createDispatchBundle(
 				context.bus.emit("run.progressed", {
 					runId,
 					agentId: req.agentId,
-					event: { type: "clio_coder_write_record_downgraded", payload: downgrade },
+					event: { type: "clio_coder_write_record_partial", payload: downgrade },
 				});
 			},
 		});

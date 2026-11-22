@@ -490,7 +490,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			return;
 		}
 		let changed = false;
-		if (type === "clio_coder_write_record_downgraded") {
+		if (type === "clio_coder_write_record_partial") {
 			const detail = (event.payload ?? {}) as Record<string, unknown>;
 			const tool = parseNonEmptyString(detail.tool);
 			const toolCallId = parseNonEmptyString(detail.toolCallId);

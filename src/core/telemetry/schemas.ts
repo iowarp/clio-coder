@@ -492,7 +492,9 @@ export const RUN_FEED_EVENTS = [
 	"clio_coder_steer_received",
 	"clio_coder_helper_result",
 	"clio_coder_helper_result_rejected",
+	// The name feeds sealed before the partial record was named for what it is; read as recorded, never emitted.
 	"clio_coder_write_record_downgraded",
+	"clio_coder_write_record_partial",
 	"unknown",
 ] as const;
 export const RUN_FEED_OUTCOMES = [

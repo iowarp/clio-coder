@@ -207,7 +207,7 @@ describe("a call refused before it reached a tool", () => {
 				helperRuns,
 			);
 			const tools = progressed
-				.filter((event) => (event as { type?: string }).type === "clio_coder_write_record_downgraded")
+				.filter((event) => (event as { type?: string }).type === "clio_coder_write_record_partial")
 				.map((event) => (event as { payload: { tool: string } }).payload.tool);
 			return { helperRuns, tools };
 		};

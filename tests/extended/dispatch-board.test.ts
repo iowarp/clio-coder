@@ -305,7 +305,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		progress({ type: "clio_coder_tool_start", payload: { tool: "grep", toolCallId: "call-2" } });
 		progress({ type: "clio_coder_steer_received", payload: { chars: 24 } });
 		progress({
-			type: "clio_coder_write_record_downgraded",
+			type: "clio_coder_write_record_partial",
 			payload: { reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-3" },
 		});
 		progress({ type: "message_end", message: { role: "assistant", usage: { input: 4, cacheRead: 2, output: 3 } } });
