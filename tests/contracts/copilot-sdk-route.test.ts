@@ -39,6 +39,7 @@ import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copi
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "../../src/domains/providers/target-model-cache.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
+import { noteQuotaRead } from "../../src/domains/quota/observed.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
@@ -865,6 +866,20 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 	// A side call leaves an empty spare that opens on its own time (PV-2), so the newest session may be that spare.
 	const asked = () => [...fake().sessions].reverse().find((session) => session.prompts.length > 0);
 	await bundle.extension.start();
+	const seededNow = Date.now();
+	noteQuotaRead(
+		{
+			providerId: "copilot",
+			displayName: "GitHub Copilot",
+			status: "ok",
+			plan: null,
+			windows: [{ key: "premium_interactions", label: "Premium", short: "prem", usedPct: 10, resetsAt: null }],
+			credits: null,
+			fetchedAt: new Date(seededNow).toISOString(),
+		},
+		60_000,
+		seededNow,
+	);
 	try {
 		await prepareListedModelCapabilities(bundle.contract, target.id);
 		const route = createBackgroundMemoryModelClient(bundle.contract, settings, 5000, null);
@@ -895,6 +910,19 @@ test("a memory side call with thinking off asks a Copilot model that cannot turn
 			"the effort the send ran under",
 		);
 	} finally {
+		noteQuotaRead(
+			{
+				providerId: "copilot",
+				displayName: "GitHub Copilot",
+				status: "ok",
+				plan: null,
+				windows: [],
+				credits: null,
+				fetchedAt: new Date(0).toISOString(),
+			},
+			0,
+			0,
+		);
 		disposeCopilotConversations("off-session");
 		disposeCopilotConversations("minimal-session");
 		await bundle.extension.stop?.();
