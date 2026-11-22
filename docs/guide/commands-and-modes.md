@@ -636,9 +636,9 @@ sessions.
 
 | View | What it shows |
 | --- | --- |
-| Activity | A heatmap of this workspace's recent session activity (Detailed output, or Default once the workspace has a session), git changes, session cost and tokens with elapsed time, and the first reported subscription window |
-| Accounts | Subscription and credit meters, every reported model group, reset countdowns and local reset times with an explicit time zone, and stale or expired readings |
-| Session | Recorded token and cost totals, verified outcomes with tokens and cost per outcome (see [Exit summary](#exit-summary)), cache traffic, reasoning, and the background-call categories (side questions, handoffs, pre-warms, memory steps) |
+| Activity | A heatmap of this workspace's recent session activity (Detailed output, or Default once the workspace has a session), git changes, session cost and tokens with elapsed time, a `Receipt` row, and a `Plan` row for the subscription window that binds first (the fullest reported window, then the earlier reset) |
+| Accounts | Subscription and credit meters, every reported model group, reset countdowns and local reset times with an explicit time zone, stale or expired readings, and the funding pools this session's calls drew on with each pool's extra cost and API equivalent |
+| Session | Recorded token and cost totals, the economics receipt and its evidence, verified outcomes with tokens and cost per outcome (see [Exit summary](#exit-summary)), cache traffic, reasoning, and the background-call categories (side questions, handoffs, pre-warms, memory steps) |
 | Models | Each model's share of recorded processed tokens, including cache traffic, plus its detailed token and cost breakdown |
 | Workers | Active and recent runs, recorded tokens and cost, context usage, and the shared account limit when the local credential owner is known |
 | Health | Telemetry journal losses, event-loop lag, transport, quota, route and System One breakers, with System One's status lines when it runs. Minimal output omits the journal and responsiveness sections and shows the connection only when it reports a failure, an SSE pin or fallback, or a recovery |
@@ -646,6 +646,27 @@ sessions.
 Press 1–6, Tab/Shift+Tab, or ←/→ to change views; ↑/↓ or PgUp/PgDn to scroll;
 Home/End or Ctrl+Home/Ctrl+End to jump to either end; and Esc to close. Each
 view keeps its own scroll position while the overlay stays open.
+
+#### The receipt
+
+The Session and Activity views, the expanded dashboard's session row and the
+exit summary's `Session cost` row carry one receipt line folded from the
+session's [economics facts](../architecture/telemetry.md#economics-facts): the
+extra cost to you, seat credits when a seat was debited, and the API
+equivalent. An amount under a cent keeps its digits and never reads as free. On
+the Session view and the dashboard, a session on a subscription route opens the
+receipt with the quota window that binds first among the accounts its calls
+draw on. Activity names that window on its `Plan` row. A part that carries an
+unknown, such as a window whose percentage or reset the provider did not
+report, is drawn in a neutral tone and is not an error.
+
+Press `e` on the Session view to show or hide the receipt's evidence. Detailed
+output opens with it shown. The evidence lists the extra cost, the provider
+charge, seat credits with whether the provider reported them or CLIO Coder
+estimated them, the API equivalent and the reference price rows it was priced
+from, electricity, and the number of calls and runs behind the figures. A
+declared pool fee belongs to its period, so it is never on a session's receipt.
+`clio-coder usage report` lists each fee once per pool and period.
 
 #### Used, and what a percentage describes
 
