@@ -21,6 +21,7 @@ export { ACP_FLEET_META_KEY, ACP_FLEET_PREVIEW_METHOD, ACP_FLEET_RUN_METHOD } fr
  */
 
 import type { TurnConstraints } from "../../core/turn-constraints.js";
+import { executionPlanStepScope } from "../../domains/dispatch/execution-plan.js";
 import type { FleetRunPreview, FleetRunPreviewResult } from "../../domains/dispatch/index.js";
 
 export const ACP_FLEET_MAX_STEPS = 64;
@@ -95,7 +96,8 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 				(step): AcpFleetStep => ({
 					stepId: previewText(step.stepId),
 					kind: step.kind === "code" ? "code" : "agent",
-					scope: step.scope,
+					// A worktree-isolated run's writing step writes the task worktree, as the approval card and `playbook graph` say.
+					scope: executionPlanStepScope(preview.plan, step.scope),
 					...(step.agentId !== undefined ? { agentId: previewText(step.agentId) } : {}),
 					...(step.commandId !== undefined ? { commandId: previewText(step.commandId) } : {}),
 					...(step.argv !== undefined ? { argv: boundedList(step.argv) } : {}),
@@ -126,6 +128,7 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 		name: previewText(preview.name),
 		planHash: preview.planHash,
 		stepCount: preview.plan.steps.length,
+		isolation: preview.plan.isolation === "worktree" ? "worktree" : "workspace",
 		waves: waves.filter((wave) => wave.steps.length > 0),
 		budget: {
 			// The wire budget is closed; how the spend was priced reaches it only through currentDisplay.

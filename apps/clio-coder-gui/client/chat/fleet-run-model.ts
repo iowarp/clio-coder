@@ -32,7 +32,13 @@ export interface FleetStepRow {
 }
 
 function describeStep(step: FleetStep): FleetStepRow {
-	const notes: string[] = [step.scope === "readonly" ? "Reads only" : "May change the workspace"];
+	const notes: string[] = [
+		step.scope === "readonly"
+			? "Reads only"
+			: step.scope === "worktree"
+				? "May change the run's task worktree"
+				: "May change the workspace",
+	];
 	if (step.writes !== null)
 		notes.push(step.writes.length === 0 ? "Declares no writes" : `Writes ${step.writes.join(", ")}`);
 	if (step.loop) notes.push(`${step.loop.role === "check" ? "Check" : "Repair"} attempt ${step.loop.attempt}`);

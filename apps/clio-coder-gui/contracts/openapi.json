@@ -16193,7 +16193,7 @@
 									"anyOf": [
 										{
 											"type": "object",
-											"required": ["status", "name", "planHash", "stepCount", "waves", "budget", "truncated"],
+											"required": ["status", "name", "planHash", "stepCount", "isolation", "waves", "budget", "truncated"],
 											"properties": {
 												"status": {
 													"type": "string",
@@ -16210,6 +16210,18 @@
 												"stepCount": {
 													"type": "integer",
 													"minimum": 0
+												},
+												"isolation": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "worktree"
+														},
+														{
+															"type": "string",
+															"const": "workspace"
+														}
+													]
 												},
 												"waves": {
 													"type": "array",
@@ -16252,6 +16264,10 @@
 																				{
 																					"type": "string",
 																					"const": "workspace"
+																				},
+																				{
+																					"type": "string",
+																					"const": "worktree"
 																				}
 																			]
 																		},
