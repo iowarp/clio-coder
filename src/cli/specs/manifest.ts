@@ -218,7 +218,7 @@ export const NESTED_LEAVES: ReadonlyArray<readonly [string, string, string]> = [
 	["playbook list", "list builtin, plugin, user and project playbooks with validation status", "playbook list [--json]"],
 	[
 		"playbook new",
-		"copy the build-review, build-test, or sdlc playbook into .clio-coder/playbooks/",
+		"copy the build-review, build-test, sdlc, or seat-stretch playbook into .clio-coder/playbooks/",
 		"playbook new <name> --from <builtin> [--json]",
 	],
 	[
