@@ -126,6 +126,7 @@ export function runPlaybookGraph(args: ReadonlyArray<string>): number {
 			message: error instanceof Error ? error.message : String(error),
 			json,
 		});
-		return 1;
+		// The code `playbook validate` and `fleet run <name>` refuse the same playbook with (SPEC 6.5).
+		return 2;
 	}
 }
