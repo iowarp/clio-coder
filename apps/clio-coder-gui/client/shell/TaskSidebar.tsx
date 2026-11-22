@@ -13,7 +13,7 @@ import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { focusComposerSoon } from "../interaction/focus-return.js";
 import { moveRowFocus } from "../interaction/row-keys.js";
-import { platformLabel, systemStatus } from "../pages/system-model.js";
+import { platformLabel, recalledSystem, rememberedSystem, systemStatus } from "../pages/system-model.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
@@ -99,9 +99,26 @@ export function TaskSidebar({
 		retry: false,
 		meta: { errorSurface: "inline" },
 	});
-	const status = systemStatus(connection, system.data?.findings, system.isError, true);
+	// A reload in this tab states its last result while the idle recheck runs, so it never flashes Connecting or Checking.
+	const [recalled] = useState(() => {
+		try {
+			return recalledSystem(sessionStorage.getItem(SYSTEM_STATUS_KEY));
+		} catch {
+			return undefined;
+		}
+	});
+	useEffect(() => {
+		if (!system.data) return;
+		try {
+			sessionStorage.setItem(SYSTEM_STATUS_KEY, rememberedSystem(system.data));
+		} catch {
+			// Storage may be full or disabled; the next load checks again.
+		}
+	}, [system.data]);
+	const status = systemStatus(connection, system.data?.findings ?? recalled?.findings, system.isError, true);
 	const platformName = platformLabel(platform);
-	const systemDetail = `CLIO Coder runtime · ${platform ?? "Local"}\n${status.detail}${system.data ? `\nLast checked ${formatTime(system.data.checkedAt)}` : ""}`;
+	const checkedAt = system.data?.checkedAt ?? recalled?.checkedAt;
+	const systemDetail = `CLIO Coder runtime · ${platform ?? "Local"}\n${status.detail}${checkedAt ? `\nLast checked ${formatTime(checkedAt)}` : ""}`;
 	const activeTask = sessionIdFromPath(location.pathname);
 	const ordered = useMemo(
 		() =>
@@ -557,7 +574,9 @@ function TaskItem({
 	);
 }
 
-const SYSTEM_CHECK_DELAY_MS = 3_000;
+const SYSTEM_STATUS_KEY = "clio-coder-system-status";
+// The check answers in tens of milliseconds; the wait only keeps it behind the first page's own reads.
+const SYSTEM_CHECK_DELAY_MS = 1_000;
 
 /** Runs `run` a few seconds after boot, when the browser is idle; returns the cancel. */
 function afterBootIdle(run: () => void): () => void {

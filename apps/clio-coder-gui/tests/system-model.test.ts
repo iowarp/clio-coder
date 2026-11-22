@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import { ACTIVITY, activityLabel } from "../client/pages/mission-control-model.js";
-import { findingAction, healthGroups, systemStatus } from "../client/pages/system-model.js";
+import {
+	findingAction,
+	healthGroups,
+	recalledSystem,
+	rememberedSystem,
+	systemStatus,
+} from "../client/pages/system-model.js";
 import { READY_LABEL, STATE_LABELS } from "../client/shell/shell-model.js";
 import { SystemReport } from "../contracts/system.js";
 
@@ -59,6 +65,18 @@ test("a scheduled idle check reads as checking, not as never checked", () => {
 	assert.equal(systemStatus("Connected", undefined, false, true).label, "Checking");
 	assert.equal(systemStatus("Connected", report.findings, false, true).label, "1 issue");
 	assert.equal(systemStatus("Connected", undefined, true, true).label, "Unverified");
+});
+
+test("a reload draws the tab's last check at once, while the stream connects, without keeping paths or details", () => {
+	const kept = rememberedSystem(report);
+	assert.equal(kept.includes("Withheld") || kept.includes("/config"), false);
+	const recalled = recalledSystem(kept);
+	assert.equal(recalled?.checkedAt, report.checkedAt);
+	assert.equal(systemStatus("Connecting…", recalled?.findings, false, true).label, "1 issue");
+	assert.equal(systemStatus("Connecting…", undefined, false, true).label, "Connecting");
+	assert.equal(systemStatus("Reconnecting…", recalled?.findings, false, true).label, "Reconnecting");
+	for (const raw of [null, "", "{", '{"checkedAt":1,"levels":[]}', '{"checkedAt":"x","levels":["bad"]}'])
+		assert.equal(recalledSystem(raw), undefined, String(raw));
 });
 
 test("Sessions cards use the sidebar's state words", () => {
