@@ -142,7 +142,11 @@ function externalTarget(input: WorkerRunInput) {
 	};
 }
 
-function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): ExternalUsageFacts {
+/**
+ * A free or all-zero target prices any usage at zero; otherwise declared rates price measured counts, unless different
+ * models served the scope, whose summed tokens no one route rate prices (S4c).
+ */
+function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts, mixedModels = false): ExternalUsageFacts {
 	if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
 	const rates = input.target.pricing;
 	if (
@@ -157,6 +161,7 @@ function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): E
 				freeRule: rates === "free" ? ("declared" as const) : ("zero-rates" as const),
 			},
 		};
+	if (mixedModels) return facts;
 	// An unpriced cache read bills at the input price, as resolveEffectivePricing does.
 	const effective = {
 		input: rates.input,
@@ -234,6 +239,7 @@ export function observeExternalWorkerRun(
 
 	let revision = 0;
 	const calls = new Set<string>();
+	const servedModels = new Set<string>();
 	telemetryHub().emit("process.started", {}, context);
 	forwarder.flush();
 	try {
@@ -242,6 +248,8 @@ export function observeExternalWorkerRun(
 				const payload = event.payload;
 				const observed = observations.get(payload);
 				const identity = payload.responseId ?? String(payload.callIndex);
+				const served = (payload.responseModel ?? payload.model).trim();
+				if (served) servedModels.add(served);
 				if (observed && !calls.has(identity)) {
 					calls.add(identity);
 					const facts = priceExternalUsage(input, externalUsageFacts(observed));
@@ -281,10 +289,11 @@ export function observeExternalWorkerRun(
 			} else if (aggregateMessages && event.type === "message_end" && event.message.role === "assistant") {
 				const message = event.message;
 				const bound = observations.get(message);
-				const facts = priceExternalUsage(
-					input,
-					externalUsageFacts(bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true }),
+				const reported = externalUsageFacts(
+					bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true },
 				);
+				// A run whose calls different models served is priced per call, never its summed tokens at one route rate.
+				const facts = priceExternalUsage(input, reported, servedModels.size > 1);
 				telemetryHub().emit(
 					"run.usage_reported",
 					{

@@ -89,6 +89,8 @@ export interface CopilotStepBilling {
 	nanoAiu: number | null;
 	/** Model calls Copilot made for this step, root agent only. */
 	modelCalls: number;
+	/** The distinct models the step's calls reported serving them; more than one leaves the step unpriced. */
+	servedModels?: string[];
 }
 
 type ConversationState = "idle" | "awaiting-tools";
@@ -939,6 +941,7 @@ class Step {
 	private nanoSum = 0;
 	/** The model the runtime reported serving this step's calls (`assistant.usage.model`). */
 	private servedModel: string | null = null;
+	private readonly servedModels = new Set<string>();
 	/** Reads this step's premium requests and AI credits from the runtime's own session accounting. */
 	settle: ((step: Step) => Promise<{ premiumRequests: number | null; nanoAiu: number | null }>) | null = null;
 	/** Copilot's ids for this step's model calls, from its messages and usage. */
@@ -1172,6 +1175,7 @@ class Step {
 		}
 		if (typeof data.model === "string" && data.model.trim().length > 0) {
 			this.servedModel = data.model.trim();
+			this.servedModels.add(this.servedModel);
 			// As on the other adapters, the response model names only a model other than the one requested.
 			if (this.servedModel !== this.model.id) this.message.responseModel = this.servedModel;
 		}
@@ -1305,7 +1309,10 @@ class Step {
 			// AI credits: the step's own reports when every call sent them, else the runtime total's growth.
 			if (!this.usageUncertain && this.nanoReports === this.usageEvents) this.billing.nanoAiu = this.nanoSum;
 			if (this.usageUncertain) this.billing = { premiumRequests: null, nanoAiu: null, modelCalls: this.usageEvents };
-			this.message.copilotBilling = { ...this.billing };
+			this.message.copilotBilling = {
+				...this.billing,
+				...(this.servedModels.size > 0 ? { servedModels: [...this.servedModels] } : {}),
+			};
 		}
 		// A count is reported only when every call of the step sent it and no unplaceable report was mixed in.
 		// Copilot sends reasoningTokens 0 as a placeholder even while the model thinks, so a reasoning 0 is a
