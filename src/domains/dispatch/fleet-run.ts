@@ -72,6 +72,7 @@ import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from 
 import { changedCheckFiles, deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
 import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
+import { keepFleetTaskWorktree, openFleetTaskWorktree } from "./fleet-task-worktree.js";
 import {
 	decideReviewGate,
 	type GateDecisionCorrelation,
@@ -262,7 +263,11 @@ export interface ExecuteFleetRunInput {
 	 * The settings that choose the sandbox loop checks and gates run in, as host
 	 * verification's checks do; absent reads as `safety.sandbox: auto`.
 	 */
-	settings?: Readonly<Pick<ClioSettings, "safety" | "targets"> & { fleet?: Pick<ClioSettings["fleet"], "limits"> }>;
+	settings?: Readonly<
+		Pick<ClioSettings, "safety" | "targets"> & {
+			fleet?: Pick<ClioSettings["fleet"], "limits"> & Partial<Pick<ClioSettings["fleet"], "worktrees" | "nodes">>;
+		}
+	>;
 	/** Cancel the fleet, including queued and running proposals. */
 	signal?: AbortSignal;
 	/**
@@ -431,12 +436,39 @@ function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number {
  * result rather than an exception.
  */
 export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
+	if (input.plan.isolation !== "worktree") return executeFleetRunIn(input, { root: input.workspaceRoot });
+	// A `worktree` playbook runs every step in one task worktree and never writes the operator's checkout.
+	const worktree = openFleetTaskWorktree({
+		workspaceRoot: input.workspaceRoot,
+		fleetRootId: input.fleetRootId,
+		...(input.resume !== undefined ? { resumeWorktree: input.resume.record.worktree ?? input.resume.record.id } : {}),
+		...(input.settings?.fleet?.worktrees !== undefined
+			? { worktreeRootSetting: input.settings.fleet.worktrees.root }
+			: {}),
+		remoteEligible: (input.settings?.fleet?.nodes?.length ?? 0) > 0,
+		onNotice: (text) => input.onNotice?.(text),
+	});
+	try {
+		return await executeFleetRunIn(input, { root: worktree.path, taskWorktree: worktree.runId });
+	} finally {
+		keepFleetTaskWorktree(worktree, input.fleetRootId, (text) => input.onNotice?.(text));
+	}
+}
+
+/** Where a run executes: the checkout it was started in, or its task worktree. */
+interface FleetRunPlace {
+	root: string;
+	/** Run id of the task worktree `root` is, recorded so a resume continues there. */
+	taskWorktree?: string;
+}
+
+async function executeFleetRunIn(input: ExecuteFleetRunInput, place: FleetRunPlace): Promise<FleetRunOutcome> {
 	// Taken before the root claims its verdict or writes a record, so a refused
 	// run leaves no durable trace and its minted id never reads as a real root.
 	// A fleet holds the checkout's writer set for its whole run; another fleet or another process's writer there queues
 	// it until the fleet run wall clock passes (DESIGN 4.5).
 	const lease = await joinWriterSet({
-		checkout: gitCheckoutRoot(input.workspaceRoot) ?? input.workspaceRoot,
+		checkout: gitCheckoutRoot(place.root) ?? place.root,
 		member: {
 			group: input.fleetRootId,
 			roots: null,
@@ -477,6 +509,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		}
 		return await runFleetHoldingWorkspace(
 			input,
+			place,
 			(seal) => {
 				emergencySeal = seal;
 			},
@@ -502,10 +535,13 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 
 async function runFleetHoldingWorkspace(
 	input: ExecuteFleetRunInput,
+	place: FleetRunPlace,
 	setEmergencySeal: (seal: () => void) => void,
 	rootTelemetry: FleetRootTelemetry,
 ): Promise<FleetRunOutcome> {
-	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
+	const { dispatch, agents, fleetRootId } = input;
+	// Every step, check, commit and boundary snapshot works here; the record keeps the checkout the run started in.
+	const workspaceRoot = place.root;
 	/** A start the admission check canceled throws the abort reason, so the plan stops the way a signal stops it. */
 	const refuseCanceledAdmission = (): void => {
 		if (input.beforeStepAdmission === undefined) return;
@@ -519,7 +555,7 @@ async function runFleetHoldingWorkspace(
 	const fleetRunRecord: FleetRunRecord = {
 		version: 1,
 		id: fleetRootId,
-		cwd: workspaceRoot,
+		cwd: input.workspaceRoot,
 		fleet: input.playbookName,
 		planHash: livePlan.hash,
 		planIdentityHash: executionPlanIdentityHash(livePlan),
@@ -529,6 +565,7 @@ async function runFleetHoldingWorkspace(
 		startedAt: new Date().toISOString(),
 		endedAt: null,
 		resumedFrom: input.resume?.record.id ?? null,
+		...(place.taskWorktree !== undefined ? { worktree: place.taskWorktree } : {}),
 		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
 	};
 	// Every step of this run dispatches under `fleetRootId` as its lineage root,

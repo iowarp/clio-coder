@@ -104,10 +104,99 @@ export function playbookCommandsPath(cwd: string): string {
 	return join(clioProjectRoot(cwd, join("playbooks", "commands.yaml")), ".clio-coder", "playbooks", "commands.yaml");
 }
 
+interface SchemaErrorLike {
+	keyword: string;
+	schemaPath: string;
+	instancePath: string;
+	message: string;
+	params: object;
+}
+
+function quotedSchemaValue(value: unknown): string {
+	return typeof value === "string" ? `'${value}'` : JSON.stringify(value);
+}
+
+/**
+ * The `anyOf` branches a value's `kind` rules out: a playbook step or loop half is a union discriminated by `kind`,
+ * and TypeBox reports every branch, so the first error is otherwise the first branch's shape (an agent step's
+ * missing `agent`) rather than what is wrong with the kind the author wrote.
+ */
+function wrongKindBranches(errors: ReadonlyArray<SchemaErrorLike>): string[] {
+	const branches: string[] = [];
+	for (const error of errors) {
+		const kindConst = /^(.*\/anyOf\/\d+)\/properties\/kind$/u.exec(error.schemaPath);
+		if (error.keyword === "const" && kindConst?.[1] !== undefined) branches.push(kindConst[1]);
+		const required = (error.params as { requiredProperties?: unknown }).requiredProperties;
+		if (
+			error.keyword === "required" &&
+			/\/anyOf\/\d+$/u.test(error.schemaPath) &&
+			Array.isArray(required) &&
+			required.includes("kind")
+		)
+			branches.push(error.schemaPath);
+	}
+	return branches;
+}
+
+/** The schema node a TypeBox `schemaPath` (`#/properties/steps/items/anyOf/1/...`) names, or undefined. */
+function schemaNodeAt(schema: unknown, schemaPath: string): unknown {
+	let node: unknown = schema;
+	for (const key of schemaPath.replace(/^#\/?/u, "").split("/")) {
+		if (key.length === 0) continue;
+		if (typeof node !== "object" || node === null) return undefined;
+		node = (node as Record<string, unknown>)[key.replaceAll("~1", "/").replaceAll("~0", "~")];
+	}
+	return node;
+}
+
+/**
+ * Every value a refused literal could have been, read from the schema rather than the error list: TypeBox reports a
+ * later union branch only up to its first failure, so the errors alone can name one literal of three.
+ */
+function allowedValues(schema: unknown, error: SchemaErrorLike): unknown[] {
+	const node = schemaNodeAt(schema, error.schemaPath) as { const?: unknown; enum?: unknown } | undefined;
+	if (error.keyword === "enum") return Array.isArray(node?.enum) ? node.enum : [];
+	if (node === undefined || !("const" in node)) return [];
+	const union = /^(.*)\/anyOf\/\d+$/u.exec(error.schemaPath)?.[1];
+	const members =
+		union === undefined ? undefined : (schemaNodeAt(schema, union) as { anyOf?: unknown } | undefined)?.anyOf;
+	if (
+		Array.isArray(members) &&
+		members.every((member) => typeof member === "object" && member !== null && "const" in member)
+	) {
+		return members.map((member) => (member as { const: unknown }).const);
+	}
+	return [node.const];
+}
+
+/**
+ * The first schema refusal as `<path>: <message>`, from the union branch the value's `kind` selects. A `const` or
+ * `enum` refusal names every value the path accepts: a union of literals fails once per literal, and TypeBox's own
+ * text for each ("must be equal to constant") names none of them.
+ */
+export function playbookSchemaErrorText(schema: unknown, errors: Iterable<SchemaErrorLike>, fallback: string): string {
+	const every = [...errors];
+	const ruledOut = wrongKindBranches(every);
+	const kept = every.filter(
+		(error) => !ruledOut.some((branch) => error.schemaPath === branch || error.schemaPath.startsWith(`${branch}/`)),
+	);
+	const first = (kept.length > 0 ? kept : every)[0];
+	if (first === undefined) return fallback;
+	const path = first.instancePath || "(root)";
+	if (first.keyword !== "const" && first.keyword !== "enum") return `${path}: ${first.message}`;
+	const allowed = allowedValues(schema, first);
+	if (allowed.length === 0) return `${path}: ${first.message}`;
+	const names = allowed.map(quotedSchemaValue);
+	return `${path}: must be ${names.length === 1 ? names[0] : `one of ${names.join(", ")}`}`;
+}
+
 function firstSchemaError(value: unknown): string | null {
 	if (Value.Check(RegistrySchema, value)) return null;
-	const first = [...Value.Errors(RegistrySchema, value)][0];
-	return first ? `${first.instancePath || "(root)"}: ${first.message}` : "command registry failed validation";
+	return playbookSchemaErrorText(
+		RegistrySchema,
+		Value.Errors(RegistrySchema, value),
+		"command registry failed validation",
+	);
 }
 
 /** Reject a relative directory that climbs out of the workspace or is absolute. */
