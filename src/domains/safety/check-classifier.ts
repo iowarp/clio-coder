@@ -418,7 +418,8 @@ export function classifyCall(
 		changedPaths,
 		shellCommand,
 		shell: command === null ? null : shellCheckReading(command, base, cwd, declaredSteps),
-		opaque: toolWritesOpaquely(toolName),
+		// A verify call that only lists the declared checks runs nothing, so it leaves the write record whole.
+		opaque: toolWritesOpaquely(toolName) && !(toolName === ToolNames.Verify && isVerifyListing(rawArgs ?? {})),
 		shape,
 		check,
 		name: verdict === "check" && command !== null ? observedCheckName(command, base, cwd) : check,
