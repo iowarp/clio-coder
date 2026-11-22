@@ -811,7 +811,8 @@ kind from its resolved pricing and runtime; there is no setting for it.
   below `safety.limits.sessionCostUsd`, where `0` means no ceiling. Otherwise it
   is skipped with `cost_ceiling`.
 - **Quota** routes bill a subscription CLIO Coder reads usage for (Codex, Anthropic
-  OAuth, Claude Code, Antigravity). A step is skipped with `quota_window` while
+  OAuth, Claude Code, Antigravity). GitHub Copilot quota is shown in `/usage` but never gates
+  a background step. A step is skipped with `quota_window` while
   the binding window is at or past the warning level `/usage` draws, and with
   `quota_retry` while the usage endpoint's 429 retry interval runs. CLIO Coder never
   fetches usage for this. A missing, stale or unusable reading defers the step

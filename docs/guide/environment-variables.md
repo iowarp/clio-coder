@@ -30,7 +30,7 @@ Precedence per directory role: `CLIO_CODER_*_DIR` > `CLIO_CODER_HOME/<role>` > X
 
 ### Relocated-home isolation for sibling CLIs
 
-When all CLIO Coder directories are at platform/XDG defaults and `CLIO_CODER_INTEROP_HOME` is not `none`, sibling CLI quota adapters (`claude-code` via `CLAUDE_CONFIG_DIR`/`.credentials.json`, `codex-cli` via `CODEX_HOME`/`auth.json`, `antigravity-code` via `ANTIGRAVITY_HOME`/`antigravity-oauth-token`) are enabled ([registry.ts](../../src/domains/quota/registry.ts)). When any CLIO Coder directory differs from its default, implicit sibling adapters are disabled unless their own env var (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ANTIGRAVITY_HOME`) is explicitly set (and `CLIO_CODER_INTEROP_HOME` is not `none`). CLIO Coder's own stored logins (`anthropic-max`, `openai-codex`) stay active in relocated homes.
+When all CLIO Coder directories are at platform/XDG defaults and `CLIO_CODER_INTEROP_HOME` is not `none`, sibling CLI quota adapters (`claude-code` via `CLAUDE_CONFIG_DIR`/`.credentials.json`, `codex-cli` via `CODEX_HOME`/`auth.json`, `antigravity-code` via `ANTIGRAVITY_HOME`/`antigravity-oauth-token`, and `copilot` through the signed-in Copilot runtime, which is also enabled whenever `COPILOT_HOME` is set explicitly) are enabled ([registry.ts](../../src/domains/quota/registry.ts)). When any CLIO Coder directory differs from its default, implicit sibling adapters are disabled unless their own env var (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ANTIGRAVITY_HOME`) is explicitly set (and `CLIO_CODER_INTEROP_HOME` is not `none`). CLIO Coder's own stored logins (`anthropic-max`, `openai-codex`) stay active in relocated homes.
 
 ## Runtime, safety, and UI knobs
 

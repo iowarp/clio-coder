@@ -323,7 +323,7 @@ A `mutation-report` result lists `mutatedPaths` and `validations`. The validator
 - A reported path the run never wrote but that exists on disk is accepted as unverified: route quality cannot reach `pass` and stays `unmeasured`.
 - A reported path the run never wrote and that does not exist fails conformance, with route quality `unmeasured`.
 - A validation marked `"baseline": true` ran before the change. Quality judges only the other validations, so a baseline is never a failure and never a pass, and `evidence inspect` prints it as taken before the change. A baseline's own observed red is excused only while the run observed no mutation; after one, every standing check outcome judged the changed tree.
-- A reported failing validation with no matching observed final pass, or an observed failing check still standing, seals `fail`. A workspace mutation clears the outcomes observed before it, so a red from before the last edit seals nothing.
+- A reported failing validation with no matching observed final pass, or an observed failing check still standing, seals `fail`. A check whose latest `verify` receipt says it could not run (a runner usage error, for example) is not a reported failure. A workspace mutation clears the outcomes observed before it, so a red from before the last edit seals nothing.
 - `pass` requires at least one reported validation that is not a baseline, every path observed, and at least one validation command the run executed to a clean exit after its last edit.
 
 The source is `validateMutation` in `src/domains/agents/result-contract.ts`. `clio-coder run --agent` exits 1 when the sealed result-contract quality is `fail`, while the run's outcome stays `succeeded`.

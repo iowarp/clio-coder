@@ -8,7 +8,7 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 
 ### Highlights
 
-- **One output contract for headless runs.** `clio-coder run --output-format json` prints a single `run_end` envelope (`schemaVersion: 2`) with the answer, exit code, outcome, typed `causes[]`, timings, checks and usage. `stream-json` streams the events and ends with the same envelope, and `clio-coder schema run-result` prints its JSON Schema.
+- **One output contract for headless runs.** `clio-coder run --output-format json` prints a single `run_end` envelope (`schemaVersion: 3`) with the answer, exit code, outcome, typed `causes[]`, timings, checks and usage. `stream-json` streams the events and ends with the same envelope, and `clio-coder schema run-result` prints its JSON Schema.
 - **Runs that state how they ended.** The new `finish` tool lets the agent declare `done`, `partly_done` or `not_done` with its limitations. CLIO Coder seals the claim beside its own assessment, lowers a `done` that left unvalidated changes or a failing check, and `run --exit-code` turns anything short of done into exit 1.
 - **Limits and previews per run.** `--max-requests`, `--max-tool-calls`, `--max-cost-usd`, `--timeout 15m`, `--sandbox required`, `--require-priced`, `--deny-tools` and `--on-permission fail` bound one run, and `--dry-run` prints the route, tools, sandbox and limits without calling a model.
 - **Structured answers and task files.** `run --output-schema schema.json` makes the answer one JSON object that the host validates, and `run --task-file task.json` carries a whole task envelope.
@@ -20,6 +20,7 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 - **A browser for the agent.** The `browser` tool loads pages, runs Playwright scripts, reads the accessibility tree, starts dev servers and takes screenshots inside the same sandbox as `bash`. Pages reach loopback until you grant a host, and a `kind: browser` verifier check gates a page on its console errors and failed requests.
 - **A second terminal on a running session.** `/attach observe|approve|pair` lets `clio-coder session attach <id>`, on the same host or over ssh, watch the session, answer its approval cards or steer it.
 - **Fleet runs that stay out of your checkout.** A playbook step with scope `worktree` runs the whole chain in one kept task worktree, the builtin `build-review` builds there, and `clio-coder fleet land` previews and lands the result. Every dispatched run has a wall clock, reviewers judge an evidence packet of the builder's diff and checks, and a plan wider than a concurrency limit runs in waves.
+- **Cost that says who pays.** A `funding` block declares who pays for each target, and every call and run keeps the provider's charge, your extra cost, seat credits, local energy and the public API price of the same usage as separate facts. `/usage`, the exit summary, `telemetry cost`, `usage report` and the desktop app's Usage page show them, a subscription route's receipt opens with the quota window that binds first, and dispatch cards list a forecast per accepted job beside each candidate route. An amount nothing measured reads unknown, never zero.
 - **Your setup from other agents.** `clio-coder interop adopt` ports Claude Code and Codex command hooks, stdio MCP servers and user instructions, and a hook can speak either agent's dialect.
 
 ### Breaking changes
@@ -74,6 +75,9 @@ CLIO Coder 0.8.5 is one large release with breaking changes, built so that a scr
 - `context.memory.observations.enabled` is no longer read. Set `context.memory.surfaces.observe`; `clio-coder doctor` names the old key and `doctor --fix` removes it.
 - CLIO Coder reads only the current memory store. `clio-coder doctor` names an older or partly unreadable store and `doctor --fix` rewrites it at the current version with the records this build reads. An invalid record is dropped at the next store write instead of moving to `records.invalid.json`.
 - A project's `.clio-coder/codewiki.json` index is no longer read; `clio-coder context index` writes `.clio-coder/codemap.json`. A `.clio-coder/fleets/` directory is no longer converted: move its playbooks to `.clio-coder/playbooks/`.
+- A turn on a cloud or subscription target is refused before the call when the target's live model list does not contain the requested model (`no model <id> on target <t>; available: ...`), and refused after it when the provider reports that a different model answered (`requested X, provider served Y; the turn is refused`). Both exit 1 with cause `model_unavailable` or `served_model_mismatch` in `causes[]`, and no tool call from a mismatched response runs. Local and gateway targets are not judged, and a router id ending in `/auto` is exempt.
+- `$0.00 local` is printed only for a local-native target. A free amount with no recorded rule reads `$0.00 free`, and a sum whose parts were free under different rules reads `$0.00 free (mixed)`; pricing sums and per-call usage carry `freeRuleMixed` for that case.
+- ACP `usage_update` carries `cost` only for a measured personal charge: the session's extra user cost in one currency, every contribution reported by the provider on a target bound to a personal pay-per-token funding pool. A route-price estimate, a seat or subscription call, a local call or an unknown leaves `cost` out, so a session with no funding binding sends none. `_meta["clio-coder/usage"].session` still carries the route-price figures.
 
 **Run records and telemetry**
 
@@ -110,7 +114,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Headless `run`**
 
-- `--output-format text|json|stream-json` selects schema v2 output. The `run_end` envelope carries `sessionId`, `runId`, `result.text`, `exitCode`, `outcome`, `causes[]`, `timings`, `verify`, `completion`, `dispatch.runs` (every child run, retries included) and usage split into `main`, compaction, `side`, workers and `total`. `text` ends with one stderr line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`.
+- `--output-format text|json|stream-json` selects schema v3 output. The `run_end` envelope carries `sessionId`, `runId`, `result.text`, `exitCode`, `outcome`, `causes[]`, `timings`, `verify`, `completion`, `dispatch.runs` (every child run, retries included) and usage split into `main`, compaction, `side`, workers and `total`. `text` ends with one stderr line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`.
 - `stream-json` tool frames carry a stable `toolCallId` (`tc_<turn>_<n>`) with the provider's id in `providerToolCallId`, and each `--steer-channel` line is acknowledged with a `steer` frame (`queued`, then `accepted` or refused with a reason).
 - `-o`/`--output-last-message <path>` writes the final answer to a file when the run exits 0.
 - `--resume <id|prefix|name>` (`-r`), `--fork` and `--name <text>`. `--fork` branches a new session from the last committed turn and never writes the parent. Resuming a session another process holds exits 2 with cause `session_live`.
@@ -130,12 +134,13 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `run --agent <recipe> --review <run id|clio-coder/task/<run id>>` runs the worker read-only in a fleet run's kept task worktree, with the branch, base, commits and uncommitted count ahead of the task. `run --agent <agent> --continue <runId>` continues an earlier ACP delegation in its peer's own session.
 - `run --agent` says why a failed assignment was not retried (`notRetried` in JSON, a `Not retried:` line in text), and its `completion.limitations` lists the limitations the worker recorded.
 - `run_end.dispatch.runs[].safety.envelope` carries each dispatched run's sealed capability envelope.
+- A `max_cost_usd` or `session_cost_ceiling` cause carries `refusal`, with the reason, the basis (the route-price ceiling, its scope and what this run spent), the calls and routes that could not be priced, and the flag or setting that raises the limit.
 
 **Completion**
 
 - The `finish` tool declares how a turn ended: `state` (`done`, `partly_done`, `not_done`) with optional `limitations`, `unverified` and `remaining`. It is the only call in its response, and the turn ends with no further model round.
 - CLIO Coder seals the declared state beside its own assessment. A `done` with unvalidated changes, a failing check, an uncollected child run or an open task is assessed `partly_done`, and the terminal UI shows one line: `declared done, assessed partly done: …`.
-- An unattended turn (a headless run, a scheduled job, an unwatched yolo continuation) that did work without declaring gets one round pinned to `finish`. An attended turn may leave the declaration out.
+- An unattended turn (a headless run, a scheduled job, an unwatched yolo continuation) that did work without declaring gets one round pinned to `finish`. An attended turn may leave the declaration out. A reply that called no other tool, such as a greeting or an answer from what the agent already knows, never calls `finish` and ends as text; the tool, the tool contract and the unattended report rule all state that one scope.
 
 **Sessions**
 
@@ -157,6 +162,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `--exit-code` on `fleet verify` (0 verified, 1 failed or unavailable, 75 pending), `evidence inspect` and `campaign run`.
 - A person at a fleet worker's approval card can keep it open past 15 minutes: each key renews the hold for 15 minutes, up to one hour after the ask opened.
 - The coordinator has `grep` and `code_nav` attached directly. Running fleet rows show each worker's context fill, and the Turn ended row states detached worker spend apart from the turn's own.
+- A builtin `seat-stretch` playbook ships as an example policy for a subscription seat: a read-only scout step, a build in a task worktree and a verifier review with one revision, one worker at a time. Its text tells a coordinator how to read the `economics` view of `context(scope="budget")` before starting: keep a 20% reserve of each quota window, defer on a stale, missing or denied reading, and choose the cheapest adequate or the best supported route from the forecasts. The reserve and the preference are lines of the playbook that you edit, not harness rules, and `fleet run` alone starts the steps without applying the policy. `clio-coder playbook new <name> --from seat-stretch` copies it, and the Seat stretch guide shows example bindings.
 - A playbook step may declare scope `worktree`. The fleet then cuts one task worktree from HEAD on `clio-coder/task/<fleet root id>`, runs every step there, commits the work to that branch when it settles and keeps it, so `clio-coder fleet land <root>` previews it and `--yes` lands it. The approval card and `playbook graph` state the isolation, and `fleet_end.worktree` names the path, branch, commit and land commands. A playbook that mixes `workspace` and `worktree` steps is refused.
 - At 85% of a run's wall clock its tools are withdrawn and it is asked for its report. At the wall the host stops it and the run seals `timed_out`; a stopped builder's result names the paths it changed, and a worktree run's edits stay committed on its unmerged task branch.
 - A plan wider than a global, node or endpoint limit runs as consecutive waves with a "dispatch waves" notice instead of being refused, and its members queue for busy slots until their run's deadline.
@@ -167,6 +173,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A second CLIO Coder process on the same state directory follows another process's live workers on its board and can answer their held approval asks; the owner records which process answered.
 - `fleet view <fleetRootId>` shows each step's task.
 - Every worker role holds `code_nav`, and the plan card and receipt name each capability withheld from a run with its reason and remedy.
+- The card for a held task merge offers Land, and `dispatch` takes `land` with a kept branch's run id to reopen that card. CLIO Coder lands the branch on the host as the operator's own action, with the checks `clio-coder fleet land` runs, so a sandboxed session needs no sandbox escape to land work the operator approved. Land is bound to the branch tip and destination the card showed, and refuses uncommitted work and protected paths.
+- A dispatch plan in which every task is a read-only run on this machine no longer stops for plan approval at default autonomy, so a headless run can fan out read-only scouts. The judgement is made on the plan admission sealed: every task must resolve to a read-only recipe or a read-only request, with no write roots, expected outputs, verification, worktree, gate, approved failover or remote node. Any other plan asks as before.
 
 **Delegation to other agents**
 
@@ -231,6 +239,21 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - `chat.prewarm` also warms `openai-codex` sessions.
 - Empty `code_nav`, `grep` and `find` results say what was searched and that an empty match does not prove absence.
 - `verify` runs a package manager's call of a declared script (`npm test`, `pnpm run lint`) as that script's check.
+- `read` takes `paths`, an array of up to 16 files, in place of `path`. Each path is admitted and read as its own read, so the safety policy and the workspace boundary apply to it exactly as to a single read, and the sections (`== <path> ==`) share the one per-call byte cap. A refused or missing path carries its own reason in place, and a path the cap left no room for is named as not read.
+
+**Cost and quota**
+
+- A `funding` settings block names who pays for a target's usage: pools with a scheme, a payer, a native unit, an optional fee, a grant with an expiry, or the declared power draw and electricity tariff of a local machine, bound to a target with `targets[].funding.pool`. Funding is set in user settings only (a project value is ignored with a notice), `clio-coder configure` has a "Funding for a target" step, and the facts describe a route without authorizing or capping anything. Reports use them for the marginal charge, the energy estimate and period fees.
+- Every settled call and run carries an `economics` block that keeps amounts of different kinds apart: the provider's charge, the marginal charge to the user, a seat credit estimate, a local energy estimate and the public API price of the same usage. The marginal charge is measured only for a personal pay-per-token pool with a provider-reported charge, and a pool that someone else pays for, or a personal seat, subscription or prepaid pool with a declared fee, estimates it at 0 as covered by the plan. A fact nothing measured reads unknown, never 0, and none of these facts feeds a cost cap.
+- `clio-coder telemetry cost` and `clio-coder usage report` print the economy under their tables: the extra user cost beside the API equivalent, seat credits, energy and cash, in total and per funding pool, with the reference price rows used. A window report also lists each declared fee once per period. The JSON reports carry the same projection as `economy`, and each `usage` scope of a `run_end` envelope carries it as `economics`, without period fees.
+- The terminal shows the same economy as a one-line receipt on the `/usage` Session and Activity tabs, the expanded dashboard's session row and the exit summary's `Session cost` row: the extra cost, seat credits where a seat was debited, and the API equivalent, in the projection's own words, so an amount under a cent keeps its digits and never reads as free. On the Session tab and the dashboard, a subscription route's receipt opens with the quota window that binds first, which is the fullest window of the accounts the session's calls draw on and, on a tie, the one that resets sooner. A part with an unknown, including a window whose percentage or reset went unreported, is drawn in the neutral unknown tone. `e` on the Session tab opens the receipt's evidence (Detailed output opens with it shown): extra cost, provider charge, seat credits and whether the provider reported or CLIO Coder estimated them, the API equivalent with the reference rows it was priced from, electricity and the calls and runs it was folded from. A declared pool fee belongs to its period and is never on a session's receipt. The evidence and the Accounts tab's funding pools point at `clio-coder usage report` for it.
+- The desktop app's Usage page has an Economics section for the window: extra charge, API equivalent, seat credits, local energy and cash per currency, one row per funding pool, each declared fee once per pool and period, and the reference rows with their as-of dates. Estimates are labelled, an unknown never renders as an amount or as zero, and the page's headline figure is named Route price. The report passes your declared funding pools as `usage report` does, so both list the same fees.
+- Dispatch plan, admission and scout cards list a forecast beside each candidate route, the route that runs first and up to six in all with the rest counted: the extra charge per accepted job with its range and whether it is measured or estimated, the seat quota per accepted job, how many attempts were accepted, and how much quality evidence the route has. A forecast counts paid attempts that failed, reads `insufficient` on fewer than six attempts or none accepted, reads unknown, never free, when an attempt's charge was not captured, and says no extra charge applies on a local route. It is information beside the choice: routing, postures, admission and pins are unchanged.
+- `context(scope="budget")` carries an `economics` view. A session reads its spend with its basis, the priced ceiling and the headroom, the quota pool of its own route as the provider last reported it (each window's label, used percentage on a stated 0 to 100 scale, reset and verdict, the reading's source and as-of time, its age and whether it is fresh), and the forecast lines for every dispatchable agent, up to twelve. Spend that no telemetry read model observes reads `unobserved`, never zero, and the plan, balance text, pool pseudonym and account stay out of the view. The pool shows a fresh shared poll reading first, else the quota this process's own requests on the route reported in band, else one bounded usage poll that makes no model call, which a headless run starts at run start, so a headless coordinator does not read a stale pool. With none fresh, the newest held reading is shown marked not fresh. A worker reads only its own run envelope, with session spend and the pool marked `withheld`.
+- A signed-in GitHub Copilot target reports its quota in the quota readout, with Premium, Chat and Completions buckets and a percentage only where the provider reports an authoritative count.
+- A dated catalogue of public API list prices ships as `models/economy-rates.json` for comparisons; it never prices a route. `pnpm economy:check [--as-of YYYY-MM-DD]` validates it in a checkout.
+- A dispatched worker is refused its route when the provider has explicitly denied that route's quota pool, with reason `provider-quota-denied` naming the provider, the window, its reset and the age of the evidence; the pinned route is never moved to another. Only a fresh denial for the credential the route spends binds: a window at 100% that the provider did not deny, or a stale, failed or unknown reading, admits.
+- Quota readings carry a pool pseudonym (a keyed hash, under a per-install key, of the provider's billing identity, never a credential), each window's native unit and duration, and an access state that reads `denied` only on the provider's own signal. Copilot quota is also recorded from the live stream as it arrives.
 
 **Terminal UI**
 
@@ -274,6 +297,10 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A worker whose OS sandbox confines every write to its write roots runs a `bash` command that passes the scan but is not recognized (a `python3 -c` readback, for one) contained, as main `bash` does at default, unless it asks to leave the sandbox or reaches outward. A worker without such a sandbox still has it refused.
 - An explorer's report owes observed evidence: one sent before any read is refused, and the repair round reads first.
 - A playbook loop's agent check gets a verification task of its own instead of the builder's prompt, and a refused playbook literal names the values it accepts.
+- At the start of a turn whose request enumerates two or more separate parts, the agent gets one note for the turn: declare the parts on the task board, send the separate deliverables as one parallel `dispatch` whatever their size, keeping only parts that share a file or need another part's result, and mark each part done with what was observed. Each writing task's write roots cover its part's area and its tests. The dispatch is named only where such a plan can run, under yolo or with an operator who can approve it. A headless run at default autonomy, where the plan ask is denied, gets the task board steps alone. The separate task board reminder stays silent on such a turn. On the first substantial request of a fresh session it is advised to map the code with `code_nav` or `context` before its first edit. Neither note appears on answers, proposals, plan-only or read-only turns, or when the request rules out delegation.
+- `claude-opus-5.5` sessions with a window of at least 48,000 tokens carry short working notes on orienting with `code_nav`, using the native file tools instead of the shell, dispatching independent parts and verifying after an edit.
+- A `code_nav` listing too large for its call shows as many rows as fit instead of an empty stub, and saves the complete listing to a file named in `offloadPath` when the byte cap cut it.
+- A malformed `edit` or `ask_user` argument is refused with the accepted shape and a minimal example instead of a bare schema error. `edit` reads `edits`, or one of its entries, sent as a string of JSON in the exact shape, and `ask_user` takes `questions` as an array also for a single question.
 
 **Context**
 
@@ -347,6 +374,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Fleet and workers**
 
+- A test-first worker that reported its deliberate red run as `passed:false` without `"baseline":true` no longer seals the run `assurance_compromised` with exit 1 when every fix landed. Every `passed:false` entry in a coder, tester, documenter or git-master mutation report now states a boolean `baseline`: `true` for a deliberate run before the change, `false` for a failure on the changed tree. A report that leaves it out, or sends a value that is not a JSON boolean, is refused with a reason showing both forms, and the bounded result repair asks the worker which it meant. A `baseline:false` failure, and a baseline whose host check is still red on the final tree, still fail quality. Verifier and reviewer reports are unchanged.
 - A worker whose only state-changing call was refused no longer reports changes on an unchanged tree, and a builder whose calls were all withheld is graded as having run no tool.
 - A read-scoped worker that reports without executing any tool settles failed, so the host retries it.
 - A standalone reviewer (`run --agent reviewer`, or a reviewer dispatched outside a review gate) whose pass rests on no successful observation settles `obligation_unmet`: "the reviewer passed the work without inspecting it".
@@ -374,6 +402,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - On a shared state directory, another host's lapsed capacity lease or plan reservation is released 60 seconds after its expiry instead of 5 or 15 minutes, and a plan whose next member is still queued stays current for other hosts.
 - Checks no longer write Python bytecode caches into the checkout, and a `verify` call that only lists checks keeps the run's write record complete.
 - A `limitation` call's reason and scope reach the run feed, and the trust line names a compromised run's deciding axis once.
+- A worker's request that a contained-yolo session refuses says so: the text names contained yolo and points at an attended operator or unconfined yolo, instead of saying the session runs at autonomy default.
 
 **Checks and safety classification**
 
@@ -388,6 +417,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - When a check ran after the last edit and failed, the finish advisory names it.
 - A safety-judge refusal of a compound bash command names the sub-command the block is about.
 - A sandbox launched inside another no longer masks `/dev/null` read-only. Contained pnpm gets its own store and an empty npm user config when `~/.npmrc` is masked, and a worker holding `web_read` gets the shell network `web_fetch` gets.
+- A check that could not run is not a failed validation. `verify` refuses a `python -m unittest` argument the runner would reject before starting anything, a unittest run that exits on its own usage error is sealed not-run and may be retried with corrected arguments, and a worker's report of such a check no longer holds its merge or marks the run compromised. A headless run lists it under `unverified` as `not run: verify <id> <args>`.
 
 **Memory**
 
@@ -401,6 +431,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Telemetry and quota**
 
+- The `/usage` Activity tab's Plan row names the quota window that binds first, not the first one an account listed, and marks a stale reading.
+- A worker retrying on its provider's limit shows a `Waiting` line on its card naming the quota window it waits on, the last reading, its age and the reset, or says that no reading is linked to its route.
 - Every side call is attributed to the surface that made it, and each reminder that costs a round settles once.
 - Each model call journals the thinking level that was requested and the effort sent on the wire.
 - A target with declared rates is priced from its settled usage counts when the runtime computed no cost, and the cache verdict counts cache writes as uncached prefill.
@@ -408,6 +440,10 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Quota readings and holds are shared across processes, a rate-limited read is held for its Retry-After, and a hold belongs to the credential that earned it.
 - Report archives written by 0.8.4 still verify and import.
 - Copilot side calls, the safety judge's included, journal their transport, seat billing and served model.
+- A provider that omits its cache-write count leaves cache writes and fresh input unknown instead of zero, and the provider's own token total is kept beside them.
+- The Codex usage poll times out on a stalled response body, and its quota windows are labelled from the duration the provider reports (`5h`, `3d`, `Weekly`) instead of a fixed pair of names.
+- A call that was aborted or ended in an error keeps its positive token counts as a lower bound and leaves its zeros unknown. A Copilot step or an external run served by more than one model is priced per call, or left unpriced, instead of at one route's rate.
+- A charge that a provider reports on a route declared free or priced at all-zero rates is kept as its own `economics` fact, flagged `free-route`, and the route price stays free.
 
 **Providers and editors**
 
@@ -420,6 +456,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A malformed `model-catalog.d` file is skipped alone, named by its path in one line, so the overlays beside it still merge.
 - First-run setup's test request on a signed-in Copilot seat reaches the model.
 - MCP images, such as a Playwright MCP screenshot, reach vision routes within the `read` image budget instead of being dropped, and the `frontend` check's screenshot attaches on vision routes.
+- A Copilot tool call is checked for repetition only once its streamed arguments are complete, so a correct call is no longer stopped as a flood of empty calls.
 
 **Terminal UI**
 
@@ -468,6 +505,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - On Windows the secret directory is made owner-only before a credential is written, and `doctor` reads its ACL by SID.
 - The desktop app signs its launch challenges, so an unauthenticated request cannot evict a launcher's challenge.
 - An ACP permission request scrubs credentials from the task line it quotes and from the call's `rawInput`, so a token typed in the prompt or a command reaches the client as `[redacted]`, as the title already did.
+- A shared settings document never contains the `funding` block or a `targets[].funding` binding, under any share profile, so pool names, fees, grants and tariffs stay on the machine.
 
 ## 0.8.4 - 2026-11-19
 

@@ -58,7 +58,7 @@ The first question is **What do you have?**: **An API key**, **A subscription** 
 4. Test. CLIO Coder sends the model one short test request and saves when it answers: `Testing <target> / <model> ... answered in <t> s.`, then `Saved. Chat and workers use this model. Change it any time with /model or /config.` A failure shows the provider's message and one fix, with **Try again**, **Change the key or address**, **Save anyway** (saved as not checked) and **Connection and machine details**. That last row opens the review: reachable, live model discovery, catalog/cache fallback and facts not checked, **Choose a different model**, and usable CPUs, available memory and automatic local-worker sizing; its **Save target** sends the test again. With `--no-verify` setup ends on that review instead.
 5. The first connection becomes the chat and fleet model; shipped defaults handle the remaining settings.
 
-When CLIO Coder finds a route before asking (a provider key in the environment, a sign-in or key it stored, a saved target, or a model server on a default loopback port), the first screen is **Clio found a way to reach a model:** with one row per route, such as `Anthropic, with the key in ANTHROPIC_API_KEY` or `A model server at http://127.0.0.1:11434 (Ollama)`, and **Set up something else**. Choosing one skips the provider, address and credential steps and goes to the test request, or to the model step when the detection carried no model. The detection rules are in [Chat route detection](#chat-route-detection).
+When CLIO Coder finds a route before asking (a provider key in the environment, a sign-in or key it stored, a saved target, or a model server on a default loopback port), the first screen is **CLIO Coder found a way to reach a model:** with one row per route, such as `Anthropic, with the key in ANTHROPIC_API_KEY` or `A model server at http://127.0.0.1:11434 (Ollama)`, and **Set up something else**. Choosing one skips the provider, address and credential steps and goes to the test request, or to the model step when the detection carried no model. The detection rules are in [Chat route detection](#chat-route-detection).
 
 When setup still needs something, CLIO Coder says it the same way everywhere (startup, `doctor`, `run`, the footer and the desktop app): one sentence naming what is missing, followed by the command that fixes it, for example `openai has no key or sign-in stored. Run: clio-coder auth login openai`. In the terminal app the footer and a failed prompt add `(or press Enter on /config)` to a missing sign-in. A chat target at an address a project's settings chose gets none of your keys, so its sentence says to define the target in your user settings with its own key variable (`auth.apiKeyEnvVar`) instead of naming a login. It never suggests a well-known variable such as `OPENAI_API_KEY`, since the project picked the address.
 
@@ -330,7 +330,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` or `web_read` already get; a project layer can only set `false` |
 | `safety.scratchRoots` | `[]` | immediately; user layer only; extra directories the main session's sandboxed commands and typed `write` and `edit` calls may write at autonomy `default` without asking, where its deletes run as they do in the workspace |
 | `safety.sandboxPassEnv` | `[]` | immediately for the main session, next dispatch for workers; user layer only; environment variable names a sandboxed command keeps although they look like credentials, which the sandbox otherwise removes before the command starts; arena contenders also keep these names from your environment |
-| `safety.liveCheckTargets` | `[]` | immediately; user layer only; target ids whose runtime's own login file the main session's sandboxed commands may read, read-only, so a live check of a candidate build can sign in; only `copilot-sdk` targets qualify, revealing `$COPILOT_HOME/config.json` (default `~/.copilot/config.json`); gh's token, the keychain and Clio's credentials stay hidden, and dispatched workers and host verification keep every mask |
+| `safety.liveCheckTargets` | `[]` | immediately; user layer only; target ids whose runtime's own login file the main session's sandboxed commands may read, read-only, so a live check of a candidate build can sign in; only `copilot-sdk` targets qualify, revealing `$COPILOT_HOME/config.json` (default `~/.copilot/config.json`); gh's token, the keychain and CLIO Coder's credentials stay hidden, and dispatched workers and host verification keep every mask |
 | `safety.sandboxUnixSockets` | `block` | immediately for the main session, next dispatch for workers; user layer only; `block` makes creating a Unix-domain socket fail inside the OS sandbox (a seccomp filter under bubblewrap, profile rules under the unverified seatbelt), because a socket a contained command reaches, such as tmux, an X11 display or a daemon's control socket, runs commands outside it; `owned` (bubblewrap only, Seatbelt blocks) hides only the sockets you own and leaves other users' reachable, such as the MUNGE, `sackd` and SSSD sockets cluster commands need, while abstract sockets and sockets created after the launch stay reachable too; `allow` leaves every socket reachable |
 | `safety.sandboxCacheMaxGiB` | `4` | immediately; user layer only; GiB the main-session sandbox's tool cache `<cache dir>/sandbox-cache` may hold; once a day at startup, and on `clio-coder doctor --fix`, its least recently used top-level tool directories are removed until it fits, never while a running process that ran a contained command holds its lease under `<cache dir>/sandbox-cache-leases/`, and nothing outside the directory; `doctor` warns when it is over; `0` is no cap |
 | `safety.snapshots` | `auto` | immediately; `auto` snapshots a Git work tree before each turn's first mutating call and before every destructive call, `off` takes none; a project layer can only set `auto` |
@@ -643,13 +643,50 @@ Cost appears in these places, and every one renders the journaled facts through 
 | `usd` fact | What the footer, `/usage` and run tables show |
 | --- | --- |
 | measured | A dollar amount such as `$1.23`. |
-| measured 0 with `pricedBy: free` | When every priced call was free: `$0.00 local` under `local-native`, `$0.00 free (declared)` under `declared` and `$0.00 free (zero-rates)` under `zero-rates`. Calls that name different rules, or records written before the rule was kept, read `$0.00 local`. |
+| measured 0 with `pricedBy: free` | When every priced call was free: `$0.00 local` under `local-native`, `$0.00 free (declared)` under `declared` and `$0.00 free (zero-rates)` under `zero-rates`. Calls that name different rules read `$0.00 free (mixed)`, and a free amount with no recorded rule reads `$0.00 free`. |
 | estimated | `~$1.23 est`. |
 | unknown | Tokens are still counted, but the call adds nothing to the dollar total. A session with some priced calls shows `$1.23 +?`. A session with none shows no cost field in the footer and `/usage`, and `not measured` in the fixed-width tables. |
 
 The pricing rule also decides what the cost ceiling sees. `safety.limits.sessionCostUsd` gates chat requests only on routes priced by target rates or the catalog, and gates dispatched routes that have a nonzero rate. Free and unpriced routes are not counted, so work on an unpriced LiteLLM target spends outside the ceiling until the target declares `pricing`. Side calls (`/btw` side questions, `/handoff` rounds, compaction summaries, System One and the safety judge) are checked against the ceiling whatever their route's pricing: an unpriced side call adds nothing, but once the session's priced spend has reached the ceiling it is held or refused like a priced one. A pre-warm is gated like the turn it warms, so it is not held on an unpriced route. A dispatch routing intent that sets `maxCostUsd` prices a route with no rates at a fixed admission estimate of 1 USD. On a priced route whose server omits token usage, a call made while a session ceiling or `--max-cost-usd` cap is active is charged an estimate from its request size and streamed output at the route's rates, shown as `~$<amount> est`, and the session gets one notice that the route's spend is estimated. A provider error status is charged nothing.
 
 `safety.limits.sessionCostUsd` accepts any finite number of at least 0, fractions included. `0` means no session ceiling. The session gate admits every paid request, and an interactive session never waits on a raise. A dispatch plan and a Scout continuation carry a ceiling of 0 that enforces nothing, and a fleet preview skips its remaining-budget check. A negative value fails settings validation with `safety.limits.sessionCostUsd: expected a number >= 0, got <value>`. `clio-coder configure` shows a ceiling of 0 as `none` and a positive one as `$<amount> USD` on its `Session cost limit` row, and its prompt accepts 0 to remove the ceiling. A positive ceiling still refuses a paid request once priced spend reaches it, and `clio-coder run` then exits 4 with `budget_ceiling` ([exit codes](exit-codes-and-output.md)). In every mode it also stops running workers at their next metered call once session spend reaches it.
+
+### Funding facts
+
+`funding` records who pays for a target's usage. Reports use it for the marginal charge, the energy estimate and period fees; it prices nothing, authorizes nothing, feeds no cap and is never included in shared telemetry; route pricing stays `targets[].pricing` ([`src/core/funding-config.ts`](../../src/core/funding-config.ts)).
+
+```yaml
+funding:
+  lab-grant:
+    scheme: declared
+    payer: sponsor
+    nativeUnit: compute-hours
+    grant: { amount: 5000, expiresAt: "2027-06-30T00:00:00Z" }
+  workstation:
+    scheme: declared
+    payer: personal
+    local:
+      activeWatts: 320
+      idleWatts: 45
+      tariff: { ratePerKwh: 0.14, currency: USD }
+targets:
+  - id: campus
+    # runtime, url and model as before
+    funding: { pool: lab-grant }
+```
+
+| Pool key | Value |
+| --- | --- |
+| `scheme` | Required: `detected`, `declared` or `unknown`. |
+| `payer` | `personal`, `sponsor`, `employer` or `none`. A `sponsor` or `employer` pool is a declared pool with a grant expiry. |
+| `nativeUnit` | The unit the provider meters in, such as `tokens`, `requests`, `premium-requests`, `compute-hours` or `provider-credits`. |
+| `fee` | `amount`, an ISO 4217 `currency` and a `period` of `day`, `week`, `month`, `year` or `one-time`. |
+| `grant` | `expiresAt` as a UTC timestamp and an optional `amount`, which needs `nativeUnit`. |
+| `local` | `activeWatts`, `idleWatts` (never above `activeWatts`) and `tariff` with `ratePerKwh` and `currency`. |
+
+A pool id starts with a letter and has up to 48 letters, digits, `_` or `-`. A target names its pool with `targets[].funding.pool`; naming an unknown pool is a validation error. `clio-coder configure` offers a "Funding for a target" step, which records what it can observe (`detection`: a `local-native` runtime or a stored sign-in) without refreshing a login or calling a provider. A target with no binding, an `unknown` scheme, or a detected sign-in that has since changed resolves to unknown funding.
+
+Funding is set in user settings only. A project layer that sets `funding` or `targets[].funding` is ignored with the notice `funding is set only in user settings; project value ignored`.
 
 ## Local model settings
 

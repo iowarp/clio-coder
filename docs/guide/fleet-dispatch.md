@@ -512,7 +512,13 @@ rebinds the same assignment member to its actual node and cost bound, so a retry
 never queues behind or outspends its own plan slot. Admission checks the global
 pool, the node and the target's inference endpoint independently; a target's
 `maxConcurrentRequests` overrides the endpoint slot count CLIO Coder discovers, and the
-orchestrator's own streaming turn holds one endpoint slot. The schema, locking protocol,
+orchestrator's own streaming turn holds one endpoint slot. Admission also refuses a route
+whose quota pool the provider has explicitly denied, with reason `provider-quota-denied`
+naming the provider, the window, its reset and the age of the evidence
+([admission.ts](../../src/domains/dispatch/admission.ts)). It reads the shared quota cache
+without a network call, and only a fresh denial for the credential the route spends binds:
+a window at 100% that the provider did not deny, or a stale or failed reading, admits. The
+refused route is not moved to another. The schema, locking protocol,
 lease and drain lifetimes, and owner-liveness rules are specified in
 [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md).
 
@@ -874,7 +880,7 @@ transcript, headless `run` prints it to stderr as `clio-coder run: ...`, `run --
 preserved, conflicted, withheld or refused application, and a merge whose branch held no
 change, produce no notice.
 
-Five cases withhold the merge: a worker whose own report lists a failing validation,
+Five cases withhold the merge: a worker whose own report lists a failing validation (a check whose latest `verify` receipt says it could not run is not one),
 a worker whose task requested validation but which executed no check, a worker that
 names a check it did not run (`declaredChecks`) with no validation that passed, a task
 that names its check as an exact command the worker never ran to a clean exit, through the
@@ -894,7 +900,13 @@ places a clause of the task that asks for tests to be removed exempts the remova
 clause that tells the worker not to validate (for example "do not run the tests") means an
 unrun check does not withhold. A withheld merge ends the run `failed` with outcome code
 `merge_withheld`, which suppresses automatic retry; its work stays committed on the preserved
-branch, and the detail names the `clio-coder fleet land` command that applies it.
+branch, and the detail names the `clio-coder fleet land` command that applies it. In an
+attended session the held-merge card also offers Land, and `dispatch` with `land` set to the
+kept branch's run id reopens that card. CLIO Coder then lands the branch on the host as the
+operator's action, with the checks `fleet land` runs, so a sandboxed session lands approved
+work without a sandbox escape ([task-land.ts](../../src/tools/task-land.ts)). Land is bound to
+the branch tip and the destination the card showed, and it refuses uncommitted work that no
+commit accounts for and protected paths.
 
 When a worker claimed passing checks but executed no command and no host verification ran,
 the dispatch result names the parent's next step. For a run that can change code, under a
@@ -1575,7 +1587,7 @@ handoffs bound to run digests. The scheduler performs whole-plan preflight and r
 the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call maps to an approval ask at the `default` autonomy
-level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`, contained or unconfined. A `/council` or `/poll` typed in the composer is admitted the same way, so it shows that card at `default` too. A call is plan-scale when it fans out more than one task, continues a
+level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`, contained or unconfined. One kind of plan does not stop at `default` either: a parallel, sequential or pipeline plan that admission sealed and in which every task is a read-only run on this machine. Each task must resolve to the `explorer` role, which comes from the recipe's capability class or a read-only request and never from the task text, with no write roots, expected outputs, verification, worktree, approved failover, agent selection or authority grant, and the plan must have no Scout source, confirmation or `apply_winner` ([dispatch-plan.ts](../../src/tools/dispatch-plan.ts)). Such a plan runs the route it showed, so a headless run at `default` can fan out read-only scouts, and its run records carry `approval: "read-only"`. Any writer task, gate, remote node or other condition above keeps the ask. A `/council` or `/poll` typed in the composer is admitted the same way, so it shows that card at `default` too. A call is plan-scale when it fans out more than one task, continues a
 Scout split, runs compete or council, places work on a remote node, carries a task
 with approved failover, or applies a compete winner with `apply_winner`
 ([dispatch-plan.ts](../../src/tools/dispatch-plan.ts)). Before asking, CLIO Coder resolves the effective agent, target,
@@ -2521,6 +2533,8 @@ Planning time estimates and the dispatch `budget` are advisory during execution 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own run record and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 
 An editing mutation report may omit all validations when every checking call it attempted has an observed blocked outcome. It conforms with unmeasured quality. No attempts, unknown outcomes, or any executed check retain the concrete validation requirement.
+
+Every `passed: false` entry in a mutation report states a boolean `baseline`. `"baseline": true` marks a deliberate run before the change, such as a red test-first run, which quality does not judge. `"baseline": false` marks a failure on the changed tree, which fails quality. The run after the change is its own entry. A report that omits `baseline` on a failing entry, or sends a value that is not a JSON boolean, is refused as unmeasured with a reason showing both forms, and the bounded repair asks the worker again. A baseline whose host check is still red on the final tree still fails quality. Verifier and reviewer reports carry no `baseline`, because their `passed: false` is the verdict itself.
 
 Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases of the canonical `npm run test` command across all three managers. The test aliases also match the package-manager-neutral `verify(check="test")` summary recorded as `npm run test`. Other script names remain distinct; `npm run test:unit` does not ground a claim of `npm test`.
 

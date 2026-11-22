@@ -273,11 +273,12 @@ On a route without prompt caching, an automatic or fit fold checkpoint, never a 
 
 ## read: page through a file with offset, limit, and tail
 
-Reads one UTF-8 text file, an image, or a document rendered as text: a Jupyter notebook, a PDF, or a zip, tar or tar.gz archive. Sources: [read.ts](../../src/tools/read.ts), `src/tools/read-documents/`.
+Reads a UTF-8 text file, an image, or a document rendered as text: a Jupyter notebook, a PDF, or a zip, tar or tar.gz archive. Sources: [read.ts](../../src/tools/read.ts), `src/tools/read-documents/`.
 
 | Argument | Contract |
 | --- | --- |
-| `path` | Required; relative/absolute, with `~` home expansion. |
+| `path` | One file; relative/absolute, with `~` home expansion. Required unless `paths` is given. |
+| `paths` | Several files in one call, up to 16, in place of `path`; `offset`, `limit`, `tail` and `line_numbers` apply to each. Not with `pages` or `member`. |
 | `offset` | 1-indexed line, default 1. |
 | `limit` | Maximum lines. |
 | `tail` | Last N lines; overrides offset/limit. |
@@ -300,7 +301,10 @@ In an installed package, most `.ts` files under `src/` ship packed in `dist/asse
 ```text
 read(path="src/tools/read.ts", offset=80, limit=60)
 read(path="build.log", tail=100)
+read(paths=["src/tools/read.ts", "src/tools/read-fan-out.ts"], line_numbers=true)
 ```
+
+A call with `paths` is run as one read per file ([read-fan-out.ts](../../src/tools/read-fan-out.ts)). Each path is admitted on its own, so the safety policy, the workspace boundary and the sandbox treat it exactly as they treat a single read, and a refused path shows `not read:` with its reason in place while the others are returned. The result has one `== <path> ==` section per file, and all sections share the one per-call cap: a path the cap left no room for reads `not read: this call's byte cap was used by the files above; read it in another call`, and a section cut by the cap ends `[cut: this call's byte cap]`. An image is read alone, with `path`. The call is blocked when every path was refused and is an error when no path returned content.
 
 ## edit: exact text replacements in one file
 
@@ -311,7 +315,7 @@ Replaces disjoint exact text regions in an existing file. Sources: [edit.ts](../
 | `path` | Required target file. |
 | `edits` | Required array of `{oldText,newText}`; each old text must identify one unique, non-overlapping region. |
 
-Files up to 1 MiB try exact match, then Unicode punctuation/nonbreaking-space/trailing-whitespace normalization, then indentation-relaxed line matching that preserves file indentation. Ambiguous or absent matches error. Above 1 MiB only exact matching applies. NUL, invalid UTF-8, mixed LF/CRLF, and bare CR are refused; BOM and uniform line endings are preserved. JSON-string edits and a legacy top-level old/new pair are normalized.
+Files up to 1 MiB try exact match, then Unicode punctuation/nonbreaking-space/trailing-whitespace normalization, then indentation-relaxed line matching that preserves file indentation. Ambiguous or absent matches error. Above 1 MiB only exact matching applies. NUL, invalid UTF-8, mixed LF/CRLF, and bare CR are refused; BOM and uniform line endings are preserved. JSON-string edits and a legacy top-level old/new pair are normalized. An `edits` entry sent as a string of JSON in the exact shape is read the same way. Any other shape is refused with the accepted shape and an example, `[{"oldText":"...","newText":"..."}]`, and nothing changes.
 
 Edit and write serialize same-target changes and publish through a temporary file, fsync, and rename. Symlink paths update their target; mode bits are preserved. Ownership/ACL/xattrs/timestamps are not copied, external writers are not locked, and the last rename wins. A post-rename directory-fsync failure reports publication with a durability warning.
 
@@ -686,6 +690,8 @@ Python entries resolve their interpreter once per derivation, so every Python ch
 
 A check that cannot start is reported as `unavailable`, with `judgement.execution` set to `unavailable` and `validation` to `not-run`. That covers a runner `verify` refuses up front (`needs-provisioning`, no interpreter) and a startup failure such as a missing executable, a sandbox refusal or a missing `pytest`, `tox` or `nox` module. The result tells the agent that rerunning the entry with other arguments or a different cwd cannot help. In a worker run the loop guard enforces that: a second `verify` call for the same check in the run is blocked, and the worker reports the limitation instead of retrying.
 
+A runner's usage error is the exception, because other arguments can help. `verify` refuses a `python -m unittest` argument the runner would reject before it starts anything (`verify: check '<id>' runs ..., which does not accept '<arg>'; nothing ran`, with the accepted forms). A unittest run that exits 2 on its own usage error is sealed `unavailable` and `not-run` with `usageError: true`, never as a failed check, and a corrected retry is admitted. A check that could not run is not a failed validation: a worker's report of it does not hold the merge or compromise the run, and a headless run lists it in `unverified` as `not run: verify <id> <args>`.
+
 ### Skipped declaration files
 
 Discovery reads declaration files without blocking on them, so a named pipe at `Makefile` cannot stall `verify` past `timeout_ms`. It opens each file nonblocking and requires a regular file of at most 1 MiB (`DECLARED_FILE_CAP_BYTES`) whose real path stays inside the workspace root. A file that exists but fails that test, or is malformed (invalid JSON in `package.json`, invalid TOML in `pyproject.toml` or `Cargo.toml`), is skipped rather than aborting discovery. The skip is named as `<file>: <reason>; <kind> discovery skipped.`, for example `package.json: resolves outside the workspace root to <path>; package script discovery skipped.` Both the check listing and the refusal that follows a discovery with nothing declared carry those lines under `Skipped during discovery:`. A `package.json` read that fails when a check runs names the file in its error.
@@ -895,7 +901,7 @@ a qualified embedding route before use. Results locate originals that must be
 read before making claims. See [Semantic context](semantic-context.md) and
 `src/tools/context/surface.ts`.
 
-`context(scope="budget")` accepts only `scope` and retrieves the native main session's live request budget. Worker and external-agent registries without that session port report it unavailable.
+`context(scope="budget")` accepts only `scope` and retrieves the native main session's live request budget. Worker and external-agent registries without that session port report it unavailable. The result also carries an `economics` view of the caller's own position. A session sees its spend (`usd`, a `basis` of `measured`, `estimated`, `lower-bound`, `unstated` or `unobserved`, the priced ceiling and the headroom), the quota pool of its chat route as the provider last reported it (access, overage, each window's label, used percentage, reset and verdict, a `usedPctUnit` stating that percentages run from 0 to 100, the reading's `source` of `poll`, `stream-event` or `response-headers`, its as-of time, its age and a `fresh` flag), and the forecast lines a dispatch plan card would print for every dispatchable agent, at most twelve with the rest counted. The pool is a fresh shared poll reading when one is held, else the newest quota this process's own requests on the route reported in band (a Codex stream event or Anthropic response headers), else one usage poll bounded at 3 seconds that makes no model call. A headless run starts that poll at run start when the shared reading is stale. Age and freshness are measured from the instant the provider reported the reading, and a reading stamped after the read is never fresh. A provider's timestamped denial counts as a reading. A stale reading is shown as stale, spend with no telemetry read model is `unobserved` and never zero, and the plan, balance text and account identity are left out. A worker sees only its own run envelope (tool calls, retries, wall time, deadline, response time), with `spend` and `pool` set to `withheld`. The view is information: it changes no routing, admission or ceiling.
 
 `context(scope="settings")` reads an allowlisted view of the running session's
 effective configuration. It explains autonomy, worker approvals, and configured
@@ -1282,7 +1288,7 @@ Arguments:
 
 The model writes its final reply and calls `finish` alone in the same response. A `finish` beside other calls is refused while its siblings run, and the model declares once it has their results. The result reads `completion declared: <state>`, or `completion declared: <state> (<N> limitation(s))` when limitations are given, and ends the turn: no further model round runs. The declaration comes only from the call's arguments; CLIO Coder never reads a completion state from the reply text.
 
-An attended turn may leave `finish` out. An unattended turn (a headless `run`, a job, or a yolo continuation the host started, not a turn a middleware continuation request carries onward) that called a tool and ended without declaring gets one more round whose reminder asks for the declaration. That round runs at most once per operator prompt, and never when tools are locked or the turn ended on a turn-ending tool.
+`finish` applies only to a turn that called another tool. A reply that called none (a greeting, an answer, a question back) is complete as text and never calls it; the tool description, the tool contract line and the unattended report rule state that same scope. An attended turn may leave `finish` out. An unattended turn (a headless `run`, a job, or a yolo continuation the host started, not a turn a middleware continuation request carries onward) that called a tool and ended without declaring gets one more round whose reminder asks for the declaration. That round runs at most once per operator prompt, and never when tools are locked or the turn ended on a turn-ending tool.
 
 ### Completion states
 
@@ -1294,6 +1300,8 @@ The host seals every ended turn as the claim beside its assessment. An undeclare
 | `failed_check` | A check failed since the last change. |
 | `uncollected_run` | A detached dispatch batch is ready to collect, or on a declared turn still running. |
 | `open_task` | The task board still has pending or active items, or on a declared turn blocked ones. |
+| `observation_budget` | A headless run's last read or search calls were refused by the spent observation pool, so what they would have shown went unseen. |
+| `missing_output` | A file the operator named as an output does not exist when the turn is sealed. |
 
 A declared turn takes no continuation. The high-rigor finish gate does not re-prompt a turn that declared `partly_done` or `not_done`, and on a declared `done` what the gate would have asked for becomes a sealed fact, while the gate's reminder is still injected as a warning. An undeclared work turn keeps the existing continuations: the open-tasks nudge carries it onward once per operator prompt while board items stay open. A headless run carries the sealed completion in its `run_end` envelope, and `run --exit-code` maps an unfinished state to exit 1 ([Completion and `--exit-code`](exit-codes-and-output.md#completion-and---exit-code)).
 
@@ -1360,7 +1368,7 @@ Arguments:
 
 - `action` (optional). `ask` (default) to present questions; `complete` to finalise the interview and record compact decisions.
 - `mode` (optional). `round` (default) to batch multiple questions; `single_question` for exactly one question.
-- `questions` (optional array). For `action="ask"`, up to four question objects containing:
+- `questions` (optional array). For `action="ask"`, up to four question objects (always an array, also for one question; a bare string in it is read as that question's text) containing:
   - `question` (required): Question text prompt.
   - `header` (optional): Short header.
   - `options` (optional array): Suggested choices (`{label, description}`).
