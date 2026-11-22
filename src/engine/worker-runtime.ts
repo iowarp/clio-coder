@@ -64,7 +64,7 @@ import {
 	responseSchemaDialectFor,
 	runtimeSpeaksResponseSchemaDialect,
 } from "../core/response-schema.js";
-import { workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
+import { workerSandboxConfinesWrites, workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../core/tool-names.js";
