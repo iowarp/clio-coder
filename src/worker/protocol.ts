@@ -1093,7 +1093,7 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"clio_coder_helper_result",
 	// The worker's repair count settles as measured; a dropped report would settle a false low count (C-28).
-	"clio_coder_result_contract_repair",
+	"clio_coder_repair_rounds_started",
 	"message_end",
 	"clio_coder_run_outcome",
 	"clio_coder_flow_restrictions",

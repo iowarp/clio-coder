@@ -240,6 +240,16 @@ class FakeSession {
 			this.emit("session.idle", {});
 			return;
 		}
+		if (prompt.includes("op:streamed-call")) {
+			// As the live runtime streams a reply that is only a tool call: its input deltas first, the request and usage last.
+			this.emit("assistant.message_start", { messageId: "c1" });
+			this.emit("assistant.tool_call_delta", { toolCallId: "call_streamed", toolName: "read", inputDelta: '{"path":' });
+			this.emit("assistant.tool_call_delta", { toolCallId: "call_streamed", toolName: "read", inputDelta: '"a.md"}' });
+			await globalThis.__clioCopilotCallSettles;
+			this.usage({ model: "fake-model", apiCallId: "c1", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.emit("assistant.message", { messageId: "c1", apiCallId: "c1", content: "", toolRequests: [{ toolCallId: "call_streamed", name: "read", arguments: { path: "a.md" } }] });
+			return;
+		}
 		if (prompt.includes("op:after-reasoning")) {
 			this.usage({ model: "fake-model", apiCallId: "msg_A", inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
 			this.usage({ model: "fake-model", apiCallId: "msg_B", inputTokens: 30, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
@@ -1915,6 +1925,39 @@ test("a thinking block whose signature names it narration is the reply text befo
 			{ type: "text", text: "The cap is 38,797,312 bytes (uploads/limits.py:2).\n\n" },
 			{ type: "toolCall", id: "call_narrated" },
 		],
+	);
+	disposeCopilotConversations(key);
+});
+
+test("a reply that is only a tool call streams its first token before the call settles, so a held follower can start", async () => {
+	const key = "streamed-call-session";
+	let settle!: () => void;
+	(globalThis as { __clioCopilotCallSettles?: Promise<void> }).__clioCopilotCallSettles = new Promise<void>(
+		(resolve) => {
+			settle = resolve;
+		},
+	);
+	const stream = engineStreamSimple(
+		model,
+		normalizeContext({ tools: [readTool], messages: [user("op:streamed-call")] }),
+		{ sessionId: key },
+	);
+	const seen: string[] = [];
+	const drained = (async () => {
+		for await (const event of stream) seen.push(event.type);
+	})();
+	const streamedFirst = await eventually(() => seen.includes("toolcall_start"));
+	settle();
+	await drained;
+	const message = await stream.result();
+	ok(streamedFirst, `the tool call streamed before the call settled: ${seen.join(",")}`);
+	deepStrictEqual(seen.slice(0, 4), ["start", "toolcall_start", "toolcall_delta", "toolcall_delta"]);
+	strictEqual(message.stopReason, "toolUse");
+	deepStrictEqual(
+		message.content.map((block) =>
+			block.type === "toolCall" ? { id: block.id, name: block.name, args: block.arguments } : block,
+		),
+		[{ id: "call_streamed", name: "read", args: { path: "a.md" } }],
 	);
 	disposeCopilotConversations(key);
 });

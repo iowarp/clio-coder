@@ -33,7 +33,7 @@ export const codeNavToolSurface: ToolSurface = {
 		related: Type.Optional(
 			Type.Boolean({
 				description:
-					"symbol/outline: add the owning file's import neighborhood. Importers are import edges, not call sites; test importers are hints, not coverage.",
+					"symbol/outline only (others refuse): adds the owning file's import neighborhood. Importers are import edges, not call sites or test coverage.",
 			}),
 		),
 	}),

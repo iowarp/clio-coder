@@ -304,7 +304,8 @@ export async function collectRuns(
 			? null
 			: renderAgentLedgerBoard(ledgerId, {
 					assignments: projectLedgerAssignments(ledgerRuns, readRun),
-					receiptFindings: projectReceiptFindings(ledgerRuns, readRun),
+					// Each run's answer is printed with its run, so its findings are not repeated on the board.
+					answered: projectReceiptFindings(ledgerRuns, readRun),
 				});
 	// The batch is only reported collected when the durable mark actually
 	// persisted; on failure it stays open for a later collect and the result

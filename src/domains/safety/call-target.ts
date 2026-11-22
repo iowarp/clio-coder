@@ -210,6 +210,7 @@ const CALL_ACTION_VOCABULARY: Readonly<Record<string, { verb: string; field: str
 	steer: { verb: "steering", field: "run_id" },
 	tasks: { verb: "tasks", field: "action" },
 	dispatch: { verb: "dispatching", field: "agent" },
+	limitation: { verb: "recording", field: "scope" },
 	// ACP tool kinds. A peer names its own argument fields, so these rely on
 	// the shared allowlist below rather than on a field this side can predict.
 	execute: { verb: "running", field: "command" },
@@ -356,6 +357,12 @@ export function describeCallAction(
 	if (tool === "gateway") {
 		const gateway = describeGatewayCall(args);
 		if (gateway !== null) return gateway;
+	}
+	// A limitation records why a check could not run and what it left unverified; the run's record keeps both.
+	if (tool === "limitation" && typeof args?.scope === "string") {
+		const reason = typeof args.reason === "string" && args.reason.trim().length > 0 ? `${args.reason.trim()}: ` : "";
+		const bounded = boundActionObject(`${reason}${args.scope}`);
+		if (bounded !== null) return { verb: "recording", ...describedObject(bounded) };
 	}
 	// A bare verify lists what can be checked; saying it verified something would claim a check that never ran.
 	if (tool === "verify" && args?.check === undefined && args?.path === undefined) {

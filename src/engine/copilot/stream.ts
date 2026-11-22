@@ -828,6 +828,8 @@ class Step {
 	};
 	private textIndex: number | null = null;
 	private thinkingIndex: number | null = null;
+	/** Tool calls whose input is streaming, by Copilot's tool call id, before the message that requests them. */
+	private readonly streamingToolCalls = new Map<string, number>();
 	private started = false;
 	private finished = false;
 	private error: string | null = null;
@@ -910,6 +912,30 @@ class Step {
 		const block = this.message.content[this.thinkingIndex] as ThinkingContent;
 		block.thinking += delta;
 		this.stream.push({ type: "thinking_delta", contentIndex: this.thinkingIndex, delta, partial: this.message });
+	}
+
+	private toolCallDelta(id: string, name: string | undefined, delta: string): void {
+		this.start();
+		let index = this.streamingToolCalls.get(id);
+		if (index === undefined) {
+			index = this.message.content.length;
+			this.streamingToolCalls.set(id, index);
+			this.message.content.push({ type: "toolCall", id, name: name ?? "", arguments: {} });
+			this.stream.push({ type: "toolcall_start", contentIndex: index, partial: this.message });
+		}
+		if (delta.length > 0) this.stream.push({ type: "toolcall_delta", contentIndex: index, delta, partial: this.message });
+	}
+
+	/** Text that arrives only with the message (narration, unstreamed content) still reads before the calls it introduces. */
+	private textBeforeStreamedCalls(): void {
+		if (this.textIndex === null || this.streamingToolCalls.size === 0) return;
+		const first = Math.min(...this.streamingToolCalls.values());
+		if (this.textIndex < first) return;
+		const [block] = this.message.content.splice(this.textIndex, 1);
+		if (block === undefined) return;
+		this.message.content.splice(first, 0, block);
+		for (const [id, index] of this.streamingToolCalls) if (index >= first) this.streamingToolCalls.set(id, index + 1);
+		this.textIndex = first;
 	}
 
 	private closeOpenBlocks(): void {
@@ -1035,6 +1061,12 @@ class Step {
 				this.answered = true;
 				this.thinking(event.data.deltaContent);
 				return;
+			case "assistant.tool_call_delta":
+				// A reply that is only a tool call streams too, so its first token is seen when it arrives, not when the
+				// whole call settles (a held shared-prefix follower starts on it). The arguments land with the message.
+				this.answered = true;
+				this.toolCallDelta(event.data.toolCallId, event.data.toolName, event.data.inputDelta);
+				return;
 			case "assistant.usage":
 				if (!event.data.parentToolCallId) this.usage(event.data);
 				return;
@@ -1045,6 +1077,7 @@ class Step {
 				const streamed = this.textIndex === null ? "" : (this.message.content[this.textIndex] as TextContent).text;
 				this.narration(event.data.reasoningBlocks);
 				if (streamed.length === 0 && event.data.content) this.text(event.data.content);
+				this.textBeforeStreamedCalls();
 				const requests = event.data.toolRequests ?? [];
 				if (requests.length === 0) return;
 				this.closeOpenBlocks();
@@ -1059,9 +1092,13 @@ class Step {
 								? (request.arguments as ToolCall["arguments"])
 								: {},
 					};
-					const index = this.message.content.length;
-					this.message.content.push(toolCall);
-					this.stream.push({ type: "toolcall_start", contentIndex: index, partial: this.message });
+					const streamed = this.streamingToolCalls.get(request.toolCallId);
+					this.streamingToolCalls.delete(request.toolCallId);
+					const index = streamed ?? this.message.content.length;
+					if (streamed === undefined) {
+						this.message.content.push(toolCall);
+						this.stream.push({ type: "toolcall_start", contentIndex: index, partial: this.message });
+					} else this.message.content[index] = toolCall;
 					this.stream.push({ type: "toolcall_end", contentIndex: index, toolCall, partial: this.message });
 					ids.push(request.toolCallId);
 				}
@@ -1114,6 +1151,13 @@ class Step {
 	private complete(stop: "stop" | "toolUse" | "aborted" | "error", toolCallIds: string[], errorText?: string): void {
 		this.start();
 		this.closeOpenBlocks();
+		// A tool call that streamed but was never requested is not a call: the step keeps only requested ones.
+		if (this.streamingToolCalls.size > 0) {
+			const unrequested = new Set(this.streamingToolCalls.values());
+			this.streamingToolCalls.clear();
+			const kept = this.message.content.filter((_, index) => !unrequested.has(index));
+			this.message.content.splice(0, this.message.content.length, ...kept);
+		}
 		// A step that reached no model call billed nothing and records no seat units.
 		if (this.billing.modelCalls > 0) {
 			// AI credits: the step's own reports when every call sent them, else the runtime total's growth.

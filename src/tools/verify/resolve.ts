@@ -262,6 +262,15 @@ export function sweepRunNames(workspaceRoot: string, check: DeclaredCheck): stri
 		.sort();
 }
 
+/** The script a bare package-manager run names (`npm test`, `yarn run lint`), or null. `bun test` is bun's own runner. */
+function packageScriptInvoked(command: string): string | null {
+	const match = /^(npm|pnpm|yarn|bun)\s+(?:(run|run-script)\s+)?([^\s-][^\s]*)$/u.exec(command);
+	if (match === null) return null;
+	const [, manager, run, script] = match;
+	if (manager === "bun" && run === undefined) return null;
+	return script ?? null;
+}
+
 function resolveRunCheck(workspaceRoot: string, check: DeclaredCheck, run: string): VerifyResolution {
 	const resolved = resolveSweepRun(workspaceRoot, check, run);
 	return resolved.ok
@@ -282,7 +291,14 @@ function resolveWithDiscovery(
 	const discovery = cache?.discovery ?? discoverDeclaredChecksAtRoot(workspaceRoot, cwdArg);
 	if (!discovery.ok) return { kind: "unresolved", message: discovery.reason };
 	const declared = discovery.sources.flatMap((source) => source.checks);
-	const hit = declared.find((candidate) => candidate.id === check);
+	const named = declared.find((candidate) => candidate.id === check);
+	// `npm test`, `pnpm run lint`: a package manager running a declared script is that script's check.
+	const script = named === undefined ? packageScriptInvoked(check) : null;
+	const hit =
+		named ??
+		(script === null
+			? undefined
+			: declared.find((candidate) => candidate.source.kind === "package.json" && candidate.id === script));
 	if (hit?.source.kind === "project-catalog") {
 		if (hit.runs !== undefined) {
 			return {

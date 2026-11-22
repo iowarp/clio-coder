@@ -7,7 +7,11 @@ import {
 	redactCommandOutputSecrets,
 	redactSecretsText,
 } from "../../src/domains/evidence/redact.js";
-import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../../src/domains/safety/call-target.js";
+import {
+	describeCallAction,
+	describeCallTarget,
+	WORKER_CALL_TARGET_MAX_CHARS,
+} from "../../src/domains/safety/call-target.js";
 import { redactSecretString } from "../../src/domains/safety/redaction.js";
 
 /**
@@ -207,6 +211,15 @@ describe("approval line of a store put that replaces a blob", () => {
 		strictEqual(
 			describeCallTarget(ToolNames.Store, { op: "put", tag: "fleet", path: "out/v3.csv" }),
 			"op=<string 3 bytes> · tag=<string 5 bytes> · path=out/v3.csv",
+		);
+	});
+});
+
+describe("run record of a limitation call", () => {
+	it("records the limitation's reason and what it left unverified", () => {
+		deepStrictEqual(
+			describeCallAction(ToolNames.Limitation, { scope: "npm test could not run in the sandbox", reason: "environment" }),
+			{ verb: "recording", object: "environment: npm test could not run in the sandbox" },
 		);
 	});
 });

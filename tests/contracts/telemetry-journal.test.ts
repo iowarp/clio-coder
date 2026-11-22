@@ -475,7 +475,7 @@ test("run feed telemetry names every worker frame it keeps and carries feed.json
 		for (const type of [
 			"clio_coder_helper_result",
 			"clio_coder_helper_result_rejected",
-			"clio_coder_write_record_downgraded",
+			"clio_coder_write_record_partial",
 		])
 			display.append(runId, { at, type });
 		// feed.jsonl reaches its cap first, since the journal keeps no detail: both stores truncate at the same row.

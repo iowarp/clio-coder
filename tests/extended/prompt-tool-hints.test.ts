@@ -53,6 +53,21 @@ describe("role-aware prompt hints", () => {
 		strictEqual(boundWorker.includes("explicit pending skill request"), false);
 	});
 
+	it("gives a worker git's argument shapes behind the gateway, and no session-only gateway hint", () => {
+		const toolNames = [
+			ToolNames.Context,
+			ToolNames.Read,
+			ToolNames.Gateway,
+			ToolNames.Git,
+			ToolNames.WebFetch,
+		] as never[];
+		const prompt = rolePrompt("worker", toolNames, toolPromptHintsForNames(toolNames, "worker"));
+		match(prompt, /Reach `git`, `web_fetch` through gateway/u);
+		match(prompt, /capability="git",args=\{op:"status"\}\) or args=\{op:"diff"/u);
+		strictEqual(prompt.includes(hintFor(ToolNames.WebFetch, "worker")), false);
+		strictEqual(hintFor(ToolNames.Git, "session"), "");
+	});
+
 	it("advertises only the closed code_nav sources", () => {
 		const hint = hintFor(ToolNames.CodeNav, "session");
 		match(hint, /source=workspace \(default\)/u);

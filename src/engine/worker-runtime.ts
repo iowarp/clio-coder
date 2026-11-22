@@ -1640,7 +1640,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		streamFn: (currentModel, transcript, streamOptions) => {
 			if (resultContractRepairsQueued > resultContractRepairsStarted) {
 				resultContractRepairsStarted += 1;
-				emit({ type: "clio_coder_result_contract_repair", payload: { started: resultContractRepairsStarted } });
+				emit({ type: "clio_coder_repair_rounds_started", payload: { started: resultContractRepairsStarted } });
 			}
 			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
@@ -3198,7 +3198,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.telemetryContext ? withTelemetryContext(input.telemetryContext, work) : work();
 	const promise = runScoped(async (): Promise<WorkerRunResult> => {
 		try {
-			emit({ type: "clio_coder_result_contract_repair", payload: { started: 0 } });
+			emit({ type: "clio_coder_repair_rounds_started", payload: { started: 0 } });
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();

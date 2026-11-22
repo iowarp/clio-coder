@@ -18,6 +18,7 @@ import { finishRunResult, settleFinishedRun } from "../../src/domains/dispatch/r
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
+import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js";
 import { parseAgentLedgerEntry } from "../../src/worker/protocol.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -105,6 +106,30 @@ test("scheduler facts precede receipt findings and oldest posts drop before find
 	assert.match(bounded, /scout-1/u);
 	assert.match(bounded, /scout-2/u);
 	assert.doesNotMatch(bounded, /Findings/u);
+});
+
+test("a result that already prints each run's answer repeats none of its findings, and workers are not told to claim or repost", () => {
+	const p = projection();
+	const post = (sequence: number, claim: string) => ({
+		id: `e${sequence}`,
+		sequence,
+		at: "2026-11-21T00:00:00.000Z",
+		runId: p.sealed.id,
+		assignmentId: p.sealed.id,
+		agentId: "scout",
+		nodeId: "local",
+		body: { kind: "finding" as const, claim, path: "src/main.ts", line: 3 },
+	});
+	const board = renderAgentLedger([post(1, "Entry"), post(2, "Peer-only note")], {
+		assignments: p.assignments,
+		answered: p.receiptFindings,
+	});
+	assert.doesNotMatch(board, /Findings \(from run record\)/u);
+	assert.doesNotMatch(board, /\bEntry\b|Uncited/u);
+	assert.match(board, /Peer-only note/u);
+	const hint = toolPromptHintsForNames(["ledger"], "worker")[0]?.hint ?? "";
+	assert.doesNotMatch(hint, /Before working|After inspection/u);
+	assert.match(hint, /do not repost them/u);
 });
 
 test("projection survives run-row resume and renders an empty board and worker snapshot without a claim prerequisite", async () => {

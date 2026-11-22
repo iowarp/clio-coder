@@ -183,10 +183,12 @@ describe("tool boundary contract", () => {
 
 	it("keeps the code_nav source selector closed and defaults its schema to workspace", async () => {
 		const parameters = codeNavToolSurface.parameters as {
-			properties?: { source?: { enum?: unknown; default?: unknown } };
+			properties?: { source?: { enum?: unknown; default?: unknown }; related?: { description?: string } };
 		};
 		deepStrictEqual(parameters.properties?.source?.enum, ["workspace", "clio"]);
 		strictEqual(parameters.properties?.source?.default, "workspace");
+		// The model reads which modes take related before the call, not from a refusal after it.
+		match(parameters.properties?.related?.description ?? "", /^symbol\/outline only \(others refuse\):/u);
 
 		const arbitrary = await codeNavTool.run({ source: scratch.dir, mode: "symbol", query: "codeNavTool" });
 		strictEqual(arbitrary.kind, "error");

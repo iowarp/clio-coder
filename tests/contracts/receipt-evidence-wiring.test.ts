@@ -195,13 +195,19 @@ describe("a call refused before it reached a tool", () => {
 			const progressed: unknown[] = [];
 			const helperRuns: boolean[] = [];
 			await receiptFor(
-				[...call("submit-1", INTERNAL_HELPER_RESULT_TOOL), ...call("mcp-1", "mcp__fixture__sync"), ...readCall],
+				[
+					// A verify that only lists the checks runs nothing; the record stays whole until a real opaque call.
+					...call("list-1", "verify"),
+					...call("submit-1", INTERNAL_HELPER_RESULT_TOOL),
+					...call("mcp-1", "mcp__fixture__sync"),
+					...readCall,
+				],
 				progressed,
 				override,
 				helperRuns,
 			);
 			const tools = progressed
-				.filter((event) => (event as { type?: string }).type === "clio_coder_write_record_downgraded")
+				.filter((event) => (event as { type?: string }).type === "clio_coder_write_record_partial")
 				.map((event) => (event as { payload: { tool: string } }).payload.tool);
 			return { helperRuns, tools };
 		};

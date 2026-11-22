@@ -1559,7 +1559,8 @@ function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
 	};
 	return {
 		assignments: projectLedgerAssignments(runs, readRun),
-		receiptFindings: projectReceiptFindings(runs, readRun),
+		// Each run's answer is printed above the board, so its findings are not repeated there.
+		answered: projectReceiptFindings(runs, readRun),
 	};
 }
 
