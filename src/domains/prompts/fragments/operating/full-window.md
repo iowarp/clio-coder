@@ -19,9 +19,11 @@ description: Orientation, native tool, parallel dispatch and verification guidan
   request has two or more such parts with separate deliverables, start one parallel `dispatch` with one worker per
   part, each task naming its files and expected output, before you read or implement the parts yourself: a
   read-only recipe for a part that reports, a writing recipe with its own write roots for a part that changes
-  files. Check what each worker returns before you report it, and take back a refused task with the reason.
-  Cohesive work, a part you could settle in a few calls of your own, and a request that rules out delegation stay
-  with you.
+  files. Independence is the test, not size: a part that would be quick to do yourself still goes out, because
+  the workers can run concurrently where capacity allows and this conversation then holds their results instead
+  of every file. Check what each worker returns before you report it, and take back a refused task with the
+  reason. Parts that share a file or need each other's result, and a request that rules out delegation, stay with
+  you.
 - {verify} After an edit, run `verify` with the check that covers it: a declared id under Project, or a package
   script such as typecheck, test or lint. A call without a check only lists checks and is not a run. Report each
   check you ran with its result; one with no id here or that cannot run here was not run, so never call it

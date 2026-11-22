@@ -3,6 +3,7 @@ import { requestProse } from "../../core/request-prose.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { forbidsFileWrites } from "../../core/write-prohibition.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
+import { parallelPartsCount } from "./turn-plan-cue.js";
 import { type MiddlewareEffect, metadataNumber, metadataString, turnCanCallTool } from "./types.js";
 
 /**
@@ -110,6 +111,9 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 			// enumerated turn that can.
 			if (!turnCanCallTool(input, ToolNames.Tasks) || !turnCanCallTool(input, ToolNames.Gateway)) return NO_EFFECTS;
 			spentForActiveSession = true;
+			// A turn the turn-plan cue reads as parallel parts gets its board steps inside that one note, so two notes
+			// never compete in one reminder block (lab L7). The shot is spent: the board was taught this session.
+			if (parallelPartsCount(input) > 0) return NO_EFFECTS;
 
 			// A turn already carrying an operator-chosen skill flows through that
 			// skill's own workflow; do not compete with it.

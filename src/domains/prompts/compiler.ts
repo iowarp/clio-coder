@@ -318,10 +318,12 @@ export const SESSION_APPROVAL_SEMANTICS =
  * The headless replacement for `SESSION_APPROVAL_SEMANTICS`. A `clio-coder run`
  * denies every approval ask (src/core/headless-permission.ts), so promising a
  * pause would send the model to wait on an operator who never answers. Yolo
- * renders neither line, because nothing parks there (#407).
+ * renders neither line, because nothing parks there (#407). Its `{dispatch}`
+ * sentence renders only where dispatch is reachable and restates the plan-ask
+ * exception the default safety fragments name, as plan admission judges it.
  */
 export const HEADLESS_SESSION_APPROVAL_SEMANTICS =
-	"No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run.";
+	"No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run. {dispatch} A plan-scale dispatch asks once for its plan, which is denied here, so make separate changes yourself; only a plain parallel, sequential or pipeline plan whose every task is a local read-only scout with no worktree, write roots, outputs, checks, agent or grant skips that plan ask, and no other.";
 
 /**
  * The posture id `safety.default` names no fragment of its own: it resolves
@@ -349,6 +351,7 @@ function renderSafetySection(
 	safetyFragment: LoadedFragment,
 	level: string,
 	headless: boolean,
+	facts: SessionFacts,
 	confinement?: YoloConfinement,
 	headlessApprovalInContract = false,
 ): string {
@@ -361,7 +364,7 @@ function renderSafetySection(
 		level === "yolo" || (headless && headlessApprovalInContract)
 			? null
 			: headless
-				? HEADLESS_SESSION_APPROVAL_SEMANTICS
+				? renderRowConditions(HEADLESS_SESSION_APPROVAL_SEMANTICS, facts)
 				: SESSION_APPROVAL_SEMANTICS;
 	if (body.length === 0) return oneLine;
 	return approval === null ? `${oneLine}\n\n${body}` : `${oneLine}\n${approval}\n\n${body}`;
@@ -379,7 +382,7 @@ export function renderSessionPostureUpdate(table: FragmentTable, level: string, 
 		"[CLIO Coder host policy update]",
 		"Effective for the following turn and subsequent turns. This supersedes the compiled # Safety posture, all earlier posture updates, and the posture-dependent turn-ending and settings-change guidance. Other instructions still apply.",
 		"# Safety",
-		renderSafetySection(safety, level, inputs.headless === true, inputs.yoloConfinement),
+		renderSafetySection(safety, level, inputs.headless === true, facts, inputs.yoloConfinement),
 		...(hasEnding
 			? [renderTurnEndingContract((inputs.toolNames ?? []).includes("ask_user"), level === "yolo").join("\n")]
 			: []),
@@ -1199,7 +1202,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 				? posture.id.slice("safety.".length)
 				: posture.id;
 	const session = inputs.sessionInputs;
-	const picker = new FragmentPicker(table, sessionFacts(session, autonomyLevel));
+	const facts = sessionFacts(session, autonomyLevel);
+	const picker = new FragmentPicker(table, facts);
 	// prompts.profile v2 swaps the core text for the D-02 drafts (S-82); v1 is untouched.
 	const v2 = session.promptProfile === "v2" && inputs.identity === "identity.clio";
 	const identity = picker.require(v2 ? "identity.clio-v2" : inputs.identity, "identity");
@@ -1384,7 +1388,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 						.join("\n")
 				: "",
 		],
-		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true, session.yoloConfinement, v2)],
+		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true, facts, session.yoloConfinement, v2)],
 		[
 			"runtime",
 			[renderRuntimeBlock(session), v2RuntimePaths, modelNotes?.body.trim(), fullWindow?.body.trim()]

@@ -4,7 +4,13 @@ import { requestProse } from "../../core/request-prose.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { forbidsFileWrites } from "../../core/write-prohibition.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
-import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, metadataString } from "./types.js";
+import {
+	type MiddlewareEffect,
+	type MiddlewareHookInput,
+	metadataNumber,
+	metadataString,
+	turnCanCallTool,
+} from "./types.js";
 
 /**
  * Turn-plan cue, packaged as a turn_start hook of the main session (workers never register it).
@@ -14,8 +20,16 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, metada
  *
  * - Parallel parts: the request enumerates two or more substantive parts, none opening as a sequel ("then",
  *   "after that"), and the turn can call `dispatch`. The note counts the parts, never quoting them, and asks for one parallel dispatch
- *   with one task per separate deliverable before the model reads or implements them itself, keeping dependent,
- *   cohesive or small parts local. It is advice: no worker is required and no admission changes.
+ *   with one task per separate deliverable before the model reads or implements them itself, keeping only dependent
+ *   or file-sharing parts local. Independence, not size, is the stated test (maintainer 2026-11-22: Sonnet and Opus
+ *   read "few-call parts stay here" as covering every part and never dispatched). Since the files are unread, each
+ *   writing task's write roots cover its part's area and tests, from a tree listing, not guessed files a worker would
+ *   have to widen. It is advice: no worker is required and no admission changes. When the turn can also keep a task
+ *   board, the same note opens with the board plan and closes with its bookkeeping, and the task-board reminder stays
+ *   silent for that turn.
+ *   The dispatch is named only where such a plan runs (`dispatchRuns`: yolo, or an operator who can approve it);
+ *   elsewhere, as at headless default where the writing tasks would be refused, the note keeps the board part only
+ *   (lab D, wave 78), as numbered calls: the plan first, then done with a note per part before the turn ends.
  * - Pre-edit priming: once per session, while nothing in the workspace has been read, edited or mapped, on a
  *   substantive request the turn can edit and map (`code_nav` or `context`). The note names the map calls to make
  *   before the first edit.
@@ -74,19 +88,64 @@ function callForm(capability: string, args: string, attached: Set<string> | null
 	return attached?.has(capability) === false ? `gateway(op="call", capability="${capability}", args=${args})` : direct;
 }
 
-function parallelPartsMessage(count: number, attached: Set<string> | null): string {
+function parallelPartsMessage(
+	count: number,
+	attached: Set<string> | null,
+	board: boolean,
+	dispatchRuns: boolean,
+	finish: boolean,
+): string {
+	// One instruction for the turn: the board reminder stays silent when this note fires (`parallelPartsCount`), so
+	// the board and the dispatch are steps of one plan and never two notes to choose between (lab L7: with both in
+	// one block Sonnet followed the dispatch note and dropped the board, 4/4/4 tasks calls to 0/0/1).
+	const plan = callForm(
+		ToolNames.Tasks,
+		'{action:"plan", title:"<board>", tasks:["<one per part>"]}',
+		attached,
+		'`tasks` action="plan" with a title and one task per part',
+	);
+	if (!dispatchRuns) {
+		// Only the board calls measured to hold: the plan first and a done per part before the turn ends (lab D: Sonnet
+		// at its default thinking planned the board, then fixed every part in one command and finished with each part
+		// still open). Start is left to the model; measured runs went from pending straight to done.
+		const done = callForm(
+			ToolNames.Tasks,
+			'{action:"done", id:"<its id>", note:"<what you observed>"}',
+			attached,
+			'`tasks` action="done" id="<its id>" note="<what you observed>"',
+		);
+		// Partly done is the host's assessment of a turn declared through finish (min(claimed, facts)), so only there.
+		const close = finish
+			? `before you call finish: ${done}, failed or unrun checks included. A part still open on the board when ` +
+				"you call finish leaves the run assessed as partly done."
+			: `before you end the turn: ${done}, failed or unrun checks included.`;
+		return (
+			`[CLIO Coder] The operator's request lists ${count} parts; keep them on the task board as you work. ` +
+			`1. Your first tool call, before any read or command: ${plan}. 2. After checking each part, ${close}`
+		);
+	}
 	const dispatch = callForm(
 		ToolNames.Dispatch,
 		'{tasks:[{task:"<one part>"}, ...]}',
 		attached,
 		"`dispatch` with one `tasks` entry per part",
 	);
+	const first = board ? `First declare the task board: ${plan}. Then the parts` : "Parts";
+	const track = board
+		? ' Mark a part "start" on the board when its worker or your own work on it begins, and "done" with a note of ' +
+			"what was observed, failed or unrun checks included, once you have checked the result."
+		: " Check each worker's result before reporting it.";
 	return (
-		`[CLIO Coder] The operator's request lists ${count} parts. If two or more are separate deliverables (none needs ` +
-		`another's result; no two change the same file), start one parallel ${dispatch} before reading or implementing ` +
-		"them yourself: each task names its files and expected output, with a read-only recipe for a report and a " +
-		"writing recipe with its own write roots for a change. A task board tracks dispatched parts as well. Keep " +
-		"dependent, cohesive or few-call parts here, and check each worker's result before reporting it."
+		`[CLIO Coder] The operator's request lists ${count} parts. ${first} that are separate deliverables (none needs ` +
+		`another's result; no two change the same file) go to workers: start one parallel ${dispatch} before reading or ` +
+		"implementing them yourself. Independence is the test, not size: a part that would be quick to do here still " +
+		"goes out, because each worker takes its own part, workers can run concurrently where capacity allows, and " +
+		"this conversation then carries their results instead of every file. Each task names its part's area and expected " +
+		"output, with a read-only recipe for a report and a writing recipe for a change. You have not read the files " +
+		"yet, so give each writing task `intent.write_roots` covering its part's whole area (its directory or module, " +
+		"and the tests that cover it), with paths taken from one listing of the tree, not guessed single files its " +
+		"worker would have to ask to widen. Keep here only a part that needs another part's result or shares an area " +
+		`with one.${track}`
 	);
 }
 
@@ -131,8 +190,38 @@ function orients(
 	return isReadOnlyCall(tool, input.toolArgs);
 }
 
+/** The capability set a turn reports, preferring the capability list over the attached tool list. */
+function turnCapabilities(input: MiddlewareHookInput): Set<string> | null {
+	return reported(input, "activeCapabilityNames") ?? reported(input, "activeToolNames");
+}
+
+/**
+ * How many parts the parallel note counts on this turn, or 0 when it stays silent. One predicate for the cue and
+ * for the task-board reminder, which yields to the note so a multi-part turn gets one instruction.
+ */
+export function parallelPartsCount(input: MiddlewareHookInput): number {
+	if (input.hook !== "turn_start") return 0;
+	const origin = input.metadata?.turnOrigin;
+	if (input.metadata?.requestContinuation === true || (origin !== undefined && origin !== "operator")) return 0;
+	const mode = input.metadata?.turnMode;
+	if (mode === "answer" || mode === "proposal" || input.metadata?.turnReadOnly === true) return 0;
+	if (input.metadata?.turnStepPolicy === true) return 0;
+	if ((metadataNumber(input, "pendingSkillRequests") ?? 0) > 0) return 0;
+	const text = requestProse(input.text ?? "");
+	if (isPlanOnlyRequest(text) || forbidsFileWrites(text)) return 0;
+	if (turnCapabilities(input)?.has(ToolNames.Dispatch) !== true || NO_DELEGATION.test(text)) return 0;
+	const parts = enumeratedParts(text);
+	const substantive = parts.filter((part) => words(part) >= PART_MIN_WORDS);
+	return substantive.length >= 2 && !parts.slice(1).some((part) => SEQUEL.test(part.trim())) ? substantive.length : 0;
+}
+
+/**
+ * `dispatchRuns` says whether a parallel writing plan would run on this session: yolo, or an operator who can approve
+ * it. Without it the note keeps the board part only. Defaults to true.
+ */
 export function createTurnPlanCueRegistration(
 	bashChangesTree: (args: MiddlewareHookInput["toolArgs"]) => boolean,
+	deps: { dispatchRuns?: () => boolean } = {},
 ): MiddlewareHookRegistration {
 	let lastSeenSessionId: string | null | undefined;
 	let observedAnyTurn = false;
@@ -173,15 +262,17 @@ export function createTurnPlanCueRegistration(
 			if ((metadataNumber(input, "pendingSkillRequests") ?? 0) > 0) return NONE;
 			const text = requestProse(input.text ?? "");
 			if (isPlanOnlyRequest(text) || forbidsFileWrites(text)) return NONE;
-			const capabilities = reported(input, "activeCapabilityNames") ?? reported(input, "activeToolNames");
+			const capabilities = turnCapabilities(input);
 			if (capabilities === null) return NONE;
 			const attached = reported(input, "activeToolNames");
 			const notes: string[] = [];
-			if (capabilities.has(ToolNames.Dispatch) && !NO_DELEGATION.test(text)) {
-				const parts = enumeratedParts(text);
-				const substantive = parts.filter((part) => words(part) >= PART_MIN_WORDS);
-				if (substantive.length >= 2 && !parts.slice(1).some((part) => SEQUEL.test(part.trim())))
-					notes.push(parallelPartsMessage(substantive.length, attached));
+			const parallel = parallelPartsCount(input);
+			if (parallel > 0) {
+				// The board clause names tasks and gateway bookkeeping, so it needs both, as the board reminder does.
+				const board = turnCanCallTool(input, ToolNames.Tasks) && turnCanCallTool(input, ToolNames.Gateway);
+				const dispatchRuns = deps.dispatchRuns?.() ?? true;
+				const finish = turnCanCallTool(input, ToolNames.Finish);
+				if (dispatchRuns || board) notes.push(parallelPartsMessage(parallel, attached, board, dispatchRuns, finish));
 			}
 			const canEdit = capabilities.has(ToolNames.Edit) || capabilities.has(ToolNames.Write);
 			const canMap = capabilities.has(ToolNames.CodeNav) || capabilities.has(ToolNames.Context);

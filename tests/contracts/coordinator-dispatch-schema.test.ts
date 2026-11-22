@@ -301,11 +301,9 @@ describe("compact coordinator dispatch contract", () => {
 			},
 		});
 		const prompt = compiled.systemPrompt.replace(/\s+/gu, " ");
-		match(
-			prompt,
-			/Execute a small, cohesive local implementation and its focused check directly when your admitted tools suffice and delegation adds no useful independence or capability/u,
-		);
-		match(prompt, /Delegate substantial work with independent parts or work requiring worker capabilities/u);
+		match(prompt, /Execute one cohesive change and its focused check directly when your admitted tools suffice/u);
+		match(prompt, /two or more separate deliverables .* is delegated whatever the size of each part/u);
+		match(prompt, /Work requiring worker capabilities is delegated too/u);
 		strictEqual(prompt.includes("open-ended repository exploration belongs to Scout"), false);
 		match(prompt, /honor explicit delegation requests/u);
 		match(prompt, /explicit no-delegation/u);
