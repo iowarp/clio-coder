@@ -114,6 +114,8 @@ export interface DispatchPlanTaskView {
 	writes?: string;
 	/** Capabilities the run's envelope withheld, one line each (M7). */
 	withheld?: ReadonlyArray<string>;
+	/** Each candidate route's forecast beside the choice, one line each, the route that runs first (R4). */
+	forecasts?: ReadonlyArray<string>;
 }
 
 export interface DispatchPlanView {
@@ -174,6 +176,7 @@ export interface ResolvedDispatchPlanArtifact {
 				| "limits"
 				| "writes"
 				| "withheld"
+				| "forecasts"
 			> &
 			Required<
 				Pick<
@@ -498,6 +501,7 @@ function renderPlanText(
 		if (task.limits !== undefined) lines.push(`    limits: ${safeField(task.limits)}`);
 		if (task.writes !== undefined) lines.push(`    writes: ${safeField(task.writes)}`);
 		for (const line of task.withheld ?? []) lines.push(`    withheld: ${safeField(line)}`);
+		for (const line of task.forecasts ?? []) lines.push(`    forecast: ${safeField(line)}`);
 		for (const note of task.checkedAtRun ?? []) lines.push(`    checked at run: ${safeField(note)}`);
 		if (task.worktree === true)
 			lines.push(
@@ -608,6 +612,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"limits",
 		"writes",
 		"withheld",
+		"forecasts",
 	]);
 	if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
 	for (const key of [
@@ -678,6 +683,13 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		(!Array.isArray(value.withheld) ||
 			value.withheld.length === 0 ||
 			!value.withheld.every((line) => typeof line === "string" && line.length > 0))
+	)
+		return false;
+	if (
+		value.forecasts !== undefined &&
+		(!Array.isArray(value.forecasts) ||
+			value.forecasts.length === 0 ||
+			!value.forecasts.every((line) => typeof line === "string" && line.length > 0))
 	)
 		return false;
 	if (value.worktree !== undefined && value.worktree !== true) return false;
@@ -957,6 +969,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			...(typeof task.limits === "string" ? { limits: task.limits } : {}),
 			...(typeof task.writes === "string" ? { writes: task.writes } : {}),
 			...(task.withheld !== undefined ? { withheld: [...task.withheld] } : {}),
+			...(task.forecasts !== undefined ? { forecasts: [...task.forecasts] } : {}),
 			...(task.context !== undefined ? { context: parseWorkerContextPolicy(task.context) } : {}),
 			...(task.workerContext !== undefined ? { workerContext: structuredClone(task.workerContext) } : {}),
 			...(task.worktree === true

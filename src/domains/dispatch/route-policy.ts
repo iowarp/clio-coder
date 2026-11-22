@@ -5,6 +5,7 @@
  */
 
 import type { UnitTotal, UnitTotalRefusal } from "../../core/telemetry/economy.js";
+import { renderCredit } from "../../core/telemetry/render.js";
 import type { AgentLatencyClass } from "../agents/spec.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
@@ -351,6 +352,47 @@ export function forecastRoute(input: {
 		},
 		exclusion: input.exclusion ?? null,
 	};
+}
+
+/** One candidate route's forecast on a plan card; `executed` marks the route the task runs on. */
+export interface RouteCandidateForecast {
+	/** `agent target/model@node`. */
+	route: string;
+	executed: boolean;
+	forecast: RouteForecast;
+}
+
+/** Plan-card lines for candidate forecasts, the route that runs marked: data beside the choice, never a ranking (R4). */
+export function candidateForecastLines(forecasts: {
+	candidates: ReadonlyArray<RouteCandidateForecast>;
+	omitted: number;
+}): string[] {
+	const lines = forecasts.candidates.map(({ route, executed, forecast }) => {
+		const cost = forecast.costPerAcceptedJob;
+		const money = (value: number) => renderCredit(value, cost.status === "forecast" ? cost.currency : "USD");
+		const costText =
+			cost.status === "forecast"
+				? `${money(cost.expected)} (${money(cost.range.low)}-${cost.range.high === null ? "unbounded" : money(cost.range.high)}, ${cost.basis})`
+				: cost.status === "unknown"
+					? `unknown (${cost.unpricedAttempts} unpriced attempts)`
+					: cost.status === "not-applicable"
+						? "no extra charge applies"
+						: `insufficient (${cost.reason})`;
+		const quota = forecast.quotaPerAcceptedJob;
+		const quotaText =
+			quota.status === "forecast"
+				? `${(quota.expected / 1e9).toFixed(3)} AI credits (${quota.basis})`
+				: quota.status === "unknown"
+					? `unknown (${quota.unknownAttempts} attempts)`
+					: quota.status === "insufficient"
+						? `insufficient (${quota.reason})`
+						: "not applicable";
+		const { labeled, samples } = forecast.qualityEvidence;
+		const excluded = forecast.exclusion === null ? "" : ` excluded=${forecast.exclusion}`;
+		return `${executed ? "runs" : "alternative"} ${route}: per accepted job ${costText}, quota ${quotaText}; ${forecast.acceptedJobs}/${forecast.attempts} attempts accepted, quality labeled ${labeled}/${samples}${excluded}`;
+	});
+	if (forecasts.omitted > 0) lines.push(`+${forecasts.omitted} more candidates`);
+	return lines;
 }
 
 /** Active eligibility requires a lower bound and six exact-route quality labels. */

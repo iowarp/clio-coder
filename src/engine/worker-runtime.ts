@@ -92,6 +92,7 @@ import {
 } from "../domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../domains/agents/result-contract-filesystem.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
+import { workerEconomicsView } from "../domains/dispatch/economics-view.js";
 import { HANDBACK_CONTEXT_SHARE, HANDBACK_NOTE_SHARE, WALL_HANDBACK_SHARE } from "../domains/dispatch/handback.js";
 import type { RunRole } from "../domains/dispatch/obligation.js";
 import type { RunLimits } from "../domains/dispatch/run-limits.js";
@@ -1161,6 +1162,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			: undefined,
 		(effects, hookInput) => protectedArtifacts.absorbAwaited(hookInput, effects),
 		input.storeGrant,
+		async () => workerEconomicsView(input.limits),
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;

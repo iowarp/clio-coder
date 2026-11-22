@@ -1,7 +1,7 @@
 import type { FactSum } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type { PricingSum } from "../../core/telemetry/pricing.js";
-import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
+import type { QuotaAccess, QuotaOverage, RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DeclaredCheckKind } from "../../tools/verify/catalog.js";
 import type { NumericTolerance } from "../../tools/verify/numeric.js";
@@ -30,6 +30,7 @@ import type { DispatchOwner } from "./ownership.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
+import type { RouteCandidateForecast } from "./route-policy.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunResult, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 import type { WorkerApprovalWindowView } from "./worker-approval-window.js";
@@ -353,6 +354,12 @@ export interface DispatchPlanTaskResolution {
 	writes?: string;
 	/** One line per capability the run's envelope withheld, with why and what would keep it (M7). */
 	withheld?: ReadonlyArray<string>;
+	/**
+	 * Each candidate's forecast as data (R4), the route that runs first: the router's own readiness window read beside
+	 * its ranking, never instead of it. Bounded, `omitted` counting the candidates past the bound; absent when the route
+	 * universe could not be enumerated.
+	 */
+	forecasts?: { candidates: ReadonlyArray<RouteCandidateForecast>; omitted: number };
 }
 
 /**
@@ -467,6 +474,75 @@ export interface DispatchLandOutcome {
 	detail: string;
 }
 
+/**
+ * The money and quota facts `context(scope="budget")` shows its caller (S16), bounded to the caller's own scope and
+ * read from cached state only, never the network. A field the caller may not see reads withheld, never zero; no
+ * credential, account identity, plan or pool the caller's route does not draw on appears.
+ */
+export type BudgetEconomicsView =
+	| {
+			scope: "session";
+			/** The session's spend as dispatch admission counts it: settled journals plus workers still metering. */
+			spend:
+				| {
+						usd: number;
+						/** Measured, estimated, a lower bound because some calls went unpriced, or unstated by the spend fold. */
+						basis: "measured" | "estimated" | "lower-bound" | "unstated";
+						ceilingUsd: number | null;
+						/** Ceiling less spend; null without a ceiling. Never a forecast of what the next call costs. */
+						headroomUsd: number | null;
+				  }
+				/** No telemetry read model observes this session's spend: unknown, never a measured zero. */
+				| { usd: null; basis: "unobserved"; ceilingUsd: number | null; headroomUsd: null };
+			/** The chat route's quota pool as last read, or why there is no reading to show. */
+			pool: BudgetPoolView | { status: "none"; reason: string };
+			/**
+			 * Per-candidate forecasts (R4), the plan card's own lines for every dispatchable agent: the route each runs on
+			 * now first, then the alternatives its router weighs; bounded, a last line counting those omitted.
+			 */
+			forecasts: ReadonlyArray<string>;
+	  }
+	| {
+			scope: "worker";
+			/** This run's own sealed envelope; nothing about the session or any pool. */
+			envelope: {
+				toolCalls: number;
+				retries: number;
+				wallMs: number;
+				deadlineAt: string;
+				responseMs: number;
+			} | null;
+			spend: "withheld";
+			pool: "withheld";
+	  };
+
+/** One quota pool as the provider last reported it; its own verdict, not Clio's guess. */
+export interface BudgetPoolView {
+	status: "reading";
+	provider: string;
+	/** The provider's deny status for the pool (S5b); unknown when it gave none, never read as allowed. */
+	access: QuotaAccess;
+	/** Whether credits or overage can pay past a full window; permission, not authority to grant it. */
+	overage: QuotaOverage;
+	/** Each window as reported; `usedPct` is null when the provider gave no percentage, as for an unlimited allowance. */
+	windows: ReadonlyArray<{
+		label: string;
+		usedPct: number | null;
+		unlimited?: true;
+		resetsAt: string | null;
+		access: QuotaAccess | null;
+	}>;
+	/** Credit pool use as a percentage; null when the provider reported none. */
+	creditsUsedPct: number | null;
+	observedAt: string;
+	ageMs: number;
+	/** Inside the reading's freshness window and not served stale. A stale reading is shown, never acted on. */
+	fresh: boolean;
+}
+
+/** Host-owned read of the caller's economics view (S16). */
+export type BudgetEconomicsPort = () => Promise<BudgetEconomicsView>;
+
 export interface DispatchContract {
 	/** True when the domain event pump publishes DispatchProgress itself. */
 	readonly publishesProgress?: boolean;
@@ -486,6 +562,8 @@ export interface DispatchContract {
 	 * failure aborts rather than choosing a different unapproved node.
 	 */
 	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
+	/** The session's economics view for `context(scope="budget")`; cached reads only (S16). */
+	budgetEconomics?: BudgetEconomicsPort;
 	/**
 	 * The grants preview derives for a request on its fixed route, refusing
 	 * what preview refuses. Null for an ACP delegation, whose tool surface Clio
