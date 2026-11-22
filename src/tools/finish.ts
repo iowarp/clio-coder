@@ -244,8 +244,14 @@ export const finishTool: ToolSpec = {
 	// The schema stays at its floor (fleet design open question 10): the enums carry the meaning, and the operating
 	// fragments carry the guidance on when and how to declare. The wording is measured (CLI-P49): "call it alone"
 	// read to some models as "the response is only this call", so the description says the reply text comes first.
+	// One rule, stated first and the same wherever finish is named (this description, the catalog objective, the
+	// tool contract line, operating.report): finish follows a turn that called another tool, never a text-only
+	// reply. The harness already works that way (`finishRoundDue` needs calledWork; an attended turn never needs
+	// it), but the old opening "Declare how the turn ended" read as owed on every turn beside "a greeting needs no
+	// tools": 10 of 18 headless "hi" runs called finish, and gemini-4-carbon spent 154 s and 10.7k reasoning
+	// tokens on "hi" deciding which rule won (lab 2026-11-22).
 	description:
-		"Declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
+		"finish is only for a turn in which you called another tool: a reply that called none (a greeting, an answer, a question back) is complete as text and never calls finish. After such work, declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
 	parameters: Type.Object({
 		state: StringEnum(COMPLETION_STATES),
 		limitations: Type.Optional(

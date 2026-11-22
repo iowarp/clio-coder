@@ -466,7 +466,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 	},
 	[ToolNames.Finish]: {
-		objective: "Declare how the turn ended (done, partly_done or not_done) as the last call of the final reply.",
+		objective:
+			"Declare how a turn that called another tool ended (done, partly_done, not_done), as its last call; not for a text-only reply.",
 		uiLabel: "Finish",
 		resultSizePolicy: {
 			kind: "exact",
