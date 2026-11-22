@@ -544,12 +544,26 @@ export function copilotModelRow(
 	};
 }
 
+/**
+ * When the runtime fetched each listed model. The SDK's `listModels` answers from a per-client cache that hands back
+ * the same model objects until it refetches, so a cache hit keeps the time of the fetch that produced it and never
+ * passes an old tariff off as freshly read.
+ */
+const listingFetchedAt = new WeakMap<ModelInfo, string>();
+
 async function listHeld(): Promise<CopilotModelRow[]> {
 	await copilotAccount();
 	const client = await copilotClient();
 	const models: ModelInfo[] = await client.listModels();
-	const readAt = new Date().toISOString();
+	const answeredAt = new Date().toISOString();
 	return models
 		.filter((model) => model.policy === undefined || model.policy.state === "enabled")
-		.map((model) => copilotModelRow(model, "default", readAt));
+		.map((model) => {
+			let readAt = listingFetchedAt.get(model);
+			if (readAt === undefined) {
+				readAt = answeredAt;
+				listingFetchedAt.set(model, readAt);
+			}
+			return copilotModelRow(model, "default", readAt);
+		});
 }

@@ -758,6 +758,12 @@ test("the listing's full billing reaches the seam as stated, with the time it wa
 		deepStrictEqual(row?.billing, billing);
 		const readAt = Date.parse(row?.listingReadAt ?? "");
 		ok(readAt >= before && readAt <= Date.now(), "the read time is when this listing was read");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		const cached = (await listCopilotSdkModels()).find((entry) => entry.id === "billed");
+		strictEqual(cached?.listingReadAt, row?.listingReadAt, "a cache hit keeps the time its listing was fetched");
+		models[models.findIndex((entry) => entry.id === "billed")] = { ...original[0], id: "billed", billing };
+		const refetched = (await listCopilotSdkModels()).find((entry) => entry.id === "billed");
+		ok(Date.parse(refetched?.listingReadAt ?? "") > readAt, "a refetched listing carries its own read time");
 		ok(
 			!("billing" in (rows.find((entry) => entry.id === "fake-model") ?? {})),
 			"a model listed without billing has none",
