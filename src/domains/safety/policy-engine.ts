@@ -3951,13 +3951,16 @@ export const TASK_GATE_REFUSED_RULE_ID = "verify-task-gate-asks";
  * ask; what it passed as unrecognized becomes recognized only when the worker
  * runs it under bubblewrap confined to its own write roots, as main bash at
  * default runs it contained. Anywhere else a gate gets exactly the admission bash would give the
- * same argv, so task text cannot carry an unrecognized command past an ask.
+ * same argv, so task text cannot carry an unrecognized command past an ask. A gate whose bash verdict a write-confined
+ * worker sandbox already contained (row 371) is the same gate: it keeps the task-gate attribution, with the same
+ * admission (M-48).
  */
-function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecognition" | "reasons">>(
+function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecognition" | "reasons" | "ruleId">>(
 	bash: T,
 	confined: boolean,
 ): T {
-	if (bash.kind !== "allow" || bash.execRecognition !== "unrecognized" || !confined) return bash;
+	const contained = bash.execRecognition === "unrecognized" || bash.ruleId === WORKER_SANDBOX_CONTAINED_RULE_ID;
+	if (bash.kind !== "allow" || !contained || !confined) return bash;
 	return {
 		...bash,
 		ruleId: TASK_GATE_RULE_ID,
