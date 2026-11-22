@@ -17,7 +17,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { pinRunSettings, RUN_OVERRIDES_ENV, requirePricedRefusal } from "../../src/core/run-overrides.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
-import { factKnownValue } from "../../src/core/telemetry/known.js";
+import { factKnownValue, usdAmountOrFact } from "../../src/core/telemetry/known.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
@@ -64,6 +64,32 @@ describe("--max-cost-usd and parallel dispatches", () => {
 		const callUsd = 0.3;
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = 0;
+test("a step's cost is its known USD, or the unknown fact when nothing priced it, never a measured 0 (row 362)", () => {
+	const empty = { measured: 0, estimated: 0, unknownCount: 0, absentCount: 0 };
+	const none = { measured: 0, estimated: 0, unknown: 0 };
+	deepStrictEqual(usdAmountOrFact({ ...empty, coverage: none }), { kind: "unknown", reason: "not-observed" });
+	deepStrictEqual(usdAmountOrFact({ ...empty, unknownCount: 2, coverage: { ...none, unknown: 2 } }), {
+		kind: "unknown",
+		reason: "not-observed",
+	});
+	deepStrictEqual(usdAmountOrFact({ ...empty, absentCount: 1, coverage: none }), {
+		kind: "absent",
+		reason: "not-applicable",
+	});
+	// A measured zero is a real price (a free route), and a partial sum keeps its known part.
+	strictEqual(usdAmountOrFact({ ...empty, coverage: { ...none, measured: 1 } }), 0);
+	strictEqual(
+		usdAmountOrFact({
+			measured: 0.25,
+			estimated: 0.5,
+			unknownCount: 1,
+			absentCount: 0,
+			coverage: { measured: 1, estimated: 1, unknown: 1 },
+		}),
+		0.75,
+	);
+});
+
 		settings.safety.limits.sessionCostUsd = capUsd;
 		// Each worker would spend $3 over ten calls if nothing stopped it.
 		const pricedWorker = (spec: WorkerSpec): SpawnedWorker => {

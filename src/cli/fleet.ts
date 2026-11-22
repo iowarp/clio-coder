@@ -22,7 +22,7 @@ import { dirname } from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import type { FactSum } from "../core/telemetry/fact.js";
-import { factKnownValue } from "../core/telemetry/known.js";
+import { factKnownValue, usdAmountOrFact } from "../core/telemetry/known.js";
 import { sumFactSums } from "../core/telemetry/pricing.js";
 import { renderPricingSum, renderUsdLimit, renderUsdSum } from "../core/telemetry/render.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
@@ -334,7 +334,8 @@ function fleetEndDocument(
 			track.totalCost === null
 				? null
 				: {
-						usd: factKnownValue(track.totalCost.usd),
+						// An unpriced total is null, never a measured 0 (row 362); the schema has always allowed it.
+						usd: typeof usdAmountOrFact(track.totalCost.usd) === "number" ? factKnownValue(track.totalCost.usd) : null,
 						measuredUsd: track.totalCost.usd.measured,
 						estimatedUsd: track.totalCost.usd.estimated,
 						unknownCount: track.totalCost.usd.unknownCount,
@@ -733,7 +734,7 @@ async function runFleetTracked(
 									runId: stepRunId,
 									...(step.failureReason !== undefined ? { failureReason: step.failureReason } : {}),
 									...(step.recordPath !== undefined ? { recordPath: step.recordPath } : {}),
-									costUsd: factKnownValue(step.pricing.usd),
+									costUsd: usdAmountOrFact(step.pricing.usd),
 									cost: renderPricingSum(step.pricing),
 								})}\n`,
 							);
