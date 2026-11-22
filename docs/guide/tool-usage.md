@@ -1286,7 +1286,7 @@ Arguments:
 
 The model writes its final reply and calls `finish` alone in the same response. A `finish` beside other calls is refused while its siblings run, and the model declares once it has their results. The result reads `completion declared: <state>`, or `completion declared: <state> (<N> limitation(s))` when limitations are given, and ends the turn: no further model round runs. The declaration comes only from the call's arguments; CLIO Coder never reads a completion state from the reply text.
 
-An attended turn may leave `finish` out. An unattended turn (a headless `run`, a job, or a yolo continuation the host started, not a turn a middleware continuation request carries onward) that called a tool and ended without declaring gets one more round whose reminder asks for the declaration. That round runs at most once per operator prompt, and never when tools are locked or the turn ended on a turn-ending tool.
+`finish` applies only to a turn that called another tool. A reply that called none (a greeting, an answer, a question back) is complete as text and never calls it; the tool description, the tool contract line and the unattended report rule state that same scope. An attended turn may leave `finish` out. An unattended turn (a headless `run`, a job, or a yolo continuation the host started, not a turn a middleware continuation request carries onward) that called a tool and ended without declaring gets one more round whose reminder asks for the declaration. That round runs at most once per operator prompt, and never when tools are locked or the turn ended on a turn-ending tool.
 
 ### Completion states
 

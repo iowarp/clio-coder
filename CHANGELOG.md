@@ -137,7 +137,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 - The `finish` tool declares how a turn ended: `state` (`done`, `partly_done`, `not_done`) with optional `limitations`, `unverified` and `remaining`. It is the only call in its response, and the turn ends with no further model round.
 - CLIO Coder seals the declared state beside its own assessment. A `done` with unvalidated changes, a failing check, an uncollected child run or an open task is assessed `partly_done`, and the terminal UI shows one line: `declared done, assessed partly done: …`.
-- An unattended turn (a headless run, a scheduled job, an unwatched yolo continuation) that did work without declaring gets one round pinned to `finish`. An attended turn may leave the declaration out.
+- An unattended turn (a headless run, a scheduled job, an unwatched yolo continuation) that did work without declaring gets one round pinned to `finish`. An attended turn may leave the declaration out. A reply that called no other tool, such as a greeting or an answer from what the agent already knows, never calls `finish` and ends as text; the tool, the tool contract and the unattended report rule all state that one scope.
 
 **Sessions**
 
