@@ -284,6 +284,20 @@ peer:
 | `acp_thinking_unavailable` | `agent does not offer that thinking level` | None. |
 | `acp_transport_error` | `lost the connection to the agent` | Follows the dispatch retry rules. |
 
+When the peer's prompt answers while it still reports work in progress (a
+tool call left pending or running, or a running or background state), CLIO Coder
+holds the session open until the peer reports idle, the run is cancelled, the
+connection closes, or 120 s pass. The run record keeps how long it waited, how
+many updates arrived and which of these ended the hold.
+
+A later run can continue an ACP delegation in the peer's own session: the
+`dispatch` tool's `continue_run` argument, or
+`clio-coder run --agent <agent> --continue <runId>`. The earlier run must be an
+ACP delegation of the same agent, dispatched by the same session, settled, and
+must have recorded a peer session; anything else is refused with the reason
+before the run takes a slot. When the peer marked that session unable to take
+another turn, the run opens a fresh peer session and says why.
+
 ### Claude Agent SDK runtime
 
 The `claude-sdk` target runtime runs Claude through the Claude Agent SDK
@@ -467,6 +481,11 @@ therefore always `unknown`.
 
 ### Adopt resources from an installed host
 
+`clio-coder configure --section workspace` offers "Adopt from Claude Code, Codex
+and other agents": it shows the adoption plan of each detected host that has
+something new and asks before applying it. Without a terminal it prints the
+plans and writes nothing.
+
 ```bash
 clio-coder interop adopt claude-code --dry-run
 clio-coder interop adopt codex --kind skill --project
@@ -476,7 +495,7 @@ clio-coder interop adopt copilot --kind prompt --user
 
 The host names are `claude-code`, `codex`, `antigravity`, `copilot`, and
 `opencode`; `claude` and `agy` are accepted aliases. `--kind` selects `skill`,
-`agent`, `prompt`, or `plugin`. The destination defaults to user scope;
+`agent`, `prompt`, `plugin`, `mcp`, `hook`, or `instructions`. The destination defaults to user scope;
 `--project` chooses the current project's library, and naming both scopes is
 refused. Destination scope does not filter source scope: every matching
 discovered user and project resource is reviewed in the plan. An invalid host,
@@ -522,11 +541,14 @@ install command, or, for its author, rename `resources.fleets` to
 `resources.playbooks`, the `fleets` directory to `playbooks`, and fleet kinds
 and requirements to `playbook`. Nothing is written.
 
-Installed packages retain `{kind: "interop", host, source}` provenance and
-`trust: "foreign"`, with the original absolute source path. Skill and prompt
-loading keeps the existing `integrations.projectResources.trustProjectImports`
-opt-in, including when a project resource is adopted to user scope. Approval to
-copy a resource does not grant that trust. Adoption also never approves
+Installed packages retain `{kind: "interop", host, source}` provenance with the
+original absolute source path. A resource read from your own home (`~/.claude`,
+`~/.codex` and their peers) installs as `trust: "trusted"`: the reviewed plan
+is the consent, and it reaches the model without further opt-in. A resource
+read from a repository's agent directories installs as `trust: "foreign"`, and
+its skills and prompts load only under the
+`integrations.projectResources.trustProjectImports` opt-in, including when it
+is adopted to user scope. Adoption also never approves
 workspace trust: a `--project` adoption writes `.clio-coder/plugins/state.json`,
 including the workspace's first, and the adopted package stays unloaded until
 `clio-coder config trust plugins` approves the project's plugin state. A
