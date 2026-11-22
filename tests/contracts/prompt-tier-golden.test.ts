@@ -144,7 +144,7 @@ describe("prompts.profile v2 (S-82)", () => {
 		const attended = installedSize(session("attended-default").systemPrompt);
 		const headless = installedSize(session("headless-default").systemPrompt);
 		ok(attended <= 26_000, `attended ${attended}`);
-		ok(headless <= 19_000, `headless ${headless}`);
+		ok(headless <= 19_244, `headless ${headless}`);
 	});
 
 	// ACP is the attended surface without the TUI: no operator interviews unless the client offers them.

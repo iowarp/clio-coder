@@ -285,7 +285,10 @@ Always refused: deleting /, the home directory or a system tree; mkfs and writes
 to block devices; fork bombs; writes into Clio's config and state; reads of its
 credential store and secret paths; rules in an approved `.clio-coder/safety.yaml`.
 A plan-scale dispatch (several tasks, a compete, a remote node) asks
-once for the whole plan.
+once for the whole plan. A plain parallel, sequential or pipeline plan whose
+every task is a local read-only scout with no worktree, write roots, outputs,
+checks, agent or grant skips that ask, on its shown route with no failover;
+every other permission still applies.
 Clio's safety judge reviews a call that needs approval against the operator's
 requests. A blocked call returns its reason: do not repeat it or a reworded
 form; record the open decision for your final reply.
