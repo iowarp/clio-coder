@@ -4,6 +4,7 @@ import { SURFACE_IDS } from "../side-surfaces.js";
 import { REQUESTED_THINKING_LEVELS, WIRE_EFFORT_PATTERN } from "./call-effort.js";
 import {
 	CallEconomicsSchema,
+	ChargeDiscrepancySchema,
 	EconomyUnitSchema,
 	OpaqueIdSchema,
 	RunEconomicsSchema,
@@ -447,6 +448,8 @@ export const CallSettledSchema = Type.Object(
 					premiumRequests: factSchema(Type.Number({ minimum: 0 })),
 					nanoAiu: factSchema(Type.Number({ minimum: 0 })),
 					modelCalls: factSchema(count),
+					/** The seat reported a debit for a call on a route declared free (R1). */
+					discrepancy: Type.Optional(ChargeDiscrepancySchema),
 				},
 				closed,
 			),

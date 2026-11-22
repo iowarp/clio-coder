@@ -544,6 +544,7 @@ export const CallRowSchema = Type.Object(
 					premiumRequests: SeatUnitSchema,
 					nanoAiu: SeatUnitSchema,
 					modelCalls: SeatUnitSchema,
+					discrepancy: CallSettledSchema.properties.billing.properties.discrepancy,
 				},
 				closed,
 			),

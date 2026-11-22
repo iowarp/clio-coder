@@ -2310,6 +2310,7 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 					premiumRequests: seatUnit(settled.billing.premiumRequests, "units"),
 					nanoAiu: seatUnit(settled.billing.nanoAiu),
 					modelCalls: seatUnit(settled.billing.modelCalls),
+					...(settled.billing.discrepancy ? { discrepancy: settled.billing.discrepancy } : {}),
 				}
 			: null,
 		economics: callEconomicsOf(settled),
