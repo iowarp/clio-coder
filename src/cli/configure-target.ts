@@ -636,6 +636,7 @@ export function describeTargetFunding(target: TargetDescriptor, definitions: Cli
 		return `unknown (${resolved.reason.replaceAll("-", " ")}; ${target.funding?.pool ?? "not bound"})`;
 	}
 	const { fee, grant, local, nativeUnit, payer } = resolved.pool;
+	const grantAmount = nativeUnit === undefined ? undefined : grant?.amount;
 	return [
 		`${resolved.status}: ${resolved.poolId}`,
 		...(resolved.status === "detected"
@@ -645,7 +646,7 @@ export function describeTargetFunding(target: TargetDescriptor, definitions: Cli
 		...(fee === undefined ? [] : [`${fee.amount} ${fee.currency} / ${fee.period}`]),
 		...(grant === undefined
 			? []
-			: [`grant${grant.amount === undefined ? "" : ` ${grant.amount} ${nativeUnit}`} expires ${grant.expiresAt}`]),
+			: [`grant${grantAmount === undefined ? "" : ` ${grantAmount} ${nativeUnit}`} expires ${grant.expiresAt}`]),
 		...(local?.activeWatts === undefined ? [] : [`${local.activeWatts} W active`]),
 		...(local?.idleWatts === undefined ? [] : [`${local.idleWatts} W idle`]),
 		...(local?.tariff === undefined ? [] : [`${local.tariff.ratePerKwh} ${local.tariff.currency} / kWh`]),

@@ -843,7 +843,8 @@ function validateFundingPool(issues: Issues, path: string, value: unknown): Fund
 			const amount = "amount" in grant ? expectNumber(issues, `${p}.amount`, grant.amount, { min: 0 }) : undefined;
 			if (amount !== undefined && pool.nativeUnit === undefined)
 				issues.add(`${path}.nativeUnit`, "required when a grant amount is declared");
-			if (expiresAt !== undefined) pool.grant = { expiresAt, ...(amount !== undefined ? { amount } : {}) };
+			if (expiresAt !== undefined)
+				pool.grant = { expiresAt, ...(amount !== undefined && pool.nativeUnit !== undefined ? { amount } : {}) };
 		}
 	}
 	if ("local" in raw) {
@@ -856,6 +857,11 @@ function validateFundingPool(issues: Issues, path: string, value: unknown): Fund
 				if (!(key in local)) continue;
 				const watts = expectNumber(issues, `${p}.${key}`, local[key], { min: 0 });
 				if (watts !== undefined) power[key] = watts;
+			}
+			if (power.activeWatts !== undefined && power.idleWatts !== undefined && power.activeWatts < power.idleWatts) {
+				issues.add(`${p}.activeWatts`, "must be at least idleWatts");
+				delete power.activeWatts;
+				delete power.idleWatts;
 			}
 			if ("tariff" in local) {
 				const tariff = fundingMap(issues, `${p}.tariff`, local.tariff);

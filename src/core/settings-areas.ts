@@ -62,7 +62,7 @@ export function resolveSettingsArea(name: string): SettingsAreaId | undefined {
 /** Group labels in display order, per area. A row's group is the one its placement names. */
 export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly string[]>> = {
 	recent: ["Pinned", "Recent", "Suggested"],
-	models: ["Connections", "Funding", "Chat model", "Reasoning & length", "Speed", "Quick switch", "Model tiers"],
+	models: ["Connections", "Chat model", "Reasoning & length", "Speed", "Quick switch", "Model tiers", "Funding"],
 	chat: ["Replies", "Alerts", "Recovery", "Transcript", "Guidance", "Updates", "Graphical app"],
 	workers: [
 		"Default worker",
@@ -110,6 +110,7 @@ const RAW_COLLECTIONS: ReadonlySet<string> = new Set([
 	"fleet.adaptiveRouting.agentRoles",
 	"interface.keybindings",
 	"integrations.externalAgents.entries",
+	"funding",
 ]);
 const GUIDED_ROW_IDS: ReadonlySet<string> = new Set([
 	"fleet.profiles",
@@ -126,8 +127,8 @@ const place = (area: SettingsAreaId, group = ""): SettingsPlacement => ({ area, 
  * path. Anything unplaced falls into Advanced "Other" so no row is unreachable.
  */
 export function settingsPlacementForRow(id: string, path: string): SettingsPlacement {
+	if (path === "targets[].funding") return place("models", "Funding");
 	if (id === "targets" || id === "targets.add-cta" || under(path, "targets")) return place("models", "Connections");
-	if (under(path, "funding")) return place("models", "Funding");
 	if (id.startsWith("maintenance.")) return place("advanced", "Maintenance");
 	if (RAW_COLLECTIONS.has(path) && !GUIDED_ROW_IDS.has(id)) return place("advanced", "Raw collections");
 	switch (path) {

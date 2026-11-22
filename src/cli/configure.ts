@@ -1450,6 +1450,8 @@ async function declareFundingPool(rl: ConfigurePrompts): Promise<FundingPool> {
 	if (await askYesNo(rl, "Declare local electricity facts?", false)) {
 		const activeWatts = await askFundingNumber(rl, "Active watts (blank if unknown)");
 		const idleWatts = await askFundingNumber(rl, "Idle watts (blank if unknown)");
+		if (activeWatts !== undefined && idleWatts !== undefined && activeWatts < idleWatts)
+			throw new Error("Active watts must be at least idle watts");
 		const ratePerKwh = await askFundingNumber(rl, "Electricity rate per kWh (blank if unknown)");
 		const tariff =
 			ratePerKwh === undefined
@@ -1596,12 +1598,6 @@ const CONTENT_PARTS = {
 				},
 			},
 			{
-				label: "Funding for a target",
-				place: "funding",
-				hint: "optional fee, grant or electricity facts; does not send requests",
-				run: configureTargetFunding,
-			},
-			{
 				label: "Rename a target",
 				place: "targets",
 				run: async (io) => {
@@ -1636,6 +1632,12 @@ const CONTENT_PARTS = {
 						else io.warn(`Could not remove target ${chosen}`);
 					}
 				},
+			},
+			{
+				label: "Funding for a target",
+				place: "targets[].funding",
+				hint: "optional fee, grant or electricity facts; does not send requests",
+				run: configureTargetFunding,
 			},
 		],
 	},
