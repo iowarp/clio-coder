@@ -24,7 +24,13 @@ import { dispatchBoardItems, renderDispatchActivity, runTableRows } from "../dis
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { actionKeyLabel, formatKeyLabel } from "../keybinding-manager.js";
 import type { QuotaProviders } from "../quota-view.js";
-import { routeWeeklyQuota } from "../quota-view.js";
+import {
+	bindingQuotaWindow,
+	bindingWindowPart,
+	linkedQuotaAccounts,
+	quotaWaitWords,
+	routeWeeklyQuota,
+} from "../quota-view.js";
 import {
 	brandMark,
 	type ClioTheme,
@@ -45,6 +51,7 @@ import {
 	type Tone,
 } from "../theme/index.js";
 import { fitIdentityLabel, fitPathLabel, modelNickname } from "../theme/labels.js";
+import { economyReceipt } from "../usage-words.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import {
@@ -115,14 +122,49 @@ function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProv
 		wrapTextWithAnsi(`${theme.fg("annotation", `${label}  `)}${clean(value)}`, width);
 	const internal = row.agentAudience === "shadow" || row.agentAudience === "internal";
 	const weekly = routeWeeklyQuota(row, quota);
+	// A retry the provider's limit caused waits on a quota window; it names the one that binds, or says none is known.
+	const waiting =
+		row.status === "retrying" && row.retry && QUOTA_RETRY.test(row.retry.reason)
+			? quotaWaitWords(
+					bindingQuotaWindow(
+						linkedQuotaAccounts(quota, { runtimeIds: [row.runtimeId], targetIds: [row.targetId], node: row.node }),
+					),
+					Date.now(),
+				)
+			: null;
 	return [
 		sectionRule(theme, width, clean(row.agentId), { meta: internal ? "internal agent" : "fleet agent" }),
 		...field("Route", `${row.targetId}/${row.wireModelId}`),
 		...(weekly ? field("Account", `Shared ${weekly.account} · ${weekly.label}`) : []),
+		...(waiting ? field("Waiting", waiting) : []),
 		...(row.progress && row.taskSummary ? field("Task", row.taskSummary) : []),
 		...renderDispatchActivity(row, width),
 		...field("Inspect", `/view dispatch:${row.runId}`),
 	];
+}
+
+const QUOTA_RETRY = /rate[- ]?limit|quota|usage limit|\b429\b/iu;
+
+/**
+ * The session's receipt as chips: the binding window of the account the main route draws on first, then the extra
+ * cost, seat credits and API equivalent, each the S10 projection's own words. A part with an unknown keeps the neutral
+ * tone. A declared fee is never a chip here: it belongs to its period, not to a turn or a session row.
+ */
+function receiptChips(theme: ClioTheme, state: FooterDashboardRenderState): string[] {
+	const spend = state.telemetry;
+	if (spend.kind !== "ready" || !spend.economy) return [];
+	const binding = state.quotaRoute
+		? bindingQuotaWindow(
+				linkedQuotaAccounts(state.quota ?? [], {
+					runtimeIds: [state.quotaRoute.runtimeId],
+					targetIds: spend.economyTargets ?? [],
+					node: state.quotaRoute.node,
+				}),
+			)
+		: null;
+	return economyReceipt(spend.economy, binding === null ? null : bindingWindowPart(binding, state.now)).map((part) =>
+		theme.fg(part.unknown ? "unknownValue" : "counter", part.text),
+	);
 }
 
 /**
@@ -211,6 +253,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								? null
 								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
+			...receiptChips(theme, state),
 			tools === null ? null : labelled("tools", theme.fg("counter", toolChip(clean(tools), width))),
 			ceilingChip(state),
 		],
@@ -371,6 +414,10 @@ function sessionSpendChips(telemetry: FooterTelemetry): string[] {
 		),
 		theme.fg("metricValue", telemetry.cost ?? "nothing charged yet"),
 		...(telemetry.neverSent ? [theme.fg("warning", telemetry.neverSent)] : []),
+		// The row already names the weekly window, so the receipt here starts at the extra cost.
+		...(telemetry.economy ? economyReceipt(telemetry.economy, null) : []).map((part) =>
+			theme.fg(part.unknown ? "unknownValue" : "metricValue", part.text),
+		),
 	];
 }
 
