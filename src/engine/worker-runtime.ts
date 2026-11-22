@@ -153,7 +153,12 @@ import {
 	gatewayChainReceipts,
 } from "../tools/surface.js";
 import type { TaskWorktree } from "../tools/task-worktree.js";
-import { clearTaskGates, configureTaskGates, isTaskGateCall } from "../tools/verify/task-gates.js";
+import {
+	clearTaskGates,
+	configureTaskGates,
+	contractDeclaresTaskGates,
+	isTaskGateCall,
+} from "../tools/verify/task-gates.js";
 import {
 	type AgentLedgerPort,
 	canonicalJson,
@@ -1081,9 +1086,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			? { initialState: { artifacts: [...input.protectedArtifactState.artifacts] } }
 			: {}),
 	});
-	// A verifier has no shell; the gate commands its task names are what it may
-	// run through verify (task-gates.ts). Every other role sees none.
-	if (input.resultContract?.kind === "verifier-report") {
+	// A checker (verifier, debugger) has no shell; the gate commands its task
+	// names are what it may run through verify (task-gates.ts). Every other role sees none.
+	if (contractDeclaresTaskGates(input.resultContract?.kind)) {
 		configureTaskGates(input.task, {
 			confined: workerSandboxWritesNothing(),
 			// The main-session sandbox main bash would run an unrecognized gate in.

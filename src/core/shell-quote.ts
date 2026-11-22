@@ -24,3 +24,8 @@
 export function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, "'\\''")}'`;
 }
+
+/** An argv as one POSIX command line: a plain word as written, any other word single-quoted. */
+export function shellJoin(argv: ReadonlyArray<string>): string {
+	return argv.map((word) => (/^[\w./+@%,:=-]+$/u.test(word) ? word : shellQuote(word))).join(" ");
+}

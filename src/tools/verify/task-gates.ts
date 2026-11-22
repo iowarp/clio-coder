@@ -3,18 +3,28 @@ import { shellLikeArgv } from "../../core/shell-argv.js";
 import { type DeclaredCheck, defaultVerifyTimeoutMs } from "./catalog.js";
 
 /**
- * Gate commands a verifier's dispatched task names, run through verify. A
- * verifier has no shell, so before these existed a task that said "run
- * `python3 bench/heat_check.py --plain` and report the gate" could only be
- * reported unverified unless the repository happened to declare that exact
- * command. The task text is the dispatcher's declaration: each inline code
- * span that reads as one plain command becomes a check the verifier runs by
- * id or by its exact text, with no extra args, from the workspace root, under
- * the same safe-exec bounds and safety scan as every other verify check.
+ * Gate commands a checker's dispatched task names, run through verify. A
+ * checker (verifier or debugger) has no shell, so before these existed a task
+ * that said "run `python3 bench/heat_check.py --plain` and report the gate"
+ * could only be reported unverified unless the repository happened to declare
+ * that exact command. The task text is the dispatcher's declaration: each
+ * `check: <command>` line (an explicit marker, like `output: <path>`) and each
+ * inline code span that reads as one plain command becomes a check the
+ * checker runs by id or by its exact text, with no extra args, from the
+ * workspace root, under the same safe-exec bounds and safety scan as every
+ * other verify check. Prose is never scanned for commands.
  *
- * Only a worker whose result contract is a verifier report configures gates,
+ * Only a worker whose result contract is a checker report configures gates,
  * so no other role and no main session gains a command it did not have.
  */
+
+/** Result contracts of the checker role (DESIGN 4.4: "no shell; declared checks and task gates"). */
+const CHECKER_CONTRACTS: ReadonlySet<string> = new Set(["verifier-report", "debugger-report"]);
+
+/** True for a run whose result contract makes it a checker, the only role whose task declares gates. */
+export function contractDeclaresTaskGates(kind: string | undefined): boolean {
+	return kind !== undefined && CHECKER_CONTRACTS.has(kind);
+}
 
 export interface TaskGate {
 	id: string;
@@ -29,7 +39,7 @@ export interface RejectedTaskGate {
 }
 
 interface TaskGateState {
-	/** True in a verifier worker, which has no shell to fall back to. */
+	/** True in a checker worker, which has no shell to fall back to. */
 	active: boolean;
 	gates: TaskGate[];
 	rejected: RejectedTaskGate[];
@@ -43,8 +53,8 @@ export const TASK_GATE_LIMIT = 8;
 const SPAN_LIMIT = 400;
 /** The ceiling a model-supplied timeout_ms meets for a task gate. */
 export const TASK_GATE_MAX_TIMEOUT_MS = 600_000;
-/** The policy engine recognizes only bare argv words; a gate outside them would ask and so never run headless. */
-const BARE_WORD = /^[\w=./:-]+$/u;
+/** A gate word is shell-quoted when judged, so it never splits into another command; control characters never pass. */
+const CONTROL_CHARACTER = /\p{Cc}/u;
 /** One-word spans that still name a whole gate; any other one-word span is a file, flag or identifier. */
 const SINGLE_WORD_RUNNERS = new Set(["pytest", "tox", "nox", "make", "ctest", "ninja", "just", "mypy", "ruff"]);
 /**
@@ -106,17 +116,34 @@ function inlineSpans(task: string): string[] {
 	return spans;
 }
 
-/** The argv a span declares, a reason it is refused, or null when it does not read as a command at all. */
-function spanArgv(span: string): { argv: string[] } | { reason: string } | null {
+/** A task line `check: <command>`; the command is taken whole, a pair of enclosing backticks removed (M-42). */
+const CHECK_LINE = /^check:[ \t]*(\S(?:.*\S)?)[ \t]*$/gmu;
+
+function checkMarkerCommands(task: string): string[] {
+	const commands: string[] = [];
+	for (const match of task.matchAll(CHECK_LINE)) {
+		const raw = match[1] ?? "";
+		commands.push(collapse(/^`([^`]+)`$/u.exec(raw)?.[1] ?? raw));
+	}
+	return commands;
+}
+
+/**
+ * The argv a span declares, a reason it is refused, or null when it does not read as a command at all. A `check:`
+ * line is `explicit`: it always declares a command, so what would make an inline span prose is a refusal instead.
+ */
+function spanArgv(span: string, explicit = false): { argv: string[] } | { reason: string } | null {
 	if (span.length === 0) return null;
 	const words = span.split(" ");
 	const program = words[0] ?? "";
-	if (words.length === 1 && !SINGLE_WORD_RUNNERS.has(program)) return null;
+	if (words.length === 1 && !SINGLE_WORD_RUNNERS.has(program) && !explicit) return null;
 	if (/^[A-Za-z_]\w*=/u.test(program)) return { reason: "environment assignments are not part of a gate" };
 	// A command starts with a program name or a path to one. A bare file name
 	// (`calc.py --plain`) is prose about the file: it would not run as written.
-	if (!/^(?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)*$/u.test(program) || program.startsWith("-")) return null;
-	if (!program.includes("/") && /\.[A-Za-z]\w*$/u.test(program)) return null;
+	const named = /^(?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)*$/u.test(program) && !program.startsWith("-");
+	if (!named || (!program.includes("/") && /\.[A-Za-z]\w*$/u.test(program))) {
+		return explicit ? { reason: `'${program}' is not a program name or a path to one` } : null;
+	}
 	if (span.length > SPAN_LIMIT) return { reason: `longer than ${SPAN_LIMIT} characters` };
 	const argv = shellLikeArgv(span, { rejectComments: true });
 	if (argv instanceof Error) return { reason: `not one plain command (${argv.message})` };
@@ -124,10 +151,7 @@ function spanArgv(span: string): { argv: string[] } | { reason: string } | null 
 	const first = argv[0] ?? "";
 	const base = first.split("/").pop() ?? first;
 	if (REFUSED_PROGRAMS.has(base)) return { reason: `'${base}' is not a verification command` };
-	const odd = argv.find((word) => !BARE_WORD.test(word));
-	if (odd !== undefined) {
-		return { reason: `'${odd}' is not a bare word (letters, digits, and _ = . / : - only)` };
-	}
+	if (argv.some((word) => CONTROL_CHARACTER.test(word))) return { reason: "a word holds a control character" };
 	return { argv };
 }
 
@@ -136,10 +160,14 @@ export function extractTaskGates(task: string): { gates: TaskGate[]; rejected: R
 	const gates: TaskGate[] = [];
 	const rejected: RejectedTaskGate[] = [];
 	const seen = new Set<string>();
-	for (const span of inlineSpans(task)) {
+	const spans = [
+		...checkMarkerCommands(task).map((span) => ({ span, explicit: true })),
+		...inlineSpans(task).map((span) => ({ span, explicit: false })),
+	];
+	for (const { span, explicit } of spans) {
 		if (seen.has(span)) continue;
 		seen.add(span);
-		const parsed = spanArgv(span);
+		const parsed = spanArgv(span, explicit);
 		if (parsed === null) continue;
 		if ("reason" in parsed) {
 			rejected.push({ text: span, reason: parsed.reason });
@@ -154,7 +182,7 @@ export function extractTaskGates(task: string): { gates: TaskGate[]; rejected: R
 	return { gates, rejected };
 }
 
-/** Set once at a verifier worker's start from its dispatched task. */
+/** Set once at a checker worker's start from its dispatched task. */
 export function configureTaskGates(task: string, options: { confined: boolean; containable?: boolean }): void {
 	state = {
 		active: true,
@@ -164,21 +192,21 @@ export function configureTaskGates(task: string, options: { confined: boolean; c
 	};
 }
 
-/** Back to no gates: a process that is not a verifier worker. */
+/** Back to no gates: a process that is not a checker worker. */
 export function clearTaskGates(): void {
 	state = { active: false, gates: [], rejected: [], confined: false, containable: false };
 }
 
 /**
- * What an unresolved verify call tells a verifier in place of "use bash",
- * which it does not have. Empty outside a verifier worker.
+ * What an unresolved verify call tells a checker in place of "use bash",
+ * which it does not have. Empty outside a checker worker.
  */
 export function taskGateFallbackHint(): string {
 	if (!state.active) return "";
 	const named = state.gates.map((gate) => `${gate.id} (${gate.text})`).join(", ");
 	return (
 		(named.length > 0 ? ` Gates the task declares: ${named}.` : "") +
-		" This role has no shell: a command that is neither a listed check nor written in backticks in the task cannot run here, so report it unverified and say why."
+		" This role has no shell: a command that is neither a listed check nor on a `check:` line or in backticks in the task cannot run here, so report it unverified and say why."
 	);
 }
 

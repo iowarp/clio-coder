@@ -22,6 +22,7 @@ import {
 } from "../../core/sandbox/main-session.js";
 import { isSkippedSecretScanDirectory, SECRET_SCAN_LIMITS } from "../../core/sandbox/secret-files.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
+import { shellJoin } from "../../core/shell-quote.js";
 import { storeBookkeepingPaths, storeGrantProbes, storeWriteSet } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
@@ -1622,7 +1623,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
 		const verifyArgv =
 			verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs, cwd);
-		const verifyCommand = verifyArgv?.join(" ") ?? null;
+		const verifyCommand = verifyArgv === null ? null : shellJoin(verifyArgv);
 		const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call, rawClassification)).filter(
 			(scan) => scan !== "",
 		);
@@ -2060,7 +2061,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const verifyCommand =
 			verifyResolution === null || verifyArgs === null
 				? null
-				: (verifyResolutionArgv(verifyResolution, verifyArgs, cwd)?.join(" ") ?? null);
+				: (() => {
+						const argv = verifyResolutionArgv(verifyResolution, verifyArgs, cwd);
+						return argv === null ? null : shellJoin(argv);
+					})();
 		const checkCwd =
 			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain" || verifyResolution?.kind === "task"
 				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
@@ -2325,7 +2329,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const argv = verifyResolutionArgv(resolution, args, cwd);
 		return argv === null
 			? null
-			: { command: argv.join(" "), confined: resolution.confined, containable: resolution.containable };
+			: { command: shellJoin(argv), confined: resolution.confined, containable: resolution.containable };
 	};
 
 	/**
@@ -2362,6 +2366,22 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return named;
 		}
 		if (bash.kind === "block") return named;
+		// Interpreter source (`python3 -c ...`) hides its paths from the scan, the one ask main bash at default leaves
+		// to its sandbox. A gate in a sandbox that writes nothing takes that contained verdict, so a checker can run the
+		// command its task names (M-42); every other ask still refuses the gate.
+		if (gate.confined && bash.ruleId === HIDDEN_CONTENT_RULE_ID) {
+			const contained = evaluateOperatorDefault(bashCall, posture, {
+				level: "default",
+				scratchRoots: [],
+				sandbox: true,
+				snapshots: false,
+				readOnly: true,
+			});
+			if (contained.kind === "allow") {
+				const { shellSandbox: _ownSandbox, ...inWorkerSandbox } = contained;
+				return taskGatePolicy({ ...inWorkerSandbox, tool: ToolNames.Verify, command: gate.command }, true);
+			}
+		}
 		const { rejection: _rejection, ...rest } = named;
 		return gateDecision("block", rest, {
 			...rest,
@@ -3625,8 +3645,8 @@ function evaluateBashPolicy(
 	) {
 		return {
 			kind: "ask",
-			reasonCode: "bash-hidden-content",
-			ruleId: "bash-hidden-content",
+			reasonCode: HIDDEN_CONTENT_RULE_ID,
+			ruleId: HIDDEN_CONTENT_RULE_ID,
 			reasons: [
 				"shell variables, unparsed shell scripts or interpreter source hide which paths it touches from the safety net, so each such command needs your approval",
 				// A loop over files was the common case in recorded Opus runs; one
@@ -3876,6 +3896,9 @@ interface TaskGateUnderJudgment {
 
 /** Rule id of a verifier's task gate the scan passed, run in a sandbox that writes nothing. */
 export const TASK_GATE_RULE_ID = "verify-task-gate";
+
+/** Rule id of the ask for a command whose variables or interpreter source hide the paths it touches. */
+const HIDDEN_CONTENT_RULE_ID = "bash-hidden-content";
 
 /** Rule id of a task gate refused because bash would have asked for the same argv. */
 export const TASK_GATE_REFUSED_RULE_ID = "verify-task-gate-asks";

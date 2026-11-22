@@ -20,6 +20,7 @@ import { verifyTool } from "../../src/tools/verify/index.js";
 import {
 	clearTaskGates,
 	configureTaskGates,
+	contractDeclaresTaskGates,
 	extractTaskGates,
 	taskGateBounds,
 	taskGateCheck,
@@ -94,6 +95,31 @@ describe("verifier task gates", () => {
 
 		const widened = await verify("gate-1", { args: ["--extra"] });
 		strictEqual(widened.kind === "error" && widened.details?.unresolved, true);
+	});
+
+	it("runs a checker's `check:` task line as a verify check, inline source only in a sandbox that writes nothing (M-42)", async () => {
+		const root = enter({ "m.py": "def add(a, b):\n    return a + b\n" });
+		const task = 'Without editing any file, verify m.add(1,1)==2.\ncheck: python3 -c "import m; print(m.add(1,1))"';
+		ok(contractDeclaresTaskGates("debugger-report") && !contractDeclaresTaskGates("mutation-report"));
+		deepStrictEqual(
+			extractTaskGates(task).gates.map((gate) => gate.command),
+			[["python3", "-c", "import m; print(m.add(1,1))"]],
+		);
+		// Prose is never scanned for commands; a marker that names no program is refused, not dropped.
+		deepStrictEqual(extractTaskGates("Verify it by running python3 -c 'print(2)' and report.").gates, []);
+		deepStrictEqual(
+			extractTaskGates("check: calc.py --plain").rejected.map((entry) => entry.text),
+			["calc.py --plain"],
+		);
+		const gateKind = (confined: boolean) => {
+			configureTaskGates(task, { confined });
+			return createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: ToolNames.Verify, args: { check: "gate-1" } }).kind;
+		};
+		strictEqual(gateKind(false), "block");
+		strictEqual(gateKind(true), "allow");
+		const ran = await verify("gate-1");
+		strictEqual(ran.kind, "ok", JSON.stringify(ran));
+		if (ran.kind === "ok") match(ran.output, /\b2\b/u);
 	});
 
 	it("lists the gates and tells a verifier it has no shell for anything else", async () => {
