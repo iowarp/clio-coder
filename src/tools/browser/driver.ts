@@ -10,8 +10,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { format } from "node:util";
 import type {
@@ -241,31 +244,131 @@ function playwrightChromium(): Promise<Any> {
 	}));
 }
 
-/** Loopback and granted hosts only: a page cannot make the browser reach anything else. */
-function routeGranted(route: Any): unknown {
-	let host = "";
-	try {
-		const url = new URL(route.request().url());
-		if (url.protocol !== "http:" && url.protocol !== "https:") return route.continue();
-		host = url.hostname;
-	} catch {
-		return route.continue();
-	}
-	if (isLoopbackHost(host) || (!init?.hermetic && grantedHosts.has(host.toLowerCase()))) return route.continue();
+/**
+ * Loopback, and the granted hosts in the session's own browser. An attached browser runs outside the driver's proxy,
+ * where a redirect hop cannot be checked, so its pages reach loopback only and grants do not count there.
+ */
+function reachable(host: string): boolean {
+	return isLoopbackHost(host) || (!init?.hermetic && attachedTo === undefined && grantedHosts.has(host.toLowerCase()));
+}
+
+function refuse(host: string): void {
 	blockedHosts.add(host);
 	newlyBlocked.add(host.toLowerCase());
+}
+
+/**
+ * Loopback and granted hosts only: a page cannot make the browser reach anything else. Playwright routes only the
+ * first request of a redirect chain; the proxy below checks every hop after it. Other schemes never load (file: would
+ * read the disk), except data: and blob: subresources, which a page makes from its own content and reach nothing.
+ */
+function routeGranted(route: Any): unknown {
+	let url: URL;
+	try {
+		url = new URL(route.request().url());
+	} catch {
+		return route.abort("blockedbyclient");
+	}
+	if (url.protocol === "data:" || url.protocol === "blob:") return route.continue();
+	if (url.protocol !== "http:" && url.protocol !== "https:") return route.abort("blockedbyclient");
+	if (reachable(url.hostname)) return route.continue();
+	refuse(url.hostname);
 	return route.abort("blockedbyclient");
 }
+
+const HOP_BY_HOP = new Set([
+	"connection",
+	"keep-alive",
+	"proxy-connection",
+	"proxy-authorization",
+	"proxy-authenticate",
+]);
+
+/**
+ * The forward proxy the session's own browser sends every request beyond loopback through, each redirect hop a new
+ * request. Chromium follows redirects itself, so this is the only place a hop to an ungranted host can be refused
+ * before it leaves the machine. Loopback bypasses it (see ensureContext); link-local and every other address do not.
+ */
+function startReachProxy(): Promise<number> {
+	const server = http.createServer((req, res) => {
+		let target: URL;
+		try {
+			target = new URL(req.url ?? "");
+		} catch {
+			req.socket.destroy();
+			return;
+		}
+		if (target.protocol !== "http:" || !reachable(target.hostname)) {
+			if (target.protocol === "http:") refuse(target.hostname);
+			req.socket.destroy();
+			return;
+		}
+		const headers: http.OutgoingHttpHeaders = {};
+		for (const [name, value] of Object.entries(req.headers)) if (!HOP_BY_HOP.has(name)) headers[name] = value;
+		const upstream = http.request(target, { method: req.method, headers }, (response) => {
+			const raw: string[] = [];
+			for (let i = 0; i + 1 < response.rawHeaders.length; i += 2) {
+				const name = response.rawHeaders[i] as string;
+				if (!HOP_BY_HOP.has(name.toLowerCase())) raw.push(name, response.rawHeaders[i + 1] as string);
+			}
+			res.writeHead(response.statusCode ?? 502, response.statusMessage, raw);
+			response.pipe(res);
+		});
+		upstream.on("error", () => res.destroy());
+		res.on("close", () => upstream.destroy());
+		req.pipe(upstream);
+	});
+	server.on("connect", (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
+		const authority = req.url ?? "";
+		let host: string;
+		try {
+			host = new URL(`http://${authority}`).hostname;
+		} catch {
+			socket.destroy();
+			return;
+		}
+		if (!reachable(host)) {
+			refuse(host);
+			socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+			return;
+		}
+		const port = Number(/:(\d+)$/u.exec(authority)?.[1] ?? 443);
+		const upstream = net.connect(port, host.replace(/^\[|\]$/gu, ""), () => {
+			socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+			if (head.length > 0) upstream.write(head);
+			upstream.pipe(socket);
+			socket.pipe(upstream);
+		});
+		upstream.on("error", () => socket.destroy());
+		socket.on("error", () => upstream.destroy());
+	});
+	server.on("clientError", (_error, socket) => socket.destroy());
+	return new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => resolve((server.address() as net.AddressInfo).port));
+	});
+}
+
+let reachProxyPort: Promise<number> | undefined;
 
 async function ensureContext(): Promise<void> {
 	if (context) return;
 	if (!init) throw new Error("driver not initialised");
 	const { chromium, version } = await playwrightChromium();
+	reachProxyPort ??= startReachProxy();
+	const proxyPort = await reachProxyPort;
 	try {
 		browser = await chromium.launch({
 			headless: true,
 			...(init.channel ? { channel: init.channel } : {}),
-			args: ["--disable-dev-shm-usage"],
+			args: [
+				"--disable-dev-shm-usage",
+				`--proxy-server=http://127.0.0.1:${proxyPort}`,
+				// Loopback goes direct as before. `<-loopback>` drops Chromium's implicit bypass, which also covers
+				// link-local addresses such as a cloud metadata service, so those go through the proxy's check; it must come
+				// first, or it also overrides the loopback rules after it.
+				"--proxy-bypass-list=<-loopback>;localhost;*.localhost;127.0.0.1/8;[::1]",
+			],
 		});
 	} catch (error) {
 		throw new Error(`the browser did not start: ${clip(error instanceof Error ? error.message : error, 600)}`);
@@ -314,6 +417,23 @@ function recordError(id: string, e: Any): void {
 	push({ page: id, kind: "exception", text: clip(e?.message ?? e), ...frameOf(e?.stack) });
 }
 
+function protocolOf(raw: string): string {
+	try {
+		return new URL(raw).protocol;
+	} catch {
+		return "";
+	}
+}
+
+/** A failure the route (blocked by client) or the proxy (tunnel refused, connection dropped) made for a host it refused. */
+function refusedBy(errorText: string, host: string): boolean {
+	return (
+		blockedHosts.has(host) &&
+		!reachable(host) &&
+		/^net::ERR_(?:BLOCKED_BY_CLIENT|TUNNEL_CONNECTION_FAILED|EMPTY_RESPONSE)/u.test(errorText)
+	);
+}
+
 function listen(id: string, page: Any): void {
 	page.on("console", (m: Any) => recordConsole(id, m));
 	page.on("pageerror", (e: Any) => recordError(id, e));
@@ -331,12 +451,15 @@ function listen(id: string, page: Any): void {
 			kind: "request",
 			method: r.method(),
 			url: redact(r.url()),
-			error:
-				errorText.startsWith("net::ERR_BLOCKED_BY_CLIENT") && blockedHosts.has(host)
-					? init?.hermetic
-						? `blocked: ${host} is outside loopback and this browser session is hermetic, so it is not reachable`
+			error: refusedBy(errorText, host)
+				? init?.hermetic
+					? `blocked: ${host} is outside loopback and this browser session is hermetic, so it is not reachable`
+					: attachedTo !== undefined
+						? `blocked: ${host} is outside loopback, all an attached browser's pages may reach (no host is granted while attached)`
 						: `blocked: ${host} is not granted to this browser session; browser open with allow_hosts ${JSON.stringify([host.toLowerCase()])} admits it`
-					: clip(errorText),
+				: /^https?:$/u.test(protocolOf(r.url())) || !errorText.startsWith("net::ERR_BLOCKED_BY_CLIENT")
+					? clip(errorText)
+					: `blocked: ${protocolOf(r.url())} URLs do not load; this browser loads http and https only`,
 			resource: r.resourceType(),
 		});
 	});
@@ -649,6 +772,16 @@ async function run(request: BrowserRunRequest): Promise<BrowserReply> {
 // ── Operations ───────────────────────────────────────────────────────────────
 
 async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
+	let scheme: string | undefined;
+	try {
+		scheme = new URL(request.url).protocol;
+	} catch {
+		// Named below.
+	}
+	if (request.url !== "about:blank" && scheme !== "http:" && scheme !== "https:")
+		throw new Error(
+			`only http and https URLs load in the browser, so ${scheme ?? JSON.stringify(clip(request.url, 80))} is refused and nothing was loaded; read a local file with the read tool, or serve its directory on loopback with op=serve`,
+		);
 	await ensureContext();
 	if (!init?.hermetic) for (const host of request.grantHosts ?? []) grantedHosts.add(host.toLowerCase());
 	let id = request.page;
@@ -674,6 +807,8 @@ async function open(request: BrowserOpenRequest): Promise<BrowserReply> {
 		await settle(page);
 	} catch (error) {
 		loadError = clip(error instanceof Error ? error.message.split("\n")[0] : error, 600);
+		if (newlyBlocked.size > 0 && /ERR_(?:BLOCKED_BY_CLIENT|TUNNEL_CONNECTION_FAILED|EMPTY_RESPONSE)/u.test(loadError))
+			loadError += `; the browser refused ${[...newlyBlocked].join(", ")}, which this session may not reach (a redirect may have led there)`;
 		if (init?.hermetic && /ERR_CONNECTION_REFUSED/u.test(loadError))
 			loadError +=
 				"; this hermetic session has its own loopback, so a server started outside it is not reachable: start it here with op=serve";

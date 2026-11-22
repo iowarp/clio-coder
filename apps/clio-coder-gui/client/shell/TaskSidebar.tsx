@@ -110,15 +110,17 @@ export function TaskSidebar({
 	useEffect(() => {
 		if (!system.data) return;
 		try {
-			sessionStorage.setItem(SYSTEM_STATUS_KEY, rememberedSystem(system.data));
+			sessionStorage.setItem(SYSTEM_STATUS_KEY, rememberedSystem(system.data, platform));
 		} catch {
 			// Storage may be full or disabled; the next load checks again.
 		}
-	}, [system.data]);
+	}, [system.data, platform]);
 	const status = systemStatus(connection, system.data?.findings ?? recalled?.findings, system.isError, true);
-	const platformName = platformLabel(platform);
+	// Until the runtime reports its platform, the recalled one stands in, so a reload never reads "System Local" first.
+	const shownPlatform = platform ?? recalled?.platform;
+	const platformName = platformLabel(shownPlatform);
 	const checkedAt = system.data?.checkedAt ?? recalled?.checkedAt;
-	const systemDetail = `CLIO Coder runtime · ${platform ?? "Local"}\n${status.detail}${checkedAt ? `\nLast checked ${formatTime(checkedAt)}` : ""}`;
+	const systemDetail = `CLIO Coder runtime · ${shownPlatform ?? "Local"}\n${status.detail}${checkedAt ? `\nLast checked ${formatTime(checkedAt)}` : ""}`;
 	const activeTask = sessionIdFromPath(location.pathname);
 	const ordered = useMemo(
 		() =>

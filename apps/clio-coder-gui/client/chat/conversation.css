@@ -110,11 +110,21 @@
 	border-radius: var(--radius-sm);
 	cursor: pointer;
 }
+/* The global field rule makes every input full width; here the radio keeps its own size, so each row's text starts
+   at the same x beside it instead of sharing the row with the radio by content width. */
+.output-detail__option > input {
+	flex: none;
+	width: auto;
+	margin: 0;
+	padding: 0;
+}
 .output-detail__option:hover,
 .output-detail__option:has(input:checked) {
 	background: var(--well);
 }
 .output-detail__option > span {
+	flex: 1;
+	min-width: 0;
 	display: grid;
 	gap: 2px;
 }

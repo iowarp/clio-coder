@@ -95,10 +95,16 @@ function eventLines(events: BrowserEventDelta | undefined): string[] {
 function blockedGrant(
 	events: BrowserEventDelta | undefined,
 	hermetic: boolean,
-): { hosts: string[]; grant: string; line: string } | null {
+	attachedTo?: string,
+): { hosts: string[]; grant?: string; line: string } | null {
 	if (hermetic) return null;
 	const hosts = (events?.blockedHosts ?? []).filter((host) => /^[a-z\d.\-[\]:]{1,253}$/u.test(host));
 	if (hosts.length === 0) return null;
+	if (attachedTo !== undefined)
+		return {
+			hosts,
+			line: `blocked: ${hosts.join(", ")} outside loopback; while attached to ${attachedTo} pages reach loopback only and no host is granted (close detaches; the session's own browser takes allow_hosts)`,
+		};
 	const grant = `browser open with allow_hosts ${JSON.stringify(hosts)}`;
 	return {
 		hosts,
@@ -128,7 +134,7 @@ function formatBrowserReply(
 	op: BrowserOp,
 	reply: BrowserReply,
 	notes: ReadonlyArray<string>,
-	view: { workspace: string; hermetic: boolean },
+	view: { workspace: string; hermetic: boolean; attachedTo?: string },
 ): string {
 	const head: string[] = [];
 	const facts = reply.pageFacts;
@@ -137,7 +143,7 @@ function formatBrowserReply(
 	);
 	if (reply.closed) head.push(reply.closed === "session" ? "session closed" : "page closed");
 	if (reply.attached) head.push(`attached to ${reply.attached} (${reply.pages?.length ?? 0} page(s))`);
-	const blocked = blockedGrant(reply.events, view.hermetic);
+	const blocked = blockedGrant(reply.events, view.hermetic, view.attachedTo);
 	if (blocked !== null) head.push(blocked.line);
 	for (const note of notes) head.push(note);
 	if (op === "serve" && reply.ok && (reply.servers ?? []).length === 0) head.push("no server is running");
@@ -281,6 +287,14 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 						kind: "error",
 						message: `browser open: this browser session is hermetic (loopback only), so ${beyond.join(", ")} is not reachable and nothing was loaded. A hermetic session never grants a host; close the whole session (op=close) and open without hermetic to ask for one.`,
 						details: { op, hermetic: true, unreachable: beyond },
+					};
+				const attachedTo = attached.get(sessionId);
+				const outward = attachedTo !== undefined ? browserOutwardHosts(args, sessionId, { ignoreGrants: true }) : [];
+				if (outward.length > 0)
+					return {
+						kind: "error",
+						message: `browser open: while attached to ${attachedTo}, pages reach loopback only, so ${outward.join(", ")} is refused and nothing was loaded. CLIO Coder cannot check the redirects of a browser it did not start, so allow_hosts and hosts beyond loopback are refused while attached; close (op=close) detaches, and open then uses the session's own browser, where allow_hosts grants a host.`,
+						details: { op, attached: attachedTo, unreachable: outward },
 					};
 			}
 			if (op === "run" && str(args, "script") === undefined && str(args, "file") === undefined)
@@ -469,13 +483,20 @@ export function createBrowserTool(deps: BrowserToolDeps): BrowserTool {
 			} catch (error) {
 				return { kind: "error", message: `browser ${op}: ${error instanceof Error ? error.message : String(error)}` };
 			}
-			const output = formatBrowserReply(op, reply, notes, { workspace, hermetic });
-			const blocked = blockedGrant(reply.events, hermetic);
+			const attachedTo = attached.get(sessionId);
+			const output = formatBrowserReply(op, reply, notes, {
+				workspace,
+				hermetic,
+				...(attachedTo !== undefined ? { attachedTo } : {}),
+			});
+			const blocked = blockedGrant(reply.events, hermetic, attachedTo);
 			const details: Record<string, unknown> = {
 				op,
 				...(reply.pageFacts ? { page: reply.pageFacts.page } : {}),
 				...(reply.shots && reply.shots.length > 0 ? { shots: reply.shots.map((shot) => shot.path) } : {}),
-				...(blocked !== null ? { blockedHosts: blocked.hosts, blockedGrant: blocked.grant } : {}),
+				...(blocked !== null
+					? { blockedHosts: blocked.hosts, ...(blocked.grant !== undefined ? { blockedGrant: blocked.grant } : {}) }
+					: {}),
 				...(reply.servers && reply.servers.length > 0
 					? { servers: reply.servers.map((s) => ({ command: s.command, ready: s.ready, state: s.state })) }
 					: {}),
