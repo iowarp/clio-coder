@@ -2534,6 +2534,8 @@ A pipeline stops before admitting a dependent when a completed step reports fail
 
 An editing mutation report may omit all validations when every checking call it attempted has an observed blocked outcome. It conforms with unmeasured quality. No attempts, unknown outcomes, or any executed check retain the concrete validation requirement.
 
+Every `passed: false` entry in a mutation report states a boolean `baseline`. `"baseline": true` marks a deliberate run before the change, such as a red test-first run, which quality does not judge. `"baseline": false` marks a failure on the changed tree, which fails quality. The run after the change is its own entry. A report that omits `baseline` on a failing entry, or sends a value that is not a JSON boolean, is refused as unmeasured with a reason showing both forms, and the bounded repair asks the worker again. A baseline whose host check is still red on the final tree still fails quality. Verifier and reviewer reports carry no `baseline`, because their `passed: false` is the verdict itself.
+
 Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases of the canonical `npm run test` command across all three managers. The test aliases also match the package-manager-neutral `verify(check="test")` summary recorded as `npm run test`. Other script names remain distinct; `npm run test:unit` does not ground a claim of `npm test`.
 
 A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct.

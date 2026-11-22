@@ -901,7 +901,7 @@ a qualified embedding route before use. Results locate originals that must be
 read before making claims. See [Semantic context](semantic-context.md) and
 `src/tools/context/surface.ts`.
 
-`context(scope="budget")` accepts only `scope` and retrieves the native main session's live request budget. Worker and external-agent registries without that session port report it unavailable.
+`context(scope="budget")` accepts only `scope` and retrieves the native main session's live request budget. Worker and external-agent registries without that session port report it unavailable. The result also carries an `economics` view of the caller's own position. A session sees its spend (`usd`, a `basis` of `measured`, `estimated`, `lower-bound`, `unstated` or `unobserved`, the priced ceiling and the headroom), the quota pool of its chat route as the provider last reported it (access, overage, each window's label, used percentage, reset and verdict, the reading's age and a `fresh` flag), and the forecast lines a dispatch plan card would print for every dispatchable agent, at most twelve with the rest counted. A stale reading is shown as stale, spend with no telemetry read model is `unobserved` and never zero, and the plan, balance text and account identity are left out. A worker sees only its own run envelope (tool calls, retries, wall time, deadline, response time), with `spend` and `pool` set to `withheld`. The view is information: it changes no routing, admission or ceiling.
 
 `context(scope="settings")` reads an allowlisted view of the running session's
 effective configuration. It explains autonomy, worker approvals, and configured
