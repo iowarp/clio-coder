@@ -258,7 +258,7 @@ function readRecord(path: string): WriterSetRecord | null {
 		return value;
 	} catch (error) {
 		throw new Error(
-			`writer set record is unreadable at ${path}: ${error instanceof Error ? error.message : String(error)}; remove it once no Clio process writes in that checkout`,
+			`writer set record is unreadable at ${path}: ${error instanceof Error ? error.message : String(error)}; remove it once no CLIO Coder process writes in that checkout`,
 		);
 	}
 }

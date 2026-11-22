@@ -1869,7 +1869,7 @@ const CONTENT_PARTS = {
 			const dirs = resolveClioDirs();
 			const info = getVersionInfo();
 			return [
-				["Clio Coder", readClioVersionLabel()],
+				["CLIO Coder", readClioVersionLabel()],
 				["Node.js", info.node],
 				["Platform", info.platform],
 				["Config dir", shortenPath(dirs.config)],

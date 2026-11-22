@@ -17,7 +17,7 @@ const migration: Migration = {
 		const stat = lstatSync(dir, { throwIfNoEntry: false });
 		if (stat === undefined) return report;
 		if (!stat.isDirectory()) {
-			report.attention.push(`${dir} is not a directory, so it was left in place; Clio no longer reads it.`);
+			report.attention.push(`${dir} is not a directory, so it was left in place; CLIO Coder no longer reads it.`);
 			return report;
 		}
 		let removed = 0;
@@ -36,7 +36,7 @@ const migration: Migration = {
 			} catch (error) {
 				// The records are inert, so a failed removal is reported and never stops the upgrade.
 				report.attention.push(
-					`${path} could not be removed (${error instanceof Error ? error.message : String(error)}); Clio no longer reads it, so it can be deleted by hand.`,
+					`${path} could not be removed (${error instanceof Error ? error.message : String(error)}); CLIO Coder no longer reads it, so it can be deleted by hand.`,
 				);
 				kept.push(name);
 			}
@@ -46,11 +46,13 @@ const migration: Migration = {
 				rmdirSync(dir);
 			} catch (error) {
 				report.attention.push(
-					`${dir} could not be removed (${error instanceof Error ? error.message : String(error)}); Clio no longer reads it.`,
+					`${dir} could not be removed (${error instanceof Error ? error.message : String(error)}); CLIO Coder no longer reads it.`,
 				);
 			}
 		} else {
-			report.attention.push(`${dir} still holds ${kept.join(", ")}, so it was left in place; Clio no longer reads it.`);
+			report.attention.push(
+				`${dir} still holds ${kept.join(", ")}, so it was left in place; CLIO Coder no longer reads it.`,
+			);
 		}
 		report.changed.push(
 			`Retired the fleet workspace locks (${removed} record(s) removed); a fleet run now joins the checkout's writer set.`,

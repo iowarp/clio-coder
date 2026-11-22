@@ -38,7 +38,7 @@ const migration: Migration = {
 				if (removed) deleted += 1;
 			} catch (error) {
 				report.attention.push(
-					`${path} was left as it was (${error instanceof Error ? error.message : String(error)}); the writer set refuses it, so remove it once no Clio process writes in that checkout.`,
+					`${path} was left as it was (${error instanceof Error ? error.message : String(error)}); the writer set refuses it, so remove it once no CLIO Coder process writes in that checkout.`,
 				);
 			}
 		}

@@ -557,7 +557,7 @@ test("an open worker card leaves when another Clio process answered its ask, and
 		});
 		strictEqual(state, "closed");
 		ok(
-			notices.some((text) => /answered in another Clio session/u.test(text)),
+			notices.some((text) => /answered in another CLIO Coder session/u.test(text)),
 			notices.join("\n"),
 		);
 	} finally {

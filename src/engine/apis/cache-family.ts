@@ -120,7 +120,7 @@ function reportLaneFallback(conversation: string, lane: number, error: unknown, 
 	fallbackNoticed.add(conversation);
 	const why =
 		timeoutMs !== null
-			? `another Clio process held the dispatch admission lock past ${timeoutMs} ms`
+			? `another CLIO Coder process held the dispatch admission lock past ${timeoutMs} ms`
 			: `the dispatch admission store failed (${error instanceof Error ? error.message : String(error)})`;
 	emitLaneFallbackNotice({
 		kind: "cache-lane-fallback",

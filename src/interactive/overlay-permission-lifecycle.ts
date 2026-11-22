@@ -595,7 +595,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					: cause === "revoked"
 						? `${call} no longer needs an answer: the ask was withdrawn, and the call did not run.`
 						: cause === "answered"
-							? `${call} was answered in another Clio session.`
+							? `${call} was answered in another CLIO Coder session.`
 							: `Your answer to ${call} came too late. It did not run, ${after}.`;
 		deps.appendNotice("warn", `${what} /view dispatch:${entry.runId}`);
 	};
