@@ -129,6 +129,16 @@ upgrade migrates your settings.
   `--fork`, `fleet run --detach` with `fleet wait`, and
   `clio-coder config get|set|unset`. The `data` tool reads Zarr and inspects
   ADIOS2.
+- **The agent gets a browser, and you get a second terminal.** The `browser`
+  tool loads pages, runs Playwright scripts and takes screenshots inside the
+  same sandbox as `bash`, reaching loopback until you grant a host.
+  `/attach` lets `clio-coder session attach <id>` watch a running session,
+  answer its approvals or steer it, on the same host or over ssh.
+- **Fleet runs stay out of your checkout.** A playbook step with scope
+  `worktree` runs in one kept task worktree, and `clio-coder fleet land`
+  previews and lands the result.
+- **Bring your setup.** `clio-coder interop adopt` ports Claude Code and Codex
+  command hooks, stdio MCP servers and user instructions.
 
 **What breaks.** Each command and flag has one spelling, and earlier
 spellings are gone: `run` reads stdin only when you pass `-`,

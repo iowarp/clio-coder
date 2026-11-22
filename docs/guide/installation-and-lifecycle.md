@@ -257,7 +257,7 @@ parameter, no workspace parameter, no unofficial Node mirror and no forced Node 
 `install.cmd` has no options of its own. It passes its arguments to
 `install.ps1`, so a CMD user writes PowerShell parameter names such as
 `-Version 0.6.0`. Both installers end with the next step for this home, then `Desktop app: clio-coder gui`.
-The next step is `Clio Coder <version> is installed.`, `Next:  cd <your project> && clio-coder` and one line
+The next step is `CLIO Coder <version> is installed.`, `Next:  cd <your project> && clio-coder` and one line
 about the first launch, such as `The first launch sets up a model. Found: ANTHROPIC_API_KEY.` or
 `Chat uses <target> / <model>.` A package older than 0.7.1 gets `Run: clio-coder` instead. While the launcher
 directory is not on `PATH`, a closing line names the launcher's full path to run until it is.

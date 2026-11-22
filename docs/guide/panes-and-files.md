@@ -101,9 +101,9 @@ session runs in the plain terminal without a launch notice, a pane feature such
 as `/panes`, `/files` or `Alt+E` answers ``terminal panes are not installed. Run
 `clio-coder panes install`, then restart `clio-coder` ``, and `clio-coder doctor`
 warns; `clio-coder panes install` adds them. A home that already
-has panes updates them when the pinned version moves: the launch prints `Clio
+has panes updates them when the pinned version moves: the launch prints `CLIO
 Coder: setting up terminal panes (one time)...` and downloads the new pin,
-waiting at most 30 seconds. If that fails, it prints ``Clio Coder: terminal
+waiting at most 30 seconds. If that fails, it prints ``CLIO Coder: terminal
 panes unavailable (<reason>). Continuing in this terminal; run `clio-coder
 panes install` to retry.`` and the session runs in the plain terminal. Later
 launches skip that update for a day, or until the pinned version changes, and
@@ -181,7 +181,7 @@ INFO external tool cliamp   not found (install with `clio-coder tools install cl
 INFO files pane profile     /home/you/.cache/clio-coder/yazi/profile (missing); user config /home/you/.config/yazi is separate and untouched
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
-OK   naming panes           no legacy Clio Coder pane ownership tokens or watch titles found
+OK   naming panes           no legacy CLIO Coder pane ownership tokens or watch titles found
 OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is writable
 ```
 
@@ -299,7 +299,7 @@ When Herdr declines a move, the notice names the reason (`the files pane did not
   terminal is restored:
 
   ```text
-  Clio left 1 pane open in herdr: shell (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.
+  CLIO Coder left 1 pane open in herdr: shell (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.
   ```
 
   Nothing is printed when only docks were open.

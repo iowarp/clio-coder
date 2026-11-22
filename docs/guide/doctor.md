@@ -47,7 +47,7 @@
 | Row(s) | Checks and failure conditions |
 | --- | --- |
 | `repair` | `!!` (`--fix could not finish: <reason>`) if `--fix` threw while repairing directories. |
-| `Clio Coder version`, `node version`, `platform`, `engine runtime` | CLI version, Node `>= 22.19.0`, OS/arch, bundled/SDK runtime presence. |
+| `CLIO Coder version`, `node version`, `platform`, `engine runtime` | CLI version, Node `>= 22.19.0`, OS/arch, bundled/SDK runtime presence. |
 | `install method` | Kind (`installer`, `npm`, `pnpm`, `bun`, `homebrew`, `winget`, `source`, `local`, `unknown`), tracking/pin state (`follows <channel>; background updates on` or `off (<blocker>)` where blocker is `env`\|`setting`\|`installer`; `pinned to <version> since <date> (<origin>); release with clio-coder upgrade --channel <channel>`; npm/pnpm/bun `<kind> global; follows latest through <kind>; update after exit on\|off (<reason>)`), last background update / waiting `pid@host` holds. `WARN` on launcher/Node mismatch, failed/waiting update, or `unknown` layout. |
 | `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir` | Absolute, distinct, non-nesting paths (including symlinks). |
 | `settings.yaml*` | `settings.yaml` (`OK` or `!!` invalid keys), `settings.yaml mode` (`WARN` > `0600` POSIX; `--fix` prints `tightened <old> -> 600`; skipped on Windows), `settings.yaml booleans` (`WARN` YAML 1.1 `on`/`off`), `settings.yaml retired values`, `settings.yaml repair` / `repair skipped` (`WARN` when aliases/anchors/tags block rewrite). |
