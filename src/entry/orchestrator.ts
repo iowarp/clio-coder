@@ -3745,6 +3745,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (options.headless) {
 		recordBoot();
 		if (options.headless.compact) return runHeadlessCompaction(chat, options.headless.compact, { termination, timer });
+		dispatch?.primeRouteQuota?.();
 		// Operatorless: there is no TUI subscriber to turn a loop-guard interrupt
 		// into a run stop, so a degenerate local model would spin until an
 		// external timeout (each call blocked, the agent loop never aborted). Wire
