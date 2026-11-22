@@ -13027,10 +13027,15 @@ export function createDispatchBundle(
 		}
 		const verdict =
 			record.tool === WRITE_ROOTS_GRANT_TOOL
-				? evaluateWriteRootGrant({ autonomy: input.autonomy, attended: grantAttended() })
+				? evaluateWriteRootGrant({
+						autonomy: input.autonomy,
+						...(input.operatorAutonomy !== undefined ? { operatorAutonomy: input.operatorAutonomy } : {}),
+						attended: grantAttended(),
+					})
 				: evaluateMainGrant({
 						record,
 						autonomy: input.autonomy,
+						...(input.operatorAutonomy !== undefined ? { operatorAutonomy: input.operatorAutonomy } : {}),
 						attended: grantAttended(),
 						safety,
 						...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),

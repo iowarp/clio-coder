@@ -8,6 +8,7 @@ import {
 import { ToolNames } from "../../core/tool-names.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { DispatchRequest, MainGrantOutcome } from "./contract.js";
+import { mainGrantBelowYolo } from "./grant-authority.js";
 import type { GrantBroker, GrantDecision, GrantRecord } from "./grant-broker.js";
 import { withDispatchIntentWriteRoots } from "./intent.js";
 import { resolveDispatchPathScope } from "./path-scope.js";
@@ -214,17 +215,16 @@ export type WriteRootGrantVerdict =
 	| { kind: "deny"; reason: string };
 
 /**
- * Who may widen a write root. At yolo the main agent's approval stands; below
- * yolo an attended operator decides, and with nobody to ask it is denied.
+ * Who may widen a write root. At unconfined yolo the main agent's approval stands; below it (contained yolo included)
+ * an attended operator decides, and with nobody to ask it is denied.
  */
-export function evaluateWriteRootGrant(input: { autonomy: AutonomyLevel; attended: boolean }): WriteRootGrantVerdict {
+export function evaluateWriteRootGrant(input: {
+	autonomy: AutonomyLevel;
+	operatorAutonomy?: AutonomyLevel;
+	attended: boolean;
+}): WriteRootGrantVerdict {
 	if (input.autonomy === "yolo") return { kind: "grant" };
-	return input.attended
-		? { kind: "ask-operator", reason: `the main agent runs at autonomy ${input.autonomy}, so the operator decides` }
-		: {
-				kind: "deny",
-				reason: `the main agent runs at autonomy ${input.autonomy} with no operator to ask; only --autonomy yolo lets it widen write roots`,
-			};
+	return mainGrantBelowYolo(input);
 }
 
 /**
