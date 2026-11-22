@@ -10,7 +10,9 @@ import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
+import { hadOldYolo } from "../../src/domains/lifecycle/state.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
@@ -349,17 +351,42 @@ test("the contained migration records the confinement once and keeps an operator
 	match(readFileSync(settingsPath(), "utf8"), /yoloConfinement: unconfined/u);
 });
 
-test("the contained-yolo notice states the sandbox backend and judge state a yolo run records", () => {
+test("the contained-yolo notice states the sandbox backend and judge state a yolo run records", async (t) => {
 	const bwrap = { available: true, backend: "bwrap" as const, executable: "/usr/bin/bwrap", reason: null };
-	const off = yoloContainedMigrationNotice("off", bwrap, true);
+	const off = yoloContainedMigrationNotice({ sandbox: "off", judge: { enabled: true } }, bwrap, true);
 	match(off, /without an OS sandbox \(safety\.sandbox is off\)/u);
 	doesNotMatch(off, /OS sandbox and the safety judge stay on|in the bwrap/u);
 	match(off, /the safety judge reviews/u);
-	const on = yoloContainedMigrationNotice("auto", bwrap, false);
+	const on = yoloContainedMigrationNotice({ sandbox: "auto", judge: { enabled: false } }, bwrap, true);
 	match(on, /commands run in the bwrap OS sandbox/u);
 	match(on, /the safety judge is off \(safety\.judge\.enabled\)/u);
 	const none = { available: false, backend: null, executable: null, reason: "bwrap not found" };
-	match(yoloContainedMigrationNotice("auto", none, true), /without an OS sandbox \(bwrap not found\)/u);
+	match(
+		yoloContainedMigrationNotice({ sandbox: "auto", judge: { enabled: true } }, none, true),
+		/without an OS sandbox \(bwrap not found\)/u,
+	);
+	// Row 362 (10): only a home upgraded from before contained yolo (0.7.0) hears of a change and an old yolo.
+	match(on, /^Yolo now runs contained: .*To keep the old unconfined yolo, set/u);
+	const fresh = yoloContainedMigrationNotice({ sandbox: "auto", judge: { enabled: true } }, bwrap, false);
+	match(fresh, /^Yolo runs contained: commands run in the bwrap OS sandbox/u);
+	match(fresh, /To run yolo unconfined, set safety\.yoloConfinement: unconfined/u);
+	doesNotMatch(fresh, /\bnow\b|\bold\b/u);
+	const home = await isolateClioEnv("clio-yolo-home-history-");
+	t.after(() => home.restore());
+	strictEqual(hadOldYolo(), false);
+	const record = (fields: Record<string, string>) => {
+		mkdirSync(clioStateDir(), { recursive: true });
+		writeFileSync(
+			join(clioStateDir(), "home.json"),
+			JSON.stringify({ version: "0.8.5", platform: "linux", nodeVersion: "v22.19.0", ...fields }),
+		);
+	};
+	record({ repairedAt: "2026-11-21T00:00:00.000Z" });
+	strictEqual(hadOldYolo(), false);
+	record({ upgradedFrom: "0.8.4" });
+	strictEqual(hadOldYolo(), false);
+	record({ upgradedFrom: "0.6.9" });
+	strictEqual(hadOldYolo(), true);
 });
 
 test("contained yolo runs an outward call the judge allows only when the operator named it", async () => {

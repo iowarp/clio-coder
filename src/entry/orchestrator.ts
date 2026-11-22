@@ -94,7 +94,7 @@ import {
 	isLoadableExtension,
 } from "../domains/extensions/index.js";
 import { InteropDomainModule } from "../domains/interop/index.js";
-import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
+import { describeUpgradeNotice, ensureClioState, hadOldYolo, takeUpgradeNotice } from "../domains/lifecycle/index.js";
 import {
 	createBackgroundCallJournal,
 	createBackgroundMemoryRouting,
@@ -2079,15 +2079,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			yoloHeldAtBoot = true;
 		}
 	}
-	// Yolo became contained (ob-yolo D1). An operator who used yolo before
-	// hears it once: interactive after accepting yolo, headless on a yolo run.
+	// Yolo became contained (ob-yolo D1). A home that has not recorded its confinement hears it once (interactive after
+	// accepting yolo, headless on a yolo run); only one upgraded from before contained yolo hears of a change.
 	if (
 		yoloRefusal === null &&
 		(interactive ? savedSafety.yoloAccepted === true : startupAutonomy === "yolo") &&
 		savedSafety.yoloConfinement !== "unconfined" &&
 		recordYoloConfinementOnce()
 	) {
-		const notice = yoloContainedMigrationNotice(savedSafety.sandbox, sandboxAvailability(), savedSafety.judge.enabled);
+		const notice = yoloContainedMigrationNotice(savedSafety, sandboxAvailability(), hadOldYolo());
 		if (interactive) initialNotices.push(notice);
 		else process.stderr.write(`clio-coder: ${notice}\n`);
 	}
