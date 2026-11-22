@@ -464,6 +464,23 @@ describe("execution scheduler lifecycle", () => {
 		strictEqual(outcome.loops[0]?.repairs, 2);
 	});
 
+	it("ships seat-stretch as static scout, build and one-revision review steps, one worker at a time (S17)", () => {
+		const path = new URL("../../src/domains/agents/playbooks/seat-stretch.md", import.meta.url);
+		const playbook = parsePlaybook(readFileSync(path, "utf8"), path.pathname);
+		deepStrictEqual(
+			playbook.steps.map((step) => [step.kind, step.id, step.dependencies]),
+			[
+				["agent", "scout", []],
+				["agent", "build", ["scout"]],
+				["loop", "review", ["build"]],
+			],
+		);
+		strictEqual(playbook.maxWorkers, 1);
+		strictEqual(playbook.onFailure, "stop");
+		strictEqual(playbook.budgetUsd, null);
+		ok(playbook.body.includes("{{task}}"));
+	});
+
 	it("gives a build-review check step its own verification task, never the builder's prompt", () => {
 		const path = new URL("../../src/domains/agents/playbooks/build-review.md", import.meta.url);
 		const playbook = parsePlaybook(readFileSync(path, "utf8"), path.pathname);

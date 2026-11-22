@@ -5,7 +5,7 @@ import { clioProjectRoot } from "../core/project-root.js";
 import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
 import type { ErrorSlug } from "./kit/slugs.js";
 
-const BUILTINS = ["build-review", "build-test", "sdlc"] as const;
+const BUILTINS = ["build-review", "build-test", "sdlc", "seat-stretch"] as const;
 const SAFE_STEM = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/u;
 
 export function runPlaybookNew(argv: ReadonlyArray<string>): number {

@@ -26,7 +26,7 @@ Author and check repo-owned playbooks. The fleet runs them: clio-coder fleet run
 Subcommands:
   list [--json]                 list builtin, plugin, user and project playbooks with validation status
   new <name> --from <builtin> [--json]
-                                copy the build-review, build-test, or sdlc playbook into .clio-coder/playbooks/
+                                copy the build-review, build-test, sdlc, or seat-stretch playbook into .clio-coder/playbooks/
   validate <name> [--var key=value ...] [--json]
                                 run a playbook's execution preflight without side effects
   graph <name> [--var key=value ...] [--json]

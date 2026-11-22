@@ -19,8 +19,8 @@ Documentation does not establish the current availability of a workflow or speci
 Before proposing playbook commands or YAML, call clio_docs with query="fleet authoring"
 and read the bundled source `domains/agents/playbooks/build-review.md` under the
 Clio source path. Use the actual schema, not guessed keys such as `after`.
-`clio-coder playbook new <name> --from <builtin>` copies build-review, build-test, or
-sdlc into `.clio-coder/playbooks/<name>.md`. These templates use version 3 YAML frontmatter
+`clio-coder playbook new <name> --from <builtin>` copies build-review, build-test,
+sdlc, or seat-stretch into `.clio-coder/playbooks/<name>.md`. These templates use version 3 YAML frontmatter
 with name, description, steps (kind/id/agent/scope/dependencies), maxWorkers,
 onFailure, and a Markdown task body containing `{{task}}`. The `--from` argument
 is required: for example, `clio-coder playbook new plan-review --from build-review`.
