@@ -3,8 +3,9 @@
  * Run with `pnpm economy:check`; `--as-of YYYY-MM-DD` audits row coverage on another day (default: today, UTC).
  *
  * Errors (exit 1): malformed rows, wrong units, unsourced rates or tier predicates, bad thresholds, overlapping
- * rows, gaps between a model's standard rows, a model with no current or future standard row. Warnings: a model
- * whose list price starts later (future-only), an ended promotion, a row verified more than 30 days ago.
+ * rows, gaps between a model's standard rows, a model with no standard row effective on the day (future-only or
+ * ended) unless a promotion running that day ends where an announced standard row starts. Warnings: an ended
+ * promotion, a row verified more than 30 days ago.
  * Reads only the packaged file; no network.
  */
 
