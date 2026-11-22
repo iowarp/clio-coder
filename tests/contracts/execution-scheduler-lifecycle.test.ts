@@ -1,12 +1,13 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { parsePlaybook } from "../../src/domains/agents/playbook.js";
+import { parsePlaybook, renderPlaybookPrompt } from "../../src/domains/agents/playbook.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
 import { compileExecutionPlan, spliceExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionSchedulerAdapter, ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import { executePlan } from "../../src/domains/dispatch/execution-scheduler.js";
+import { fleetNodeTaskBrief } from "../../src/domains/dispatch/fleet-node-prompt.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -457,6 +458,50 @@ describe("execution scheduler lifecycle", () => {
 		strictEqual(outcome.loops[0]?.resolved, true);
 		strictEqual(outcome.loops[0]?.attempts, 3);
 		strictEqual(outcome.loops[0]?.repairs, 2);
+	});
+
+	it("gives a build-review check step its own verification task, never the builder's prompt", () => {
+		const path = new URL("../../src/domains/agents/playbooks/build-review.md", import.meta.url);
+		const playbook = parsePlaybook(readFileSync(path, "utf8"), path.pathname);
+		const vars = { task: "Add clamp(x, lo, hi) to src/math.js" };
+		const p = compileFleetExecutionPlan({
+			playbook,
+			vars,
+			task: renderPlaybookPrompt(playbook.body, vars),
+			resolveAgent: (context) =>
+				context.gateRole === "reviewer"
+					? {
+							requestedAuthority: "read-only",
+							approvedAuthority: "read-only",
+							expectedResultContract: "review-verdict",
+							executionRole: "reviewer",
+						}
+					: {
+							requestedAuthority: "workspace-edit",
+							approvedAuthority: "workspace-edit",
+							expectedResultContract: "mutation-report",
+							executionRole: "builder",
+						},
+		});
+		const task = (id: string): string => {
+			const found = p.steps.find((candidate) => candidate.id === id);
+			return found?.kind === "agent" ? found.task : "";
+		};
+		ok(task("build").startsWith("Implement this change"));
+		ok(task("review.repair.1").startsWith("Implement this change"));
+		for (const [id, authors] of [
+			["review.check.1", "`build` (coder)"],
+			["review.check.2", "`build` (coder), `review.repair.1` (coder)"],
+		] as const) {
+			// What `fleet view` shows as the step's task is the verification brief.
+			const brief = fleetNodeTaskBrief(task(id));
+			ok(brief.startsWith("Verify the change"), brief);
+			ok(!brief.includes("Implement this change"), brief);
+			ok(!brief.includes("If it fails you"), brief);
+			ok(brief.includes(vars.task), brief);
+			ok(brief.includes(authors), brief);
+			ok(task(id).includes("`review-verdict`"));
+		}
 	});
 
 	it("admission failure launches no work, and invalid replay releases the reservation", async () => {
