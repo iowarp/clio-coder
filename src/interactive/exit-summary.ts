@@ -15,7 +15,7 @@ import {
 	frame,
 	innerDivider,
 } from "./theme/index.js";
-import { USAGE_NOT_MEASURED } from "./usage-words.js";
+import { economyReceipt, USAGE_NOT_MEASURED } from "./usage-words.js";
 
 const count = (value: number): string => value.toLocaleString("en-US");
 const countLabel = (value: number | string, noun: string): string =>
@@ -29,6 +29,15 @@ const SPEND_NOT_AVAILABLE = "not available";
  * spend, so it says so: `172,879 tokens each` beside one worker's outcome read as that worker's 75,311 (bt-11). A
  * share keeps the session row's own mark, so an unpriced route reads `cost not measured` here as it does on /usage.
  */
+/**
+ * The route-priced cost, then the receipt the economics fold gives: extra cost, seat credits, API equivalent. A
+ * declared pool fee belongs to its period, so it is never on this per-session line.
+ */
+function sessionCostFacts(spend: ExitSummarySnapshot["spend"]): string[] {
+	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
+	return [spend.cost, ...(spend.economy ? economyReceipt(spend.economy, null).map((part) => part.text) : [])];
+}
+
 function verifiedFacts(spend: ExitSummarySnapshot["spend"]): string[] {
 	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
 	const verified = spend.verified;
@@ -315,7 +324,7 @@ export function renderExitSummary(
 				: "not reported",
 		]);
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.tokens) : [SPEND_NOT_AVAILABLE]);
-		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE, visitTime]);
+		add("Session cost", [...sessionCostFacts(spend), visitTime]);
 		add("Session verified", verifiedFacts(spend));
 		// What Clio decided while the operator was away is never folded away.
 		if (unattended !== null) add("Unattended", unattended);
@@ -352,7 +361,7 @@ export function renderExitSummary(
 			...(spend.kind === "ready" && spend.callTimeCoverage !== null ? [spend.callTimeCoverage] : []),
 		]);
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.breakdown) : [SPEND_NOT_AVAILABLE]);
-		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE]);
+		add("Session cost", sessionCostFacts(spend));
 		add("Session verified", verifiedFacts(spend));
 		if (style === "report" && spend.kind === "ready" && spend.cache !== null) {
 			add("Cache", [

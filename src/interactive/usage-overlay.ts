@@ -1,6 +1,7 @@
 import type { OutputStyle } from "../core/defaults.js";
 import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
+import type { EconomyProjection } from "../core/telemetry/economy.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import { renderUpperBound } from "../core/telemetry/render.js";
@@ -21,10 +22,20 @@ import { createLocalMachineSampler } from "./footer/system-metrics.js";
 import { type HealthDataOptions, healthData, healthLines } from "./health-overlay.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
-import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
+import {
+	bindingQuotaWindow,
+	bindingWindowPart,
+	linkedQuotaAccounts,
+	quotaMeter,
+	renderQuotaAccounts,
+	renderWorkerUsage,
+} from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, positionRow, rule } from "./theme/index.js";
 import {
+	economyEvidence,
+	economyReceipt,
 	NO_VERIFIED_OUTCOME,
+	type ReceiptPart,
 	sentCallCount,
 	sessionVerifiedOutcomes,
 	USAGE_NOT_MEASURED,
@@ -238,6 +249,7 @@ function summaryBlock(
 	verified: VerifiedOutcomeCount | null,
 	contentWidth: number,
 	style: OutputStyle,
+	receipt: readonly ReceiptPart[] = [],
 ): string[] {
 	const session = view.session();
 	const byRole = view.cost("role");
@@ -260,6 +272,7 @@ function summaryBlock(
 				? [["never sent", `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"}`] as const]
 				: []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
+			...(receipt.length > 0 ? [["receipt", receiptText(receipt)] as const] : []),
 			...(verified !== null ? verifiedRows(view, verified) : []),
 			...tokenRows(view, undefined, style),
 			...(cached && style === "detailed"
@@ -302,6 +315,82 @@ function verifiedRows(view: TelemetryView, outcomes: VerifiedOutcomeCount): Arra
 	];
 }
 
+/** The receipt's parts on one line; a part with an unknown is drawn in the neutral unknown tone, never as a fault. */
+function receiptText(parts: readonly ReceiptPart[]): string {
+	const theme = clioTheme();
+	return parts
+		.map((part) => (part.unknown ? theme.fg("unknownValue", part.text) : part.text))
+		.join(theme.fg("annotation", " · "));
+}
+
+/**
+ * The session's receipt with the binding window of the quota accounts its calls draw on, linked by the calls' runtimes
+ * and targets, when any is linked.
+ */
+function sessionReceipt(economy: SessionEconomy, quota: QuotaProviders, now: number): ReceiptPart[] {
+	const binding = bindingQuotaWindow(
+		linkedQuotaAccounts(quota, {
+			runtimeIds: economy.runtimeIds,
+			targetIds: economy.projection.groups.target.map((group) => group.key),
+		}),
+	);
+	return economyReceipt(economy.projection.total, binding === null ? null : bindingWindowPart(binding, now));
+}
+
+/** The receipt's evidence, expanded under the Session tab; a value with an unknown keeps the neutral tone. */
+function evidenceLines(economy: EconomyProjection, contentWidth: number): string[] {
+	const theme = clioTheme();
+	const rows = economyEvidence(economy, "session");
+	if (rows.length === 0) return [];
+	return [
+		theme.style("sectionHeading", "Receipt evidence", { bold: true }),
+		...kvBlock(
+			rows.map(([label, value, note, unknown]) => {
+				const shown = unknown ? theme.fg("unknownValue", value) : value;
+				return note === undefined ? ([label, shown] as const) : ([label, shown, note] as const);
+			}),
+			contentWidth,
+		),
+	];
+}
+
+/**
+ * The funding pools this session's calls drew on, beside the account limits: each pool's extra cost and API
+ * equivalent. A session's projection carries no declared fee, which belongs to its pool's period; any it does carry
+ * is listed once per period.
+ */
+function poolLines(economy: EconomyProjection, contentWidth: number): string[] {
+	const theme = clioTheme();
+	const pools = economy.groups.pool;
+	if (pools.length === 0) return [];
+	return [
+		"",
+		theme.style("sectionHeading", "Funding pools · this session", { bold: true }),
+		...wrapTextWithAnsi(
+			theme.fg("annotation", "Declared fees belong to their period, not a session: clio-coder usage report."),
+			contentWidth,
+		),
+		...kvBlock(
+			pools.flatMap((pool) => [
+				pool.contributions > 0
+					? ([`pool ${pool.key}`, pool.display.extra, pool.display.apiEquivalent] as const)
+					: ([`pool ${pool.key}`, theme.fg("annotation", "no calls this session")] as const),
+				...pool.periods.flatMap((period) =>
+					period.fees.map(
+						(fee) =>
+							[
+								"  fee",
+								fee.display,
+								`from ${fee.period.start.slice(0, 10)} · paid by ${fee.payer} · once per period`,
+							] as const,
+					),
+				),
+			]),
+			contentWidth,
+		),
+	];
+}
+
 /** The Models tab: one block per `target/model`, the reported model where the provider named one. */
 function modelLines(view: TelemetryView, contentWidth: number, style: OutputStyle): string[] {
 	const theme = clioTheme();
@@ -333,6 +422,14 @@ interface UsageData {
 	recall: RecallTelemetry | null;
 	/** The session's verified outcomes, re-read with the recall fold rather than per frame; null without a ledger. */
 	verified: VerifiedOutcomeCount | null;
+	/** The session's economics folded once (token economy S10), re-read when the view changes; null without a view. */
+	economy: SessionEconomy | null;
+}
+
+/** The session's folded economics and the runtimes its calls ran on, which link its quota accounts. */
+interface SessionEconomy {
+	projection: EconomyProjection;
+	runtimeIds: readonly string[];
 }
 
 export interface OpenUsageOverlayOptions {
@@ -453,21 +550,23 @@ function renderActivity(
 		].filter((part) => part !== null);
 		if (usage.length > 0) lines.push(...row("Usage", theme.fg("annotation", usage.join(" · "))));
 	}
-	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
+	// The window that binds first, the fullest one, not whichever account happened to be listed first.
+	const window = bindingQuotaWindow(quota);
 	if (window) {
-		const reported = factKnownValue(window.item.usedPct.fact);
-		const pct = Math.max(0, Math.min(100, reported));
 		const meter =
-			Number.isFinite(reported) && style !== "compact"
-				? `${quotaMeter(pct, Math.min(28, Math.max(1, contentWidth - 30)))} `
+			window.pct !== null && style !== "compact"
+				? `${quotaMeter(Math.min(100, window.pct), Math.min(28, Math.max(1, contentWidth - 30)), window.severity)} `
 				: "";
 		lines.push(
 			...row(
 				"Plan",
-				`${meter}${window.item.usedPct.display} used ${theme.fg("annotation", `· ${window.entry.provider} ${window.item.label}`)}`,
+				`${meter}${window.used} used ${theme.fg("annotation", `· ${window.stale ? "STALE · " : ""}${window.provider} ${window.window}`)}`,
 			),
 		);
 	} else lines.push(...row("Plan", theme.fg("annotation", "no subscription window reported")));
+	// The Plan row above names the binding window, so the receipt here starts at the extra cost.
+	const receipt = data.economy ? economyReceipt(data.economy.projection.total, null) : [];
+	if (receipt.length > 0) lines.push(...row("Receipt", receiptText(receipt)));
 	return lines;
 }
 
@@ -497,6 +596,8 @@ const USAGE_TABS = ["Activity", "Accounts", "Session", "Models", "Workers", "Hea
 
 class UsageOverlayBody implements Component {
 	tab = 0;
+	/** The Session tab shows the receipt's evidence; `e` toggles it, and Detailed opens with it shown. */
+	evidence: boolean | null = null;
 	private offsets = [0, 0, 0, 0, 0, 0];
 	private height = 20;
 	private pageHeight = 16;
@@ -521,6 +622,10 @@ class UsageOverlayBody implements Component {
 		private readonly onTabShown: (tab: number) => void = () => {},
 	) {}
 
+	showsEvidence(): boolean {
+		return this.evidence ?? this.getOutputStyle() === "detailed";
+	}
+
 	/** Whether the open view has more than it shows, so the scroll keys move something. */
 	overflows(): boolean {
 		return this.lineCount > this.pageHeight;
@@ -534,6 +639,7 @@ class UsageOverlayBody implements Component {
 	handleInput(data: string): void {
 		const selected = (["1", "2", "3", "4", "5", "6"] as const).findIndex((key) => matchesKey(data, key));
 		if (selected >= 0) this.tab = selected;
+		else if (matchesKey(data, "e") && this.tab === 2) this.evidence = !this.showsEvidence();
 		else if (matchesKey(data, "tab") || matchesKey(data, "right")) this.tab = (this.tab + 1) % USAGE_TABS.length;
 		else if (matchesKey(data, "shift+tab") || matchesKey(data, "left"))
 			this.tab = (this.tab + USAGE_TABS.length - 1) % USAGE_TABS.length;
@@ -595,6 +701,7 @@ class UsageOverlayBody implements Component {
 							),
 							contentWidth,
 						)),
+				...(data.economy ? poolLines(data.economy.projection, contentWidth) : []),
 			];
 		else if (this.tab === 2)
 			body = [
@@ -606,8 +713,16 @@ class UsageOverlayBody implements Component {
 						]
 					: []),
 				...(data.view
-					? summaryBlock(data.view, data.recall, data.verified, contentWidth, style)
+					? summaryBlock(
+							data.view,
+							data.recall,
+							data.verified,
+							contentWidth,
+							style,
+							data.economy ? sessionReceipt(data.economy, quota, this.activity.now()) : [],
+						)
 					: [theme.fg("annotation", data.missing)]),
+				...(data.economy && this.showsEvidence() ? ["", ...evidenceLines(data.economy.projection, contentWidth)] : []),
 				"",
 				rule(theme, contentWidth),
 				...(style === "detailed"
@@ -675,8 +790,30 @@ export function openUsageOverlay(
 	const sessions = options?.listSessions?.() ?? [];
 	// The local machine is sampled only while the Health tab is on screen.
 	const machine = createLocalMachineSampler(() => tui.requestRender());
+	// The fold reads every settled call, so it runs once per view, not once per frame.
+	const economies = new WeakMap<TelemetryView, SessionEconomy>();
+	const economyOf = (view: TelemetryView | null): SessionEconomy | null => {
+		if (!view) return null;
+		const cached = economies.get(view);
+		if (cached) return cached;
+		const runtimeIds = new Set<string>();
+		for (const record of view.callRecords())
+			if (record.k === "call.started") runtimeIds.add(record.data.target.runtimeId);
+		const economy = { projection: view.economy(), runtimeIds: [...runtimeIds] };
+		economies.set(view, economy);
+		return economy;
+	};
 	const body = new UsageOverlayBody(
-		() => ({ view: readModel?.live() ?? null, missing: readModel ? NOT_STARTED : NOT_AVAILABLE, recall, verified }),
+		() => {
+			const view = readModel?.live() ?? null;
+			return {
+				view,
+				missing: readModel ? NOT_STARTED : NOT_AVAILABLE,
+				recall,
+				verified,
+				economy: economyOf(view),
+			};
+		},
 		() => {
 			quotaFeed.peekSnapshots();
 			return readModel?.quota().providers ?? [];
@@ -711,6 +848,17 @@ export function openUsageOverlay(
 		footerHint: (innerWidth) =>
 			buildResponsiveHint([
 				{ key: "1–6 / Tab", verb: "view", critical: true },
+				// The evidence is folded away in Standard, so its key outlives the scroll keys on a narrow rail.
+				...(body.tab === 2
+					? [
+							{
+								key: "e",
+								verb: body.showsEvidence() ? "hide evidence" : "evidence",
+								short: body.showsEvidence() ? "hide" : "evidence",
+								critical: true,
+							},
+						]
+					: []),
 				...(body.overflows()
 					? [
 							{ key: "↑↓", verb: "scroll" },

@@ -7,10 +7,11 @@
  * `3 calls had no usage data`.
  */
 
+import type { EconomyProjection, EconomyQuantities, UnitTotal, UnitTotalRefusal } from "../core/telemetry/economy.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { factKnownValue } from "../core/telemetry/known.js";
-import { renderCountSum, renderUsdSum } from "../core/telemetry/render.js";
+import { renderCountSum, renderUnitTotal, renderUsdSum } from "../core/telemetry/render.js";
 import {
 	countVerifiedOutcomes,
 	perVerifiedOutcome,
@@ -305,4 +306,165 @@ export function verifiedOutcomeWords(view: TelemetryView, outcomes: VerifiedOutc
 		tokens: usageSaysNothing(tokens) ? USAGE_NOT_MEASURED : tokens,
 		cost,
 	};
+}
+
+// ---- the economics receipt (token economy S12) ----
+
+type EconomyTotal = UnitTotal | UnitTotalRefusal;
+
+/** Some contribution fed the total, known or not; a total no contribution fed has nothing to say. */
+function totalFed(total: EconomyTotal | FactSum): boolean {
+	if ("refused" in total) return true;
+	const sum = "sum" in total ? total.sum : total;
+	return sum.coverage.measured + sum.coverage.estimated + sum.unknownCount > 0;
+}
+
+/** Some contribution measured or estimated the total; a bare unknown on the receipt line would name nothing. */
+function totalKnownFed(total: EconomyTotal): boolean {
+	if ("refused" in total) return true;
+	return total.sum.coverage.measured + total.sum.coverage.estimated > 0;
+}
+
+/** A total with an unknown or refused part, which a surface draws in the neutral unknown tone, never as a fault. */
+function totalUnknown(total: EconomyTotal | FactSum): boolean {
+	if ("refused" in total) return true;
+	return ("sum" in total ? total.sum : total).unknownCount > 0;
+}
+
+/** One part of the receipt line and whether it carries an unknown. */
+export interface ReceiptPart {
+	text: string;
+	unknown: boolean;
+}
+
+/**
+ * The scope's one-line receipt: the binding quota window first when the route draws on a subscription, then the extra
+ * cost to the user, any seat credits, and the API equivalent. It folds the calls' economics only, so a declared pool
+ * fee, which belongs to its period, never appears on it, whatever scope (a turn or a session) it sums. Every amount is
+ * the S10 projection's own display, so a sub-cent amount keeps its digits and never reads as free. Empty when no call
+ * contributed.
+ */
+export function economyReceipt(total: EconomyQuantities, window: ReceiptPart | null): ReceiptPart[] {
+	if (total.contributions === 0) return [];
+	return [
+		...(window !== null ? [window] : []),
+		{ text: total.display.extra, unknown: totalUnknown(total.marginalCharge) },
+		// Seat credits read as `N AI credits`, so only a route that debited a seat shows them here; the evidence keeps the rest.
+		...(totalKnownFed(total.seatCredits)
+			? [{ text: total.display.seatCredits, unknown: totalUnknown(total.seatCredits) }]
+			: []),
+		...(totalFed(total.apiEquivalent)
+			? [{ text: total.display.apiEquivalent, unknown: totalUnknown(total.apiEquivalent) }]
+			: []),
+	];
+}
+
+/** The receipt as plain words, for a surface that draws it without tones. */
+export function receiptLine(parts: readonly ReceiptPart[]): string {
+	return parts.map((part) => part.text).join(" · ");
+}
+
+/** One evidence row: label, value, an optional note, and whether the value carries an unknown. */
+export type EvidenceRow = readonly [label: string, value: string, note: string | undefined, unknown: boolean];
+
+/** Whose word the seat-credit debit is: the provider's report wins over the listing estimate, call by call. */
+function seatCreditsNote(total: EconomyQuantities["seatCredits"]): string | undefined {
+	if ("refused" in total) return undefined;
+	const { measured, estimated } = total.sum.coverage;
+	if (measured > 0 && estimated > 0) return `${measured} provider-reported, ${estimated} estimated debits`;
+	if (measured > 0) return "provider-reported debit";
+	return estimated > 0 ? "estimated debit" : undefined;
+}
+
+/**
+ * What the receipt stands on, for the expanded view: each additive fact and the comparison, the reference rows it was
+ * priced from, each declared fee once per pool and period, the period cash, and the sources it was folded from. A
+ * session's projection carries no declared fee, which belongs to its pool's period, so it shows no period cash and
+ * points at the report that has them.
+ */
+export function economyEvidence(economy: EconomyProjection, scope: "session" | "period" = "period"): EvidenceRow[] {
+	const total = economy.total;
+	if (total.contributions === 0 && economy.fees.length === 0) return [];
+	const row = (label: string, value: string, note: string | undefined, unknown: boolean): EvidenceRow => [
+		label,
+		value,
+		note,
+		unknown,
+	];
+	const sources = economy.sources;
+	return [
+		row(
+			"extra cost",
+			total.display.extra,
+			"actual only with a provider or statement assertion",
+			totalUnknown(total.marginalCharge),
+		),
+		...(totalFed(total.providerCharge)
+			? [row("provider charge", total.display.providerCharge, undefined, totalUnknown(total.providerCharge))]
+			: []),
+		...(totalFed(total.seatCredits)
+			? [
+					row(
+						"seat credits",
+						total.display.seatCredits,
+						seatCreditsNote(total.seatCredits),
+						totalUnknown(total.seatCredits),
+					),
+				]
+			: []),
+		...(totalFed(total.apiEquivalent)
+			? [
+					row(
+						"API equivalent",
+						renderUnitTotal(total.apiEquivalent),
+						"public list price, never cash",
+						totalUnknown(total.apiEquivalent),
+					),
+				]
+			: []),
+		...economy.references.map((reference) =>
+			row(
+				"priced from",
+				`${reference.referenceRowId} as of ${reference.asOf}`,
+				`${reference.basis} · ${reference.contributions} ${reference.contributions === 1 ? "call" : "calls"}`,
+				false,
+			),
+		),
+		...(totalFed(total.energyKwh)
+			? [
+					row(
+						"electricity",
+						total.display.energy,
+						undefined,
+						totalUnknown(total.energyKwh) || totalUnknown(total.energyCost),
+					),
+				]
+			: []),
+		...economy.fees.map((fee) =>
+			row(
+				"fee",
+				fee.display,
+				`pool ${fee.poolId} · from ${fee.period.start.slice(0, 10)} · paid by ${fee.payer} · once per period`,
+				fee.payer === "unknown",
+			),
+		),
+		scope === "session" && economy.fees.length === 0
+			? row("declared fees", "per pool and period", "clio-coder usage report lists each once", false)
+			: row(
+					"period cash",
+					economy.cash.display,
+					"personal fees, extra charges, electricity",
+					economy.cash.unknownCount > 0,
+				),
+		row(
+			"sources",
+			[
+				`${sources.attempts} ${sources.attempts === 1 ? "call" : "calls"}`,
+				`${sources.runs} ${sources.runs === 1 ? "run" : "runs"}`,
+				...(sources.gaps > 0 ? [`${sources.gaps} unreadable`] : []),
+			].join(" · "),
+			undefined,
+			sources.gaps > 0,
+		),
+	];
 }

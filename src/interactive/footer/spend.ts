@@ -1,5 +1,6 @@
 import type { CallRowV1, FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
+import type { EconomyQuantities } from "../../core/telemetry/economy.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
@@ -43,6 +44,10 @@ export interface FooterSpend {
 	promptCache: { read: string; write: string; uncached: string; verdict: string } | null;
 	/** The newest main call's speed once it settles; the streaming turn's live rate is the footer's own. */
 	speed: FooterSpeed | null;
+	/** The session's economics total as the S10 projection folds it, which the receipt chips render; fees stay out. */
+	economy?: EconomyQuantities;
+	/** The targets the projection's calls drew on, which link the quota accounts whose window leads the receipt. */
+	economyTargets?: readonly string[];
 }
 /**
  * Output over the call's generation time (first token to settle) and its TTFT (send to first token), both journaled
@@ -120,6 +125,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 		const quantity = turnQuantity(metric);
 		return quantity ? measuredCount(quantity) : null;
 	};
+	const economy = view.economy();
 	const spend: FooterTelemetry = {
 		kind: "ready",
 		tokens: contributed(session.totals.tokens) ? renderCompactCount(session.totals.tokens.fact) : null,
@@ -149,6 +155,8 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 				}
 			: null,
 		speed: main ? footerSpeed(main) : null,
+		economy: economy.total,
+		economyTargets: economy.groups.target.map((group) => group.key),
 	};
 	spends.set(view, spend);
 	return spend;

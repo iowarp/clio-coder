@@ -3,6 +3,7 @@ import { relative, resolve } from "node:path";
 import { relativePathEscapes } from "../core/path-containment.js";
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
+import type { EconomyQuantities } from "../core/telemetry/economy.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { renderUpperBound } from "../core/telemetry/render.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -190,6 +191,8 @@ export type ExitSpend =
 			 * reported its cache read.
 			 */
 			cache: CacheWords | null;
+			/** The session's economics total as the S10 projection folds it, for the receipt beside the cost. */
+			economy?: EconomyQuantities;
 	  };
 
 /**
@@ -271,6 +274,7 @@ export function exitSpend(
 		})),
 		verified: verifiedOutcomeWords(view, sessionVerifiedOutcomes(view, entries)),
 		cache: cacheShareWords(view),
+		economy: view.economy().total,
 	};
 }
 

@@ -22,6 +22,7 @@ import {
 	chipRows,
 	clioTheme,
 	emptyState,
+	formatCompactMs,
 	GLYPH,
 	meter,
 	NARROW_WIDTH,
@@ -275,6 +276,109 @@ export function routeWeeklyQuota(
 		account: account.provider,
 		severity: severityForPct(factKnownValue(window.usedPct.fact)),
 	};
+}
+
+/**
+ * Subscription runtimes whose local credential owns a quota account, by the account's provider id: the quota
+ * registry's runtime map, spelled here so the views import no adapter.
+ */
+const SUBSCRIPTION_RUNTIME_PROVIDER: Readonly<Record<string, string>> = {
+	"claude-code": "claude-code",
+	"claude-sdk": "claude-code",
+	"anthropic-max": "anthropic-max",
+	"antigravity-code": "antigravity",
+	"openai-codex": "codex",
+	"codex-cli": "codex-cli",
+	"copilot-sdk": "copilot",
+};
+
+/**
+ * The quota accounts a route or a session's targets draw from: an account whose provider owns the runtime's local
+ * credential, or whose credential names one of the targets (a streamed Codex reading is keyed `codex:<target>`). A
+ * remote node's credential is not this machine's, so it links none.
+ */
+export function linkedQuotaAccounts(
+	providers: QuotaProviders,
+	scope: { runtimeIds?: readonly string[]; targetIds?: readonly string[]; node?: string | undefined },
+): QuotaProviders {
+	if (scope.node && scope.node !== "local") return [];
+	const owners = new Set((scope.runtimeIds ?? []).flatMap((id) => SUBSCRIPTION_RUNTIME_PROVIDER[id] ?? []));
+	const targets = new Set(scope.targetIds ?? []);
+	return providers.filter(
+		(account) =>
+			owners.has(account.provider) ||
+			account.credentials.some((credential) => targets.has(credential) || targets.has(credential.split(":")[1] ?? "")),
+	);
+}
+
+/** The window that binds first: the fullest known one, then the earlier reset. */
+export interface BindingQuotaWindow {
+	provider: string;
+	window: string;
+	used: string;
+	/** The known percent used, or null when the reading did not say. */
+	pct: number | null;
+	severity: QuotaSeverity;
+	stale: boolean;
+	resetsAt: string | null;
+	observedAt: string | null;
+}
+
+export function bindingQuotaWindow(accounts: QuotaProviders): BindingQuotaWindow | null {
+	let best: { pct: number; reset: number; binding: BindingQuotaWindow } | null = null;
+	for (const account of accounts) {
+		if (account.status !== "ok") continue;
+		for (const window of account.windows) {
+			const known = factKnownValue(window.usedPct.fact);
+			const pct = Number.isFinite(known) ? known : -1;
+			const resetMs = window.resetsAt === null ? Number.POSITIVE_INFINITY : Date.parse(window.resetsAt);
+			const reset = Number.isFinite(resetMs) ? resetMs : Number.POSITIVE_INFINITY;
+			if (best !== null && (pct < best.pct || (pct === best.pct && reset >= best.reset))) continue;
+			best = {
+				pct,
+				reset,
+				binding: {
+					provider: clean(account.displayName || account.provider),
+					window: clean(window.label ?? window.key),
+					used: window.usedPct.display,
+					pct: pct >= 0 ? pct : null,
+					severity: severityForPct(Math.max(0, pct)),
+					stale: account.stale,
+					resetsAt: window.resetsAt,
+					observedAt: account.observedAt,
+				},
+			};
+		}
+	}
+	return best?.binding ?? null;
+}
+
+/**
+ * `Codex weekly 41% used · resets in 2d 3h`; a stale reading says so first, and an unreported percent or reset says
+ * unknown.
+ */
+function bindingWindowWords(binding: BindingQuotaWindow, now = Date.now()): string {
+	const reset = quotaResetDuration(binding.resetsAt, now);
+	return `${binding.stale ? "STALE · " : ""}${binding.provider} ${binding.window} ${
+		binding.pct === null ? "use unknown" : `${binding.used} used`
+	} · ${reset !== null ? `resets in ${reset}` : binding.resetsAt === null ? "reset unknown" : "reset passed"}`;
+}
+
+/** The binding window as a receipt part: its words, in the neutral unknown tone when the percent or reset is unknown. */
+export function bindingWindowPart(binding: BindingQuotaWindow, now = Date.now()): { text: string; unknown: boolean } {
+	return { text: bindingWindowWords(binding, now), unknown: binding.pct === null || binding.resetsAt === null };
+}
+
+/**
+ * What a worker held back by its provider's limit waits on: the binding window with its last reading and reset, never
+ * a bare "endpoint busy"; with no reading linked to the route it says the window is unknown.
+ */
+export function quotaWaitWords(binding: BindingQuotaWindow | null, now = Date.now()): string {
+	if (binding === null) return "waiting for quota · window unknown (no reading linked to this route) · reset unknown";
+	const read = binding.observedAt === null ? null : Date.parse(binding.observedAt);
+	const age =
+		read === null || !Number.isFinite(read) ? "never read" : `read ${formatCompactMs(Math.max(0, now - read))} ago`;
+	return `waiting for quota on ${bindingWindowWords(binding, now)} · ${age}`;
 }
 
 export function workerQuotaLabel(row: Pick<DispatchBoardRow, "runtimeId" | "node">, providers: QuotaProviders): string {
