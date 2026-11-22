@@ -26,6 +26,7 @@ import {
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { DocumentKind } from "./read-documents/index.js";
+import { READ_PATHS_MAX, readPathsShapeError } from "./read-fan-out.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { toolResultContextText } from "./result-disposition.js";
 import { isSessionOffloadPath } from "./result-shaping.js";
@@ -866,9 +867,14 @@ export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision; notebooks, PDFs (pages) and zip/tar archives (member) render as text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
-	}KB per call by default; a truncated result says how to continue with offset/limit. Clio's own docs/*.md default to an ${DEFAULT_DOCS_HEAD_LINES}-line head plus section index when offset, limit and tail are omitted; use clio_docs hit read.args for a section, or offset=1 without limit for an explicit full read within the caps. Files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. line_numbers=true prefixes each line with its 1-based number and " | ", which is not file content.`,
+	}KB per call by default; a truncated result says how to continue with offset/limit. Several files in one call: paths, an array of up to ${READ_PATHS_MAX}; each is checked and read as its own read and the results share that one per-call cap, so prefer it to a shell loop of cat. Clio's own docs/*.md default to an ${DEFAULT_DOCS_HEAD_LINES}-line head plus section index when offset, limit and tail are omitted; use clio_docs hit read.args for a section, or offset=1 without limit for an explicit full read within the caps. Files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. line_numbers=true prefixes each line with its 1-based number and " | ", which is not file content.`,
 	parameters: Type.Object({
-		path: Type.String({ description: "File path (relative or absolute)." }),
+		path: Type.Optional(Type.String({ description: "File path (relative or absolute)." })),
+		paths: Type.Optional(
+			Type.Array(Type.String(), {
+				description: "Several file paths read in one call, instead of path; offset, limit and tail apply to each.",
+			}),
+		),
 		line_numbers: Type.Optional(
 			Type.Boolean({
 				description: "Prefix line numbers for citations.",
@@ -883,8 +889,18 @@ export const readTool: ToolSpec = {
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args, options): Promise<ToolResult> {
+		// The registry expands `paths` into single-path reads before admission, so each path meets the safety
+		// policy as its own call. A caller that reaches the body with the array still set never went through that.
+		if (Array.isArray(args.paths) && args.paths.length > 0) {
+			return {
+				kind: "error",
+				message: readPathsShapeError(args) ?? "read: several paths are not available on this route; read one path per call",
+			};
+		}
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
+		// One slice of a multi-path call holds only what the call's shared cap has left.
+		const callCap = Math.min(readMaxBytes(), options?.readCapBytes ?? Number.POSITIVE_INFINITY);
 		const filePath = resolveReadPath(pathArg);
 		const moved = hookLandingRefusal("read", options?.hookLanding, filePath);
 		if (moved !== null) return { kind: "error", message: moved };
@@ -926,11 +942,7 @@ export const readTool: ToolSpec = {
 			// step: the open below awaits, and parallel siblings reserving meanwhile must see it. Finalize reconciles it
 			// to the bytes returned; the finally block refunds every early return and error. An exhausted slice charges
 			// nothing.
-			const reservation = reserveObservation(
-				readMaxBytes(),
-				poolOptions,
-				readReservationBytes(pathArg, request, entry.size),
-			);
+			const reservation = reserveObservation(callCap, poolOptions, readReservationBytes(pathArg, request, entry.size));
 			held = reservation;
 			commitObservationReservation(reservation);
 			if (reservation.exhausted) {
@@ -955,13 +967,13 @@ export const readTool: ToolSpec = {
 			await readTestSeams.afterIdentity?.(file, filePath);
 			const first = await readExact(handle, 0, Math.min(file.bytes, READ_SCAN_CHUNK_BYTES));
 			if (detectSupportedImageMimeType(first) !== null) {
-				widenObservationReservation(reservation, readMaxBytes());
+				widenObservationReservation(reservation, callCap);
 				return await readImage(handle, pathArg, file, reservation, options);
 			}
 			const kind = detectDocumentKind(filePath, first);
 			if (kind !== null) {
 				// A rendered document's size is not its file's: a PDF's text or an archive's listing can exceed it.
-				widenObservationReservation(reservation, readMaxBytes());
+				widenObservationReservation(reservation, callCap);
 				const documentRequest = {
 					...request,
 					...(pages !== undefined ? { pages } : {}),
@@ -982,7 +994,7 @@ export const readTool: ToolSpec = {
 				file.bytes <= first.length ? first[file.bytes - 1] : (await readExact(handle, file.bytes - 1, 1))[0];
 			const bundledDoc = defaultDocsWindow && (await isBundledDoc(filePath));
 			// The section index rides beside the head, so a bundled doc keeps the per-call cap it always had.
-			if (bundledDoc) widenObservationReservation(reservation, readMaxBytes());
+			if (bundledDoc) widenObservationReservation(reservation, callCap);
 			const docsIndex = bundledDoc ? await bundledDocIndex(handle, file, reservation.callCapBytes, request.signal) : null;
 			if (docsIndex !== null) request.limit = DEFAULT_DOCS_HEAD_LINES;
 			const plan: ReadPlan = {
@@ -998,7 +1010,7 @@ export const readTool: ToolSpec = {
 			// no continuation. Widen toward the per-call cap the read had before C-17 and read the window again.
 			if (!("kind" in view) && view.shownCount === 0 && view.readRange.partialLine && docsIndex === null) {
 				const before = reservation.callCapBytes;
-				widenObservationReservation(reservation, readMaxBytes());
+				widenObservationReservation(reservation, callCap);
 				if (reservation.callCapBytes > before) {
 					plan.cap = reservation.callCapBytes;
 					view = await readView();

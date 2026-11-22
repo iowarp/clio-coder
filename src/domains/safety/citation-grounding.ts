@@ -88,6 +88,15 @@ function recordCitationEvidence(
 	cwd: string,
 ): void {
 	if (toolName === ToolNames.Read) {
+		// A multi-path read is N reads joined (src/tools/read-fan-out.ts); each path's own details ground its lines.
+		if (Array.isArray(details?.reads)) {
+			for (const read of details.reads as ReadonlyArray<{ path?: unknown; details?: Readonly<Record<string, unknown>> }>) {
+				if (typeof read.path !== "string") continue;
+				const { paths: _paths, ...single } = args ?? {};
+				recordCitationEvidence(evidence, toolName, { ...single, path: read.path }, read.details, cwd);
+			}
+			return;
+		}
 		if (typeof args?.path !== "string" || args.path.length === 0) return;
 		const file = resolveReadPath(args.path, cwd);
 		if (args.line_numbers !== true) {

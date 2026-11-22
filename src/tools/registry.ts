@@ -92,6 +92,13 @@ import { approvalGiver, gateReasonText, withApprovalNote } from "./approval-note
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import { settleObservationCharge } from "./observation.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
+import {
+	joinReadFanOut,
+	READ_PATHS_MIN_SLICE_BYTES,
+	type ReadFanOutEntry,
+	readFanOut,
+	readFanOutCapBytes,
+} from "./read-fan-out.js";
 import { type ToolResultDigest, type ToolResultDisposition, toolResultContextText } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
 import { shellExitSpeaksForCommand } from "./shell-exit-scope.js";
@@ -661,6 +668,8 @@ export interface ToolInvokeOptions {
 	 * `runObservationPool` in `observation.ts` sizes it.
 	 */
 	observationRunPool?: { limitBytes: number; resultCapBytes: number };
+	/** What the shared per-call cap of a multi-path `read` has left for this one path; set only by the registry. */
+	readCapBytes?: number;
 	/** Trusted model the call runs on, as tool hooks receive it; the worker's own model in a worker. */
 	model?: ModelRunInfo;
 	signal?: AbortSignal;
@@ -3001,6 +3010,74 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		verdict.denial !== undefined &&
 		(verdict.denial.layer !== "operator_approval" || unattendedDenials.has(verdict.denial));
 
+	/** Admit and run one call, with the main agent's denial memory around it. */
+	const invokeSingle: ToolRegistry["invoke"] = async (call, options) => {
+		return withRegistryScope(options, async () => {
+			if (deps.principal === "worker") return invokeAdmitted(call, options);
+			// A refusal is final for the identical call within the turn: the same
+			// policy, the same operator and the same server would answer it the
+			// same way. Refusing the repeat here, before admission, keeps it from
+			// asking the operator again or reaching the server again, where the
+			// loop guard would otherwise allow two more attempts first. A call with
+			// no turn (/council, an ACP host dispatch) is the operator's own
+			// command, so nothing is remembered for it.
+			const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+			if (level !== deniedCallsLevel) {
+				deniedCalls.clear();
+				deniedCallsLevel = level;
+			}
+			const turnId = options?.turnId;
+			const key =
+				turnId === undefined
+					? null
+					: `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
+			const prior = key === null ? undefined : deniedCalls.get(key);
+			if (prior?.denial !== undefined) {
+				const decision = blockDecision(
+					prior.decision,
+					prior.decision.kind === "allow"
+						? { short: prior.reason, detail: prior.reason, hints: [] }
+						: prior.decision.rejection,
+					{ reasonCode: DENIED_REPEAT_REASON_CODE },
+				);
+				const repeat: Extract<RegistryVerdict, { kind: "blocked" }> = {
+					kind: "blocked",
+					reason: `${repeatedDenialReason(effectiveToolCall(call.tool, call.args).toolName, prior.denial)}\n${prior.reason}`,
+					decision,
+					// A repeat of an ask nobody could approve is still that unanswered
+					// ask, so receipts keep counting it as a permission request.
+					...(prior.deniedPark === true ? { deniedPark: true } : {}),
+					denial: prior.denial,
+				};
+				recordRegistryDisposition(call, decision, "blocked", { reasonCode: DENIED_REPEAT_REASON_CODE });
+				return observeBlockedAttempt(call, repeat, options) ?? repeat;
+			}
+			const verdict = await invokeAdmitted(call, options);
+			// An operator's answer can grant what an earlier call was refused.
+			if (effectiveToolCall(call.tool, call.args).toolName === ToolNames.AskUser && askUserAnswered(verdict)) {
+				deniedCalls.clear();
+				if ((deps.principal ?? "main") === "main") deps.onOperatorAnswered?.(operatorAnswers(verdict), options);
+			}
+			if (key !== null && rememberedRefusal(verdict) && verdict.denial !== undefined) {
+				// Only a remembered refusal tells the model its repeat is refused
+				// without running; an attended operator's refusal, a worker's and a
+				// turnless call's are asked or run again.
+				const remembered: Extract<RegistryVerdict, { kind: "blocked" }> = {
+					...verdict,
+					denial: { ...verdict.denial, repeatRefused: true },
+				};
+				deniedCalls.delete(key);
+				deniedCalls.set(key, remembered);
+				if (deniedCalls.size > DENIED_CALL_MEMORY_LIMIT) {
+					const oldest = deniedCalls.keys().next().value;
+					if (oldest !== undefined) deniedCalls.delete(oldest);
+				}
+				return remembered;
+			}
+			return verdict;
+		});
+	};
+
 	return {
 		register(spec) {
 			tools.set(spec.name, spec);
@@ -3026,70 +3103,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			});
 		},
 		async invoke(call, options) {
-			return withRegistryScope(options, async () => {
-				if (deps.principal === "worker") return invokeAdmitted(call, options);
-				// A refusal is final for the identical call within the turn: the same
-				// policy, the same operator and the same server would answer it the
-				// same way. Refusing the repeat here, before admission, keeps it from
-				// asking the operator again or reaching the server again, where the
-				// loop guard would otherwise allow two more attempts first. A call with
-				// no turn (/council, an ACP host dispatch) is the operator's own
-				// command, so nothing is remembered for it.
-				const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-				if (level !== deniedCallsLevel) {
-					deniedCalls.clear();
-					deniedCallsLevel = level;
+			// A multi-path read is N single-path reads: each takes the single-call entry, so admission, the safety
+			// policy, denial memory, hooks and the observation pool all see one path per call, as they always have.
+			const fanOut = call.tool === ToolNames.Read ? readFanOut(call.args) : null;
+			if (fanOut === null) return invokeSingle(call, options);
+			const reads: ReadFanOutEntry[] = [];
+			let left = readFanOutCapBytes();
+			for (const path of fanOut.paths) {
+				if (reads.length > 0 && (left < READ_PATHS_MIN_SLICE_BYTES || options?.signal?.aborted === true)) {
+					reads.push({ path, verdict: null });
+					continue;
 				}
-				const turnId = options?.turnId;
-				const key =
-					turnId === undefined
-						? null
-						: `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
-				const prior = key === null ? undefined : deniedCalls.get(key);
-				if (prior?.denial !== undefined) {
-					const decision = blockDecision(
-						prior.decision,
-						prior.decision.kind === "allow"
-							? { short: prior.reason, detail: prior.reason, hints: [] }
-							: prior.decision.rejection,
-						{ reasonCode: DENIED_REPEAT_REASON_CODE },
-					);
-					const repeat: Extract<RegistryVerdict, { kind: "blocked" }> = {
-						kind: "blocked",
-						reason: `${repeatedDenialReason(effectiveToolCall(call.tool, call.args).toolName, prior.denial)}\n${prior.reason}`,
-						decision,
-						// A repeat of an ask nobody could approve is still that unanswered
-						// ask, so receipts keep counting it as a permission request.
-						...(prior.deniedPark === true ? { deniedPark: true } : {}),
-						denial: prior.denial,
-					};
-					recordRegistryDisposition(call, decision, "blocked", { reasonCode: DENIED_REPEAT_REASON_CODE });
-					return observeBlockedAttempt(call, repeat, options) ?? repeat;
-				}
-				const verdict = await invokeAdmitted(call, options);
-				// An operator's answer can grant what an earlier call was refused.
-				if (effectiveToolCall(call.tool, call.args).toolName === ToolNames.AskUser && askUserAnswered(verdict)) {
-					deniedCalls.clear();
-					if ((deps.principal ?? "main") === "main") deps.onOperatorAnswered?.(operatorAnswers(verdict), options);
-				}
-				if (key !== null && rememberedRefusal(verdict) && verdict.denial !== undefined) {
-					// Only a remembered refusal tells the model its repeat is refused
-					// without running; an attended operator's refusal, a worker's and a
-					// turnless call's are asked or run again.
-					const remembered: Extract<RegistryVerdict, { kind: "blocked" }> = {
-						...verdict,
-						denial: { ...verdict.denial, repeatRefused: true },
-					};
-					deniedCalls.delete(key);
-					deniedCalls.set(key, remembered);
-					if (deniedCalls.size > DENIED_CALL_MEMORY_LIMIT) {
-						const oldest = deniedCalls.keys().next().value;
-						if (oldest !== undefined) deniedCalls.delete(oldest);
-					}
-					return remembered;
-				}
-				return verdict;
-			});
+				const verdict = await invokeSingle(
+					{ tool: ToolNames.Read, args: { ...fanOut.shared, path } },
+					{ ...options, readCapBytes: left },
+				);
+				reads.push({ path, verdict });
+				if (verdict.kind === "ok" && verdict.result.kind === "ok") left -= Buffer.byteLength(verdict.result.output);
+			}
+			return joinReadFanOut(reads);
 		},
 		async requestReadRootApproval(root, options, task) {
 			return withRegistryScope(options, async () => {
