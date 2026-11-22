@@ -13,6 +13,8 @@
  */
 
 import { renderUsdLimit } from "../../core/telemetry/render.js";
+import type { ExecutionPlan } from "../../domains/dispatch/execution-plan.js";
+import { executionPlanIsolationText, executionPlanStepScope } from "../../domains/dispatch/execution-plan.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
 import { budgetSpendText } from "../../domains/scheduling/budget.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
@@ -78,7 +80,7 @@ function formatArgv(argv: ReadonlyArray<string>): string {
 }
 
 /** One step as its table cells: id, what runs it, where and how, its scope and boundary. */
-function stepCells(step: FleetRunPreviewStep): string[] {
+function stepCells(step: FleetRunPreviewStep, plan: Pick<ExecutionPlan, "isolation">): string[] {
 	// `repair repair 1` when the loop is named after its role; one word then.
 	const loop =
 		step.loop === undefined
@@ -88,7 +90,7 @@ function stepCells(step: FleetRunPreviewStep): string[] {
 				: ` (${step.loop.loopId} ${step.loop.role} ${step.loop.attempt})`;
 	const id = `${step.stepId}${loop}`;
 	if (step.replayed === true) return [id, "replay", "prior sealed result, not dispatched", ""];
-	const boundary = `${step.scope} · ${formatWriteBoundary(step.writes)}`;
+	const boundary = `${executionPlanStepScope(plan, step.scope)} · ${formatWriteBoundary(step.writes)}`;
 	if (step.kind === "code") {
 		const gate = step.gate === undefined ? "" : ` · gate path ${step.gate.path}`;
 		const where = step.argv === undefined ? `command ${step.commandId ?? "?"}${gate}` : `${formatArgv(step.argv)}${gate}`;
@@ -203,6 +205,10 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 			width,
 		),
 	];
+	// Where the run writes is part of what approving does, so it sits beside it.
+	if (preview.plan.isolation === "worktree") {
+		rows.push(...factRows(theme, [{ label: "worktree", value: executionPlanIsolationText(), tone: "info" }], width));
+	}
 	if (preview.resume !== undefined) {
 		const replayed = [...preview.resume.replayed.keys()];
 		// The workspace is shown so the operator sees which checkout's prefix is replayed.
@@ -219,7 +225,7 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 				meta: `${wave.steps.length} step${wave.steps.length === 1 ? "" : "s"}`,
 			}),
 		);
-		const cells = wave.steps.map(stepCells);
+		const cells = wave.steps.map((step) => stepCells(step, preview.plan));
 		// Nothing about a step may drop out at any width: who runs it, where, and
 		// what it may write are the approval. The table is used only when every
 		// column fits whole; otherwise each step is a block of facts under its id.

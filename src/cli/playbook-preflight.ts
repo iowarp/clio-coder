@@ -5,6 +5,7 @@ import {
 	loadPlaybookCommands,
 	type Playbook,
 	type PlaybookCommandRegistry,
+	type PlaybookStepScope,
 	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
 import { discoverAgentRecipes } from "../domains/agents/registry.js";
@@ -22,10 +23,8 @@ export interface PlaybookPreflightResult {
 }
 
 /** Every agent a playbook dispatches, including both halves of every loop. */
-export function playbookAgents(
-	playbook: Playbook,
-): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
-	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
+export function playbookAgents(playbook: Playbook): Array<{ id: string; agent: string; scope: PlaybookStepScope }> {
+	const agents: Array<{ id: string; agent: string; scope: PlaybookStepScope }> = [];
 	for (const step of playbook.steps) {
 		if (step.kind === "agent") {
 			agents.push({ id: step.id, agent: step.agent, scope: step.scope });

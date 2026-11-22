@@ -1922,6 +1922,17 @@ export function settleTaskWorktree(worktree: TaskWorktree, accounted?: TaskWorkt
 	});
 }
 
+/**
+ * Take a kept worktree back for a run that continues in it (a resumed isolated fleet): the claim is active again and
+ * names this process, so `fleet land` reports it running and restart recovery reads a crash honestly.
+ */
+export function reopenTaskWorktree(worktree: TaskWorktree): void {
+	assertOwnership(worktree);
+	const ownerPath = claimPathFor(worktree.root, worktree.runId);
+	const marker = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
+	replaceMarker(ownerPath, { ...marker, state: "active" satisfies TaskWorktreeState, owner: currentProcessLease() });
+}
+
 function accountedField(accounted: TaskWorktreePreview): {
 	accounted: { commit: string; untracked: object; ignored?: ReadonlyArray<string> };
 } {

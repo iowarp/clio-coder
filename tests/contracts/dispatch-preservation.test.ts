@@ -538,6 +538,86 @@ test("a two-cycle fleet loop persists independently recoverable states before re
 		await env.restore();
 	}
 });
+test("a worktree-scoped fleet runs every step in one kept task worktree that fleet land lands", async () => {
+	const { parsePlaybook } = await import("../../src/domains/agents/playbook.js");
+	const { compileFleetExecutionPlan } = await import("../../src/domains/dispatch/fleet-plan.js");
+	const { executeFleetRun } = await import("../../src/domains/dispatch/fleet-run.js");
+	const { executeTaskLand, planTaskLand } = await import("../../src/tools/task-land.js");
+	const { isolateClioEnv } = await import("../harness/scratch-env.js");
+	const env = await isolateClioEnv("clio-coder-fleet-worktree-");
+	const root = repo();
+	try {
+		const playbook = parsePlaybook(
+			[
+				"---",
+				"version: 3",
+				"name: wt",
+				"steps:",
+				"  - {kind: code, id: build, command: build, scope: worktree, dependencies: []}",
+				"  - {kind: code, id: check, command: check, scope: readonly, dependencies: [build]}",
+				"maxWorkers: 1",
+				"onFailure: stop",
+				"---",
+				"build it",
+			].join("\n"),
+			join(root, "wt.md"),
+		);
+		const command = (id: string, script: string) => ({
+			id,
+			argv: [process.execPath, "-e", script],
+			cwd: "",
+			timeoutMs: 10000,
+			env: [],
+			description: id,
+		});
+		const commands = {
+			version: 1 as const,
+			path: join(root, "commands.yaml"),
+			commands: new Map([
+				["build", command("build", "require('node:fs').writeFileSync('base.txt','built')")],
+				// Passes only where the build's change is: the check reads the same worktree.
+				["check", command("check", "process.exit(require('node:fs').readFileSync('base.txt','utf8')==='built'?0:1)")],
+			]),
+		};
+		const plan = compileFleetExecutionPlan({
+			playbook,
+			commands,
+			task: "build it",
+			resolveAgent: () => {
+				throw new Error("no agent steps");
+			},
+		});
+		strictEqual(plan.isolation, "worktree");
+		const notices: string[] = [];
+		const outcome = await executeFleetRun({
+			plan,
+			playbookName: "wt",
+			commands,
+			workspaceRoot: root,
+			fleetRootId: "fleet-worktree-contract",
+			dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
+			agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
+			attributionEnabled: false,
+			onNotice: (text) => notices.push(text),
+		});
+		strictEqual(outcome.cleanRun, true);
+		// The operator checkout is untouched; the work waits on the run's task branch.
+		strictEqual(readFileSync(join(root, "base.txt"), "utf8"), "base");
+		strictEqual(git(root, "status", "--porcelain"), "");
+		ok(
+			notices.some((text) => text.includes("clio-coder fleet land fleet-worktree-contract")),
+			notices.join("\n"),
+		);
+		const landing = planTaskLand({ root, ref: "fleet-worktree-contract", mode: "merge" });
+		strictEqual(landing.refusal, null);
+		executeTaskLand(landing);
+		strictEqual(readFileSync(join(root, "base.txt"), "utf8"), "built");
+		strictEqual(git(root, "branch", "--list", "clio-coder/task/fleet-worktree-contract"), "");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		await env.restore();
+	}
+});
 test("a fleet loop check runs in the sandbox host verification uses, with the workspace's secret files hidden", async (t) => {
 	const { sandboxAvailability } = await import("../../src/core/sandbox/availability.js");
 	const availability = sandboxAvailability();
